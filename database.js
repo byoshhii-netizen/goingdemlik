@@ -26,7 +26,6 @@ async function initDb() {
       password_hash TEXT NOT NULL,
       avatar TEXT DEFAULT '',
       bio TEXT DEFAULT '',
-      display_name TEXT DEFAULT '',
       links TEXT DEFAULT '[]',
       level_id INTEGER DEFAULT 1,
       show_level_badge INTEGER DEFAULT 1,
@@ -72,68 +71,6 @@ async function initDb() {
       daily_forums_plus INTEGER DEFAULT -1,
       daily_books_plus INTEGER DEFAULT -1,
       daily_book_pages_plus INTEGER DEFAULT -1
-    );
-
-    -- Media (videos/photos)
-    CREATE TABLE IF NOT EXISTS media (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL,
-      type TEXT NOT NULL, -- 'video' or 'photo' or 'reel'
-      title TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      media_url TEXT DEFAULT '',
-      thumb_url TEXT DEFAULT '',
-      metadata JSONB DEFAULT '{}',
-      views BIGINT DEFAULT 0,
-      likes BIGINT DEFAULT 0,
-      is_private INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS media_comments (
-      id BIGSERIAL PRIMARY KEY,
-      media_id BIGINT NOT NULL,
-      user_id BIGINT,
-      content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS media_likes (
-      id BIGSERIAL PRIMARY KEY,
-      media_id BIGINT NOT NULL,
-      user_id BIGINT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(media_id, user_id),
-      FOREIGN KEY(media_id) REFERENCES media(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    -- Ads managed by admin
-    CREATE TABLE IF NOT EXISTS ads (
-      id BIGSERIAL PRIMARY KEY,
-      image_url TEXT NOT NULL,
-      title TEXT DEFAULT '',
-      description TEXT DEFAULT '',
-      target_url TEXT DEFAULT '',
-      impressions BIGINT DEFAULT 0,
-      clicks BIGINT DEFAULT 0,
-      active INTEGER DEFAULT 1,
-      start_at TIMESTAMP,
-      end_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-
-    -- Censorship rules
-    CREATE TABLE IF NOT EXISTS censor_rules (
-      id BIGSERIAL PRIMARY KEY,
-      phrase TEXT NOT NULL,
-      level TEXT DEFAULT 'medium', -- low|medium|high
-      action TEXT DEFAULT 'replace', -- replace|block
-      replacement TEXT DEFAULT '***',
-      created_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -417,7 +354,6 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_bio TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_genre TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_website TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;
@@ -503,11 +439,9 @@ async function initDb() {
 
   // Seed admin password
   const { rows: pwRows } = await query("SELECT value FROM settings WHERE key='admin_password'");
-  const adminHash = crypto.createHash('sha256').update('admin123').digest('hex');
   if (pwRows.length === 0) {
-    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['admin_password', adminHash]);
-  } else if (pwRows[0].value !== adminHash) {
-    await query('UPDATE settings SET value=$1 WHERE key=$2', [adminHash, 'admin_password']);
+    const hash = crypto.createHash('sha256').update('admin123').digest('hex');
+    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['admin_password', hash]);
   }
 
   // Seed KVKK

@@ -7,21 +7,10 @@ const multer = require('multer');
 const slugify = require('slugify');
 const rateLimit = require('express-rate-limit');
 const cloudinary = require('cloudinary').v2;
-const mime = require('mime-types');
 const { query, initDb } = require('./database');
-let sharp = null;
-try { sharp = require('sharp'); } catch (e) { /* sharp optional; install if you want HEIC->JPEG conversion */ }
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Global error handlers to avoid uncaught exceptions killing the process
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err && err.stack ? err.stack : err);
-});
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled rejection:', reason && reason.stack ? reason.stack : reason);
-});
 
 // Cloudinary config — Railway'de CLOUDINARY_URL env var olarak ekle
 // Format: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
@@ -39,71 +28,13 @@ if (process.env.CLOUDINARY_URL) {
 const USE_CLOUDINARY = !!(process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME);
 
 // Fallback: local disk (Railway volume veya geliştirme)
-const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
+const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
 if (!USE_CLOUDINARY) {
-  try {
-    if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-    // quick writability test
-    const testPath = path.join(UPLOAD_DIR, '.upload_test');
-    fs.writeFileSync(testPath, 'ok');
-    fs.unlinkSync(testPath);
-  } catch (e) {
-    console.error('Upload directory not writable or cannot be created:', UPLOAD_DIR, e && e.message ? e.message : e);
-  }
-
-  // Serve uploads with range support for video streaming
-  app.get('/uploads/:name', (req, res) => {
-    const fileName = req.params.name;
-    const filePath = path.join(UPLOAD_DIR, fileName);
-    if (!fs.existsSync(filePath)) return res.status(404).end();
-    let stat;
-    try { stat = fs.statSync(filePath); } catch (e) { console.error('Stat failed for upload:', filePath, e && e.message ? e.message : e); return res.status(404).end(); }
-    const total = stat.size;
-    const range = req.headers.range;
-    const contentType = mime.lookup(filePath) || 'application/octet-stream';
-    if (range) {
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
-      if (isNaN(start) || isNaN(end) || start >= total) {
-        res.status(416).set('Content-Range', `bytes */${total}`).end();
-        return;
-      }
-      const chunkSize = (end - start) + 1;
-      let stream;
-      try {
-        stream = fs.createReadStream(filePath, { start, end });
-      } catch (err) {
-        console.error('Error creating read stream for', filePath, err && err.message ? err.message : err);
-        return res.status(404).end();
-      }
-      res.writeHead(206, {
-        'Content-Range': `bytes ${start}-${end}/${total}`,
-        'Accept-Ranges': 'bytes',
-        'Content-Length': chunkSize,
-        'Content-Type': contentType,
-      });
-      stream.on('error', (err) => {
-        console.error('Stream error for', filePath, err && err.message ? err.message : err);
-        try { res.status(404).end(); } catch(e){}
-      });
-      stream.pipe(res);
-    } else {
-      res.writeHead(200, {
-        'Content-Length': total,
-        'Content-Type': contentType,
-        'Accept-Ranges': 'bytes',
-      });
-      const s = fs.createReadStream(filePath);
-      s.on('error', (err) => { console.error('Stream error for', filePath, err && err.message ? err.message : err); try { res.status(404).end(); } catch(e){} });
-      s.pipe(res);
-    }
-  });
-
-  app.use('/uploads', express.static(UPLOAD_DIR));
+  try { if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) {}
 }
 
 app.use(express.json());
+if (!USE_CLOUDINARY) app.use('/uploads', express.static(UPLOAD_DIR));
 
 // Cloudflare proxy arkasındaysa gerçek IP'yi al
 app.set('trust proxy', 1);
@@ -121,13 +52,13 @@ app.use((req, res, next) => {
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net https://accounts.spotify.com; " +
+    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; " +
     "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; " +
     "img-src 'self' data: https: blob:; " +
     "media-src 'self' https: blob:; " +
-    "connect-src 'self' https://api.spotify.com https://pagead2.googlesyndication.com https://accounts.spotify.com https://fonts.googleapis.com https://fonts.gstatic.com; " +
-    "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://accounts.spotify.com https://accounts.google.com;"
+    "connect-src 'self' https://api.spotify.com https://pagead2.googlesyndication.com; " +
+    "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;"
   );
   // Statik dosyalarda source map'leri engelle
   if (req.path.endsWith('.map')) {
@@ -184,22 +115,13 @@ const createLimiter = rateLimit({
 });
 
 app.use('/api/', generalLimiter);
-// Auth rate limiting is disabled to avoid the 15 dakika bekleme uyarısı.
-// app.use('/api/auth/login', authLimiter);
-// app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
 app.use('/api/upload', uploadLimiter);
 app.use('/api/group/:slug/upload', uploadLimiter);
 app.use('/api/forums', createLimiter);
 app.use('/api/books', createLimiter);
 app.use('/api/group/:slug/messages', createLimiter);
-
-// Multer / upload error handler
-app.use((err, req, res, next) => {
-  if (err && err.name === 'MulterError') {
-    return res.status(400).json({ error: err.message });
-  }
-  next(err);
-});
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -344,65 +266,52 @@ async function checkDailyLimit(userId, user, type) {
 }
 
 // ===== MULTER / UPLOAD =====
-// Use disk storage for uploads to avoid buffering large files in memory
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, uuidv4() + ext);
-  }
-});
-const maxMb = parseInt(process.env.MAX_UPLOAD_MB || '500');
+// Memory storage — Cloudinary varsa RAM'den upload, yoksa disk'e yaz
+const storage = USE_CLOUDINARY
+  ? multer.memoryStorage()
+  : multer.diskStorage({
+      destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+      filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        cb(null, uuidv4() + ext);
+      }
+    });
 const upload = multer({
   storage,
-  limits: { fileSize: maxMb * 1024 * 1024 }, // configurable via MAX_UPLOAD_MB env (default 200MB)
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (audio için)
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
-        // Allow HEIC/HEIF from iPhones
-        allowedImages.push('image/heic', 'image/heif', 'image/x-heic');
-      const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
-      const allowedVideo = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska'];
-      if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/') || allowedVideo.includes(file.mimetype) || file.mimetype.startsWith('video/')) cb(null, true);
+    const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
+    if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
     else cb(new Error('Sadece resim veya ses dosyaları kabul edilir'));
   }
 });
 
 // Yükleme helper'ı — Cloudinary ya da disk
 async function handleUpload(file) {
-  // We store uploads on disk; if Cloudinary configured, upload from the file path to avoid buffering
-  const filepath = file.path || (file.filename ? path.join(UPLOAD_DIR, file.filename) : null);
-  const ext = filepath ? path.extname(filepath).toLowerCase() : '';
-  const isHeic = (file.mimetype && (file.mimetype.includes('heic') || file.mimetype.includes('heif'))) || ext === '.heic' || ext === '.heif';
   if (USE_CLOUDINARY) {
     return new Promise((resolve, reject) => {
-      if (!filepath || !fs.existsSync(filepath)) return reject(new Error('Dosya bulunamadı (disk)'));
+      if (!file.buffer || file.buffer.length === 0) {
+        return reject(new Error('Dosya buffer boş'));
+      }
+      const ext = path.extname(file.originalname).replace('.', '') || 'jpg';
+      const public_id = 'demlik/' + uuidv4();
       const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
-      const opts = isAudio ? { resource_type: 'video' } : { quality: 'auto', fetch_format: 'auto' };
-      cloudinary.uploader.upload(filepath, opts, (err, result) => {
-        // remove local temp file regardless of result
-        try { fs.unlinkSync(filepath); } catch (e) {}
-        if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
-        if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));
-        resolve(result.secure_url);
-      });
+      const stream = cloudinary.uploader.upload_stream(
+        isAudio
+          ? { public_id, resource_type: 'video' } // Cloudinary audio için 'video' resource type kullanır
+          : { public_id, resource_type: 'image', quality: 'auto', fetch_format: 'auto' },
+        (err, result) => {
+          if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
+          if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));
+          resolve(result.secure_url);
+        }
+      );
+      stream.end(file.buffer);
     });
+  } else {
+    return '/uploads/' + file.filename;
   }
-  // Local disk storage: if HEIC and sharp available, convert to JPEG for browser compatibility
-  try {
-    if (isHeic && sharp && filepath && fs.existsSync(filepath)) {
-      const base = path.basename(filepath, ext);
-      const outFilename = base + '.jpg';
-      const outPath = path.join(UPLOAD_DIR, outFilename);
-      await sharp(filepath).rotate().jpeg({ quality: 80 }).toFile(outPath);
-      try { fs.unlinkSync(filepath); } catch (e) {}
-      // ensure returned path points to converted file
-      return '/uploads/' + outFilename;
-    }
-  } catch (e) {
-    console.error('HEIC conversion failed:', e && e.message ? e.message : e);
-    // fallthrough to return original file
-  }
-  return '/uploads/' + file.filename;
 }
 
 // ===== ROBOTS & SITEMAP =====
@@ -482,7 +391,6 @@ app.post('/api/auth/register', async (req, res) => {
     if (!username || !email || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
-    if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk olamaz' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
@@ -696,11 +604,6 @@ app.post('/api/forum/:slug/view', async (req, res) => {
 app.post('/api/forums', authMiddleware, async (req, res) => {
   try {
     const { title, content, banner_image, allow_comments, tagIds, customTags, banner_fit, images, thumbnail } = req.body;
-    // Censor title & content
-    const censTitle = await applyCensor(title);
-    if (censTitle.blocked) return res.status(400).json({ error: 'Başlık yasaklı kelime içeriyor' });
-    const censContent = await applyCensor(content);
-    if (censContent.blocked) return res.status(400).json({ error: 'İçerik yasaklı kelime içeriyor' });
     if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
     const limitErr = await checkDailyLimit(req.user.id, req.user, 'forums');
     if (limitErr) return res.status(429).json({ error: limitErr });
@@ -712,7 +615,7 @@ app.post('/api/forums', authMiddleware, async (req, res) => {
     const customTagsStr = allCustomTags.join(',');
     const { rows } = await query(
       'INSERT INTO forums (user_id,title,content,banner_image,slug,allow_comments,custom_tags,banner_fit,images,thumbnail) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
-      [req.user.id, censTitle.text, censContent.text, banner_image || '', tempSlug, allow_comments !== false ? 1 : 0, customTagsStr, banner_fit || 'cover', JSON.stringify(images || []), thumbnail || '']);
+      [req.user.id, title, content, banner_image || '', tempSlug, allow_comments !== false ? 1 : 0, customTagsStr, banner_fit || 'cover', JSON.stringify(images || []), thumbnail || '']);
     const id = rows[0].id;
     const realSlug = makeSlug(title, id);
     await query('UPDATE forums SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -738,18 +641,13 @@ app.put('/api/forum/:slug', authMiddleware, async (req, res) => {
   if (forum.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { title, content, banner_image, allow_comments, tagIds, customTags, banner_fit, images, thumbnail } = req.body;
   // İçerik içindeki #tag'ları da custom_tags'e merge et
-  // Censor updated title/content
   const newContent = content || forum.content;
-  const censTitle = await applyCensor(title || forum.title);
-  if (censTitle.blocked) return res.status(400).json({ error: 'Başlık yasaklı kelime içeriyor' });
-  const censContent = await applyCensor(newContent);
-  if (censContent.blocked) return res.status(400).json({ error: 'İçerik yasaklı kelime içeriyor' });
   const contentHashtags = (newContent.match(/#([a-zA-Z0-9_\u00c7\u00e7\u011e\u011f\u0130\u0131\u00d6\u00f6\u015e\u015f\u00dc\u00fc]+)/g) || []).map(t => t.slice(1).toLowerCase());
   const manualTagsPut = customTags !== undefined ? (Array.isArray(customTags) ? customTags : customTags.split(',').map(t => t.trim()).filter(Boolean)) : (forum.custom_tags ? forum.custom_tags.split(',').map(t => t.trim()).filter(Boolean) : []);
   const allCustomTagsPut = [...new Set([...manualTagsPut.map(t => t.toLowerCase()), ...contentHashtags])];
   const customTagsStr = allCustomTagsPut.join(',');
   await query('UPDATE forums SET title=$1,content=$2,banner_image=$3,allow_comments=$4,custom_tags=$5,banner_fit=$6,images=$7,thumbnail=$8,updated_at=NOW() WHERE id=$9',
-    [censTitle.text||forum.title, censContent.text||forum.content, banner_image??forum.banner_image,
+    [title||forum.title, content||forum.content, banner_image??forum.banner_image,
      allow_comments!==undefined?(allow_comments?1:0):forum.allow_comments, customTagsStr,
      banner_fit||forum.banner_fit||'cover',
      JSON.stringify(images !== undefined ? images : ((() => { try { return JSON.parse(forum.images||'[]'); } catch{return [];} })())),
@@ -814,15 +712,11 @@ app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
   if (!forum.allow_comments) return res.status(403).json({ error: 'Yorumlar kapalı' });
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-  const cens = await applyCensor(content);
-  if (cens.blocked) return res.status(400).json({ error: 'Yorum yasaklı kelime içeriyor' });
   const { rows } = await query('INSERT INTO forum_comments (forum_id,user_id,content) VALUES ($1,$2,$3) RETURNING id', [forum.id, req.user.id, content.trim()]);
-  // replace stored content with censored text
-  await query('UPDATE forum_comments SET content=$1 WHERE id=$2', [cens.text, rows[0].id]);
   await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
   await updateUserLevel(req.user.id);
-  // @mention bildirimleri (use censored text)
-  await parseMentionsAndNotify(cens.text, req.user, 'comment_mention', '/forum/' + req.params.slug, forum.title).catch(() => {});
+  // @mention bildirimleri
+  await parseMentionsAndNotify(content, req.user, 'comment_mention', '/forum/' + req.params.slug, forum.title).catch(() => {});
   const { rows: cRows } = await query(`SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.level_id FROM forum_comments fc LEFT JOIN users u ON fc.user_id=u.id WHERE fc.id=$1`, [rows[0].id]);
   res.json(cRows[0]);
 });
@@ -935,17 +829,13 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { title, content, chapter_id, image_url } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
-  const censTitle = await applyCensor(title);
-  if (censTitle.blocked) return res.status(400).json({ error: 'Başlık yasaklı kelime içeriyor' });
-  const censContent = await applyCensor(content);
-  if (censContent.blocked) return res.status(400).json({ error: 'İçerik yasaklı kelime içeriyor' });
   const limitErr = await checkDailyLimit(req.user.id, req.user, 'book_pages');
   if (limitErr) return res.status(429).json({ error: limitErr });
   const { rows: cnt } = await query('SELECT COUNT(*) as c FROM book_pages WHERE book_id=$1', [book.id]);
   const pageNum = parseInt(cnt[0].c) + 1;
   const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 40) + '-' + Date.now();
   const { rows } = await query('INSERT INTO book_pages (book_id,chapter_id,title,content,page_num,slug,image_url) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-    [book.id, chapter_id||null, censTitle.text, censContent.text, pageNum, tempSlug, image_url||'']);
+    [book.id, chapter_id||null, title, content, pageNum, tempSlug, image_url||'']);
   const id = rows[0].id;
   const realSlug = makeSlug(title, id);
   await query('UPDATE book_pages SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -1181,10 +1071,8 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!m.length) return res.status(403).json({ error: 'Üye değilsiniz' });
   const { content, image_url } = req.body;
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
-  const cens = await applyCensor(content || '');
-  if (cens.blocked) return res.status(400).json({ error: 'Mesaj yasaklı kelime içeriyor' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
-    [group.id, req.user.id, cens.text || '', image_url||'']);
+    [group.id, req.user.id, content||'', image_url||'']);
   const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
@@ -1285,7 +1173,7 @@ app.get('/api/profile/:username', async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, display_name, username, name_color, show_level_badge, show_level_color, title, location, allow_mentions } = req.body;
+  const { bio, links, name_color, show_level_badge, show_level_color, title, location, allow_mentions } = req.body;
   let newAvatar = req.user.avatar;
   if (req.file) {
     try {
@@ -1295,17 +1183,8 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
     }
   }
   const newLinks = links ? (typeof links === 'string' ? links : JSON.stringify(links)) : req.user.links;
-  // handle username change: validate and ensure uniqueness
-  let finalUsername = req.user.username;
-  if (username && username !== req.user.username) {
-    if (typeof username !== 'string' || username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
-    if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk olamaz' });
-    const { rows: exists } = await query('SELECT id FROM users WHERE username=$1', [username]);
-    if (exists.length) return res.status(400).json({ error: 'Bu kullanıcı adı zaten alınmış' });
-    finalUsername = username;
-  }
-  await query('UPDATE users SET username=$1,bio=$2,display_name=$3,links=$4,name_color=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,title=$9,location=$10,allow_mentions=$11 WHERE id=$12',
-    [finalUsername, bio??req.user.bio, display_name!==undefined?display_name:req.user.display_name, newLinks, name_color??req.user.name_color,
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,show_level_badge=$4,show_level_color=$5,avatar=$6,title=$7,location=$8,allow_mentions=$9 WHERE id=$10',
+    [bio??req.user.bio, newLinks, name_color??req.user.name_color,
      show_level_badge!==undefined?(show_level_badge?1:0):req.user.show_level_badge,
      show_level_color!==undefined?(show_level_color?1:0):req.user.show_level_color,
      newAvatar, title??req.user.title??'', location??req.user.location??'',
@@ -1321,209 +1200,6 @@ app.put('/api/profile/password', authMiddleware, async (req, res) => {
   if (req.user.password_hash !== hashPassword(old_password)) return res.status(401).json({ error: 'Eski şifre yanlış' });
   if (new_password.length < 6) return res.status(400).json({ error: 'Yeni şifre en az 6 karakter' });
   await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(new_password), req.user.id]);
-  res.json({ ok: true });
-});
-
-// ===== MEDIA / ADS / CENSOR HELPERS & ROUTES =====
-
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-async function getCensorLevel() {
-  const { rows } = await query('SELECT value FROM settings WHERE key=$1', ['censor_level']);
-  return (rows[0] && rows[0].value) || 'medium';
-}
-
-async function applyCensor(text, level) {
-  if (!text) return { blocked: false, text: '' };
-  const rulesRes = await query('SELECT phrase, level, action, replacement FROM censor_rules');
-  const rules = rulesRes.rows || [];
-  const order = { low: 1, medium: 2, high: 3 };
-  const currentLevel = level || await getCensorLevel();
-  let out = text;
-  for (const r of rules) {
-    try {
-      const ruleLevel = r.level || 'medium';
-      if ((order[ruleLevel] || 1) > (order[currentLevel] || 2)) continue;
-      const re = new RegExp(escapeRegExp(r.phrase), 'ig');
-      if (r.action === 'block') {
-        if (re.test(out)) return { blocked: true, text: '' };
-      } else {
-        out = out.replace(re, r.replacement || '***');
-      }
-    } catch (e) { continue; }
-  }
-  return { blocked: false, text: out };
-}
-
-// List media (videos/photos)
-app.get('/api/media', async (req, res) => {
-  try {
-    const type = req.query.type || 'all';
-    const page = Math.max(1, parseInt(req.query.page || '1'));
-    const limit = Math.min(50, parseInt(req.query.limit || '20'));
-    const offset = (page - 1) * limit;
-    let q = 'SELECT m.*, u.username, u.avatar, u.display_name FROM media m LEFT JOIN users u ON u.id=m.user_id';
-    const params = [];
-    if (type !== 'all') { params.push(type); q += ' WHERE m.type=$' + params.length; }
-    params.push(limit, offset);
-    q += ' ORDER BY m.created_at DESC LIMIT $' + (params.length - 1) + ' OFFSET $' + params.length;
-    const { rows } = await query(q, params);
-    res.json(rows.map(r => ({ ...r, user: { username: r.username, avatar: r.avatar, display_name: r.display_name } }))); 
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Get one media item with comments
-app.get('/api/media/:id', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const { rows } = await query('SELECT m.*, u.username, u.avatar, u.display_name FROM media m LEFT JOIN users u ON u.id=m.user_id WHERE m.id=$1', [id]);
-    if (!rows.length) return res.status(404).json({ error: 'Media bulunamadı' });
-    const media = rows[0];
-    const comments = (await query('SELECT mc.*, u.username, u.avatar, u.display_name FROM media_comments mc LEFT JOIN users u ON u.id=mc.user_id WHERE mc.media_id=$1 ORDER BY mc.created_at ASC', [id])).rows;
-    res.json({ media, comments });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Upload media
-app.post('/api/media', authMiddleware, upload.single('file'), async (req, res) => {
-  try {
-    // Log incoming upload info to help diagnose network/size issues
-    try { console.log('Media upload request:', req.file && { originalname: req.file.originalname, size: req.file.size, mimetype: req.file.mimetype }); } catch(e) {}
-    const { title = '', description = '', type = 'video' } = req.body;
-    if (!req.file) return res.status(400).json({ error: 'Dosya gerekli' });
-    const url = await handleUpload(req.file);
-    // thumbnail can be provided by client or left empty
-    const thumb = req.body.thumb_url || '';
-    const censTitle = await applyCensor(title);
-    if (censTitle.blocked) return res.status(400).json({ error: 'İçerik yasaklı kelime içeriyor' });
-    const censDesc = await applyCensor(description);
-    if (censDesc.blocked) return res.status(400).json({ error: 'İçerik yasaklı kelime içeriyor' });
-    const { rows } = await query('INSERT INTO media (user_id,type,title,description,media_url,thumb_url,metadata) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [req.user.id, type, censTitle.text, censDesc.text, url, thumb, JSON.stringify({ uploaded_at: new Date().toISOString() })]);
-    const m = rows[0];
-    res.json(m);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Comment on media
-app.post('/api/media/:id/comments', authMiddleware, async (req, res) => {
-  try {
-    const mediaId = parseInt(req.params.id);
-    const content = (req.body.content || '').trim();
-    if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
-    const cens = await applyCensor(content);
-    if (cens.blocked) return res.status(400).json({ error: 'Yorum yasaklı kelime içeriyor' });
-    const { rows } = await query('INSERT INTO media_comments (media_id,user_id,content) VALUES ($1,$2,$3) RETURNING *', [mediaId, req.user.id, cens.text]);
-    const comment = rows[0];
-    const joined = (await query('SELECT mc.*, u.username, u.avatar, u.display_name FROM media_comments mc LEFT JOIN users u ON u.id=mc.user_id WHERE mc.id=$1', [comment.id])).rows[0];
-    res.json(joined);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Like / unlike media (toggle)
-app.post('/api/media/:id/like', authMiddleware, async (req, res) => {
-  try {
-    const mediaId = parseInt(req.params.id);
-    const userId = req.user.id;
-    const { rows: exists } = await query('SELECT id FROM media_likes WHERE media_id=$1 AND user_id=$2', [mediaId, userId]);
-    if (exists.length) {
-      await query('DELETE FROM media_likes WHERE id=$1', [exists[0].id]);
-      await query('UPDATE media SET likes = GREATEST(0, likes-1) WHERE id=$1', [mediaId]);
-      const { rows } = await query('SELECT likes FROM media WHERE id=$1', [mediaId]);
-      return res.json({ liked: false, likes: rows[0]?.likes || 0 });
-    } else {
-      await query('INSERT INTO media_likes (media_id,user_id) VALUES ($1,$2)', [mediaId, userId]);
-      await query('UPDATE media SET likes = likes+1 WHERE id=$1', [mediaId]);
-      const { rows } = await query('SELECT likes FROM media WHERE id=$1', [mediaId]);
-      return res.json({ liked: true, likes: rows[0]?.likes || 0 });
-    }
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Increment view count
-app.post('/api/media/:id/view', async (req, res) => {
-  try {
-    const mediaId = parseInt(req.params.id);
-    await query('UPDATE media SET views = views + 1 WHERE id=$1', [mediaId]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Public ads
-app.get('/api/ads', async (req, res) => {
-  try {
-    const { rows } = await query("SELECT * FROM ads WHERE active=1 AND (start_at IS NULL OR start_at<=NOW()) AND (end_at IS NULL OR end_at>=NOW()) ORDER BY created_at DESC LIMIT 20");
-    res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/ads/:id/impression', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    await query('UPDATE ads SET impressions=impressions+1 WHERE id=$1', [id]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/ads/:id/click', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    await query('UPDATE ads SET clicks=clicks+1 WHERE id=$1', [id]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Admin ad management
-app.get('/api/admin/ads', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM ads ORDER BY created_at DESC');
-  res.json(rows);
-});
-
-app.post('/api/admin/ads', adminMiddleware, async (req, res) => {
-  const { image_url, title, description, target_url, start_at, end_at, active } = req.body;
-  const { rows } = await query('INSERT INTO ads (image_url,title,description,target_url,start_at,end_at,active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [image_url, title||'', description||'', target_url||'', start_at||null, end_at||null, active?1:0]);
-  res.json(rows[0]);
-});
-
-app.put('/api/admin/ads/:id', adminMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { image_url, title, description, target_url, start_at, end_at, active } = req.body;
-  await query('UPDATE ads SET image_url=$1,title=$2,description=$3,target_url=$4,start_at=$5,end_at=$6,active=$7 WHERE id=$8', [image_url, title||'', description||'', target_url||'', start_at||null, end_at||null, active?1:0, id]);
-  const updated = (await query('SELECT * FROM ads WHERE id=$1', [id])).rows[0];
-  res.json(updated);
-});
-
-app.delete('/api/admin/ads/:id', adminMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id);
-  await query('DELETE FROM ads WHERE id=$1', [id]);
-  res.json({ ok: true });
-});
-
-// Admin censor rules
-app.get('/api/admin/censor', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM censor_rules ORDER BY created_at DESC');
-  res.json(rows);
-});
-
-app.post('/api/admin/censor', adminMiddleware, async (req, res) => {
-  const { phrase, level, action, replacement } = req.body;
-  const { rows } = await query('INSERT INTO censor_rules (phrase,level,action,replacement) VALUES ($1,$2,$3,$4) RETURNING *', [phrase, level||'medium', action||'replace', replacement||'***']);
-  res.json(rows[0]);
-});
-
-app.put('/api/admin/censor/:id', adminMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id);
-  const { phrase, level, action, replacement } = req.body;
-  await query('UPDATE censor_rules SET phrase=$1,level=$2,action=$3,replacement=$4 WHERE id=$5', [phrase, level||'medium', action||'replace', replacement||'***', id]);
-  const updated = (await query('SELECT * FROM censor_rules WHERE id=$1', [id])).rows[0];
-  res.json(updated);
-});
-
-app.delete('/api/admin/censor/:id', adminMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id);
-  await query('DELETE FROM censor_rules WHERE id=$1', [id]);
   res.json({ ok: true });
 });
 
@@ -1581,17 +1257,6 @@ app.post('/api/admin/user/:id/unban', adminMiddleware, async (req, res) => {
   await query("UPDATE users SET banned=0,ban_type='',banned_ip='' WHERE id=$1", [req.params.id]);
   await logAction('admin', 'unban_user', rows[0].username);
   res.json({ ok: true });
-});
-
-// Note: API 404 fallback handled later after all routes (see app.get('*')).
-
-// Global error handler — ensure API errors return JSON
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err && err.stack ? err.stack : err);
-  if (req.path && req.path.startsWith('/api')) {
-    return res.status(err?.status || 500).json({ error: err?.message || 'Internal server error' });
-  }
-  next(err);
 });
 
 app.delete('/api/admin/user/:id', adminMiddleware, async (req, res) => {
@@ -1787,19 +1452,6 @@ app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async
 app.get('/api/kvkk', async (req, res) => {
   const { rows } = await query("SELECT value FROM settings WHERE key='kvkk_text'");
   res.json({ text: rows[0]?.value || '' });
-});
-
-// First-time admin setup: set admin password hash if not set
-app.post('/api/admin/setup', async (req, res) => {
-  try {
-    const { password } = req.body;
-    if (!password) return res.status(400).json({ error: 'Parola gerekli' });
-    const { rows } = await query("SELECT value FROM settings WHERE key='admin_password'");
-    if (rows.length) return res.status(403).json({ error: 'Admin parolası zaten ayarlı' });
-    const hash = crypto.createHash('sha256').update(password).digest('hex');
-    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['admin_password', hash]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/public-settings', async (req, res) => {
@@ -2704,11 +2356,9 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
   if (!content?.trim() && !image_url && !shared_forum_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
-  const cens = await applyCensor(content || '');
-  if (cens.blocked) return res.status(400).json({ error: 'Mesaj yasaklı kelime içeriyor' });
   const { rows: msgRows } = await query(
     'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-    [conv.id, uid, cens.text||'', image_url, shared_forum_id||null, reply_to_id||null]
+    [conv.id, uid, content||'', image_url, shared_forum_id||null, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   // Forum paylaşım sayısını artır
@@ -2716,8 +2366,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await query('UPDATE forums SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_forum_id]);
   }
   // DM @mention bildirimleri
-  if (cens.text?.trim()) {
-    await parseMentionsAndNotify(cens.text, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
+  if (content?.trim()) {
+    await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
     SELECT m.*, u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
