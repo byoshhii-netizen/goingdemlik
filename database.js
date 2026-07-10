@@ -126,6 +126,70 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS videos (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      video_url TEXT NOT NULL,
+      banner_image TEXT DEFAULT '',
+      slug TEXT UNIQUE,
+      allow_comments INTEGER DEFAULT 1,
+      views INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS video_likes (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT,
+      user_id BIGINT,
+      UNIQUE(video_id, user_id),
+      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS video_saves (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT,
+      user_id BIGINT,
+      UNIQUE(video_id, user_id),
+      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS video_comments (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT,
+      user_id BIGINT,
+      content TEXT NOT NULL,
+      is_pinned INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS video_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT,
+      user_id BIGINT,
+      UNIQUE(comment_id, user_id),
+      FOREIGN KEY(comment_id) REFERENCES video_comments(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_follows (
+      id BIGSERIAL PRIMARY KEY,
+      follower_id BIGINT NOT NULL,
+      followed_id BIGINT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(follower_id, followed_id),
+      FOREIGN KEY(follower_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(followed_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS tags (
       id BIGSERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
@@ -147,6 +211,8 @@ async function initDb() {
       user_id BIGINT,
       title TEXT NOT NULL,
       preface TEXT DEFAULT '',
+      karakterler TEXT DEFAULT '',
+      kadro TEXT DEFAULT '',
       cover_image TEXT DEFAULT '',
       slug TEXT UNIQUE,
       page_count INTEGER DEFAULT 0,
@@ -154,6 +220,9 @@ async function initDb() {
       updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
     );
+
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS karakterler TEXT DEFAULT '';
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS kadro TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS book_chapters (
       id BIGSERIAL PRIMARY KEY,
@@ -362,6 +431,9 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS banner_fit TEXT DEFAULT 'cover';
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS images TEXT DEFAULT '[]';
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
+    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS is_pinned INTEGER DEFAULT 0;
+    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,

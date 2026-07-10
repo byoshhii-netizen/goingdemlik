@@ -38,13 +38,13 @@ function updatePageMeta(title, description, imageUrl) {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
-function toast(msg, type = 'success') {
+function toast(msg, type = 'success', duration = 3500) {
   const c = $('#toast-container');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
   t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span>${msg}</span>`;
   c.appendChild(t);
-  setTimeout(() => t.remove(), 3500);
+  setTimeout(() => t.remove(), duration);
 }
 
 function showModal(title, bodyHTML) {
@@ -163,6 +163,8 @@ function renderRoute(fullPath) {
   if (path.startsWith('/kitap/') && segs.length === 4 && segs[2] === 'sayfa') return renderPageReader(app, segs[1], segs[3]);
   if (path === '/gruplar') return renderGroupList(app);
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
+  if (path === '/videolar') return renderVideoList(app);
+  if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
@@ -1032,7 +1034,9 @@ function bookCardHTML(b) {
 function showNewBookModal(existing = null) {
   showModal(existing ? 'Kitabı Düzenle' : 'Yeni Kitap', `
     <div class="form-group"><label>Başlık</label><input id="bk-title" type="text" value="${existing ? escHtml(existing.title) : ''}" /></div>
-    <div class="form-group"><label>Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
+    <div class="form-group"><label>Tanıtım / Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
+    <div class="form-group"><label>Karakterler (opsiyonel)</label><textarea id="bk-karakterler" rows="3" placeholder="Karakter isimleri, kısa notlar...">${existing ? escHtml(existing.karakterler || '') : ''}</textarea></div>
+    <div class="form-group"><label>Kadro (opsiyonel)</label><textarea id="bk-kadro" rows="3" placeholder="Oyuncu kadrosu, karakter dağılımı...">${existing ? escHtml(existing.kadro || '') : ''}</textarea></div>
     <div class="form-group">
       <label>Kapak Resmi (opsiyonel)</label>
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
@@ -1063,11 +1067,18 @@ function showNewBookModal(existing = null) {
         const r = await apiForm('/upload', fd);
         cover_image = r.url;
       }
+      const payload = {
+        title,
+        preface: $('#bk-preface').value.trim(),
+        karakterler: $('#bk-karakterler').value.trim(),
+        kadro: $('#bk-kadro').value.trim(),
+        cover_image
+      };
       if (existing) {
-        await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify({ title, preface: $('#bk-preface').value.trim(), cover_image }) });
+        await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
         toast('Kitap güncellendi'); hideModal(); renderRoute(location.pathname);
       } else {
-        const b = await api('/books', { method: 'POST', body: JSON.stringify({ title, preface: $('#bk-preface').value.trim(), cover_image }) });
+        const b = await api('/books', { method: 'POST', body: JSON.stringify(payload) });
         toast('Kitap oluşturuldu'); hideModal(); navigate('/kitap/' + b.slug);
       }
     } catch (e) { $('#bk-error').textContent = e.message; }
@@ -1128,7 +1139,9 @@ async function renderBookDetail(app, slug) {
           ${book.created_at ? `<span><i class="fas fa-calendar"></i> ${formatDate(book.created_at)}</span>` : ''}
           ${book.updated_at ? `<span><i class="fas fa-edit"></i> Güncellendi ${formatDate(book.updated_at)}</span>` : ''}
         </div>
-        ${book.preface ? `<div class="book-preface">${escHtml(book.preface)}</div>` : ''}
+        ${book.preface ? `<div class="book-preface"><strong>Tanıtım / Önsöz</strong><p>${escHtml(book.preface)}</p></div>` : ''}
+        ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
+        ${book.kadro ? `<div class="book-preface"><strong>Kadro</strong><p>${escHtml(book.kadro)}</p></div>` : ''}
         ${firstPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> Oku</a></div>` : ''}
         ${isOwner ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
@@ -1817,13 +1830,263 @@ function memberItemHTML(m, isOwner, groupSlug) {
   </div>`;
 }
 
+function videoCardHTML(v) {
+  const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
+  return `<div class="video-card" onclick="navigate('/video/${escHtml(v.slug)}')">
+    <div class="video-thumb">
+      ${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-video"></i></div>`}
+    </div>
+    <div class="video-card-body">
+      <div class="video-card-title">${escHtml(v.title)}</div>
+      <div class="video-card-meta">${escHtml(v.username || 'Silinmiş kullanıcı')} • ${v.views || 0} izlenme</div>
+      ${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+async function showNewVideoModal(existing = null) {
+  let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
+  try { videoSettings = await api('/video-settings'); } catch {}
+  const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
+  showModal(existing ? 'Videoyu Düzenle' : 'Video Yükle', `
+    <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" /></div>
+    <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="5">${escHtml(defaultDescription)}</textarea></div>
+    <div class="form-group">
+      <label>Video Dosyası</label>
+      <input type="file" id="video-file" accept="video/*" />
+      ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
+    </div>
+    <div class="form-group">
+      <label>Banner / Kapak</label>
+      <input type="file" id="video-banner-file" accept="image/*" />
+      ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
+    </div>
+    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
+    <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
+    <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
+    <div id="video-error" class="form-error mt-4"></div>
+  `);
+
+  $('#video-submit').addEventListener('click', async () => {
+    const title = $('#video-title').value.trim();
+    const description = $('#video-description').value.trim();
+    const videoFile = $('#video-file').files[0];
+    const bannerFile = $('#video-banner-file').files[0];
+    if (!title) { $('#video-error').textContent = 'Başlık zorunlu'; return; }
+    if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
+
+    const submitBtn = $('#video-submit');
+    submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
+    const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
+
+    try {
+      let videoUrl = existing?.video_url || '';
+      let bannerImage = existing?.banner_image || '';
+      if (videoFile) {
+        const fd = new FormData(); fd.append('file', videoFile);
+        const xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener('progress', e => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            progress.innerHTML = `<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor... ${pct}%</div><div style="margin-top:6px;background:var(--bg-card2);height:8px;border-radius:999px;overflow:hidden"><div style="height:100%;background:var(--grad-red);width:${pct}%"></div></div>`;
+          }
+        });
+        const uploadResult = await new Promise((resolve, reject) => {
+          xhr.addEventListener('load', () => {
+            try { const data = JSON.parse(xhr.responseText); if (xhr.status >= 400) reject(new Error(data.error || 'Yükleme hatası')); else resolve(data); } catch (e) { reject(new Error('Yanıt geçersiz')); }
+          });
+          xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
+          xhr.open('POST', '/api/upload');
+          xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
+          xhr.send(fd);
+        });
+        videoUrl = uploadResult.url;
+      }
+      if (bannerFile) {
+        const fd = new FormData(); fd.append('file', bannerFile);
+        const bannerResult = await apiForm('/upload', fd);
+        bannerImage = bannerResult.url;
+      }
+      const payload = { title, description: description || '', video_url: videoUrl, banner_image: bannerImage, allow_comments: $('#video-comments').checked };
+      if (existing) {
+        await api('/video/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
+        toast('Video güncellendi');
+      } else {
+        const created = await api('/videos', { method: 'POST', body: JSON.stringify(payload) });
+        const successMs = Math.max(1000, parseInt(videoSettings.uploadSuccessDuration || 3) * 1000);
+        toast(videoSettings.uploadSuccessText || 'YÜKLENDİ', 'success', successMs);
+        hideModal(); navigate('/video/' + created.slug); return;
+      }
+      hideModal(); renderRoute(location.pathname);
+    } catch (e) {
+      $('#video-error').textContent = e.message;
+    } finally {
+      submitBtn.disabled = false; submitBtn.innerHTML = existing ? 'Güncelle' : 'Yükle';
+    }
+  });
+}
+
+async function renderVideoList(app) {
+  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
+  try {
+    const videos = await api('/videos');
+    document.title = 'Videolar – Demlik';
+    updatePageMeta('Videolar – Demlik', 'Topluluk videolarını keşfet.', '');
+    app.innerHTML = `<div class="container page">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div><div class="page-title">Videolar</div><div class="page-subtitle">Video yükle, izle, yorum yap.</div></div>
+        ${currentUser ? `<button class="btn btn-primary" id="new-video-btn"><i class="fas fa-plus"></i> Video Yükle</button>` : ''}
+      </div>
+      <div class="grid-3">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
+    </div>`;
+    $('#new-video-btn')?.addEventListener('click', () => showNewVideoModal());
+  } catch {}
+}
+
+async function renderVideoDetail(app, slug) {
+  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
+  let video, liked = false, saved = false, comments = [], videoSettings = { emptyDescriptionText: 'Bu videoya bir açıklama eklenmemiş.' };
+  try {
+    video = await api('/video/' + slug);
+    try { videoSettings = await api('/video-settings'); } catch {}
+    if (currentUser) { const likeRes = await api('/video/' + slug + '/liked'); liked = likeRes.liked; } 
+    if (currentUser) { const saveRes = await api('/video/' + slug + '/saved'); saved = saveRes.saved; }
+    comments = await api('/video/' + slug + '/comments');
+    await api('/video/' + slug + '/view', { method: 'POST' });
+  } catch {
+    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Video bulunamadı.</p></div></div>'; return;
+  }
+  document.title = video.title + ' – Demlik';
+  updatePageMeta(video.title + ' – Demlik', video.description || 'Demlik videoları', video.banner_image || '');
+  const isOwner = currentUser && currentUser.id === video.user_id;
+  let followState = false;
+  if (currentUser && currentUser.username !== video.username) {
+    try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
+  }
+  const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
+  const formattedDescription = descriptionText.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
+  app.innerHTML = `<div class="container page">
+    <div class="video-player-card">
+      <div class="video-player-shell">
+        <video controls preload="metadata" class="video-player" poster="${escHtml(video.banner_image || '')}">
+          <source src="${escHtml(video.video_url)}" />
+        </video>
+      </div>
+      <div class="video-meta-block">
+        <div class="video-title">${escHtml(video.title)}</div>
+        <div class="video-author-row">
+          <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
+          ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
+        </div>
+        <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
+        <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
+        <div class="video-description-card">
+          <div class="video-description-title">Açıklama</div>
+          <div class="video-description-text" id="video-description-text">${formattedDescription}</div>
+        </div>
+      </div>
+    </div>
+    <div class="video-comments-card">
+      <div class="comments-title"><i class="fas fa-comments"></i> Yorumlar (${comments.length})</div>
+      ${currentUser ? `<div class="comment-form"><textarea id="video-comment-input" placeholder="Yorum yaz..."></textarea><button class="btn btn-primary btn-sm" id="video-comment-submit"><i class="fas fa-paper-plane"></i></button></div>` : '<div class="empty-state"><i class="fas fa-sign-in-alt"></i><p>Yorum yapmak için giriş yapın.</p></div>'}
+      <div id="video-comments-list">${comments.map(c => renderVideoComment(c, isOwner)).join('')}</div>
+    </div>
+  </div>`;
+
+  $('#video-like-btn')?.addEventListener('click', async () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    try { const r = await api('/video/' + slug + '/like', { method: 'POST' }); liked = r.liked; $('#video-like-count').textContent = parseInt($('#video-like-count').textContent) + (liked ? 1 : -1); $('#video-like-btn').classList.toggle('btn-primary', liked); } catch {}
+  });
+
+  $('#video-save-btn')?.addEventListener('click', async () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    try { const r = await api('/video/' + slug + '/save', { method: 'POST' }); saved = r.saved; $('#video-save-btn').innerHTML = `<i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}`; } catch {}
+  });
+
+  $('#follow-btn')?.addEventListener('click', async () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    try {
+      const r = await api('/user/' + encodeURIComponent(video.username) + '/follow', { method: 'POST' });
+      followState = r.following;
+      $('#follow-btn').textContent = followState ? 'Takip ediliyor' : 'Takip et';
+    } catch {}
+  });
+
+  $('#video-share-btn')?.addEventListener('click', async () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    showModal('Videoyu İlet', `<div class="form-group"><label>Mesaj</label><textarea id="video-forward-msg" rows="4" placeholder="İletmek istediğin kısa mesaj..."></textarea></div><button class="btn btn-primary" id="video-forward-send"><i class="fas fa-paper-plane"></i> İlet</button>`);
+    $('#video-forward-send').addEventListener('click', () => {
+      hideModal(); toast('Video iletildi');
+    });
+  });
+
+  $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
+  $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
+
+  $('#video-comment-submit')?.addEventListener('click', async () => {
+    const content = $('#video-comment-input').value.trim();
+    if (!content) return;
+    try {
+      const comment = await api('/video/' + slug + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+      $('#video-comments-list').insertAdjacentHTML('beforeend', renderVideoComment(comment, isOwner));
+      $('#video-comment-input').value = '';
+      $('.comments-title').innerHTML = `<i class="fas fa-comments"></i> Yorumlar (${$('#video-comments-list').children.length})`;
+    } catch (e) { toast(e.message,'error'); }
+  });
+
+  $('#video-comments-list').addEventListener('click', async e => {
+    const likeBtn = e.target.closest('.video-comment-like');
+    if (likeBtn) {
+      try { await api('/video/' + slug + '/comments/' + likeBtn.dataset.id + '/like', { method: 'POST' }); const c = likeBtn.querySelector('.video-comment-count'); c.textContent = parseInt(c.textContent) + 1; } catch {}
+    }
+    const editBtn = e.target.closest('.video-comment-edit');
+    if (editBtn) {
+      const id = editBtn.dataset.id;
+      const current = editBtn.dataset.content;
+      const newText = prompt('Düzenle', current);
+      if (newText === null) return;
+      try { const updated = await api('/video/' + slug + '/comments/' + id, { method: 'PUT', body: JSON.stringify({ content: newText.trim() }) }); editBtn.closest('.comment').querySelector('.comment-content').innerHTML = renderContent(updated.content); toast('Yorum güncellendi'); } catch (e) { toast(e.message,'error'); }
+    }
+    const pinBtn = e.target.closest('.video-comment-pin');
+    if (pinBtn) {
+      try { await api('/video/' + slug + '/comments/' + pinBtn.dataset.id + '/pin', { method: 'POST' }); toast('İşlem tamam'); renderRoute(location.pathname); } catch(e){ toast(e.message,'error'); }
+    }
+  });
+}
+
+function renderVideoComment(c, isOwner) {
+  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner);
+  const canPin = currentUser && isOwner;
+  return `<div class="comment">
+    ${avatarImg(c, 'comment-avatar')}
+    <div class="comment-body">
+      <div class="comment-header">
+        <span class="comment-author">${c.username ? `<a href="/profil/${escHtml(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
+        <span class="comment-time">${timeAgo(c.created_at)}${c.is_pinned ? ' • Üstte sabitlendi' : ''}${c.updated_at && c.updated_at !== c.created_at ? ' • düzenlendi' : ''}</span>
+      </div>
+      <div class="comment-content">${renderContent(c.content)}</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${canPin ? `<button class="btn btn-ghost btn-sm video-comment-pin" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-thumbtack"></i></button>` : ''}
+          ${canEdit ? `<button class="btn btn-ghost btn-sm video-comment-edit" data-id="${c.id}" data-content="${escHtml(c.content)}" style="padding:2px 6px"><i class="fas fa-edit"></i></button>` : ''}
+        </div>
+        <button class="btn btn-ghost btn-sm video-comment-like" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-heart"></i> <span class="video-comment-count">${c.like_count || 0}</span></button>
+      </div>
+    </div>
+  </div>`;
+}
+
 async function renderProfile(app, username) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
   try { data = await api('/profile/' + username); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-user-slash"></i><p>Kullanıcı bulunamadı.</p></div></div>'; return; }
 
-  const { user, forums, books, groups, songs, level, levels, book_page_count } = data;
+  const { user, forums, books, groups, videos, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
+  const profileVideos = Array.isArray(videos) ? videos : [];
+  let savedVideos = [];
+  try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
+  const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
   const profileSongsHTML = profileSongs.length ? `<div class="grid-3" style="gap:16px">${profileSongs.map(s => `
       <div class="song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -1945,6 +2208,8 @@ async function renderProfile(app, username) {
       <button class="tab active" data-tab="forums">Forumlar</button>
       <button class="tab" data-tab="books">Kitaplar</button>
       <button class="tab" data-tab="groups">Gruplar</button>
+      <button class="tab" data-tab="videos">Videolar</button>
+      <button class="tab" data-tab="saved">Kaydedilenler</button>
       <button class="tab" data-tab="songs">Müzikler</button>
     </div>
 
@@ -1957,6 +2222,12 @@ async function renderProfile(app, username) {
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
     </div>
+    <div id="tab-videos" class="hidden">
+      ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
+    </div>
+    <div id="tab-saved" class="hidden">
+      ${profileSavedVideos.length ? `<div class="grid-3">${profileSavedVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>'}
+    </div>
     <div id="tab-songs" class="hidden">
       ${profileSongsHTML}
     </div>
@@ -1966,7 +2237,7 @@ async function renderProfile(app, username) {
     btn.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
-      ['forums', 'books', 'groups', 'songs'].forEach(name => {
+      ['forums', 'books', 'groups', 'videos', 'saved', 'songs'].forEach(name => {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
       });

@@ -152,6 +152,10 @@ function makeSlug(title, id) {
   return base + '-' + id;
 }
 
+function getSettingValue(key, fallback = '') {
+  return key;
+}
+
 async function logAction(actor, action, target = '', detail = '', ip = '') {
   await query('INSERT INTO system_logs (actor,action,target,detail,ip) VALUES ($1,$2,$3,$4,$5)',
     [actor, action, target, detail, ip]);
@@ -278,12 +282,13 @@ const storage = USE_CLOUDINARY
     });
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (audio için)
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
     const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
-    if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
-    else cb(new Error('Sadece resim veya ses dosyaları kabul edilir'));
+    const allowedVideo = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska'];
+    if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || allowedVideo.includes(file.mimetype) || file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) cb(null, true);
+    else cb(new Error('Sadece resim, ses veya video dosyaları kabul edilir'));
   }
 });
 
@@ -297,9 +302,10 @@ async function handleUpload(file) {
       const ext = path.extname(file.originalname).replace('.', '') || 'jpg';
       const public_id = 'demlik/' + uuidv4();
       const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
+      const isVideo = file.mimetype && file.mimetype.startsWith('video/');
       const stream = cloudinary.uploader.upload_stream(
-        isAudio
-          ? { public_id, resource_type: 'video' } // Cloudinary audio için 'video' resource type kullanır
+        (isAudio || isVideo)
+          ? { public_id, resource_type: 'video' }
           : { public_id, resource_type: 'image', quality: 'auto', fetch_format: 'auto' },
         (err, result) => {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
@@ -778,13 +784,13 @@ app.get('/api/book/:slug', async (req, res) => {
 
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
-    const { title, preface, cover_image } = req.body;
+    const { title, preface, karakterler, kadro, cover_image } = req.body;
     if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
     const limitErr = await checkDailyLimit(req.user.id, req.user, 'books');
     if (limitErr) return res.status(429).json({ error: limitErr });
     const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,cover_image,slug) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-      [req.user.id, title, preface||'', cover_image||'', tempSlug]);
+    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
+      [req.user.id, title, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug]);
     const id = rows[0].id;
     const realSlug = makeSlug(title, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -801,9 +807,9 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, preface, cover_image } = req.body;
-  await query('UPDATE books SET title=$1,preface=$2,cover_image=$3,updated_at=NOW() WHERE id=$4',
-    [title||book.title, preface??book.preface, cover_image??book.cover_image, book.id]);
+  const { title, preface, karakterler, kadro, cover_image } = req.body;
+  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,updated_at=NOW() WHERE id=$6',
+    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, book.id]);
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(rows[0]);
 });
@@ -1161,15 +1167,16 @@ app.get('/api/profile/:username', async (req, res) => {
   const { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = users[0];
-  const [forums, books, groups, level, levels, bpCount] = await Promise.all([
+  const [forums, books, groups, videos, level, levels, bpCount] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
+    query(`SELECT v.*, u.username, u.avatar FROM videos v LEFT JOIN users u ON v.user_id=u.id WHERE v.user_id=$1 ORDER BY v.created_at DESC LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount });
+  res.json({ user: sanitizeUser(user), forums, books, groups, videos, level, levels, book_page_count: bpCount });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
@@ -1211,6 +1218,190 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
   } catch (e) {
     res.status(500).json({ error: 'Yükleme hatası: ' + e.message });
   }
+});
+
+app.get('/api/videos', async (req, res) => {
+  const { rows } = await query(`
+    SELECT v.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      (SELECT COUNT(*) FROM video_likes WHERE video_id=v.id) as like_count,
+      (SELECT COUNT(*) FROM video_comments WHERE video_id=v.id) as comment_count
+    FROM videos v LEFT JOIN users u ON v.user_id=u.id
+    ORDER BY v.created_at DESC
+  `);
+  res.json(rows);
+});
+
+app.get('/api/video/:slug', optionalAuth, async (req, res) => {
+  const { rows } = await query(`
+    SELECT v.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      (SELECT COUNT(*) FROM video_likes WHERE video_id=v.id) as like_count,
+      (SELECT COUNT(*) FROM video_comments WHERE video_id=v.id) as comment_count
+    FROM videos v LEFT JOIN users u ON v.user_id=u.id WHERE v.slug=$1`, [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.post('/api/videos', authMiddleware, async (req, res) => {
+  try {
+    const { title, description, video_url, banner_image } = req.body;
+    if (!title || !video_url) return res.status(400).json({ error: 'Başlık ve video zorunlu' });
+    const slug = makeSlug(title, Date.now());
+    const { rows } = await query(
+      'INSERT INTO videos (user_id,title,description,video_url,banner_image,slug) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.user.id, title, description || '', video_url, banner_image || '', slug]
+    );
+    const { rows: videoRows } = await query('SELECT * FROM videos WHERE id=$1', [rows[0].id]);
+    res.json(videoRows[0]);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.put('/api/video/:slug', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const video = rows[0];
+  if (video.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { title, description, video_url, banner_image, allow_comments } = req.body;
+  const updated = await query(
+    'UPDATE videos SET title=$1, description=$2, video_url=$3, banner_image=$4, allow_comments=$5, updated_at=NOW() WHERE id=$6 RETURNING *',
+    [title || video.title, description !== undefined ? description : video.description, video_url || video.video_url, banner_image !== undefined ? banner_image : video.banner_image, allow_comments !== undefined ? (allow_comments ? 1 : 0) : video.allow_comments, video.id]
+  );
+  res.json(updated.rows[0]);
+});
+
+app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const video = rows[0];
+  if (video.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  await query('DELETE FROM video_comment_likes WHERE comment_id IN (SELECT id FROM video_comments WHERE video_id=$1)', [video.id]);
+  await query('DELETE FROM video_comments WHERE video_id=$1', [video.id]);
+  await query('DELETE FROM video_likes WHERE video_id=$1', [video.id]);
+  await query('DELETE FROM video_saves WHERE video_id=$1', [video.id]);
+  await query('DELETE FROM videos WHERE id=$1', [video.id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/video/:slug/view', async (req, res) => {
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  await query('UPDATE videos SET views=views+1 WHERE id=$1', [rows[0].id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/video/:slug/like', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const videoId = rows[0].id;
+  const { rows: existing } = await query('SELECT id FROM video_likes WHERE video_id=$1 AND user_id=$2', [videoId, req.user.id]);
+  if (existing.length) { await query('DELETE FROM video_likes WHERE id=$1', [existing[0].id]); res.json({ liked: false }); }
+  else { await query('INSERT INTO video_likes (video_id,user_id) VALUES ($1,$2)', [videoId, req.user.id]); res.json({ liked: true }); }
+});
+
+app.post('/api/video/:slug/save', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const videoId = rows[0].id;
+  const { rows: existing } = await query('SELECT id FROM video_saves WHERE video_id=$1 AND user_id=$2', [videoId, req.user.id]);
+  if (existing.length) { await query('DELETE FROM video_saves WHERE id=$1', [existing[0].id]); res.json({ saved: false }); }
+  else { await query('INSERT INTO video_saves (video_id,user_id) VALUES ($1,$2)', [videoId, req.user.id]); res.json({ saved: true }); }
+});
+
+app.get('/api/video/:slug/saved', optionalAuth, async (req, res) => {
+  if (!req.user) return res.json({ saved: false });
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.json({ saved: false });
+  const { rows: savedRows } = await query('SELECT id FROM video_saves WHERE video_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
+  res.json({ saved: !!savedRows.length });
+});
+
+app.get('/api/video/:slug/liked', optionalAuth, async (req, res) => {
+  if (!req.user) return res.json({ liked: false });
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.json({ liked: false });
+  const { rows: likeRows } = await query('SELECT id FROM video_likes WHERE video_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
+  res.json({ liked: !!likeRows.length });
+});
+
+app.get('/api/video/:slug/comments', async (req, res) => {
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const { rows: comments } = await query(`
+    SELECT vc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus,
+      (SELECT COUNT(*) FROM video_comment_likes WHERE comment_id=vc.id) as like_count
+    FROM video_comments vc LEFT JOIN users u ON vc.user_id=u.id
+    WHERE vc.video_id=$1 ORDER BY vc.is_pinned DESC, vc.created_at ASC`, [rows[0].id]);
+  res.json(comments);
+});
+
+app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const video = rows[0];
+  if (!video.allow_comments) return res.status(403).json({ error: 'Yorumlar kapalı' });
+  const { content } = req.body;
+  if (!content?.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
+  const { rows: inserted } = await query('INSERT INTO video_comments (video_id,user_id,content) VALUES ($1,$2,$3) RETURNING *', [video.id, req.user.id, content.trim()]);
+  const { rows: full } = await query(`SELECT vc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus FROM video_comments vc LEFT JOIN users u ON vc.user_id=u.id WHERE vc.id=$1`, [inserted[0].id]);
+  res.json(full[0]);
+});
+
+app.put('/api/video/:slug/comments/:id', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT vc.*, v.user_id as owner_id FROM video_comments vc JOIN videos v ON vc.video_id=v.id WHERE vc.id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const comment = rows[0];
+  if (comment.user_id != req.user.id && comment.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { content } = req.body;
+  const { rows: updated } = await query('UPDATE video_comments SET content=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [content?.trim() || comment.content, comment.id]);
+  res.json(updated[0]);
+});
+
+app.post('/api/video/:slug/comments/:id/pin', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT v.user_id FROM videos v WHERE v.slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const videoOwnerId = rows[0].user_id;
+  if (videoOwnerId != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows: commentRows } = await query('SELECT * FROM video_comments WHERE id=$1', [req.params.id]);
+  if (!commentRows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  await query('UPDATE video_comments SET is_pinned = CASE WHEN is_pinned=1 THEN 0 ELSE 1 END, updated_at=NOW() WHERE id=$1', [commentRows[0].id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/video/:slug/comments/:id/like', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id FROM video_comments WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const { rows: existing } = await query('SELECT id FROM video_comment_likes WHERE comment_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
+  if (existing.length) { await query('DELETE FROM video_comment_likes WHERE id=$1', [existing[0].id]); res.json({ liked: false }); }
+  else { await query('INSERT INTO video_comment_likes (comment_id,user_id) VALUES ($1,$2)', [rows[0].id, req.user.id]); res.json({ liked: true }); }
+});
+
+app.post('/api/user/:username/follow', authMiddleware, async (req, res) => {
+  const { rows: targetRows } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!targetRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (targetRows[0].id === req.user.id) return res.status(400).json({ error: 'Kendini takip edemezsin' });
+  const { rows: existing } = await query('SELECT id FROM user_follows WHERE follower_id=$1 AND followed_id=$2', [req.user.id, targetRows[0].id]);
+  if (existing.length) { await query('DELETE FROM user_follows WHERE id=$1', [existing[0].id]); res.json({ following: false }); }
+  else { await query('INSERT INTO user_follows (follower_id,followed_id) VALUES ($1,$2)', [req.user.id, targetRows[0].id]); res.json({ following: true }); }
+});
+
+app.get('/api/user/:username/following', optionalAuth, async (req, res) => {
+  if (!req.user) return res.json({ following: false });
+  const { rows: targetRows } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!targetRows.length) return res.json({ following: false });
+  const { rows } = await query('SELECT id FROM user_follows WHERE follower_id=$1 AND followed_id=$2', [req.user.id, targetRows[0].id]);
+  res.json({ following: !!rows.length });
+});
+
+app.get('/api/user/:username/saved-videos', optionalAuth, async (req, res) => {
+  const { rows: targetRows } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!targetRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows } = await query(`
+    SELECT v.*, u.username, u.avatar FROM videos v
+    JOIN video_saves vs ON vs.video_id=v.id
+    LEFT JOIN users u ON v.user_id=u.id
+    WHERE vs.user_id=$1 ORDER BY vs.id DESC`, [targetRows[0].id]);
+  res.json(rows);
 });
 
 // ===== ADMIN =====
@@ -1430,8 +1621,38 @@ app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
 app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key, value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  // admin_password için hash işlemi client tarafında yapılıyor, server direkt kaydeder
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, value]);
+  res.json({ ok: true });
+});
+
+app.get('/api/video-settings', async (req, res) => {
+  const { rows } = await query("SELECT key,value FROM settings WHERE key IN ('video_upload_success_text','video_upload_success_duration','video_default_description','video_empty_description_text')");
+  const data = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.json({
+    uploadSuccessText: data.video_upload_success_text || 'YÜKLENDİ',
+    uploadSuccessDuration: data.video_upload_success_duration || '3',
+    defaultDescription: data.video_default_description || '',
+    emptyDescriptionText: data.video_empty_description_text || 'Bu videoya bir açıklama eklenmemiş.'
+  });
+});
+
+app.get('/api/admin/video-settings', adminMiddleware, async (req, res) => {
+  const { rows } = await query("SELECT key,value FROM settings WHERE key IN ('video_upload_success_text','video_upload_success_duration','video_default_description','video_empty_description_text')");
+  const data = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.json({
+    uploadSuccessText: data.video_upload_success_text || 'YÜKLENDİ',
+    uploadSuccessDuration: data.video_upload_success_duration || '3',
+    defaultDescription: data.video_default_description || '',
+    emptyDescriptionText: data.video_empty_description_text || 'Bu videoya bir açıklama eklenmemiş.'
+  });
+});
+
+app.post('/api/admin/video-settings', adminMiddleware, async (req, res) => {
+  const { uploadSuccessText, uploadSuccessDuration, defaultDescription, emptyDescriptionText } = req.body;
+  await query("INSERT INTO settings (key,value) VALUES ('video_upload_success_text',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [uploadSuccessText || 'YÜKLENDİ']);
+  await query("INSERT INTO settings (key,value) VALUES ('video_upload_success_duration',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [String(uploadSuccessDuration || '3')]);
+  await query("INSERT INTO settings (key,value) VALUES ('video_default_description',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [defaultDescription || '']);
+  await query("INSERT INTO settings (key,value) VALUES ('video_empty_description_text',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.']);
   res.json({ ok: true });
 });
 

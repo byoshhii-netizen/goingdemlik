@@ -1624,6 +1624,17 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-video" style="color:var(--red2);margin-right:8px"></i>Video Yayınlama</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Yükleme başarı mesajı</label><input id="s-video-success-text" value="${escHtml(settings['video_upload_success_text']||'YÜKLENDİ')}" /></div>
+          <div class="form-group"><label>Başarı popup süresi (sn)</label><input id="s-video-success-duration" type="number" min="1" max="10" value="${escHtml(settings['video_upload_success_duration']||'3')}" /></div>
+          <div class="form-group"><label>Varsayılan açıklama</label><textarea id="s-video-default-desc" rows="3">${escHtml(settings['video_default_description']||'')}</textarea></div>
+          <div class="form-group"><label>Boş açıklama metni</label><textarea id="s-video-empty-desc" rows="3">${escHtml(settings['video_empty_description_text']||'Bu videoya bir açıklama eklenmemiş.')}</textarea></div>
+          <button class="btn btn-primary" id="s-video-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+          <div id="s-video-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Şarkı Yayınlama Kuralları</span></div>
         <div class="card-body">
           <div class="form-group"><label>Kendi Şarkım – Kurallar</label><textarea id="s-music-own" rows="4">${escHtml(settings['music_own_rules']||'')}</textarea></div>
@@ -1696,5 +1707,18 @@ async function renderSettings(main) {
   });
   document.getElementById('s-music-other-save').addEventListener('click', async () => {
     await saveSetting('music_other_rules', document.getElementById('s-music-other').value.trim(), document.getElementById('s-music-msg'));
+  });
+  document.getElementById('s-video-save').addEventListener('click', async () => {
+    const msg = document.getElementById('s-video-msg');
+    try {
+      await adminApi('/video-settings', { method:'POST', body: JSON.stringify({
+        uploadSuccessText: document.getElementById('s-video-success-text').value.trim(),
+        uploadSuccessDuration: document.getElementById('s-video-success-duration').value.trim(),
+        defaultDescription: document.getElementById('s-video-default-desc').value.trim(),
+        emptyDescriptionText: document.getElementById('s-video-empty-desc').value.trim()
+      }) });
+      toast('Video ayarları kaydedildi');
+      msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
+    } catch (e) { msg.textContent=e.message; }
   });
 }
