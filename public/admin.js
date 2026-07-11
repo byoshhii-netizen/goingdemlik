@@ -114,7 +114,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers,
-    forums: renderForums, books: renderBooks, groups: renderGroups, artists: renderArtists,
+    forums: renderForums, books: renderBooks, videos: renderVideos, 'video-ads': renderVideoAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
@@ -554,6 +554,200 @@ async function renderGroups(main) {
   $('#group-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderTable(groups.filter(g => g.name.toLowerCase().includes(q) || (g.owner_name||'').toLowerCase().includes(q)));
+  });
+}
+
+// ===== VIDEOS =====
+async function renderVideos(main) {
+  let videos = [];
+  try { videos = await adminApi('/videos'); } catch (e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-video"></i></div> Videolar</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-video"></i></div> Videolar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${videos.length})</span></div>
+      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="video-search" placeholder="Başlık veya kullanıcı ara..." style="min-width:240px" /></div>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Kullanıcı</th><th>Yorum</th><th>Beğeni</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <tbody id="videos-tbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  const renderTable = list => {
+    const tbody = $('#videos-tbody'); if (!tbody) return;
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">Video bulunamadı</td></tr>'; return; }
+    tbody.innerHTML = list.map(v => `<tr>
+      <td style="color:var(--text3);font-size:12px">#${v.id}</td>
+      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(v.title)}">${escHtml(v.title)}</td>
+      <td><span style="color:var(--blue2)">${escHtml(v.username||'Silinmiş')}</span></td>
+      <td style="color:var(--text3);font-size:12px">${v.allow_comments?'<span class="badge badge-green">Açık</span>':'<span class="badge badge-red">Kapalı</span>'}</td>
+      <td style="color:var(--text3);font-size:12px">${v.like_count||0}</td>
+      <td style="color:var(--text3);font-size:12px">${v.active?'<span class="badge badge-green">Aktif</span>':'<span class="badge badge-red">Pasif</span>'}</td>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-xs edit-video-btn" data-id="${v.id}">Düzenle</button>
+          <button class="btn btn-danger btn-xs delete-video-btn" data-id="${v.id}">Sil</button>
+        </div>
+      </td>
+    </tr>`).join('');
+
+    tbody.querySelectorAll('.edit-video-btn').forEach(btn => btn.addEventListener('click', async () => {
+      const video = videos.find(x => x.id == btn.dataset.id);
+      if (video) showVideoEditModal(video);
+    }));
+    tbody.querySelectorAll('.delete-video-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Bu videoyu silmek istediğine emin misin?')) return;
+      try { await adminApi('/video/' + btn.dataset.id, { method:'DELETE' }); toast('Video silindi'); videos = videos.filter(v => v.id != btn.dataset.id); renderTable(videos); }
+      catch (e) { toast(e.message,'error'); }
+    }));
+  };
+
+  renderTable(videos);
+  $('#video-search').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    renderTable(videos.filter(v => v.title.toLowerCase().includes(q) || (v.username||'').toLowerCase().includes(q)));
+  });
+}
+
+function showVideoEditModal(video) {
+  showModal(`Video Düzenle — ${escHtml(video.title)}`, `
+    <div class="form-group"><label>Başlık</label><input id="ve-title" value="${escHtml(video.title)}" /></div>
+    <div class="form-group"><label>Açıklama</label><textarea id="ve-description" rows="5">${escHtml(video.description||'')}</textarea></div>
+    <div class="form-group"><label>Video URL</label><input id="ve-video-url" value="${escHtml(video.video_url||'')}" /></div>
+    <div class="form-group"><label>Yeni Video Dosyası</label><input type="file" id="ve-video-file" accept="video/*" /></div>
+    <div class="form-group"><label>Banner URL</label><input id="ve-banner-url" value="${escHtml(video.banner_image||'')}" /></div>
+    <div class="form-group"><label>Yorumlara izin</label><label class="checkbox-label"><input type="checkbox" id="ve-allow-comments" ${video.allow_comments? 'checked' : ''} /> Açık</label></div>
+    <div class="form-group"><label>Aktif</label><label class="checkbox-label"><input type="checkbox" id="ve-active" ${video.active? 'checked' : ''} /> Aktif</label></div>
+    <button class="btn btn-primary" id="ve-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+    <div id="ve-msg" class="form-error mt-4"></div>
+  `);
+
+  document.getElementById('ve-save').addEventListener('click', async () => {
+    const btn = document.getElementById('ve-save'); btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Kaydediliyor...';
+    const file = document.getElementById('ve-video-file').files[0];
+    let videoUrl = document.getElementById('ve-video-url').value.trim();
+    try {
+      if (file) {
+        const fd = new FormData(); fd.append('file', file);
+        const uploadRes = await fetch('/api/admin/upload-video', { method:'POST', headers:{'X-Admin-Token':adminToken}, body: fd });
+        const data = await uploadRes.json(); if (!uploadRes.ok) throw new Error(data.error||'Yükleme hatası');
+        videoUrl = data.url;
+      }
+      const payload = {
+        title: document.getElementById('ve-title').value.trim(),
+        description: document.getElementById('ve-description').value.trim(),
+        video_url: videoUrl,
+        banner_image: document.getElementById('ve-banner-url').value.trim(),
+        allow_comments: document.getElementById('ve-allow-comments').checked,
+        active: document.getElementById('ve-active').checked
+      };
+      await adminApi('/video/' + video.id, { method:'PUT', body: JSON.stringify(payload) });
+      toast('Video güncellendi'); hideModal(); loadSection('videos');
+    } catch (e) { document.getElementById('ve-msg').textContent = e.message; }
+    finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> Kaydet'; }
+  });
+}
+
+// ===== VIDEO ADS =====
+async function renderVideoAds(main) {
+  let ads = [];
+  try { ads = await adminApi('/video-ads'); } catch (e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> Video Reklamları</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="adm-section-header" style="align-items:center">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> Video Reklamları <span style="font-size:13px;font-weight:400;color:var(--text2)">(${ads.length})</span></div>
+      <button class="btn btn-primary btn-sm" id="add-video-ad-btn"><i class="fas fa-plus"></i> Yeni Reklam</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Site</th><th>Öncelik</th><th>Zaman</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <tbody id="video-ads-tbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  const renderTable = list => {
+    const tbody = $('#video-ads-tbody'); if (!tbody) return;
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">Reklam bulunamadı</td></tr>'; return; }
+    tbody.innerHTML = list.map(ad => `<tr>
+      <td style="color:var(--text3);font-size:12px">#${ad.id}</td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(ad.title)}">${escHtml(ad.title)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(ad.site_url)}"><a href="${escHtml(ad.site_url)}" target="_blank" rel="noopener noreferrer">${escHtml(ad.site_url)}</a></td>
+      <td style="color:var(--text3);font-size:12px">${ad.priority || 0}</td>
+      <td style="color:var(--text3);font-size:12px">${ad.display_after_seconds || 0}s</td>
+      <td style="color:var(--text3);font-size:12px">${ad.active?'<span class="badge badge-green">Aktif</span>':'<span class="badge badge-red">Pasif</span>'}</td>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-xs edit-ad-btn" data-id="${ad.id}">Düzenle</button>
+          <button class="btn btn-danger btn-xs delete-ad-btn" data-id="${ad.id}">Sil</button>
+        </div>
+      </td>
+    </tr>`).join('');
+    tbody.querySelectorAll('.edit-ad-btn').forEach(btn => btn.addEventListener('click', () => {
+      const ad = ads.find(x => x.id == btn.dataset.id);
+      if (ad) showVideoAdModal(ad);
+    }));
+    tbody.querySelectorAll('.delete-ad-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Bu reklamı silmek istediğine emin misin?')) return;
+      try { await adminApi('/video-ads/' + btn.dataset.id, { method:'DELETE' }); toast('Reklam silindi'); ads = ads.filter(x => x.id != btn.dataset.id); renderTable(ads); }
+      catch (e) { toast(e.message,'error'); }
+    }));
+  };
+
+  renderTable(ads);
+  $('#add-video-ad-btn')?.addEventListener('click', () => showVideoAdModal());
+}
+
+function showVideoAdModal(ad = {}) {
+  const isEdit = !!ad.id;
+  showModal(`${isEdit ? 'Reklam Düzenle' : 'Yeni Reklam'}`, `
+    <div class="form-group"><label>Başlık</label><input id="va-title" value="${escHtml(ad.title||'')}" /></div>
+    <div class="form-group"><label>Video URL</label><input id="va-video-url" value="${escHtml(ad.video_url||'')}" /></div>
+    <div class="form-group"><label>Site Linki</label><input id="va-site-url" value="${escHtml(ad.site_url||'')}" /></div>
+    <div class="form-group"><label>Konum</label>
+      <select id="va-position">
+        <option value="bottom-right" ${ad.position==='bottom-right'?'selected':''}>Sağ Alt</option>
+        <option value="bottom-left" ${ad.position==='bottom-left'?'selected':''}>Sol Alt</option>
+        <option value="top-right" ${ad.position==='top-right'?'selected':''}>Sağ Üst</option>
+        <option value="top-left" ${ad.position==='top-left'?'selected':''}>Sol Üst</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Sıralama Önceliği</label><input id="va-priority" type="number" value="${escHtml(ad.priority||0)}" /></div>
+    <div class="form-group"><label>Gösterim Süresi (sn)</label><input id="va-display-after" type="number" min="0" value="${escHtml(ad.display_after_seconds||0)}" /></div>
+    <div class="form-group"><label>Aktif</label><label class="checkbox-label"><input type="checkbox" id="va-active" ${ad.active? 'checked' : ''} /> Aktif</label></div>
+    <button class="btn btn-primary" id="va-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+    <div id="va-msg" class="form-error mt-4"></div>
+  `);
+
+  document.getElementById('va-save').addEventListener('click', async () => {
+    const btn = document.getElementById('va-save'); btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Kaydediliyor...';
+    try {
+      const payload = {
+        title: document.getElementById('va-title').value.trim(),
+        video_url: document.getElementById('va-video-url').value.trim(),
+        site_url: document.getElementById('va-site-url').value.trim(),
+        position: document.getElementById('va-position').value,
+        priority: parseInt(document.getElementById('va-priority').value, 10) || 0,
+        display_after_seconds: parseInt(document.getElementById('va-display-after').value, 10) || 0,
+        active: document.getElementById('va-active').checked
+      };
+      if (!payload.title || !payload.video_url) throw new Error('Başlık ve video URL gereklidir');
+      if (isEdit) {
+        await adminApi('/video-ads/' + ad.id, { method:'PUT', body: JSON.stringify(payload) });
+      } else {
+        await adminApi('/video-ads', { method:'POST', body: JSON.stringify(payload) });
+      }
+      toast('Reklam kaydedildi'); hideModal(); loadSection('video-ads');
+    } catch (e) { document.getElementById('va-msg').textContent = e.message; }
+    finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> Kaydet'; }
   });
 }
 

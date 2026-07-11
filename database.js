@@ -136,6 +136,7 @@ async function initDb() {
       slug TEXT UNIQUE,
       allow_comments INTEGER DEFAULT 1,
       views INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -178,6 +179,19 @@ async function initDb() {
       UNIQUE(comment_id, user_id),
       FOREIGN KEY(comment_id) REFERENCES video_comments(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS video_ads (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      video_url TEXT NOT NULL,
+      site_url TEXT DEFAULT '',
+      position TEXT DEFAULT 'bottom-right',
+      priority INTEGER DEFAULT 0,
+      display_after_seconds INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS user_follows (
@@ -440,8 +454,10 @@ async function initDb() {
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS slug TEXT DEFAULT '';
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS views INTEGER DEFAULT 0;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1;
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    ALTER TABLE video_ads ADD COLUMN IF NOT EXISTS display_after_seconds INTEGER DEFAULT 0;
     ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS is_pinned INTEGER DEFAULT 0;
     ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 

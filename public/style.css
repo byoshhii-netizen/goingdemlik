@@ -253,8 +253,17 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .video-card-meta { font-size: 12px; color: var(--text-secondary); }
 .video-card-desc { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 .video-player-card { display:grid; grid-template-columns: 1.5fr 0.9fr; gap: 20px; align-items:start; }
-.video-player-shell { background:#000; border-radius: var(--radius); overflow:hidden; border:1px solid var(--border); }
+.video-player-shell { position: relative; background:#000; border-radius: var(--radius); overflow:hidden; border:1px solid var(--border); }
 .video-player { width:100%; aspect-ratio:16/9; background:#000; }
+.video-ad-overlay { position:absolute; display:flex; flex-direction:column; gap:6px; padding:12px 14px; border-radius:14px; background: rgba(0,0,0,0.75); color:#fff; font-size:13px; line-height:1.4; z-index: 5; min-width:180px; max-width:260px; }
+.video-ad-overlay.hidden { display:none; }
+.video-ad-overlay a { color:#fff; text-decoration:none; }
+.video-ad-overlay.bottom-right { bottom:16px; right:16px; }
+.video-ad-overlay.bottom-left { bottom:16px; left:16px; }
+.video-ad-overlay.top-right { top:16px; right:16px; }
+.video-ad-overlay.top-left { top:16px; left:16px; }
+.video-ad-overlay .video-ad-link { display:grid; gap:4px; }
+.video-comment-like.liked { color: var(--accent-red); }
 .video-meta-block, .video-comments-card { background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius); padding: 18px; display:grid; gap:14px; }
 .video-title { font-size: 24px; font-weight: 800; }
 .video-author-row, .video-stats-row, .video-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }

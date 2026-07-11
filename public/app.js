@@ -216,7 +216,7 @@ function updateNavUI() {
     $('#dropdown-profile').setAttribute('href', '/profil/' + currentUser.username);
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
-      navBrand.setAttribute('href', '/profil/' + currentUser.username);
+      navBrand.setAttribute('href', '/');
       navBrand.style.cursor = 'pointer';
     }
 
@@ -1983,9 +1983,10 @@ async function renderVideoDetail(app, slug) {
   app.innerHTML = `<div class="container page">
     <div class="video-player-card">
       <div class="video-player-shell">
-        <video controls preload="metadata" class="video-player" poster="${escHtml(video.banner_image || '')}">
+        <video controls preload="metadata" class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
           <source src="${escHtml(video.video_url)}" />
         </video>
+        <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
       </div>
       <div class="video-meta-block">
         <div class="video-title">${escHtml(video.title)}</div>
@@ -2010,9 +2011,24 @@ async function renderVideoDetail(app, slug) {
 
   $('#video-like-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
-    try { const r = await api('/video/' + slug + '/like', { method: 'POST' }); liked = r.liked; $('#video-like-count').textContent = parseInt($('#video-like-count').textContent) + (liked ? 1 : -1); $('#video-like-btn').classList.toggle('btn-primary', liked); } catch {}
+    const btn = $('#video-like-btn');
+    btn.disabled = true;
+    try {
+      const r = await api('/video/' + slug + '/like', { method: 'POST' });
+      liked = r.liked;
+      const countEl = $('#video-like-count');
+      const currentCount = Math.max(0, parseInt(countEl.textContent) || 0);
+      countEl.textContent = currentCount + (liked ? 1 : -1);
+      btn.classList.toggle('btn-primary', liked);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
   });
 
+  const likeBtn = $('#video-like-btn');
+  if (likeBtn) likeBtn.classList.toggle('btn-primary', liked);
   $('#video-save-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
     try { const r = await api('/video/' + slug + '/save', { method: 'POST' }); saved = r.saved; $('#video-save-btn').innerHTML = `<i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}`; } catch {}
@@ -2035,6 +2051,36 @@ async function renderVideoDetail(app, slug) {
     });
   });
 
+  try {
+    const ads = await api('/video-ads');
+    if (Array.isArray(ads) && ads.length) {
+      const activeAds = ads.filter(a => a.active === 1 || a.active === true).sort((a, b) => (b.priority || 0) - (a.priority || 0));
+      if (activeAds.length) {
+        const ad = activeAds[0];
+        const adEl = $('#video-ad-overlay');
+        if (adEl) {
+          adEl.innerHTML = `<a href="${escHtml(ad.site_url || '#')}" target="_blank" rel="noopener noreferrer" class="video-ad-link"><strong>${escHtml(ad.title)}</strong><span>${escHtml(ad.site_url || '')}</span></a>`;
+          adEl.className = `video-ad-overlay hidden ${escHtml(ad.position || 'bottom-right')}`;
+          const videoEl = $('#video-player-el');
+          if (videoEl && ad.display_after_seconds >= 0) {
+            const showOverlay = () => {
+              const seconds = Math.floor(videoEl.currentTime || 0);
+              if (seconds >= (ad.display_after_seconds || 0)) {
+                adEl.classList.remove('hidden');
+              } else {
+                adEl.classList.add('hidden');
+              }
+            };
+            videoEl.addEventListener('timeupdate', showOverlay);
+            showOverlay();
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // ads optional
+  }
+
   $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
   $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
 
@@ -2052,7 +2098,19 @@ async function renderVideoDetail(app, slug) {
   $('#video-comments-list').addEventListener('click', async e => {
     const likeBtn = e.target.closest('.video-comment-like');
     if (likeBtn) {
-      try { await api('/video/' + slug + '/comments/' + likeBtn.dataset.id + '/like', { method: 'POST' }); const c = likeBtn.querySelector('.video-comment-count'); c.textContent = parseInt(c.textContent) + 1; } catch {}
+      likeBtn.disabled = true;
+      try {
+        const r = await api('/video/' + slug + '/comments/' + likeBtn.dataset.id + '/like', { method: 'POST' });
+        const c = likeBtn.querySelector('.video-comment-count');
+        const currentCount = Math.max(0, parseInt(c.textContent) || 0);
+        c.textContent = currentCount + (r.liked ? 1 : -1);
+        likeBtn.classList.toggle('liked', r.liked);
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        likeBtn.disabled = false;
+      }
+      return;
     }
     const editBtn = e.target.closest('.video-comment-edit');
     if (editBtn) {

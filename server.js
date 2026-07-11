@@ -1241,6 +1241,7 @@ app.get('/api/videos', async (req, res) => {
       (SELECT COUNT(*) FROM video_likes WHERE video_id=v.id) as like_count,
       (SELECT COUNT(*) FROM video_comments WHERE video_id=v.id) as comment_count
     FROM videos v LEFT JOIN users u ON v.user_id=u.id
+    WHERE v.active=1
     ORDER BY v.created_at DESC
   `);
   res.json(rows);
@@ -1253,7 +1254,11 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM video_comments WHERE video_id=v.id) as comment_count
     FROM videos v LEFT JOIN users u ON v.user_id=u.id WHERE v.slug=$1`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
-  res.json(rows[0]);
+  const video = rows[0];
+  if (!video.active && (!req.user || (req.user.id !== video.user_id && !req.user.is_admin))) {
+    return res.status(404).json({ error: 'Video bulunamadı' });
+  }
+  res.json(video);
 });
 
 app.post('/api/videos', authMiddleware, async (req, res) => {
@@ -1668,6 +1673,90 @@ app.post('/api/admin/video-settings', adminMiddleware, async (req, res) => {
   await query("INSERT INTO settings (key,value) VALUES ('video_upload_success_duration',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [String(uploadSuccessDuration || '3')]);
   await query("INSERT INTO settings (key,value) VALUES ('video_default_description',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [defaultDescription || '']);
   await query("INSERT INTO settings (key,value) VALUES ('video_empty_description_text',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.']);
+  res.json({ ok: true });
+});
+
+app.get('/api/video-ads', async (req, res) => {
+  const { rows } = await query('SELECT * FROM video_ads WHERE active=1 ORDER BY priority DESC, created_at DESC');
+  res.json(rows);
+});
+
+app.get('/api/admin/videos', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT v.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      (SELECT COUNT(*) FROM video_likes WHERE video_id=v.id) as like_count,
+      (SELECT COUNT(*) FROM video_comments WHERE video_id=v.id) as comment_count
+    FROM videos v LEFT JOIN users u ON v.user_id=u.id
+    ORDER BY v.created_at DESC
+  `);
+  res.json(rows);
+});
+
+app.put('/api/admin/video/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM videos WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const video = rows[0];
+  const { title, description, video_url, banner_image, allow_comments, active } = req.body;
+  const updated = await query(
+    'UPDATE videos SET title=$1, description=$2, video_url=$3, banner_image=$4, allow_comments=$5, active=$6, updated_at=NOW() WHERE id=$7 RETURNING *',
+    [title || video.title, description !== undefined ? description : video.description, video_url || video.video_url, banner_image !== undefined ? banner_image : video.banner_image, allow_comments !== undefined ? (allow_comments ? 1 : 0) : video.allow_comments, active !== undefined ? (active ? 1 : 0) : video.active, video.id]
+  );
+  res.json(updated.rows[0]);
+});
+
+app.delete('/api/admin/video/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM videos WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const video = rows[0];
+  await query('DELETE FROM video_comment_likes WHERE comment_id IN (SELECT id FROM video_comments WHERE video_id=$1)', [video.id]);
+  await query('DELETE FROM video_comments WHERE video_id=$1', [video.id]);
+  await query('DELETE FROM video_likes WHERE video_id=$1', [video.id]);
+  await query('DELETE FROM video_saves WHERE video_id=$1', [video.id]);
+  await query('DELETE FROM videos WHERE id=$1', [video.id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/upload-video', adminMiddleware, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Dosya bulunamadı' });
+  try {
+    const url = await handleUpload(req.file);
+    res.json({ url });
+  } catch (e) {
+    res.status(500).json({ error: 'Yükleme hatası: ' + e.message });
+  }
+});
+
+app.get('/api/admin/video-ads', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM video_ads ORDER BY priority DESC, created_at DESC');
+  res.json(rows);
+});
+
+app.post('/api/admin/video-ads', adminMiddleware, async (req, res) => {
+  const { title, video_url, site_url, position, priority, display_after_seconds, active } = req.body;
+  if (!title || !video_url) return res.status(400).json({ error: 'Başlık ve video URL zorunlu' });
+  const { rows } = await query(
+    'INSERT INTO video_ads (title, video_url, site_url, position, priority, display_after_seconds, active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+    [title, video_url, site_url || '', position || 'bottom-right', priority || 0, display_after_seconds || 0, active ? 1 : 0]
+  );
+  res.json(rows[0]);
+});
+
+app.put('/api/admin/video-ads/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM video_ads WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Reklam bulunamadı' });
+  const ad = rows[0];
+  const { title, video_url, site_url, position, priority, display_after_seconds, active } = req.body;
+  const { rows: updated } = await query(
+    'UPDATE video_ads SET title=$1, video_url=$2, site_url=$3, position=$4, priority=$5, display_after_seconds=$6, active=$7, updated_at=NOW() WHERE id=$8 RETURNING *',
+    [title || ad.title, video_url || ad.video_url, site_url !== undefined ? site_url : ad.site_url, position || ad.position, priority !== undefined ? priority : ad.priority, display_after_seconds !== undefined ? display_after_seconds : ad.display_after_seconds, active !== undefined ? (active ? 1 : 0) : ad.active, ad.id]
+  );
+  res.json(updated[0]);
+});
+
+app.delete('/api/admin/video-ads/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM video_ads WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Reklam bulunamadı' });
+  await query('DELETE FROM video_ads WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 });
 
