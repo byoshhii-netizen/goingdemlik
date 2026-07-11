@@ -1021,6 +1021,7 @@ function bookCardHTML(b) {
   return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
+      ${b.is_hidden ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent-red2);color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px"><i class="fas fa-lock"></i></div>' : ''}
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
@@ -1041,6 +1042,10 @@ function showNewBookModal(existing = null) {
       <label>Kapak Resmi (opsiyonel)</label>
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
       ${existing && existing.cover_image ? `<img id="bk-cover-preview" src="${escHtml(existing.cover_image)}" style="width:100px;height:133px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="bk-cover-preview" style="display:none"></div>`}
+    </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="bk-is-hidden" ${existing && existing.is_hidden ? 'checked' : ''} />
+      <label for="bk-is-hidden" style="margin:0;cursor:pointer">Gizli Kitap (Yalnızca siz ve yönetim görebilir)</label>
     </div>
     <button class="btn btn-primary" id="bk-submit" style="width:100%">${existing ? 'Güncelle' : 'Oluştur'}</button>
     <div id="bk-error" class="form-error mt-4"></div>
@@ -1072,7 +1077,8 @@ function showNewBookModal(existing = null) {
         preface: $('#bk-preface').value.trim(),
         karakterler: $('#bk-karakterler').value.trim(),
         kadro: $('#bk-kadro').value.trim(),
-        cover_image
+        cover_image,
+        is_hidden: $('#bk-is-hidden').checked
       };
       if (existing) {
         await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
@@ -1132,7 +1138,7 @@ async function renderBookDetail(app, slug) {
         ${book.cover_image ? `<img src="${escHtml(book.cover_image)}" alt="" />` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-card2)"><i class="fas fa-book" style="font-size:40px;color:var(--text-muted)"></i></div>`}
       </div>
       <div class="book-detail-info">
-        <div class="book-detail-title">${escHtml(book.title)}</div>
+        <div class="book-detail-title">${escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
         <div class="book-detail-meta">
           <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
           <span><i class="fas fa-file-alt"></i> ${book.page_count || 0} sayfa</span>

@@ -1,4 +1,5 @@
-﻿const express = require('express');
+﻿require('dotenv').config();
+const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -28,7 +29,7 @@ if (process.env.CLOUDINARY_URL) {
 const USE_CLOUDINARY = !!(process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME);
 
 // Fallback: local disk (Railway volume veya geliştirme)
-const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, 'uploads');
 if (!USE_CLOUDINARY) {
   try { if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) {}
 }
@@ -768,15 +769,25 @@ app.get('/api/forum/:slug/tags', async (req, res) => {
 });
 
 // ===== BOOKS =====
-app.get('/api/books', async (req, res) => {
+app.get('/api/books', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id ORDER BY b.created_at DESC`);
-  res.json(rows);
+  // Filter hidden books - show only if user is owner or admin
+  const filtered = rows.filter(book => {
+    if (!book.is_hidden) return true;
+    if (req.user && book.user_id === req.user.id) return true;
+    return false;
+  });
+  res.json(filtered);
 });
 
-app.get('/api/book/:slug', async (req, res) => {
+app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE b.slug=$1`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
+  // Check if book is hidden and user doesn't have access
+  if (book.is_hidden && (!req.user || (req.user.id !== book.user_id))) {
+    return res.status(403).json({ error: 'Bu kitap gizli' });
+  }
   const { rows: chapters } = await query('SELECT * FROM book_chapters WHERE book_id=$1 ORDER BY order_num ASC', [book.id]);
   const { rows: pages } = await query('SELECT id,title,page_num,slug,chapter_id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
   res.json({ book, chapters, pages });
@@ -784,13 +795,13 @@ app.get('/api/book/:slug', async (req, res) => {
 
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
-    const { title, preface, karakterler, kadro, cover_image } = req.body;
+    const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
     if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
     const limitErr = await checkDailyLimit(req.user.id, req.user, 'books');
     if (limitErr) return res.status(429).json({ error: limitErr });
     const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
-      [req.user.id, title, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug]);
+    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+      [req.user.id, title, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, is_hidden?1:0]);
     const id = rows[0].id;
     const realSlug = makeSlug(title, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -807,9 +818,9 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, preface, karakterler, kadro, cover_image } = req.body;
-  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,updated_at=NOW() WHERE id=$6',
-    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, book.id]);
+  const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
+  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,updated_at=NOW() WHERE id=$7',
+    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined?is_hidden?1:0:book.is_hidden, book.id]);
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(rows[0]);
 });
@@ -850,10 +861,14 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
   res.json(pRows[0]);
 });
 
-app.get('/api/book/:slug/page/:pageSlug', async (req, res) => {
+app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
+  // Check if book is hidden and user doesn't have access
+  if (book.is_hidden && (!req.user || (req.user.id !== book.user_id))) {
+    return res.status(403).json({ error: 'Bu kitap gizli' });
+  }
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
   if (!pRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const page = pRows[0];
