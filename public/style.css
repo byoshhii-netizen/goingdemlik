@@ -443,6 +443,99 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .form-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 .form-error { font-size: 12px; color: var(--accent-red2); margin-top: 4px; }
 
+/* ===== TOGGLE SWITCH ===== */
+.book-privacy-toggle {
+  background: linear-gradient(135deg, rgba(220,38,38,0.08) 0%, rgba(220,38,38,0.04) 100%);
+  border: 1px solid rgba(220,38,38,0.2);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.toggle-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toggle-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toggle-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.toggle-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.toggle-switch {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  display: none;
+}
+
+.toggle-slider {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 28px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 14px;
+  transition: background 0.3s ease;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background: white;
+  top: 1px;
+  left: 1px;
+  transition: transform 0.3s ease;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+}
+
+.toggle-switch input:checked + .toggle-slider::after {
+  transform: translateX(20px);
+}
+
+@media (max-width: 600px) {
+  .book-privacy-toggle {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .toggle-header {
+    width: 100%;
+  }
+}
+
 /* ===== AUTH PAGES ===== */
 .auth-page { min-height: calc(100vh - 60px); display: flex; align-items: center; justify-content: center; padding: 40px 20px; }
 .auth-card { width: 100%; max-width: 460px; }

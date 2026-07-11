@@ -1043,9 +1043,18 @@ function showNewBookModal(existing = null) {
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
       ${existing && existing.cover_image ? `<img id="bk-cover-preview" src="${escHtml(existing.cover_image)}" style="width:100px;height:133px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="bk-cover-preview" style="display:none"></div>`}
     </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:8px">
-      <input type="checkbox" id="bk-is-hidden" ${existing && existing.is_hidden ? 'checked' : ''} />
-      <label for="bk-is-hidden" style="margin:0;cursor:pointer">Gizli Kitap (Yalnızca siz ve yönetim görebilir)</label>
+    <div class="book-privacy-toggle">
+      <div class="toggle-header">
+        <i class="fas fa-lock" style="color:var(--accent-red2);font-size:16px"></i>
+        <div class="toggle-label">
+          <div class="toggle-title">Gizli Kitap</div>
+          <div class="toggle-desc">Sadece siz ve yönetim görebilir</div>
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="bk-is-hidden" ${existing && existing.is_hidden ? 'checked' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
     </div>
     <button class="btn btn-primary" id="bk-submit" style="width:100%">${existing ? 'Güncelle' : 'Oluştur'}</button>
     <div id="bk-error" class="form-error mt-4"></div>
