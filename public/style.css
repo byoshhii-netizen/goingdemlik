@@ -226,7 +226,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .card-footer { padding: 12px 20px; border-top: 1px solid var(--border); }
 
 .book-card {
-  background: linear-gradient(180deg, #171717 0%, #111111 100%);
+  background: linear-gradient(180deg, #5a371f 0%, #2f1a0f 100%);
   border: 1px solid rgba(220,38,38,0.14);
   border-radius: var(--radius);
   overflow: hidden;
@@ -324,6 +324,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .book-detail-header { display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: flex-start; margin-bottom: 32px; }
 .book-detail-cover { width: 100%; min-height: 360px; border-radius: var(--radius); overflow: hidden; background: var(--bg-card2); display: flex; align-items: center; justify-content: center; }
 .book-detail-cover img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Restore brown background for book detail cover to match original style */
+.book-detail-cover { background: linear-gradient(180deg, #5a371f 0%, #2f1a0f 100%); }
 .book-detail-info { display: grid; gap: 16px; }
 .book-detail-title { font-size: 32px; font-weight: 800; }
 .book-detail-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--text-secondary); font-size: 13px; }
@@ -335,7 +338,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .ebook-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
 .ebook-toolbar button { border: 1px solid var(--border); background: var(--bg-card); color: var(--text-primary); padding: 8px 12px; border-radius: var(--radius-sm); }
 .ebook-page-counter { color: var(--text-secondary); font-size: 13px; }
-.ebook-page-content { background: var(--bg-card2); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; min-height: 360px; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
+.ebook-page-content { background: linear-gradient(180deg, #3f2415 0%, #26130a 100%); border: 1px solid rgba(0,0,0,0.12); border-radius: var(--radius); padding: 24px; min-height: 360px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06); }
 .book-title-heading { font-size: 26px; font-weight: 800; margin-bottom: 18px; }
 .book-text { font-size: inherit; color: var(--text-primary); line-height: 1.9; white-space: pre-wrap; }
 .ebook-page-image { width: 100%; max-height: 320px; border-radius: 16px; margin-bottom: 18px; object-fit: cover; }
@@ -346,6 +349,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .page-item:last-child { border-bottom: none; }
 .page-num { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; background: rgba(220,38,38,0.12); color: var(--accent-red); font-weight: 700; font-size: 14px; }
 .page-title { color: var(--text-primary); font-weight: 600; }
+
+/* Hide top-level page titles from rendering on the page while keeping document.title intact */
+.page-title { display: none !important; }
 .resume-card { border: 1px solid rgba(59,130,246,0.2); background: rgba(59,130,246,0.08); border-radius: 18px; padding: 18px 22px; }
 
 @media (max-width: 1024px) {
