@@ -268,6 +268,18 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .video-comment-like.liked { color: var(--accent-red); }
 .video-meta-block, .video-comments-card { background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius); padding: 18px; display:grid; gap:14px; }
 .video-title { font-size: 24px; font-weight: 800; }
+
+/* Prevent long titles from overflowing their containers
+   Applies a 2-line clamp with ellipsis fallback for supported browsers.
+   Ensures responsive wrapping and avoids layout breakage. */
+.page-title, .video-title, .book-title, .forum-card-title, .forum-card .forum-card-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
 .video-author-row, .video-stats-row, .video-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .video-author-link { display:inline-flex; align-items:center; gap:8px; color: var(--text-primary); font-weight:600; }
 .video-description-card { background: rgba(255,255,255,0.02); border:1px solid rgba(220,38,38,0.12); border-radius: 12px; padding: 12px; }
