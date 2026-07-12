@@ -286,9 +286,15 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
-    const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
-    const allowedVideo = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska'];
-    if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || allowedVideo.includes(file.mimetype) || file.mimetype.startsWith('audio/') || file.mimetype.startsWith('video/')) cb(null, true);
+    const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave', 'application/ogg'];
+    const allowedVideo = ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-matroska', 'video/x-msvideo', 'video/x-ms-wmv', 'video/3gpp', 'video/3gpp2', 'video/x-m4v'];
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const isKnownExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.mp3', '.wav', '.ogg', '.flac', '.aac', '.mp4', '.webm', '.mov', '.m4v', '.mkv', '.avi', '.wmv', '.3gp', '.3g2'].includes(ext);
+    const mime = (file.mimetype || '').toLowerCase();
+    const isImage = allowedImages.includes(mime) || mime.startsWith('image/');
+    const isAudio = allowedAudio.includes(mime) || mime.startsWith('audio/');
+    const isVideo = allowedVideo.includes(mime) || mime.startsWith('video/');
+    if (isImage || isAudio || isVideo || isKnownExt) cb(null, true);
     else cb(new Error('Sadece resim, ses veya video dosyaları kabul edilir'));
   }
 });
@@ -1263,12 +1269,12 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
 
 app.post('/api/videos', authMiddleware, async (req, res) => {
   try {
-    const { title, description, video_url, banner_image } = req.body;
+    const { title, description, video_url, banner_image, is_reals } = req.body;
     if (!title || !video_url) return res.status(400).json({ error: 'Başlık ve video zorunlu' });
     const slug = makeSlug(title, Date.now());
     const { rows } = await query(
-      'INSERT INTO videos (user_id,title,description,video_url,banner_image,slug) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.user.id, title, description || '', video_url, banner_image || '', slug]
+      'INSERT INTO videos (user_id,title,description,video_url,banner_image,slug,is_reals) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [req.user.id, title, description || '', video_url, banner_image || '', slug, is_reals ? 1 : 0]
     );
     const { rows: videoRows } = await query('SELECT * FROM videos WHERE id=$1', [rows[0].id]);
     res.json(videoRows[0]);
@@ -1282,12 +1288,40 @@ app.put('/api/video/:slug', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   const video = rows[0];
   if (video.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, description, video_url, banner_image, allow_comments } = req.body;
+  const { title, description, video_url, banner_image, allow_comments, is_reals } = req.body;
   const updated = await query(
-    'UPDATE videos SET title=$1, description=$2, video_url=$3, banner_image=$4, allow_comments=$5, updated_at=NOW() WHERE id=$6 RETURNING *',
-    [title || video.title, description !== undefined ? description : video.description, video_url || video.video_url, banner_image !== undefined ? banner_image : video.banner_image, allow_comments !== undefined ? (allow_comments ? 1 : 0) : video.allow_comments, video.id]
+    'UPDATE videos SET title=$1, description=$2, video_url=$3, banner_image=$4, allow_comments=$5, is_reals=$6, updated_at=NOW() WHERE id=$7 RETURNING *',
+    [title || video.title, description !== undefined ? description : video.description, video_url || video.video_url, banner_image !== undefined ? banner_image : video.banner_image, allow_comments !== undefined ? (allow_comments ? 1 : 0) : video.allow_comments, is_reals !== undefined ? (is_reals ? 1 : 0) : video.is_reals, video.id]
   );
   res.json(updated.rows[0]);
+});
+
+// Public: get reals feed (vertical short videos)
+app.get('/api/reals', async (req, res) => {
+  const { rows } = await query(`
+    SELECT v.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      (SELECT COUNT(*) FROM video_likes WHERE video_id=v.id) as like_count,
+      (SELECT COUNT(*) FROM video_comments WHERE video_id=v.id) as comment_count
+    FROM videos v LEFT JOIN users u ON v.user_id=u.id
+    WHERE v.active=1 AND v.is_reals=1
+    ORDER BY v.created_at DESC
+  `);
+  res.json(rows);
+});
+
+// Public: reals settings (reminder text editable by admin)
+app.get('/api/reals-settings', async (req, res) => {
+  const { rows } = await query("SELECT value FROM settings WHERE key='reals_reminder'");
+  res.json({ reminder: rows.length ? rows[0].value : '' });
+});
+
+// Resend (repost) endpoint
+app.post('/api/video/:slug/resend', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const videoId = rows[0].id;
+  await query('INSERT INTO video_resends (video_id, user_id) VALUES ($1,$2)', [videoId, req.user.id]);
+  res.json({ ok: true });
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {

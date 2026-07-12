@@ -623,6 +623,7 @@ function showVideoEditModal(video) {
     <div class="form-group"><label>Banner URL</label><input id="ve-banner-url" value="${escHtml(video.banner_image||'')}" /></div>
     <div class="form-group"><label>Yorumlara izin</label><label class="checkbox-label"><input type="checkbox" id="ve-allow-comments" ${video.allow_comments? 'checked' : ''} /> Açık</label></div>
     <div class="form-group"><label>Aktif</label><label class="checkbox-label"><input type="checkbox" id="ve-active" ${video.active? 'checked' : ''} /> Aktif</label></div>
+    <div class="form-group"><label>Reals</label><label class="checkbox-label"><input type="checkbox" id="ve-is-reals" ${video.is_reals? 'checked' : ''} /> Reals olarak işaretle</label></div>
     <button class="btn btn-primary" id="ve-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
     <div id="ve-msg" class="form-error mt-4"></div>
   `);
@@ -644,7 +645,8 @@ function showVideoEditModal(video) {
         video_url: videoUrl,
         banner_image: document.getElementById('ve-banner-url').value.trim(),
         allow_comments: document.getElementById('ve-allow-comments').checked,
-        active: document.getElementById('ve-active').checked
+        active: document.getElementById('ve-active').checked,
+        is_reals: document.getElementById('ve-is-reals').checked
       };
       await adminApi('/video/' + video.id, { method:'PUT', body: JSON.stringify(payload) });
       toast('Video güncellendi'); hideModal(); loadSection('videos');
@@ -1838,6 +1840,15 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-bolt" style="color:var(--red2);margin-right:8px"></i>Reals</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Reals ilk hatırlatma metni (kısa)</label><textarea id="s-reals-reminder" rows="3">${escHtml(settings['reals_reminder']||'')}</textarea></div>
+          <div class="form-group"><label>Hatırlatma yalnızca ilk ziyaret için gösterilsin</label><div style="font-size:12px;color:var(--text2)">Kullanıcı Reals sayfasına ilk girdiğinde bir kez gösterilecek.</div></div>
+          <button class="btn btn-primary" id="s-reals-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+          <div id="s-reals-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Şarkı Yayınlama Kuralları</span></div>
         <div class="card-body">
           <div class="form-group"><label>Kendi Şarkım – Kurallar</label><textarea id="s-music-own" rows="4">${escHtml(settings['music_own_rules']||'')}</textarea></div>
@@ -1924,4 +1935,14 @@ async function renderSettings(main) {
       msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
     } catch (e) { msg.textContent=e.message; }
   });
+
+  // Reals reminder save
+  document.getElementById('s-reals-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-reals-msg');
+    try {
+      await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg);
+      msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
+    } catch (e) { msg.textContent=e.message; }
+  });
 }
+

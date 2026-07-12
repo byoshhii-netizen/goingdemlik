@@ -165,6 +165,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
   if (path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
+  if (path === '/reals') return renderRealsFeed(app);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
@@ -186,6 +187,89 @@ function updateNavActive(path) {
   });
   updateMobileBottomBar(path);
 }
+
+// Reals feed basic viewer
+async function renderRealsFeed(app) {
+  document.title = 'Reals – Demlik';
+  updatePageMeta('Reals – Demlik', 'Kısa dikey videolar', '');
+  app.innerHTML = `
+    <div class="reals-container">
+      <div id="reals-list" class="reals-list"></div>
+    </div>`;
+
+  // fetch reals
+  let reals = [];
+  try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">+'+e.message+'</div>'; return; }
+  const listEl = document.getElementById('reals-list');
+  if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
+
+  // show reminder once per user (server provides text)
+  try {
+    const rs = await fetch('/api/reals-settings');
+    const data = await rs.json();
+    const reminder = data.reminder || '';
+    if (reminder && !localStorage.getItem('seen_reals_reminder')) {
+      showModal('Reals', `<div style="padding:12px">${escHtml(reminder)}</div><div style="text-align:right;margin-top:10px"><button class="btn" id="reals-remind-ok">Tamam</button></div>`);
+      document.getElementById('reals-remind-ok').addEventListener('click', () => { hideModal(); localStorage.setItem('seen_reals_reminder','1'); });
+    }
+  } catch {}
+
+  // render stacked videos
+  listEl.innerHTML = reals.map(r => `
+    <div class="reals-item" data-id="${r.id}">
+      <video class="reals-video" preload="none" playsinline muted src="${escHtml(r.video_url)}"></video>
+      <div class="reals-meta">
+        <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
+        <div class="reals-desc">${escHtml(r.description||'')}</div>
+        <div class="reals-actions">
+          <button class="btn btn-ghost like-btn"> <i class="fas fa-heart"></i> <span class="count">${r.like_count||0}</span></button>
+          <button class="btn btn-ghost comment-btn"> <i class="fas fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
+          <button class="btn btn-ghost resend-btn"> <i class="fas fa-retweet"></i></button>
+          <button class="btn btn-ghost share-btn"> <i class="fas fa-share-alt"></i></button>
+        </div>
+      </div>
+    </div>`).join('');
+
+  // simple swipe / wheel handling: show one at a time
+  let idx = 0;
+  const items = Array.from(document.querySelectorAll('.reals-item'));
+  function showIndex(i) {
+    if (i < 0) i = 0; if (i >= items.length) i = items.length-1; idx = i;
+    items.forEach((it, j) => { it.style.transform = `translateY(${(j-idx)*100}%)`; it.style.transition = 'transform .35s'; const vid = it.querySelector('video'); if (j===idx) { vid.muted = false; vid.play().catch(()=>{}); } else { vid.pause(); vid.currentTime = 0; vid.muted = true; } });
+  }
+  items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
+  listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
+  showIndex(0);
+
+  // wheel
+  let wheelDeb = false;
+  window.addEventListener('wheel', e => {
+    if (wheelDeb) return; wheelDeb = true; setTimeout(() => wheelDeb=false, 300);
+    if (e.deltaY > 0) showIndex(idx+1); else showIndex(idx-1);
+  }, { passive: true });
+
+  // touch
+  let startY = null;
+  window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; });
+  window.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (diff > 30) showIndex(idx+1); else if (diff < -30) showIndex(idx-1); startY = null; });
+
+  // tap to pause/play
+  items.forEach(it => {
+    const vid = it.querySelector('video');
+    it.addEventListener('click', e => {
+      if (vid.paused) vid.play(); else vid.pause();
+    });
+  });
+
+  // action buttons
+  listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+    e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent||0)+1; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+  }));
+  listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+    e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.id; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+  }));
+}
+
 
 async function initAuth() {
   if (!currentToken) return updateNavUI();
@@ -1962,12 +2046,20 @@ async function renderVideoDetail(app, slug) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let video, liked = false, saved = false, comments = [], videoSettings = { emptyDescriptionText: 'Bu videoya bir açıklama eklenmemiş.' };
   try {
-    video = await api('/video/' + slug);
-    try { videoSettings = await api('/video-settings'); } catch {}
-    if (currentUser) { const likeRes = await api('/video/' + slug + '/liked'); liked = likeRes.liked; } 
-    if (currentUser) { const saveRes = await api('/video/' + slug + '/saved'); saved = saveRes.saved; }
-    comments = await api('/video/' + slug + '/comments');
-    await api('/video/' + slug + '/view', { method: 'POST' });
+    const [videoData, settingsData, commentsData, likeData, saveData] = await Promise.all([
+      api('/video/' + slug).catch(() => null),
+      api('/video-settings').catch(() => ({ emptyDescriptionText: 'Bu videoya bir açıklama eklenmemiş.' })),
+      api('/video/' + slug + '/comments').catch(() => []),
+      currentUser ? api('/video/' + slug + '/liked').catch(() => ({ liked: false })) : Promise.resolve({ liked: false }),
+      currentUser ? api('/video/' + slug + '/saved').catch(() => ({ saved: false })) : Promise.resolve({ saved: false })
+    ]);
+    if (!videoData) throw new Error('Video bulunamadı');
+    video = videoData;
+    videoSettings = settingsData || videoSettings;
+    comments = Array.isArray(commentsData) ? commentsData : [];
+    liked = !!likeData?.liked;
+    saved = !!saveData?.saved;
+    api('/video/' + slug + '/view', { method: 'POST' }).catch(() => {});
   } catch {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Video bulunamadı.</p></div></div>'; return;
   }
@@ -1983,7 +2075,7 @@ async function renderVideoDetail(app, slug) {
   app.innerHTML = `<div class="container page">
     <div class="video-player-card">
       <div class="video-player-shell">
-        <video controls preload="metadata" class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
+        <video controls preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
           <source src="${escHtml(video.video_url)}" />
         </video>
         <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>

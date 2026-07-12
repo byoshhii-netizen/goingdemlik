@@ -194,6 +194,19 @@ async function initDb() {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
+    -- Reals flag for videos
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_reals INTEGER DEFAULT 0;
+
+    -- Track resends (user reposts) for videos
+    CREATE TABLE IF NOT EXISTS video_resends (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS user_follows (
       id BIGSERIAL PRIMARY KEY,
       follower_id BIGINT NOT NULL,

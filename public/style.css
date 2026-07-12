@@ -285,7 +285,16 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .comment-form { flex-direction: column; }
   .comment-form .btn { width: 100%; }
   .video-ad-overlay { min-width: 140px; max-width: calc(100% - 24px); font-size: 12px; padding: 10px 12px; }
+  /* Reals styles */
+  .reals-container { position: relative; height: 100vh; }
+  .reals-list { position: relative; height: 100vh; }
+  .reals-item { width: 100%; height: 100vh; display:flex; align-items:flex-end; justify-content:flex-start; padding:16px; box-sizing:border-box; }
+  .reals-video { width:100%; height:100%; object-fit:cover; border-radius:0; }
+  .reals-meta { position:absolute; bottom:20px; left:16px; right:16px; color:#fff; }
+  .reals-user { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .reals-actions { display:flex; gap:8px; margin-top:8px; }
 }
+
 .book-info { padding: 16px; display: grid; gap: 8px; }
 .book-title { font-size: 18px; font-weight: 800; color: var(--text-primary); }
 .book-author, .book-pages { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
