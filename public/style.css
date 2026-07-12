@@ -832,15 +832,15 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .ebook-reader {
   min-width: 0;
   width: 100%;
-  background: #1c1410;
+  background: linear-gradient(180deg, #5a371f 0%, #2f1a0f 100%);
   border-radius: 16px;
   box-shadow: 0 8px 40px rgba(0,0,0,0.6);
   overflow: hidden;
   box-sizing: border-box;
 }
 .ebook-toolbar {
-  background: #111;
-  border-bottom: 1px solid rgba(220,38,38,0.2);
+  background: linear-gradient(180deg, #5a371f 0%, #2f1a0f 100%);
+  border-bottom: 1px solid rgba(0,0,0,0.18);
   padding: 12px 20px;
   display: flex;
   align-items: center;
@@ -864,18 +864,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   box-sizing: border-box;
   overflow-x: hidden;
 }
-  box-sizing: border-box;
-  overflow-x: hidden;
-}
 .ebook-page-content .book-title-heading {
-  font-size: 1.3em;
-  font-weight: 700;
-  margin-bottom: 24px;
-  color: #f0e8dc;
-  font-family: 'Georgia', serif;
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  hyphens: auto;
+  display: none !important;
 }
 .ebook-page-content .book-text {
   white-space: pre-wrap;
@@ -1074,12 +1064,45 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .ebook-toolbar { padding: 10px 12px; top: 54px; }
   .ebook-layout { flex-direction: column; }
   .ebook-toc { width: 100%; }
+  .ebook-toolbar { position: sticky; top: 0; left: 0; right: 0; z-index: 12; }
+  .ebook-page-content { overflow-x: hidden; }
+  .ebook-page-content .book-title-heading { display: none !important; }
+  .ebook-page-content .book-text { word-break: break-word; }
 
-  /* Tabs */
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 10px;
+  }
+  .page-header > div { width: 100%; }
+  .page-title, .page-subtitle { width: 100%; }
+  .page-title { white-space: normal; overflow-wrap: break-word; }
+  .page-subtitle { white-space: normal; }
+
+  .forum-card { width: 100%; overflow: hidden; }
+  .forum-card-body { min-width: 0; }
+  .forum-card-title, .forum-card-preview, .forum-card-meta, .forum-meta-item { overflow-wrap: anywhere; }
+  .forum-card-banner { width: 100%; height: auto; }
+
+  .grid-3 { grid-template-columns: 1fr; }
+  .grid-2 { grid-template-columns: 1fr; }
+
+  .video-card { width: 100%; }
+  .video-card-body { min-width: 0; }
+  .video-card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .profile-links, .profile-stats, .forum-actions { width: 100%; }
+  .profile-links { justify-content: flex-start; flex-wrap: wrap; }
+
+  .book-detail-header { flex-direction: column; }
+  .book-detail-cover { width: 100%; max-width: 100%; }
+
+  .ebook-toolbar button, .ebook-nav-btn, .forum-action-btn { width: 100%; justify-content: center; }
+
   .tabs { overflow-x: auto; padding-bottom: 0; -webkit-overflow-scrolling: touch; }
   .tab { white-space: nowrap; flex-shrink: 0; padding: 10px 14px; }
 
-  /* Form */
   .form-row { grid-template-columns: 1fr; gap: 12px; }
   input, textarea, select { font-size: 16px; } /* iOS zoom önleme */
 }
@@ -1089,12 +1112,25 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .hero-title { font-size: 34px; }
   .forum-detail-title { font-size: 18px; }
   .book-detail-header { flex-direction: column; }
-  .book-detail-cover { width: 100%; max-width: 180px; align-self: center; }
+  .book-detail-cover { width: 100%; max-width: 100%; align-self: center; }
   .profile-header { flex-direction: column; align-items: center; text-align: center; }
   .profile-links { justify-content: center; }
   .profile-stats { justify-content: center; }
   .page-nav-btn.prev .page-nav-title,
   .page-nav-btn.next .page-nav-title { display: none; }
+
+  .container, .page, .ebook-page-content, .ebook-reader, .forum-card, .video-card, .profile-header, .book-detail-header, .ebook-toolbar {
+    width: 100%;
+    max-width: 100%;
+  }
+  .ebook-page-content { padding: 18px 14px; }
+  .page-title, .page-subtitle, .forum-card-title, .video-card-title, .book-detail-title {
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+  }
+  .ebook-toolbar { gap: 8px; }
+  .ebook-toolbar button { flex: 1; }
 }
 
 /* --- Dokunma hedefleri --- */
