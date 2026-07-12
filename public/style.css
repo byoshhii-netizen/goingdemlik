@@ -272,13 +272,22 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 /* Prevent long titles from overflowing their containers
    Applies a 2-line clamp with ellipsis fallback for supported browsers.
    Ensures responsive wrapping and avoids layout breakage. */
-.page-title, .video-title, .book-title, .forum-card-title, .forum-card .forum-card-title {
+.page-title, .video-title, .book-title, .forum-card-title, .forum-card .forum-card-title,
+.forum-detail-title, .video-card-title, .book-detail-title, .book-title-heading,
+.card-title, .list-card-title, .forum-detail .forum-detail-title, .video-player-card .video-title {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
   word-break: break-word;
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* Ensure flex children can shrink so titles don't force overflow */
+.forum-card-body, .card-body, .video-card-body, .book-detail-info, .page-header, .nav-brand {
+  min-width: 0;
 }
 .video-author-row, .video-stats-row, .video-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .video-author-link { display:inline-flex; align-items:center; gap:8px; color: var(--text-primary); font-weight:600; }
