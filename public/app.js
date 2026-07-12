@@ -2000,6 +2000,7 @@ async function showNewVideoModal(existing = null) {
       ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
     </div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
+    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
     <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
     <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
     <div id="video-error" class="form-error mt-4"></div>
@@ -2045,7 +2046,14 @@ async function showNewVideoModal(existing = null) {
         const bannerResult = await apiForm('/upload', fd);
         bannerImage = bannerResult.url;
       }
-      const payload = { title, description: description || '', video_url: videoUrl, banner_image: bannerImage, allow_comments: $('#video-comments').checked };
+      const payload = {
+        title,
+        description: description || '',
+        video_url: videoUrl,
+        banner_image: bannerImage,
+        allow_comments: $('#video-comments').checked,
+        is_reals: $('#video-is-reals').checked
+      };
       if (existing) {
         await api('/video/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
         toast('Video güncellendi');
