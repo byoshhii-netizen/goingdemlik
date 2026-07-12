@@ -200,6 +200,35 @@ function shuffleArray(arr) {
   return a;
 }
 
+function generateVideoPoster(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.src = objectUrl;
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+
+    const cleanup = () => URL.revokeObjectURL(objectUrl);
+    video.addEventListener('loadeddata', () => {
+      video.currentTime = 0;
+    }, { once: true });
+    video.addEventListener('seeked', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 720;
+      canvas.height = 1280;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        cleanup();
+        if (!blob) return reject(new Error('Poster oluşturulamadı'));
+        resolve(new File([blob], 'poster.png', { type: 'image/png' }));
+      }, 'image/png');
+    }, { once: true });
+    video.addEventListener('error', () => { cleanup(); reject(new Error('Video önizlemesi oluşturulamadı')); }, { once: true });
+  });
+}
+
 async function renderRealsFeed(app) {
   document.title = 'Reals – Demlik';
   updatePageMeta('Reals – Demlik', 'Kısa dikey videolar', '');
@@ -235,10 +264,21 @@ async function renderRealsFeed(app) {
   let watchedIds = new Set();
   let idx = 0;
   let items = [];
+  function setRealsVideoSource(videoEl, src) {
+    if (!src) {
+      videoEl.removeAttribute('src');
+      videoEl.load();
+      return;
+    }
+    if (videoEl.getAttribute('src') === src) return;
+    videoEl.setAttribute('src', src);
+    videoEl.load();
+  }
+
   function renderItems() {
     listEl.innerHTML = orderedReals.map(r => `
-      <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}">
-        <video class="reals-video" preload="none" playsinline muted src="${escHtml(r.video_url)}"></video>
+      <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}">
+        <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
         <div class="reals-meta">
           <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
           <div class="reals-desc">${escHtml(r.description||'')}</div>
@@ -256,6 +296,7 @@ async function renderRealsFeed(app) {
     listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
     items.forEach(it => {
       const vid = it.querySelector('video');
+      setRealsVideoSource(vid, '');
       it.addEventListener('click', () => { if (vid.paused) vid.play(); else vid.pause(); });
     });
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
@@ -277,7 +318,12 @@ async function renderRealsFeed(app) {
     const [moved] = orderedReals.splice(pos, 1);
     orderedReals.push(moved);
     realsFeedOrder = orderedReals.map(r => r.id);
-    renderItems();
+    const itemEl = items.find(it => Number(it.dataset.id) === id);
+    if (itemEl) {
+      listEl.appendChild(itemEl);
+      items = items.filter(it => Number(it.dataset.id) !== id);
+      items.push(itemEl);
+    }
   }
 
   function showIndex(i) {
@@ -289,7 +335,17 @@ async function renderRealsFeed(app) {
       it.style.transform = `translateY(${(j-idx)*100}%)`;
       it.style.transition = 'transform .35s';
       const vid = it.querySelector('video');
-      if (j === idx) { vid.muted = false; vid.play().catch(() => {}); } else { vid.pause(); vid.currentTime = 0; vid.muted = true; }
+      const videoUrl = it.dataset.videoUrl;
+      if (j === idx) {
+        setRealsVideoSource(vid, videoUrl);
+        vid.muted = false;
+        vid.play().catch(() => {});
+      } else {
+        setRealsVideoSource(vid, '');
+        vid.pause();
+        vid.currentTime = 0;
+        vid.muted = true;
+      }
     });
   }
 
@@ -2008,6 +2064,21 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     <div id="video-error" class="form-error mt-4"></div>
   `);
 
+  const videoInput = $('#video-file');
+  const bannerInput = $('#video-banner-file');
+  let autoBannerFile = null;
+
+  videoInput?.addEventListener('change', async () => {
+    const file = videoInput.files[0];
+    if (!file || bannerInput?.files?.length) return;
+    try {
+      const generated = await generateVideoPoster(file);
+      autoBannerFile = generated;
+    } catch {
+      autoBannerFile = null;
+    }
+  });
+
   $('#video-submit').addEventListener('click', async () => {
     const title = $('#video-title').value.trim();
     const description = $('#video-description').value.trim();
@@ -2045,6 +2116,10 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       }
       if (bannerFile) {
         const fd = new FormData(); fd.append('file', bannerFile);
+        const bannerResult = await apiForm('/upload', fd);
+        bannerImage = bannerResult.url;
+      } else if (autoBannerFile) {
+        const fd = new FormData(); fd.append('file', autoBannerFile);
         const bannerResult = await apiForm('/upload', fd);
         bannerImage = bannerResult.url;
       }
