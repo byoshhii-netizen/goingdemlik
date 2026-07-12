@@ -469,6 +469,8 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => { if (currentUser) showNewForumModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
+$('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
+$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(null, true), 120); } else { navigate('/giris'); } });
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
   currentToken = null; currentUser = null;
@@ -1982,7 +1984,7 @@ function videoCardHTML(v) {
   </div>`;
 }
 
-async function showNewVideoModal(existing = null) {
+async function showNewVideoModal(existing = null, forceReals = false) {
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   try { videoSettings = await api('/video-settings'); } catch {}
   const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
@@ -2000,7 +2002,7 @@ async function showNewVideoModal(existing = null) {
       ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
     </div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
+    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
     <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
     <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
     <div id="video-error" class="form-error mt-4"></div>
