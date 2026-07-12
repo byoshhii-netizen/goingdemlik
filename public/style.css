@@ -262,7 +262,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .video-ad-overlay.bottom-left { bottom:16px; left:16px; }
 .video-ad-overlay.top-right { top:16px; right:16px; }
 .video-ad-overlay.top-left { top:16px; left:16px; }
-.video-ad-overlay .video-ad-link { display:grid; gap:4px; }
+.video-ad-overlay .video-ad-link { display:grid; gap:8px; }
+.video-ad-overlay .video-ad-video { width:100%; max-height:120px; border-radius:8px; object-fit:cover; background:#000; }
+.video-ad-overlay .video-ad-copy { display:grid; gap:2px; }
 .video-comment-like.liked { color: var(--accent-red); }
 .video-meta-block, .video-comments-card { background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius); padding: 18px; display:grid; gap:14px; }
 .video-title { font-size: 24px; font-weight: 800; }
@@ -276,6 +278,14 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .comment-form textarea { min-height: 72px; }
 .comment-form .btn { flex-shrink:0; }
 @media (max-width: 900px) { .video-player-card { grid-template-columns: 1fr; } }
+@media (max-width: 768px) {
+  .video-title { font-size: 20px; }
+  .video-actions { flex-direction: column; align-items: stretch; }
+  .video-actions .btn { width: 100%; justify-content: center; }
+  .comment-form { flex-direction: column; }
+  .comment-form .btn { width: 100%; }
+  .video-ad-overlay { min-width: 140px; max-width: calc(100% - 24px); font-size: 12px; padding: 10px 12px; }
+}
 .book-info { padding: 16px; display: grid; gap: 8px; }
 .book-title { font-size: 18px; font-weight: 800; color: var(--text-primary); }
 .book-author, .book-pages { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }

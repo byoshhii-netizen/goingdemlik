@@ -2045,10 +2045,7 @@ async function renderVideoDetail(app, slug) {
 
   $('#video-share-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
-    showModal('Videoyu İlet', `<div class="form-group"><label>Mesaj</label><textarea id="video-forward-msg" rows="4" placeholder="İletmek istediğin kısa mesaj..."></textarea></div><button class="btn btn-primary" id="video-forward-send"><i class="fas fa-paper-plane"></i> İlet</button>`);
-    $('#video-forward-send').addEventListener('click', () => {
-      hideModal(); toast('Video iletildi');
-    });
+    showForwardVideoModal(video);
   });
 
   try {
@@ -2059,7 +2056,11 @@ async function renderVideoDetail(app, slug) {
         const ad = activeAds[0];
         const adEl = $('#video-ad-overlay');
         if (adEl) {
-          adEl.innerHTML = `<a href="${escHtml(ad.site_url || '#')}" target="_blank" rel="noopener noreferrer" class="video-ad-link"><strong>${escHtml(ad.title)}</strong><span>${escHtml(ad.site_url || '')}</span></a>`;
+          const safeSiteUrl = normalizeExternalUrl(ad.site_url || '#');
+          adEl.innerHTML = `<a href="${escHtml(safeSiteUrl)}" target="_blank" rel="noopener noreferrer" class="video-ad-link">
+            ${ad.video_url ? `<video src="${escHtml(ad.video_url)}" class="video-ad-video" autoplay muted loop playsinline></video>` : ''}
+            <div class="video-ad-copy"><strong>${escHtml(ad.title)}</strong><span>${escHtml(ad.site_url || '')}</span></div>
+          </a>`;
           adEl.className = `video-ad-overlay hidden ${escHtml(ad.position || 'bottom-right')}`;
           const videoEl = $('#video-player-el');
           if (videoEl && ad.display_after_seconds >= 0) {
@@ -2894,6 +2895,45 @@ async function loadAnnouncements() {
 
 init();
 
+// ===== VIDEO İLET MODAL =====
+async function showForwardVideoModal(video) {
+  let convs = [];
+  try { convs = await api('/conversations'); } catch {}
+  const listHTML = convs.length === 0
+    ? `<div class="empty-state" style="padding:20px"><p>Henüz mesajlaşma yok. Bir kullanıcıya mesaj gönderin.</p></div>`
+    : convs.map(c => `<div class="forward-item" data-username="${escHtml(c.other_username)}" style="display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
+      ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+      <span style="color:var(--text-primary);font-size:14px">${escHtml(c.other_username)}</span>
+    </div>`).join('');
+  showModal('Videoyu İlet', `
+    <div style="margin-bottom:12px">
+      <input id="video-fwd-search" type="text" placeholder="Kullanıcı adı ara..." style="width:100%;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px" />
+    </div>
+    <div id="video-fwd-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">${listHTML}</div>
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <input id="video-fwd-username" type="text" placeholder="veya direkt kullanıcı adı gir..." style="flex:1;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px" />
+      <button class="btn btn-primary" id="video-fwd-send-btn"><i class="fas fa-paper-plane"></i> İlet</button>
+    </div>
+    <div id="video-fwd-error" style="color:var(--accent-red2);font-size:12px;margin-top:6px"></div>
+  `);
+  $('#video-fwd-search')?.addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    $$('#video-fwd-list .forward-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
+  });
+  $$('#video-fwd-list .forward-item').forEach(el => {
+    el.addEventListener('click', () => { $('#video-fwd-username').value = el.dataset.username; });
+  });
+  $('#video-fwd-send-btn').addEventListener('click', async () => {
+    const username = $('#video-fwd-username').value.trim();
+    if (!username) { $('#video-fwd-error').textContent = 'Kullanıcı adı girin'; return; }
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}/messages`, { method: 'POST', body: JSON.stringify({ shared_video_id: video.id }) });
+      hideModal(); toast('Video iletildi!');
+      navigate('/mesajlar/' + username);
+    } catch (e) { $('#video-fwd-error').textContent = e.message; }
+  });
+}
+
 // ===== FORUM İLET MODAL =====
 async function showForwardForumModal(forum) {
   let convs = [];
@@ -3245,6 +3285,10 @@ function dmMessageHTML(m, myId, selMode) {
             ${m.shared_forum_id ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
               ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
               <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title||'')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
+            </div>` : ''}
+            ${m.shared_video_id ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
+              ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
+              <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title||'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
             </div>` : ''}
             ${m.content ? `<span>${escHtml(m.content)}</span>` : ''}
           </div>`}

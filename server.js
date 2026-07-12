@@ -2614,11 +2614,13 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     SELECT m.*, 
       u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
+      v.title as video_title, v.slug as video_slug, v.banner_image as video_banner,
       r.content as reply_content, ru.username as reply_username,
       m.read_at
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
+    LEFT JOIN videos v ON m.shared_video_id=v.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
@@ -2675,15 +2677,19 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  const { content, shared_forum_id, reply_to_id } = req.body;
+  const { content, shared_forum_id, shared_video_id, reply_to_id } = req.body;
   let image_url = '';
   if (req.file) {
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
-  if (!content?.trim() && !image_url && !shared_forum_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (shared_video_id) {
+    const { rows: videoRows } = await query('SELECT id FROM videos WHERE id=$1', [shared_video_id]);
+    if (!videoRows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  }
+  if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-    [conv.id, uid, content||'', image_url, shared_forum_id||null, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   // Forum paylaşım sayısını artır
@@ -2697,9 +2703,11 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   const { rows: full } = await query(`
     SELECT m.*, u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
+      v.title as video_title, v.slug as video_slug, v.banner_image as video_banner,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
+    LEFT JOIN videos v ON m.shared_video_id=v.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1

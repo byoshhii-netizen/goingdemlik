@@ -387,6 +387,7 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';

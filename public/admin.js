@@ -710,8 +710,8 @@ function showVideoAdModal(ad = {}) {
   const isEdit = !!ad.id;
   showModal(`${isEdit ? 'Reklam Düzenle' : 'Yeni Reklam'}`, `
     <div class="form-group"><label>Başlık</label><input id="va-title" value="${escHtml(ad.title||'')}" /></div>
-    <div class="form-group"><label>Video URL</label><input id="va-video-url" value="${escHtml(ad.video_url||'')}" /></div>
-    <div class="form-group"><label>Site Linki</label><input id="va-site-url" value="${escHtml(ad.site_url||'')}" /></div>
+    <div class="form-group"><label>Reklam Videosu</label><input type="file" id="va-video-file" accept="video/*" /></div>
+    <div class="form-group"><label>Site Linki</label><input id="va-site-url" value="${escHtml(ad.site_url||'')}" placeholder="https://ornek.com" /></div>
     <div class="form-group"><label>Konum</label>
       <select id="va-position">
         <option value="bottom-right" ${ad.position==='bottom-right'?'selected':''}>Sağ Alt</option>
@@ -730,16 +730,25 @@ function showVideoAdModal(ad = {}) {
   document.getElementById('va-save').addEventListener('click', async () => {
     const btn = document.getElementById('va-save'); btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Kaydediliyor...';
     try {
+      const file = document.getElementById('va-video-file').files[0];
+      let videoUrl = ad.video_url || '';
+      if (file) {
+        const fd = new FormData(); fd.append('file', file);
+        const uploadRes = await fetch('/api/admin/upload-video', { method:'POST', headers:{'X-Admin-Token':adminToken}, body: fd });
+        const data = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(data.error || 'Reklam videosu yüklenemedi');
+        videoUrl = data.url;
+      }
       const payload = {
         title: document.getElementById('va-title').value.trim(),
-        video_url: document.getElementById('va-video-url').value.trim(),
+        video_url: videoUrl,
         site_url: document.getElementById('va-site-url').value.trim(),
         position: document.getElementById('va-position').value,
         priority: parseInt(document.getElementById('va-priority').value, 10) || 0,
         display_after_seconds: parseInt(document.getElementById('va-display-after').value, 10) || 0,
         active: document.getElementById('va-active').checked
       };
-      if (!payload.title || !payload.video_url) throw new Error('Başlık ve video URL gereklidir');
+      if (!payload.title || !payload.video_url) throw new Error('Başlık ve reklam videosu gereklidir');
       if (isEdit) {
         await adminApi('/video-ads/' + ad.id, { method:'PUT', body: JSON.stringify(payload) });
       } else {
