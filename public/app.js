@@ -1,5 +1,6 @@
 ﻿let currentUser = null;
 let currentToken = localStorage.getItem('token');
+let realsFeedOrder = null;
 
 const SITE_URL = 'https://demlik.up.railway.app';
 
@@ -166,6 +167,7 @@ function renderRoute(fullPath) {
   if (path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
   if (path === '/reals') return renderRealsFeed(app);
+  if (path.startsWith('/reals/')) return renderVideoDetail(app, segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
@@ -189,6 +191,15 @@ function updateNavActive(path) {
 }
 
 // Reals feed basic viewer
+function shuffleArray(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 async function renderRealsFeed(app) {
   document.title = 'Reals – Demlik';
   updatePageMeta('Reals – Demlik', 'Kısa dikey videolar', '');
@@ -199,9 +210,16 @@ async function renderRealsFeed(app) {
 
   // fetch reals
   let reals = [];
-  try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">+'+e.message+'</div>'; return; }
+  try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
   const listEl = document.getElementById('reals-list');
   if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
+
+  // page refresh resets order; same tab navigation preserves it
+  const currentIds = reals.map(r => r.id);
+  if (!Array.isArray(realsFeedOrder) || realsFeedOrder.length !== currentIds.length || currentIds.some(id => !realsFeedOrder.includes(id))) {
+    realsFeedOrder = shuffleArray(currentIds);
+  }
+  const orderedReals = realsFeedOrder.map(id => reals.find(r => r.id === id)).filter(Boolean);
 
   // show reminder once per user (server provides text)
   try {
@@ -214,31 +232,68 @@ async function renderRealsFeed(app) {
     }
   } catch {}
 
-  // render stacked videos
-  listEl.innerHTML = reals.map(r => `
-    <div class="reals-item" data-id="${r.id}">
-      <video class="reals-video" preload="none" playsinline muted src="${escHtml(r.video_url)}"></video>
-      <div class="reals-meta">
-        <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
-        <div class="reals-desc">${escHtml(r.description||'')}</div>
-        <div class="reals-actions">
-          <button class="btn btn-ghost like-btn"> <i class="fas fa-heart"></i> <span class="count">${r.like_count||0}</span></button>
-          <button class="btn btn-ghost comment-btn"> <i class="fas fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
-          <button class="btn btn-ghost resend-btn"> <i class="fas fa-retweet"></i></button>
-          <button class="btn btn-ghost share-btn"> <i class="fas fa-share-alt"></i></button>
-        </div>
-      </div>
-    </div>`).join('');
-
-  // simple swipe / wheel handling: show one at a time
+  let watchedIds = new Set();
   let idx = 0;
-  const items = Array.from(document.querySelectorAll('.reals-item'));
-  function showIndex(i) {
-    if (i < 0) i = 0; if (i >= items.length) i = items.length-1; idx = i;
-    items.forEach((it, j) => { it.style.transform = `translateY(${(j-idx)*100}%)`; it.style.transition = 'transform .35s'; const vid = it.querySelector('video'); if (j===idx) { vid.muted = false; vid.play().catch(()=>{}); } else { vid.pause(); vid.currentTime = 0; vid.muted = true; } });
+  let items = [];
+  function renderItems() {
+    listEl.innerHTML = orderedReals.map(r => `
+      <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}">
+        <video class="reals-video" preload="none" playsinline muted src="${escHtml(r.video_url)}"></video>
+        <div class="reals-meta">
+          <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
+          <div class="reals-desc">${escHtml(r.description||'')}</div>
+          <div class="reals-actions">
+            <button class="btn btn-ghost like-btn"> <i class="fas fa-heart"></i> <span class="count">${r.like_count||0}</span></button>
+            <button class="btn btn-ghost comment-btn"> <i class="fas fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
+            <button class="btn btn-ghost resend-btn"> <i class="fas fa-retweet"></i></button>
+            <button class="btn btn-ghost share-btn"> <i class="fas fa-share-alt"></i></button>
+            <a href="/reals/${escHtml(r.slug)}" data-link class="btn btn-outline btn-sm view-detail-btn"><i class="fas fa-external-link-alt"></i> Detay</a>
+          </div>
+        </div>
+      </div>`).join('');
+    items = Array.from(document.querySelectorAll('.reals-item'));
+    items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
+    listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
+    items.forEach(it => {
+      const vid = it.querySelector('video');
+      it.addEventListener('click', () => { if (vid.paused) vid.play(); else vid.pause(); });
+    });
+    listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent||0)+1; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+    }));
+    listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+    }));
+    listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; const video = orderedReals.find(r => r.slug === slug); if (video) showForwardVideoModal(video);
+    }));
   }
-  items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
-  listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
+
+  function markWatchedAndReorder(id) {
+    if (watchedIds.has(id)) return;
+    watchedIds.add(id);
+    const pos = orderedReals.findIndex(r => r.id === id);
+    if (pos === -1) return;
+    const [moved] = orderedReals.splice(pos, 1);
+    orderedReals.push(moved);
+    realsFeedOrder = orderedReals.map(r => r.id);
+    renderItems();
+  }
+
+  function showIndex(i) {
+    if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
+    const previousId = items[idx]?.dataset.id;
+    if (previousId && i !== idx) markWatchedAndReorder(Number(previousId));
+    idx = i;
+    items.forEach((it, j) => {
+      it.style.transform = `translateY(${(j-idx)*100}%)`;
+      it.style.transition = 'transform .35s';
+      const vid = it.querySelector('video');
+      if (j === idx) { vid.muted = false; vid.play().catch(() => {}); } else { vid.pause(); vid.currentTime = 0; vid.muted = true; }
+    });
+  }
+
+  renderItems();
   showIndex(0);
 
   // wheel
@@ -252,22 +307,6 @@ async function renderRealsFeed(app) {
   let startY = null;
   window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; });
   window.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (diff > 30) showIndex(idx+1); else if (diff < -30) showIndex(idx-1); startY = null; });
-
-  // tap to pause/play
-  items.forEach(it => {
-    const vid = it.querySelector('video');
-    it.addEventListener('click', e => {
-      if (vid.paused) vid.play(); else vid.pause();
-    });
-  });
-
-  // action buttons
-  listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-    e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent||0)+1; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
-  }));
-  listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-    e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.id; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
-  }));
 }
 
 
