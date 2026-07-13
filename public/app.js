@@ -3240,9 +3240,7 @@ async function renderMessages(app, targetUsername) {
     el.addEventListener('click', () => {
       $$('.dm-conv-item').forEach(x => x.classList.remove('active'));
       el.classList.add('active');
-      renderDMChat(el.dataset.username);
-      const newPath = '/mesajlar/' + el.dataset.username;
-      if (location.pathname !== newPath) history.pushState({}, '', newPath);
+      navigate('/mesajlar/' + el.dataset.username);
     });
   });
 
