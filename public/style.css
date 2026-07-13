@@ -1245,7 +1245,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 @media (max-width: 768px) {
   .dm-layout { flex-direction: column; height: auto; min-height: calc(100vh - 120px); }
-  .dm-sidebar { width: 100%; height: auto; max-height: 240px; border-right: none; border-bottom: 1px solid var(--border); }
+  .dm-sidebar { width: 100%; height: auto; max-height: 60vh; min-height: 280px; border-right: none; border-bottom: 1px solid var(--border); overflow-y: auto; }
+  .dm-conv-list { overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .dm-chat { height: calc(100vh - 300px); min-height: 300px; }
   .dm-msg-content { max-width: 88%; }
   .dm-input-bar { padding: 8px 10px; }

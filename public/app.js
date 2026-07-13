@@ -3244,9 +3244,24 @@ async function renderMessages(app, targetUsername) {
     });
   });
 
-  $('#new-dm-btn')?.addEventListener('click', () => {
+  $('#new-dm-btn')?.addEventListener('click', async () => {
+    const friends = await api('/friends').catch(() => []);
+    const accepted = (friends || []).filter(f => f.status === 'accepted');
     showModal('Yeni Mesaj', `
       <div class="form-group"><label>Kullanıcı adı</label><input id="new-dm-username" type="text" placeholder="kullanici_adi" /></div>
+      <div class="form-group">
+        <label>Arkadaşlardan seç</label>
+        <div id="new-dm-friends" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
+          ${accepted.length ? accepted.map(f => {
+            const other_username = f.requester_username === currentUser.username ? f.addressee_username : f.requester_username;
+            const avatar = f.requester_avatar && f.requester_username === currentUser.username ? f.requester_avatar : (f.addressee_avatar && f.addressee_username === currentUser.username ? f.addressee_avatar : '');
+            return `<button class="btn btn-ghost" type="button" style="justify-content:flex-start" data-username="${escHtml(other_username)}" data-action="open-dm">
+              ${avatar ? `<img src="${escHtml(avatar)}" class="avatar-sm" style="margin-right:8px" />` : `<div class="avatar-sm avatar-placeholder" style="margin-right:8px"><i class="fas fa-user"></i></div>`}
+              <span>${escHtml(other_username)}</span>
+            </button>`;
+          }).join('') : '<div style="font-size:13px;color:var(--text-muted)">Henüz arkadaşın yok</div>'}
+        </div>
+      </div>
       <button class="btn btn-primary" style="width:100%" id="new-dm-go">Mesaja Git</button>
     `);
     $('#new-dm-go').addEventListener('click', () => {
@@ -3254,6 +3269,12 @@ async function renderMessages(app, targetUsername) {
       if (!u) return;
       hideModal();
       navigate('/mesajlar/' + u);
+    });
+    $$('#new-dm-friends button[data-action="open-dm"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        hideModal();
+        navigate('/mesajlar/' + btn.dataset.username);
+      });
     });
   });
 
