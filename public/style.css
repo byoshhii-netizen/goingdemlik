@@ -1648,3 +1648,80 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .gplayer-vol-wrap { display: none; }
   #global-music-player { bottom: 56px; } /* bottom bar yüksekliği */
 }
+
+
+/* ===== MOBİL DÜZELTME - ÇAKIŞAN KURALLARI GİDER ===== */
+
+/* Avatar ve sabit boyutlu elemanlar max-width:100% kuralından muaf */
+.nav-avatar, .comment-avatar, .chat-msg-avatar, .fdm-avatar,
+.avatar-sm, .avatar-md, .member-avatar, .profile-avatar,
+.profile-avatar-placeholder, .music-cover, .gplayer-cover,
+.gplayer-cover-ph, .music-cover-ph {
+  max-width: unset !important;
+}
+
+/* ebook-toolbar butonları tüm genişliği almasın */
+@media (max-width: 768px) {
+  .ebook-toolbar button { width: auto !important; flex: 0 0 auto !important; }
+  .ebook-nav-btn { width: auto !important; flex: 1 !important; max-width: 48% !important; }
+  .ebook-nav { gap: 8px !important; }
+
+  /* forum-action-btn full width olmamalı - wrap etsin */
+  .forum-action-btn { width: auto !important; flex-shrink: 0 !important; }
+  .forum-actions { flex-wrap: wrap !important; gap: 8px !important; }
+
+  /* btn ellipsis sadece flex olmayanlarda sorun çıkarıyor */
+  .btn { overflow: visible !important; text-overflow: clip !important; }
+
+  /* kitap grid: 2 kolon küçük ekranda daha iyi */
+  .grid-3 { grid-template-columns: repeat(2, 1fr) !important; gap: 12px !important; }
+
+  /* Müzik listesi mobil - sütunları gizle */
+  .music-table-header { display: none !important; }
+  .music-row { padding: 8px 10px; gap: 8px; }
+  .music-num { width: 22px; font-size: 12px; }
+  .music-plays { display: none !important; }
+  .music-date { display: none !important; }
+
+  /* DM layout düzeltme */
+  .dm-layout { height: calc(100vh - 60px - 60px); }
+  .dm-sidebar { max-height: 200px; }
+  .dm-chat { height: 100%; min-height: 260px; }
+
+  /* Modal tam genişlik + bottom sheet */
+  .modal { border-radius: 20px 20px 0 0 !important; max-width: 100% !important; }
+
+  /* Video player mobil */
+  .video-player-card { grid-template-columns: 1fr !important; }
+  .video-ad-overlay { font-size: 11px !important; padding: 8px 10px !important; min-width: 120px !important; }
+
+  /* Profil stat sayıları taşmasın */
+  .profile-stats { gap: 12px !important; flex-wrap: wrap !important; justify-content: center !important; }
+  .profile-stat-num { font-size: 16px !important; }
+
+  /* Section header flex wrap */
+  .section-header { flex-wrap: wrap; gap: 8px; }
+
+  /* Footer mobil */
+  #site-footer { margin-bottom: 60px; }
+
+  /* Şarkı kartı grid */
+  .grid-2 { grid-template-columns: repeat(2, 1fr) !important; gap: 10px !important; }
+}
+
+@media (max-width: 480px) {
+  /* Çok küçük ekranlarda tek kolon */
+  .grid-2, .grid-3 { grid-template-columns: 1fr !important; }
+  
+  /* Müzik detay header */
+  .music-detail-header { gap: 12px; }
+  .music-detail-cover, .music-detail-cover-ph { width: 140px !important; height: 140px !important; }
+
+  /* Profil avatar küçült */
+  .profile-avatar, .profile-avatar-placeholder { width: 70px !important; height: 70px !important; font-size: 28px !important; }
+  .profile-username { font-size: 16px !important; }
+
+  /* Ebook nav butonlar yan yana sığsın */
+  .ebook-nav-btn { padding: 8px 10px !important; font-size: 12px !important; }
+  .ebook-nav-btn span:not(.sr-only) { display: none; }
+}
