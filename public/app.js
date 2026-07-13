@@ -99,6 +99,10 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function closeMobileMenu() {
+  $('#mobile-menu')?.classList.add('hidden');
+}
+
 function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.show_level_color !== 0 && u.name_color) ? `style="color:${escHtml(u.name_color)}"` : '';
@@ -127,6 +131,7 @@ function renderContent(text) {
 }
 
 function navigate(path, push = true) {
+  closeMobileMenu();
   if (push) history.pushState({}, '', path);
   // path içindeki query string'i renderRoute'a geçir
   renderRoute(path);
@@ -3208,12 +3213,23 @@ async function renderMessages(app, targetUsername) {
       </div>
     </div>`;
 
-  app.innerHTML = `<div class="dm-layout">
+  app.innerHTML = `<div class="dm-layout${targetUsername && window.innerWidth <= 768 ? ' dm-mobile-chat-open' : ''}">
     ${sidebarHTML}
     <div class="dm-main" id="dm-main">
       ${targetUsername ? '' : `<div class="dm-empty"><i class="fas fa-comments" style="font-size:48px;color:var(--text-muted);margin-bottom:16px"></i><p style="color:var(--text-muted)">Bir konuşma seçin</p></div>`}
     </div>
   </div>`;
+
+  const syncDmMobileView = () => {
+    const layout = $('.dm-layout');
+    if (!layout) return;
+    const isMobile = window.innerWidth <= 768;
+    layout.classList.toggle('dm-mobile-chat-open', isMobile && !!targetUsername);
+  };
+  syncDmMobileView();
+  window.removeEventListener('resize', window.__dmMobileViewHandler);
+  window.__dmMobileViewHandler = syncDmMobileView;
+  window.addEventListener('resize', window.__dmMobileViewHandler);
 
   $('#dm-search')?.addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
@@ -3324,6 +3340,7 @@ async function renderDMChat(username) {
   mainEl.innerHTML = `<div class="dm-chat">
     <div class="dm-chat-header">
       <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none"><i class="fas fa-arrow-left"></i></button>
         ${other.avatar ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
         <a href="/profil/${escHtml(other.username)}" data-link style="font-weight:600;font-size:14px;color:${other.name_color || 'var(--text-primary)'}">${escHtml(other.username)}</a>
       </div>
@@ -3354,6 +3371,10 @@ async function renderDMChat(username) {
       <button class="btn btn-primary btn-sm" id="dm-send-btn"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>`;
+
+  $('#dm-mobile-back-btn')?.addEventListener('click', () => {
+    navigate('/mesajlar');
+  });
 
   const dmMessagesContainer = $('#dm-messages');
   if (dmMessagesContainer) dmMessagesContainer.scrollTop = dmMessagesContainer.scrollHeight;

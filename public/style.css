@@ -1250,6 +1250,10 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-msg-content { max-width: 88%; }
   .dm-input-bar { padding: 8px 10px; }
   .dm-msg-bubble { font-size: 13px; padding: 7px 10px; }
+  .dm-layout:not(.dm-mobile-chat-open) .dm-main { display: none; }
+  .dm-layout.dm-mobile-chat-open .dm-sidebar { display: none; }
+  .dm-layout.dm-mobile-chat-open .dm-main { display: flex; }
+  .dm-mobile-back-btn { display: inline-flex !important; }
 }
 
 /* ===== FLOATING DM WIDGET ===== */
