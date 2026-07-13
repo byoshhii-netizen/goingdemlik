@@ -2039,7 +2039,11 @@ function videoCardHTML(v) {
     </div>
     <div class="video-card-body">
       <div class="video-card-title">${escHtml(v.title)}</div>
-      <div class="video-card-meta">${escHtml(v.username || 'Silinmiş kullanıcı')} • ${v.views || 0} izlenme</div>
+      <div class="video-card-meta">
+        <span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span>
+        <span>•</span>
+        <span>${v.views || 0} izlenme</span>
+      </div>
       ${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}
     </div>
   </div>`;
@@ -2161,11 +2165,14 @@ async function renderVideoList(app) {
     document.title = 'Videolar – Demlik';
     updatePageMeta('Videolar – Demlik', 'Topluluk videolarını keşfet.', '');
     app.innerHTML = `<div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div><div class="page-title">Videolar</div><div class="page-subtitle">Video yükle, izle, yorum yap.</div></div>
+      <div class="video-list-header">
+        <div>
+          <div class="page-title">Videolar</div>
+          <div class="page-subtitle">Video yükle, izle, yorum yap.</div>
+        </div>
         ${currentUser ? `<button class="btn btn-primary" id="new-video-btn"><i class="fas fa-plus"></i> Video Yükle</button>` : ''}
       </div>
-      <div class="grid-3">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
+      <div class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
     </div>`;
     $('#new-video-btn')?.addEventListener('click', () => showNewVideoModal());
   } catch {}
@@ -2202,31 +2209,37 @@ async function renderVideoDetail(app, slug) {
   const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
   const formattedDescription = descriptionText.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
   app.innerHTML = `<div class="container page">
-    <div class="video-player-card">
-      <div class="video-player-shell">
-        <video controls preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
-          <source src="${escHtml(video.video_url)}" />
-        </video>
-        <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
-      </div>
-      <div class="video-meta-block">
-        <div class="video-title">${escHtml(video.title)}</div>
-        <div class="video-author-row">
-          <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-          ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
+    <div class="video-page-layout">
+      <div class="video-main-column">
+        <div class="video-player-card">
+          <div class="video-player-shell">
+            <video controls preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
+              <source src="${escHtml(video.video_url)}" />
+            </video>
+            <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
+          </div>
         </div>
-        <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
-        <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
-        <div class="video-description-card">
-          <div class="video-description-title">Açıklama</div>
-          <div class="video-description-text" id="video-description-text">${formattedDescription}</div>
+        <div class="video-comments-card">
+          <div class="comments-title"><i class="fas fa-comments"></i> Yorumlar (${comments.length})</div>
+          ${currentUser ? `<div class="comment-form"><textarea id="video-comment-input" placeholder="Yorum yaz..."></textarea><button class="btn btn-primary btn-sm" id="video-comment-submit"><i class="fas fa-paper-plane"></i></button></div>` : '<div class="empty-state"><i class="fas fa-sign-in-alt"></i><p>Yorum yapmak için giriş yapın.</p></div>'}
+          <div id="video-comments-list">${comments.map(c => renderVideoComment(c, isOwner)).join('')}</div>
         </div>
       </div>
-    </div>
-    <div class="video-comments-card">
-      <div class="comments-title"><i class="fas fa-comments"></i> Yorumlar (${comments.length})</div>
-      ${currentUser ? `<div class="comment-form"><textarea id="video-comment-input" placeholder="Yorum yaz..."></textarea><button class="btn btn-primary btn-sm" id="video-comment-submit"><i class="fas fa-paper-plane"></i></button></div>` : '<div class="empty-state"><i class="fas fa-sign-in-alt"></i><p>Yorum yapmak için giriş yapın.</p></div>'}
-      <div id="video-comments-list">${comments.map(c => renderVideoComment(c, isOwner)).join('')}</div>
+      <aside class="video-side-panel">
+        <div class="video-meta-block">
+          <div class="video-title">${escHtml(video.title)}</div>
+          <div class="video-author-row">
+            <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
+            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
+          </div>
+          <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
+          <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
+          <div class="video-description-card">
+            <div class="video-description-title">Açıklama</div>
+            <div class="video-description-text" id="video-description-text">${formattedDescription}</div>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>`;
 
