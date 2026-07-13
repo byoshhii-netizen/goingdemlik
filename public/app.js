@@ -3199,15 +3199,28 @@ async function renderMessages(app, targetUsername) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - Demlik';
   let convs = [];
+  let hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
+  try { hiddenConvs = await api('/conversations/hidden'); } catch {}
 
   const sidebarHTML = `
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
         <span style="font-size:13px;font-weight:700">Mesajlar</span>
-        <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
+          <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
+        </div>
       </div>
       <div class="dm-search-wrap"><input id="dm-search" type="text" placeholder="Ara..." class="dm-search" /></div>
+      <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
+        <div class="dm-hidden-panel-content">
+          <div class="dm-hidden-panel-header">Kilitli mesajlar</div>
+          <div id="dm-hidden-list" class="dm-hidden-list">
+            ${hiddenConvs.length ? hiddenConvs.map(c => dmConvItemHTML(c, true)).join('') : `<div class="dm-empty-small">Kilitli konuşma yok</div>`}
+          </div>
+        </div>
+      </div>
       <div id="dm-conv-list" class="dm-conv-list">
         ${convs.map(c => dmConvItemHTML(c)).join('') || `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>`}
       </div>
@@ -3233,7 +3246,11 @@ async function renderMessages(app, targetUsername) {
 
   $('#dm-search')?.addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
-    $$('#dm-conv-list .dm-conv-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
+    $$('.dm-conv-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
+  });
+
+  $('#dm-hidden-toggle-btn')?.addEventListener('click', () => {
+    $('#dm-hidden-panel')?.classList.toggle('hidden');
   });
 
   $$('.dm-conv-item').forEach(el => {
@@ -3253,11 +3270,12 @@ async function renderMessages(app, targetUsername) {
         <label>Arkadaşlardan seç</label>
         <div id="new-dm-friends" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
           ${accepted.length ? accepted.map(f => {
-            const other_username = f.requester_username === currentUser.username ? f.addressee_username : f.requester_username;
-            const avatar = f.requester_avatar && f.requester_username === currentUser.username ? f.requester_avatar : (f.addressee_avatar && f.addressee_username === currentUser.username ? f.addressee_avatar : '');
+            const other_username = f.other_username || (f.requester_id === currentUser.id ? (f.addressee_username || f.requester_username) : (f.requester_username || f.addressee_username)) || 'Kullanıcı';
+            const avatar = f.other_avatar || (f.requester_id === currentUser.id ? f.addressee_avatar : f.requester_avatar) || '';
+            const nameColor = f.other_name_color || '';
             return `<button class="btn btn-ghost" type="button" style="justify-content:flex-start" data-username="${escHtml(other_username)}" data-action="open-dm">
               ${avatar ? `<img src="${escHtml(avatar)}" class="avatar-sm" style="margin-right:8px" />` : `<div class="avatar-sm avatar-placeholder" style="margin-right:8px"><i class="fas fa-user"></i></div>`}
-              <span>${escHtml(other_username)}</span>
+              <span style="${nameColor ? `color:${escHtml(nameColor)}` : ''}">${escHtml(other_username)}</span>
             </button>`;
           }).join('') : '<div style="font-size:13px;color:var(--text-muted)">Henüz arkadaşın yok</div>'}
         </div>
@@ -3285,13 +3303,13 @@ async function renderMessages(app, targetUsername) {
   }
 }
 
-function dmConvItemHTML(c) {
+function dmConvItemHTML(c, isHidden = false) {
   const unread = parseInt(c.unread_count) || 0;
   return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}">
     ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div class="dm-conv-info">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="dm-conv-name" style="${c.other_name_color ? `color:${escHtml(c.other_name_color)}` : ''}">${escHtml(c.other_username)}</span>
+        <span class="dm-conv-name" style="${c.other_name_color ? `color:${escHtml(c.other_name_color)}` : ''}">${escHtml(c.other_username)}${isHidden ? '<i class="fas fa-lock dm-conv-lock"></i>' : ''}</span>
         ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
       </div>
       <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>

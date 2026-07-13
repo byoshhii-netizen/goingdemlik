@@ -2615,6 +2615,24 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
+  const uid = req.user.id;
+  const { rows } = await query(`
+    SELECT c.*,
+      CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
+      CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
+    FROM dm_conversations c
+    JOIN users u1 ON c.user1_id=u1.id
+    JOIN users u2 ON c.user2_id=u2.id
+    WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
+    ORDER BY c.last_message_at DESC
+  `, [uid]);
+  res.json(rows);
+});
+
 app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
