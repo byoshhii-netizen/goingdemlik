@@ -2619,37 +2619,42 @@ function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span>Profil Bilgileri</span></div>
         <div class="card-body">
-          <div class="form-group" style="display:flex;align-items:center;gap:16px">
-            ${currentUser.avatar ? `<img src="${escHtml(currentUser.avatar)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover" />` : `<div style="width:64px;height:64px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center"><i class="fas fa-user" style="font-size:24px;color:var(--text-muted)"></i></div>`}
-            <div style="flex:1">
-              <label>Avatar Yükle</label>
-              <input type="file" id="avatar-file" accept="image/*" style="padding:6px" />
+          <div class="profile-header-grid">
+            <div class="profile-avatar-block">
+              ${currentUser.avatar ? `<img src="${escHtml(currentUser.avatar)}" class="profile-avatar" />` : `<div class="profile-avatar placeholder"><i class="fas fa-user"></i></div>`}
+              <label class="btn btn-outline btn-sm upload-btn"><i class="fas fa-upload"></i> Avatar Seç
+                <input type="file" id="avatar-file" accept="image/*" style="display:none" />
+              </label>
+            </div>
+            <div class="profile-fields">
+              <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="4" placeholder="Kendinden kısaca bahset...">${escHtml(currentUser.bio || '')}</textarea></div>
+              <div class="form-row">
+                <div class="form-group"><label>Ünvan</label><input type="text" id="s-title" placeholder="Örn: Yazar, Öğrenci, Mühendis..." value="${escHtml(currentUser.title || '')}" /></div>
+                <div class="form-group"><label>Konum</label><input type="text" id="s-location" placeholder="Örn: İstanbul, Türkiye" value="${escHtml(currentUser.location || '')}" /></div>
+              </div>
             </div>
           </div>
-          <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="3">${escHtml(currentUser.bio || '')}</textarea></div>
-          <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" placeholder="Örn: Yazar, Öğrenci, Mühendis..." value="${escHtml(currentUser.title || '')}" /></div>
-          <div class="form-group"><label>Konum (opsiyonel)</label><input type="text" id="s-location" placeholder="Örn: İstanbul, Türkiye" value="${escHtml(currentUser.location || '')}" /></div>
-          <div class="form-row">
-            <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
-            <div class="form-group"><label>Konum <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-location" value="${escHtml(currentUser.location || '')}" placeholder="Örn: İstanbul, Türkiye" /></div>
+          <div class="form-group"><label>Linkler</label><div id="links-container" class="links-grid"></div></div>
+          <div class="links-actions">
+            <button type="button" class="btn btn-outline btn-sm" id="add-link-btn"><i class="fas fa-plus"></i> Yeni Link</button>
+            <span class="form-note">Bu bağlantılar profil kartınızda görünecektir.</span>
           </div>
-          <div class="form-group">
-            <label>Linkler</label>
-            <div id="links-container" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
-            <button type="button" class="btn btn-outline btn-sm" id="add-link-btn"><i class="fas fa-plus"></i> Link Ekle</button>
-          </div>
-          <button class="btn btn-primary" id="save-profile-btn">Kaydet</button>
+          <button class="btn btn-primary" id="save-profile-btn">Profil Kaydet</button>
           <div id="profile-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
 
     function renderLinkRows(linksArr) {
       const container = $('#links-container');
+      if (!linksArr.length) {
+        container.innerHTML = '<div class="empty-state">Henüz bağlantı eklenmemiş. Yeni bir bağlantı ekleyin.</div>';
+        return;
+      }
       container.innerHTML = linksArr.map((l, i) => `
-        <div class="link-row" data-idx="${i}" style="display:flex;gap:8px;align-items:center">
-          <input type="text" placeholder="Başlık (örn: GitHub)" value="${escHtml(l.label || '')}" data-field="label" style="flex:1" />
-          <input type="text" placeholder="URL (https://...)" value="${escHtml(l.url || '')}" data-field="url" style="flex:2" />
-          <button type="button" class="btn btn-ghost btn-sm remove-link-btn" data-idx="${i}" style="color:var(--accent-red2);flex-shrink:0"><i class="fas fa-times"></i></button>
+        <div class="link-row" data-idx="${i}">
+          <input type="text" placeholder="Başlık (örn: GitHub)" value="${escHtml(l.label || '')}" data-field="label" />
+          <input type="text" placeholder="URL (https://...)" value="${escHtml(l.url || '')}" data-field="url" />
+          <button type="button" class="btn btn-ghost btn-sm remove-link-btn" data-idx="${i}" title="Sil"><i class="fas fa-times"></i></button>
         </div>`).join('');
     }
 
@@ -2664,7 +2669,7 @@ function renderSettingsSection(section) {
     $('#links-container').addEventListener('click', e => {
       const rem = e.target.closest('.remove-link-btn');
       if (rem) {
-        currentLinks.splice(parseInt(rem.dataset.idx), 1);
+        currentLinks.splice(parseInt(rem.dataset.idx, 10), 1);
         renderLinkRows(currentLinks);
       }
     });
@@ -2672,7 +2677,7 @@ function renderSettingsSection(section) {
     $('#links-container').addEventListener('input', e => {
       const row = e.target.closest('.link-row');
       if (!row) return;
-      const idx = parseInt(row.dataset.idx);
+      const idx = parseInt(row.dataset.idx, 10);
       const field = e.target.dataset.field;
       if (field && currentLinks[idx] !== undefined) currentLinks[idx][field] = e.target.value;
     });
@@ -2693,7 +2698,6 @@ function renderSettingsSection(section) {
         currentUser = updated;
         updateNavUI();
         toast('Profil güncellendi');
-        $('#profile-msg').style.color = 'var(--accent-red2)';
         $('#profile-msg').textContent = '';
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
@@ -2726,8 +2730,8 @@ function renderSettingsSection(section) {
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
-          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
-          ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini etkinleştir</label></div>
+          ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi</label><input type="color" id="s-name-color" value="${escHtml(currentUser.name_color || '#f5f5f5')}" class="color-input" /></div>` : `<div class="form-note">VIP/Plus kullanıcılar için isim rengi seçimi aktiftir.</div>`}
           <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
@@ -2744,6 +2748,7 @@ function renderSettingsSection(section) {
         const updated = await apiForm('/profile', fd, 'PUT');
         currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
+        $('#appear-msg').textContent = '';
       } catch (e) { $('#appear-msg').textContent = e.message; }
     });
   } else if (section === 'notifications') {
