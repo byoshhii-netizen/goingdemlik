@@ -460,20 +460,6 @@ function updateNavUI() {
   }
 }
 
-// Mobile: clicking the top-right avatar/logo should open the current user's profile
-document.addEventListener('click', e => {
-  const avatar = e.target.closest('.nav-avatar');
-  if (!avatar) return;
-  // only on narrow screens treat avatar as profile shortcut
-  if (window.innerWidth <= 860) {
-    if (currentUser && currentUser.username) {
-      navigate('/profil/' + currentUser.username);
-    } else {
-      navigate('/giris');
-    }
-  }
-});
-
 function updateMobileBottomBar(path) {
   $$('#mobile-bottom-bar a').forEach(a => {
     const href = a.getAttribute('href');
@@ -481,7 +467,16 @@ function updateMobileBottomBar(path) {
   });
 }
 
-$('#nav-user-btn').addEventListener('click', () => {
+$('#nav-user-btn').addEventListener('click', e => {
+  if (window.innerWidth <= 860) {
+    e.preventDefault();
+    if (currentUser && currentUser.username) {
+      navigate('/profil/' + currentUser.username);
+    } else {
+      navigate('/giris');
+    }
+    return;
+  }
   $('#dropdown-menu').classList.toggle('hidden');
 });
 document.addEventListener('click', e => {
