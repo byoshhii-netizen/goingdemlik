@@ -115,6 +115,16 @@ function avatarImg(u, cls = 'avatar-sm') {
   return `<div class="${cls} avatar-placeholder" style="font-size:0.75em;font-weight:700;color:var(--text-muted)">?</div>`;
 }
 
+function hasAdminPermission(permission) {
+  if (!currentUser || !currentUser.is_admin) return false;
+  if (currentUser.isSuperAdmin) return true;
+  return !!(currentUser.adminPermissions && currentUser.adminPermissions[permission]);
+}
+
+function canModerateContent() {
+  return hasAdminPermission('can_edit_content') || hasAdminPermission('can_delete_content');
+}
+
 // ===== IÇERIK RENDER (hashtag + mention) =====
 function renderContent(text) {
   if (!text) return '';
@@ -987,12 +997,14 @@ async function renderForumDetail(app, slug) {
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Konu bulunamadı.</p></div></div>'; return; }
 
   const isOwner = currentUser && currentUser.id === forum.user_id;
+  const canEditForum = isOwner || hasAdminPermission('can_edit_content');
+  const canDeleteForum = isOwner || hasAdminPermission('can_delete_content');
 
   app.innerHTML = `<div class="container page">
     <div class="forum-detail">
-      ${isOwner ? `<div style="display:flex;gap:8px;margin-bottom:16px">
-        <button class="btn btn-outline btn-sm" id="edit-forum-btn"><i class="fas fa-edit"></i> Düzenle</button>
-        <button class="btn btn-danger btn-sm" id="del-forum-btn"><i class="fas fa-trash"></i> Sil</button>
+      ${canEditForum || canDeleteForum ? `<div style="display:flex;gap:8px;margin-bottom:16px">
+        ${canEditForum ? `<button class="btn btn-outline btn-sm" id="edit-forum-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}
+        ${canDeleteForum ? `<button class="btn btn-danger btn-sm" id="del-forum-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}
       </div>` : ''}
       <div class="forum-detail-header">
         <div class="forum-detail-title">${escHtml(forum.title)}</div>
@@ -1148,7 +1160,7 @@ async function renderForumDetail(app, slug) {
 }
 
 function commentHTML(c) {
-  const canDel = currentUser && currentUser.id === c.user_id;
+  const canDel = currentUser && (currentUser.id === c.user_id || hasAdminPermission('can_delete_content'));
   const canReply = !!currentUser;
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
@@ -1295,6 +1307,8 @@ async function renderBookDetail(app, slug) {
   document.title = book.title + ' – Demlik';
   updatePageMeta(book.title + ' – Demlik', book.preface ? book.preface.substring(0,155) : book.title + ' – Demlik\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
+  const canEditBook = isOwner || hasAdminPermission('can_edit_content');
+  const canDeleteBook = isOwner || hasAdminPermission('can_delete_content');
 
   const sortedPages = [...pages].sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
   const firstPage = sortedPages[0];
@@ -1344,11 +1358,11 @@ async function renderBookDetail(app, slug) {
         ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
         ${book.kadro ? `<div class="book-preface"><strong>Kadro</strong><p>${escHtml(book.kadro)}</p></div>` : ''}
         ${firstPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> Oku</a></div>` : ''}
-        ${isOwner ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
-          <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
-          <button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>
-          <button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>
-          <button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>
+        ${(canEditBook || canDeleteBook) ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+          ${canEditBook ? `<button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}
+          ${canEditBook ? `<button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>` : ''}
+          ${canEditBook ? `<button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>` : ''}
+          ${canDeleteBook ? `<button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}
         </div>` : ''}
         <div style="margin-top:12px">
           <button class="btn btn-outline btn-sm" id="download-pdf-btn"><i class="fas fa-file-pdf" style="color:#ef4444"></i> PDF İndir</button>
@@ -1364,14 +1378,18 @@ async function renderBookDetail(app, slug) {
     </div>
   </div>`;
 
-  if (isOwner) {
-    $('#edit-book-btn').addEventListener('click', () => showNewBookModal(book));
-    $('#del-book-btn').addEventListener('click', async () => {
-      if (!confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
-      try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
-    });
-    $('#add-page-btn').addEventListener('click', () => showAddPageModal(slug, chapters));
-    $('#add-chap-btn').addEventListener('click', () => showAddChapterModal(slug));
+  if (canEditBook || canDeleteBook) {
+    if (canEditBook) {
+      $('#edit-book-btn')?.addEventListener('click', () => showNewBookModal(book));
+      $('#add-page-btn')?.addEventListener('click', () => showAddPageModal(slug, chapters));
+      $('#add-chap-btn')?.addEventListener('click', () => showAddChapterModal(slug));
+    }
+    if (canDeleteBook) {
+      $('#del-book-btn')?.addEventListener('click', async () => {
+        if (!confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
+        try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
+      });
+    }
     document.querySelectorAll('.del-chapter').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -2202,6 +2220,8 @@ async function renderVideoDetail(app, slug) {
   document.title = video.title + ' – Demlik';
   updatePageMeta(video.title + ' – Demlik', video.description || 'Demlik videoları', video.banner_image || '');
   const isOwner = currentUser && currentUser.id === video.user_id;
+  const canEditVideo = isOwner || hasAdminPermission('can_edit_content');
+  const canDeleteVideo = isOwner || hasAdminPermission('can_delete_content');
   let followState = false;
   if (currentUser && currentUser.username !== video.username) {
     try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
@@ -2233,7 +2253,7 @@ async function renderVideoDetail(app, slug) {
             ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
           </div>
           <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
-          <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
+          <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${canEditVideo ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${canDeleteVideo ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
           <div class="video-description-card">
             <div class="video-description-title">Açıklama</div>
             <div class="video-description-text" id="video-description-text">${formattedDescription}</div>
@@ -2316,8 +2336,8 @@ async function renderVideoDetail(app, slug) {
     // ads optional
   }
 
-  $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
-  $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
+  $('#video-edit-btn')?.addEventListener('click', () => { if (!canEditVideo) return; showNewVideoModal(video); });
+  $('#video-delete-btn')?.addEventListener('click', async () => { if (!canDeleteVideo) return; if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
 
   $('#video-comment-submit')?.addEventListener('click', async () => {
     const content = $('#video-comment-input').value.trim();
@@ -2363,8 +2383,8 @@ async function renderVideoDetail(app, slug) {
 }
 
 function renderVideoComment(c, isOwner) {
-  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner);
-  const canPin = currentUser && isOwner;
+  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner || hasAdminPermission('can_edit_content'));
+  const canPin = currentUser && (isOwner || hasAdminPermission('can_edit_content'));
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">

@@ -200,6 +200,19 @@ async function adminMiddleware(req, res, next) {
   next();
 }
 
+async function getAdminPermissionRow(userId) {
+  if (!userId) return null;
+  const { rows } = await query('SELECT * FROM admin_permissions WHERE user_id=$1', [userId]);
+  return rows[0] || null;
+}
+
+async function hasAdminPermission(req, permission) {
+  if (!req.user?.is_admin) return false;
+  const row = await getAdminPermissionRow(req.user.id);
+  if (!row) return true;
+  return !!row[permission];
+}
+
 async function updateUserLevel(userId) {
   const { rows: users } = await query('SELECT forum_count, book_count, comment_count FROM users WHERE id=$1', [userId]);
   if (!users.length) return;
@@ -450,13 +463,33 @@ app.post('/api/auth/login', async (req, res) => {
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(user.username, 'login', '', '', ip);
-    res.json({ token, user: sanitizeUser(user) });
+    const sanitizedUser = sanitizeUser(user);
+    if (user.is_admin) {
+      const permRow = await getAdminPermissionRow(user.id);
+      sanitizedUser.adminPermissions = permRow || {
+        can_ban_users:1, can_delete_content:1, can_edit_content:1,
+        can_manage_levels:1, can_manage_tags:1, can_manage_announcements:1,
+        can_view_logs:1, can_manage_settings:1, can_manage_admins:1, can_view_users:1
+      };
+      sanitizedUser.isSuperAdmin = !permRow;
+    }
+    res.json({ token, user: sanitizedUser });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const { rows: lvRows } = await query('SELECT * FROM levels WHERE id=$1', [req.user.level_id]);
-  res.json({ user: sanitizeUser(req.user), level: lvRows[0] || null });
+  const user = sanitizeUser(req.user);
+  if (req.user.is_admin) {
+    const permRow = await getAdminPermissionRow(req.user.id);
+    user.adminPermissions = permRow || {
+      can_ban_users:1, can_delete_content:1, can_edit_content:1,
+      can_manage_levels:1, can_manage_tags:1, can_manage_announcements:1,
+      can_view_logs:1, can_manage_settings:1, can_manage_admins:1, can_view_users:1
+    };
+    user.isSuperAdmin = !permRow;
+  }
+  res.json({ user, level: lvRows[0] || null });
 });
 
 app.post('/api/auth/logout', authMiddleware, async (req, res) => {
@@ -651,7 +684,7 @@ app.put('/api/forum/:slug', authMiddleware, async (req, res) => {
   const { rows: fRows } = await query('SELECT * FROM forums WHERE slug=$1', [req.params.slug]);
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const forum = fRows[0];
-  if (forum.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (forum.user_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content'))) return res.status(403).json({ error: 'Yetki yok' });
   const { title, content, banner_image, allow_comments, tagIds, customTags, banner_fit, images, thumbnail } = req.body;
   // İçerik içindeki #tag'ları da custom_tags'e merge et
   const newContent = content || forum.content;
@@ -678,7 +711,7 @@ app.delete('/api/forum/:slug', authMiddleware, async (req, res) => {
   const { rows: fRows } = await query('SELECT * FROM forums WHERE slug=$1', [req.params.slug]);
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const forum = fRows[0];
-  if (forum.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (forum.user_id != req.user.id && !(await hasAdminPermission(req, 'can_delete_content'))) return res.status(403).json({ error: 'Yetki yok' });
   await query('DELETE FROM forum_comments WHERE forum_id=$1', [forum.id]);
   await query('DELETE FROM forum_likes WHERE forum_id=$1', [forum.id]);
   await query('DELETE FROM forum_views WHERE forum_id=$1', [forum.id]);
@@ -737,7 +770,7 @@ app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
 app.delete('/api/forum/:slug/comments/:id', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM forum_comments WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
-  if (rows[0].user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (rows[0].user_id != req.user.id && !(await hasAdminPermission(req, 'can_delete_content'))) return res.status(403).json({ error: 'Yetki yok' });
   await query('DELETE FROM forum_comments WHERE id=$1', [rows[0].id]);
   await query('UPDATE users SET comment_count=GREATEST(0,comment_count-1) WHERE id=$1', [req.user.id]);
   await updateUserLevel(req.user.id);
@@ -780,7 +813,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
   // Filter hidden books - show only if user is owner or admin
   const filtered = rows.filter(book => {
     if (!book.is_hidden) return true;
-    if (req.user && book.user_id === req.user.id) return true;
+    if (req.user && (book.user_id === req.user.id || req.user.is_admin)) return true;
     return false;
   });
   res.json(filtered);
@@ -823,7 +856,7 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (book.user_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content'))) return res.status(403).json({ error: 'Yetki yok' });
   const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
   await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,updated_at=NOW() WHERE id=$7',
     [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined?is_hidden?1:0:book.is_hidden, book.id]);
@@ -835,7 +868,7 @@ app.delete('/api/book/:slug', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (book.user_id != req.user.id && !(await hasAdminPermission(req, 'can_delete_content'))) return res.status(403).json({ error: 'Yetki yok' });
   await query('DELETE FROM book_pages WHERE book_id=$1', [book.id]);
   await query('DELETE FROM book_chapters WHERE book_id=$1', [book.id]);
   await query('DELETE FROM books WHERE id=$1', [book.id]);
@@ -849,7 +882,7 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (book.user_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content'))) return res.status(403).json({ error: 'Yetki yok' });
   const { title, content, chapter_id, image_url } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
   const limitErr = await checkDailyLimit(req.user.id, req.user, 'book_pages');
@@ -916,7 +949,7 @@ app.delete('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) =>
 
 app.post('/api/book/:slug/chapters', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
-  if (!bRows.length || bRows[0].user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (!bRows.length || (bRows[0].user_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content')))) return res.status(403).json({ error: 'Yetki yok' });
   const { title, order_num } = req.body;
   if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
   const { rows } = await query('INSERT INTO book_chapters (book_id,title,order_num) VALUES ($1,$2,$3) RETURNING *',
@@ -926,7 +959,7 @@ app.post('/api/book/:slug/chapters', authMiddleware, async (req, res) => {
 
 app.put('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
-  if (!bRows.length || bRows[0].user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (!bRows.length || (bRows[0].user_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content')))) return res.status(403).json({ error: 'Yetki yok' });
   const { rows: chRows } = await query('SELECT * FROM book_chapters WHERE id=$1 AND book_id=$2', [req.params.id, bRows[0].id]);
   if (!chRows.length) return res.status(404).json({ error: 'Bölüm bulunamadı' });
   const ch = chRows[0];
@@ -938,7 +971,7 @@ app.put('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
 
 app.delete('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
-  if (!bRows.length || bRows[0].user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (!bRows.length || (bRows[0].user_id != req.user.id && !(await hasAdminPermission(req, 'can_delete_content')))) return res.status(403).json({ error: 'Yetki yok' });
   const { rows: chRows } = await query('SELECT * FROM book_chapters WHERE id=$1 AND book_id=$2', [req.params.id, bRows[0].id]);
   if (!chRows.length) return res.status(404).json({ error: 'Bölüm bulunamadı' });
   await query('UPDATE book_pages SET chapter_id=NULL WHERE chapter_id=$1', [chRows[0].id]);
@@ -1287,7 +1320,7 @@ app.put('/api/video/:slug', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM videos WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   const video = rows[0];
-  if (video.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (video.user_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content'))) return res.status(403).json({ error: 'Yetki yok' });
   const { title, description, video_url, banner_image, allow_comments, is_reals } = req.body;
   const updated = await query(
     'UPDATE videos SET title=$1, description=$2, video_url=$3, banner_image=$4, allow_comments=$5, is_reals=$6, updated_at=NOW() WHERE id=$7 RETURNING *',
@@ -1328,7 +1361,7 @@ app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM videos WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   const video = rows[0];
-  if (video.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (video.user_id != req.user.id && !(await hasAdminPermission(req, 'can_delete_content'))) return res.status(403).json({ error: 'Yetki yok' });
   await query('DELETE FROM video_comment_likes WHERE comment_id IN (SELECT id FROM video_comments WHERE video_id=$1)', [video.id]);
   await query('DELETE FROM video_comments WHERE video_id=$1', [video.id]);
   await query('DELETE FROM video_likes WHERE video_id=$1', [video.id]);
@@ -1405,7 +1438,7 @@ app.put('/api/video/:slug/comments/:id', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT vc.*, v.user_id as owner_id FROM video_comments vc JOIN videos v ON vc.video_id=v.id WHERE vc.id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
   const comment = rows[0];
-  if (comment.user_id != req.user.id && comment.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (comment.user_id != req.user.id && comment.owner_id != req.user.id && !(await hasAdminPermission(req, 'can_edit_content'))) return res.status(403).json({ error: 'Yetki yok' });
   const { content } = req.body;
   const { rows: updated } = await query('UPDATE video_comments SET content=$1, updated_at=NOW() WHERE id=$2 RETURNING *', [content?.trim() || comment.content, comment.id]);
   res.json(updated[0]);
@@ -1415,7 +1448,7 @@ app.post('/api/video/:slug/comments/:id/pin', authMiddleware, async (req, res) =
   const { rows } = await query('SELECT v.user_id FROM videos v WHERE v.slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   const videoOwnerId = rows[0].user_id;
-  if (videoOwnerId != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  if (videoOwnerId != req.user.id && !(await hasAdminPermission(req, 'can_edit_content'))) return res.status(403).json({ error: 'Yetki yok' });
   const { rows: commentRows } = await query('SELECT * FROM video_comments WHERE id=$1', [req.params.id]);
   if (!commentRows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
   await query('UPDATE video_comments SET is_pinned = CASE WHEN is_pinned=1 THEN 0 ELSE 1 END, updated_at=NOW() WHERE id=$1', [commentRows[0].id]);
