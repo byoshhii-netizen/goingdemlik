@@ -1,8 +1,7 @@
 ﻿let currentUser = null;
 let currentToken = localStorage.getItem('token');
-let realsFeedOrder = null;
 
-const SITE_URL = 'https://demlik.up.railway.app';
+const SITE_URL = 'https://demlikforum.up.railway.app';
 
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
@@ -13,14 +12,14 @@ function updatePageMeta(title, description, imageUrl) {
   if (!desc) { desc = document.createElement('meta'); desc.setAttribute('name','description'); document.head.appendChild(desc); }
   desc.setAttribute('content', description);
 
-  const ogFields = { 'og:title': title, 'og:description': description, 'og:image': imageUrl || (SITE_URL + '/demlik.png'), 'og:url': location.href };
+  const ogFields = { 'og:title': title, 'og:description': description, 'og:image': imageUrl || (SITE_URL + '/teatube.png'), 'og:url': location.href };
   Object.entries(ogFields).forEach(([prop, content]) => {
     let el = document.querySelector(`meta[property="${prop}"]`);
     if (!el) { el = document.createElement('meta'); el.setAttribute('property', prop); document.head.appendChild(el); }
     el.setAttribute('content', content);
   });
 
-  const twFields = { 'twitter:title': title, 'twitter:description': description, 'twitter:image': imageUrl || (SITE_URL + '/demlik.png') };
+  const twFields = { 'twitter:title': title, 'twitter:description': description, 'twitter:image': imageUrl || (SITE_URL + '/teatube.png') };
   Object.entries(twFields).forEach(([name, content]) => {
     let el = document.querySelector(`meta[name="${name}"]`);
     if (!el) { el = document.createElement('meta'); el.setAttribute('name', name); document.head.appendChild(el); }
@@ -39,13 +38,13 @@ function updatePageMeta(title, description, imageUrl) {
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
 
-function toast(msg, type = 'success', duration = 3500) {
+function toast(msg, type = 'success') {
   const c = $('#toast-container');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
   t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span>${msg}</span>`;
   c.appendChild(t);
-  setTimeout(() => t.remove(), duration);
+  setTimeout(() => t.remove(), 3500);
 }
 
 function showModal(title, bodyHTML) {
@@ -61,21 +60,88 @@ function hideModal() {
 $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
+function showMobilePostMenu() {
+  showModal('Hızlı Paylaşım', `
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <button class="btn btn-primary btn-block" id="mobile-post-photo"><i class="fas fa-camera-retro"></i> Fotoğraf Paylaş</button>
+      <button class="btn btn-primary btn-block" id="mobile-post-forum"><i class="fas fa-comments"></i> Konu Aç</button>
+      <button class="btn btn-primary btn-block" id="mobile-post-book"><i class="fas fa-book"></i> Kitap Paylaş</button>
+      <button class="btn btn-primary btn-block" id="mobile-post-group"><i class="fas fa-users"></i> Grup Oluştur</button>
+      <button class="btn btn-primary btn-block" id="mobile-post-music"><i class="fas fa-music"></i> Müzik Paylaş</button>
+    </div>
+  `);
+
+  $('#mobile-post-photo')?.addEventListener('click', () => { hideModal(); showNewPhotoModal(); });
+  $('#mobile-post-forum')?.addEventListener('click', () => { hideModal(); navigate('/forum'); setTimeout(() => showNewForumModal(), 100); });
+  $('#mobile-post-book')?.addEventListener('click', () => { hideModal(); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); });
+  $('#mobile-post-group')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); });
+  $('#mobile-post-music')?.addEventListener('click', () => { hideModal(); navigate('/sarki-yukle'); });
+}
+
+async function showNewPhotoModal() {
+  showModal('Fotoğraf Yükle', `
+    <div class="form-group"><label>Fotoğraf</label><input type="file" id="photo-file-input" accept="image/*" /></div>
+    <div class="form-group"><label>Başlık / Açıklama (opsiyonel)</label><input type="text" id="photo-caption" /></div>
+    <button class="btn btn-primary" id="photo-submit-btn" style="width:100%">Yükle</button>
+    <div id="photo-upload-error" class="form-error mt-4"></div>
+  `);
+
+  $('#photo-submit-btn')?.addEventListener('click', async () => {
+    const fileInput = $('#photo-file-input');
+    const caption = $('#photo-caption')?.value.trim();
+    if (!fileInput || !fileInput.files.length) { $('#photo-upload-error').textContent = 'Fotoğraf seçmelisiniz'; return; }
+    const file = fileInput.files[0];
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const uploadRes = await apiForm('/api/upload', form);
+      await api('/photos', { method: 'POST', body: JSON.stringify({ url: uploadRes.url, caption }) });
+      hideModal();
+      toast('Fotoğraf yüklendi');
+      if (location.pathname === '/fotograflar') renderRoute(location.pathname);
+    } catch (err) { $('#photo-upload-error').textContent = err.message; }
+  });
+}
+
+function showEntryAuthPopup() {
+  if (currentUser) return;
+  if (sessionStorage.getItem('ttAuthPromptShown')) return;
+  if (location.pathname === '/giris' || location.pathname === '/kayit') return;
+
+  sessionStorage.setItem('ttAuthPromptShown', '1');
+  showModal('TeaTube’a Katıl', `
+    <div style="display:flex;flex-direction:column;gap:12px;text-align:center">
+      <p>En iyi paylaşımlar için hemen giriş yap veya kaydol.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+        <a href="/giris" data-link class="btn btn-primary btn-sm" style="flex:1;min-width:120px">Giriş Yap</a>
+        <a href="/kayit" data-link class="btn btn-ghost btn-sm" style="flex:1;min-width:120px">Kayıt Ol</a>
+      </div>
+      <button class="btn btn-outline btn-sm" id="auth-popup-close" style="width:100%">Sonra</button>
+    </div>
+  `);
+  $('#auth-popup-close')?.addEventListener('click', hideModal);
+}
+
 async function api(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
   const res = await fetch('/api' + path, { ...options, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Hata');
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : {}; } catch (err) { data = null; }
+  if (!res.ok) throw new Error((data && data.error) || text || 'Hata');
   return data;
 }
 
 async function apiForm(path, formData, method = 'POST') {
   const headers = {};
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
-  const res = await fetch('/api' + path, { method, body: formData, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Hata');
+  const url = path.startsWith('/api') ? path : '/api' + path;
+  const res = await fetch(url, { method, body: formData, headers });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : {}; } catch (err) { data = null; }
+  if (!res.ok) throw new Error((data && data.error) || text || 'Hata');
   return data;
 }
 
@@ -99,15 +165,18 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function closeMobileMenu() {
-  $('#mobile-menu')?.classList.add('hidden');
-}
-
 function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.show_level_color !== 0 && u.name_color) ? `style="color:${escHtml(u.name_color)}"` : '';
-  const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="Demlik Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
-  return `<span class="user-badge" ${color}>${escHtml(u.username)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  const selectedBadge = (() => {
+    if (u.badge_display === 'vip' && u.is_vip) return ' <i class="fas fa-gem user-vip" title="VIP"></i>';
+    if (u.badge_display === 'plus' && u.is_plus) return ' <i class="fas fa-plus user-plus" title="Plus"></i>';
+    if (u.badge_display === 'custom' && u.badge_icon) return ` <i class="${escHtml(u.badge_icon)}" title="${escHtml(u.badge_name || 'Rozet')}"></i>`;
+    if (u.badge_display === 'level') return ' <i class="fas fa-star user-level" title="Seviye"></i>';
+    return '';
+  })();
+  const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="TeaTube Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
+  return `<span class="user-badge" ${color}>${escHtml(u.username)}${selectedBadge}${adminBadge}</span>`;
 }
 
 function avatarImg(u, cls = 'avatar-sm') {
@@ -131,7 +200,6 @@ function renderContent(text) {
 }
 
 function navigate(path, push = true) {
-  closeMobileMenu();
   if (push) history.pushState({}, '', path);
   // path içindeki query string'i renderRoute'a geçir
   renderRoute(path);
@@ -169,10 +237,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/kitap/') && segs.length === 4 && segs[2] === 'sayfa') return renderPageReader(app, segs[1], segs[3]);
   if (path === '/gruplar') return renderGroupList(app);
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
-  if (path === '/videolar') return renderVideoList(app);
-  if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
-  if (path === '/reals') return renderRealsFeed(app);
-  if (path.startsWith('/reals/')) return renderVideoDetail(app, segs[1]);
+  if (path.startsWith('/profil/') && segs.length === 4 && segs[2] === 'foto') return renderPhotoDetail(app, segs[3], segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
@@ -180,6 +245,9 @@ function renderRoute(fullPath) {
   if (path === '/mesajlar') return renderMessages(app, null);
   if (path.startsWith('/mesajlar/')) return renderMessages(app, segs[1]);
   if (path === '/arkadaslar') return renderFriends(app);
+  if (path === '/fotograflar') return renderPhotos(app);
+  if (path === '/vip') return renderVip(app);
+  if (path.startsWith('/foto/')) return renderPhotoDetail(app, segs[1]);
   if (path === '/muzikler') return renderMusicList(app);
   if (path.startsWith('/muzik/')) return renderMusicDetail(app, segs[1]);
   if (path === '/artist-basvuru') return renderArtistApply(app);
@@ -195,181 +263,132 @@ function updateNavActive(path) {
   updateMobileBottomBar(path);
 }
 
-// Reals feed basic viewer
-function shuffleArray(arr) {
-  const a = arr.slice();
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function generateVideoPoster(file) {
-  return new Promise((resolve, reject) => {
-    const objectUrl = URL.createObjectURL(file);
-    const video = document.createElement('video');
-    video.src = objectUrl;
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-
-    const cleanup = () => URL.revokeObjectURL(objectUrl);
-    video.addEventListener('loadeddata', () => {
-      video.currentTime = 0;
-    }, { once: true });
-    video.addEventListener('seeked', () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 720;
-      canvas.height = 1280;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(blob => {
-        cleanup();
-        if (!blob) return reject(new Error('Poster oluşturulamadı'));
-        resolve(new File([blob], 'poster.png', { type: 'image/png' }));
-      }, 'image/png');
-    }, { once: true });
-    video.addEventListener('error', () => { cleanup(); reject(new Error('Video önizlemesi oluşturulamadı')); }, { once: true });
-  });
-}
-
-async function renderRealsFeed(app) {
-  document.title = 'Reals – Demlik';
-  updatePageMeta('Reals – Demlik', 'Kısa dikey videolar', '');
+async function renderVip(app) {
+  if (!currentUser) { navigate('/giris'); return; }
+  document.title = 'Üyelik - TeaTube';
   app.innerHTML = `
-    <div class="reals-container">
-      <div id="reals-list" class="reals-list"></div>
-    </div>`;
-
-  // fetch reals
-  let reals = [];
-  try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
-  const listEl = document.getElementById('reals-list');
-  if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
-
-  // page refresh resets order; same tab navigation preserves it
-  const currentIds = reals.map(r => r.id);
-  if (!Array.isArray(realsFeedOrder) || realsFeedOrder.length !== currentIds.length || currentIds.some(id => !realsFeedOrder.includes(id))) {
-    realsFeedOrder = shuffleArray(currentIds);
-  }
-  const orderedReals = realsFeedOrder.map(id => reals.find(r => r.id === id)).filter(Boolean);
-
-  // show reminder once per user (server provides text)
-  try {
-    const rs = await fetch('/api/reals-settings');
-    const data = await rs.json();
-    const reminder = data.reminder || '';
-    if (reminder && !localStorage.getItem('seen_reals_reminder')) {
-      showModal('Reals', `<div style="padding:12px">${escHtml(reminder)}</div><div style="text-align:right;margin-top:10px"><button class="btn" id="reals-remind-ok">Tamam</button></div>`);
-      document.getElementById('reals-remind-ok').addEventListener('click', () => { hideModal(); localStorage.setItem('seen_reals_reminder','1'); });
-    }
-  } catch {}
-
-  let watchedIds = new Set();
-  let idx = 0;
-  let items = [];
-  function setRealsVideoSource(videoEl, src) {
-    if (!src) {
-      videoEl.removeAttribute('src');
-      videoEl.load();
-      return;
-    }
-    if (videoEl.getAttribute('src') === src) return;
-    videoEl.setAttribute('src', src);
-    videoEl.load();
-  }
-
-  function renderItems() {
-    listEl.innerHTML = orderedReals.map(r => `
-      <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}">
-        <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
-        <div class="reals-meta">
-          <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
-          <div class="reals-desc">${escHtml(r.description||'')}</div>
-          <div class="reals-actions">
-            <button class="btn btn-ghost like-btn"> <i class="fas fa-heart"></i> <span class="count">${r.like_count||0}</span></button>
-            <button class="btn btn-ghost comment-btn"> <i class="fas fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
-            <button class="btn btn-ghost resend-btn"> <i class="fas fa-retweet"></i></button>
-            <button class="btn btn-ghost share-btn"> <i class="fas fa-share-alt"></i></button>
-            <a href="/reals/${escHtml(r.slug)}" data-link class="btn btn-outline btn-sm view-detail-btn"><i class="fas fa-external-link-alt"></i> Detay</a>
+    <div class="container page">
+      <div class="page-header"><div class="page-title">Üyelik Paketleri</div></div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">
+        <div class="card" style="flex:1;min-width:260px">
+          <div class="card-header"><strong>VIP</strong></div>
+          <div class="card-body">
+            <p style="color:var(--text-secondary)">Profil renginizi özelleştirin, özel rozet ve öncelikli destek.</p>
+            <p style="font-size:18px;font-weight:700">₺29 / aylık</p>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn btn-primary" id="buy-vip">Satın Al</button>
+              <button class="btn btn-outline" id="gift-vip">Hediye Et</button>
+            </div>
           </div>
         </div>
-      </div>`).join('');
-    items = Array.from(document.querySelectorAll('.reals-item'));
-    items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
-    listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
-    items.forEach(it => {
-      const vid = it.querySelector('video');
-      setRealsVideoSource(vid, '');
-      it.addEventListener('click', () => { if (vid.paused) vid.play(); else vid.pause(); });
+        <div class="card" style="flex:1;min-width:260px">
+          <div class="card-header"><strong>Plus+</strong></div>
+          <div class="card-body">
+            <p style="color:var(--text-secondary)">VIP özellikleri + ekstra görünürlük ve içerik artıları.</p>
+            <p style="font-size:18px;font-weight:700">₺49 / aylık</p>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn btn-primary" id="buy-plus">Satın Al</button>
+              <button class="btn btn-outline" id="gift-plus">Hediye Et</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:18px;color:var(--text-muted)">Not: Bu sayfa demo amaçlıdır — gerçek ödeme entegrasyonu yok, satın alma anında hesabınıza paket atanır.</div>
+      <div class="card" style="margin-top:18px">
+        <div class="card-header"><strong>Hediye Kodunu Kullan</strong></div>
+        <div class="card-body" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start">
+          <input id="redeem-code" placeholder="Hediye kodu girin" style="flex:1;min-width:220px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg-card2);color:var(--text-primary)" />
+          <button class="btn btn-primary" id="redeem-btn">Kullan</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <div class="card-header"><strong>Gönderilen Hediyeler</strong></div>
+        <div class="card-body" id="gift-history"><div style="color:var(--text-muted);font-size:13px">Yükleniyor...</div></div>
+      </div>
+    </div>`
+
+  $('#buy-vip')?.addEventListener('click', async () => {
+    // Open checkout modal and start payment session
+    showModal('Ödeme — VIP', `<div style="padding:12px"><p>VIP üyelik satın alma işlemi başlatılıyor...</p><div id="checkout-spinner" style="margin-top:12px"><div class="spinner"></div></div></div>`);
+    try {
+      const resp = await api('/create-payment-session', { method: 'POST', body: JSON.stringify({ type: 'vip' }) });
+      // if provider returned a URL, redirect user
+      if (resp && resp.url) {
+        hideModal(); window.location = resp.url; return;
+      }
+      // otherwise show failure
+      hideModal(); showModal('Ödeme Hatası', `<div style="padding:12px">Ödeme başlatılamadı: ${escHtml(resp && resp.error || 'Bilinmeyen hata')}</div>`);
+    } catch (e) { hideModal(); showModal('Ödeme Hatası', `<div style="padding:12px">Ödeme gerçekleştirilemedi: ${escHtml(e.message)}</div>`); }
+  });
+  $('#buy-plus')?.addEventListener('click', async () => {
+    showModal('Ödeme — Plus+', `<div style="padding:12px"><p>Plus+ üyelik satın alma işlemi başlatılıyor...</p><div id="checkout-spinner" style="margin-top:12px"><div class="spinner"></div></div></div>`);
+    try {
+      const resp = await api('/create-payment-session', { method: 'POST', body: JSON.stringify({ type: 'plus' }) });
+      if (resp && resp.url) { hideModal(); window.location = resp.url; return; }
+      hideModal(); showModal('Ödeme Hatası', `<div style="padding:12px">Ödeme başlatılamadı: ${escHtml(resp && resp.error || 'Bilinmeyen hata')}</div>`);
+    } catch (e) { hideModal(); showModal('Ödeme Hatası', `<div style="padding:12px">Ödeme gerçekleştirilemedi: ${escHtml(e.message)}</div>`); }
+  });
+
+  $('#gift-vip')?.addEventListener('click', () => openGiftModal('vip'));
+  $('#gift-plus')?.addEventListener('click', () => openGiftModal('plus'));
+
+  function openGiftModal(type) {
+    showModal('Üyelik Hediye Et', `
+      <div style="padding:12px;display:flex;flex-direction:column;gap:8px">
+        <div>Kime hediye edeceksiniz? (kullanıcı adı)</div>
+        <input id="gift-to-username" placeholder="alici_kullanici_adi" />
+        <div style="font-size:13px;color:var(--text-muted)">Eğer kullanıcı henüz kayıtlı değilse, hediye kodu oluşturulacak ve el ile paylaşabilirsiniz.</div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-primary" id="gift-send">Gönder</button><button class="btn btn-ghost" id="gift-cancel">İptal</button></div>
+      </div>
+    `);
+    $('#gift-cancel')?.addEventListener('click', hideModal);
+    $('#gift-send')?.addEventListener('click', async () => {
+      const to = ($('#gift-to-username').value || '').trim();
+      if (!to) { toast('Alıcı kullanıcı adı girin','error'); return; }
+      try {
+        const resp = await api('/gift', { method: 'POST', body: JSON.stringify({ type, to_username: to }) });
+        hideModal();
+        if (resp.assigned_to) {
+          toast('Üyelik hediye edildi');
+        } else {
+          showModal('Hediye Kodu', `<div style="padding:12px">Hediye oluşturuldu. Kodu alıcıya iletin: <div style="margin-top:8px;padding:8px;background:var(--bg-card2);border:1px solid var(--border);border-radius:6px;font-weight:700">${escHtml(resp.code)}</div></div>`);
+        }
+      } catch (e) { hideModal(); showModal('Hata', `<div style="padding:12px">Hediye başarısız: ${escHtml(e.message)}</div>`); }
     });
-    listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent||0)+1; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
-    }));
-    listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
-    }));
-    listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; const video = orderedReals.find(r => r.slug === slug); if (video) showForwardVideoModal(video);
-    }));
   }
 
-  function markWatchedAndReorder(id) {
-    if (watchedIds.has(id)) return;
-    watchedIds.add(id);
-    const pos = orderedReals.findIndex(r => r.id === id);
-    if (pos === -1) return;
-    const [moved] = orderedReals.splice(pos, 1);
-    orderedReals.push(moved);
-    realsFeedOrder = orderedReals.map(r => r.id);
-    const itemEl = items.find(it => Number(it.dataset.id) === id);
-    if (itemEl) {
-      listEl.appendChild(itemEl);
-      items = items.filter(it => Number(it.dataset.id) !== id);
-      items.push(itemEl);
+  $('#redeem-btn')?.addEventListener('click', async () => {
+    const code = ($('#redeem-code')?.value || '').trim();
+    if (!code) return toast('Kod girin','error');
+    try {
+      const updated = await api('/redeem-gift', { method: 'POST', body: JSON.stringify({ code }) });
+      currentUser = updated; updateNavUI(); toast('Hediye başarıyla kullanıldı'); renderRoute(location.pathname);
+    } catch (e) { toast(e.message,'error'); }
+  });
+
+  async function loadGiftHistory() {
+    const historyEl = $('#gift-history');
+    if (!historyEl) return;
+    try {
+      const gifts = await api('/gifts');
+      if (!gifts.length) {
+        historyEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Henüz gönderdiğiniz hediye yok.</div>';
+        return;
+      }
+      historyEl.innerHTML = gifts.map(g => `
+        <div style="padding:10px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px;background:var(--bg-card2)">
+          <div><strong>${escHtml(g.type === 'vip' ? 'VIP' : 'Plus+')}</strong> paketini gönderdiniz</div>
+          <div style="font-size:13px;color:var(--text-muted);margin:6px 0">Alıcı: ${escHtml(g.recipient_username || 'Belirsiz')} · Kod: ${escHtml(g.code)}</div>
+          <div style="font-size:13px;color:var(--text-muted)">${escHtml(new Date(g.created_at).toLocaleString('tr-TR'))} · ${g.redeemed ? 'Kullanıldı' : 'Beklemede'}</div>
+        </div>
+      `).join('');
+    } catch (e) {
+      historyEl.innerHTML = `<div style="color:var(--accent-red2)">${escHtml(e.message)}</div>`;
     }
   }
 
-  function showIndex(i) {
-    if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
-    const previousId = items[idx]?.dataset.id;
-    if (previousId && i !== idx) markWatchedAndReorder(Number(previousId));
-    idx = i;
-    items.forEach((it, j) => {
-      it.style.transform = `translateY(${(j-idx)*100}%)`;
-      it.style.transition = 'transform .35s';
-      const vid = it.querySelector('video');
-      const videoUrl = it.dataset.videoUrl;
-      if (j === idx) {
-        setRealsVideoSource(vid, videoUrl);
-        vid.muted = false;
-        vid.play().catch(() => {});
-      } else {
-        setRealsVideoSource(vid, '');
-        vid.pause();
-        vid.currentTime = 0;
-        vid.muted = true;
-      }
-    });
-  }
-
-  renderItems();
-  showIndex(0);
-
-  // wheel
-  let wheelDeb = false;
-  window.addEventListener('wheel', e => {
-    if (wheelDeb) return; wheelDeb = true; setTimeout(() => wheelDeb=false, 300);
-    if (e.deltaY > 0) showIndex(idx+1); else showIndex(idx-1);
-  }, { passive: true });
-
-  // touch
-  let startY = null;
-  window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; });
-  window.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (diff > 30) showIndex(idx+1); else if (diff < -30) showIndex(idx-1); startY = null; });
+  loadGiftHistory();
 }
-
 
 async function initAuth() {
   if (!currentToken) return updateNavUI();
@@ -398,11 +417,6 @@ function updateNavUI() {
     const btn = $('#nav-user-btn');
     btn.innerHTML = `${nav}<i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted)"></i>`;
     $('#dropdown-profile').setAttribute('href', '/profil/' + currentUser.username);
-    const navBrand = document.querySelector('.nav-brand');
-    if (navBrand) {
-      navBrand.setAttribute('href', '/');
-      navBrand.style.cursor = 'pointer';
-    }
 
     if (mobAuth) mobAuth.classList.add('hidden');
     if (mobNew) mobNew.classList.remove('hidden');
@@ -429,11 +443,6 @@ function updateNavUI() {
     }
   } else {
     authEl.classList.remove('hidden');
-    const navBrand = document.querySelector('.nav-brand');
-    if (navBrand) {
-      navBrand.setAttribute('href', '/');
-      navBrand.style.cursor = '';
-    }
     userEl.classList.add('hidden');
     if (mobAuth) mobAuth.classList.remove('hidden');
     if (mobNew) mobNew.classList.add('hidden');
@@ -451,11 +460,21 @@ function updateNavUI() {
 function updateMobileBottomBar(path) {
   $$('#mobile-bottom-bar a').forEach(a => {
     const href = a.getAttribute('href');
-    a.classList.toggle('active', href === path || (href !== '/' && path.startsWith(href)));
+    a.classList.toggle('active', href === path || (href !== '/' && href !== '#' && path.startsWith(href)));
   });
 }
 
+$('#mbb-new')?.addEventListener('click', e => {
+  e.preventDefault();
+  if (!currentUser) return navigate('/giris');
+  showMobilePostMenu();
+});
+
 $('#nav-user-btn').addEventListener('click', () => {
+  if (window.innerWidth <= 768 && currentUser) {
+    navigate('/profil/' + currentUser.username);
+    return;
+  }
   $('#dropdown-menu').classList.toggle('hidden');
 });
 document.addEventListener('click', e => {
@@ -529,9 +548,8 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 });
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => { if (currentUser) showNewForumModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
+$('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (!currentUser) { navigate('/giris'); return; } showNewPhotoModal(); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
-$('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
-$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(null, true), 120); } else { navigate('/giris'); } });
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
   currentToken = null; currentUser = null;
@@ -555,44 +573,103 @@ document.addEventListener('click', e => {
   const mobNewForum = e.target.closest('#mob-new-forum');
   const mobNewBook = e.target.closest('#mob-new-book');
   const mobNewGroup = e.target.closest('#mob-new-group');
+  const mobLink = e.target.closest('.mobile-nav-link');
+  if (mobLink) {
+    $('#mobile-menu')?.classList.add('hidden');
+  }
   if (mobNewForum) { $('#mobile-menu').classList.add('hidden'); navigate('/forum'); setTimeout(() => showNewForumModal(), 100); }
   if (mobNewBook) { $('#mobile-menu').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
   if (mobNewGroup) { $('#mobile-menu').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
 });
 
 async function renderHome(app) {
-  document.title = 'Demlik – Topluluk Platformu';
-  updatePageMeta('Demlik – Topluluk Platformu', 'Çay kadar sıcak topluluk platformu.', '');
+  document.title = 'TeaTube – Topluluk Platformu';
+  updatePageMeta('TeaTube – Topluluk Platformu', 'TeaTube her tür içeriğin paylaşıldığı fotoğraf, yazı ve müzik platformu.', '');
+  const isMobile = window.innerWidth <= 900;
+  const homeTitle = isMobile ? 'Öne Çıkan Fotoğraflar' : 'Popüler Konular';
+  const homeSubtitle = isMobile ? 'Topluluğun en yeni paylaşımları' : 'Topluluğun en çok konuşulan başlıkları';
+  const homeAction = isMobile
+    ? currentUser ? `<button class="btn btn-primary btn-sm" id="home-new-photo-btn"><i class="fas fa-upload"></i> Fotoğraf Yükle</button>` : `<a href="/giris" data-link class="btn btn-primary btn-sm">Giriş Yap</a>`
+    : currentUser ? `<button class="btn btn-primary btn-sm" id="home-new-forum-btn"><i class="fas fa-plus"></i> Yeni Konu Aç</button>` : `<a href="/giris" data-link class="btn btn-primary btn-sm">Giriş Yap</a>`;
+  const homeMoreLink = isMobile ? `<a href="/fotograflar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a>` : `<a href="/forum" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a>`;
+  const photosTabActive = isMobile ? ' active' : '';
+  const forumsTabActive = !isMobile ? ' active' : '';
+
   app.innerHTML = `
     <div class="container page">
-      <div class="section">
-        <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-          <div><div class="page-title">Son Konular</div></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-            <div class="search-bar" style="margin:0;flex:1;min-width:180px"><i class="fas fa-search"></i><input type="text" id="home-forum-search" placeholder="Konu ara..." /></div>
-            ${currentUser ? `<button class="btn btn-primary btn-sm" id="home-new-forum-btn"><i class="fas fa-plus"></i> Yeni Konu</button>` : ''}
-            <a href="/forum" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a>
-          </div>
-        </div>
-        <div id="home-forums"><div class="loading-center"><div class="spinner"></div></div></div>
+      <div class="home-tabs-row">
+        <a href="/fotograflar" data-link class="home-tab${photosTabActive}" id="photos-tab">Fotoğraflar</a>
+        <a href="/forum" data-link class="home-tab${forumsTabActive}" id="forums-tab">Konular</a>
+        <a href="/muzikler" data-link class="home-tab">Müzikler</a>
+        <a href="/gruplar" data-link class="home-tab">Gruplar</a>
       </div>
       <div class="section">
-        <div class="section-header">
-          <div class="section-title"><div class="section-title-bar"></div>Öne Çıkan Kitaplar</div>
-          <a href="/kitaplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a>
+        <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+          <div><div class="page-title">${homeTitle}</div><div class="page-subtitle">${homeSubtitle}</div></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            ${homeAction}
+            ${homeMoreLink}
+          </div>
         </div>
-        <div id="home-books" class="grid-3"></div>
+        <div id="home-content" class="home-content"></div>
       </div>
     </div>`;
 
-  if (currentUser) $('#home-new-forum-btn')?.addEventListener('click', () => showNewForumModal());
+  if (currentUser) {
+    $('#home-new-photo-btn')?.addEventListener('click', showNewPhotoModal);
+    $('#home-new-forum-btn')?.addEventListener('click', () => showNewForumModal());
+  }
+
+  if (window.innerWidth <= 900) {
+    loadHomePhotos();
+  } else {
+    loadHomeForums();
+  }
+
+  async function loadHomePhotos() {
+     const contentEl = $('#home-content');
+     if (!contentEl) return;
+     try {
+       const photos = await api('/photos');
+       if (!photos.length) {
+         contentEl.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-camera-retro"></i><p>Henüz fotoğraf yok.</p></div>'; 
+         return;
+       }
+       contentEl.innerHTML = `<div class="photos-grid">${photos.slice(0, 8).map(photoCardHTML).join('')}</div>`;
+       attachPhotoCardActions(contentEl);
+     } catch (e) {
+       contentEl.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-exclamation-circle"></i><p style="color:var(--accent-red2)">${escHtml(e.message)}</p></div>`;
+     }
+   }
+
+   async function loadHomeForums() {
+     const contentEl = $('#home-content');
+     if (!contentEl) return;
+     try {
+       const forums = await api('/forums');
+       if (!forums.length) { contentEl.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Henüz konu yok.</p></div>'; return; }
+       contentEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${forums.slice(0,8).map(f => forumCardHTML(f)).join('')}</div>`;
+     } catch (e) {
+       contentEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p style="color:var(--accent-red2)">${escHtml(e.message)}</p></div>`;
+  }
 
   let allForums = [];
   try {
     allForums = await api('/forums');
     const el = $('#home-forums');
+    if (!el) return;
     if (!allForums.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Henüz konu yok.</p></div>'; }
     else el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${allForums.slice(0, 10).map(f => forumCardHTML(f)).join('')}</div>`;
+  } catch {}
+
+  try {
+    const tags = await api('/tags');
+    const categories = $('#home-categories');
+    if (categories) {
+      categories.innerHTML = tags.length
+        ? tags.slice(0, 8).map(t => `<button type="button" class="home-category-btn" onclick="navigate('/forum?tag=${encodeURIComponent(t.name)}')">#${escHtml(t.name)}</button>`).join('')
+        : '';
+    }
   } catch {}
 
   $('#home-forum-search')?.addEventListener('input', e => {
@@ -605,16 +682,23 @@ async function renderHome(app) {
   });
 
   try {
-    const books = await api('/books');
-    const el = $('#home-books');
-    if (!books.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-book"></i><p>Henüz kitap yok.</p></div>'; }
-    else el.innerHTML = books.slice(0, 6).map(b => bookCardHTML(b)).join('');
+    const friends = await api('/friends');
+    const el = $('#home-friends');
+    if (!friends.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaş yok.</p></div>'; }
+    else el.innerHTML = friends.filter(f => f.status === 'accepted').slice(0, 6).map(f => friendItemHTML(f, 'accepted', currentUser ? currentUser.id : 0)).join('');
   } catch {}
+
+  // Decide default home content based on viewport: mobile -> photos, desktop -> topics
+  const isMobile = window.innerWidth <= 900;
+  // Toggle active state on tabs (only photos/forums have explicit ids)
+  $('#photos-tab')?.classList.toggle('active', isMobile);
+  $('#forums-tab')?.classList.toggle('active', !isMobile);
+  if (isMobile) loadHomePhotos(); else loadHomeForums();
 }
 
 async function renderForumList(app, queryString) {
-  document.title = 'Konular – Demlik';
-  updatePageMeta('Konular – Demlik', 'Toplulukla fikir paylaş, tartış, keşfet.', '');
+  document.title = 'Konular – TeaTube';
+  updatePageMeta('Konular – TeaTube', 'Toplulukla fikir paylaş, tartış, keşfet.', '');
 
   // URL'den ?tag= parametresini oku — önce argüman, yoksa location.search
   const qs = queryString !== undefined ? queryString : location.search;
@@ -656,6 +740,42 @@ async function renderForumList(app, queryString) {
     });
     renderForumListItems(filtered);
   });
+}
+
+async function renderPhotoDetail(app, id, ownerUsername) {
+  try {
+    const photo = await api('/photos/' + encodeURIComponent(id));
+    if (!photo) return navigate('/fotograflar');
+    document.title = (photo.caption ? photo.caption + ' – ' : '') + 'Fotoğraf – TeaTube';
+    updatePageMeta(photo.caption || 'Fotoğraf', photo.caption || '', photo.url || '');
+    app.innerHTML = `
+      <div class="container page">
+        <div class="section">
+          <div class="photo-detail">
+            <div class="photo-detail-media"><img src="${escHtml(photo.url)}" alt="${escHtml(photo.caption||'')}"></div>
+            <div class="photo-detail-body">
+              <h2>${escHtml(photo.caption||'')}</h2>
+              <div class="meta-row">Paylaşan: <a href="/profil/${escHtml(photo.username||ownerUsername||'')}" data-link>${escHtml(photo.username||ownerUsername||'')}</a></div>
+              <div style="margin-top:12px">
+                <button class="btn btn-ghost photo-like-btn" data-id="${escHtml(photo.id)}">${photo.liked?'<i class="fas fa-heart" style="color:var(--accent-red2)"></i>':'<i class="far fa-heart"></i>'} <span class="photo-like-count">${photo.like_count||0}</span></button>
+                <button class="btn btn-ghost photo-comment-btn" data-id="${escHtml(photo.id)}"><i class="fas fa-comment"></i> Yorumlar (${photo.comment_count||0})</button>
+              </div>
+              <div id="photo-comments-list" style="margin-top:16px"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    attachPhotoCardActions(app);
+    // load comments
+    try {
+      const comments = await api(`/photos/${encodeURIComponent(id)}/comments`);
+      const el = $('#photo-comments-list');
+      if (!comments.length) { el.innerHTML = '<div class="empty-state"><p>Henüz yorum yok.</p></div>'; }
+      else el.innerHTML = comments.map(c => `<div class="comment-item">${escHtml(c.username)}: ${escHtml(c.content)}</div>`).join('');
+    } catch {}
+  } catch (e) {
+    toast('Fotoğraf bulunamadı', 'error'); navigate('/fotograflar');
+  }
 }
 
 function renderForumListItems(forums) {
@@ -710,6 +830,177 @@ function forumCardHTML(f) {
 window.navigateTag = function(tag) {
   navigate('/forum?tag=' + encodeURIComponent(tag));
 };
+
+function photoCardHTML(p) {
+  const isOwn = currentUser && currentUser.username === p.username;
+  return `
+    <div class="photo-card">
+      <div class="photo-card-media" onclick="navigate('/profil/${escHtml(p.username)}/foto/${escHtml(p.id)}')" style="cursor:pointer">
+        <img src="${escHtml(p.url)}" alt="${escHtml(p.caption || 'Fotoğraf')}" />
+        ${isOwn ? `<div class="photo-card-actions">
+          <button class="btn btn-ghost btn-sm photo-edit-btn" data-id="${escHtml(p.id)}" title="Düzenle"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-danger btn-sm photo-delete-btn" data-id="${escHtml(p.id)}" title="Sil"><i class="fas fa-trash"></i></button>
+        </div>` : ''}
+      </div>
+      <div class="photo-card-body">
+        <div class="photo-card-caption">${escHtml(p.caption || '')}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            ${p.avatar ? `<img src="${escHtml(p.avatar)}" class="avatar-sm" alt="" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+            <div class="photo-uploader">${escHtml(p.username)}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="btn btn-ghost btn-sm photo-like-btn" data-id="${escHtml(p.id)}" title="Beğen">${p.liked ? '<i class="fas fa-heart" style="color:var(--accent-red2)"></i>' : '<i class="far fa-heart"></i>'} <span class="photo-like-count">${p.like_count||0}</span></button>
+            <button class="btn btn-ghost btn-sm photo-comment-btn" data-id="${escHtml(p.id)}" title="Yorumlar"><i class="fas fa-comment"></i> <span class="photo-comment-count">${p.comment_count||0}</span></button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function attachPhotoCardActions(container) {
+  container.querySelectorAll('.photo-edit-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      await editPhoto(btn.dataset.id);
+    });
+  });
+  container.querySelectorAll('.photo-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      await deletePhoto(btn.dataset.id);
+    });
+  });
+  container.querySelectorAll('.photo-like-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      await togglePhotoLike(btn.dataset.id, btn);
+    });
+  });
+  container.querySelectorAll('.photo-comment-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      await showPhotoComments(btn.dataset.id);
+    });
+  });
+}
+
+async function editPhoto(photoId) {
+  try {
+    const photo = await api('/photos/' + encodeURIComponent(photoId));
+    if (!currentUser || photo.username !== currentUser.username) return toast('Bu fotoğrafı düzenleyemezsiniz', 'error');
+    showModal('Fotoğraf Düzenle', `
+      <div class="form-group"><label>Fotoğraf URL</label><input id="edit-photo-url" type="text" value="${escHtml(photo.url)}" /></div>
+      <div class="form-group"><label>Başlık / Açıklama</label><textarea id="edit-photo-caption" rows="4">${escHtml(photo.caption || '')}</textarea></div>
+      <div class="form-group"><label>Yeni Fotoğraf (opsiyonel)</label><input type="file" id="edit-photo-file" accept="image/*" /></div>
+      <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="edit-show-likes" ${photo.show_likes==1? 'checked' : ''} /> Beğeni sayısını göster</label></div>
+      <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="edit-allow-comments" ${photo.allow_comments==1? 'checked' : ''} /> Yorumlara izin ver</label></div>
+      <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="edit-allow-shares" ${photo.allow_shares==1? 'checked' : ''} /> İletilere izin ver</label></div>
+      <button class="btn btn-primary" id="edit-photo-save" style="width:100%">Kaydet</button>
+      <div id="edit-photo-error" class="form-error mt-4"></div>
+    `);
+
+    $('#edit-photo-save')?.addEventListener('click', async () => {
+      const url = $('#edit-photo-url')?.value.trim();
+      const caption = $('#edit-photo-caption')?.value.trim();
+      if (!url) { $('#edit-photo-error').textContent = 'Fotoğraf URL gerekli'; return; }
+      let finalUrl = url;
+      const fileInput = $('#edit-photo-file');
+      if (fileInput && fileInput.files.length) {
+        try {
+          const fd = new FormData();
+          fd.append('file', fileInput.files[0]);
+          const uploadRes = await apiForm('/api/upload', fd);
+          finalUrl = uploadRes.url;
+        } catch (e) { $('#edit-photo-error').textContent = e.message; return; }
+      }
+      try {
+        const show_likes = $('#edit-show-likes')?.checked ? 1 : 0;
+        const allow_comments = $('#edit-allow-comments')?.checked ? 1 : 0;
+        const allow_shares = $('#edit-allow-shares')?.checked ? 1 : 0;
+        await api('/photos/' + encodeURIComponent(photoId), { method: 'PUT', body: JSON.stringify({ url: finalUrl, caption, show_likes, allow_comments, allow_shares }) });
+        hideModal();
+        toast('Fotoğraf güncellendi');
+        renderRoute(location.pathname);
+      } catch (e) { $('#edit-photo-error').textContent = e.message; }
+    });
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function togglePhotoLike(photoId, btn) {
+  if (!currentUser) { navigate('/giris'); return; }
+  try {
+    const res = await api(`/photos/${encodeURIComponent(photoId)}/like`, { method: 'POST' });
+    const countEl = btn.querySelector('.photo-like-count');
+    if (res.liked) {
+      btn.innerHTML = '<i class="fas fa-heart" style="color:var(--accent-red2)"></i> <span class="photo-like-count">' + ((countEl?parseInt(countEl.textContent||'0'):0)+1) + '</span>';
+    } else {
+      btn.innerHTML = '<i class="far fa-heart"></i> <span class="photo-like-count">' + (Math.max((countEl?parseInt(countEl.textContent||'0'):0)-1,0)) + '</span>';
+    }
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function showPhotoComments(photoId) {
+  try {
+    const comments = await api(`/photos/${encodeURIComponent(photoId)}/comments`);
+    const photo = await api(`/photos/${encodeURIComponent(photoId)}`);
+    showModal('Yorumlar', `
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div id="photo-comments-list" style="max-height:320px;overflow:auto;padding:6px"></div>
+        ${currentUser ? `<textarea id="photo-comment-input" rows="3" style="width:100%;background:var(--bg-card2);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:8px" placeholder="Yorum yaz..."></textarea>
+        <button class="btn btn-primary" id="photo-comment-send">Gönder</button>` : `<a href="/giris" data-link class="btn btn-primary">Giriş Yap</a>`}
+      </div>
+    `);
+    const listEl = $('#photo-comments-list');
+    function renderList() {
+      listEl.innerHTML = comments.length ? comments.map(c => `
+        <div style="padding:8px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start">
+          ${c.avatar ? `<img src="${escHtml(c.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;align-items:center"><strong>${escHtml(c.username||'Silindi')}</strong><span style="font-size:12px;color:var(--text-muted)">${timeAgo(c.created_at)}</span></div>
+            <div style="margin-top:6px;color:var(--text-primary)">${escHtml(c.content)}</div>
+          </div>
+          ${currentUser && (currentUser.username===c.username || currentUser.is_admin || photo.user_id===currentUser.id) ? `<button class="btn btn-ghost btn-sm comment-delete" data-id="${escHtml(c.id)}">Sil</button>` : ''}
+        </div>
+      `).join('') : '<div style="color:var(--text-muted);padding:8px;text-align:center">Yorum yok</div>';
+    }
+    renderList();
+    $('#photo-comment-send')?.addEventListener('click', async () => {
+      const txt = $('#photo-comment-input').value.trim();
+      if (!txt) return;
+      try {
+        const added = await api(`/photos/${encodeURIComponent(photoId)}/comments`, { method: 'POST', body: JSON.stringify({ content: txt }) });
+        comments.push(added);
+        renderList();
+        $('#photo-comment-input').value = '';
+      } catch (e) { $('#photo-comment-input').value = ''; toast(e.message, 'error'); }
+    });
+    $('#modal-body')?.addEventListener('click', async (e) => {
+      const del = e.target.closest('.comment-delete');
+      if (del) {
+        if (!confirm('Bu yorumu silmek istiyor musunuz?')) return;
+        try { await api(`/photos/comments/${encodeURIComponent(del.dataset.id)}`, { method: 'DELETE' });
+          const idx = comments.findIndex(c => c.id == del.dataset.id);
+          if (idx >= 0) comments.splice(idx,1);
+          renderList();
+        } catch (err) { toast(err.message, 'error'); }
+      }
+    });
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deletePhoto(photoId) {
+  if (!confirm('Bu fotoğrafı silmek istediğine emin misin?')) return;
+  try {
+    await api('/photos/' + encodeURIComponent(photoId), { method: 'DELETE' });
+    toast('Fotoğraf silindi');
+    renderRoute(location.pathname);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
 
 function showNewForumModal(existing = null) {
   showModal(existing ? 'Konuyu Düzenle' : 'Yeni Konu Aç', `
@@ -913,8 +1204,10 @@ function showNewForumModal(existing = null) {
       if (thumbFile) {
         const thumbFd = new FormData(); thumbFd.append('file', thumbFile);
         const thumbRes = await fetch('/api/upload', { method: 'POST', headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') }, body: thumbFd });
-        const thumbData = await thumbRes.json();
-        if (thumbRes.ok && thumbData.url) thumbnailUrl = thumbData.url;
+        const thumbText = await thumbRes.text();
+        const thumbData = thumbText ? JSON.parse(thumbText) : {};
+        if (!thumbRes.ok) throw new Error(thumbData.error || thumbText || 'Kapak resmi yüklenemedi');
+        if (thumbData.url) thumbnailUrl = thumbData.url;
       }
 
       // Ek resimleri yükle
@@ -923,8 +1216,10 @@ function showNewForumModal(existing = null) {
         const imgFile = extraImageFiles[i];
         const imgFd = new FormData(); imgFd.append('file', imgFile);
         const imgRes = await fetch('/api/upload', { method: 'POST', headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('token') || '') }, body: imgFd });
-        const imgData = await imgRes.json();
-        if (imgRes.ok && imgData.url) uploadedExtraImages.push(imgData.url);
+        const imgText = await imgRes.text();
+        const imgData = imgText ? JSON.parse(imgText) : {};
+        if (!imgRes.ok) throw new Error(imgData.error || imgText || 'Resim yüklenemedi');
+        if (imgData.url) uploadedExtraImages.push(imgData.url);
       }
 
       if (existing) {
@@ -955,9 +1250,9 @@ async function renderForumDetail(app, slug) {
   let forum, liked = false, comments = [];
   try {
     forum = await api('/forum/' + slug);
-    document.title = forum.title + ' – Demlik';
+    document.title = forum.title + ' – TeaTube';
     updatePageMeta(
-      forum.title + ' – Demlik',
+      forum.title + ' – TeaTube',
       forum.content.substring(0, 155).replace(/\n/g, ' '),
       forum.banner_image || ''
     );
@@ -973,7 +1268,7 @@ async function renderForumDetail(app, slug) {
       'datePublished': forum.created_at,
       'dateModified': forum.updated_at || forum.created_at,
       'author': { '@type': 'Person', 'name': forum.username || 'Anonim' },
-      'publisher': { '@type': 'Organization', 'name': 'Demlik', 'url': SITE_URL },
+      'publisher': { '@type': 'Organization', 'name': 'TeaTube', 'url': SITE_URL },
       'interactionStatistic': [
         { '@type': 'InteractionCounter', 'interactionType': 'https://schema.org/LikeAction', 'userInteractionCount': forum.like_count || 0 },
         { '@type': 'InteractionCounter', 'interactionType': 'https://schema.org/CommentAction', 'userInteractionCount': forum.comment_count || 0 }
@@ -1040,10 +1335,6 @@ async function renderForumDetail(app, slug) {
       <div class="comments-section">
         <div class="comments-title"><i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${comments.length})</div>
         ${currentUser && forum.allow_comments ? `
-          <div id="comment-reply-area" style="display:none;margin-bottom:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg-secondary);align-items:center;justify-content:space-between;gap:10px">
-            <span id="comment-reply-text" style="font-size:13px;color:var(--text-secondary)"></span>
-            <button type="button" class="btn btn-ghost btn-sm" id="comment-reply-clear" style="padding:2px 8px">✕</button>
-          </div>
           <div class="comment-form">
             ${avatarImg(currentUser, 'comment-avatar')}
             <textarea id="comment-input" placeholder="Yorumunuzu yazın..."></textarea>
@@ -1081,48 +1372,19 @@ async function renderForumDetail(app, slug) {
 
   $('#forward-forum-btn')?.addEventListener('click', () => showForwardForumModal(forum));
 
-  let commentReplyTarget = null;
-  const clearCommentReply = () => {
-    commentReplyTarget = null;
-    const area = $('#comment-reply-area');
-    if (area) area.style.display = 'none';
-    const text = $('#comment-reply-text');
-    if (text) text.textContent = '';
-  };
-
   $('#comment-submit')?.addEventListener('click', async () => {
-    let content = $('#comment-input').value.trim();
+    const content = $('#comment-input').value.trim();
     if (!content) return;
-    if (commentReplyTarget) {
-      const mention = '@' + commentReplyTarget.username;
-      if (!content.startsWith(mention)) content = mention + ' ' + content;
-    }
     try {
       const c = await api('/forum/' + slug + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
       $('#comments-list').insertAdjacentHTML('beforeend', commentHTML(c));
       $('#comment-input').value = '';
-      clearCommentReply();
       const title = $('.comments-title');
       if (title) title.innerHTML = `<i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${$('#comments-list').children.length})`;
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  $('#comment-reply-clear')?.addEventListener('click', clearCommentReply);
-
   $('#comments-list').addEventListener('click', async e => {
-    const replyBtn = e.target.closest('.reply-comment-btn');
-    if (replyBtn) {
-      if (!currentUser) { navigate('/giris'); return; }
-      commentReplyTarget = { id: replyBtn.dataset.id, username: replyBtn.dataset.username };
-      const area = $('#comment-reply-area');
-      const text = $('#comment-reply-text');
-      if (area && text) {
-        area.style.display = 'flex';
-        text.textContent = `Yanıtlanıyor: ${replyBtn.dataset.username}`;
-      }
-      $('#comment-input')?.focus();
-      return;
-    }
     const del = e.target.closest('.del-comment');
     if (del) {
       if (!confirm('Yorum silinsin mi?')) return;
@@ -1149,18 +1411,16 @@ async function renderForumDetail(app, slug) {
 
 function commentHTML(c) {
   const canDel = currentUser && currentUser.id === c.user_id;
-  const canReply = !!currentUser;
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
       <div class="comment-header">
-        <span class="comment-author">${c.username ? `<a href="/profil/${escHtml(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
+        <span class="comment-author">${userDisplayName(c)}</span>
         <span class="comment-time">${timeAgo(c.created_at)}</span>
       </div>
       <div class="comment-content">${renderContent(c.content)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
         <div style="display:flex;align-items:center;gap:8px">
-          ${canReply ? `<button class="btn btn-ghost btn-sm reply-comment-btn" data-id="${c.id}" data-username="${escHtml(c.username || '')}" style="padding:2px 6px;color:var(--text-secondary)"><i class="fas fa-reply"></i></button>` : ''}
           ${canDel ? `<button class="btn btn-ghost btn-sm del-comment" data-id="${c.id}" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
         </div>
         <button class="like-comment-btn forum-action-btn" data-id="${c.id}" style="padding:4px 10px;font-size:12px">
@@ -1172,8 +1432,8 @@ function commentHTML(c) {
 }
 
 async function renderBookList(app) {
-  document.title = 'Kitaplar – Demlik';
-  updatePageMeta('Kitaplar – Demlik', 'Topluluğun yazdığı eserleri keşfet.', '');
+  document.title = 'Kitaplar – TeaTube';
+  updatePageMeta('Kitaplar – TeaTube', 'Topluluğun yazdığı eserleri keşfet.', '');
   app.innerHTML = `
     <div class="container page">
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
@@ -1207,7 +1467,6 @@ function bookCardHTML(b) {
   return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
-      ${b.is_hidden ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent-red2);color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px"><i class="fas fa-lock"></i></div>' : ''}
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
@@ -1221,26 +1480,11 @@ function bookCardHTML(b) {
 function showNewBookModal(existing = null) {
   showModal(existing ? 'Kitabı Düzenle' : 'Yeni Kitap', `
     <div class="form-group"><label>Başlık</label><input id="bk-title" type="text" value="${existing ? escHtml(existing.title) : ''}" /></div>
-    <div class="form-group"><label>Tanıtım / Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
-    <div class="form-group"><label>Karakterler (opsiyonel)</label><textarea id="bk-karakterler" rows="3" placeholder="Karakter isimleri, kısa notlar...">${existing ? escHtml(existing.karakterler || '') : ''}</textarea></div>
-    <div class="form-group"><label>Kadro (opsiyonel)</label><textarea id="bk-kadro" rows="3" placeholder="Oyuncu kadrosu, karakter dağılımı...">${existing ? escHtml(existing.kadro || '') : ''}</textarea></div>
+    <div class="form-group"><label>Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
     <div class="form-group">
       <label>Kapak Resmi (opsiyonel)</label>
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
       ${existing && existing.cover_image ? `<img id="bk-cover-preview" src="${escHtml(existing.cover_image)}" style="width:100px;height:133px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="bk-cover-preview" style="display:none"></div>`}
-    </div>
-    <div class="book-privacy-toggle">
-      <div class="toggle-header">
-        <i class="fas fa-lock" style="color:var(--accent-red2);font-size:16px"></i>
-        <div class="toggle-label">
-          <div class="toggle-title">Gizli Kitap</div>
-          <div class="toggle-desc">Sadece siz ve yönetim görebilir</div>
-        </div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="bk-is-hidden" ${existing && existing.is_hidden ? 'checked' : ''} />
-        <span class="toggle-slider"></span>
-      </label>
     </div>
     <button class="btn btn-primary" id="bk-submit" style="width:100%">${existing ? 'Güncelle' : 'Oluştur'}</button>
     <div id="bk-error" class="form-error mt-4"></div>
@@ -1264,22 +1508,14 @@ function showNewBookModal(existing = null) {
       const coverFile = $('#bk-cover-file').files[0];
       if (coverFile) {
         const fd = new FormData(); fd.append('file', coverFile);
-        const r = await apiForm('/upload', fd);
+        const r = await apiForm('/api/upload', fd);
         cover_image = r.url;
       }
-      const payload = {
-        title,
-        preface: $('#bk-preface').value.trim(),
-        karakterler: $('#bk-karakterler').value.trim(),
-        kadro: $('#bk-kadro').value.trim(),
-        cover_image,
-        is_hidden: $('#bk-is-hidden').checked
-      };
       if (existing) {
-        await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
+        await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify({ title, preface: $('#bk-preface').value.trim(), cover_image }) });
         toast('Kitap güncellendi'); hideModal(); renderRoute(location.pathname);
       } else {
-        const b = await api('/books', { method: 'POST', body: JSON.stringify(payload) });
+        const b = await api('/books', { method: 'POST', body: JSON.stringify({ title, preface: $('#bk-preface').value.trim(), cover_image }) });
         toast('Kitap oluşturuldu'); hideModal(); navigate('/kitap/' + b.slug);
       }
     } catch (e) { $('#bk-error').textContent = e.message; }
@@ -1292,30 +1528,13 @@ async function renderBookDetail(app, slug) {
   try { data = await api('/book/' + slug); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Kitap bulunamadı.</p></div></div>'; return; }
 
   const { book, chapters, pages } = data;
-  document.title = book.title + ' – Demlik';
-  updatePageMeta(book.title + ' – Demlik', book.preface ? book.preface.substring(0,155) : book.title + ' – Demlik\'te yayınlanan kitap.', book.cover_image || '');
+  document.title = book.title + ' – TeaTube';
+  updatePageMeta(book.title + ' – TeaTube', book.preface ? book.preface.substring(0,155) : book.title + ' – TeaTube\'da yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
 
-  const sortedPages = [...pages].sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
-  const firstPage = sortedPages[0];
-  const unassigned = sortedPages.filter(p => !p.chapter_id);
+  const unassigned = pages.filter(p => !p.chapter_id);
   const chapPages = {};
-  chapters.forEach(c => { chapPages[c.id] = sortedPages.filter(p => p.chapter_id === c.id); });
-  const lastReadSlug = localStorage.getItem('demlik_book_last_page_' + slug);
-  const lastReadPage = sortedPages.find(p => p.slug === lastReadSlug);
-  const resumeHTML = lastReadPage ? `<div class="resume-card" style="margin-bottom:20px;padding:18px 20px;border:1px solid var(--border);border-radius:16px;background:rgba(59,130,246,0.05);display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700;color:var(--accent-red2)">Okuduğun yerde kaldın</div>
-        <div style="font-size:14px;color:var(--text-primary);margin-top:6px">${escHtml(lastReadPage.page_num + '. ' + lastReadPage.title)}</div>
-      </div>
-      <a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(lastReadPage.slug)}" data-link class="btn btn-primary btn-sm">Devam Et</a>
-    </div>` : (firstPage ? `<div class="resume-card" style="margin-bottom:20px;padding:18px 20px;border:1px solid var(--border);border-radius:16px;background:rgba(59,130,246,0.05);display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:700;color:var(--accent-red2)">Okumaya başla</div>
-        <div style="font-size:14px;color:var(--text-primary);margin-top:6px">${escHtml(firstPage.page_num + '. ' + firstPage.title)}</div>
-      </div>
-      <a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm">Oku</a>
-    </div>` : '');
+  chapters.forEach(c => { chapPages[c.id] = pages.filter(p => p.chapter_id === c.id); });
 
   const chapListHTML = chapters.map(c => `
     <div class="chapter-item">
@@ -1333,17 +1552,9 @@ async function renderBookDetail(app, slug) {
         ${book.cover_image ? `<img src="${escHtml(book.cover_image)}" alt="" />` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-card2)"><i class="fas fa-book" style="font-size:40px;color:var(--text-muted)"></i></div>`}
       </div>
       <div class="book-detail-info">
-        <div class="book-detail-title">${escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
-        <div class="book-detail-meta">
-          <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
-          <span><i class="fas fa-file-alt"></i> ${book.page_count || 0} sayfa</span>
-          ${book.created_at ? `<span><i class="fas fa-calendar"></i> ${formatDate(book.created_at)}</span>` : ''}
-          ${book.updated_at ? `<span><i class="fas fa-edit"></i> Güncellendi ${formatDate(book.updated_at)}</span>` : ''}
-        </div>
-        ${book.preface ? `<div class="book-preface"><strong>Tanıtım / Önsöz</strong><p>${escHtml(book.preface)}</p></div>` : ''}
-        ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
-        ${book.kadro ? `<div class="book-preface"><strong>Kadro</strong><p>${escHtml(book.kadro)}</p></div>` : ''}
-        ${firstPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> Oku</a></div>` : ''}
+        <div class="book-detail-title">${escHtml(book.title)}</div>
+        <div class="book-detail-author">${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)} &middot; ${book.page_count} sayfa</div>
+        ${book.preface ? `<div class="book-preface">${escHtml(book.preface)}</div>` : ''}
         ${isOwner ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
           <button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>
@@ -1355,12 +1566,16 @@ async function renderBookDetail(app, slug) {
         </div>
       </div>
     </div>
-    <div class="chapters-list">
-      ${resumeHTML}
-      <div class="section-title" style="margin-bottom:16px"><div class="section-title-bar"></div>İçindekiler</div>
-      ${!chapters.length && !pages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
-      ${unassignedHTML}
-      ${chapListHTML}
+    <div class="book-pages-list">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px">
+        <div style="font-weight:700;font-size:15px">${book.page_count || 0} sayfa</div>
+        <div>
+          <button class="btn btn-primary" id="book-read-btn"><i class="fas fa-book-open"></i> Oku</button>
+        </div>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:8px;overflow:auto;padding-bottom:8px" id="book-pages-strip">
+        ${pages.map(p => `<a href="/kitap/${escHtml(book.slug)}/sayfa/${escHtml(p.slug)}" data-link class="book-page-item" style="white-space:nowrap;padding:8px 12px;border-radius:8px;background:var(--bg-card2);border:1px solid var(--border);font-size:13px;color:var(--text-primary)">${p.page_num}. ${escHtml(p.title)}</a>`).join('')}
+      </div>
     </div>
   </div>`;
 
@@ -1380,6 +1595,17 @@ async function renderBookDetail(app, slug) {
       });
     });
   }
+
+  // Oku butonu: en son okunan sayfaya devam etme
+  $('#book-read-btn')?.addEventListener('click', () => {
+    try {
+      const last = localStorage.getItem('book_last_' + book.slug);
+      if (last) return navigate('/kitap/' + encodeURIComponent(book.slug) + '/sayfa/' + encodeURIComponent(last));
+      // yoksa ilk sayfaya git
+      if (pages && pages.length) return navigate('/kitap/' + encodeURIComponent(book.slug) + '/sayfa/' + encodeURIComponent(pages[0].slug));
+      navigate('/kitap/' + encodeURIComponent(book.slug));
+    } catch (e) { navigate('/kitap/' + encodeURIComponent(book.slug)); }
+  });
 
   $('#download-pdf-btn')?.addEventListener('click', async () => {
     toast('PDF hazırlanıyor...', 'success');
@@ -1502,7 +1728,7 @@ async function showAddPageModal(bookSlug, chapters) {
       const imgFile = $('#pg-image-file').files[0];
       if (imgFile) {
         const fd = new FormData(); fd.append('file', imgFile);
-        const r = await apiForm('/upload', fd);
+        const r = await apiForm('/api/upload', fd);
         image_url = r.url;
       }
       await api('/book/' + bookSlug + '/pages', { method: 'POST', body: JSON.stringify({ title, content, chapter_id, image_url }) });
@@ -1616,8 +1842,6 @@ async function renderPageReader(app, bookSlug, pageSlug) {
     </div>
   </div>`;
 
-  localStorage.setItem('demlik_book_last_page_' + bookSlug, pageSlug);
-
   // Font boyutu kontrolleri
   const contentEl = $('#ebook-content');
   $('#font-dec').addEventListener('click', () => {
@@ -1666,10 +1890,13 @@ async function renderPageReader(app, bookSlug, pageSlug) {
       try { await api(`/book/${bookSlug}/page/${pageSlug}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate('/kitap/' + bookSlug); } catch (e) { toast(e.message, 'error'); }
     });
   }
+
+  // Sayfa görüntülendi: son okunan konumu kaydet
+  try { localStorage.setItem('book_last_' + bookSlug, page.slug); } catch (e) {}
 }
 
 async function renderGroupList(app) {
-  document.title = 'Gruplar - Demlik';
+  document.title = 'Gruplar - TeaTube';
   app.innerHTML = `
     <div class="container page">
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
@@ -1710,6 +1937,59 @@ async function renderGroupList(app) {
   $('#group-search')?.addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderGroups(groups.filter(g => g.name.toLowerCase().includes(q) || (g.description || '').toLowerCase().includes(q)));
+  });
+}
+
+async function renderPhotos(app) {
+  document.title = 'Fotoğraflar - TeaTube';
+  app.innerHTML = `<div class="container page">
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Topluluk tarafından paylaşılan fotoğraflar</div></div>
+      ${currentUser ? `<button class="btn btn-primary" id="photo-upload-btn"><i class="fas fa-upload"></i> Fotoğraf Yükle</button>` : `<a href="/giris" data-link class="btn btn-primary btn-sm">Giriş Yap</a>`}
+    </div>
+    <div id="photos-grid" class="photos-grid"><div class="loading-center"><div class="spinner"></div></div></div>
+  </div>`;
+
+  async function loadPhotos() {
+    const grid = $('#photos-grid');
+    if (!grid) return;
+    try {
+      const photos = await api('/photos');
+      if (!photos.length) {
+        grid.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-camera-retro"></i><p>Henüz fotoğraf yok.</p></div>';
+        return;
+      }
+      grid.innerHTML = photos.map(photoCardHTML).join('');
+      attachPhotoCardActions(grid);
+    } catch (e) {
+      grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-exclamation-circle"></i><p style="color:var(--accent-red2)">${escHtml(e.message)}</p></div>`;
+    }
+  }
+
+  loadPhotos();
+
+  $('#photo-upload-btn')?.addEventListener('click', () => {
+    showModal('Fotoğraf Yükle', `
+      <div class="form-group"><label>Fotoğraf</label><input type="file" id="photo-file-input" accept="image/*" /></div>
+      <div class="form-group"><label>Başlık / Açıklama (opsiyonel)</label><input type="text" id="photo-caption" /></div>
+      <button class="btn btn-primary" id="photo-submit-btn" style="width:100%">Yükle</button>
+      <div id="photo-upload-error" class="form-error mt-4"></div>
+    `);
+    $('#photo-submit-btn')?.addEventListener('click', async () => {
+      const fileInput = $('#photo-file-input');
+      const caption = $('#photo-caption')?.value.trim();
+      if (!fileInput || !fileInput.files.length) { $('#photo-upload-error').textContent = 'Fotoğraf seçmelisiniz'; return; }
+      const file = fileInput.files[0];
+      const form = new FormData();
+      form.append('file', file);
+      try {
+        const uploadRes = await apiForm('/api/upload', form);
+        await api('/photos', { method: 'POST', body: JSON.stringify({ url: uploadRes.url, caption }) });
+        hideModal();
+        toast('Fotoğraf yüklendi');
+        loadPhotos();
+      } catch (err) { $('#photo-upload-error').textContent = err.message; }
+    });
   });
 }
 
@@ -1767,7 +2047,7 @@ function showNewGroupModal() {
       const coverFile = $('#gr-cover-file').files[0];
       if (coverFile) {
         const fd = new FormData(); fd.append('file', coverFile);
-        const r = await apiForm('/upload', fd);
+        const r = await apiForm('/api/upload', fd);
         cover_image = r.url;
       }
       const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, type: $('#gr-type').value, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked, invite_only: $('#gr-invite').checked }) });
@@ -1790,7 +2070,7 @@ async function renderGroupDetail(app, slug) {
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>'; return; }
 
   const { group, isMember, role } = groupData;
-  document.title = group.name + ' - Demlik';
+  document.title = group.name + ' - TeaTube';
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
   const canSend = currentUser && isMember && group.allow_chat;
@@ -1970,7 +2250,7 @@ async function renderGroupDetail(app, slug) {
         const coverFile = $('#gs-cover-file').files[0];
         if (coverFile) {
           const fd = new FormData(); fd.append('file', coverFile);
-          const r = await apiForm('/upload', fd);
+          const r = await apiForm('/api/upload', fd);
           cover_image = r.url;
         }
         await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, type: $('#gs-type').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
@@ -2031,380 +2311,35 @@ function memberItemHTML(m, isOwner, groupSlug) {
   </div>`;
 }
 
-function videoCardHTML(v) {
-  const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
-  return `<div class="video-card" onclick="navigate('/video/${escHtml(v.slug)}')">
-    <div class="video-thumb">
-      ${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-video"></i></div>`}
-    </div>
-    <div class="video-card-body">
-      <div class="video-card-title">${escHtml(v.title)}</div>
-      <div class="video-card-meta">
-        <span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span>
-        <span>•</span>
-        <span>${v.views || 0} izlenme</span>
-      </div>
-      ${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}
-    </div>
-  </div>`;
-}
-
-async function showNewVideoModal(existing = null, forceReals = false) {
-  let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
-  try { videoSettings = await api('/video-settings'); } catch {}
-  const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
-  showModal(existing ? 'Videoyu Düzenle' : 'Video Yükle', `
-    <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" /></div>
-    <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="5">${escHtml(defaultDescription)}</textarea></div>
-    <div class="form-group">
-      <label>Video Dosyası</label>
-      <input type="file" id="video-file" accept="video/*" />
-      ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
-    </div>
-    <div class="form-group">
-      <label>Banner / Kapak</label>
-      <input type="file" id="video-banner-file" accept="image/*" />
-      ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
-    </div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
-    <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
-    <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
-    <div id="video-error" class="form-error mt-4"></div>
-  `);
-
-  const videoInput = $('#video-file');
-  const bannerInput = $('#video-banner-file');
-  let autoBannerFile = null;
-
-  videoInput?.addEventListener('change', async () => {
-    const file = videoInput.files[0];
-    if (!file || bannerInput?.files?.length) return;
-    try {
-      const generated = await generateVideoPoster(file);
-      autoBannerFile = generated;
-    } catch {
-      autoBannerFile = null;
-    }
-  });
-
-  $('#video-submit').addEventListener('click', async () => {
-    const title = $('#video-title').value.trim();
-    const description = $('#video-description').value.trim();
-    const videoFile = $('#video-file').files[0];
-    const bannerFile = $('#video-banner-file').files[0];
-    if (!title) { $('#video-error').textContent = 'Başlık zorunlu'; return; }
-    if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
-
-    const submitBtn = $('#video-submit');
-    submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
-    const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
-
-    try {
-      let videoUrl = existing?.video_url || '';
-      let bannerImage = existing?.banner_image || '';
-      if (videoFile) {
-        const fd = new FormData(); fd.append('file', videoFile);
-        const xhr = new XMLHttpRequest();
-        xhr.upload.addEventListener('progress', e => {
-          if (e.lengthComputable) {
-            const pct = Math.round((e.loaded / e.total) * 100);
-            progress.innerHTML = `<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor... ${pct}%</div><div style="margin-top:6px;background:var(--bg-card2);height:8px;border-radius:999px;overflow:hidden"><div style="height:100%;background:var(--grad-red);width:${pct}%"></div></div>`;
-          }
-        });
-        const uploadResult = await new Promise((resolve, reject) => {
-          xhr.addEventListener('load', () => {
-            try { const data = JSON.parse(xhr.responseText); if (xhr.status >= 400) reject(new Error(data.error || 'Yükleme hatası')); else resolve(data); } catch (e) { reject(new Error('Yanıt geçersiz')); }
-          });
-          xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
-          xhr.open('POST', '/api/upload');
-          xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
-          xhr.send(fd);
-        });
-        videoUrl = uploadResult.url;
-      }
-      if (bannerFile) {
-        const fd = new FormData(); fd.append('file', bannerFile);
-        const bannerResult = await apiForm('/upload', fd);
-        bannerImage = bannerResult.url;
-      } else if (autoBannerFile) {
-        const fd = new FormData(); fd.append('file', autoBannerFile);
-        const bannerResult = await apiForm('/upload', fd);
-        bannerImage = bannerResult.url;
-      }
-      const payload = {
-        title,
-        description: description || '',
-        video_url: videoUrl,
-        banner_image: bannerImage,
-        allow_comments: $('#video-comments').checked,
-        is_reals: $('#video-is-reals').checked
-      };
-      if (existing) {
-        await api('/video/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
-        toast('Video güncellendi');
-      } else {
-        const created = await api('/videos', { method: 'POST', body: JSON.stringify(payload) });
-        const successMs = Math.max(1000, parseInt(videoSettings.uploadSuccessDuration || 3) * 1000);
-        toast(videoSettings.uploadSuccessText || 'YÜKLENDİ', 'success', successMs);
-        hideModal(); navigate('/video/' + created.slug); return;
-      }
-      hideModal(); renderRoute(location.pathname);
-    } catch (e) {
-      $('#video-error').textContent = e.message;
-    } finally {
-      submitBtn.disabled = false; submitBtn.innerHTML = existing ? 'Güncelle' : 'Yükle';
-    }
-  });
-}
-
-async function renderVideoList(app) {
-  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
-  try {
-    const videos = await api('/videos');
-    document.title = 'Videolar – Demlik';
-    updatePageMeta('Videolar – Demlik', 'Topluluk videolarını keşfet.', '');
-    app.innerHTML = `<div class="container page">
-      <div class="video-list-header">
-        <div>
-          <div class="page-title">Videolar</div>
-          <div class="page-subtitle">Video yükle, izle, yorum yap.</div>
-        </div>
-        ${currentUser ? `<button class="btn btn-primary" id="new-video-btn"><i class="fas fa-plus"></i> Video Yükle</button>` : ''}
-      </div>
-      <div class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
-    </div>`;
-    $('#new-video-btn')?.addEventListener('click', () => showNewVideoModal());
-  } catch {}
-}
-
-async function renderVideoDetail(app, slug) {
-  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
-  let video, liked = false, saved = false, comments = [], videoSettings = { emptyDescriptionText: 'Bu videoya bir açıklama eklenmemiş.' };
-  try {
-    const [videoData, settingsData, commentsData, likeData, saveData] = await Promise.all([
-      api('/video/' + slug).catch(() => null),
-      api('/video-settings').catch(() => ({ emptyDescriptionText: 'Bu videoya bir açıklama eklenmemiş.' })),
-      api('/video/' + slug + '/comments').catch(() => []),
-      currentUser ? api('/video/' + slug + '/liked').catch(() => ({ liked: false })) : Promise.resolve({ liked: false }),
-      currentUser ? api('/video/' + slug + '/saved').catch(() => ({ saved: false })) : Promise.resolve({ saved: false })
-    ]);
-    if (!videoData) throw new Error('Video bulunamadı');
-    video = videoData;
-    videoSettings = settingsData || videoSettings;
-    comments = Array.isArray(commentsData) ? commentsData : [];
-    liked = !!likeData?.liked;
-    saved = !!saveData?.saved;
-    api('/video/' + slug + '/view', { method: 'POST' }).catch(() => {});
-  } catch {
-    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Video bulunamadı.</p></div></div>'; return;
-  }
-  document.title = video.title + ' – Demlik';
-  updatePageMeta(video.title + ' – Demlik', video.description || 'Demlik videoları', video.banner_image || '');
-  const isOwner = currentUser && currentUser.id === video.user_id;
-  let followState = false;
-  if (currentUser && currentUser.username !== video.username) {
-    try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
-  }
-  const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
-  const formattedDescription = descriptionText.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
-  app.innerHTML = `<div class="container page">
-    <div class="video-page-layout">
-      <div class="video-main-column">
-        <div class="video-player-card">
-          <div class="video-player-shell">
-            <video controls preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
-              <source src="${escHtml(video.video_url)}" />
-            </video>
-            <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
-          </div>
-        </div>
-        <div class="video-comments-card">
-          <div class="comments-title"><i class="fas fa-comments"></i> Yorumlar (${comments.length})</div>
-          ${currentUser ? `<div class="comment-form"><textarea id="video-comment-input" placeholder="Yorum yaz..."></textarea><button class="btn btn-primary btn-sm" id="video-comment-submit"><i class="fas fa-paper-plane"></i></button></div>` : '<div class="empty-state"><i class="fas fa-sign-in-alt"></i><p>Yorum yapmak için giriş yapın.</p></div>'}
-          <div id="video-comments-list">${comments.map(c => renderVideoComment(c, isOwner)).join('')}</div>
-        </div>
-      </div>
-      <aside class="video-side-panel">
-        <div class="video-meta-block">
-          <div class="video-title">${escHtml(video.title)}</div>
-          <div class="video-author-row">
-            <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
-          </div>
-          <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
-          <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
-          <div class="video-description-card">
-            <div class="video-description-title">Açıklama</div>
-            <div class="video-description-text" id="video-description-text">${formattedDescription}</div>
-          </div>
-        </div>
-      </aside>
-    </div>
-  </div>`;
-
-  $('#video-like-btn')?.addEventListener('click', async () => {
-    if (!currentUser) { navigate('/giris'); return; }
-    const btn = $('#video-like-btn');
-    btn.disabled = true;
-    try {
-      const r = await api('/video/' + slug + '/like', { method: 'POST' });
-      liked = r.liked;
-      const countEl = $('#video-like-count');
-      const currentCount = Math.max(0, parseInt(countEl.textContent) || 0);
-      countEl.textContent = currentCount + (liked ? 1 : -1);
-      btn.classList.toggle('btn-primary', liked);
-    } catch (e) {
-      toast(e.message, 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  const likeBtn = $('#video-like-btn');
-  if (likeBtn) likeBtn.classList.toggle('btn-primary', liked);
-  $('#video-save-btn')?.addEventListener('click', async () => {
-    if (!currentUser) { navigate('/giris'); return; }
-    try { const r = await api('/video/' + slug + '/save', { method: 'POST' }); saved = r.saved; $('#video-save-btn').innerHTML = `<i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}`; } catch {}
-  });
-
-  $('#follow-btn')?.addEventListener('click', async () => {
-    if (!currentUser) { navigate('/giris'); return; }
-    try {
-      const r = await api('/user/' + encodeURIComponent(video.username) + '/follow', { method: 'POST' });
-      followState = r.following;
-      $('#follow-btn').textContent = followState ? 'Takip ediliyor' : 'Takip et';
-    } catch {}
-  });
-
-  $('#video-share-btn')?.addEventListener('click', async () => {
-    if (!currentUser) { navigate('/giris'); return; }
-    showForwardVideoModal(video);
-  });
-
-  try {
-    const ads = await api('/video-ads');
-    if (Array.isArray(ads) && ads.length) {
-      const activeAds = ads.filter(a => a.active === 1 || a.active === true).sort((a, b) => (b.priority || 0) - (a.priority || 0));
-      if (activeAds.length) {
-        const ad = activeAds[0];
-        const adEl = $('#video-ad-overlay');
-        if (adEl) {
-          const safeSiteUrl = normalizeExternalUrl(ad.site_url || '#');
-          adEl.innerHTML = `<a href="${escHtml(safeSiteUrl)}" target="_blank" rel="noopener noreferrer" class="video-ad-link">
-            ${ad.video_url ? `<video src="${escHtml(ad.video_url)}" class="video-ad-video" autoplay muted loop playsinline></video>` : ''}
-            <div class="video-ad-copy"><strong>${escHtml(ad.title)}</strong><span>${escHtml(ad.site_url || '')}</span></div>
-          </a>`;
-          adEl.className = `video-ad-overlay hidden ${escHtml(ad.position || 'bottom-right')}`;
-          const videoEl = $('#video-player-el');
-          if (videoEl && ad.display_after_seconds >= 0) {
-            const showOverlay = () => {
-              const seconds = Math.floor(videoEl.currentTime || 0);
-              if (seconds >= (ad.display_after_seconds || 0)) {
-                adEl.classList.remove('hidden');
-              } else {
-                adEl.classList.add('hidden');
-              }
-            };
-            videoEl.addEventListener('timeupdate', showOverlay);
-            showOverlay();
-          }
-        }
-      }
-    }
-  } catch (e) {
-    // ads optional
-  }
-
-  $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
-  $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
-
-  $('#video-comment-submit')?.addEventListener('click', async () => {
-    const content = $('#video-comment-input').value.trim();
-    if (!content) return;
-    try {
-      const comment = await api('/video/' + slug + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
-      $('#video-comments-list').insertAdjacentHTML('beforeend', renderVideoComment(comment, isOwner));
-      $('#video-comment-input').value = '';
-      $('.comments-title').innerHTML = `<i class="fas fa-comments"></i> Yorumlar (${$('#video-comments-list').children.length})`;
-    } catch (e) { toast(e.message,'error'); }
-  });
-
-  $('#video-comments-list').addEventListener('click', async e => {
-    const likeBtn = e.target.closest('.video-comment-like');
-    if (likeBtn) {
-      likeBtn.disabled = true;
-      try {
-        const r = await api('/video/' + slug + '/comments/' + likeBtn.dataset.id + '/like', { method: 'POST' });
-        const c = likeBtn.querySelector('.video-comment-count');
-        const currentCount = Math.max(0, parseInt(c.textContent) || 0);
-        c.textContent = currentCount + (r.liked ? 1 : -1);
-        likeBtn.classList.toggle('liked', r.liked);
-      } catch (e) {
-        toast(e.message, 'error');
-      } finally {
-        likeBtn.disabled = false;
-      }
-      return;
-    }
-    const editBtn = e.target.closest('.video-comment-edit');
-    if (editBtn) {
-      const id = editBtn.dataset.id;
-      const current = editBtn.dataset.content;
-      const newText = prompt('Düzenle', current);
-      if (newText === null) return;
-      try { const updated = await api('/video/' + slug + '/comments/' + id, { method: 'PUT', body: JSON.stringify({ content: newText.trim() }) }); editBtn.closest('.comment').querySelector('.comment-content').innerHTML = renderContent(updated.content); toast('Yorum güncellendi'); } catch (e) { toast(e.message,'error'); }
-    }
-    const pinBtn = e.target.closest('.video-comment-pin');
-    if (pinBtn) {
-      try { await api('/video/' + slug + '/comments/' + pinBtn.dataset.id + '/pin', { method: 'POST' }); toast('İşlem tamam'); renderRoute(location.pathname); } catch(e){ toast(e.message,'error'); }
-    }
-  });
-}
-
-function renderVideoComment(c, isOwner) {
-  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner);
-  const canPin = currentUser && isOwner;
-  return `<div class="comment">
-    ${avatarImg(c, 'comment-avatar')}
-    <div class="comment-body">
-      <div class="comment-header">
-        <span class="comment-author">${c.username ? `<a href="/profil/${escHtml(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
-        <span class="comment-time">${timeAgo(c.created_at)}${c.is_pinned ? ' • Üstte sabitlendi' : ''}${c.updated_at && c.updated_at !== c.created_at ? ' • düzenlendi' : ''}</span>
-      </div>
-      <div class="comment-content">${renderContent(c.content)}</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
-        <div style="display:flex;align-items:center;gap:8px">
-          ${canPin ? `<button class="btn btn-ghost btn-sm video-comment-pin" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-thumbtack"></i></button>` : ''}
-          ${canEdit ? `<button class="btn btn-ghost btn-sm video-comment-edit" data-id="${c.id}" data-content="${escHtml(c.content)}" style="padding:2px 6px"><i class="fas fa-edit"></i></button>` : ''}
-        </div>
-        <button class="btn btn-ghost btn-sm video-comment-like" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-heart"></i> <span class="video-comment-count">${c.like_count || 0}</span></button>
-      </div>
-    </div>
-  </div>`;
-}
-
 async function renderProfile(app, username) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
   try { data = await api('/profile/' + username); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-user-slash"></i><p>Kullanıcı bulunamadı.</p></div></div>'; return; }
 
-  const { user, forums, books, groups, videos, songs, level, levels, book_page_count } = data;
-  const profileSongs = Array.isArray(songs) ? songs : [];
-  const profileVideos = Array.isArray(videos) ? videos : [];
-  let savedVideos = [];
-  try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
-  const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
-  const profileSongsHTML = profileSongs.length ? `<div class="grid-3" style="gap:16px">${profileSongs.map(s => `
-      <div class="song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
-        ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
-        <div class="song-card-body">
-          <div class="song-card-title">${escHtml(s.title)}</div>
-          <div class="song-card-subtitle">${escHtml(s.artist_name || s.uploader_name || s.username || '')}</div>
-          <div class="song-card-meta">${s.play_count || 0} dinlenme</div>
-        </div>
-      </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok</p></div>';
-  document.title = user.username + ' - Demlik';
+  const { user, forums, books, groups, level, levels, book_page_count } = data;
+  document.title = user.username + ' - TeaTube';
+
+  let profileFriends = [];
+  let profilePhotos = [];
+  try { profileFriends = await api('/profile/' + username + '/friends'); } catch {}
+  try { profilePhotos = await api('/photos?username=' + encodeURIComponent(username)); } catch {}
+
+  const profilePhotosHTML = profilePhotos.length
+    ? `<div class="profile-photos-grid">${profilePhotos.slice(0, 6).map(p => `
+        <a href="${escHtml(p.url)}" target="_blank" rel="noopener noreferrer" class="profile-photo-card">
+          <img src="${escHtml(p.url)}" alt="${escHtml(p.caption || 'Fotoğraf')}" />
+          ${p.caption ? `<div class="photo-caption">${escHtml(p.caption)}</div>` : ''}
+        </a>`).join('')}</div>`
+    : '<div class="empty-state"><i class="fas fa-camera-retro"></i><p>Henüz fotoğraf yok.</p></div>';
+
+  const profileFriendsHTML = profileFriends.length
+    ? `<div class="friends-grid">${profileFriends.map(f => `
+        <a href="/profil/${escHtml(f.username)}" data-link class="friend-card">
+          ${f.avatar ? `<img src="${escHtml(f.avatar)}" alt="${escHtml(f.username)}" />` : `<div class="friend-avatar-placeholder"><i class="fas fa-user"></i></div>`}
+          <div class="friend-card-name">${escHtml(f.username)}</div>
+          ${f.title ? `<div class="friend-card-title">${escHtml(f.title)}</div>` : ''}
+        </a>`).join('')}</div>`
+    : '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Arkadaş yok.</p></div>';
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
   let progressHTML = '';
@@ -2465,11 +2400,31 @@ async function renderProfile(app, username) {
 
   const links = (() => { try { return JSON.parse(user.links || '[]'); } catch { return []; } })();
   const isOwn = currentUser && currentUser.id === user.id;
+  const renderBadgeIcon = icon => {
+    if (!icon) return '';
+    const trimmed = icon.trim();
+    if (/^https?:\/\//i.test(trimmed) || /\.(png|jpe?g|gif|svg)(\?.*)?$/i.test(trimmed)) {
+      return `<img src="${escHtml(trimmed)}" class="profile-badge-icon" alt="" />`;
+    }
+    return `<i class="${escHtml(trimmed)}"></i>`;
+  };
+  const selectedNameBadge = (() => {
+    if (user.badge_display === 'vip' && user.is_vip) return ` <span class="profile-name-badge">${renderBadgeIcon('fas fa-gem')}</span>`;
+    if (user.badge_display === 'plus' && user.is_plus) return ` <span class="profile-name-badge">${renderBadgeIcon('fas fa-plus-circle')}</span>`;
+    if (user.badge_display === 'custom' && user.badge_icon) return ` <span class="profile-name-badge" style="color:${escHtml(user.badge_color || '#6b7280')};">${renderBadgeIcon(user.badge_icon)}</span>`;
+    if (user.badge_display === 'level' && level && user.show_level_badge) return ` <span class="profile-name-badge" style="color:${levelColor};">${renderBadgeIcon(level.icon)}</span>`;
+    return '';
+  })();
 
   // Rozet satırı
   const badgeItems = [];
   if (level && user.show_level_badge) {
-    badgeItems.push(`<span class="profile-badge" style="color:${escHtml(levelColor)};border-color:${escHtml(levelColor)};background:${escHtml(levelColor)}20" title="Seviye: ${escHtml(level.name)}"><i class="${escHtml(level.icon)}"></i> ${escHtml(level.name)} <span style="font-size:10px;opacity:0.7">seviye</span></span>`);
+    badgeItems.push(`<span class="profile-badge" style="color:${escHtml(levelColor)};border-color:${escHtml(levelColor)};background:${escHtml(levelColor)}20" title="Seviye: ${escHtml(level.name)}">${renderBadgeIcon(level.icon)} ${escHtml(level.name)} <span style="font-size:10px;opacity:0.7">seviye</span></span>`);
+  }
+  if (user.badge_name) {
+    const badgeColor = user.badge_color || '#6b7280';
+    const badgeIcon = user.badge_icon || 'fas fa-award';
+    badgeItems.push(`<span class="profile-badge" style="color:${escHtml(badgeColor)};border-color:${escHtml(badgeColor)};background:${escHtml(badgeColor)}20" title="${escHtml(user.badge_name)}">${renderBadgeIcon(badgeIcon)} ${escHtml(user.badge_name)}</span>`);
   }
   if (user.is_artist) {
     badgeItems.push(`<span class="profile-badge" style="color:#a855f7;border-color:#a855f733;background:#a855f715" title="Artist"><i class="fas fa-microphone-alt"></i> Artist</span>`);
@@ -2489,7 +2444,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="Demlik Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
+          ${escHtml(user.username)}${selectedNameBadge}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="TeaTube Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -2504,7 +2459,6 @@ async function renderProfile(app, username) {
         <div class="profile-stats" style="margin-top:12px">
           <div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>
           <div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>
-          ${profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
           <div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/panel-giris" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
@@ -2512,32 +2466,27 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
+    <div class="section profile-section">
+      <div class="section-header">
+        <div class="section-title"><div class="section-title-bar"></div>Fotoğraflar</div>
+      </div>
+      ${profilePhotosHTML}
+    </div>
+
     <div class="tabs">
       <button class="tab active" data-tab="forums">Forumlar</button>
-      <button class="tab" data-tab="books">Kitaplar</button>
+      <button class="tab" data-tab="friends">Arkadaşlar</button>
       <button class="tab" data-tab="groups">Gruplar</button>
-      <button class="tab" data-tab="videos">Videolar</button>
-      <button class="tab" data-tab="saved">Kaydedilenler</button>
-      <button class="tab" data-tab="songs">Müzikler</button>
     </div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
     </div>
-    <div id="tab-books" class="hidden">
-      ${books.length ? `<div class="grid-3">${books.map(b => bookCardHTML(b)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
+    <div id="tab-friends" class="hidden">
+      ${profileFriendsHTML}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
-    </div>
-    <div id="tab-videos" class="hidden">
-      ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
-    </div>
-    <div id="tab-saved" class="hidden">
-      ${profileSavedVideos.length ? `<div class="grid-3">${profileSavedVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>'}
-    </div>
-    <div id="tab-songs" class="hidden">
-      ${profileSongsHTML}
     </div>
   </div>`;
 
@@ -2545,10 +2494,7 @@ async function renderProfile(app, username) {
     btn.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
-      ['forums', 'books', 'groups', 'videos', 'saved', 'songs'].forEach(name => {
-        const tab = $('#tab-' + name);
-        if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
-      });
+      ['forums', 'friends', 'groups'].forEach(name => $('#tab-' + name).classList.toggle('hidden', name !== btn.dataset.tab));
     });
   });
 
@@ -2558,7 +2504,7 @@ async function renderProfile(app, username) {
 
 async function renderSettings(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Ayarlar - Demlik';
+  document.title = 'Ayarlar - TeaTube';
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title">Ayarlar</div></div>
@@ -2707,17 +2653,49 @@ function renderSettingsSection(section) {
         <div class="card-body">
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
-          ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
+          <div class="form-group"><label>İsim Rengi</label>
+            ${currentUser.is_vip ? `<input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" />` : `<div style="display:flex;align-items:center;gap:8px"><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" disabled /><button class="btn btn-ghost btn-sm" id="buy-vip-btn">VIP Ol</button></div>`}
+          </div>
+          <div class="form-group"><label>Gösterilecek rozet</label>
+            <select id="s-badge-display" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text)">
+              <option value="level"${!currentUser.badge_display || currentUser.badge_display==='level' ? ' selected' : ''}>Seviye rozeti</option>
+              ${currentUser.is_vip ? `<option value="vip"${currentUser.badge_display==='vip' ? ' selected' : ''}>VIP rozeti</option>` : ''}
+              ${currentUser.is_plus ? `<option value="plus"${currentUser.badge_display==='plus' ? ' selected' : ''}>Plus rozeti</option>` : ''}
+              ${currentUser.is_vip || currentUser.is_plus ? `<option value="custom"${currentUser.badge_display==='custom' ? ' selected' : ''}>Özel rozet</option>` : ''}
+              <option value="none"${currentUser.badge_display==='none' ? ' selected' : ''}>Rozet göstermeyi kapat</option>
+            </select>
+          </div>
+          ${(currentUser.is_vip || currentUser.is_plus) ? `<div id="custom-badge-controls" style="display:${currentUser.badge_display==='custom' ? 'block' : 'none'}">
+            <div class="form-group"><label>Rozet Adı</label><input type="text" id="s-badge-name" value="${escHtml(currentUser.badge_name || '')}" placeholder="Örn: VIP, Plus, Sanatçı..." /></div>
+            <div class="form-group"><label>Rozet İkonu</label><input type="text" id="s-badge-icon" value="${escHtml(currentUser.badge_icon || 'fas fa-award')}" placeholder="fas fa-award veya ⭐" /></div>
+            <div class="form-group"><label>Rozet Rengi</label><input type="color" id="s-badge-color" value="${currentUser.badge_color || '#6b7280'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>
+          </div>` : ''}
           <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    const badgeDisplaySelect = $('#s-badge-display');
+    if (badgeDisplaySelect) {
+      badgeDisplaySelect.addEventListener('change', () => {
+        const customControls = $('#custom-badge-controls');
+        if (customControls) customControls.style.display = badgeDisplaySelect.value === 'custom' ? 'block' : 'none';
+      });
+    }
+
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_badge: $('#s-show-badge').checked,
         show_level_color: $('#s-show-color').checked,
       };
-      if (currentUser.is_vip || currentUser.is_plus) body.name_color = $('#s-name-color')?.value || '';
+      if (currentUser.is_vip) {
+        body.name_color = $('#s-name-color')?.value || '';
+      }
+      body.badge_display = $('#s-badge-display')?.value || 'level';
+      if (currentUser.is_vip || currentUser.is_plus) {
+        body.badge_name = $('#s-badge-name')?.value.trim() || '';
+        body.badge_icon = $('#s-badge-icon')?.value.trim() || '';
+        body.badge_color = $('#s-badge-color')?.value || '#6b7280';
+      }
       try {
         const fd = new FormData();
         Object.entries(body).forEach(([k, v]) => fd.append(k, v));
@@ -2725,6 +2703,20 @@ function renderSettingsSection(section) {
         currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
       } catch (e) { $('#appear-msg').textContent = e.message; }
+    });
+    // VIP satın alma butonu: non-VIP kullanıcıları VIP sayfasına yönlendir
+    $('#buy-vip-btn')?.addEventListener('click', () => {
+      showModal('VIP Ol', `
+        <div style="padding:12px">
+          <p style="margin-bottom:12px">İsim rengini değiştirmek için VIP olmanız gerekiyor. VIP ile profil renkleri, özel rozet ve daha fazlasına erişim sağlarsınız.</p>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" id="vip-go">VIP Sayfasına Git</button>
+            <button class="btn btn-ghost" id="vip-close">Kapat</button>
+          </div>
+        </div>
+      `);
+      $('#vip-close')?.addEventListener('click', hideModal);
+      $('#vip-go')?.addEventListener('click', () => { hideModal(); navigate('/vip'); });
     });
   } else if (section === 'notifications') {
     el.innerHTML = `
@@ -2906,7 +2898,7 @@ function renderSettingsSection(section) {
 
 function renderLogin(app) {
   if (currentUser) { navigate('/'); return; }
-  document.title = 'Giriş Yap - Demlik';
+  document.title = 'Giriş Yap - TeaTube';
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card card card-body">
       <div class="auth-title">Giriş Yap</div>
@@ -2997,7 +2989,7 @@ function renderLogin(app) {
 
 function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
-  document.title = 'Kayıt Ol - Demlik';
+  document.title = 'Kayıt Ol - TeaTube';
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card card card-body">
       <div class="auth-title">Kayıt Ol</div>
@@ -3066,7 +3058,7 @@ function renderRegister(app) {
 }
 
 function renderNotFound(app) {
-  document.title = 'Sayfa Bulunamadı - Demlik';
+  document.title = 'Sayfa Bulunamadı - TeaTube';
   app.innerHTML = `<div class="container page" style="text-align:center;padding:80px 20px">
     <div style="font-size:72px;font-weight:900;color:var(--accent-red);opacity:0.3">404</div>
     <div style="font-size:24px;font-weight:700;margin-bottom:12px">Sayfa Bulunamadı</div>
@@ -3099,6 +3091,7 @@ async function init() {
   } catch {}
   loadAnnouncements();
   renderRoute(location.pathname + location.search);
+  showEntryAuthPopup();
   if (currentUser) {
     checkUnreadMessages();
     setInterval(() => { if (currentUser) checkUnreadMessages(); }, 15000);
@@ -3128,45 +3121,6 @@ async function loadAnnouncements() {
 }
 
 init();
-
-// ===== VIDEO İLET MODAL =====
-async function showForwardVideoModal(video) {
-  let convs = [];
-  try { convs = await api('/conversations'); } catch {}
-  const listHTML = convs.length === 0
-    ? `<div class="empty-state" style="padding:20px"><p>Henüz mesajlaşma yok. Bir kullanıcıya mesaj gönderin.</p></div>`
-    : convs.map(c => `<div class="forward-item" data-username="${escHtml(c.other_username)}" style="display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
-      ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-      <span style="color:var(--text-primary);font-size:14px">${escHtml(c.other_username)}</span>
-    </div>`).join('');
-  showModal('Videoyu İlet', `
-    <div style="margin-bottom:12px">
-      <input id="video-fwd-search" type="text" placeholder="Kullanıcı adı ara..." style="width:100%;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px" />
-    </div>
-    <div id="video-fwd-list" style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:8px">${listHTML}</div>
-    <div style="margin-top:8px;display:flex;gap:8px">
-      <input id="video-fwd-username" type="text" placeholder="veya direkt kullanıcı adı gir..." style="flex:1;padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px" />
-      <button class="btn btn-primary" id="video-fwd-send-btn"><i class="fas fa-paper-plane"></i> İlet</button>
-    </div>
-    <div id="video-fwd-error" style="color:var(--accent-red2);font-size:12px;margin-top:6px"></div>
-  `);
-  $('#video-fwd-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    $$('#video-fwd-list .forward-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
-  });
-  $$('#video-fwd-list .forward-item').forEach(el => {
-    el.addEventListener('click', () => { $('#video-fwd-username').value = el.dataset.username; });
-  });
-  $('#video-fwd-send-btn').addEventListener('click', async () => {
-    const username = $('#video-fwd-username').value.trim();
-    if (!username) { $('#video-fwd-error').textContent = 'Kullanıcı adı girin'; return; }
-    try {
-      await api(`/conversation/${encodeURIComponent(username)}/messages`, { method: 'POST', body: JSON.stringify({ shared_video_id: video.id }) });
-      hideModal(); toast('Video iletildi!');
-      navigate('/mesajlar/' + username);
-    } catch (e) { $('#video-fwd-error').textContent = e.message; }
-  });
-}
 
 // ===== FORUM İLET MODAL =====
 async function showForwardForumModal(forum) {
@@ -3210,89 +3164,172 @@ async function showForwardForumModal(forum) {
 // ===== MESAJLAR SAYFASI =====
 async function renderMessages(app, targetUsername) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Mesajlar - Demlik';
+  document.title = 'Mesajlar - TeaTube';
   let convs = [];
-  let hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
-  try { hiddenConvs = await api('/conversations/hidden'); } catch {}
 
   const sidebarHTML = `
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
         <span style="font-size:13px;font-weight:700">Mesajlar</span>
-        <div style="display:flex;align-items:center;gap:6px">
-          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
-          <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
-        </div>
+        <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
       </div>
       <div class="dm-search-wrap"><input id="dm-search" type="text" placeholder="Ara..." class="dm-search" /></div>
-      <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
-        <div class="dm-hidden-panel-content">
-          <div class="dm-hidden-panel-header">Kilitli mesajlar</div>
-          <div id="dm-hidden-list" class="dm-hidden-list">
-            ${hiddenConvs.length ? hiddenConvs.map(c => dmConvItemHTML(c, true)).join('') : `<div class="dm-empty-small">Kilitli konuşma yok</div>`}
-          </div>
-        </div>
-      </div>
       <div id="dm-conv-list" class="dm-conv-list">
         ${convs.map(c => dmConvItemHTML(c)).join('') || `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>`}
       </div>
     </div>`;
 
-  app.innerHTML = `<div class="dm-layout${targetUsername && window.innerWidth <= 768 ? ' dm-mobile-chat-open' : ''}">
-    ${sidebarHTML}
+  app.innerHTML = `<div class="dm-layout">
+    <div class="dm-sidebar">
+      <div class="dm-sidebar-header" style="flex-direction:column;align-items:flex-start;gap:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;width:100%;gap:10px">
+          <span style="font-size:13px;font-weight:700">Mesajlar</span>
+          <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
+        </div>
+        <div class="dm-tab-buttons">
+          <button class="dm-tab active" data-tab="dm">Bireysel</button>
+          <button class="dm-tab" data-tab="groups">Gruplar</button>
+        </div>
+        <div class="dm-search-wrap"><input id="dm-search" type="text" placeholder="Ara..." class="dm-search" /></div>
+      </div>
+      <div id="dm-conv-list" class="dm-conv-list">
+        ${convs.map(c => dmConvItemHTML(c)).join('') || `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>`}
+      </div>
+      <div style="padding:10px;border-top:1px solid var(--border);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong style="font-size:13px">Arkadaşlar</strong>
+          <button class="btn btn-ghost btn-sm" id="dm-friends-toggle">Aç/Kapa</button>
+        </div>
+        <div id="dm-friends-widget">
+          <div style="font-size:13px;color:var(--text-muted)">Yükleniyor...</div>
+        </div>
+      </div>
+    </div>
     <div class="dm-main" id="dm-main">
       ${targetUsername ? '' : `<div class="dm-empty"><i class="fas fa-comments" style="font-size:48px;color:var(--text-muted);margin-bottom:16px"></i><p style="color:var(--text-muted)">Bir konuşma seçin</p></div>`}
     </div>
   </div>`;
 
-  const syncDmMobileView = () => {
-    const layout = $('.dm-layout');
-    if (!layout) return;
-    const isMobile = window.innerWidth <= 768;
-    layout.classList.toggle('dm-mobile-chat-open', isMobile && !!targetUsername);
-  };
-  syncDmMobileView();
-  window.removeEventListener('resize', window.__dmMobileViewHandler);
-  window.__dmMobileViewHandler = syncDmMobileView;
-  window.addEventListener('resize', window.__dmMobileViewHandler);
+  const dmTabs = $$('.dm-tab');
+  function setDmTab(tab) {
+    dmTabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+    const convList = $('#dm-conv-list');
+    if (!convList) return;
+    if (tab === 'groups') {
+      convList.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+      api('/groups').then(groups => {
+        convList.innerHTML = groups.length ? groups.map(g => `
+          <div class="dm-group-item" onclick="navigate('/grup/${escHtml(g.slug)}')">
+            ${g.cover_image ? `<img src="${escHtml(g.cover_image)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-users"></i></div>`}
+            <div style="flex:1;min-width:0">
+              <div class="dm-conv-name">${escHtml(g.name)}</div>
+              <div class="dm-conv-last">${escHtml(g.description || 'Grup sohbetine git')}</div>
+            </div>
+          </div>`).join('') : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz grup yok</div>';
+      }).catch(() => {
+        convList.innerHTML = '<div style="padding:20px;text-align:center;color:var(--accent-red2);font-size:13px">Gruplar yüklenemedi</div>';
+      });
+    } else {
+      convList.innerHTML = convs.map(c => dmConvItemHTML(c)).join('') || `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>`;
+      bindConvItems();
+    }
+  }
 
-  $('#dm-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    $$('.dm-conv-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
-  });
-
-  $('#dm-hidden-toggle-btn')?.addEventListener('click', () => {
-    $('#dm-hidden-panel')?.classList.toggle('hidden');
-  });
-
-  $$('.dm-conv-item').forEach(el => {
-    el.addEventListener('click', () => {
-      $$('.dm-conv-item').forEach(x => x.classList.remove('active'));
-      el.classList.add('active');
-      navigate('/mesajlar/' + el.dataset.username);
+  function bindConvItems() {
+    $$('.dm-conv-item').forEach(el => {
+      el.addEventListener('click', () => {
+        $$('.dm-conv-item').forEach(x => x.classList.remove('active'));
+        el.classList.add('active');
+        renderDMChat(el.dataset.username);
+      });
     });
-  });
+  }
+  dmTabs.forEach(btn => btn.addEventListener('click', () => setDmTab(btn.dataset.tab)));
+  bindConvItems();
 
-  $('#new-dm-btn')?.addEventListener('click', async () => {
-    const friends = await api('/friends').catch(() => []);
-    const accepted = (friends || []).filter(f => f.status === 'accepted');
+  // Load compact friends widget for DM sidebar
+  async function loadDmFriends() {
+    const widget = $('#dm-friends-widget');
+    if (!widget) return;
+    try {
+      const friends = await api('/friends');
+      const blocks = await api('/blocks');
+      const pending_in = friends.filter(f => f.status === 'pending' && f.addressee_id == currentUser.id);
+      const pending_out = friends.filter(f => f.status === 'pending' && f.requester_id == currentUser.id);
+      const accepted = friends.filter(f => f.status === 'accepted');
+      widget.innerHTML = `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <button class="btn btn-ghost btn-sm" id="dm-friends-tab-friends">Arkadaşlar (${accepted.length})</button>
+          <button class="btn btn-ghost btn-sm" id="dm-friends-tab-req">İstekler (${pending_in.length})</button>
+          <button class="btn btn-ghost btn-sm" id="dm-friends-tab-sent">Gönderilen (${pending_out.length})</button>
+        </div>
+        <div id="dm-friends-list" style="max-height:220px;overflow:auto"></div>
+        <div style="margin-top:8px"><input id="dm-friend-search" type="text" placeholder="Kullanıcı ara..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card2);color:var(--text-primary)" /></div>
+      `;
+      const list = $('#dm-friends-list');
+      function renderTab(tab) {
+        if (tab === 'friends') {
+          list.innerHTML = accepted.length ? accepted.slice(0,8).map(f => `
+            <div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border)">
+              ${f.other_avatar?`<img src="${escHtml(f.other_avatar)}" class="avatar-sm"/>`:`<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+              <div style="flex:1"><div style="font-weight:600">${escHtml(f.other_username)}</div></div>
+              <button class="btn btn-ghost btn-sm dm-friend-msg" data-username="${escHtml(f.other_username)}">Mesaj</button>
+            </div>
+          `).join('') : '<div style="color:var(--text-muted);padding:8px;text-align:center">Arkadaş yok</div>';
+        } else if (tab === 'req') {
+          list.innerHTML = pending_in.length ? pending_in.map(f => `
+            <div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border)">
+              ${f.other_avatar?`<img src="${escHtml(f.other_avatar)}" class="avatar-sm"/>`:`<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+              <div style="flex:1"><div style="font-weight:600">${escHtml(f.other_username)}</div></div>
+              <button class="btn btn-primary btn-sm friend-accept" data-id="${escHtml(f.id)}">✓</button>
+              <button class="btn btn-danger btn-sm friend-reject" data-id="${escHtml(f.id)}">✕</button>
+            </div>
+          `).join('') : '<div style="color:var(--text-muted);padding:8px;text-align:center">İstek yok</div>';
+        } else {
+          list.innerHTML = pending_out.length ? pending_out.map(f => `
+            <div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border)">
+              ${f.other_avatar?`<img src="${escHtml(f.other_avatar)}" class="avatar-sm"/>`:`<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+              <div style="flex:1"><div style="font-weight:600">${escHtml(f.other_username)}</div></div>
+              <button class="btn btn-ghost btn-sm" disabled>Beklemede</button>
+            </div>
+          `).join('') : '<div style="color:var(--text-muted);padding:8px;text-align:center">Gönderilen isteği yok</div>';
+        }
+      }
+      renderTab('friends');
+      $('#dm-friends-tab-friends')?.addEventListener('click', () => renderTab('friends'));
+      $('#dm-friends-tab-req')?.addEventListener('click', () => renderTab('req'));
+      $('#dm-friends-tab-sent')?.addEventListener('click', () => renderTab('sent'));
+      $('#dm-friend-search')?.addEventListener('keydown', e => { if (e.key==='Enter') doDmFriendSearch(); });
+      $('#dm-friend-search')?.addEventListener('input', e => { const q=e.target.value.toLowerCase(); list.querySelectorAll('div').forEach(el=>{ el.style.display = el.textContent.toLowerCase().includes(q)?'':'none'; }); });
+      // actions
+      list.addEventListener('click', async e => {
+        const accept = e.target.closest('.friend-accept');
+        const reject = e.target.closest('.friend-reject');
+        const msgBtn = e.target.closest('.dm-friend-msg');
+        if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); loadDmFriends(); } catch (err){ toast(err.message,'error'); } }
+        if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); loadDmFriends(); } catch (err){ toast(err.message,'error'); } }
+        if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
+      });
+
+      async function doDmFriendSearch() {
+        const q = $('#dm-friend-search').value.trim();
+        if (!q) return;
+        try {
+          const users = await api(`/search/users?q=${encodeURIComponent(q)}`);
+          list.innerHTML = users.map(u=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border)">${u.avatar?`<img src="${escHtml(u.avatar)}" class="avatar-sm"/>`:`<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}<div style="flex:1"><a href="/profil/${escHtml(u.username)}" data-link>${escHtml(u.username)}</a></div><button class="btn btn-primary btn-sm dm-friend-msg" data-username="${escHtml(u.username)}">Mesaj</button><button class="btn btn-primary btn-sm send-req-btn" data-username="${escHtml(u.username)}">+ Arkadaş</button></div>`).join('');
+          list.querySelectorAll('.send-req-btn').forEach(btn=>btn.addEventListener('click', async ()=>{ try{ await api(`/friends/request/${encodeURIComponent(btn.dataset.username)}`, { method: 'POST' }); btn.textContent='✓ Gönderildi'; btn.disabled=true;}catch(e){toast(e.message,'error')} }));
+        } catch(e){ toast(e.message,'error'); }
+      }
+
+    } catch (e) { widget.innerHTML = `<div style="color:var(--accent-red2)">${escHtml(e.message)}</div>`; }
+  }
+  if (currentUser) loadDmFriends();
+  $('#dm-friends-toggle')?.addEventListener('click', () => { $('#dm-friends-widget').classList.toggle('hidden'); });
+
+  $('#new-dm-btn')?.addEventListener('click', () => {
     showModal('Yeni Mesaj', `
       <div class="form-group"><label>Kullanıcı adı</label><input id="new-dm-username" type="text" placeholder="kullanici_adi" /></div>
-      <div class="form-group">
-        <label>Arkadaşlardan seç</label>
-        <div id="new-dm-friends" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
-          ${accepted.length ? accepted.map(f => {
-            const other_username = f.other_username || (f.requester_id === currentUser.id ? (f.addressee_username || f.requester_username) : (f.requester_username || f.addressee_username)) || 'Kullanıcı';
-            const avatar = f.other_avatar || (f.requester_id === currentUser.id ? f.addressee_avatar : f.requester_avatar) || '';
-            const nameColor = f.other_name_color || '';
-            return `<button class="btn btn-ghost" type="button" style="justify-content:flex-start" data-username="${escHtml(other_username)}" data-action="open-dm">
-              ${avatar ? `<img src="${escHtml(avatar)}" class="avatar-sm" style="margin-right:8px" />` : `<div class="avatar-sm avatar-placeholder" style="margin-right:8px"><i class="fas fa-user"></i></div>`}
-              <span style="${nameColor ? `color:${escHtml(nameColor)}` : ''}">${escHtml(other_username)}</span>
-            </button>`;
-          }).join('') : '<div style="font-size:13px;color:var(--text-muted)">Henüz arkadaşın yok</div>'}
-        </div>
-      </div>
       <button class="btn btn-primary" style="width:100%" id="new-dm-go">Mesaja Git</button>
     `);
     $('#new-dm-go').addEventListener('click', () => {
@@ -3301,11 +3338,37 @@ async function renderMessages(app, targetUsername) {
       hideModal();
       navigate('/mesajlar/' + u);
     });
-    $$('#new-dm-friends button[data-action="open-dm"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        hideModal();
-        navigate('/mesajlar/' + btn.dataset.username);
-      });
+  });
+
+  if (targetUsername) {
+    const activeEl = $(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
+    if (activeEl) { activeEl.classList.add('active'); }
+    await renderDMChat(targetUsername);
+  }
+
+  $('#dm-search')?.addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    $$('#dm-conv-list .dm-conv-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
+  });
+
+  $$('.dm-conv-item').forEach(el => {
+    el.addEventListener('click', () => {
+      $$('.dm-conv-item').forEach(x => x.classList.remove('active'));
+      el.classList.add('active');
+      renderDMChat(el.dataset.username);
+    });
+  });
+
+  $('#new-dm-btn')?.addEventListener('click', () => {
+    showModal('Yeni Mesaj', `
+      <div class="form-group"><label>Kullanıcı adı</label><input id="new-dm-username" type="text" placeholder="kullanici_adi" /></div>
+      <button class="btn btn-primary" style="width:100%" id="new-dm-go">Mesaja Git</button>
+    `);
+    $('#new-dm-go').addEventListener('click', () => {
+      const u = $('#new-dm-username').value.trim();
+      if (!u) return;
+      hideModal();
+      navigate('/mesajlar/' + u);
     });
   });
 
@@ -3316,13 +3379,13 @@ async function renderMessages(app, targetUsername) {
   }
 }
 
-function dmConvItemHTML(c, isHidden = false) {
+function dmConvItemHTML(c) {
   const unread = parseInt(c.unread_count) || 0;
   return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}">
     ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div class="dm-conv-info">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="dm-conv-name" style="${c.other_name_color ? `color:${escHtml(c.other_name_color)}` : ''}">${escHtml(c.other_username)}${isHidden ? '<i class="fas fa-lock dm-conv-lock"></i>' : ''}</span>
+        <span class="dm-conv-name" style="${c.other_name_color ? `color:${escHtml(c.other_name_color)}` : ''}">${escHtml(c.other_username)}</span>
         ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
       </div>
       <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
@@ -3356,7 +3419,7 @@ async function renderDMChat(username) {
 
   const { conv, other, messages, isHidden, hasPassword } = data;
   if (isHidden) {
-    mainEl.innerHTML = `<div class="dm-chat">
+    mainEl.innerHTML = `<div class="dm-chat" style="display:flex;flex-direction:column;height:100%">
       <div class="dm-chat-header">
         <div style="display:flex;align-items:center;gap:10px">
           <i class="fas fa-lock" style="color:var(--accent-red2)"></i>
@@ -3390,7 +3453,6 @@ async function renderDMChat(username) {
   mainEl.innerHTML = `<div class="dm-chat">
     <div class="dm-chat-header">
       <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none"><i class="fas fa-arrow-left"></i></button>
         ${other.avatar ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
         <a href="/profil/${escHtml(other.username)}" data-link style="font-weight:600;font-size:14px;color:${other.name_color || 'var(--text-primary)'}">${escHtml(other.username)}</a>
       </div>
@@ -3403,7 +3465,7 @@ async function renderDMChat(username) {
         <button class="btn btn-ghost btn-sm" id="dm-options-btn"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
-    <div class="dm-messages" id="dm-messages">
+    <div class="dm-messages" id="dm-messages" style="flex:1;overflow:auto;min-height:0;padding:12px">
       ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
     </div>
     <div id="dm-reply-bar" style="display:none;padding:6px 14px;background:var(--bg-card2);border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);display:flex;align-items:center;justify-content:space-between">
@@ -3421,13 +3483,6 @@ async function renderDMChat(username) {
       <button class="btn btn-primary btn-sm" id="dm-send-btn"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>`;
-
-  $('#dm-mobile-back-btn')?.addEventListener('click', () => {
-    navigate('/mesajlar');
-  });
-
-  const dmMessagesContainer = $('#dm-messages');
-  if (dmMessagesContainer) dmMessagesContainer.scrollTop = dmMessagesContainer.scrollHeight;
 
   // Scroll to bottom
   const msgsEl = $('#dm-messages');
@@ -3573,10 +3628,6 @@ function dmMessageHTML(m, myId, selMode) {
               ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
               <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title||'')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
             </div>` : ''}
-            ${m.shared_video_id ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
-              ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
-              <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title||'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
-            </div>` : ''}
             ${m.content ? `<span>${escHtml(m.content)}</span>` : ''}
           </div>`}
       <div class="dm-msg-meta">
@@ -3688,7 +3739,7 @@ function showDmOptionsMenu(username, convId) {
 // ===== ARKADAŞLAR SAYFASI =====
 async function renderFriends(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Arkadaşlar - Demlik';
+  document.title = 'Arkadaşlar - TeaTube';
   let friends = [];
   try { friends = await api('/friends'); } catch {}
   let blocks = [];
@@ -3700,7 +3751,7 @@ async function renderFriends(app) {
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div class="friends-layout">
       <div>
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Arkadaşlar (${accepted.length})</button>
@@ -3802,7 +3853,7 @@ function friendItemHTML(f, type, myId) {
       ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Sil"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>`;
   }
-  return `<div class="card card-body friend-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}" ${type === 'accepted' ? `onclick="navigate('/mesajlar/${escHtml(other_username)}')"` : ''}>
+  return `<div class="card card-body" style="margin-bottom:8px;display:flex;align-items:center;gap:10px">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
       <a href="/profil/${escHtml(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
@@ -3810,9 +3861,9 @@ function friendItemHTML(f, type, myId) {
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
     <div style="display:flex;gap:6px">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-times"></i></button>` : ''}
-      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}"><i class="fas fa-times"></i></button>` : ''}
+      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>
   </div>`;
 }
@@ -4044,7 +4095,7 @@ document.addEventListener('click', e => {
   const popup = document.createElement('div');
   popup.id = 'admin-shield-popup';
   popup.style.cssText = `position:fixed;z-index:99999;background:#1a1a2e;border:1px solid #5865F2;border-radius:10px;padding:12px 16px;max-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.6);animation:fadeIn 0.15s ease`;
-  popup.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="fas fa-shield" style="color:#5865F2;font-size:16px"></i><span style="font-weight:700;color:#e0e0ff;font-size:14px">Demlik Yetkilisi</span></div><div style="font-size:13px;font-weight:600;color:#c0c8ff;margin-bottom:4px">Demlik yetkili hesabı.</div><div style="font-size:12px;color:#8888aa">Bu kullanıcı ${sinceText} tarihinde yetkili oldu.</div>`;
+  popup.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="fas fa-shield" style="color:#5865F2;font-size:16px"></i><span style="font-weight:700;color:#e0e0ff;font-size:14px">TeaTube Yetkilisi</span></div><div style="font-size:13px;font-weight:600;color:#c0c8ff;margin-bottom:4px">TeaTube yetkili hesabı.</div><div style="font-size:12px;color:#8888aa">Bu kullanıcı ${sinceText} tarihinde yetkili oldu.</div>`;
   const rect = shield.getBoundingClientRect();
   document.body.appendChild(popup);
   const pw = popup.offsetWidth, ph = popup.offsetHeight;
@@ -4099,7 +4150,7 @@ async function renderSpotifyWidget(username, containerId) {
 
 // ===== MÜZİK LİSTESİ =====
 async function renderMusicList(app) {
-  document.title = 'Müzikler – Demlik';
+  document.title = 'Müzikler – TeaTube';
   app.innerHTML = `<div class="container page">
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
       <div class="page-title" style="display:flex;align-items:center;gap:10px">
@@ -4227,7 +4278,7 @@ function openMiniPlayer(audioUrl, slug, song) {
     </div>`;
   player.style.display = 'block';
   // localStorage'dan ses seviyesini oku
-  const savedVol = parseFloat(localStorage.getItem('demlik_volume') ?? '0.8');
+  const savedVol = parseFloat(localStorage.getItem('teatube_volume') ?? localStorage.getItem('demlik_volume') ?? '0.8');
   audio.volume = savedVol;
 
   function fmtTime(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
@@ -4265,6 +4316,7 @@ function openMiniPlayer(audioUrl, slug, song) {
     volSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
       audio.volume = v / 100;
+      localStorage.setItem('teatube_volume', v / 100);
       localStorage.setItem('demlik_volume', v / 100);
       updateVolIcon(v);
     });
@@ -4273,10 +4325,12 @@ function openMiniPlayer(audioUrl, slug, song) {
     volBtn.addEventListener('click', () => {
       if (audio.volume > 0) {
         audio.volume = 0; if(volSlider) volSlider.value = 0;
+        localStorage.setItem('teatube_volume', '0');
         localStorage.setItem('demlik_volume', '0');
         volBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
       } else {
         audio.volume = 0.8; if(volSlider) volSlider.value = 80;
+        localStorage.setItem('teatube_volume', '0.8');
         localStorage.setItem('demlik_volume', '0.8');
         volBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
       }
@@ -4296,10 +4350,21 @@ async function renderMusicDetail(app, slug) {
   try { song = await api('/songs/' + slug); } catch {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Şarkı bulunamadı.</p></div></div>'; return;
   }
-  document.title = `${song.title} – ${song.artist_name} | Demlik`;
+  document.title = `${song.title} – ${song.artist_name} | TeaTube`;
   const isOwn = song.song_type === 'own';
   const hasLyrics = !!song.lyrics?.trim();
   const isUploader = currentUser && currentUser.id === song.uploader_id;
+  let friendStatus = null;
+  if (currentUser && currentUser.username !== song.uploader) {
+    try { const friends = await api('/friends'); friendStatus = friends.find(f => f.other_username === song.uploader); } catch (e) { }
+  }
+  const followBtnLabel = friendStatus
+    ? friendStatus.status === 'accepted' ? 'Mesaj Gönder' : 'İstek Gönderildi'
+    : 'Takip Et';
+  const followBtnClass = friendStatus
+    ? friendStatus.status === 'accepted' ? 'btn-primary' : 'btn-outline'
+    : 'btn-primary';
+  const followBtnDisabled = friendStatus && friendStatus.status === 'pending' ? 'disabled' : '';
 
   app.innerHTML = `<div class="container page">
     <div class="music-detail-header">
@@ -4309,26 +4374,36 @@ async function renderMusicDetail(app, slug) {
           : `<div class="music-detail-cover music-detail-cover-ph"><i class="fas fa-music"></i></div>`}
       </div>
       <div class="music-detail-info">
-        <div class="music-detail-top">
-          <div>
-            <div class="music-detail-type-badge">${isOwn ? '<i class="fas fa-microphone"></i> Sanatçı Şarkısı' : '<i class="fas fa-share"></i> Paylaşılan Şarkı'}</div>
-            <div class="music-detail-title">${escHtml(song.title)}</div>
-            <div class="music-detail-artist">${escHtml(song.artist_name)}</div>
-          </div>
-          ${isUploader ? `<div class="music-detail-actions"><button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button></div>` : ''}
-        </div>
+        <div class="music-detail-type-badge">${isOwn ? '<i class="fas fa-microphone"></i> Sanatçı Şarkısı' : '<i class="fas fa-share"></i> Paylaşılan Şarkı'}</div>
+        <div class="music-detail-title">${escHtml(song.title)}</div>
+        <div class="music-detail-artist">${escHtml(song.artist_name)}</div>
         <div class="music-detail-meta">
           ${song.genre ? `<span><i class="fas fa-tag"></i> ${escHtml(song.genre)}</span>` : ''}
           ${song.distributor ? `<span><i class="fas fa-building"></i> ${escHtml(song.distributor)}</span>` : ''}
           <span><i class="fas fa-headphones"></i> ${song.play_count} dinlenme</span>
           <span><i class="fas fa-calendar"></i> ${formatDate(song.published_at)}</span>
         </div>
+        <div class="music-detail-uploader">
+          <div class="music-detail-uploader-left">
+            ${song.uploader_avatar ? `<img src="${escHtml(song.uploader_avatar)}" class="music-detail-uploader-avatar" />`
+              : `<div class="music-detail-uploader-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`}
+          </div>
+          <div class="music-detail-uploader-meta">
+            <a href="/profil/${escHtml(song.uploader)}" data-link class="music-detail-uploader-name">${escHtml(song.uploader)}</a>
+            <div class="music-detail-uploader-label">Hesap bilgileri ve takip etme seçenekleri</div>
+            <div class="music-detail-uploader-actions">
+              <button class="btn btn-outline btn-sm" id="song-profile-btn">Hesaba Git</button>
+              ${currentUser && currentUser.username !== song.uploader ? `<button class="btn ${followBtnClass} btn-sm" id="song-follow-btn" ${followBtnDisabled}>${followBtnLabel}</button>` : ''}
+            </div>
+          </div>
+        </div>
+        ${isUploader ? `<div class="music-detail-controls"><button class="music-edit-top-btn btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button></div>` : ''}
         <div class="music-player-box" id="music-player-box">
           <audio id="detail-audio" src="${escHtml(song.audio_url)}" preload="metadata"></audio>
-          <div class="music-player-controls">
+          <div class="music-player-controls" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <button class="music-play-btn" id="detail-play-btn"><i class="fas fa-play"></i> Oynat</button>
-            <div class="music-vol-wrap">
-              <button id="detail-vol-btn" class="music-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
+            <div class="music-volume-inline">
+              <button id="detail-vol-btn" type="button" title="Ses" class="music-vol-icon"><i class="fas fa-volume-up"></i></button>
               <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="music-vol-slider" title="Ses seviyesi" />
             </div>
           </div>
@@ -4341,6 +4416,15 @@ async function renderMusicDetail(app, slug) {
             <span class="music-time" id="dp-dur">0:00</span>
           </div>
         </div>
+        <div class="music-detail-actions">
+          <button class="music-action-btn btn btn-outline btn-sm" id="song-like-btn"><i class="fas fa-heart"></i> Beğen</button>
+          <button class="music-action-btn btn btn-outline btn-sm" id="song-forward-btn"><i class="fas fa-share"></i> İlet</button>
+          <button class="music-action-btn btn btn-outline btn-sm" id="song-share-btn"><i class="fas fa-external-link-alt"></i> Paylaş</button>
+        </div>
+        ${song.share_reason ? `
+          <div class="music-detail-description">
+            ${escHtml(song.share_reason)}
+          </div>` : ''}
         ${!isOwn && song.share_reason ? `
           <div class="music-share-reason">
             <div class="music-share-reason-label"><i class="fas fa-question-circle"></i> Neden paylaştınız?</div>
@@ -4394,7 +4478,7 @@ async function renderMusicDetail(app, slug) {
   seek?.addEventListener('input', e => { if(audio.duration) audio.currentTime=(parseFloat(e.target.value)/100)*audio.duration; });
 
   // Detail page ses kontrolü (localStorage'dan başlat)
-  const savedVol = parseFloat(localStorage.getItem('demlik_volume') ?? '0.8');
+  const savedVol = parseFloat(localStorage.getItem('teatube_volume') ?? localStorage.getItem('demlik_volume') ?? '0.8');
   audio.volume = savedVol;
   const detailVolSlider = document.getElementById('detail-vol');
   const detailVolBtn = document.getElementById('detail-vol-btn');
@@ -4408,18 +4492,108 @@ async function renderMusicDetail(app, slug) {
     detailVolSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
       audio.volume = v / 100;
+      localStorage.setItem('teatube_volume', v / 100);
       localStorage.setItem('demlik_volume', v / 100);
       updateVolIcon(v);
     });
     detailVolBtn?.addEventListener('click', () => {
       if (audio.volume > 0) {
         audio.volume = 0; detailVolSlider.value = 0;
+        localStorage.setItem('teatube_volume', '0');
         localStorage.setItem('demlik_volume', '0');
         if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
       } else {
         audio.volume = 0.8; detailVolSlider.value = 80;
+        localStorage.setItem('teatube_volume', '0.8');
         localStorage.setItem('demlik_volume', '0.8');
         if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
+      }
+    });
+  }
+
+  const likeBtn = document.getElementById('song-like-btn');
+  const forwardBtn = document.getElementById('song-forward-btn');
+  const shareBtn = document.getElementById('song-share-btn');
+  const profileBtn = document.getElementById('song-profile-btn');
+  const followBtn = document.getElementById('song-follow-btn');
+  let songLiked = false;
+
+  if (likeBtn) {
+    likeBtn.addEventListener('click', () => {
+      songLiked = !songLiked;
+      likeBtn.classList.toggle('active', songLiked);
+      likeBtn.innerHTML = `<i class="fas fa-heart"></i> ${songLiked ? 'Beğenildi' : 'Beğen'}`;
+      toast(songLiked ? 'Şarkıyı beğendiniz' : 'Beğenme kaldırıldı');
+    });
+  }
+
+  if (profileBtn) {
+    profileBtn.addEventListener('click', () => {
+      navigate('/profil/' + encodeURIComponent(song.uploader));
+    });
+  }
+
+  if (followBtn) {
+    followBtn.addEventListener('click', async () => {
+      if (!currentUser) { navigate('/giris'); return; }
+      if (friendStatus && friendStatus.status === 'accepted') {
+        navigate('/mesajlar/' + encodeURIComponent(song.uploader));
+        return;
+      }
+      try {
+        await api(`/friends/request/${encodeURIComponent(song.uploader)}`, { method: 'POST' });
+        followBtn.textContent = 'İstek Gönderildi';
+        followBtn.classList.remove('btn-primary');
+        followBtn.classList.add('btn-outline');
+        followBtn.disabled = true;
+        toast('Arkadaşlık isteği gönderildi');
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    });
+  }
+
+  if (forwardBtn) {
+    forwardBtn.addEventListener('click', () => {
+      if (!currentUser) { navigate('/giris'); return; }
+      showModal('Müziği İlet', `
+        <div class="form-group"><label>Hedef kullanıcı</label><input id="song-forward-user" placeholder="kullanici_adi" /></div>
+        <div class="form-group"><label>Mesaj</label><textarea id="song-forward-msg" rows="4">${escHtml(song.title)} - ${escHtml(song.artist_name)}\n${location.href}</textarea></div>
+        <button class="btn btn-primary" id="song-forward-confirm">İlet</button>
+        <div id="song-forward-error" class="form-error mt-2"></div>
+      `);
+      $('#song-forward-confirm')?.addEventListener('click', async () => {
+        const target = $('#song-forward-user')?.value.trim();
+        const message = $('#song-forward-msg')?.value.trim();
+        if (!target) { $('#song-forward-error').textContent = 'Kullanıcı adı girin'; return; }
+        try {
+          await api(`/conversation/${encodeURIComponent(target)}/messages`, { method: 'POST', body: JSON.stringify({ content: message }) });
+          hideModal();
+          toast('Müzik iletildi');
+          navigate('/mesajlar/' + target);
+        } catch (e) {
+          $('#song-forward-error').textContent = e.message;
+        }
+      });
+    });
+  }
+
+  if (shareBtn) {
+    shareBtn.addEventListener('click', async () => {
+      const url = location.href;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: song.title, text: song.artist_name, url });
+        } catch (err) {
+          // ignore cancel
+        }
+      } else {
+        try {
+          await navigator.clipboard.writeText(url);
+          toast('Bağlantı kopyalandı');
+        } catch (err) {
+          toast('Bağlantı kopyalanamadı', 'error');
+        }
       }
     });
   }
@@ -4476,7 +4650,7 @@ async function renderMusicDetail(app, slug) {
 }
 async function renderArtistApply(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Artist Başvurusu – Demlik';
+  document.title = 'Artist Başvurusu – TeaTube';
   let existing = null;
   try { existing = await api('/artist/my-application'); } catch {}
 
@@ -4517,7 +4691,7 @@ async function renderArtistApply(app) {
     <div class="card">
       <div class="card-body">
         <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">
-          Artist rozeti alarak kendi şarkılarınızı Demlik'te yayınlayabilirsiniz.
+          Artist rozeti alarak kendi şarkılarınızı TeaTube'da yayınlayabilirsiniz.
         </p>
         <div class="form-group"><label>Müzik Türünüz *</label>
           <input id="apply-genre" placeholder="Pop, Rock, Hip-Hop, Elektronik..." />
@@ -4571,7 +4745,7 @@ async function renderArtistApply(app) {
 async function renderArtistPanel(app) {
   if (!currentUser) { navigate('/giris'); return; }
   if (!currentUser.is_artist) { navigate('/artist-basvuru'); return; }
-  document.title = 'Artist Panel – Demlik';
+  document.title = 'Artist Panel – TeaTube';
 
   let rules = { own_rules: '', other_rules: '' };
   try { rules = await api('/music-rules'); } catch {}
@@ -4669,7 +4843,7 @@ async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
   // Artist olanlar kendi panelini kullansın
   if (currentUser.is_artist) { navigate('/artist-panel'); return; }
-  document.title = 'Şarkı Paylaş – Demlik';
+  document.title = 'Şarkı Paylaş – TeaTube';
 
   let rules = { other_rules: '' };
   try { rules = await api('/music-rules'); } catch {}
