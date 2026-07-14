@@ -651,7 +651,8 @@ async function renderHome(app) {
        contentEl.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${forums.slice(0,8).map(f => forumCardHTML(f)).join('')}</div>`;
      } catch (e) {
        contentEl.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p style="color:var(--accent-red2)">${escHtml(e.message)}</p></div>`;
-  }
+     }
+   }
 
   let allForums = [];
   try {
@@ -4948,3 +4949,4 @@ async function renderShareSong(app) {
     }
   });
 }
+
