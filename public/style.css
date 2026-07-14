@@ -715,6 +715,24 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .comment-form { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 24px; }
 .comment-form textarea { flex: 1; min-height: 80px; }
 
+/* Avatar / logo fixes: ensure images keep aspect ratio and don't stretch or overflow */
+.comment-avatar, .nav-avatar, .profile-avatar, .chat-msg-avatar, .member-avatar, .avatar-sm {
+  display: block; /* avoid inline whitespace/layout issues */
+  width: 38px; height: 38px; /* default small avatar size */
+  border-radius: 50%;
+  object-fit: cover; /* crop instead of stretching */
+  -o-object-fit: cover;
+  background: var(--bg-card2);
+  flex-shrink: 0;
+}
+.profile-avatar { width: 100px; height: 100px; } /* keep profile size defined explicitly */
+.profile-avatar.placeholder, .profile-avatar-placeholder { display: grid; place-items: center; }
+
+/* prevent images inside avatar elements from inheriting max-width that could distort them */
+.comment-avatar[src], .nav-avatar[src], .profile-avatar[src], .chat-msg-avatar[src], .member-avatar[src] {
+  max-width: none;
+}
+
 /* ===== BOOK DETAIL ===== */
 .book-detail-header { display: flex; gap: 28px; margin-bottom: 32px; }
 @media (max-width: 600px) { .book-detail-header { flex-direction: column; } }
