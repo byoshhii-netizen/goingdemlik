@@ -433,9 +433,10 @@ function updateNavUI() {
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
-      mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
-      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
-      mbbAuth.querySelector('i').className = 'fas fa-user-circle';
+      // On mobile, use the bottom-right slot for Friends instead of Profile
+      mbbAuth.setAttribute('href', '/arkadaslar');
+      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Arkadaşlar';
+      mbbAuth.querySelector('i').className = 'fas fa-user-friends';
     }
   } else {
     authEl.classList.remove('hidden');
@@ -451,12 +452,27 @@ function updateNavUI() {
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
-      mbbAuth.setAttribute('href', '/giris');
-      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
-      mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
+      // keep bottom-right as Friends link on mobile even when logged out
+      mbbAuth.setAttribute('href', '/arkadaslar');
+      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Arkadaşlar';
+      mbbAuth.querySelector('i').className = 'fas fa-user-friends';
     }
   }
 }
+
+// Mobile: clicking the top-right avatar/logo should open the current user's profile
+document.addEventListener('click', e => {
+  const avatar = e.target.closest('.nav-avatar');
+  if (!avatar) return;
+  // only on narrow screens treat avatar as profile shortcut
+  if (window.innerWidth <= 860) {
+    if (currentUser && currentUser.username) {
+      navigate('/profil/' + currentUser.username);
+    } else {
+      navigate('/giris');
+    }
+  }
+});
 
 function updateMobileBottomBar(path) {
   $$('#mobile-bottom-bar a').forEach(a => {

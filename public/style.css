@@ -733,6 +733,14 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   max-width: none;
 }
 
+/* Override global img constraints for avatar images */
+img.comment-avatar, img.nav-avatar, img.profile-avatar, img.chat-msg-avatar, img.member-avatar, img.avatar-sm {
+  max-width: none !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+
 /* ===== BOOK DETAIL ===== */
 .book-detail-header { display: flex; gap: 28px; margin-bottom: 32px; }
 @media (max-width: 600px) { .book-detail-header { flex-direction: column; } }
