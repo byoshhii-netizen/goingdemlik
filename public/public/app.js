@@ -423,9 +423,9 @@ function updateNavUI() {
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
-      mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
-      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
-      mbbAuth.querySelector('i').className = 'fas fa-user-circle';
+      mbbAuth.setAttribute('href', '/arkadaslar');
+      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Arkadaşlar';
+      mbbAuth.querySelector('i').className = 'fas fa-user-friends';
     }
   } else {
     authEl.classList.remove('hidden');
@@ -441,9 +441,9 @@ function updateNavUI() {
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
-      mbbAuth.setAttribute('href', '/giris');
-      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
-      mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
+      mbbAuth.setAttribute('href', '/arkadaslar');
+      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Arkadaşlar';
+      mbbAuth.querySelector('i').className = 'fas fa-user-friends';
     }
   }
 }
@@ -455,7 +455,16 @@ function updateMobileBottomBar(path) {
   });
 }
 
-$('#nav-user-btn').addEventListener('click', () => {
+$('#nav-user-btn').addEventListener('click', e => {
+  if (window.innerWidth <= 860) {
+    e.preventDefault();
+    if (currentUser && currentUser.username) {
+      navigate('/profil/' + currentUser.username);
+    } else {
+      navigate('/giris');
+    }
+    return;
+  }
   $('#dropdown-menu').classList.toggle('hidden');
 });
 document.addEventListener('click', e => {
