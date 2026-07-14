@@ -690,7 +690,6 @@ async function renderHome(app) {
   } catch {}
 
   // Decide default home content based on viewport: mobile -> photos, desktop -> topics
-  const isMobile = window.innerWidth <= 900;
   // Toggle active state on tabs (only photos/forums have explicit ids)
   $('#photos-tab')?.classList.toggle('active', isMobile);
   $('#forums-tab')?.classList.toggle('active', !isMobile);
