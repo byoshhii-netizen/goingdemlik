@@ -36,9 +36,6 @@ function updatePageMeta(title, description, imageUrl) {
   ld.textContent = '';
 }
 
-function $(sel) { return document.querySelector(sel); }
-function $$(sel) { return document.querySelectorAll(sel); }
-
 function toast(msg, type = 'success', duration = 3500) {
   const c = $('#toast-container');
   const t = document.createElement('div');
@@ -431,11 +428,12 @@ function updateNavUI() {
       $('#mobile-menu').classList.add('hidden');
     });
 
-    // Mobile bottom bar - arkadaşlar göster, auth gizle
     const mbbAuth = $('#mbb-auth');
-    const mbbFriends = $('#mbb-friends');
-    if (mbbAuth) mbbAuth.style.display = 'none';
-    if (mbbFriends) mbbFriends.style.display = 'flex';
+    if (mbbAuth) {
+      mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
+      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
+      mbbAuth.querySelector('i').className = 'fas fa-user-circle';
+    }
   } else {
     authEl.classList.remove('hidden');
     const navBrand = document.querySelector('.nav-brand');
@@ -448,13 +446,13 @@ function updateNavUI() {
     if (mobNew) mobNew.classList.add('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = '';
 
-    // Mobile bottom bar - auth göster, arkadaşlar gizle
     const mbbAuth = $('#mbb-auth');
-    const mbbFriends = $('#mbb-friends');
-    if (mbbAuth) { mbbAuth.style.display = 'flex'; mbbAuth.setAttribute('href', '/giris'); }
-    if (mbbFriends) mbbFriends.style.display = 'none';
+    if (mbbAuth) {
+      mbbAuth.setAttribute('href', '/giris');
+      const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
+      mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
+    }
   }
-}
 }
 
 function updateMobileBottomBar(path) {
@@ -467,7 +465,6 @@ function updateMobileBottomBar(path) {
 $('#nav-user-btn').addEventListener('click', () => {
   $('#dropdown-menu').classList.toggle('hidden');
 });
-
 document.addEventListener('click', e => {
   if (!$('#nav-dropdown')?.contains(e.target)) $('#dropdown-menu')?.classList.add('hidden');
   if (!$('#new-btn-wrap')?.contains(e.target)) $('#new-dropdown')?.classList.add('hidden');
