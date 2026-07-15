@@ -1,35 +1,9 @@
-﻿// ===== TeaTube ADMIN PANEL =====
+﻿// ===== DEMLIK ADMIN PANEL =====
 let adminToken = sessionStorage.getItem('admin_token') || '';
 let currentSection = 'dashboard';
 
 function $(s) { return document.querySelector(s); }
 function $$(s) { return document.querySelectorAll(s); }
-
-function initAdminPanel() {
-  const loginScreen = $('#login-screen');
-  const panel = $('#admin-panel');
-  const loginBtn = $('#admin-login-btn');
-  const pwInput = $('#admin-pw-input');
-  const logoutBtn = $('#admin-logout-btn');
-  const modalClose = $('#modal-close');
-  const modalOverlay = $('#modal-overlay');
-  if (!loginScreen || !panel || !loginBtn || !pwInput || !logoutBtn || !modalClose || !modalOverlay) return;
-
-  adminToken = sessionStorage.getItem('admin_token') || '';
-  if (adminToken) {
-    showPanel();
-    return;
-  }
-
-  loginBtn.addEventListener('click', tryLogin);
-  pwInput.addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
-  logoutBtn.addEventListener('click', () => {
-    adminToken = ''; sessionStorage.removeItem('admin_token');
-    location.reload();
-  });
-  modalClose.addEventListener('click', hideModal);
-  modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) hideModal(); });
-}
 
 function toast(msg, type = 'success') {
   const c = $('#toast-container');
@@ -79,8 +53,9 @@ $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
 // ===== AUTH =====
-document.addEventListener('DOMContentLoaded', initAdminPanel);
-if (document.readyState !== 'loading') initAdminPanel();
+if (adminToken) showPanel();
+$('#admin-login-btn').addEventListener('click', tryLogin);
+$('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
 async function tryLogin() {
   const pw = $('#admin-pw-input').value;
@@ -100,20 +75,20 @@ async function tryLogin() {
 }
 
 function showPanel() {
-  const loginScreen = $('#login-screen');
-  const panel = $('#admin-panel');
-  if (!loginScreen || !panel) return;
-  loginScreen.style.display = 'none';
-  panel.classList.add('visible');
+  $('#login-screen').style.display = 'none';
+  $('#admin-panel').classList.add('visible');
   loadTopbarStats();
   setupNav();
   loadSection('dashboard');
 }
 
+$('#admin-logout-btn').addEventListener('click', () => {
+  adminToken = ''; sessionStorage.removeItem('admin_token');
+  location.reload();
+});
+
 function setupNav() {
   $$('.adm-nav-item').forEach(item => {
-    if (item.dataset.bound === '1') return;
-    item.dataset.bound = '1';
     item.addEventListener('click', () => {
       $$('.adm-nav-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
@@ -139,14 +114,12 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers,
-    forums: renderForums, books: renderBooks, groups: renderGroups, artists: renderArtists,
+    forums: renderForums, books: renderBooks, videos: renderVideos, 'video-ads': renderVideoAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
-    songs: renderAdminSongs, photos: renderAdminPhotos, 'artist-apps': renderArtistApps
+    songs: renderAdminSongs, 'artist-apps': renderArtistApps
   };
-  // add badges handler
-  map['badges'] = renderBadges;
   if (map[section]) map[section](main);
 }
 
@@ -303,90 +276,6 @@ function renderUsersTable(users) {
   });
 }
 
-// ===== PHOTOS =====
-async function renderAdminPhotos(main) {
-  let photos = [];
-  try { photos = await adminApi('/photos'); } catch (e) { main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`; return; }
-  main.innerHTML = `
-    <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-camera-retro"></i></div> Fotoğraflar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${photos.length})</span></div>
-      <div><button class="btn btn-primary" id="adm-photos-refresh">Yenile</button></div>
-    </div>
-    <div class="card">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Mini</th><th>Açıklama</th><th>Kullanıcı</th><th>Beğeni</th><th>Yorum</th><th>Paylaşım</th><th>Tarih</th><th>Ayarlar</th><th>İşlem</th></tr></thead>
-          <tbody id="adm-photos-tbody"></tbody>
-        </table>
-      </div>
-    </div>`;
-  const tbody = $('#adm-photos-tbody');
-  tbody.innerHTML = photos.map(p => `<tr>
-    <td>#${p.id}</td>
-    <td><img src="${escHtml(p.url)}" style="width:64px;height:48px;object-fit:cover;border-radius:6px" /></td>
-    <td>${escHtml(p.caption||'')}</td>
-    <td>${escHtml(p.username||'')}</td>
-    <td>${p.like_count||0}</td>
-    <td>${p.comment_count||0}</td>
-    <td>${p.share_count||0}</td>
-    <td>${formatDate(p.created_at)}</td>
-    <td>Beğeni:${p.show_likes?'<span style="color:var(--green)">E</span>':'<span style="color:var(--text3)">H</span>'} Yorum:${p.allow_comments?'<span style="color:var(--green)">E</span>':'<span style="color:var(--text3)">H</span>'} Paylaş:${p.allow_shares?'<span style="color:var(--green)">E</span>':'<span style="color:var(--text3)">H</span>'}</td>
-    <td>
-      <button class="btn btn-outline btn-xs adm-photo-view" data-id="${p.id}">Görüntüle</button>
-      <button class="btn btn-blue btn-xs adm-photo-edit" data-id="${p.id}">Düzenle</button>
-      <button class="btn btn-danger btn-xs adm-photo-delete" data-id="${p.id}">Sil</button>
-    </td>
-  </tr>`).join('');
-
-  $('#adm-photos-refresh')?.addEventListener('click', () => loadSection('photos'));
-
-  tbody.querySelectorAll('.adm-photo-view').forEach(b => b.addEventListener('click', async () => {
-    const id = b.dataset.id;
-    const p = photos.find(x => String(x.id) === String(id));
-    if (!p) return toast('Fotoğraf bulunamadı','error');
-    showModal('Fotoğraf İncele', `<div style="display:flex;gap:12px"><div style="flex:1"><img src="${escHtml(p.url)}" style="max-width:100%;border-radius:8px" /></div><div style="width:320px"><h3>${escHtml(p.caption||'')}</h3><p>Kullanıcı: ${escHtml(p.username||'')}</p><p>ID: ${p.id}</p><p>Tarih: ${formatDate(p.created_at)}</p></div></div>`);
-  }));
-
-  tbody.querySelectorAll('.adm-photo-edit').forEach(b => b.addEventListener('click', async () => {
-    const id = b.dataset.id; const p = photos.find(x => String(x.id) === String(id));
-    if (!p) return toast('Fotoğraf bulunamadı','error');
-    showModal('Fotoğraf Düzenle', `
-      <div class="form-group"><label>Fotoğraf URL</label><input id="adm-photo-url" value="${escHtml(p.url)}" /></div>
-      <div class="form-group"><label>Açıklama</label><textarea id="adm-photo-caption">${escHtml(p.caption||'')}</textarea></div>
-      <div class="form-row">
-        <div class="form-group"><label>Beğeni Sayısı</label><input id="adm-photo-likes" type="number" value="${p.like_count||0}" /></div>
-        <div class="form-group"><label>Yorum Sayısı</label><input id="adm-photo-comments" type="number" value="${p.comment_count||0}" /></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Paylaşım Sayısı</label><input id="adm-photo-shares" type="number" value="${p.share_count||0}" /></div>
-        <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="adm-photo-showlikes" ${p.show_likes? 'checked': ''} /> Beğeni göster</label></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="adm-photo-allowcomments" ${p.allow_comments? 'checked': ''} /> Yorumlara izin ver</label></div>
-        <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="adm-photo-allowshares" ${p.allow_shares? 'checked': ''} /> Paylaşılabilir</label></div>
-      </div>
-      <div style="display:flex;gap:8px"><button class="btn btn-primary" id="adm-photo-save">Kaydet</button><button class="btn btn-outline" id="adm-photo-cancel">İptal</button></div>
-    `);
-    $('#adm-photo-cancel').addEventListener('click', hideModal);
-    $('#adm-photo-save').addEventListener('click', async () => {
-      const url = $('#adm-photo-url').value.trim();
-      const caption = $('#adm-photo-caption').value.trim();
-      const show_likes = !!$('#adm-photo-showlikes').checked;
-      const allow_comments = !!$('#adm-photo-allowcomments').checked;
-      const allow_shares = !!$('#adm-photo-allowshares').checked;
-      try {
-        const updated = await adminApi(`/photos/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ url, caption, show_likes, allow_comments, allow_shares, like_count: parseInt($('#adm-photo-likes').value)||0, comment_count: parseInt($('#adm-photo-comments').value)||0, share_count: parseInt($('#adm-photo-shares').value)||0 }) });
-        hideModal(); toast('Güncellendi'); loadSection('photos');
-      } catch (e) { $('#modal-body #edit-photo-error')?.textContent = e.message || 'Hata'; }
-    });
-  }));
-
-  tbody.querySelectorAll('.adm-photo-delete').forEach(b => b.addEventListener('click', async () => {
-    if (!confirm('Bu fotoğrafı kalıcı olarak silmek istediğinize emin misiniz?')) return;
-    try { await adminApi(`/photos/${encodeURIComponent(b.dataset.id)}`, { method: 'DELETE' }); toast('Silindi'); loadSection('photos'); } catch (e) { toast(e.message || 'Hata', 'error'); }
-  }));
-}
-
 function showEditUserModal(user) {
   showModal('Kullanıcı Düzenle — ' + user.username, `
     <div class="form-row">
@@ -401,16 +290,6 @@ function showEditUserModal(user) {
       <div class="form-group"><label>Ünvan</label><input id="eu-title" value="${escHtml(user.title||'')}" placeholder="Örn: Yazılımcı" /></div>
       <div class="form-group"><label>İsim Rengi</label><input id="eu-color" type="color" value="${user.name_color||'#f5f5f5'}" style="height:38px;cursor:pointer" /></div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label>Rozet Adı</label><input id="eu-badge-name" value="${escHtml(user.badge_name||'')}" placeholder="Örn: Katılımcı" /></div>
-      <div class="form-group"><label>Rozet İkonu</label><input id="eu-badge-icon" value="${escHtml(user.badge_icon||'fas fa-award')}" placeholder="fas fa-award veya ⭐" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Rozet Rengi</label><input id="eu-badge-color" type="color" value="${user.badge_color||'#6b7280'}" style="height:38px;cursor:pointer" /></div>
-      <div class="form-group" style="display:flex;align-items:flex-end;">
-        <div style="font-size:11px;color:var(--text3);line-height:1.4">Bu rozet admin tarafından kullanıcıya atanmış olarak gösterilir.</div>
-      </div>
-    </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
       <label class="checkbox-label"><input type="checkbox" id="eu-vip" ${user.is_vip?'checked':''} /> VIP</label>
       <label class="checkbox-label"><input type="checkbox" id="eu-plus" ${user.is_plus?'checked':''} /> Plus</label>
@@ -424,7 +303,7 @@ function showEditUserModal(user) {
     const body = { username: $('#eu-username').value.trim(), email: $('#eu-email').value.trim(),
       is_vip: $('#eu-vip').checked, is_plus: $('#eu-plus').checked,
       name_color: $('#eu-color').value, level_id: parseInt($('#eu-level').value)||1,
-      title: $('#eu-title').value.trim(), badge_name: $('#eu-badge-name').value.trim(), badge_icon: $('#eu-badge-icon').value.trim(), badge_color: $('#eu-badge-color').value };
+      title: $('#eu-title').value.trim() };
     const pw = $('#eu-pw').value; if (pw) body.password = pw;
     try {
       await adminApi('/user/'+user.id, {method:'PUT', body:JSON.stringify(body)});
@@ -521,7 +400,7 @@ async function renderForums(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Başlık</th><th>Yazar</th><th>Görüntülenme</th><th>Beğeni</th><th>Yorum</th><th>Paylaşım</th><th>Tarih</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Yazar</th><th>Görüntülenme</th><th>Beğeni</th><th>Tarih</th><th>İşlem</th></tr></thead>
           <tbody id="forums-tbody"></tbody>
         </table>
       </div>
@@ -535,8 +414,6 @@ async function renderForums(main) {
       <td><span style="color:var(--blue2)">${escHtml(f.username||'—')}</span></td>
       <td style="font-size:12px;color:var(--text2)">${f.views||0} <i class="fas fa-eye" style="font-size:10px"></i></td>
       <td style="font-size:12px;color:var(--text2)">${f.like_count||0} <i class="fas fa-heart" style="font-size:10px;color:#ef4444"></i></td>
-      <td style="font-size:12px;color:var(--text2)">${f.comment_count||0} <i class="fas fa-comment" style="font-size:10px;color:#7c87f5"></i></td>
-      <td style="font-size:12px;color:var(--text2)">${f.share_count||0} <i class="fas fa-share-alt" style="font-size:10px;color:#22c55e"></i></td>
       <td style="color:var(--text3);font-size:12px">${timeAgo(f.created_at)}</td>
       <td>
         <div style="display:flex;gap:4px">
@@ -553,11 +430,6 @@ async function renderForums(main) {
           <div class="form-group"><label>Başlık</label><input id="ef-title" value="${escHtml(f.title)}" /></div>
           <div class="form-row">
             <div class="form-group"><label>Görüntülenme</label><input id="ef-views" type="number" value="${f.views||0}" /></div>
-            <div class="form-group"><label>Beğeni Sayısı</label><input id="ef-likes" type="number" value="${f.like_count||0}" /></div>
-          </div>
-          <div class="form-row">
-            <div class="form-group"><label>Yorum Sayısı</label><input id="ef-comments" type="number" value="${f.comment_count||0}" /></div>
-            <div class="form-group"><label>Paylaşım Sayısı</label><input id="ef-shares" type="number" value="${f.share_count||0}" /></div>
           </div>
           <div id="ef-err" class="form-error"></div>
           <button class="btn btn-primary" id="ef-save" style="width:100%;justify-content:center;margin-top:12px"><i class="fas fa-save"></i> Kaydet</button>
@@ -568,10 +440,7 @@ async function renderForums(main) {
           try {
             const body = {
               title: $('#ef-title').value.trim() || f.title,
-              views: parseInt($('#ef-views').value) || 0,
-              like_count: parseInt($('#ef-likes').value) || 0,
-              comment_count: parseInt($('#ef-comments').value) || 0,
-              share_count: parseInt($('#ef-shares').value) || 0
+              views: parseInt($('#ef-views').value) || 0
             };
             await adminApi('/forum/'+f.id, { method:'PUT', body:JSON.stringify(body) });
             toast('Konu güncellendi');
@@ -626,18 +495,8 @@ async function renderBooks(main) {
       <td><span style="color:var(--blue2)">${escHtml(b.username||'—')}</span></td>
       <td style="color:var(--text3);font-size:12px">${b.page_count||0}</td>
       <td style="color:var(--text3);font-size:12px">${timeAgo(b.created_at)}</td>
-      <td style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-outline btn-xs view-book-btn" data-slug="${escHtml(b.slug)}"><i class="fas fa-book-open"></i> Oku</button>
-        <button class="btn btn-danger btn-xs del-book-btn" data-id="${b.id}"><i class="fas fa-trash"></i> Sil</button>
-      </td>
+      <td><button class="btn btn-danger btn-xs del-book-btn" data-id="${b.id}"><i class="fas fa-trash"></i> Sil</button></td>
     </tr>`).join('');
-    tbody.querySelectorAll('.view-book-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const slug = btn.dataset.slug;
-        if (slug) window.open('/kitap/' + encodeURIComponent(slug), '_blank');
-      });
-    });
-
     tbody.querySelectorAll('.del-book-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('Bu kitabı silmek istediğine emin misin?')) return;
@@ -695,6 +554,211 @@ async function renderGroups(main) {
   $('#group-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderTable(groups.filter(g => g.name.toLowerCase().includes(q) || (g.owner_name||'').toLowerCase().includes(q)));
+  });
+}
+
+// ===== VIDEOS =====
+async function renderVideos(main) {
+  let videos = [];
+  try { videos = await adminApi('/videos'); } catch (e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-video"></i></div> Videolar</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-video"></i></div> Videolar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${videos.length})</span></div>
+      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="video-search" placeholder="Başlık veya kullanıcı ara..." style="min-width:240px" /></div>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Kullanıcı</th><th>Yorum</th><th>Beğeni</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <tbody id="videos-tbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  const renderTable = list => {
+    const tbody = $('#videos-tbody'); if (!tbody) return;
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">Video bulunamadı</td></tr>'; return; }
+    tbody.innerHTML = list.map(v => `<tr>
+      <td style="color:var(--text3);font-size:12px">#${v.id}</td>
+      <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(v.title)}">${escHtml(v.title)}</td>
+      <td><span style="color:var(--blue2)">${escHtml(v.username||'Silinmiş')}</span></td>
+      <td style="color:var(--text3);font-size:12px">${v.allow_comments?'<span class="badge badge-green">Açık</span>':'<span class="badge badge-red">Kapalı</span>'}</td>
+      <td style="color:var(--text3);font-size:12px">${v.like_count||0}</td>
+      <td style="color:var(--text3);font-size:12px">${v.active?'<span class="badge badge-green">Aktif</span>':'<span class="badge badge-red">Pasif</span>'}</td>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-xs edit-video-btn" data-id="${v.id}">Düzenle</button>
+          <button class="btn btn-danger btn-xs delete-video-btn" data-id="${v.id}">Sil</button>
+        </div>
+      </td>
+    </tr>`).join('');
+
+    tbody.querySelectorAll('.edit-video-btn').forEach(btn => btn.addEventListener('click', async () => {
+      const video = videos.find(x => x.id == btn.dataset.id);
+      if (video) showVideoEditModal(video);
+    }));
+    tbody.querySelectorAll('.delete-video-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Bu videoyu silmek istediğine emin misin?')) return;
+      try { await adminApi('/video/' + btn.dataset.id, { method:'DELETE' }); toast('Video silindi'); videos = videos.filter(v => v.id != btn.dataset.id); renderTable(videos); }
+      catch (e) { toast(e.message,'error'); }
+    }));
+  };
+
+  renderTable(videos);
+  $('#video-search').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    renderTable(videos.filter(v => v.title.toLowerCase().includes(q) || (v.username||'').toLowerCase().includes(q)));
+  });
+}
+
+function showVideoEditModal(video) {
+  showModal(`Video Düzenle — ${escHtml(video.title)}`, `
+    <div class="form-group"><label>Başlık</label><input id="ve-title" value="${escHtml(video.title)}" /></div>
+    <div class="form-group"><label>Açıklama</label><textarea id="ve-description" rows="5">${escHtml(video.description||'')}</textarea></div>
+    <div class="form-group"><label>Video URL</label><input id="ve-video-url" value="${escHtml(video.video_url||'')}" /></div>
+    <div class="form-group"><label>Yeni Video Dosyası</label><input type="file" id="ve-video-file" accept="video/*" /></div>
+    <div class="form-group"><label>Banner URL</label><input id="ve-banner-url" value="${escHtml(video.banner_image||'')}" /></div>
+    <div class="form-group"><label>Yorumlara izin</label><label class="checkbox-label"><input type="checkbox" id="ve-allow-comments" ${video.allow_comments? 'checked' : ''} /> Açık</label></div>
+    <div class="form-group"><label>Aktif</label><label class="checkbox-label"><input type="checkbox" id="ve-active" ${video.active? 'checked' : ''} /> Aktif</label></div>
+    <div class="form-group"><label>Reals</label><label class="checkbox-label"><input type="checkbox" id="ve-is-reals" ${video.is_reals? 'checked' : ''} /> Reals olarak işaretle</label></div>
+    <button class="btn btn-primary" id="ve-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+    <div id="ve-msg" class="form-error mt-4"></div>
+  `);
+
+  document.getElementById('ve-save').addEventListener('click', async () => {
+    const btn = document.getElementById('ve-save'); btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Kaydediliyor...';
+    const file = document.getElementById('ve-video-file').files[0];
+    let videoUrl = document.getElementById('ve-video-url').value.trim();
+    try {
+      if (file) {
+        const fd = new FormData(); fd.append('file', file);
+        const uploadRes = await fetch('/api/admin/upload-video', { method:'POST', headers:{'X-Admin-Token':adminToken}, body: fd });
+        const data = await uploadRes.json(); if (!uploadRes.ok) throw new Error(data.error||'Yükleme hatası');
+        videoUrl = data.url;
+      }
+      const payload = {
+        title: document.getElementById('ve-title').value.trim(),
+        description: document.getElementById('ve-description').value.trim(),
+        video_url: videoUrl,
+        banner_image: document.getElementById('ve-banner-url').value.trim(),
+        allow_comments: document.getElementById('ve-allow-comments').checked,
+        active: document.getElementById('ve-active').checked,
+        is_reals: document.getElementById('ve-is-reals').checked
+      };
+      await adminApi('/video/' + video.id, { method:'PUT', body: JSON.stringify(payload) });
+      toast('Video güncellendi'); hideModal(); loadSection('videos');
+    } catch (e) { document.getElementById('ve-msg').textContent = e.message; }
+    finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> Kaydet'; }
+  });
+}
+
+// ===== VIDEO ADS =====
+async function renderVideoAds(main) {
+  let ads = [];
+  try { ads = await adminApi('/video-ads'); } catch (e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> Video Reklamları</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="adm-section-header" style="align-items:center">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> Video Reklamları <span style="font-size:13px;font-weight:400;color:var(--text2)">(${ads.length})</span></div>
+      <button class="btn btn-primary btn-sm" id="add-video-ad-btn"><i class="fas fa-plus"></i> Yeni Reklam</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Site</th><th>Öncelik</th><th>Zaman</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <tbody id="video-ads-tbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  const renderTable = list => {
+    const tbody = $('#video-ads-tbody'); if (!tbody) return;
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">Reklam bulunamadı</td></tr>'; return; }
+    tbody.innerHTML = list.map(ad => `<tr>
+      <td style="color:var(--text3);font-size:12px">#${ad.id}</td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(ad.title)}">${escHtml(ad.title)}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(ad.site_url)}"><a href="${escHtml(ad.site_url)}" target="_blank" rel="noopener noreferrer">${escHtml(ad.site_url)}</a></td>
+      <td style="color:var(--text3);font-size:12px">${ad.priority || 0}</td>
+      <td style="color:var(--text3);font-size:12px">${ad.display_after_seconds || 0}s</td>
+      <td style="color:var(--text3);font-size:12px">${ad.active?'<span class="badge badge-green">Aktif</span>':'<span class="badge badge-red">Pasif</span>'}</td>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-xs edit-ad-btn" data-id="${ad.id}">Düzenle</button>
+          <button class="btn btn-danger btn-xs delete-ad-btn" data-id="${ad.id}">Sil</button>
+        </div>
+      </td>
+    </tr>`).join('');
+    tbody.querySelectorAll('.edit-ad-btn').forEach(btn => btn.addEventListener('click', () => {
+      const ad = ads.find(x => x.id == btn.dataset.id);
+      if (ad) showVideoAdModal(ad);
+    }));
+    tbody.querySelectorAll('.delete-ad-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (!confirm('Bu reklamı silmek istediğine emin misin?')) return;
+      try { await adminApi('/video-ads/' + btn.dataset.id, { method:'DELETE' }); toast('Reklam silindi'); ads = ads.filter(x => x.id != btn.dataset.id); renderTable(ads); }
+      catch (e) { toast(e.message,'error'); }
+    }));
+  };
+
+  renderTable(ads);
+  $('#add-video-ad-btn')?.addEventListener('click', () => showVideoAdModal());
+}
+
+function showVideoAdModal(ad = {}) {
+  const isEdit = !!ad.id;
+  showModal(`${isEdit ? 'Reklam Düzenle' : 'Yeni Reklam'}`, `
+    <div class="form-group"><label>Başlık</label><input id="va-title" value="${escHtml(ad.title||'')}" /></div>
+    <div class="form-group"><label>Reklam Videosu</label><input type="file" id="va-video-file" accept="video/*" /></div>
+    <div class="form-group"><label>Site Linki</label><input id="va-site-url" value="${escHtml(ad.site_url||'')}" placeholder="https://ornek.com" /></div>
+    <div class="form-group"><label>Konum</label>
+      <select id="va-position">
+        <option value="bottom-right" ${ad.position==='bottom-right'?'selected':''}>Sağ Alt</option>
+        <option value="bottom-left" ${ad.position==='bottom-left'?'selected':''}>Sol Alt</option>
+        <option value="top-right" ${ad.position==='top-right'?'selected':''}>Sağ Üst</option>
+        <option value="top-left" ${ad.position==='top-left'?'selected':''}>Sol Üst</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Sıralama Önceliği</label><input id="va-priority" type="number" value="${escHtml(ad.priority||0)}" /></div>
+    <div class="form-group"><label>Gösterim Süresi (sn)</label><input id="va-display-after" type="number" min="0" value="${escHtml(ad.display_after_seconds||0)}" /></div>
+    <div class="form-group"><label>Aktif</label><label class="checkbox-label"><input type="checkbox" id="va-active" ${ad.active? 'checked' : ''} /> Aktif</label></div>
+    <button class="btn btn-primary" id="va-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+    <div id="va-msg" class="form-error mt-4"></div>
+  `);
+
+  document.getElementById('va-save').addEventListener('click', async () => {
+    const btn = document.getElementById('va-save'); btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Kaydediliyor...';
+    try {
+      const file = document.getElementById('va-video-file').files[0];
+      let videoUrl = ad.video_url || '';
+      if (file) {
+        const fd = new FormData(); fd.append('file', file);
+        const uploadRes = await fetch('/api/admin/upload-video', { method:'POST', headers:{'X-Admin-Token':adminToken}, body: fd });
+        const data = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(data.error || 'Reklam videosu yüklenemedi');
+        videoUrl = data.url;
+      }
+      const payload = {
+        title: document.getElementById('va-title').value.trim(),
+        video_url: videoUrl,
+        site_url: document.getElementById('va-site-url').value.trim(),
+        position: document.getElementById('va-position').value,
+        priority: parseInt(document.getElementById('va-priority').value, 10) || 0,
+        display_after_seconds: parseInt(document.getElementById('va-display-after').value, 10) || 0,
+        active: document.getElementById('va-active').checked
+      };
+      if (!payload.title || !payload.video_url) throw new Error('Başlık ve reklam videosu gereklidir');
+      if (isEdit) {
+        await adminApi('/video-ads/' + ad.id, { method:'PUT', body: JSON.stringify(payload) });
+      } else {
+        await adminApi('/video-ads', { method:'POST', body: JSON.stringify(payload) });
+      }
+      toast('Reklam kaydedildi'); hideModal(); loadSection('video-ads');
+    } catch (e) { document.getElementById('va-msg').textContent = e.message; }
+    finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> Kaydet'; }
   });
 }
 
@@ -787,70 +851,6 @@ async function renderArtists(main) {
       (a.artist_display_name||'').toLowerCase().includes(q) ||
       (a.artist_genre||'').toLowerCase().includes(q)
     ));
-  });
-}
-
-// ===== BADGES (ROZETLER) =====
-async function renderBadges(main) {
-  let badges = [];
-  try { badges = await adminApi('/badges'); } catch (e) { /* ignore */ }
-  let users = [];
-  try { users = await adminApi('/users'); } catch (e) { users = []; }
-
-  main.innerHTML = `
-    <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-award"></i></div> Rozetler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${badges.length})</span></div>
-      <div><button class="btn btn-primary" id="adm-badges-refresh">Yenile</button></div>
-    </div>
-    <div class="card" style="margin-bottom:16px;padding:16px">
-      <div style="display:flex;gap:12px;align-items:center">
-        <input id="new-badge-name" placeholder="Rozet adı (ör: Katılımcı)" />
-        <input id="new-badge-icon" placeholder="ikon (fas fa-award) veya URL" />
-        <input id="new-badge-color" type="color" value="#6b7280" style="height:38px" />
-        <button class="btn btn-primary" id="create-badge">Oluştur</button>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-header"><span>Mevcut Rozetler</span></div>
-      <div class="card-body" id="badges-list">
-        ${badges.length ? badges.map(b => `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border)"><div><strong style="margin-right:8px;color:${escHtml(b.color||'#6b7280')}">${escHtml(b.name)}</strong> ${b.icon ? `<span style="margin-left:6px">${escHtml(b.icon)}</span>` : ''}</div><div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm assign-badge" data-id="${escHtml(b.id)}">Kullanıcıya Ver</button><button class="btn btn-danger btn-sm delete-badge" data-id="${escHtml(b.id)}">Sil</button></div></div>`).join('') : '<div style="padding:12px;color:var(--text-muted)">Rozet yok</div>'}
-      </div>
-    </div>
-    <div class="card" style="margin-top:16px">
-      <div class="card-header"><span>Kullanıcılara Rozet Ver</span></div>
-      <div class="card-body">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <select id="badge-select">${badges.map(b=>`<option value="${escHtml(b.id)}">${escHtml(b.name)}</option>`).join('')}</select>
-          <select id="user-select">${users.map(u=>`<option value="${u.id}">${escHtml(u.username)}</option>`).join('')}</select>
-          <button class="btn btn-primary" id="assign-badge-btn">Ver</button>
-        </div>
-        <div id="badge-assign-msg" style="color:var(--text-muted)"></div>
-      </div>
-    </div>
-  `;
-
-  $('#adm-badges-refresh')?.addEventListener('click', () => loadSection('badges'));
-  $('#create-badge')?.addEventListener('click', async () => {
-    const name = $('#new-badge-name').value.trim(); const icon = $('#new-badge-icon').value.trim(); const color = $('#new-badge-color').value;
-    if (!name) return toast('Rozet adı gerekli','error');
-    try { await adminApi('/badges', { method: 'POST', body: JSON.stringify({ name, icon, color }) }); toast('Rozet oluşturuldu'); loadSection('badges'); } catch (e) { toast(e.message,'error'); }
-  });
-  $('#badges-list')?.addEventListener('click', async e => {
-    const del = e.target.closest('.delete-badge');
-    const assign = e.target.closest('.assign-badge');
-    if (del) { if (!confirm('Rozeti silmek istediğinize emin misiniz?')) return; try { await adminApi('/badges/' + del.dataset.id, { method: 'DELETE' }); toast('Silindi'); loadSection('badges'); } catch (e) { toast(e.message,'error'); } }
-    if (assign) {
-      const bId = assign.dataset.id; const sel = $('#user-select'); if (!sel) return; const uid = sel.value; try {
-        const b = badges.find(x=>String(x.id)===String(bId)); if (!b) return toast('Rozet bulunamadı','error');
-        await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) });
-        toast('Rozet verildi');
-      } catch (e) { toast(e.message,'error'); }
-    }
-  });
-
-  $('#assign-badge-btn')?.addEventListener('click', async () => {
-    const bid = $('#badge-select').value; const uid = $('#user-select').value; if (!bid || !uid) return;
-    try { const b = badges.find(x=>String(x.id)===String(bid)); await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) }); $('#badge-assign-msg').textContent = 'Rozet verildi'; } catch (e) { $('#badge-assign-msg').textContent = e.message; }
   });
 }
 
@@ -1775,7 +1775,7 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Genel</span></div>
         <div class="card-body">
-          <div class="form-group"><label>Site Adı</label><input id="s-sitename" value="${escHtml(settings['site_name']||'TeaTube')}" /></div>
+          <div class="form-group"><label>Site Adı</label><input id="s-sitename" value="${escHtml(settings['site_name']||'Demlik')}" /></div>
           <div class="form-group">
             <label>Site Logosu</label>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
@@ -1826,6 +1826,26 @@ async function renderSettings(main) {
           <div class="form-group"><textarea id="s-kvkk" rows="5">${escHtml(settings['kvkk_text']||'')}</textarea></div>
           <button class="btn btn-primary" id="s-kvkk-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-kvkk-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span><i class="fas fa-video" style="color:var(--red2);margin-right:8px"></i>Video Yayınlama</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Yükleme başarı mesajı</label><input id="s-video-success-text" value="${escHtml(settings['video_upload_success_text']||'YÜKLENDİ')}" /></div>
+          <div class="form-group"><label>Başarı popup süresi (sn)</label><input id="s-video-success-duration" type="number" min="1" max="10" value="${escHtml(settings['video_upload_success_duration']||'3')}" /></div>
+          <div class="form-group"><label>Varsayılan açıklama</label><textarea id="s-video-default-desc" rows="3">${escHtml(settings['video_default_description']||'')}</textarea></div>
+          <div class="form-group"><label>Boş açıklama metni</label><textarea id="s-video-empty-desc" rows="3">${escHtml(settings['video_empty_description_text']||'Bu videoya bir açıklama eklenmemiş.')}</textarea></div>
+          <button class="btn btn-primary" id="s-video-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+          <div id="s-video-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span><i class="fas fa-bolt" style="color:var(--red2);margin-right:8px"></i>Reals</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Reals ilk hatırlatma metni (kısa)</label><textarea id="s-reals-reminder" rows="3">${escHtml(settings['reals_reminder']||'')}</textarea></div>
+          <div class="form-group"><label>Hatırlatma yalnızca ilk ziyaret için gösterilsin</label><div style="font-size:12px;color:var(--text2)">Kullanıcı Reals sayfasına ilk girdiğinde bir kez gösterilecek.</div></div>
+          <button class="btn btn-primary" id="s-reals-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
+          <div id="s-reals-msg" class="form-error mt-4"></div>
         </div>
       </div>
       <div class="card">
@@ -1902,4 +1922,27 @@ async function renderSettings(main) {
   document.getElementById('s-music-other-save').addEventListener('click', async () => {
     await saveSetting('music_other_rules', document.getElementById('s-music-other').value.trim(), document.getElementById('s-music-msg'));
   });
+  document.getElementById('s-video-save').addEventListener('click', async () => {
+    const msg = document.getElementById('s-video-msg');
+    try {
+      await adminApi('/video-settings', { method:'POST', body: JSON.stringify({
+        uploadSuccessText: document.getElementById('s-video-success-text').value.trim(),
+        uploadSuccessDuration: document.getElementById('s-video-success-duration').value.trim(),
+        defaultDescription: document.getElementById('s-video-default-desc').value.trim(),
+        emptyDescriptionText: document.getElementById('s-video-empty-desc').value.trim()
+      }) });
+      toast('Video ayarları kaydedildi');
+      msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
+    } catch (e) { msg.textContent=e.message; }
+  });
+
+  // Reals reminder save
+  document.getElementById('s-reals-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-reals-msg');
+    try {
+      await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg);
+      msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
+    } catch (e) { msg.textContent=e.message; }
+  });
 }
+
