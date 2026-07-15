@@ -36,6 +36,9 @@ function updatePageMeta(title, description, imageUrl) {
   ld.textContent = '';
 }
 
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
+
 function toast(msg, type = 'success', duration = 3500) {
   const c = $('#toast-container');
   const t = document.createElement('div');
@@ -112,97 +115,6 @@ function avatarImg(u, cls = 'avatar-sm') {
   return `<div class="${cls} avatar-placeholder" style="font-size:0.75em;font-weight:700;color:var(--text-muted)">?</div>`;
 }
 
-// Initialize ad slots (left/center/right), fetch ads and render periodically
-async function initAdSlots() {
-  if (!document.body) return;
-  if (document.getElementById('site-ad-slots')) return;
-  const wrap = document.createElement('div'); wrap.id = 'site-ad-slots'; wrap.className = 'site-ad-slots';
-  wrap.innerHTML = `
-    <div class="ad-slot ad-left" data-pos="left"></div>
-    <div class="ad-slot ad-center" data-pos="center"></div>
-    <div class="ad-slot ad-right" data-pos="right"></div>
-  `;
-  document.body.appendChild(wrap);
-
-  let lastAds = [];
-  let cfg = { ad_rotation_interval: 30, ad_pool_mode: 'mixed' };
-  let rotationIndex = 0;
-  const displayedThisRound = new Set();
-
-  function renderAdHTML(ad) {
-    const url = ad.link_url ? escHtml(ad.link_url) : '#';
-    const img = ad.image_url ? `<img src="${escHtml(ad.image_url)}" alt="${escHtml(ad.title||'Reklam')}" />` : `<div class="ad-placeholder">${escHtml(ad.title||'Reklam')}</div>`;
-    return `<a href="${url}" class="ad-link" target="_blank" rel="noopener noreferrer" data-ad-id="${ad.id}">${img}</a>`;
-  }
-
-  async function trackImpression(adId, el) {
-    try { await fetch('/api/ads/' + adId + '/view', { method: 'POST' }); } catch {}
-    const a = el.querySelector('a[data-ad-id]');
-    if (a) a.addEventListener('click', async (ev) => { try { await fetch('/api/ads/' + adId + '/click', { method: 'POST' }); } catch {} });
-  }
-
-  async function loadAndRender() {
-    try {
-      const res = await fetch('/api/ads/public');
-      const data = await res.json();
-      lastAds = data.ads || [];
-      cfg = data.config || cfg;
-
-      const leftEl = wrap.querySelector('.ad-left');
-      const centerEl = wrap.querySelector('.ad-center');
-      const rightEl = wrap.querySelector('.ad-right');
-      leftEl.innerHTML = ''; centerEl.innerHTML = ''; rightEl.innerHTML = '';
-
-      const mode = (cfg.ad_pool_mode || 'mixed').toLowerCase();
-
-      if (!lastAds.length) return;
-
-      if (mode === 'manual' && cfg.ad_manual_ad_id) {
-        const sel = lastAds.find(a => parseInt(a.id,10) === parseInt(cfg.ad_manual_ad_id,10));
-        if (sel) { leftEl.innerHTML = renderAdHTML(sel); centerEl.innerHTML = renderAdHTML(sel); rightEl.innerHTML = renderAdHTML(sel); trackImpression(sel.id, leftEl); trackImpression(sel.id, centerEl); trackImpression(sel.id, rightEl); }
-        return;
-      }
-
-      if (mode === 'single') {
-        // rotate a single prominent ad every interval (same ad in all slots)
-        const ad = lastAds[rotationIndex % lastAds.length];
-        leftEl.innerHTML = renderAdHTML(ad); centerEl.innerHTML = renderAdHTML(ad); rightEl.innerHTML = renderAdHTML(ad);
-        trackImpression(ad.id, leftEl); trackImpression(ad.id, centerEl); trackImpression(ad.id, rightEl);
-        rotationIndex++;
-        return;
-      }
-
-      // mixed mode: show up to 3 different ads; rotate their order each interval
-      const count = Math.min(lastAds.length, Math.max(1, parseInt(cfg.ad_pool_count || 3, 10)));
-      const selection = [];
-      for (let i=0;i<count;i++) selection.push(lastAds[(rotationIndex + i) % lastAds.length]);
-      rotationIndex++;
-      // assign selection to slots
-      leftEl.innerHTML = renderAdHTML(selection[0] || lastAds[0]);
-      centerEl.innerHTML = renderAdHTML(selection[1] || selection[0] || lastAds[0]);
-      rightEl.innerHTML = renderAdHTML(selection[2] || selection[0] || lastAds[0]);
-      // track impressions
-      try { trackImpression((selection[0]||lastAds[0]).id, leftEl); } catch {}
-      try { trackImpression((selection[1]||selection[0]||lastAds[0]).id, centerEl); } catch {}
-      try { trackImpression((selection[2]||selection[0]||lastAds[0]).id, rightEl); } catch {}
-    } catch (e) { console.warn('ad load failed', e); }
-  }
-
-  await loadAndRender();
-  const intervalSec = Math.max(5, parseInt(cfg.ad_rotation_interval || 30, 10));
-  setInterval(loadAndRender, intervalSec * 1000);
-}
-
-function hasAdminPermission(permission) {
-  if (!currentUser || !currentUser.is_admin) return false;
-  if (currentUser.isSuperAdmin) return true;
-  return !!(currentUser.adminPermissions && currentUser.adminPermissions[permission]);
-}
-
-function canModerateContent() {
-  return hasAdminPermission('can_edit_content') || hasAdminPermission('can_delete_content');
-}
-
 // ===== IÇERIK RENDER (hashtag + mention) =====
 function renderContent(text) {
   if (!text) return '';
@@ -273,8 +185,6 @@ function renderRoute(fullPath) {
   if (path === '/artist-basvuru') return renderArtistApply(app);
   if (path === '/artist-panel') return renderArtistPanel(app);
   if (path === '/sarki-yukle') return renderShareSong(app);
-  if (path === '/reklam') return renderAdLanding(app);
-  if (path.startsWith('/reklam/panel/')) return renderAdPanel(app, segs.slice(2).join('/'));
   renderNotFound(app);
 }
 
@@ -332,17 +242,20 @@ async function renderRealsFeed(app) {
       <div id="reals-list" class="reals-list"></div>
     </div>`;
 
+  // fetch reals
   let reals = [];
   try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
   const listEl = document.getElementById('reals-list');
   if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
 
+  // page refresh resets order; same tab navigation preserves it
   const currentIds = reals.map(r => r.id);
   if (!Array.isArray(realsFeedOrder) || realsFeedOrder.length !== currentIds.length || currentIds.some(id => !realsFeedOrder.includes(id))) {
     realsFeedOrder = shuffleArray(currentIds);
   }
   const orderedReals = realsFeedOrder.map(id => reals.find(r => r.id === id)).filter(Boolean);
 
+  // show reminder once per user (server provides text)
   try {
     const rs = await fetch('/api/reals-settings');
     const data = await rs.json();
@@ -356,7 +269,6 @@ async function renderRealsFeed(app) {
   let watchedIds = new Set();
   let idx = 0;
   let items = [];
-
   function setRealsVideoSource(videoEl, src) {
     if (!src) {
       videoEl.removeAttribute('src');
@@ -373,34 +285,30 @@ async function renderRealsFeed(app) {
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}">
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
         <div class="reals-meta">
-            <div class="reals-user" data-username="${escHtml(r.username)}">${avatarImg(r)} ${userDisplayName(r)}</div>
-          <div class="reals-desc">${escHtml(r.description || '')}</div>
+          <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
+          <div class="reals-desc">${escHtml(r.description||'')}</div>
           <div class="reals-actions">
-            <button class="btn btn-ghost like-btn"><i class="fas fa-heart"></i> <span class="count">${r.like_count || 0}</span></button>
-            <button class="btn btn-ghost comment-btn"><i class="fas fa-comment"></i> <span class="count">${r.comment_count || 0}</span></button>
-            <button class="btn btn-ghost resend-btn"><i class="fas fa-retweet"></i></button>
-            <button class="btn btn-ghost share-btn"><i class="fas fa-share-alt"></i></button>
+            <button class="btn btn-ghost like-btn"> <i class="fas fa-heart"></i> <span class="count">${r.like_count||0}</span></button>
+            <button class="btn btn-ghost comment-btn"> <i class="fas fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
+            <button class="btn btn-ghost resend-btn"> <i class="fas fa-retweet"></i></button>
+            <button class="btn btn-ghost share-btn"> <i class="fas fa-share-alt"></i></button>
             <a href="/reals/${escHtml(r.slug)}" data-link class="btn btn-outline btn-sm view-detail-btn"><i class="fas fa-external-link-alt"></i> Detay</a>
           </div>
         </div>
       </div>`).join('');
     items = Array.from(document.querySelectorAll('.reals-item'));
-    listEl.style.position = 'relative';
-    listEl.style.height = '100dvh';
-    listEl.style.overflow = 'hidden';
+    items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
+    listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
     items.forEach(it => {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
-      it.addEventListener('click', () => {
-        if (!vid.paused) vid.pause();
-        else vid.play().catch(() => { vid.muted = true; vid.play().catch(() => {}); });
-      });
+      it.addEventListener('click', () => { if (vid.paused) vid.play(); else vid.pause(); });
     });
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled = true; await api(`/video/${id}/like`, { method: 'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent || 0) + 1; } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; }
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent||0)+1; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
     }));
     listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; try { btn.disabled = true; await api(`/video/${slug}/resend`, { method: 'POST' }); toast('Yeniden paylaşıldı'); } catch (e) { toast(e.message, 'error'); } finally { btn.disabled = false; }
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
     }));
     listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; const video = orderedReals.find(r => r.slug === slug); if (video) showForwardVideoModal(video);
@@ -424,19 +332,19 @@ async function renderRealsFeed(app) {
   }
 
   function showIndex(i) {
-    if (i < 0) i = 0; if (i >= items.length) i = items.length - 1;
+    if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
     const previousId = items[idx]?.dataset.id;
     if (previousId && i !== idx) markWatchedAndReorder(Number(previousId));
     idx = i;
     items.forEach((it, j) => {
-      it.style.transform = `translateY(${(j - idx) * 100}%)`;
-      it.style.transition = 'transform .35s ease';
+      it.style.transform = `translateY(${(j-idx)*100}%)`;
+      it.style.transition = 'transform .35s';
       const vid = it.querySelector('video');
       const videoUrl = it.dataset.videoUrl;
       if (j === idx) {
         setRealsVideoSource(vid, videoUrl);
-        vid.muted = true;
-        vid.play().catch(() => { vid.muted = true; });
+        vid.muted = false;
+        vid.play().catch(() => {});
       } else {
         setRealsVideoSource(vid, '');
         vid.pause();
@@ -449,15 +357,17 @@ async function renderRealsFeed(app) {
   renderItems();
   showIndex(0);
 
+  // wheel
   let wheelDeb = false;
   window.addEventListener('wheel', e => {
-    if (wheelDeb) return; wheelDeb = true; setTimeout(() => wheelDeb = false, 300);
-    if (e.deltaY > 0) showIndex(idx + 1); else showIndex(idx - 1);
+    if (wheelDeb) return; wheelDeb = true; setTimeout(() => wheelDeb=false, 300);
+    if (e.deltaY > 0) showIndex(idx+1); else showIndex(idx-1);
   }, { passive: true });
 
+  // touch
   let startY = null;
   window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; });
-  window.addEventListener('touchend', e => { if (startY === null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (diff > 30) showIndex(idx + 1); else if (diff < -30) showIndex(idx - 1); startY = null; });
+  window.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (diff > 30) showIndex(idx+1); else if (diff < -30) showIndex(idx-1); startY = null; });
 }
 
 
@@ -1077,14 +987,12 @@ async function renderForumDetail(app, slug) {
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Konu bulunamadı.</p></div></div>'; return; }
 
   const isOwner = currentUser && currentUser.id === forum.user_id;
-  const canEditForum = isOwner || hasAdminPermission('can_edit_content');
-  const canDeleteForum = isOwner || hasAdminPermission('can_delete_content');
 
   app.innerHTML = `<div class="container page">
     <div class="forum-detail">
-      ${canEditForum || canDeleteForum ? `<div style="display:flex;gap:8px;margin-bottom:16px">
-        ${canEditForum ? `<button class="btn btn-outline btn-sm" id="edit-forum-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}
-        ${canDeleteForum ? `<button class="btn btn-danger btn-sm" id="del-forum-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}
+      ${isOwner ? `<div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-outline btn-sm" id="edit-forum-btn"><i class="fas fa-edit"></i> Düzenle</button>
+        <button class="btn btn-danger btn-sm" id="del-forum-btn"><i class="fas fa-trash"></i> Sil</button>
       </div>` : ''}
       <div class="forum-detail-header">
         <div class="forum-detail-title">${escHtml(forum.title)}</div>
@@ -1240,7 +1148,7 @@ async function renderForumDetail(app, slug) {
 }
 
 function commentHTML(c) {
-  const canDel = currentUser && (currentUser.id === c.user_id || hasAdminPermission('can_delete_content'));
+  const canDel = currentUser && currentUser.id === c.user_id;
   const canReply = !!currentUser;
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
@@ -1268,8 +1176,8 @@ async function renderBookList(app) {
   updatePageMeta('Kitaplar – Demlik', 'Topluluğun yazdığı eserleri keşfet.', '');
   app.innerHTML = `
     <div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div><div class="page-title">Kitaplar</div><div class="page-subtitle">Topluluğun eserleri</div></div>
+      <div class="page-header book-list-header">
+        <div class="page-header-copy"><div class="page-title">Kitaplar</div><div class="page-subtitle">Topluluğun eserleri</div></div>
         ${currentUser ? `<button class="btn btn-primary" id="new-book-btn"><i class="fas fa-plus"></i> Yeni Kitap</button>` : ''}
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
@@ -1387,8 +1295,6 @@ async function renderBookDetail(app, slug) {
   document.title = book.title + ' – Demlik';
   updatePageMeta(book.title + ' – Demlik', book.preface ? book.preface.substring(0,155) : book.title + ' – Demlik\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
-  const canEditBook = isOwner || hasAdminPermission('can_edit_content');
-  const canDeleteBook = isOwner || hasAdminPermission('can_delete_content');
 
   const sortedPages = [...pages].sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
   const firstPage = sortedPages[0];
@@ -1438,11 +1344,11 @@ async function renderBookDetail(app, slug) {
         ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
         ${book.kadro ? `<div class="book-preface"><strong>Kadro</strong><p>${escHtml(book.kadro)}</p></div>` : ''}
         ${firstPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> Oku</a></div>` : ''}
-        ${(canEditBook || canDeleteBook) ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
-          ${canEditBook ? `<button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}
-          ${canEditBook ? `<button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>` : ''}
-          ${canEditBook ? `<button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>` : ''}
-          ${canDeleteBook ? `<button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}
+        ${isOwner ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
+          <button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>
+          <button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>
+          <button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>
         </div>` : ''}
         <div style="margin-top:12px">
           <button class="btn btn-outline btn-sm" id="download-pdf-btn"><i class="fas fa-file-pdf" style="color:#ef4444"></i> PDF İndir</button>
@@ -1458,18 +1364,14 @@ async function renderBookDetail(app, slug) {
     </div>
   </div>`;
 
-  if (canEditBook || canDeleteBook) {
-    if (canEditBook) {
-      $('#edit-book-btn')?.addEventListener('click', () => showNewBookModal(book));
-      $('#add-page-btn')?.addEventListener('click', () => showAddPageModal(slug, chapters));
-      $('#add-chap-btn')?.addEventListener('click', () => showAddChapterModal(slug));
-    }
-    if (canDeleteBook) {
-      $('#del-book-btn')?.addEventListener('click', async () => {
-        if (!confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
-        try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
-      });
-    }
+  if (isOwner) {
+    $('#edit-book-btn').addEventListener('click', () => showNewBookModal(book));
+    $('#del-book-btn').addEventListener('click', async () => {
+      if (!confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
+      try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
+    });
+    $('#add-page-btn').addEventListener('click', () => showAddPageModal(slug, chapters));
+    $('#add-chap-btn').addEventListener('click', () => showAddChapterModal(slug));
     document.querySelectorAll('.del-chapter').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -2131,20 +2033,16 @@ function memberItemHTML(m, isOwner, groupSlug) {
 
 function videoCardHTML(v) {
   const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
-  const title = escHtml(v.title || 'Başlıksız video');
-  const owner = escHtml(v.username || 'Silinmiş kullanıcı');
-  const views = Number(v.views || 0).toLocaleString('tr-TR');
   return `<div class="video-card" onclick="navigate('/video/${escHtml(v.slug)}')">
     <div class="video-thumb">
       ${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-video"></i></div>`}
     </div>
     <div class="video-card-body">
-      <div class="video-card-badge">${v.is_reals ? 'Reals' : 'Video'}</div>
-      <div class="video-card-title">${title}</div>
+      <div class="video-card-title">${escHtml(v.title)}</div>
       <div class="video-card-meta">
-        <span>${owner}</span>
+        <span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span>
         <span>•</span>
-        <span>${views} izlenme</span>
+        <span>${v.views || 0} izlenme</span>
       </div>
       ${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}
     </div>
@@ -2156,25 +2054,23 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   try { videoSettings = await api('/video-settings'); } catch {}
   const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
   showModal(existing ? 'Videoyu Düzenle' : 'Video Yükle', `
-    <div style="display:grid;gap:12px">
-      <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" /></div>
-      <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="5" placeholder="Kısa bir açıklama yazın...">${escHtml(defaultDescription)}</textarea></div>
-      <div class="form-group">
-        <label>Video Dosyası</label>
-        <input type="file" id="video-file" accept="video/*,video/mp4" />
-        ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
-      </div>
-      <div class="form-group">
-        <label>Banner / Kapak</label>
-        <input type="file" id="video-banner-file" accept="image/*" />
-        ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
-      </div>
-      <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
-      <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
-      <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
-      <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
-      <div id="video-error" class="form-error mt-4"></div>
+    <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" /></div>
+    <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="5">${escHtml(defaultDescription)}</textarea></div>
+    <div class="form-group">
+      <label>Video Dosyası</label>
+      <input type="file" id="video-file" accept="video/*" />
+      ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
     </div>
+    <div class="form-group">
+      <label>Banner / Kapak</label>
+      <input type="file" id="video-banner-file" accept="image/*" />
+      ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
+    </div>
+    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
+    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
+    <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
+    <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
+    <div id="video-error" class="form-error mt-4"></div>
   `);
 
   const videoInput = $('#video-file');
@@ -2269,16 +2165,14 @@ async function renderVideoList(app) {
     document.title = 'Videolar – Demlik';
     updatePageMeta('Videolar – Demlik', 'Topluluk videolarını keşfet.', '');
     app.innerHTML = `<div class="container page">
-      <div class="video-list-shell">
-        <div class="video-list-header">
-          <div>
-            <div class="page-title">Videolar</div>
-            <div class="page-subtitle">Telefon dostu oynatma, hızlı yükleme ve temiz bir izleme deneyimi.</div>
-          </div>
-          ${currentUser ? `<button class="btn btn-primary" id="new-video-btn"><i class="fas fa-plus"></i> Video Yükle</button>` : ''}
+      <div class="video-list-header">
+        <div class="page-header-copy">
+          <div class="page-title">Videolar</div>
+          <div class="page-subtitle">Video yükle, izle, yorum yap.</div>
         </div>
-        <div class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
+        ${currentUser ? `<button class="btn btn-primary" id="new-video-btn"><i class="fas fa-plus"></i> Video Yükle</button>` : ''}
       </div>
+      <div class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
     </div>`;
     $('#new-video-btn')?.addEventListener('click', () => showNewVideoModal());
   } catch {}
@@ -2308,8 +2202,6 @@ async function renderVideoDetail(app, slug) {
   document.title = video.title + ' – Demlik';
   updatePageMeta(video.title + ' – Demlik', video.description || 'Demlik videoları', video.banner_image || '');
   const isOwner = currentUser && currentUser.id === video.user_id;
-  const canEditVideo = isOwner || hasAdminPermission('can_edit_content');
-  const canDeleteVideo = isOwner || hasAdminPermission('can_delete_content');
   let followState = false;
   if (currentUser && currentUser.username !== video.username) {
     try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
@@ -2321,19 +2213,10 @@ async function renderVideoDetail(app, slug) {
       <div class="video-main-column">
         <div class="video-player-card">
           <div class="video-player-shell">
-            <video controls preload="metadata" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
+            <video controls controlsList="nodownload nodrift" preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el" oncontextmenu="return false;">
               <source src="${escHtml(video.video_url)}" />
             </video>
             <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
-          </div>
-          <div class="video-player-meta">
-            <div class="video-title">${escHtml(video.title)}</div>
-            <div class="video-author-row">
-              <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-              ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
-            </div>
-            <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
-            <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${canEditVideo ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${canDeleteVideo ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
           </div>
         </div>
         <div class="video-comments-card">
@@ -2344,6 +2227,13 @@ async function renderVideoDetail(app, slug) {
       </div>
       <aside class="video-side-panel">
         <div class="video-meta-block">
+          <div class="video-title">${escHtml(video.title)}</div>
+          <div class="video-author-row">
+            <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
+            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
+          </div>
+          <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
+          <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
           <div class="video-description-card">
             <div class="video-description-title">Açıklama</div>
             <div class="video-description-text" id="video-description-text">${formattedDescription}</div>
@@ -2426,8 +2316,8 @@ async function renderVideoDetail(app, slug) {
     // ads optional
   }
 
-  $('#video-edit-btn')?.addEventListener('click', () => { if (!canEditVideo) return; showNewVideoModal(video); });
-  $('#video-delete-btn')?.addEventListener('click', async () => { if (!canDeleteVideo) return; if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
+  $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
+  $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
 
   $('#video-comment-submit')?.addEventListener('click', async () => {
     const content = $('#video-comment-input').value.trim();
@@ -2473,8 +2363,8 @@ async function renderVideoDetail(app, slug) {
 }
 
 function renderVideoComment(c, isOwner) {
-  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner || hasAdminPermission('can_edit_content'));
-  const canPin = currentUser && (isOwner || hasAdminPermission('can_edit_content'));
+  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner);
+  const canPin = currentUser && isOwner;
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
@@ -2709,42 +2599,37 @@ function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span>Profil Bilgileri</span></div>
         <div class="card-body">
-          <div class="profile-header-grid">
-            <div class="profile-avatar-block">
-              ${currentUser.avatar ? `<img src="${escHtml(currentUser.avatar)}" class="profile-avatar" />` : `<div class="profile-avatar placeholder"><i class="fas fa-user"></i></div>`}
-              <label class="btn btn-outline btn-sm upload-btn"><i class="fas fa-upload"></i> Avatar Seç
-                <input type="file" id="avatar-file" accept="image/*" style="display:none" />
-              </label>
-            </div>
-            <div class="profile-fields">
-              <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="4" placeholder="Kendinden kısaca bahset...">${escHtml(currentUser.bio || '')}</textarea></div>
-              <div class="form-row">
-                <div class="form-group"><label>Ünvan</label><input type="text" id="s-title" placeholder="Örn: Yazar, Öğrenci, Mühendis..." value="${escHtml(currentUser.title || '')}" /></div>
-                <div class="form-group"><label>Konum</label><input type="text" id="s-location" placeholder="Örn: İstanbul, Türkiye" value="${escHtml(currentUser.location || '')}" /></div>
-              </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:16px">
+            ${currentUser.avatar ? `<img src="${escHtml(currentUser.avatar)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover" />` : `<div style="width:64px;height:64px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center"><i class="fas fa-user" style="font-size:24px;color:var(--text-muted)"></i></div>`}
+            <div style="flex:1">
+              <label>Avatar Yükle</label>
+              <input type="file" id="avatar-file" accept="image/*" style="padding:6px" />
             </div>
           </div>
-          <div class="form-group"><label>Linkler</label><div id="links-container" class="links-grid"></div></div>
-          <div class="links-actions">
-            <button type="button" class="btn btn-outline btn-sm" id="add-link-btn"><i class="fas fa-plus"></i> Yeni Link</button>
-            <span class="form-note">Bu bağlantılar profil kartınızda görünecektir.</span>
+          <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="3">${escHtml(currentUser.bio || '')}</textarea></div>
+          <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" placeholder="Örn: Yazar, Öğrenci, Mühendis..." value="${escHtml(currentUser.title || '')}" /></div>
+          <div class="form-group"><label>Konum (opsiyonel)</label><input type="text" id="s-location" placeholder="Örn: İstanbul, Türkiye" value="${escHtml(currentUser.location || '')}" /></div>
+          <div class="form-row">
+            <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
+            <div class="form-group"><label>Konum <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-location" value="${escHtml(currentUser.location || '')}" placeholder="Örn: İstanbul, Türkiye" /></div>
           </div>
-          <button class="btn btn-primary" id="save-profile-btn">Profil Kaydet</button>
+          <div class="form-group">
+            <label>Linkler</label>
+            <div id="links-container" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
+            <button type="button" class="btn btn-outline btn-sm" id="add-link-btn"><i class="fas fa-plus"></i> Link Ekle</button>
+          </div>
+          <button class="btn btn-primary" id="save-profile-btn">Kaydet</button>
           <div id="profile-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
 
     function renderLinkRows(linksArr) {
       const container = $('#links-container');
-      if (!linksArr.length) {
-        container.innerHTML = '<div class="empty-state">Henüz bağlantı eklenmemiş. Yeni bir bağlantı ekleyin.</div>';
-        return;
-      }
       container.innerHTML = linksArr.map((l, i) => `
-        <div class="link-row" data-idx="${i}">
-          <input type="text" placeholder="Başlık (örn: GitHub)" value="${escHtml(l.label || '')}" data-field="label" />
-          <input type="text" placeholder="URL (https://...)" value="${escHtml(l.url || '')}" data-field="url" />
-          <button type="button" class="btn btn-ghost btn-sm remove-link-btn" data-idx="${i}" title="Sil"><i class="fas fa-times"></i></button>
+        <div class="link-row" data-idx="${i}" style="display:flex;gap:8px;align-items:center">
+          <input type="text" placeholder="Başlık (örn: GitHub)" value="${escHtml(l.label || '')}" data-field="label" style="flex:1" />
+          <input type="text" placeholder="URL (https://...)" value="${escHtml(l.url || '')}" data-field="url" style="flex:2" />
+          <button type="button" class="btn btn-ghost btn-sm remove-link-btn" data-idx="${i}" style="color:var(--accent-red2);flex-shrink:0"><i class="fas fa-times"></i></button>
         </div>`).join('');
     }
 
@@ -2759,7 +2644,7 @@ function renderSettingsSection(section) {
     $('#links-container').addEventListener('click', e => {
       const rem = e.target.closest('.remove-link-btn');
       if (rem) {
-        currentLinks.splice(parseInt(rem.dataset.idx, 10), 1);
+        currentLinks.splice(parseInt(rem.dataset.idx), 1);
         renderLinkRows(currentLinks);
       }
     });
@@ -2767,7 +2652,7 @@ function renderSettingsSection(section) {
     $('#links-container').addEventListener('input', e => {
       const row = e.target.closest('.link-row');
       if (!row) return;
-      const idx = parseInt(row.dataset.idx, 10);
+      const idx = parseInt(row.dataset.idx);
       const field = e.target.dataset.field;
       if (field && currentLinks[idx] !== undefined) currentLinks[idx][field] = e.target.value;
     });
@@ -2788,7 +2673,8 @@ function renderSettingsSection(section) {
         currentUser = updated;
         updateNavUI();
         toast('Profil güncellendi');
-        $('#rofile-msg').textContent = '';
+        $('#profile-msg').style.color = 'var(--accent-red2)';
+        $('#profile-msg').textContent = '';
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
 
@@ -2820,8 +2706,8 @@ function renderSettingsSection(section) {
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
-          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini etkinleştir</label></div>
-          ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi</label><input type="color" id="s-name-color" value="${escHtml(currentUser.name_color || '#f5f5f5')}" class="color-input" /></div>` : `<div class="form-note">VIP/Plus kullanıcılar için isim rengi seçimi aktiftir.</div>`}
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
+          ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
           <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
@@ -2838,7 +2724,6 @@ function renderSettingsSection(section) {
         const updated = await apiForm('/profile', fd, 'PUT');
         currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
-        $('#appear-msg').textContent = '';
       } catch (e) { $('#appear-msg').textContent = e.message; }
     });
   } else if (section === 'notifications') {
@@ -3180,105 +3065,6 @@ function renderRegister(app) {
   $('#reg-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
 }
 
-// Reklam giriş sayfası — 6 haneli kod girildiğinde claim çağrısı yapar
-function renderAdLanding(app) {
-  document.title = 'Reklam Kodu - Demlik';
-  app.innerHTML = `<div class="auth-page">
-    <div class="auth-card card card-body">
-      <div class="auth-title">Reklam Paneli</div>
-      <p class="auth-subtitle">Reklam numaranızı girin (6 haneli)</p>
-      <div class="form-group"><label>Reklam Kodu</label><input id="ad-code-input" type="text" maxlength="6" placeholder="123456"/></div>
-      <button class="btn btn-primary" id="ad-claim-btn">Giriş Yap / Kodu Gönder</button>
-      <div id="ad-claim-msg" style="margin-top:12px;color:var(--text-secondary)"></div>
-    </div>
-  </div>`;
-
-  $('#ad-code-input').addEventListener('input', e => { e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0,6); });
-  $('#ad-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ad-claim-btn').click(); });
-
-  $('#ad-claim-btn').addEventListener('click', async () => {
-    const code = $('#ad-code-input').value.trim();
-    const msgEl = $('#ad-claim-msg'); msgEl.textContent = '';
-    if (!/^[0-9]{6}$/.test(code)) { msgEl.textContent = 'Lütfen 6 haneli bir kod girin.'; return; }
-    try {
-      const res = await api('/ads/claim', { method: 'POST', body: JSON.stringify({ code }) });
-      // Eğer giriş gerekli ise yönlendir
-      if (res.needs_login) {
-        msgEl.innerHTML = 'Bu reklam hesabına erişmek için giriş yapmalısınız. <a href="/giris" data-link>Giriş Yap</a> veya <a href="/kayit" data-link>Kayıt Ol</a>';
-        return;
-      }
-      const ad = res.ad || res;
-      if (!ad) { msgEl.textContent = 'Reklam bulunamadı.'; return; }
-      // Show basic ad info and link to panel (panel requires login/ownership)
-      app.innerHTML = `<div class="card card-body">
-        <div style="display:flex;gap:12px;align-items:center">
-          ${ad.image_url ? `<img src="${escHtml(ad.image_url)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px"/>` : ''}
-          <div>
-            <div style="font-weight:700">${escHtml(ad.title || 'Reklam')}</div>
-            <div style="font-size:13px;color:var(--text-secondary)">${escHtml(ad.link_url || '')}</div>
-            <div style="margin-top:8px;color:var(--text-muted);font-size:13px">Görüntülenme: ${ad.impressions||0} — Tıklama: ${ad.clicks||0}</div>
-          </div>
-        </div>
-        <div style="margin-top:14px">
-          <button class="btn btn-primary" id="goto-panel">Reklam Paneline Git</button>
-          <button class="btn btn-outline" id="back-to-claim" style="margin-left:8px">Geri</button>
-        </div>
-      </div>`;
-      $('#back-to-claim').addEventListener('click', () => renderAdLanding(app));
-      $('#goto-panel').addEventListener('click', () => {
-        navigate('/reklam/panel/' + encodeURIComponent(ad.code));
-      });
-    } catch (e) { msgEl.textContent = e.message; }
-  });
-}
-
-// Basit reklam yönetim paneli (kullanıcı kendi reklamını görebilir / kod değiştirme)
-async function renderAdPanel(app, code) {
-  if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Reklam Paneli - Demlik';
-  app.innerHTML = `<div class="card card-body"><div style="font-weight:700">Reklam Paneli</div><div id="ad-panel-body" style="margin-top:12px">Yükleniyor...</div></div>`;
-  try {
-    const myAds = await api('/ads/me');
-    const ad = (myAds || []).find(a => String(a.code) === String(code)) || (myAds[0] || null);
-    if (!ad) { $('#ad-panel-body').innerHTML = '<div class="empty-state">Bu reklam sizin hesabınıza ait değil veya bulunamadı.</div>'; return; }
-    $('#ad-panel-body').innerHTML = `
-      <div style="display:flex;gap:12px">
-        ${ad.image_url ? `<img src="${escHtml(ad.image_url)}" style="width:120px;height:120px;object-fit:cover;border-radius:6px"/>` : ''}
-        <div style="flex:1">
-          <div style="font-weight:700">${escHtml(ad.title)}</div>
-          <div style="margin-top:6px;color:var(--text-secondary)">Link: ${escHtml(ad.link_url || '')}</div>
-          <div style="margin-top:8px;color:var(--text-muted)">Görüntülenme: ${ad.impressions||0} — Tıklama: ${ad.clicks||0}</div>
-          <div style="margin-top:12px"><button class="btn btn-outline" id="change-code-btn">Reklam Kodu Değiştir</button></div>
-        </div>
-      </div>
-    `;
-    $('#change-code-btn').addEventListener('click', async () => {
-      const newCode = prompt('Yeni 6 haneli reklam kodunu girin:');
-      if (!newCode) return;
-      if (!/^[0-9]{6}$/.test(newCode)) { alert('Kod 6 rakam olmalı'); return; }
-      if (!confirm('Bu kodu gerçekten değiştirmek istediğinizden emin misiniz? (İkinci onay gerekecek)')) return;
-      if (!confirm('SON KEZ ONAYLAYIN: Reklam kodu değiştirildiğinde eski kodla panele erişim gerekecektir. Devam edilsin mi?')) return;
-      try {
-        const updated = await api('/ads/' + ad.id, { method: 'PUT', body: JSON.stringify({ code: newCode }) });
-        toast('Kod güncellendi');
-        navigate('/reklam/panel/' + encodeURIComponent(updated.code));
-      } catch (e) { toast(e.message, 'error'); }
-    });
-    // Seviye ile arttır (kullanıcı tarafından)
-    const levelBtn = document.createElement('button');
-    levelBtn.className = 'btn btn-outline'; levelBtn.style.marginLeft = '8px'; levelBtn.textContent = 'Seviye ile Arttır';
-    levelBtn.addEventListener('click', async () => {
-      try {
-        const res = await api('/ads/' + ad.id + '/boost-level', { method: 'POST' });
-        toast('Seviye ile boost uygulandı');
-        navigate('/reklam/panel/' + encodeURIComponent(res.code || ad.code));
-      } catch (e) { toast(e.message || 'Seviye yetersiz veya hata oluştu', 'error'); }
-    });
-    document.querySelector('#ad-panel-body div')?.appendChild(levelBtn);
-    // Ödeme yöntemi şimdilik devre dışı — frontend butonu kaldırıldı
-  } catch (e) { $('#ad-panel-body').innerHTML = `<div class="form-error">${escHtml(e.message)}</div>`; }
-}
-
 function renderNotFound(app) {
   document.title = 'Sayfa Bulunamadı - Demlik';
   app.innerHTML = `<div class="container page" style="text-align:center;padding:80px 20px">
@@ -3302,7 +3088,6 @@ async function checkUnreadMessages() {
 
 async function init() {
   await initAuth();
-  try { await initAdSlots(); } catch (e) { console.warn('ad slots init failed', e); }
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     const footer = document.getElementById('site-footer');
@@ -3437,6 +3222,7 @@ async function renderMessages(app, targetUsername) {
         <span style="font-size:13px;font-weight:700">Mesajlar</span>
         <div style="display:flex;align-items:center;gap:6px">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
+          <button class="btn btn-outline btn-sm" id="dm-friends-btn" title="Arkadaşlar"><i class="fas fa-user-friends"></i></button>
           <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
         </div>
       </div>
@@ -3524,6 +3310,10 @@ async function renderMessages(app, targetUsername) {
     });
   });
 
+  $('#dm-friends-btn')?.addEventListener('click', () => {
+    navigate('/arkadaslar');
+  });
+
   if (targetUsername) {
     const activeEl = $(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
     if (activeEl) { activeEl.classList.add('active'); }
@@ -3604,10 +3394,13 @@ async function renderDMChat(username) {
 
   mainEl.innerHTML = `<div class="dm-chat">
     <div class="dm-chat-header">
-      <div style="display:flex;align-items:center;gap:10px">
+      <div class="dm-chat-user">
         <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none"><i class="fas fa-arrow-left"></i></button>
         ${other.avatar ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <a href="/profil/${escHtml(other.username)}" data-link style="font-weight:600;font-size:14px;color:${other.name_color || 'var(--text-primary)'}">${escHtml(other.username)}</a>
+        <div class="dm-chat-user-info">
+          <a href="/profil/${escHtml(other.username)}" data-link>${escHtml(other.username)}</a>
+          <div class="dm-chat-user-status">${isHidden ? 'Kilitli konuşma' : 'Çevrimiçi'}</div>
+        </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <div id="dm-sel-actions" style="display:none;gap:6px">
@@ -3632,7 +3425,7 @@ async function renderDMChat(username) {
         <img id="dm-img-thumb" style="height:48px;border-radius:6px;object-fit:cover" />
         <button onclick="clearDmImg()" style="position:absolute;top:-6px;right:-6px;background:var(--accent-red);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center">✕</button>
       </div>
-      <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1" style="flex:1;background:transparent;border:none;resize:none;color:var(--text-primary);font-size:14px;padding:8px 0;outline:none;max-height:120px;overflow-y:auto"></textarea>
+      <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
       <button class="btn btn-primary btn-sm" id="dm-send-btn"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>`;
@@ -3728,50 +3521,6 @@ async function renderDMChat(username) {
     }
   });
 
-  // Swipe / drag right to reply (pointer events)
-  (function enableDmSwipeReply(){
-    const container = $('#dm-messages');
-    if (!container) return;
-    let state = { id: null, startX: 0, startY: 0, target: null, moved: 0 };
-    container.addEventListener('pointerdown', e => {
-      const wrap = e.target.closest('.dm-msg-wrap');
-      if (!wrap) return;
-      state.id = e.pointerId; state.startX = e.clientX; state.startY = e.clientY; state.target = wrap; state.moved = 0;
-      try { container.setPointerCapture(state.id); } catch (err) {}
-      wrap.style.transition = '';
-    });
-    container.addEventListener('pointermove', e => {
-      if (state.id !== e.pointerId || !state.target) return;
-      const dx = e.clientX - state.startX; const dy = e.clientY - state.startY;
-      if (Math.abs(dy) > 60) return; // vertical scroll
-      const moveX = Math.max(0, dx);
-      state.moved = moveX;
-      state.target.style.transform = `translateX(${moveX}px)`;
-    });
-    container.addEventListener('pointerup', e => {
-      if (state.id !== e.pointerId || !state.target) { state = { id:null }; return; }
-      try { container.releasePointerCapture(state.id); } catch (err) {}
-      const wrap = state.target;
-      const moved = state.moved || 0;
-      wrap.style.transition = 'transform 160ms ease';
-      if (moved > 80) {
-        // trigger reply for this message
-        const msgId = wrap.dataset.id;
-        const content = wrap.querySelector('.dm-msg-bubble span')?.textContent || '';
-        replyToId = msgId;
-        const rb = $('#dm-reply-bar'); const rt = $('#dm-reply-text');
-        if (rb && rt) { rb.style.display = 'flex'; rt.textContent = content.substring(0,60); }
-        wrap.style.transform = 'translateX(0)';
-      } else {
-        wrap.style.transform = 'translateX(0)';
-      }
-      state = { id: null, startX:0, startY:0, target:null, moved:0 };
-    });
-    // cancel on leave / cancel
-    container.addEventListener('pointercancel', e => {
-      if (state.target) state.target.style.transform = 'translateX(0)'; state = { id:null };
-    });
-  })();
   // Options menu
   $('#dm-options-btn')?.addEventListener('click', e => {
     e.stopPropagation();
@@ -3959,7 +3708,7 @@ async function renderFriends(app) {
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div style="display:grid;grid-template-columns:${window.innerWidth <= 768 ? '1fr' : '1fr 1fr'};gap:24px">
       <div>
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Arkadaşlar (${accepted.length})</button>
@@ -4032,24 +3781,18 @@ async function renderFriends(app) {
     } catch (e) { res.innerHTML = `<p style="color:var(--accent-red2);font-size:13px">${e.message}</p>`; }
   }
 
-  // Arkadaş aksiyonları (delegated)
+  // Arkadaş aksiyonları
   app.addEventListener('click', async e => {
     const accept = e.target.closest('.friend-accept');
     const reject = e.target.closest('.friend-reject');
     const remove = e.target.closest('.friend-remove');
     const unblock = e.target.closest('.friend-unblock');
     const msgBtn = e.target.closest('.friend-msg');
-    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); return; }
-
-    const card = e.target.closest('.friend-card');
-    if (card && !e.target.closest('button') && !e.target.closest('a')) {
-      const username = card.dataset.username;
-      if (username) navigate('/mesajlar/' + username);
-    }
+    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
   });
 }
 
@@ -4067,17 +3810,17 @@ function friendItemHTML(f, type, myId) {
       ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Sil"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>`;
   }
-  return `<div class="card card-body friend-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}" data-username="${escHtml(other_username)}">
+  return `<div class="card card-body friend-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}" ${type === 'accepted' ? `onclick="navigate('/mesajlar/${escHtml(other_username)}')"` : ''}>
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
       <a href="/profil/${escHtml(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
-    <div style="display:flex;gap:6px">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}"><i class="fas fa-times"></i></button>` : ''}
-      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}"><i class="fas fa-user-minus"></i></button>` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()" style="flex:1;min-width:80px"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()" style="flex:1;min-width:80px"><i class="fas fa-times"></i> Reddet</button>` : ''}
+      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>
   </div>`;
 }
@@ -4575,12 +4318,12 @@ async function renderMusicDetail(app, slug) {
       </div>
       <div class="music-detail-info">
         <div class="music-detail-top">
-          <div>
+          <div class="music-detail-heading">
             <div class="music-detail-type-badge">${isOwn ? '<i class="fas fa-microphone"></i> Sanatçı Şarkısı' : '<i class="fas fa-share"></i> Paylaşılan Şarkı'}</div>
             <div class="music-detail-title">${escHtml(song.title)}</div>
             <div class="music-detail-artist">${escHtml(song.artist_name)}</div>
           </div>
-          ${isUploader ? `<div class="music-detail-actions"><button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button></div>` : ''}
+          ${isUploader ? `<button class="btn btn-outline btn-sm music-detail-edit-btn" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}
         </div>
         <div class="music-detail-meta">
           ${song.genre ? `<span><i class="fas fa-tag"></i> ${escHtml(song.genre)}</span>` : ''}

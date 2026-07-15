@@ -78,37 +78,6 @@ async function initDb() {
       value TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS ads (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT,
-      code TEXT UNIQUE NOT NULL,
-      title TEXT DEFAULT '',
-      image_url TEXT DEFAULT '',
-      link_url TEXT DEFAULT '',
-      status TEXT DEFAULT 'active',
-      placement_mode TEXT DEFAULT 'mixed',
-      display_order INTEGER DEFAULT 0,
-      impressions INTEGER DEFAULT 0,
-      clicks INTEGER DEFAULT 0,
-      boost_level INTEGER DEFAULT 0,
-      boost_amount INTEGER DEFAULT 0,
-      boost_price INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS ads_events (
-      id BIGSERIAL PRIMARY KEY,
-      ad_id BIGINT NOT NULL,
-      event_type TEXT NOT NULL, -- 'view' | 'click'
-      user_id BIGINT,
-      ip TEXT DEFAULT '',
-      created_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(ad_id) REFERENCES ads(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,
@@ -369,6 +338,19 @@ async function initDb() {
       FOREIGN KEY(user2_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS videos (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      video_url TEXT NOT NULL,
+      thumbnail_url TEXT DEFAULT '',
+      slug TEXT UNIQUE,
+      views INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS dm_messages (
       id BIGSERIAL PRIMARY KEY,
       conversation_id BIGINT NOT NULL,
@@ -376,6 +358,7 @@ async function initDb() {
       content TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
       shared_forum_id BIGINT,
+      shared_video_id BIGINT,
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
@@ -384,11 +367,13 @@ async function initDb() {
       FOREIGN KEY(conversation_id) REFERENCES dm_conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(shared_forum_id) REFERENCES forums(id) ON DELETE SET NULL,
+      FOREIGN KEY(shared_video_id) REFERENCES videos(id) ON DELETE SET NULL,
       FOREIGN KEY(reply_to_id) REFERENCES dm_messages(id) ON DELETE SET NULL
     );
 
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
@@ -399,7 +384,6 @@ async function initDb() {
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
-    ALTER TABLE ads ADD COLUMN IF NOT EXISTS manual_ad_id BIGINT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_token TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_refresh TEXT DEFAULT '';

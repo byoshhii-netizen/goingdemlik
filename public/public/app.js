@@ -290,7 +290,7 @@ async function renderRealsFeed(app) {
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}">
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
         <div class="reals-meta">
-            <div class="reals-user" data-username="${escHtml(r.username)}">${avatarImg(r)} ${userDisplayName(r)}</div>
+          <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
           <div class="reals-desc">${escHtml(r.description || '')}</div>
           <div class="reals-actions">
             <button class="btn btn-ghost like-btn"><i class="fas fa-heart"></i> <span class="count">${r.like_count || 0}</span></button>
@@ -3805,24 +3805,18 @@ async function renderFriends(app) {
     } catch (e) { res.innerHTML = `<p style="color:var(--accent-red2);font-size:13px">${e.message}</p>`; }
   }
 
-  // Arkadaş aksiyonları (delegated)
+  // Arkadaş aksiyonları
   app.addEventListener('click', async e => {
     const accept = e.target.closest('.friend-accept');
     const reject = e.target.closest('.friend-reject');
     const remove = e.target.closest('.friend-remove');
     const unblock = e.target.closest('.friend-unblock');
     const msgBtn = e.target.closest('.friend-msg');
-    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } return; }
-    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); return; }
-
-    const card = e.target.closest('.friend-card');
-    if (card && !e.target.closest('button') && !e.target.closest('a')) {
-      const username = card.dataset.username;
-      if (username) navigate('/mesajlar/' + username);
-    }
+    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
   });
 }
 
@@ -3840,7 +3834,7 @@ function friendItemHTML(f, type, myId) {
       ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Sil"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>`;
   }
-  return `<div class="card card-body friend-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}" data-username="${escHtml(other_username)}">
+  return `<div class="card card-body friend-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}" ${type === 'accepted' ? `onclick="navigate('/mesajlar/${escHtml(other_username)}')"` : ''}>
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
       <a href="/profil/${escHtml(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
@@ -3848,9 +3842,9 @@ function friendItemHTML(f, type, myId) {
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
     <div style="display:flex;gap:6px">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}"><i class="fas fa-times"></i></button>` : ''}
-      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}"><i class="fas fa-user-minus"></i></button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-times"></i></button>` : ''}
+      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>
   </div>`;
 }
