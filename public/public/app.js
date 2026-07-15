@@ -468,15 +468,6 @@ $('#nav-user-btn').addEventListener('click', () => {
   $('#dropdown-menu').classList.toggle('hidden');
 });
 
-// Logo tıklama - mobilde profil, desktopta ana sayfa
-document.querySelector('.nav-brand')?.addEventListener('click', (e) => {
-  if (window.innerWidth <= 768 && currentUser) {
-    e.preventDefault();
-    e.stopPropagation();
-    navigate('/profil/' + currentUser.username);
-  }
-});
-
 document.addEventListener('click', e => {
   if (!$('#nav-dropdown')?.contains(e.target)) $('#dropdown-menu')?.classList.add('hidden');
   if (!$('#new-btn-wrap')?.contains(e.target)) $('#new-dropdown')?.classList.add('hidden');
