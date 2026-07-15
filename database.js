@@ -98,6 +98,17 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS ads_events (
+      id BIGSERIAL PRIMARY KEY,
+      ad_id BIGINT NOT NULL,
+      event_type TEXT NOT NULL, -- 'view' | 'click'
+      user_id BIGINT,
+      ip TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(ad_id) REFERENCES ads(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,

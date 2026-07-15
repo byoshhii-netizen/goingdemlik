@@ -1250,8 +1250,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-msg-content { display: flex; flex-direction: column; max-width: 72%; min-width: 0; }
 .dm-msg-wrap.dm-own .dm-msg-content { align-items: flex-end; }
 .dm-msg-bubble { padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.5; word-break: break-word; overflow-wrap: anywhere; white-space: pre-wrap; }
-.dm-msg-wrap:not(.dm-own) .dm-msg-bubble { background: var(--bg-card2); border: 1px solid var(--border); border-radius: 4px 12px 12px 12px; color: var(--text-primary); }
-.dm-msg-wrap.dm-own .dm-msg-bubble { background: rgba(220,38,38,0.15); border: 1px solid rgba(220,38,38,0.3); border-radius: 12px 4px 12px 12px; color: var(--text-primary); }
+.dm-msg-wrap:not(.dm-own) .dm-msg-bubble { background: var(--bg-card2); border: 1px solid var(--border); border-radius: 12px 12px 12px 4px; color: var(--text-primary); }
+.dm-msg-wrap.dm-own .dm-msg-bubble { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px 4px 12px 12px; color: var(--text-primary); }
 .dm-msg-bubble { max-width: min(80vw, 560px); }
 .dm-chat-header > div:first-child { min-width: 0; flex: 1; display: flex; align-items: center; gap: 10px; overflow: hidden; }
 .dm-chat-header a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -112,6 +112,87 @@ function avatarImg(u, cls = 'avatar-sm') {
   return `<div class="${cls} avatar-placeholder" style="font-size:0.75em;font-weight:700;color:var(--text-muted)">?</div>`;
 }
 
+// Initialize ad slots (left/center/right), fetch ads and render periodically
+async function initAdSlots() {
+  if (!document.body) return;
+  if (document.getElementById('site-ad-slots')) return;
+  const wrap = document.createElement('div'); wrap.id = 'site-ad-slots'; wrap.className = 'site-ad-slots';
+  wrap.innerHTML = `
+    <div class="ad-slot ad-left" data-pos="left"></div>
+    <div class="ad-slot ad-center" data-pos="center"></div>
+    <div class="ad-slot ad-right" data-pos="right"></div>
+  `;
+  document.body.appendChild(wrap);
+
+  let lastAds = [];
+  let cfg = { ad_rotation_interval: 30, ad_pool_mode: 'mixed' };
+  let rotationIndex = 0;
+  const displayedThisRound = new Set();
+
+  function renderAdHTML(ad) {
+    const url = ad.link_url ? escHtml(ad.link_url) : '#';
+    const img = ad.image_url ? `<img src="${escHtml(ad.image_url)}" alt="${escHtml(ad.title||'Reklam')}" />` : `<div class="ad-placeholder">${escHtml(ad.title||'Reklam')}</div>`;
+    return `<a href="${url}" class="ad-link" target="_blank" rel="noopener noreferrer" data-ad-id="${ad.id}">${img}</a>`;
+  }
+
+  async function trackImpression(adId, el) {
+    try { await fetch('/api/ads/' + adId + '/view', { method: 'POST' }); } catch {}
+    const a = el.querySelector('a[data-ad-id]');
+    if (a) a.addEventListener('click', async (ev) => { try { await fetch('/api/ads/' + adId + '/click', { method: 'POST' }); } catch {} });
+  }
+
+  async function loadAndRender() {
+    try {
+      const res = await fetch('/api/ads/public');
+      const data = await res.json();
+      lastAds = data.ads || [];
+      cfg = data.config || cfg;
+
+      const leftEl = wrap.querySelector('.ad-left');
+      const centerEl = wrap.querySelector('.ad-center');
+      const rightEl = wrap.querySelector('.ad-right');
+      leftEl.innerHTML = ''; centerEl.innerHTML = ''; rightEl.innerHTML = '';
+
+      const mode = (cfg.ad_pool_mode || 'mixed').toLowerCase();
+
+      if (!lastAds.length) return;
+
+      if (mode === 'manual' && cfg.ad_manual_ad_id) {
+        const sel = lastAds.find(a => parseInt(a.id,10) === parseInt(cfg.ad_manual_ad_id,10));
+        if (sel) { leftEl.innerHTML = renderAdHTML(sel); centerEl.innerHTML = renderAdHTML(sel); rightEl.innerHTML = renderAdHTML(sel); trackImpression(sel.id, leftEl); trackImpression(sel.id, centerEl); trackImpression(sel.id, rightEl); }
+        return;
+      }
+
+      if (mode === 'single') {
+        // rotate a single prominent ad every interval (same ad in all slots)
+        const ad = lastAds[rotationIndex % lastAds.length];
+        leftEl.innerHTML = renderAdHTML(ad); centerEl.innerHTML = renderAdHTML(ad); rightEl.innerHTML = renderAdHTML(ad);
+        trackImpression(ad.id, leftEl); trackImpression(ad.id, centerEl); trackImpression(ad.id, rightEl);
+        rotationIndex++;
+        return;
+      }
+
+      // mixed mode: show up to 3 different ads; rotate their order each interval
+      const count = Math.min(lastAds.length, Math.max(1, parseInt(cfg.ad_pool_count || 3, 10)));
+      const selection = [];
+      for (let i=0;i<count;i++) selection.push(lastAds[(rotationIndex + i) % lastAds.length]);
+      rotationIndex++;
+      // assign selection to slots
+      leftEl.innerHTML = renderAdHTML(selection[0] || lastAds[0]);
+      centerEl.innerHTML = renderAdHTML(selection[1] || selection[0] || lastAds[0]);
+      rightEl.innerHTML = renderAdHTML(selection[2] || selection[0] || lastAds[0]);
+      // track impressions
+      try { trackImpression((selection[0]||lastAds[0]).id, leftEl); } catch {}
+      try { trackImpression((selection[1]||selection[0]||lastAds[0]).id, centerEl); } catch {}
+      try { trackImpression((selection[2]||selection[0]||lastAds[0]).id, rightEl); } catch {}
+    } catch (e) { console.warn('ad load failed', e); }
+  }
+
+  await loadAndRender();
+  const intervalSec = Math.max(5, parseInt(cfg.ad_rotation_interval || 30, 10));
+  setInterval(loadAndRender, intervalSec * 1000);
+}
+
 function hasAdminPermission(permission) {
   if (!currentUser || !currentUser.is_admin) return false;
   if (currentUser.isSuperAdmin) return true;
@@ -192,6 +273,8 @@ function renderRoute(fullPath) {
   if (path === '/artist-basvuru') return renderArtistApply(app);
   if (path === '/artist-panel') return renderArtistPanel(app);
   if (path === '/sarki-yukle') return renderShareSong(app);
+  if (path === '/reklam') return renderAdLanding(app);
+  if (path.startsWith('/reklam/panel/')) return renderAdPanel(app, segs.slice(2).join('/'));
   renderNotFound(app);
 }
 
@@ -3097,6 +3180,105 @@ function renderRegister(app) {
   $('#reg-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
 }
 
+// Reklam giriş sayfası — 6 haneli kod girildiğinde claim çağrısı yapar
+function renderAdLanding(app) {
+  document.title = 'Reklam Kodu - Demlik';
+  app.innerHTML = `<div class="auth-page">
+    <div class="auth-card card card-body">
+      <div class="auth-title">Reklam Paneli</div>
+      <p class="auth-subtitle">Reklam numaranızı girin (6 haneli)</p>
+      <div class="form-group"><label>Reklam Kodu</label><input id="ad-code-input" type="text" maxlength="6" placeholder="123456"/></div>
+      <button class="btn btn-primary" id="ad-claim-btn">Giriş Yap / Kodu Gönder</button>
+      <div id="ad-claim-msg" style="margin-top:12px;color:var(--text-secondary)"></div>
+    </div>
+  </div>`;
+
+  $('#ad-code-input').addEventListener('input', e => { e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0,6); });
+  $('#ad-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('#ad-claim-btn').click(); });
+
+  $('#ad-claim-btn').addEventListener('click', async () => {
+    const code = $('#ad-code-input').value.trim();
+    const msgEl = $('#ad-claim-msg'); msgEl.textContent = '';
+    if (!/^[0-9]{6}$/.test(code)) { msgEl.textContent = 'Lütfen 6 haneli bir kod girin.'; return; }
+    try {
+      const res = await api('/ads/claim', { method: 'POST', body: JSON.stringify({ code }) });
+      // Eğer giriş gerekli ise yönlendir
+      if (res.needs_login) {
+        msgEl.innerHTML = 'Bu reklam hesabına erişmek için giriş yapmalısınız. <a href="/giris" data-link>Giriş Yap</a> veya <a href="/kayit" data-link>Kayıt Ol</a>';
+        return;
+      }
+      const ad = res.ad || res;
+      if (!ad) { msgEl.textContent = 'Reklam bulunamadı.'; return; }
+      // Show basic ad info and link to panel (panel requires login/ownership)
+      app.innerHTML = `<div class="card card-body">
+        <div style="display:flex;gap:12px;align-items:center">
+          ${ad.image_url ? `<img src="${escHtml(ad.image_url)}" style="width:80px;height:80px;object-fit:cover;border-radius:6px"/>` : ''}
+          <div>
+            <div style="font-weight:700">${escHtml(ad.title || 'Reklam')}</div>
+            <div style="font-size:13px;color:var(--text-secondary)">${escHtml(ad.link_url || '')}</div>
+            <div style="margin-top:8px;color:var(--text-muted);font-size:13px">Görüntülenme: ${ad.impressions||0} — Tıklama: ${ad.clicks||0}</div>
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <button class="btn btn-primary" id="goto-panel">Reklam Paneline Git</button>
+          <button class="btn btn-outline" id="back-to-claim" style="margin-left:8px">Geri</button>
+        </div>
+      </div>`;
+      $('#back-to-claim').addEventListener('click', () => renderAdLanding(app));
+      $('#goto-panel').addEventListener('click', () => {
+        navigate('/reklam/panel/' + encodeURIComponent(ad.code));
+      });
+    } catch (e) { msgEl.textContent = e.message; }
+  });
+}
+
+// Basit reklam yönetim paneli (kullanıcı kendi reklamını görebilir / kod değiştirme)
+async function renderAdPanel(app, code) {
+  if (!currentUser) { navigate('/giris'); return; }
+  document.title = 'Reklam Paneli - Demlik';
+  app.innerHTML = `<div class="card card-body"><div style="font-weight:700">Reklam Paneli</div><div id="ad-panel-body" style="margin-top:12px">Yükleniyor...</div></div>`;
+  try {
+    const myAds = await api('/ads/me');
+    const ad = (myAds || []).find(a => String(a.code) === String(code)) || (myAds[0] || null);
+    if (!ad) { $('#ad-panel-body').innerHTML = '<div class="empty-state">Bu reklam sizin hesabınıza ait değil veya bulunamadı.</div>'; return; }
+    $('#ad-panel-body').innerHTML = `
+      <div style="display:flex;gap:12px">
+        ${ad.image_url ? `<img src="${escHtml(ad.image_url)}" style="width:120px;height:120px;object-fit:cover;border-radius:6px"/>` : ''}
+        <div style="flex:1">
+          <div style="font-weight:700">${escHtml(ad.title)}</div>
+          <div style="margin-top:6px;color:var(--text-secondary)">Link: ${escHtml(ad.link_url || '')}</div>
+          <div style="margin-top:8px;color:var(--text-muted)">Görüntülenme: ${ad.impressions||0} — Tıklama: ${ad.clicks||0}</div>
+          <div style="margin-top:12px"><button class="btn btn-outline" id="change-code-btn">Reklam Kodu Değiştir</button></div>
+        </div>
+      </div>
+    `;
+    $('#change-code-btn').addEventListener('click', async () => {
+      const newCode = prompt('Yeni 6 haneli reklam kodunu girin:');
+      if (!newCode) return;
+      if (!/^[0-9]{6}$/.test(newCode)) { alert('Kod 6 rakam olmalı'); return; }
+      if (!confirm('Bu kodu gerçekten değiştirmek istediğinizden emin misiniz? (İkinci onay gerekecek)')) return;
+      if (!confirm('SON KEZ ONAYLAYIN: Reklam kodu değiştirildiğinde eski kodla panele erişim gerekecektir. Devam edilsin mi?')) return;
+      try {
+        const updated = await api('/ads/' + ad.id, { method: 'PUT', body: JSON.stringify({ code: newCode }) });
+        toast('Kod güncellendi');
+        navigate('/reklam/panel/' + encodeURIComponent(updated.code));
+      } catch (e) { toast(e.message, 'error'); }
+    });
+    // Seviye ile arttır (kullanıcı tarafından)
+    const levelBtn = document.createElement('button');
+    levelBtn.className = 'btn btn-outline'; levelBtn.style.marginLeft = '8px'; levelBtn.textContent = 'Seviye ile Arttır';
+    levelBtn.addEventListener('click', async () => {
+      try {
+        const res = await api('/ads/' + ad.id + '/boost-level', { method: 'POST' });
+        toast('Seviye ile boost uygulandı');
+        navigate('/reklam/panel/' + encodeURIComponent(res.code || ad.code));
+      } catch (e) { toast(e.message || 'Seviye yetersiz veya hata oluştu', 'error'); }
+    });
+    document.querySelector('#ad-panel-body div')?.appendChild(levelBtn);
+    // Ödeme yöntemi şimdilik devre dışı — frontend butonu kaldırıldı
+  } catch (e) { $('#ad-panel-body').innerHTML = `<div class="form-error">${escHtml(e.message)}</div>`; }
+}
+
 function renderNotFound(app) {
   document.title = 'Sayfa Bulunamadı - Demlik';
   app.innerHTML = `<div class="container page" style="text-align:center;padding:80px 20px">
@@ -3120,6 +3302,7 @@ async function checkUnreadMessages() {
 
 async function init() {
   await initAuth();
+  try { await initAdSlots(); } catch (e) { console.warn('ad slots init failed', e); }
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     const footer = document.getElementById('site-footer');
@@ -3545,6 +3728,50 @@ async function renderDMChat(username) {
     }
   });
 
+  // Swipe / drag right to reply (pointer events)
+  (function enableDmSwipeReply(){
+    const container = $('#dm-messages');
+    if (!container) return;
+    let state = { id: null, startX: 0, startY: 0, target: null, moved: 0 };
+    container.addEventListener('pointerdown', e => {
+      const wrap = e.target.closest('.dm-msg-wrap');
+      if (!wrap) return;
+      state.id = e.pointerId; state.startX = e.clientX; state.startY = e.clientY; state.target = wrap; state.moved = 0;
+      try { container.setPointerCapture(state.id); } catch (err) {}
+      wrap.style.transition = '';
+    });
+    container.addEventListener('pointermove', e => {
+      if (state.id !== e.pointerId || !state.target) return;
+      const dx = e.clientX - state.startX; const dy = e.clientY - state.startY;
+      if (Math.abs(dy) > 60) return; // vertical scroll
+      const moveX = Math.max(0, dx);
+      state.moved = moveX;
+      state.target.style.transform = `translateX(${moveX}px)`;
+    });
+    container.addEventListener('pointerup', e => {
+      if (state.id !== e.pointerId || !state.target) { state = { id:null }; return; }
+      try { container.releasePointerCapture(state.id); } catch (err) {}
+      const wrap = state.target;
+      const moved = state.moved || 0;
+      wrap.style.transition = 'transform 160ms ease';
+      if (moved > 80) {
+        // trigger reply for this message
+        const msgId = wrap.dataset.id;
+        const content = wrap.querySelector('.dm-msg-bubble span')?.textContent || '';
+        replyToId = msgId;
+        const rb = $('#dm-reply-bar'); const rt = $('#dm-reply-text');
+        if (rb && rt) { rb.style.display = 'flex'; rt.textContent = content.substring(0,60); }
+        wrap.style.transform = 'translateX(0)';
+      } else {
+        wrap.style.transform = 'translateX(0)';
+      }
+      state = { id: null, startX:0, startY:0, target:null, moved:0 };
+    });
+    // cancel on leave / cancel
+    container.addEventListener('pointercancel', e => {
+      if (state.target) state.target.style.transform = 'translateX(0)'; state = { id:null };
+    });
+  })();
   // Options menu
   $('#dm-options-btn')?.addEventListener('click', e => {
     e.stopPropagation();

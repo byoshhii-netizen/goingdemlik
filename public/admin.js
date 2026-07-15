@@ -185,6 +185,10 @@ async function renderDashboard(main) {
           </div>
         </div>
       </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div></div>
+        <button class="btn btn-primary btn-sm" id="add-ad-btn"><i class="fas fa-plus"></i> Yeni Reklam</button>
+      </div>
       <div class="card">
         <div class="card-header"><span><i class="fas fa-history" style="color:#f97316;margin-right:8px"></i>Son İşlemler</span></div>
         <div class="card-body" style="padding:8px">
@@ -572,13 +576,151 @@ async function renderAdsAdmin(main) {
     <td>${ad.clicks || 0}</td>
     <td>${ad.boost_level || 0}</td>
     <td>${ad.status === 'active' ? '<span class="badge badge-green">Aktif</span>' : '<span class="badge badge-gray">Pasif</span>'}</td>
-    <td><button class="btn btn-danger btn-xs del-ad-btn" data-id="${ad.id}"><i class="fas fa-trash"></i> Sil</button></td>
+    <td>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-xs stats-ad-btn" data-id="${ad.id}"><i class="fas fa-chart-bar"></i> İstatistik</button>
+        <button class="btn btn-outline btn-xs edit-ad-btn" data-id="${ad.id}"><i class="fas fa-edit"></i> Düzenle</button>
+        <button class="btn btn-outline btn-xs boost-ad-btn" data-id="${ad.id}"><i class="fas fa-level-up-alt"></i> Boost</button>
+        <button class="btn btn-ghost btn-xs change-code-btn" data-id="${ad.id}" data-code="${escHtml(ad.code||'')}">Kod Değiştir</button>
+        <button class="btn btn-danger btn-xs del-ad-btn" data-id="${ad.id}"><i class="fas fa-trash"></i> Sil</button>
+      </div>
+    </td>
   </tr>`).join('');
 
   tbody.querySelectorAll('.del-ad-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if (!confirm('Bu reklamı silmek istediğine emin misin?')) return;
       try { await adminApi('/ads/' + btn.dataset.id, { method: 'DELETE' }); toast('Reklam silindi'); loadSection('ads'); } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  document.getElementById('add-ad-btn').addEventListener('click', () => {
+    showModal('Yeni Reklam Oluştur', `
+      <div class="form-group"><label>Başlık</label><input id="ad-title" /></div>
+      <div class="form-group"><label>Hedef URL</label><input id="ad-link" /></div>
+      <div class="form-group"><label>Durum</label><select id="ad-status"><option value="active">Aktif</option><option value="paused">Pasif</option></select></div>
+      <div class="form-group"><label>Manuel Kod (6 hane, isteğe bağlı)</label><input id="ad-code" maxlength="6" /></div>
+      <div class="form-group"><label>Görsel</label><input type="file" id="ad-image" accept="image/*" /></div>
+      <button class="btn btn-primary" id="ad-create-save">Oluştur</button>
+      <div id="ad-create-msg" class="form-error mt-4"></div>
+    `);
+    document.getElementById('ad-create-save').addEventListener('click', async () => {
+      const msgEl = document.getElementById('ad-create-msg'); msgEl.textContent = '';
+      const title = document.getElementById('ad-title').value.trim();
+      const link = document.getElementById('ad-link').value.trim();
+      const code = document.getElementById('ad-code').value.trim();
+      if (!title) { msgEl.textContent = 'Başlık gerekli'; return; }
+      if (code && !/^[0-9]{6}$/.test(code)) { msgEl.textContent = 'Kod 6 rakam olmalı'; return; }
+      if (link && !/^https?:\/\//.test(link)) { msgEl.textContent = 'Hedef URL http:// veya https:// ile başlamalı'; return; }
+      const btn = document.getElementById('ad-create-save'); btn.disabled=true; btn.textContent='Oluşturuluyor...';
+      try {
+        const fd = new FormData();
+        const file = document.getElementById('ad-image').files[0]; if (file) fd.append('image', file);
+        fd.append('title', title);
+        fd.append('link_url', link);
+        fd.append('status', document.getElementById('ad-status').value);
+        if (code) fd.append('code', code);
+        const res = await fetch('/api/admin/ads', { method: 'POST', headers: { 'X-Admin-Token': adminToken }, body: fd });
+        const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Hata');
+        toast('Reklam oluşturuldu'); hideModal(); loadSection('ads');
+      } catch (e) { document.getElementById('ad-create-msg').textContent = e.message; }
+      finally { btn.disabled=false; btn.textContent='Oluştur'; }
+    });
+  });
+
+  tbody.querySelectorAll('.boost-ad-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Bu reklamın seviye boostunu admin olarak arttırmak istediğinize emin misiniz?')) return;
+      try {
+        const updated = await adminApi('/ads/' + btn.dataset.id + '/boost-level', { method: 'POST' });
+        toast('Boost uygulandı');
+        loadSection('ads');
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  tbody.querySelectorAll('.change-code-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const old = btn.dataset.code || '';
+      const first = prompt(`Eski kod: ${old}\nYeni 6 haneli kodu girin:`);
+      if (!first) return;
+      if (!/^[0-9]{6}$/.test(first)) { alert('Kod 6 rakam olmalı'); return; }
+      if (!confirm('Bu işlemi onaylıyor musunuz?')) return;
+      // Ek sert onay: kullanıcıların panele yeniden kod girmesi istenecek
+      if (!confirm('SON KEZ ONAYLAYIN: Kod değiştiğinde kullanıcılar panel erişimi için YENİ kodu girmek zorunda kalacak. Devam edilsin mi?')) return;
+      try {
+        const updated = await adminApi('/ads/' + id + '/code', { method: 'PUT', body: JSON.stringify({ code: first, disassociate: true }) });
+        toast('Kod güncellendi ve sahiplik kaldırıldı (kullanıcı yeniden kod girecek)');
+        loadSection('ads');
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  // Edit ad modal
+  tbody.querySelectorAll('.edit-ad-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ad = ads.find(a => a.id == btn.dataset.id);
+      if (!ad) return;
+      showModal('Reklam Düzenle — #' + ad.id, `
+        <div class="form-group"><label>Başlık</label><input id="e-ad-title" value="${escHtml(ad.title||'')}" /></div>
+        <div class="form-group"><label>Hedef URL</label><input id="e-ad-link" value="${escHtml(ad.link_url||'')}" /></div>
+        <div class="form-row">
+          <div class="form-group"><label>Durum</label><select id="e-ad-status"><option value="active" ${ad.status==='active'?'selected':''}>Aktif</option><option value="paused" ${ad.status==='paused'?'selected':''}>Pasif</option></select></div>
+          <div class="form-group"><label>Konum</label><select id="e-ad-placement"><option value="mixed" ${ad.placement_mode==='mixed'?'selected':''}>Karışık</option><option value="single" ${ad.placement_mode==='single'?'selected':''}>Tekli</option><option value="manual" ${ad.placement_mode==='manual'?'selected':''}>Manuel</option></select></div>
+        </div>
+        <div class="form-row"><div class="form-group"><label>Manuel Kod (6 hane)</label><input id="e-ad-code" maxlength="6" value="${escHtml(ad.code||'')}" /></div><div class="form-group"><label>Sıra</label><input id="e-ad-order" type="number" value="${ad.display_order||0}" /></div></div>
+        <div class="form-group"><label>Görsel (yeni yükle)</label><input type="file" id="e-ad-image" accept="image/*" /></div>
+        <div class="form-row"><div class="form-group"><label>Seviye</label><input id="e-ad-boost" type="number" value="${ad.boost_level||0}" /></div><div class="form-group"><label>Fiyat</label><input id="e-ad-price" type="number" value="${ad.boost_price||0}" /></div></div>
+        <button class="btn btn-primary" id="e-ad-save">Kaydet</button>
+        <div id="e-ad-msg" class="form-error mt-4"></div>
+      `);
+
+      document.getElementById('e-ad-save').addEventListener('click', async () => {
+        const msgEl = document.getElementById('e-ad-msg'); msgEl.textContent = '';
+        const title = document.getElementById('e-ad-title').value.trim();
+        const link = document.getElementById('e-ad-link').value.trim();
+        const code = document.getElementById('e-ad-code').value.trim();
+        if (!title) { msgEl.textContent = 'Başlık gerekli'; return; }
+        if (code && !/^[0-9]{6}$/.test(code)) { msgEl.textContent = 'Kod 6 rakam olmalı'; return; }
+        if (link && !/^https?:\/\//.test(link)) { msgEl.textContent = 'Hedef URL http:// veya https:// ile başlamalı'; return; }
+        const btn2 = document.getElementById('e-ad-save'); btn2.disabled=true; btn2.textContent='Kaydediliyor...';
+        try {
+          const fd = new FormData();
+          const file = document.getElementById('e-ad-image').files[0]; if (file) fd.append('image', file);
+          fd.append('title', title);
+          fd.append('link_url', link);
+          fd.append('status', document.getElementById('e-ad-status').value);
+          fd.append('placement_mode', document.getElementById('e-ad-placement').value);
+          fd.append('display_order', document.getElementById('e-ad-order').value);
+          fd.append('code', code);
+          fd.append('boost_level', document.getElementById('e-ad-boost').value);
+          fd.append('boost_price', document.getElementById('e-ad-price').value);
+          const res = await fetch('/api/admin/ads/' + ad.id, { method: 'PUT', headers: { 'X-Admin-Token': adminToken }, body: fd });
+          const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Hata');
+          toast('Reklam güncellendi'); hideModal(); loadSection('ads');
+        } catch (e) { document.getElementById('e-ad-msg').textContent = e.message; }
+        finally { btn2.disabled=false; btn2.textContent='Kaydet'; }
+      });
+    });
+  });
+
+  // Stats modal
+  tbody.querySelectorAll('.stats-ad-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        const st = await adminApi('/ads/' + btn.dataset.id + '/stats');
+        showModal('Reklam İstatistikleri — #' + st.id, `
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div><strong>Başlık:</strong> ${escHtml(st.title||'')}</div>
+            <div><strong>Kod:</strong> ${escHtml(st.code||'')}</div>
+            <div><strong>Görüntülenme:</strong> ${st.impressions||0}</div>
+            <div><strong>Tıklama:</strong> ${st.clicks||0}</div>
+            <div><strong>Oluşturuldu:</strong> ${st.created_at ? formatDate(st.created_at) : '-'}</div>
+            <div><strong>Güncellendi:</strong> ${st.updated_at ? formatDate(st.updated_at) : '-'}</div>
+          </div>
+        `);
+      } catch (e) { toast(e.message, 'error'); }
     });
   });
 
