@@ -1789,11 +1789,38 @@ async function renderGroupDetail(app, slug) {
     try { messages = await api('/group/' + slug + '/messages'); } catch {}
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>'; return; }
 
-  const { group, isMember, role } = groupData;
+  const { group, isMember, role, joinRequestStatus } = groupData;
   document.title = group.name + ' - Demlik';
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
   const canSend = currentUser && isMember && group.allow_chat;
+
+  // Handle private group access
+  if (group.type === 'private' && !isMember && currentUser) {
+    if (joinRequestStatus?.status === 'pending') {
+      app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-clock" style="font-size:48px;color:var(--accent-red);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0">İstek atıldı, yöneticinin onayını bekleniyor...</p><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
+      return;
+    }
+    if (joinRequestStatus?.status === 'rejected') {
+      const reason = joinRequestStatus.rejectionReason || 'Belirtilmedi';
+      app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-ban" style="font-size:48px;color:var(--accent-red2);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0;color:var(--text-secondary)">Reddedildin</p><p style="font-size:14px;color:var(--text-muted);margin:8px 0">Neden: ${escHtml(reason)}</p><button class="btn btn-primary" id="retry-join-req">Tekrar İstek At</button><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
+      $('#retry-join-req')?.addEventListener('click', async () => {
+        try { await api(`/group/${slug}/join-request`, { method: 'POST' }); toast('İstek gönderildi'); renderGroupDetail(app, slug); } catch (e) { toast(e.message, 'error'); }
+      });
+      return;
+    }
+    // Show join request prompt
+    app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-lock" style="font-size:48px;color:var(--accent-red);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0">Bu grup gizli bir gruptur.</p><p style="font-size:14px;color:var(--text-secondary)">Gruba katılmak için yöneticinin onayını istemeniz gerekiyor.</p><button class="btn btn-primary" id="send-join-req">Girme İzni İste</button><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
+    $('#send-join-req')?.addEventListener('click', async () => {
+      try { await api(`/group/${slug}/join-request`, { method: 'POST' }); toast('İstek gönderildi'); renderGroupDetail(app, slug); } catch (e) { toast(e.message, 'error'); }
+    });
+    return;
+  }
+  
+  if (group.type === 'private' && !isMember && !currentUser) {
+    app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-lock" style="font-size:48px;color:var(--accent-red);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0">Bu grup gizli bir gruptur.</p><p style="font-size:14px;color:var(--text-secondary)">Katılmak için giriş yapmanız gerekiyor.</p><button class="btn btn-primary" onclick="navigate('/giris')">Giriş Yap</button><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
+    return;
+  }
 
   app.innerHTML = `<div class="container page">
     <div style="margin-bottom:20px">
@@ -1805,6 +1832,7 @@ async function renderGroupDetail(app, slug) {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${!isMember && currentUser && group.type === 'public' && !group.invite_only ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
+          ${!isMember && currentUser && group.type === 'private' ? `<button class="btn btn-primary" id="join-req-btn"><i class="fas fa-lock"></i> Girme İzni İste</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
             <button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}
@@ -1871,6 +1899,9 @@ async function renderGroupDetail(app, slug) {
   $('#join-btn')?.addEventListener('click', async () => {
     try { await api('/group/' + slug + '/join', { method: 'POST' }); toast('Gruba katıldınız!'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
   });
+  $('#join-req-btn')?.addEventListener('click', async () => {
+    try { await api('/group/' + slug + '/join-request', { method: 'POST' }); toast('Girme izni isteği gönderildi!'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
+  });
   $('#leave-btn')?.addEventListener('click', async () => {
     if (!confirm('Gruptan ayrılmak istiyor musunuz?')) return;
     try { await api('/group/' + slug + '/leave', { method: 'POST' }); toast('Gruptan ayrıldınız.'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
@@ -1890,6 +1921,29 @@ async function renderGroupDetail(app, slug) {
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
     $('#chat-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
+    
+    // Paste image support for chat input
+    $('#chat-input')?.addEventListener('paste', async e => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            const fd = new FormData(); fd.append('image', file);
+            try {
+              const r = await apiForm('/group/' + slug + '/upload', fd);
+              const msg = await api('/group/' + slug + '/messages', { method: 'POST', body: JSON.stringify({ content: '', image_url: r.url }) });
+              $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod));
+              const chatEl2 = $('#chat-messages');
+              if (chatEl2) chatEl2.scrollTop = chatEl2.scrollHeight;
+              toast('Resim gönderildi');
+            } catch (err) { toast(err.message, 'error'); }
+          }
+          break;
+        }
+      }
+    });
 
     $('#chat-img-input')?.addEventListener('change', async e => {
       const file = e.target.files[0]; if (!file) return;
@@ -3223,6 +3277,7 @@ async function renderMessages(app, targetUsername) {
         <div style="display:flex;align-items:center;gap:6px">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
           <button class="btn btn-outline btn-sm" id="dm-friends-btn" title="Arkadaşlar"><i class="fas fa-user-friends"></i></button>
+          <button class="btn btn-outline btn-sm" id="dm-groups-btn" title="Gruplar"><i class="fas fa-users"></i></button>
           <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
         </div>
       </div>
@@ -3312,6 +3367,10 @@ async function renderMessages(app, targetUsername) {
 
   $('#dm-friends-btn')?.addEventListener('click', () => {
     navigate('/arkadaslar');
+  });
+
+  $('#dm-groups-btn')?.addEventListener('click', () => {
+    navigate('/gruplar');
   });
 
   if (targetUsername) {
@@ -3502,6 +3561,30 @@ async function renderDMChat(username) {
 
   $('#dm-send-btn')?.addEventListener('click', sendDmMessage);
   $('#dm-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); } });
+
+  // Paste image support for DM
+  $('#dm-input')?.addEventListener('paste', async e => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = async ev => {
+            pendingImg = file;
+            const thumb = $('#dm-img-thumb');
+            const preview = $('#dm-img-preview');
+            if (thumb) thumb.src = ev.target.result;
+            if (preview) preview.style.display = 'flex';
+            toast('Resim yapıştırıldı');
+          };
+          reader.readAsDataURL(file);
+        }
+        break;
+      }
+    }
+  });
 
   // Otomatik büyüyen textarea
   $('#dm-input')?.addEventListener('input', e => {
@@ -3788,11 +3871,11 @@ async function renderFriends(app) {
     const remove = e.target.closest('.friend-remove');
     const unblock = e.target.closest('.friend-unblock');
     const msgBtn = e.target.closest('.friend-msg');
-    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
+    if (accept) { e.stopPropagation(); try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (reject) { e.stopPropagation(); try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (remove) { e.stopPropagation(); if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (unblock) { e.stopPropagation(); try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (msgBtn) { e.stopPropagation(); navigate('/mesajlar/' + msgBtn.dataset.username); }
   });
 }
 
@@ -3817,10 +3900,10 @@ function friendItemHTML(f, type, myId) {
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()" style="flex:1;min-width:80px"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()" style="flex:1;min-width:80px"><i class="fas fa-times"></i> Reddet</button>` : ''}
-      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button>` : ''}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;min-width:0">
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" style="white-space:nowrap"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" style="white-space:nowrap"><i class="fas fa-times"></i> Reddet</button>` : ''}
+      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>
   </div>`;
 }

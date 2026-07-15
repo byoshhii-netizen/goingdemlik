@@ -1074,12 +1074,17 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE g.slug=$1`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
-  let isMember = false, role = null;
+  let isMember = false, role = null, joinRequestStatus = null;
   if (req.user) {
     const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
     if (m.length) { isMember = true; role = m[0].role; }
+    // Check if user has pending join request for private group
+    if (!isMember && group.type === 'private') {
+      const { rows: jr } = await query('SELECT status, rejection_reason FROM group_join_requests WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+      if (jr.length) joinRequestStatus = { status: jr[0].status, rejectionReason: jr[0].rejection_reason };
+    }
   }
-  res.json({ group, isMember, role });
+  res.json({ group, isMember, role, joinRequestStatus });
 });
 
 app.post('/api/groups', authMiddleware, async (req, res) => {
@@ -1174,6 +1179,54 @@ app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [invite.group_id, req.user.id, 'member']);
   await query('UPDATE groups SET member_count=member_count+1 WHERE id=$1', [invite.group_id]);
+  res.json({ ok: true });
+});
+
+// Gizli grup join request endpoints
+app.post('/api/group/:slug/join-request', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = rows[0];
+  if (group.type !== 'private') return res.status(400).json({ error: 'Bu grup için istek gerekli değil' });
+  const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
+  const { rows: existing } = await query('SELECT id FROM group_join_requests WHERE group_id=$1 AND user_id=$2 AND status=$3', [group.id, req.user.id, 'pending']);
+  if (existing.length) return res.status(400).json({ error: 'Zaten istek gönderilmiş' });
+  await query('INSERT INTO group_join_requests (group_id, user_id, status) VALUES ($1, $2, $3)', [group.id, req.user.id, 'pending']);
+  res.json({ ok: true });
+});
+
+app.get('/api/group/:slug/join-requests', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = rows[0];
+  if (group.owner_id !== req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows: requests } = await query(`
+    SELECT jr.*, u.username, u.avatar FROM group_join_requests jr
+    LEFT JOIN users u ON jr.user_id=u.id
+    WHERE jr.group_id=$1 AND jr.status='pending'
+    ORDER BY jr.created_at ASC
+  `, [group.id]);
+  res.json(requests);
+});
+
+app.post('/api/group/:slug/join-request/:requestId/respond', authMiddleware, async (req, res) => {
+  const { action, rejectionReason } = req.body;
+  const { rows: groupRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = groupRows[0];
+  if (group.owner_id !== req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows: requests } = await query('SELECT * FROM group_join_requests WHERE id=$1 AND group_id=$2', [req.params.requestId, group.id]);
+  if (!requests.length) return res.status(404).json({ error: 'İstek bulunamadı' });
+  const request = requests[0];
+  if (action === 'approve') {
+    await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
+    await query('INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, $3)', [group.id, request.user_id, 'member']);
+    await query('UPDATE groups SET member_count=member_count+1 WHERE id=$1', [group.id]);
+  } else if (action === 'reject') {
+    await query('UPDATE group_join_requests SET status=$1, rejection_reason=$2, reviewed_at=NOW(), reviewed_by=$3 WHERE id=$4', 
+      ['rejected', rejectionReason || '', req.user.id, request.id]);
+  }
   res.json({ ok: true });
 });
 

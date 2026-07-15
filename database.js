@@ -211,6 +211,21 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS group_join_requests (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT,
+      user_id BIGINT,
+      status TEXT DEFAULT 'pending',
+      rejection_reason TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      reviewed_at TIMESTAMP,
+      reviewed_by BIGINT,
+      UNIQUE(group_id, user_id),
+      FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS moderator_permissions (
       id BIGSERIAL PRIMARY KEY,
       group_id BIGINT,
