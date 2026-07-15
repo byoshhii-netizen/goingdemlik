@@ -78,6 +78,26 @@ async function initDb() {
       value TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS ads (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT,
+      code TEXT UNIQUE NOT NULL,
+      title TEXT DEFAULT '',
+      image_url TEXT DEFAULT '',
+      link_url TEXT DEFAULT '',
+      status TEXT DEFAULT 'active',
+      placement_mode TEXT DEFAULT 'mixed',
+      display_order INTEGER DEFAULT 0,
+      impressions INTEGER DEFAULT 0,
+      clicks INTEGER DEFAULT 0,
+      boost_level INTEGER DEFAULT 0,
+      boost_amount INTEGER DEFAULT 0,
+      boost_price INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,
@@ -368,6 +388,7 @@ async function initDb() {
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
+    ALTER TABLE ads ADD COLUMN IF NOT EXISTS manual_ad_id BIGINT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_token TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_refresh TEXT DEFAULT '';

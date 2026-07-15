@@ -118,7 +118,8 @@ function loadSection(section) {
     levels: renderLevels, tags: renderTags, logs: renderLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
-    songs: renderAdminSongs, 'artist-apps': renderArtistApps
+    songs: renderAdminSongs, 'artist-apps': renderArtistApps,
+    ads: renderAdsAdmin
   };
   if (map[section]) map[section](main);
 }
@@ -506,7 +507,9 @@ async function renderBooks(main) {
     });
     tbody.querySelectorAll('.read-book-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        window.open('/kitaplar/' + btn.dataset.slug, '_blank');
+        const slug = (btn.dataset.slug || '').trim();
+        if (!slug) return;
+        window.open('/kitap/' + encodeURIComponent(slug), '_blank');
       });
     });
   };
@@ -514,6 +517,84 @@ async function renderBooks(main) {
   $('#book-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderTable(books.filter(b => b.title.toLowerCase().includes(q) || (b.username||'').toLowerCase().includes(q)));
+  });
+}
+
+// ===== ADS =====
+async function renderAdsAdmin(main) {
+  let ads = [];
+  let cfg = {};
+  try {
+    ads = await adminApi('/ads');
+    cfg = await adminApi('/ads/settings');
+  } catch (e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> Reklamlar</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> Reklam Havuzu <span style="font-size:13px;font-weight:400;color:var(--text2)">(${ads.length})</span></div>
+      <button class="btn btn-primary btn-sm" id="save-ad-settings-btn"><i class="fas fa-save"></i> Ayarları Kaydet</button>
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group"><label>Yönetim Modu</label><select id="ad-pool-mode"><option value="mixed" ${cfg.ad_pool_mode === 'mixed' ? 'selected' : ''}>Karışık</option><option value="single" ${cfg.ad_pool_mode === 'single' ? 'selected' : ''}>Tekli</option><option value="manual" ${cfg.ad_pool_mode === 'manual' ? 'selected' : ''}>Manuel</option></select></div>
+          <div class="form-group"><label>Reklam Sayısı</label><input id="ad-pool-count" type="number" value="${cfg.ad_pool_count || 3}" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Yenilenme Süresi (sn)</label><input id="ad-rotation-interval" type="number" value="${cfg.ad_rotation_interval || 30}" /></div>
+          <div class="form-group"><label>Manuel Reklam ID</label><input id="ad-manual-id" type="number" value="${cfg.ad_manual_ad_id || ''}" /></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Seviye Artırma Değeri</label><input id="ad-level-increment" type="number" value="${cfg.ad_level_boost_increment || 1}" /></div>
+          <div class="form-group"><label>Seviye Artırma Maliyeti</label><input id="ad-level-cost" type="number" value="${cfg.ad_level_boost_cost || 1}" /></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Sahip</th><th>Kod</th><th>Gösterim</th><th>Tıklama</th><th>Seviye</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <tbody id="ads-tbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  const tbody = $('#ads-tbody');
+  tbody.innerHTML = ads.map(ad => `<tr>
+    <td style="color:var(--text3);font-size:12px">#${ad.id}</td>
+    <td>${escHtml(ad.title || 'Reklam')}</td>
+    <td>${escHtml(ad.owner_name || '—')}</td>
+    <td>${escHtml(ad.code || '')}</td>
+    <td>${ad.impressions || 0}</td>
+    <td>${ad.clicks || 0}</td>
+    <td>${ad.boost_level || 0}</td>
+    <td>${ad.status === 'active' ? '<span class="badge badge-green">Aktif</span>' : '<span class="badge badge-gray">Pasif</span>'}</td>
+    <td><button class="btn btn-danger btn-xs del-ad-btn" data-id="${ad.id}"><i class="fas fa-trash"></i> Sil</button></td>
+  </tr>`).join('');
+
+  tbody.querySelectorAll('.del-ad-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Bu reklamı silmek istediğine emin misin?')) return;
+      try { await adminApi('/ads/' + btn.dataset.id, { method: 'DELETE' }); toast('Reklam silindi'); loadSection('ads'); } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  $('#save-ad-settings-btn').addEventListener('click', async () => {
+    const payload = {
+      ad_pool_mode: $('#ad-pool-mode').value,
+      ad_pool_count: $('#ad-pool-count').value,
+      ad_rotation_interval: $('#ad-rotation-interval').value,
+      ad_manual_ad_id: $('#ad-manual-id').value,
+      ad_level_boost_increment: $('#ad-level-increment').value,
+      ad_level_boost_cost: $('#ad-level-cost').value
+    };
+    try {
+      await adminApi('/ads/settings', { method: 'POST', body: JSON.stringify(payload) });
+      toast('Reklam ayarları kaydedildi');
+    } catch (e) { toast(e.message, 'error'); }
   });
 }
 
