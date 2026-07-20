@@ -2679,12 +2679,12 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const isHidden = isUser1 ? conv.hidden_by_user1 : conv.hidden_by_user2;
   const hiddenPass = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
   const { rows: msgs } = await query(`
-    SELECT m.*, 
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
-      r.content as reply_content, ru.username as reply_username,
-      m.read_at
+      r.content as reply_content, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -2765,7 +2765,9 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.*, u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+      u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       r.content as reply_content, ru.username as reply_username

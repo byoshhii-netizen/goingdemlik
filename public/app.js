@@ -3052,10 +3052,12 @@ function renderLogin(app) {
 function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
   document.title = 'Kayıt Ol - Demlik';
+
   app.innerHTML = `<div class="auth-page">
-    <div class="auth-card card card-body">
+    <div class="auth-card card card-body" id="reg-card">
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">Topluluğa katıl</p>
+
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
@@ -3073,17 +3075,39 @@ function renderRegister(app) {
           </button>
         </div>
       </div>
+
       <div class="form-group">
         <label class="checkbox-label">
           <input type="checkbox" id="reg-kvkk" />
-          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum. <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button></span>
+          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum.
+            <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button>
+          </span>
         </label>
       </div>
+
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="reg-btn">Kayıt Ol</button>
+
       <div id="reg-error" class="form-error mt-4" style="text-align:center"></div>
+
       <div class="auth-footer">Zaten hesabın var mı? <a href="/giris" data-link class="auth-link">Giriş Yap</a></div>
+
+      <!-- Register overlay -->
+      <div id="reg-overlay" class="hidden" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);backdrop-filter: blur(4px);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:10;pointer-events:auto">
+        <div style="width:86px;height:86px;border-radius:50%;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.3);display:flex;align-items:center;justify-content:center;box-shadow:0 0 24px rgba(220,38,38,0.18)">
+          <div class="spinner" style="width:26px;height:26px;border-width:3px"></div>
+        </div>
+        <div style="font-weight:800;color:#fff">Kayıt yapılıyor...</div>
+        <div style="font-size:12px;color:var(--text-muted);max-width:320px;text-align:center">Lütfen bekleyin</div>
+        <div class="reg-progress" style="width:260px;max-width:80vw;height:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:999px;overflow:hidden">
+          <div class="reg-progress-fill" style="height:100%;width:0%;background:var(--grad-red);transition:width 0.25s"></div>
+        </div>
+      </div>
     </div>
   </div>`;
+
+  // Card relative for overlay positioning
+  const regCard = $('#reg-card');
+  if (regCard) regCard.style.position = 'relative';
 
   $('#reg-pw-toggle').addEventListener('click', () => {
     const pw = $('#reg-pw');
@@ -3099,25 +3123,83 @@ function renderRegister(app) {
     } catch {}
   });
 
+  const showRegisterOverlay = () => {
+    $('#reg-error').textContent = '';
+    $('#reg-overlay')?.classList.remove('hidden');
+    const btn = $('#reg-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.dataset.prevText = btn.innerHTML;
+      btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Bekle...';
+    }
+
+    const fill = document.querySelector('#reg-overlay .reg-progress-fill');
+    if (fill) {
+      fill.style.width = '0%';
+      // indeterminate-ish progress
+      let pct = 0;
+      const start = Date.now();
+      const t = setInterval(() => {
+        // non-linear growth up to 92%
+        const elapsed = Date.now() - start;
+        pct = Math.min(92, pct + (0.6 + Math.random() * 1.8));
+        const clamped = Math.max(0, Math.min(92, pct));
+        fill.style.width = clamped.toFixed(0) + '%';
+        if (elapsed > 6500) clearInterval(t);
+      }, 160);
+      // store for stop
+      $('#reg-overlay')._progressTimer = t;
+    }
+  };
+
+  const hideRegisterOverlay = () => {
+    const ov = $('#reg-overlay');
+    ov?.classList.add('hidden');
+    if (ov?._progressTimer) { clearInterval(ov._progressTimer); ov._progressTimer = null; }
+    const btn = $('#reg-btn');
+    if (btn) {
+      btn.disabled = false;
+      if (btn.dataset.prevText) btn.innerHTML = btn.dataset.prevText;
+      else btn.innerHTML = 'Kayıt Ol';
+      delete btn.dataset.prevText;
+    }
+  };
+
   const doRegister = async () => {
     const username = $('#reg-username').value.trim();
     const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
     const kvkk_accepted = $('#reg-kvkk').checked;
-    if (!username || !email || !password) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
-    if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
+
+    const errEl = $('#reg-error');
+
+    if (!username || !email || !password) { errEl.textContent = 'Tüm alanları doldurun'; return; }
+    if (!kvkk_accepted) { errEl.textContent = 'KVKK onayı zorunludur'; return; }
+
     try {
+      showRegisterOverlay();
       const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password, kvkk_accepted }) });
-      currentToken = data.token; currentUser = data.user;
+
+      // success
+      const fill = document.querySelector('#reg-overlay .reg-progress-fill');
+      if (fill) fill.style.width = '100%';
+
+      currentToken = data.token;
+      currentUser = data.user;
       localStorage.setItem('token', currentToken);
-      updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
+      updateNavUI();
+      toast('Hoş geldiniz, ' + currentUser.username + '!');
       navigate('/');
-    } catch (e) { $('#reg-error').textContent = e.message; }
+    } catch (e) {
+      hideRegisterOverlay();
+      errEl.textContent = e.message;
+    }
   };
 
   $('#reg-btn').addEventListener('click', doRegister);
   $('#reg-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
 }
+
 
 function renderNotFound(app) {
   document.title = 'Sayfa Bulunamadı - Demlik';
