@@ -1371,8 +1371,32 @@ app.get('/api/profile/:username', async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
+  const canSetCustomColor = req.user.is_vip || req.user.is_plus;
+  let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
+  let resolvedGradient = name_gradient !== undefined ? name_gradient : (req.user.name_gradient || '');
+  if (resolvedColorMode === 'gradient') {
+    if (!req.user.is_plus) {
+      return res.status(403).json({ error: 'Gradyan isim rengi yalnızca Plus üyeler için kullanılabilir.' });
+    }
+    try {
+      const parsed = typeof resolvedGradient === 'string' ? JSON.parse(resolvedGradient || '{}') : resolvedGradient;
+      if (!parsed?.colors?.filter(Boolean)?.length) {
+        return res.status(400).json({ error: 'Gradyan için en az bir renk seçmelisiniz.' });
+      }
+      resolvedGradient = JSON.stringify({
+        type: ['linear', 'radial', 'conic'].includes(parsed.type) ? parsed.type : 'linear',
+        angle: Number.isFinite(+parsed.angle) ? +parsed.angle : 135,
+        colors: parsed.colors.filter(Boolean).slice(0, 5),
+      });
+    } catch {
+      return res.status(400).json({ error: 'Gradyan ayarları geçersiz.' });
+    }
+  } else {
+    resolvedColorMode = 'solid';
+    if (!canSetCustomColor) resolvedGradient = req.user.name_gradient || '';
+  }
   function parseBool(value) {
     if (typeof value === 'string') return value === 'true' || value === '1';
     return !!value;
@@ -1390,8 +1414,11 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
   const allowedBadgeDisplay = ['level','none'].includes(selectedBadgeDisplay)
     ? selectedBadgeDisplay
     : (canSetBadge && ['vip','plus','custom'].includes(selectedBadgeDisplay) ? selectedBadgeDisplay : req.user.badge_display || 'level');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,show_level_badge=$4,show_level_color=$5,avatar=$6,title=$7,location=$8,allow_mentions=$9,badge_name=$10,badge_icon=$11,badge_color=$12,badge_display=$13 WHERE id=$14',
-    [bio??req.user.bio, newLinks, name_color??req.user.name_color,
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,title=$9,location=$10,allow_mentions=$11,badge_name=$12,badge_icon=$13,badge_color=$14,badge_display=$15 WHERE id=$16',
+    [bio??req.user.bio, newLinks,
+     canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
+     canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
+     canSetCustomColor ? resolvedGradient : (req.user.name_gradient || ''),
      show_level_badge!==undefined?(parseBool(show_level_badge)?1:0):req.user.show_level_badge,
      show_level_color!==undefined?(parseBool(show_level_color)?1:0):req.user.show_level_color,
      newAvatar, title??req.user.title??'', location??req.user.location??'',

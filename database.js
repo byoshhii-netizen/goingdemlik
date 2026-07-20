@@ -460,6 +460,8 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS banner_fit TEXT DEFAULT 'cover';
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS images TEXT DEFAULT '[]';
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
