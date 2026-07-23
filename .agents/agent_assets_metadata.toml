@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ossrg9VqvqxZUDo_DrxdO"
+uri = "file://demlik-magaza-projesi.zip"
+type = "unspecified"
+title = "Demlik Mağaza Projesi"

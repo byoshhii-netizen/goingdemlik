@@ -1,0 +1,1 @@
+- [Shopier mağaza akışı](shopier-store.md) — Üyelik yetkisi yalnızca imzalı ve tutar/miktar doğrulanmış Shopier webhook’undan sonra verilir.
