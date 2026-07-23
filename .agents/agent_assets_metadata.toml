@@ -12,3 +12,9 @@ id = "j5WauUVWb_hKeswH45ndF"
 uri = "file://demlik-magaza-temiz.zip"
 type = "unspecified"
 title = "Demlik Mağaza Projesi — Temiz ZIP"
+
+[[outputs]]
+id = "UeThhXHBcGDN3PjLMuFtR"
+uri = "file://downloads/demlik-magaza.tar.gz"
+type = "unspecified"
+title = "Demlik Mağaza Projesi — TAR.GZ"
