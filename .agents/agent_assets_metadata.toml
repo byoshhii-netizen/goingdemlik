@@ -6,3 +6,9 @@ id = "ossrg9VqvqxZUDo_DrxdO"
 uri = "file://demlik-magaza-projesi.zip"
 type = "unspecified"
 title = "Demlik Mağaza Projesi"
+
+[[outputs]]
+id = "j5WauUVWb_hKeswH45ndF"
+uri = "file://demlik-magaza-temiz.zip"
+type = "unspecified"
+title = "Demlik Mağaza Projesi — Temiz ZIP"
