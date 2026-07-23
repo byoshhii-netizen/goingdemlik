@@ -1,4 +1,4 @@
-﻿// ===== DEMLIK ADMIN PANEL =====
+// ===== DEMLIK ADMIN PANEL =====
 let adminToken = sessionStorage.getItem('admin_token') || '';
 let currentSection = 'dashboard';
 
@@ -495,13 +495,18 @@ async function renderBooks(main) {
       <td><span style="color:var(--blue2)">${escHtml(b.username||'—')}</span></td>
       <td style="color:var(--text3);font-size:12px">${b.page_count||0}</td>
       <td style="color:var(--text3);font-size:12px">${timeAgo(b.created_at)}</td>
-      <td><button class="btn btn-danger btn-xs del-book-btn" data-id="${b.id}"><i class="fas fa-trash"></i> Sil</button></td>
+      <td><button class="btn btn-danger btn-xs del-book-btn" data-id="${b.id}"><i class="fas fa-trash"></i> Sil</button><button class="btn btn-primary btn-xs read-book-btn" data-slug="${escHtml(b.slug)}" style="margin-left:6px"><i class="fas fa-book-open"></i> Oku</button></td>
     </tr>`).join('');
     tbody.querySelectorAll('.del-book-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('Bu kitabı silmek istediğine emin misin?')) return;
         try { await adminApi('/book/'+btn.dataset.id, {method:'DELETE'}); toast('Kitap silindi'); books = books.filter(b=>b.id!=btn.dataset.id); renderTable(books); }
         catch (e) { toast(e.message, 'error'); }
+      });
+    });
+    tbody.querySelectorAll('.read-book-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.open('/kitaplar/' + btn.dataset.slug, '_blank');
       });
     });
   };
@@ -1091,8 +1096,46 @@ async function renderLevels(main) {
     tbody.querySelectorAll('.edit-level-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const l = levels.find(x => x.id == btn.dataset.id); if (!l) return;
+        const FA_ICONS_EDIT = [
+          'fas fa-star','fas fa-fire','fas fa-crown','fas fa-gem','fas fa-bolt','fas fa-heart',
+          'fas fa-shield','fas fa-dragon','fas fa-feather','fas fa-pen','fas fa-book',
+          'fas fa-seedling','fas fa-leaf','fas fa-tree','fas fa-mountain','fas fa-sun',
+          'fas fa-moon','fas fa-cloud','fas fa-snowflake','fas fa-wind',
+          'fas fa-trophy','fas fa-medal','fas fa-award','fas fa-certificate',
+          'fas fa-graduation-cap','fas fa-user-graduate','fas fa-user',
+          'fas fa-robot','fas fa-skull','fas fa-ghost','fas fa-hat-wizard',
+          'fas fa-rocket','fas fa-satellite','fas fa-meteor','fas fa-globe',
+          'fas fa-map-pin','fas fa-compass','fas fa-binoculars',
+          'fas fa-code','fas fa-laptop-code','fas fa-terminal','fas fa-bug',
+          'fas fa-music','fas fa-headphones','fas fa-microphone','fas fa-guitar',
+          'fas fa-camera','fas fa-palette','fas fa-brush','fas fa-film',
+          'fas fa-gamepad','fas fa-dice','fas fa-chess',
+          'fas fa-coffee','fas fa-mug-hot','fas fa-beer',
+          'fas fa-dumbbell','fas fa-running','fas fa-bicycle','fas fa-futbol',
+          'fas fa-car','fas fa-plane','fas fa-ship',
+          'fas fa-cat','fas fa-dog','fas fa-fish','fas fa-horse',
+          'fas fa-circle','fas fa-square','fas fa-diamond','fas fa-infinity'
+        ];
         showModal(`✏️ Seviye Düzenle — ${l.name}`, `
           <div class="form-group"><label>İsim</label><input id="elv-name" value="${escHtml(l.name)}" /></div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>İkon <span style="font-size:11px;color:var(--text3)">(FA class veya emoji)</span></label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <div id="elv-icon-preview" style="width:36px;height:36px;background:var(--bg4,var(--bg-card2));border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">
+                  <i class="${escHtml(l.icon||'fas fa-star')}" style="color:${escHtml(l.color||'#aaa')}"></i>
+                </div>
+                <input id="elv-icon" placeholder="fas fa-star veya ⭐" value="${escHtml(l.icon||'fas fa-star')}" style="flex:1" />
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" id="elv-icon-picker-btn" style="margin-top:6px;width:100%"><i class="fas fa-icons"></i> İkon Seç</button>
+              <div id="elv-icon-grid" style="display:none;max-height:200px;overflow-y:auto;background:var(--bg4,var(--bg-card2));border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:6px;grid-template-columns:repeat(8,1fr);gap:4px"></div>
+            </div>
+            <div class="form-group" style="flex:0 0 110px">
+              <label>Renk</label>
+              <input id="elv-color" type="color" value="${escHtml(l.color||'#dc2626')}" style="height:36px;padding:2px;cursor:pointer;width:100%;border-radius:8px;border:1px solid var(--border)" />
+              <input id="elv-color-hex" type="text" value="${escHtml(l.color||'#dc2626')}" maxlength="7" placeholder="#dc2626" style="margin-top:6px;width:100%;padding:6px 8px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-family:monospace;font-size:12px" />
+            </div>
+          </div>
           <div class="form-row">
             <div class="form-group"><label>Min. Forum</label><input id="elv-forums" type="number" value="${l.min_forums||0}" /></div>
             <div class="form-group"><label>Min. Kitap</label><input id="elv-books" type="number" value="${l.min_books||0}" /></div>
@@ -1100,6 +1143,9 @@ async function renderLevels(main) {
           <div class="form-row">
             <div class="form-group"><label>Min. Yorum</label><input id="elv-comments" type="number" value="${l.min_comments||0}" /></div>
             <div class="form-group"><label>Min. Kitap Sayfası</label><input id="elv-pages" type="number" value="${l.min_book_pages||0}" /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Sıra</label><input id="elv-order" type="number" value="${l.order_num||1}" /></div>
           </div>
           <div class="form-group">
             <label class="checkbox-label" style="margin:0">
@@ -1113,16 +1159,65 @@ async function renderLevels(main) {
           <div id="elv-err" class="form-error"></div>
           <button class="btn btn-primary" id="elv-save" style="width:100%;justify-content:center;margin-top:12px"><i class="fas fa-save"></i> Kaydet</button>
         `);
+
+        // İkon önizleme ve picker
+        const elvIconInput = $('#elv-icon');
+        const elvIconPreview = $('#elv-icon-preview');
+        const elvColorInput = $('#elv-color');
+        const elvColorHex = $('#elv-color-hex');
+        const elvIconGrid = $('#elv-icon-grid');
+        let elvGridOpen = false;
+
+        const updateElvPreview = () => {
+          const v = elvIconInput.value.trim();
+          const c = elvColorInput.value;
+          if (v.startsWith('fa')) {
+            elvIconPreview.innerHTML = `<i class="${escHtml(v)}" style="color:${escHtml(c)}"></i>`;
+          } else {
+            elvIconPreview.textContent = v || '?';
+          }
+        };
+        elvIconInput.addEventListener('input', updateElvPreview);
+        elvColorInput.addEventListener('input', e => { elvColorHex.value = e.target.value; updateElvPreview(); });
+        elvColorHex.addEventListener('input', e => { if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) elvColorInput.value = e.target.value; updateElvPreview(); });
+
+        $('#elv-icon-picker-btn').addEventListener('click', () => {
+          elvGridOpen = !elvGridOpen;
+          if (elvGridOpen) {
+            elvIconGrid.style.display = 'grid';
+            elvIconGrid.innerHTML = FA_ICONS_EDIT.map(ic => `
+              <button type="button" class="icon-pick-btn" data-icon="${ic}" title="${ic}"
+                style="background:var(--bg3,var(--bg-card2));border:1px solid var(--border);border-radius:6px;padding:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all .15s">
+                <i class="${ic}"></i>
+              </button>`).join('');
+            elvIconGrid.querySelectorAll('.icon-pick-btn').forEach(btn => {
+              btn.addEventListener('click', () => {
+                elvIconInput.value = btn.dataset.icon;
+                updateElvPreview();
+                elvIconGrid.style.display = 'none';
+                elvGridOpen = false;
+              });
+              btn.addEventListener('mouseover', () => btn.style.background = 'rgba(220,38,38,0.1)');
+              btn.addEventListener('mouseout', () => btn.style.background = 'var(--bg3,var(--bg-card2))');
+            });
+          } else {
+            elvIconGrid.style.display = 'none';
+          }
+        });
+
         $('#elv-save').addEventListener('click', async () => {
           const btn2 = $('#elv-save'); const err = $('#elv-err');
           btn2.disabled=true; btn2.innerHTML='<div class="spinner" style="width:14px;height:14px"></div>';
           try {
             const body = {
               name: $('#elv-name').value.trim() || l.name,
+              icon: $('#elv-icon').value.trim() || l.icon || 'fas fa-star',
+              color: $('#elv-color').value || l.color || '#dc2626',
               min_forums: +$('#elv-forums').value,
               min_books: +$('#elv-books').value,
               min_comments: +$('#elv-comments').value,
               min_book_pages: +$('#elv-pages').value,
+              order_num: +$('#elv-order').value || l.order_num,
               require_any: $('#elv-require-any').checked ? 1 : 0
             };
             await adminApi('/level/'+l.id, { method:'PUT', body:JSON.stringify(body) });
