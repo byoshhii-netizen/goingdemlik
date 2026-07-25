@@ -103,38 +103,9 @@ function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
 }
 
-function parseNameGradient(raw) {
-  if (!raw) return null;
-  try { return typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return null; }
-}
-
-function buildNameGradientCss(g) {
-  if (!g || !Array.isArray(g.colors)) return '';
-  const colors = g.colors.filter(Boolean);
-  if (!colors.length) return '';
-  const type = g.type || 'linear';
-  const angle = Number.isFinite(+g.angle) ? +g.angle : 135;
-  if (type === 'radial') return `radial-gradient(circle at 30% 30%, ${colors.join(', ')})`;
-  if (type === 'conic') return `conic-gradient(from ${angle}deg, ${colors.join(', ')})`;
-  return `linear-gradient(${angle}deg, ${colors.join(', ')})`;
-}
-
-function userNameStyleAttr(u) {
-  if (!u || u.show_level_color === 0) return '';
-  if (u.is_plus && u.name_color_mode === 'gradient') {
-    const bg = buildNameGradientCss(parseNameGradient(u.name_gradient));
-    if (bg) {
-      return `style="background:${bg};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent"`;
-    }
-  }
-  if ((u.is_vip || u.is_plus) && u.name_color) return `style="color:${escHtml(u.name_color)}"`;
-  if (u.name_color) return `style="color:${escHtml(u.name_color)}"`;
-  return '';
-}
-
 function userDisplayName(u) {
   if (!u) return 'Silindi';
-  const color = userNameStyleAttr(u);
+  const color = (u.show_level_color !== 0 && u.name_color) ? `style="color:${escHtml(u.name_color)}"` : '';
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="Demlik Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
   return `<span class="user-badge" ${color}>${escHtml(u.username)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
@@ -610,7 +581,7 @@ async function renderHome(app) {
           <div class="section-title"><div class="section-title-bar"></div>Öne Çıkan Kitaplar</div>
           <a href="/kitaplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a>
         </div>
-        <div id="home-books" class="books-grid"></div>
+        <div id="home-books" class="grid-3"></div>
       </div>
     </div>`;
 
@@ -1205,12 +1176,12 @@ async function renderBookList(app) {
   updatePageMeta('Kitaplar – Demlik', 'Topluluğun yazdığı eserleri keşfet.', '');
   app.innerHTML = `
     <div class="container page">
-      <div class="page-header book-list-header">
-        <div class="page-header-copy"><div class="page-title">Kitaplar</div><div class="page-subtitle">Topluluğun eserleri</div></div>
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div><div class="page-title">Kitaplar</div><div class="page-subtitle">Topluluğun eserleri</div></div>
         ${currentUser ? `<button class="btn btn-primary" id="new-book-btn"><i class="fas fa-plus"></i> Yeni Kitap</button>` : ''}
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
-      <div id="books-grid" class="books-grid"><div class="loading-center"><div class="spinner"></div></div></div>
+      <div id="books-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
 
   if (currentUser) $('#new-book-btn')?.addEventListener('click', () => showNewBookModal());
@@ -1232,25 +1203,26 @@ function renderBookGrid(books) {
 }
 
 function bookCardHTML(b) {
-  const previewText = b.preface ? b.preface.substring(0, 72) : '';
-  return `<article class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
-    <div class="book-cover-wrap">
-      <div class="book-cover">
-        ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" loading="lazy" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
-        ${b.is_hidden ? '<span class="book-cover-lock"><i class="fas fa-lock"></i></span>' : ''}
-      </div>
+  const previewText = b.preface ? b.preface.substring(0, 80) : '';
+  const authorDisplay = b.author || b.username || 'Bilinmiyor';
+  return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
+    <div class="book-cover">
+      ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
+      ${b.is_hidden ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent-red2);color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px"><i class="fas fa-lock"></i></div>' : ''}
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
-      <div class="book-author">${escHtml(b.username || 'Bilinmiyor')}</div>
-      ${previewText ? `<div class="book-desc">${escHtml(previewText)}…</div>` : `<div class="book-pages">${b.page_count || 0} sayfa</div>`}
+      <div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${escHtml(authorDisplay)}</div>
+      <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
+      ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}
     </div>
-  </article>`;
+  </div>`;
 }
 
 function showNewBookModal(existing = null) {
   showModal(existing ? 'Kitabı Düzenle' : 'Yeni Kitap', `
-    <div class="form-group"><label>Başlık</label><input id="bk-title" type="text" value="${existing ? escHtml(existing.title) : ''}" /></div>
+    <div class="form-group"><label>Başlık <span style="color:var(--accent-red2)">*</span></label><input id="bk-title" type="text" value="${existing ? escHtml(existing.title) : ''}" /></div>
+    <div class="form-group"><label>Kitap Yazarı <span style="color:var(--accent-red2)">*</span></label><input id="bk-author" type="text" placeholder="Yazar adı (zorunlu)" value="${existing ? escHtml(existing.author || existing.username || '') : (currentUser ? escHtml(currentUser.username) : '')}" /></div>
     <div class="form-group"><label>Tanıtım / Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
     <div class="form-group"><label>Karakterler (opsiyonel)</label><textarea id="bk-karakterler" rows="3" placeholder="Karakter isimleri, kısa notlar...">${existing ? escHtml(existing.karakterler || '') : ''}</textarea></div>
     <div class="form-group"><label>Kadro (opsiyonel)</label><textarea id="bk-kadro" rows="3" placeholder="Oyuncu kadrosu, karakter dağılımı...">${existing ? escHtml(existing.kadro || '') : ''}</textarea></div>
@@ -1259,7 +1231,7 @@ function showNewBookModal(existing = null) {
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
       ${existing && existing.cover_image ? `<img id="bk-cover-preview" src="${escHtml(existing.cover_image)}" style="width:100px;height:133px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="bk-cover-preview" style="display:none"></div>`}
     </div>
-    <div class="book-privacy-toggle">
+    <div class="book-privacy-toggle" style="margin-bottom:12px">
       <div class="toggle-header">
         <i class="fas fa-lock" style="color:var(--accent-red2);font-size:16px"></i>
         <div class="toggle-label">
@@ -1272,7 +1244,20 @@ function showNewBookModal(existing = null) {
         <span class="toggle-slider"></span>
       </label>
     </div>
-    <button class="btn btn-primary" id="bk-submit" style="width:100%">${existing ? 'Güncelle' : 'Oluştur'}</button>
+    <div class="book-privacy-toggle">
+      <div class="toggle-header">
+        <i class="fas fa-file-pdf" style="color:#ef4444;font-size:16px"></i>
+        <div class="toggle-label">
+          <div class="toggle-title">PDF İndir / Yazdır</div>
+          <div class="toggle-desc">Okuyucular kitabı indirebilir veya yazdırabilir</div>
+        </div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="bk-allow-download" ${!existing || existing.allow_download ? 'checked' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+    <button class="btn btn-primary" id="bk-submit" style="width:100%;margin-top:16px">${existing ? 'Güncelle' : 'Oluştur'}</button>
     <div id="bk-error" class="form-error mt-4"></div>
   `);
 
@@ -1288,7 +1273,9 @@ function showNewBookModal(existing = null) {
 
   $('#bk-submit').addEventListener('click', async () => {
     const title = $('#bk-title').value.trim();
+    const author = $('#bk-author').value.trim();
     if (!title) { $('#bk-error').textContent = 'Başlık zorunlu'; return; }
+    if (!author) { $('#bk-error').textContent = 'Yazar adı zorunlu'; return; }
     try {
       let cover_image = existing ? (existing.cover_image || '') : '';
       const coverFile = $('#bk-cover-file').files[0];
@@ -1299,11 +1286,13 @@ function showNewBookModal(existing = null) {
       }
       const payload = {
         title,
+        author,
         preface: $('#bk-preface').value.trim(),
         karakterler: $('#bk-karakterler').value.trim(),
         kadro: $('#bk-kadro').value.trim(),
         cover_image,
-        is_hidden: $('#bk-is-hidden').checked
+        is_hidden: $('#bk-is-hidden').checked,
+        allow_download: $('#bk-allow-download').checked
       };
       if (existing) {
         await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
@@ -1364,6 +1353,7 @@ async function renderBookDetail(app, slug) {
       </div>
       <div class="book-detail-info">
         <div class="book-detail-title">${escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
+        <div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> <span style="font-weight:600">${escHtml(book.author || book.username || 'Bilinmiyor')}</span></div>
         <div class="book-detail-meta">
           <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
           <span><i class="fas fa-file-alt"></i> ${book.page_count || 0} sayfa</span>
@@ -1380,14 +1370,13 @@ async function renderBookDetail(app, slug) {
           <button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>
           <button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>
         </div>` : ''}
-        <div style="margin-top:12px">
+        ${book.allow_download ? `<div style="margin-top:12px">
           <button class="btn btn-outline btn-sm" id="download-pdf-btn"><i class="fas fa-file-pdf" style="color:#ef4444"></i> PDF İndir</button>
-        </div>
+        </div>` : ''}
       </div>
     </div>
     <div class="chapters-list">
       ${resumeHTML}
-      <div class="section-title" style="margin-bottom:16px"><div class="section-title-bar"></div>İçindekiler</div>
       ${!chapters.length && !pages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
       ${unassignedHTML}
       ${chapListHTML}
@@ -1416,62 +1405,151 @@ async function renderBookDetail(app, slug) {
     try {
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pageW = 210; const margin = 20; const contentW = pageW - margin * 2;
+      const pageW = 210; const pageH = 297; const margin = 20; const contentW = pageW - margin * 2;
       let y = margin;
 
-      function addText(text, size, bold, color) {
+      function checkNewPage(needed) {
+        if (y + needed > pageH - margin) { doc.addPage(); y = margin; return true; }
+        return false;
+      }
+
+      function addText(text, size, bold, color, centerX) {
         doc.setFontSize(size);
         doc.setFont('helvetica', bold ? 'bold' : 'normal');
         if (color) doc.setTextColor(...color); else doc.setTextColor(30, 30, 30);
         const lines = doc.splitTextToSize(text || '', contentW);
+        const lineH = size * 0.45;
         lines.forEach(line => {
-          if (y > 270) { doc.addPage(); y = margin; }
-          doc.text(line, margin, y);
-          y += size * 0.45;
+          checkNewPage(lineH + 2);
+          if (centerX) {
+            doc.text(line, pageW / 2, y, { align: 'center' });
+          } else {
+            doc.text(line, margin, y);
+          }
+          y += lineH;
         });
         y += 3;
       }
 
-      addText(book.title, 24, true, [30, 30, 30]);
-      addText('Yazar: ' + (book.username || 'Bilinmiyor'), 12, false, [100, 100, 100]);
-      addText(book.page_count + ' sayfa', 11, false, [130, 130, 130]);
+      // ===== KAPAK SAYFASI =====
+      // Kitap kapak görseli
+      if (book.cover_image) {
+        try {
+          const imgRes = await fetch(book.cover_image);
+          const imgBlob = await imgRes.blob();
+          const imgData = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(imgBlob);
+          });
+          // Kapak: sayfanın üst yarısına ortala
+          const coverW = 90; const coverH = 120;
+          const coverX = (pageW - coverW) / 2;
+          doc.addImage(imgData, 'JPEG', coverX, 20, coverW, coverH);
+          y = 20 + coverH + 12;
+        } catch {
+          y = 60;
+        }
+      } else {
+        y = 80;
+      }
+
+      // Kitap başlığı (ortada, büyük)
+      doc.setFontSize(26);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(30, 30, 30);
+      const titleLines = doc.splitTextToSize(book.title, contentW);
+      titleLines.forEach(line => {
+        checkNewPage(12);
+        doc.text(line, pageW / 2, y, { align: 'center' });
+        y += 11;
+      });
       y += 6;
 
+      // Yazar adı (kapak altında)
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 100, 100);
+      doc.text((book.author || book.username || 'Bilinmiyor'), pageW / 2, y, { align: 'center' });
+      y += 8;
+
+      // Sayfa sayısı
+      doc.setFontSize(11);
+      doc.setTextColor(150, 150, 150);
+      doc.text(book.page_count + ' sayfa', pageW / 2, y, { align: 'center' });
+      y += 10;
+
+      // Çizgi
       doc.setDrawColor(200, 50, 50);
       doc.line(margin, y, pageW - margin, y);
       y += 8;
 
+      // Önsöz (içindekiler yok)
       if (book.preface) {
+        checkNewPage(20);
         addText('ÖNSÖZ', 14, true, [180, 30, 30]);
-        addText(book.preface, 11, false);
-        y += 6;
+        addText(book.preface, 11, false, [40, 40, 40]);
+        y += 4;
+        doc.setDrawColor(220, 80, 80);
         doc.line(margin, y, pageW - margin, y);
         y += 8;
       }
 
-      addText('İÇİNDEKİLER', 14, true, [180, 30, 30]);
+      // Sayfaları yükle ve ekle
       const allPagesData = await api('/book/' + slug);
-      const allP = allPagesData.pages || [];
-      allP.forEach(p => { addText(p.page_num + '. ' + p.title, 11, false); });
-      y += 8;
-      doc.line(margin, y, pageW - margin, y);
-      y += 8;
+      const allP = (allPagesData.pages || []).sort((a, b) => (a.page_num || 0) - (b.page_num || 0));
 
       for (const p of allP) {
         try {
           const pd = await api('/book/' + slug + '/page/' + p.slug);
           const pg = pd.page;
+          // Her sayfa yeni bir PDF sayfasında başlasın
           doc.addPage(); y = margin;
-          addText(pg.page_num + '. SAYFA', 10, false, [150, 150, 150]);
-          addText(pg.title, 16, true, [30, 30, 30]);
+
+          // Sayfa numarası (küçük, gri)
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(170, 170, 170);
+          doc.text('Sayfa ' + pg.page_num, margin, y);
+          y += 6;
+
+          // Sayfa başlığı (bozulmadan, tam satırlar)
+          doc.setFontSize(16);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(30, 30, 30);
+          const pgTitleLines = doc.splitTextToSize(pg.title || '', contentW);
+          pgTitleLines.forEach(line => {
+            doc.text(line, margin, y);
+            y += 8;
+          });
+          y += 2;
+
+          // Başlık altı çizgi
           doc.setDrawColor(220, 80, 80);
           doc.line(margin, y, pageW - margin, y);
-          y += 6;
-          addText(pg.content, 11, false, [40, 40, 40]);
+          y += 7;
+
+          // İçerik (sayfa bitmeden bölünmez, satır satır eklenir)
+          doc.setFontSize(11);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(40, 40, 40);
+          const contentLines = doc.splitTextToSize(pg.content || '', contentW);
+          const lineH = 5.2;
+          contentLines.forEach(line => {
+            if (y + lineH > pageH - margin) { doc.addPage(); y = margin; }
+            doc.text(line, margin, y);
+            y += lineH;
+          });
+
+          // Sayfa alt notu
+          doc.setFontSize(9);
+          doc.setTextColor(180, 180, 180);
+          doc.text(book.title + ' — ' + (book.author || book.username || ''), pageW / 2, pageH - 10, { align: 'center' });
         } catch {}
       }
 
-      doc.save(book.title.replace(/[^a-zA-Z0-9\s]/g, '') + '.pdf');
+      doc.save(book.title.replace(/[^a-zA-Z0-9\sğüşıöçĞÜŞİÖÇ]/g, '').trim() + '.pdf');
       toast('PDF indirildi!', 'success');
     } catch (e) { toast('PDF oluşturulamadı: ' + e.message, 'error'); }
   });
@@ -1819,38 +1897,11 @@ async function renderGroupDetail(app, slug) {
     try { messages = await api('/group/' + slug + '/messages'); } catch {}
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>'; return; }
 
-  const { group, isMember, role, joinRequestStatus } = groupData;
+  const { group, isMember, role } = groupData;
   document.title = group.name + ' - Demlik';
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
   const canSend = currentUser && isMember && group.allow_chat;
-
-  // Handle private group access
-  if (group.type === 'private' && !isMember && currentUser) {
-    if (joinRequestStatus?.status === 'pending') {
-      app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-clock" style="font-size:48px;color:var(--accent-red);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0">İstek atıldı, yöneticinin onayını bekleniyor...</p><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
-      return;
-    }
-    if (joinRequestStatus?.status === 'rejected') {
-      const reason = joinRequestStatus.rejectionReason || 'Belirtilmedi';
-      app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-ban" style="font-size:48px;color:var(--accent-red2);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0;color:var(--text-secondary)">Reddedildin</p><p style="font-size:14px;color:var(--text-muted);margin:8px 0">Neden: ${escHtml(reason)}</p><button class="btn btn-primary" id="retry-join-req">Tekrar İstek At</button><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
-      $('#retry-join-req')?.addEventListener('click', async () => {
-        try { await api(`/group/${slug}/join-request`, { method: 'POST' }); toast('İstek gönderildi'); renderGroupDetail(app, slug); } catch (e) { toast(e.message, 'error'); }
-      });
-      return;
-    }
-    // Show join request prompt
-    app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-lock" style="font-size:48px;color:var(--accent-red);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0">Bu grup gizli bir gruptur.</p><p style="font-size:14px;color:var(--text-secondary)">Gruba katılmak için yöneticinin onayını istemeniz gerekiyor.</p><button class="btn btn-primary" id="send-join-req">Girme İzni İste</button><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
-    $('#send-join-req')?.addEventListener('click', async () => {
-      try { await api(`/group/${slug}/join-request`, { method: 'POST' }); toast('İstek gönderildi'); renderGroupDetail(app, slug); } catch (e) { toast(e.message, 'error'); }
-    });
-    return;
-  }
-  
-  if (group.type === 'private' && !isMember && !currentUser) {
-    app.innerHTML = `<div class="container page"><div class="empty-state" style="margin-top:60px"><i class="fas fa-lock" style="font-size:48px;color:var(--accent-red);margin-bottom:16px"></i><h2>${escHtml(group.name)}</h2><p style="margin:12px 0">Bu grup gizli bir gruptur.</p><p style="font-size:14px;color:var(--text-secondary)">Katılmak için giriş yapmanız gerekiyor.</p><button class="btn btn-primary" onclick="navigate('/giris')">Giriş Yap</button><button class="btn btn-outline" onclick="history.back()">Geri</button></div></div>`;
-    return;
-  }
 
   app.innerHTML = `<div class="container page">
     <div style="margin-bottom:20px">
@@ -1862,7 +1913,6 @@ async function renderGroupDetail(app, slug) {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${!isMember && currentUser && group.type === 'public' && !group.invite_only ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
-          ${!isMember && currentUser && group.type === 'private' ? `<button class="btn btn-primary" id="join-req-btn"><i class="fas fa-lock"></i> Girme İzni İste</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
             <button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}
@@ -1929,9 +1979,6 @@ async function renderGroupDetail(app, slug) {
   $('#join-btn')?.addEventListener('click', async () => {
     try { await api('/group/' + slug + '/join', { method: 'POST' }); toast('Gruba katıldınız!'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
   });
-  $('#join-req-btn')?.addEventListener('click', async () => {
-    try { await api('/group/' + slug + '/join-request', { method: 'POST' }); toast('Girme izni isteği gönderildi!'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
-  });
   $('#leave-btn')?.addEventListener('click', async () => {
     if (!confirm('Gruptan ayrılmak istiyor musunuz?')) return;
     try { await api('/group/' + slug + '/leave', { method: 'POST' }); toast('Gruptan ayrıldınız.'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
@@ -1951,29 +1998,6 @@ async function renderGroupDetail(app, slug) {
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
     $('#chat-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
-    
-    // Paste image support for chat input
-    $('#chat-input')?.addEventListener('paste', async e => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.startsWith('image/')) {
-          const file = items[i].getAsFile();
-          if (file) {
-            const fd = new FormData(); fd.append('image', file);
-            try {
-              const r = await apiForm('/group/' + slug + '/upload', fd);
-              const msg = await api('/group/' + slug + '/messages', { method: 'POST', body: JSON.stringify({ content: '', image_url: r.url }) });
-              $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod));
-              const chatEl2 = $('#chat-messages');
-              if (chatEl2) chatEl2.scrollTop = chatEl2.scrollHeight;
-              toast('Resim gönderildi');
-            } catch (err) { toast(err.message, 'error'); }
-          }
-          break;
-        }
-      }
-    });
 
     $('#chat-img-input')?.addEventListener('change', async e => {
       const file = e.target.files[0]; if (!file) return;
@@ -2250,7 +2274,7 @@ async function renderVideoList(app) {
     updatePageMeta('Videolar – Demlik', 'Topluluk videolarını keşfet.', '');
     app.innerHTML = `<div class="container page">
       <div class="video-list-header">
-        <div class="page-header-copy">
+        <div>
           <div class="page-title">Videolar</div>
           <div class="page-subtitle">Video yükle, izle, yorum yap.</div>
         </div>
@@ -2297,7 +2321,7 @@ async function renderVideoDetail(app, slug) {
       <div class="video-main-column">
         <div class="video-player-card">
           <div class="video-player-shell">
-            <video controls controlsList="nodownload nodrift" preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el" oncontextmenu="return false;">
+            <video controls preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
               <source src="${escHtml(video.video_url)}" />
             </video>
             <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
@@ -2572,7 +2596,7 @@ async function renderProfile(app, username) {
         ${user.avatar ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
       <div class="profile-info">
-        <div class="profile-username" ${userNameStyleAttr(user)}>
+        <div class="profile-username" style="${user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
           ${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="Demlik Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
@@ -2609,7 +2633,7 @@ async function renderProfile(app, username) {
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
     </div>
     <div id="tab-books" class="hidden">
-      ${books.length ? `<div class="books-grid">${books.map(b => bookCardHTML(b)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
+      ${books.length ? `<div class="grid-3">${books.map(b => bookCardHTML(b)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
@@ -2785,208 +2809,29 @@ function renderSettingsSection(section) {
     });
 
   } else if (section === 'appearance') {
-    const canColor = currentUser.is_vip || currentUser.is_plus;
-    const isPlus = !!currentUser.is_plus;
-    const grad = parseNameGradient(currentUser.name_gradient) || { type: 'linear', angle: 135, colors: ['#dc2626', '#f97316', '#eab308'] };
-    const gradColors = [...(grad.colors || []), '', '', ''].slice(0, 3);
     el.innerHTML = `
-      <div class="appearance-page">
-        <div class="appearance-preview-card">
-          <div class="appearance-preview-label">Canlı önizleme</div>
-          <div class="appearance-preview-body">
-            ${currentUser.avatar ? `<img src="${escHtml(currentUser.avatar)}" class="appearance-preview-avatar" alt="" />` : `<div class="appearance-preview-avatar appearance-preview-avatar-ph"><i class="fas fa-user"></i></div>`}
-            <div class="appearance-preview-text">
-              <div id="appearance-preview-name" class="appearance-preview-username">${escHtml(currentUser.username)}</div>
-              <div class="appearance-preview-hint">Forum, yorum ve profilde böyle görünür</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card appearance-card">
-          <div class="card-header"><span><i class="fas fa-id-badge" style="margin-right:8px;color:var(--accent-red2)"></i>Rozet & isim</span></div>
-          <div class="card-body appearance-card-body">
-            <label class="appearance-toggle">
-              <input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} />
-              <span class="appearance-toggle-ui"></span>
-              <span class="appearance-toggle-copy">
-                <strong>Seviye rozetini göster</strong>
-                <small>Profil ve mesajlarda seviye simgen görünür</small>
-              </span>
-            </label>
-            <label class="appearance-toggle">
-              <input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} />
-              <span class="appearance-toggle-ui"></span>
-              <span class="appearance-toggle-copy">
-                <strong>Özel isim rengini göster</strong>
-                <small>Kapatırsan seviye rengine dönersin</small>
-              </span>
-            </label>
-          </div>
-        </div>
-
-        ${canColor ? `
-        <div class="card appearance-card">
-          <div class="card-header"><span><i class="fas fa-palette" style="margin-right:8px;color:var(--accent-red2)"></i>İsim rengi</span></div>
-          <div class="card-body appearance-card-body">
-            <div class="appearance-color-tabs">
-              <button type="button" class="appearance-tab ${(currentUser.name_color_mode || 'solid') !== 'gradient' ? 'active' : ''}" data-color-tab="solid">Düz renk</button>
-              <button type="button" class="appearance-tab ${currentUser.name_color_mode === 'gradient' ? 'active' : ''}" data-color-tab="gradient" ${isPlus ? '' : 'data-plus-only="1"'}>
-                Gradyan ${isPlus ? '' : '<i class="fas fa-plus" style="font-size:10px;margin-left:4px"></i>'}
-              </button>
-            </div>
-            <div id="appearance-solid-panel" class="appearance-panel ${(currentUser.name_color_mode || 'solid') !== 'gradient' ? '' : 'hidden'}">
-              <div class="appearance-swatch-row">
-                <input type="color" id="s-name-color" value="${escHtml((currentUser.name_color || '#f5f5f5').startsWith('#') ? currentUser.name_color : '#f5f5f5')}" />
-                <input type="text" id="s-name-color-hex" value="${escHtml(currentUser.name_color || '#f5f5f5')}" maxlength="7" placeholder="#ffffff" />
-              </div>
-              <div class="appearance-palette" id="s-color-presets"></div>
-            </div>
-            <div id="appearance-gradient-panel" class="appearance-panel ${currentUser.name_color_mode === 'gradient' ? '' : 'hidden'}">
-              ${isPlus ? `
-                <div class="form-group">
-                  <label>Gradyan türü</label>
-                  <select id="s-grad-type">
-                    <option value="linear" ${grad.type === 'linear' ? 'selected' : ''}>Doğrusal (linear)</option>
-                    <option value="radial" ${grad.type === 'radial' ? 'selected' : ''}>Dairesel (radial)</option>
-                    <option value="conic" ${grad.type === 'conic' ? 'selected' : ''}>Konik (conic)</option>
-                  </select>
-                </div>
-                <div class="form-group" id="s-grad-angle-wrap">
-                  <label>Açı <span id="s-grad-angle-val">${grad.angle ?? 135}°</span></label>
-                  <input type="range" id="s-grad-angle" min="0" max="360" value="${grad.angle ?? 135}" />
-                </div>
-                <div class="appearance-grad-colors">
-                  ${[0, 1, 2].map(i => `
-                    <div class="appearance-grad-stop">
-                      <label>Renk ${i + 1}</label>
-                      <input type="color" class="s-grad-color" data-idx="${i}" value="${escHtml((gradColors[i] && gradColors[i].startsWith('#')) ? gradColors[i] : ['#dc2626', '#ea580c', '#eab308'][i])}" />
-                    </div>`).join('')}
-                </div>
-                <div class="appearance-grad-preview" id="s-grad-preview"></div>
-              ` : `<div class="appearance-plus-lock"><i class="fas fa-lock"></i> Gradyan isim rengi yalnızca <strong>Plus</strong> üyeler içindir.</div>`}
-            </div>
-          </div>
-        </div>` : `
-        <div class="card appearance-card">
-          <div class="card-body appearance-card-body">
-            <div class="appearance-plus-lock"><i class="fas fa-gem"></i> Özel isim rengi <strong>VIP</strong> ve <strong>Plus</strong> üyelerde açılır.</div>
-          </div>
-        </div>`}
-
-        <div class="appearance-actions">
-          <button class="btn btn-primary" id="save-appearance-btn"><i class="fas fa-save"></i> Görünümü kaydet</button>
+      <div class="card">
+        <div class="card-header"><span>Görünüm</span></div>
+        <div class="card-body">
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
+          ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
+          <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
-
-    let colorMode = (currentUser.name_color_mode || 'solid') === 'gradient' && isPlus ? 'gradient' : 'solid';
-
-    function updateAppearancePreview() {
-      const preview = $('#appearance-preview-name');
-      if (!preview) return;
-      const showColor = $('#s-show-color')?.checked;
-      preview.removeAttribute('style');
-      preview.classList.remove('name-gradient-text');
-      if (!showColor) return;
-      if (colorMode === 'gradient' && isPlus) {
-        const type = $('#s-grad-type')?.value || 'linear';
-        const angle = parseInt($('#s-grad-angle')?.value || '135', 10);
-        const colors = $$('.s-grad-color').map(inp => inp.value).filter(Boolean);
-        const css = buildNameGradientCss({ type, angle, colors });
-        if (css) {
-          preview.style.background = css;
-          preview.style.webkitBackgroundClip = 'text';
-          preview.style.backgroundClip = 'text';
-          preview.style.webkitTextFillColor = 'transparent';
-        }
-        const prevBox = $('#s-grad-preview');
-        if (prevBox && css) prevBox.style.background = css;
-      } else {
-        const c = $('#s-name-color')?.value || '#f5f5f5';
-        preview.style.color = c;
-      }
-    }
-
-    const presets = ['#f5f5f5', '#fca5a5', '#dc2626', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#a855f7', '#ec4899'];
-    const presetEl = $('#s-color-presets');
-    if (presetEl) {
-      presetEl.innerHTML = presets.map(c => `<button type="button" class="appearance-preset" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('');
-      presetEl.addEventListener('click', e => {
-        const btn = e.target.closest('.appearance-preset');
-        if (!btn) return;
-        $('#s-name-color').value = btn.dataset.color;
-        $('#s-name-color-hex').value = btn.dataset.color;
-        colorMode = 'solid';
-        $$('.appearance-tab').forEach(t => t.classList.toggle('active', t.dataset.colorTab === 'solid'));
-        $('#appearance-solid-panel')?.classList.remove('hidden');
-        $('#appearance-gradient-panel')?.classList.add('hidden');
-        updateAppearancePreview();
-      });
-    }
-
-    $$('.appearance-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        if (tab.dataset.colorTab === 'gradient' && tab.dataset.plusOnly && !isPlus) {
-          toast('Gradyan isim rengi yalnızca Plus üyeler için.', 'error');
-          return;
-        }
-        colorMode = tab.dataset.colorTab;
-        $$('.appearance-tab').forEach(t => t.classList.toggle('active', t.dataset.colorTab === colorMode));
-        $('#appearance-solid-panel')?.classList.toggle('hidden', colorMode !== 'solid');
-        $('#appearance-gradient-panel')?.classList.toggle('hidden', colorMode !== 'gradient');
-        updateAppearancePreview();
-      });
-    });
-
-    $('#s-name-color')?.addEventListener('input', e => {
-      $('#s-name-color-hex').value = e.target.value;
-      colorMode = 'solid';
-      updateAppearancePreview();
-    });
-    $('#s-name-color-hex')?.addEventListener('input', e => {
-      if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) $('#s-name-color').value = e.target.value;
-      updateAppearancePreview();
-    });
-    $('#s-show-color')?.addEventListener('change', updateAppearancePreview);
-    $('#s-grad-type')?.addEventListener('change', () => {
-      const t = $('#s-grad-type')?.value;
-      $('#s-grad-angle-wrap')?.classList.toggle('hidden', t === 'radial');
-      updateAppearancePreview();
-    });
-    $('#s-grad-angle')?.addEventListener('input', e => {
-      const v = e.target.value;
-      const lbl = $('#s-grad-angle-val');
-      if (lbl) lbl.textContent = v + '°';
-      updateAppearancePreview();
-    });
-    $$('.s-grad-color').forEach(inp => inp.addEventListener('input', updateAppearancePreview));
-    updateAppearancePreview();
-
     $('#save-appearance-btn').addEventListener('click', async () => {
-      const fd = new FormData();
-      fd.append('show_level_badge', $('#s-show-badge').checked ? '1' : '0');
-      fd.append('show_level_color', $('#s-show-color').checked ? '1' : '0');
-      if (canColor) {
-        if (colorMode === 'gradient') {
-          if (!isPlus) { $('#appear-msg').textContent = 'Gradyan isim rengi yalnızca Plus üyeler içindir.'; return; }
-          fd.append('name_color_mode', 'gradient');
-          fd.append('name_gradient', JSON.stringify({
-            type: $('#s-grad-type')?.value || 'linear',
-            angle: parseInt($('#s-grad-angle')?.value || '135', 10),
-            colors: $$('.s-grad-color').map(inp => inp.value).filter(Boolean),
-          }));
-        } else {
-          fd.append('name_color_mode', 'solid');
-          fd.append('name_color', $('#s-name-color')?.value || '');
-          fd.append('name_gradient', '');
-        }
-      }
+      const body = {
+        show_level_badge: $('#s-show-badge').checked,
+        show_level_color: $('#s-show-color').checked,
+      };
+      if (currentUser.is_vip || currentUser.is_plus) body.name_color = $('#s-name-color')?.value || '';
       try {
+        const fd = new FormData();
+        Object.entries(body).forEach(([k, v]) => fd.append(k, v));
         const updated = await apiForm('/profile', fd, 'PUT');
-        currentUser = updated;
-        updateNavUI();
+        currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
-        $('#appear-msg').textContent = '';
       } catch (e) { $('#appear-msg').textContent = e.message; }
     });
   } else if (section === 'notifications') {
@@ -3261,12 +3106,10 @@ function renderLogin(app) {
 function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
   document.title = 'Kayıt Ol - Demlik';
-
   app.innerHTML = `<div class="auth-page">
-    <div class="auth-card card card-body" id="reg-card">
+    <div class="auth-card card card-body">
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">Topluluğa katıl</p>
-
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
@@ -3284,39 +3127,17 @@ function renderRegister(app) {
           </button>
         </div>
       </div>
-
       <div class="form-group">
         <label class="checkbox-label">
           <input type="checkbox" id="reg-kvkk" />
-          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum.
-            <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button>
-          </span>
+          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum. <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button></span>
         </label>
       </div>
-
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="reg-btn">Kayıt Ol</button>
-
       <div id="reg-error" class="form-error mt-4" style="text-align:center"></div>
-
       <div class="auth-footer">Zaten hesabın var mı? <a href="/giris" data-link class="auth-link">Giriş Yap</a></div>
-
-      <!-- Register overlay -->
-      <div id="reg-overlay" class="hidden" style="position:absolute;inset:0;background:rgba(0,0,0,0.55);backdrop-filter: blur(4px);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;z-index:10;pointer-events:auto">
-        <div style="width:86px;height:86px;border-radius:50%;background:rgba(220,38,38,0.12);border:1px solid rgba(220,38,38,0.3);display:flex;align-items:center;justify-content:center;box-shadow:0 0 24px rgba(220,38,38,0.18)">
-          <div class="spinner" style="width:26px;height:26px;border-width:3px"></div>
-        </div>
-        <div style="font-weight:800;color:#fff">Kayıt yapılıyor...</div>
-        <div style="font-size:12px;color:var(--text-muted);max-width:320px;text-align:center">Lütfen bekleyin</div>
-        <div class="reg-progress" style="width:260px;max-width:80vw;height:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);border-radius:999px;overflow:hidden">
-          <div class="reg-progress-fill" style="height:100%;width:0%;background:var(--grad-red);transition:width 0.25s"></div>
-        </div>
-      </div>
     </div>
   </div>`;
-
-  // Card relative for overlay positioning
-  const regCard = $('#reg-card');
-  if (regCard) regCard.style.position = 'relative';
 
   $('#reg-pw-toggle').addEventListener('click', () => {
     const pw = $('#reg-pw');
@@ -3332,83 +3153,25 @@ function renderRegister(app) {
     } catch {}
   });
 
-  const showRegisterOverlay = () => {
-    $('#reg-error').textContent = '';
-    $('#reg-overlay')?.classList.remove('hidden');
-    const btn = $('#reg-btn');
-    if (btn) {
-      btn.disabled = true;
-      btn.dataset.prevText = btn.innerHTML;
-      btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px"></div> Bekle...';
-    }
-
-    const fill = document.querySelector('#reg-overlay .reg-progress-fill');
-    if (fill) {
-      fill.style.width = '0%';
-      // indeterminate-ish progress
-      let pct = 0;
-      const start = Date.now();
-      const t = setInterval(() => {
-        // non-linear growth up to 92%
-        const elapsed = Date.now() - start;
-        pct = Math.min(92, pct + (0.6 + Math.random() * 1.8));
-        const clamped = Math.max(0, Math.min(92, pct));
-        fill.style.width = clamped.toFixed(0) + '%';
-        if (elapsed > 6500) clearInterval(t);
-      }, 160);
-      // store for stop
-      $('#reg-overlay')._progressTimer = t;
-    }
-  };
-
-  const hideRegisterOverlay = () => {
-    const ov = $('#reg-overlay');
-    ov?.classList.add('hidden');
-    if (ov?._progressTimer) { clearInterval(ov._progressTimer); ov._progressTimer = null; }
-    const btn = $('#reg-btn');
-    if (btn) {
-      btn.disabled = false;
-      if (btn.dataset.prevText) btn.innerHTML = btn.dataset.prevText;
-      else btn.innerHTML = 'Kayıt Ol';
-      delete btn.dataset.prevText;
-    }
-  };
-
   const doRegister = async () => {
     const username = $('#reg-username').value.trim();
     const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
     const kvkk_accepted = $('#reg-kvkk').checked;
-
-    const errEl = $('#reg-error');
-
-    if (!username || !email || !password) { errEl.textContent = 'Tüm alanları doldurun'; return; }
-    if (!kvkk_accepted) { errEl.textContent = 'KVKK onayı zorunludur'; return; }
-
+    if (!username || !email || !password) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
-      showRegisterOverlay();
       const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password, kvkk_accepted }) });
-
-      // success
-      const fill = document.querySelector('#reg-overlay .reg-progress-fill');
-      if (fill) fill.style.width = '100%';
-
-      currentToken = data.token;
-      currentUser = data.user;
+      currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
-      updateNavUI();
-      toast('Hoş geldiniz, ' + currentUser.username + '!');
+      updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
       navigate('/');
-    } catch (e) {
-      hideRegisterOverlay();
-      errEl.textContent = e.message;
-    }
+    } catch (e) { $('#reg-error').textContent = e.message; }
   };
 
   $('#reg-btn').addEventListener('click', doRegister);
   $('#reg-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
 }
-
 
 function renderNotFound(app) {
   document.title = 'Sayfa Bulunamadı - Demlik';
@@ -3567,8 +3330,6 @@ async function renderMessages(app, targetUsername) {
         <span style="font-size:13px;font-weight:700">Mesajlar</span>
         <div style="display:flex;align-items:center;gap:6px">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
-          <button class="btn btn-outline btn-sm" id="dm-friends-btn" title="Arkadaşlar"><i class="fas fa-user-friends"></i></button>
-          <button class="btn btn-outline btn-sm" id="dm-groups-btn" title="Gruplar"><i class="fas fa-users"></i></button>
           <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
         </div>
       </div>
@@ -3656,14 +3417,6 @@ async function renderMessages(app, targetUsername) {
     });
   });
 
-  $('#dm-friends-btn')?.addEventListener('click', () => {
-    navigate('/arkadaslar');
-  });
-
-  $('#dm-groups-btn')?.addEventListener('click', () => {
-    navigate('/gruplar');
-  });
-
   if (targetUsername) {
     const activeEl = $(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
     if (activeEl) { activeEl.classList.add('active'); }
@@ -3744,13 +3497,10 @@ async function renderDMChat(username) {
 
   mainEl.innerHTML = `<div class="dm-chat">
     <div class="dm-chat-header">
-      <div class="dm-chat-user">
+      <div style="display:flex;align-items:center;gap:10px">
         <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none"><i class="fas fa-arrow-left"></i></button>
         ${other.avatar ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <div class="dm-chat-user-info">
-          <a href="/profil/${escHtml(other.username)}" data-link>${escHtml(other.username)}</a>
-          <div class="dm-chat-user-status">${isHidden ? 'Kilitli konuşma' : 'Çevrimiçi'}</div>
-        </div>
+        <a href="/profil/${escHtml(other.username)}" data-link style="font-weight:600;font-size:14px;color:${other.name_color || 'var(--text-primary)'}">${escHtml(other.username)}</a>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <div id="dm-sel-actions" style="display:none;gap:6px">
@@ -3761,24 +3511,22 @@ async function renderDMChat(username) {
         <button class="btn btn-ghost btn-sm" id="dm-options-btn"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
-    <div class="dm-messages ig-dm-thread" id="dm-messages">
-      ${dmMessagesGroupedHTML(messages, currentUser.id, false)}
+    <div class="dm-messages" id="dm-messages">
+      ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
     </div>
-    <div id="dm-reply-bar" class="dm-reply-bar-hidden" style="padding:6px 14px;background:var(--bg-card2);border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);align-items:center;justify-content:space-between">
+    <div id="dm-reply-bar" style="display:none;padding:6px 14px;background:var(--bg-card2);border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);display:flex;align-items:center;justify-content:space-between">
       <span id="dm-reply-text"></span>
       <button onclick="clearReply()" style="background:none;color:var(--text-muted)">✕</button>
     </div>
-    <div class="dm-input-bar ig-dm-composer">
-      <label class="ig-dm-composer-btn" for="dm-img-input" title="Fotoğraf ekle"><i class="fas fa-image"></i></label>
+    <div class="dm-input-bar">
+      <label class="btn btn-ghost btn-sm" for="dm-img-input" title="Fotoğraf ekle" style="cursor:pointer;padding:6px"><i class="fas fa-image"></i></label>
       <input type="file" id="dm-img-input" accept="image/*" style="display:none" />
-      <div id="dm-img-preview" class="ig-dm-img-preview" style="display:none">
-        <img id="dm-img-thumb" alt="" />
-        <button type="button" onclick="clearDmImg()" aria-label="Kaldır"><i class="fas fa-times"></i></button>
+      <div id="dm-img-preview" style="display:none;position:relative">
+        <img id="dm-img-thumb" style="height:48px;border-radius:6px;object-fit:cover" />
+        <button onclick="clearDmImg()" style="position:absolute;top:-6px;right:-6px;background:var(--accent-red);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center">✕</button>
       </div>
-      <div class="ig-dm-input-shell">
-        <textarea id="dm-input" placeholder="Mesaj..." rows="1"></textarea>
-        <button type="button" class="ig-dm-send" id="dm-send-btn" aria-label="Gönder"><i class="fas fa-paper-plane"></i></button>
-      </div>
+      <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1" style="flex:1;background:transparent;border:none;resize:none;color:var(--text-primary);font-size:14px;padding:8px 0;outline:none;max-height:120px;overflow-y:auto"></textarea>
+      <button class="btn btn-primary btn-sm" id="dm-send-btn"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>`;
 
@@ -3799,7 +3547,7 @@ async function renderDMChat(username) {
   window.clearReply = () => {
     replyToId = null;
     const rb = $('#dm-reply-bar');
-    if (rb) { rb.classList.add('dm-reply-bar-hidden'); rb.style.display = ''; $('#dm-reply-text').textContent = ''; }
+    if (rb) { rb.style.display = 'none'; $('#dm-reply-text').textContent = ''; }
   };
 
   window.clearDmImg = () => {
@@ -3843,7 +3591,7 @@ async function renderDMChat(username) {
       const msg = await apiForm(`/conversation/${encodeURIComponent(username)}/messages`, fd);
       const msgsEl = $('#dm-messages');
       if (msgsEl) {
-        msgsEl.insertAdjacentHTML('beforeend', dmMessageHTML(msg, currentUser.id, false, { clusterStart: true, clusterEnd: true, showAvatar: true }));
+        msgsEl.insertAdjacentHTML('beforeend', dmMessageHTML(msg, currentUser.id, false));
         msgsEl.scrollTop = msgsEl.scrollHeight;
       }
       const convItem = $(`.dm-conv-item[data-username="${CSS.escape(username)}"]`);
@@ -3854,30 +3602,6 @@ async function renderDMChat(username) {
 
   $('#dm-send-btn')?.addEventListener('click', sendDmMessage);
   $('#dm-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); } });
-
-  // Paste image support for DM
-  $('#dm-input')?.addEventListener('paste', async e => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith('image/')) {
-        const file = items[i].getAsFile();
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = async ev => {
-            pendingImg = file;
-            const thumb = $('#dm-img-thumb');
-            const preview = $('#dm-img-preview');
-            if (thumb) thumb.src = ev.target.result;
-            if (preview) preview.style.display = 'flex';
-            toast('Resim yapıştırıldı');
-          };
-          reader.readAsDataURL(file);
-        }
-        break;
-      }
-    }
-  });
 
   // Otomatik büyüyen textarea
   $('#dm-input')?.addEventListener('input', e => {
@@ -3937,65 +3661,37 @@ function updateDmSelActions() {
   if (sa) sa.style.display = dmSelectedIds.size > 0 ? 'flex' : 'none';
 }
 
-function dmMessagesGroupedHTML(messages, myId, selMode) {
-  const parts = [];
-  const gapMs = 5 * 60 * 1000;
-  for (let i = 0; i < messages.length; i++) {
-    const m = messages[i];
-    const prev = messages[i - 1];
-    const next = messages[i + 1];
-    const curTime = new Date(m.created_at).getTime();
-    const prevTime = prev ? new Date(prev.created_at).getTime() : 0;
-    const nextTime = next ? new Date(next.created_at).getTime() : 0;
-    const samePrev = prev && prev.sender_id === m.sender_id && (curTime - prevTime) < gapMs;
-    const sameNext = next && next.sender_id === m.sender_id && (nextTime - curTime) < gapMs;
-    parts.push(dmMessageHTML(m, myId, selMode, {
-      clusterStart: !samePrev,
-      clusterEnd: !sameNext,
-      showAvatar: m.sender_id != myId && !sameNext,
-    }));
-  }
-  return parts.join('');
-}
-
-function dmMessageHTML(m, myId, selMode, cluster = {}) {
-  const { clusterStart = true, clusterEnd = true, showAvatar = true } = cluster;
+function dmMessageHTML(m, myId, selMode) {
   const isOwn = m.sender_id == myId;
   const deleted = m.deleted_for_all;
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe && !deleted) return '';
 
-  const bubbleMods = [
-    clusterStart ? 'ig-bubble-start' : 'ig-bubble-mid',
-    clusterEnd ? 'ig-bubble-end' : 'ig-bubble-mid',
-    deleted ? 'dm-deleted' : '',
-  ].filter(Boolean).join(' ');
-
-  return `<div class="dm-msg-wrap ig-dm-row ${isOwn ? 'dm-own ig-dm-own' : 'ig-dm-other'} ${clusterStart ? 'ig-cluster-start' : ''} ${clusterEnd ? 'ig-cluster-end' : ''}" data-id="${m.id}">
+  return `<div class="dm-msg-wrap ${isOwn ? 'dm-own' : ''}" data-id="${m.id}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
-    ${!isOwn ? `<div class="ig-dm-avatar-slot">${showAvatar ? (m.sender_avatar ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm ig-dm-avatar" alt="" />` : `<div class="avatar-sm avatar-placeholder ig-dm-avatar"><i class="fas fa-user"></i></div>`) : ''}</div>` : ''}
-    <div class="dm-msg-content ig-dm-content">
-      ${m.reply_to_id && m.reply_content ? `<div class="dm-reply-preview ig-dm-reply"><span class="ig-dm-reply-user">${escHtml(m.reply_username || '')}</span><div class="ig-dm-reply-text">${escHtml((m.reply_content||'').substring(0, 80))}</div></div>` : ''}
-      ${deleted ? `<div class="dm-msg-bubble ig-dm-bubble ${bubbleMods}"><i class="fas fa-ban"></i> Mesaj silindi</div>`
-        : `<div class="dm-msg-bubble ig-dm-bubble ${bubbleMods}">
-            ${m.image_url ? `<img src="${escHtml(m.image_url)}" class="ig-dm-image" alt="" onclick="window.open('${escHtml(m.image_url)}','_blank')" />` : ''}
-            ${m.shared_forum_id ? `<div class="dm-shared-forum ig-dm-share-card" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
-              ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" alt="" />` : ''}
-              <div class="ig-dm-share-body"><div class="ig-dm-share-title">${escHtml(m.forum_title||'')}</div><div class="ig-dm-share-link">Forum</div></div>
+    ${!isOwn ? (m.sender_avatar ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0" />` : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`) : ''}
+    <div class="dm-msg-content">
+      ${m.reply_to_id && m.reply_content ? `<div class="dm-reply-preview"><span style="color:var(--text-muted);font-size:11px">${escHtml(m.reply_username || '')}</span><div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content||'').substring(0,60))}</div></div>` : ''}
+      ${deleted ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> !!! Mesaj silindi</div>`
+        : `<div class="dm-msg-bubble">
+            ${m.image_url ? `<img src="${escHtml(m.image_url)}" style="max-width:220px;border-radius:8px;display:block;margin-bottom:6px;cursor:pointer" onclick="window.open('${escHtml(m.image_url)}','_blank')" />` : ''}
+            ${m.shared_forum_id ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
+              ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
+              <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title||'')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
             </div>` : ''}
-            ${m.shared_video_id ? `<div class="dm-shared-forum ig-dm-share-card" onclick="navigate('/video/${escHtml(m.video_slug)}')">
-              ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" alt="" />` : ''}
-              <div class="ig-dm-share-body"><div class="ig-dm-share-title">${escHtml(m.video_title||'Video')}</div><div class="ig-dm-share-link">Video</div></div>
+            ${m.shared_video_id ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
+              ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
+              <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title||'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
             </div>` : ''}
-            ${m.content ? `<span class="ig-dm-text">${escHtml(m.content)}</span>` : ''}
+            ${m.content ? `<span>${escHtml(m.content)}</span>` : ''}
           </div>`}
-      ${clusterEnd ? `<div class="dm-msg-meta ig-dm-meta">
-        <span>${timeAgo(m.created_at)}</span>
-        ${isOwn && !deleted ? `<span class="ig-dm-read">${m.read_at ? '<i class="fas fa-check-double" title="Okundu"></i>' : '<i class="fas fa-check" title="Gönderildi"></i>'}</span>` : ''}
-        <button type="button" class="dm-msg-menu-btn" data-id="${m.id}" data-own="${isOwn ? 1 : 0}"><i class="fas fa-ellipsis-h"></i></button>
-      </div>` : ''}
+      <div class="dm-msg-meta">
+        <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
+        ${isOwn && !deleted ? `<span style="font-size:11px;margin-left:3px">${m.read_at ? '<i class="fas fa-check-double" style="color:#1ED760" title="Okundu"></i>' : '<i class="fas fa-check" style="color:var(--text-muted)" title="Gönderildi"></i>'}</span>` : ''}
+        <button class="dm-msg-menu-btn" data-id="${m.id}" data-own="${isOwn ? 1 : 0}" style="background:none;color:var(--text-muted);font-size:12px;padding:0 4px;opacity:0;transition:opacity 0.15s"><i class="fas fa-ellipsis-h"></i></button>
+      </div>
     </div>
   </div>`;
 }
@@ -4027,7 +3723,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
         setReply(msgId);
         const rb = $('#dm-reply-bar');
         const rt = $('#dm-reply-text');
-        if (rb && rt) { rb.classList.remove('dm-reply-bar-hidden'); rb.style.display = 'flex'; rt.textContent = content.substring(0, 60); }
+        if (rb && rt) { rb.style.display = 'flex'; rt.textContent = content.substring(0, 60); }
       } else if (item.action === 'select') {
         dmSelectionMode = true;
         dmSelectedIds.add(String(msgId));
@@ -4112,7 +3808,7 @@ async function renderFriends(app) {
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
-    <div style="display:grid;grid-template-columns:${window.innerWidth <= 768 ? '1fr' : '1fr 1fr'};gap:24px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
       <div>
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Arkadaşlar (${accepted.length})</button>
@@ -4192,11 +3888,11 @@ async function renderFriends(app) {
     const remove = e.target.closest('.friend-remove');
     const unblock = e.target.closest('.friend-unblock');
     const msgBtn = e.target.closest('.friend-msg');
-    if (accept) { e.stopPropagation(); try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (reject) { e.stopPropagation(); try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (remove) { e.stopPropagation(); if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (unblock) { e.stopPropagation(); try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (msgBtn) { e.stopPropagation(); navigate('/mesajlar/' + msgBtn.dataset.username); }
+    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
   });
 }
 
@@ -4221,10 +3917,10 @@ function friendItemHTML(f, type, myId) {
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;flex-shrink:0;min-width:0">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" style="white-space:nowrap"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" style="white-space:nowrap"><i class="fas fa-times"></i> Reddet</button>` : ''}
-      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}"><i class="fas fa-user-minus"></i></button>` : ''}
+    <div style="display:flex;gap:6px">
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-times"></i></button>` : ''}
+      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>
   </div>`;
 }
@@ -4632,7 +4328,8 @@ function openMiniPlayer(audioUrl, slug, song) {
         <span class="gplayer-time" id="gp-dur">0:00</span>
       </div>
       <div class="gplayer-vol-wrap">
-        ${demlikVolumeControlHTML('gp')}
+        <button class="gplayer-vol-btn" id="gp-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
+        <input type="range" class="gplayer-vol-slider" id="gp-vol" min="0" max="100" value="80" step="1" title="Ses seviyesi" />
       </div>
       <button class="gplayer-close" id="gp-close"><i class="fas fa-times"></i></button>
     </div>`;
@@ -4701,45 +4398,6 @@ function openMiniPlayer(audioUrl, slug, song) {
   audio.play().catch(() => {});
 }
 
-function demlikVolumeControlHTML(prefix) {
-  return `<div class="demlik-volume" data-vol-root="${prefix}">
-    <button type="button" class="demlik-volume-trigger" id="${prefix}-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
-    <div class="demlik-volume-panel" id="${prefix}-vol-panel">
-      <input type="range" class="demlik-volume-slider" id="${prefix}-vol" min="0" max="100" value="80" step="1" aria-label="Ses seviyesi" />
-      <span class="demlik-volume-label" id="${prefix}-vol-label">80%</span>
-    </div>
-  </div>`;
-}
-
-function initDemlikVolume(audio, prefix) {
-  if (!audio) return;
-  const savedVol = parseFloat(localStorage.getItem('demlik_volume') ?? '0.8');
-  audio.volume = savedVol;
-  const btn = document.getElementById(`${prefix}-vol-btn`);
-  const panel = document.getElementById(`${prefix}-vol-panel`);
-  const slider = document.getElementById(`${prefix}-vol`);
-  const label = document.getElementById(`${prefix}-vol-label`);
-  if (!slider) return;
-  const sync = (v) => {
-    audio.volume = v / 100;
-    localStorage.setItem('demlik_volume', String(v / 100));
-    if (label) label.textContent = `${v}%`;
-    slider.style.setProperty('--vol', `${v}%`);
-    if (btn) {
-      btn.innerHTML = v === 0 ? '<i class="fas fa-volume-mute"></i>' : v < 35 ? '<i class="fas fa-volume-down"></i>' : '<i class="fas fa-volume-up"></i>';
-    }
-  };
-  sync(Math.round(savedVol * 100));
-  slider.addEventListener('input', e => sync(parseInt(e.target.value, 10)));
-  btn?.addEventListener('click', e => {
-    e.stopPropagation();
-    panel?.classList.toggle('open');
-  });
-  document.addEventListener('click', e => {
-    if (!e.target.closest(`[data-vol-root="${prefix}"]`)) panel?.classList.remove('open');
-  });
-}
-
 async function renderMusicDetail(app, slug) {
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let song;
@@ -4759,11 +4417,13 @@ async function renderMusicDetail(app, slug) {
           : `<div class="music-detail-cover music-detail-cover-ph"><i class="fas fa-music"></i></div>`}
       </div>
       <div class="music-detail-info">
-        <div class="music-detail-heading-block">
-          <div class="music-detail-type-badge">${isOwn ? '<i class="fas fa-microphone"></i> Sanatçı Şarkısı' : '<i class="fas fa-share"></i> Paylaşılan Şarkı'}</div>
-          <div class="music-detail-title">${escHtml(song.title)}</div>
-          <div class="music-detail-artist">${escHtml(song.artist_name)}</div>
-          ${isUploader ? `<button type="button" class="btn btn-outline btn-sm music-detail-edit-btn" id="song-edit-btn" style="position:absolute;top:0;right:0"><i class="fas fa-edit"></i> Düzenle</button>` : ''}
+        <div class="music-detail-top">
+          <div>
+            <div class="music-detail-type-badge">${isOwn ? '<i class="fas fa-microphone"></i> Sanatçı Şarkısı' : '<i class="fas fa-share"></i> Paylaşılan Şarkı'}</div>
+            <div class="music-detail-title">${escHtml(song.title)}</div>
+            <div class="music-detail-artist">${escHtml(song.artist_name)}</div>
+          </div>
+          ${isUploader ? `<div class="music-detail-actions"><button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button></div>` : ''}
         </div>
         <div class="music-detail-meta">
           ${song.genre ? `<span><i class="fas fa-tag"></i> ${escHtml(song.genre)}</span>` : ''}
@@ -4774,8 +4434,11 @@ async function renderMusicDetail(app, slug) {
         <div class="music-player-box" id="music-player-box">
           <audio id="detail-audio" src="${escHtml(song.audio_url)}" preload="metadata"></audio>
           <div class="music-player-controls">
-            <button type="button" class="music-play-btn" id="detail-play-btn"><i class="fas fa-play"></i> Oynat</button>
-            ${demlikVolumeControlHTML('detail')}
+            <button class="music-play-btn" id="detail-play-btn"><i class="fas fa-play"></i> Oynat</button>
+            <div class="music-vol-wrap">
+              <button id="detail-vol-btn" class="music-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
+              <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="music-vol-slider" title="Ses seviyesi" />
+            </div>
           </div>
           <div class="music-progress-wrap">
             <span class="music-time" id="dp-cur">0:00</span>
@@ -4838,7 +4501,36 @@ async function renderMusicDetail(app, slug) {
 
   seek?.addEventListener('input', e => { if(audio.duration) audio.currentTime=(parseFloat(e.target.value)/100)*audio.duration; });
 
-  initDemlikVolume(audio, 'detail');
+  // Detail page ses kontrolü (localStorage'dan başlat)
+  const savedVol = parseFloat(localStorage.getItem('demlik_volume') ?? '0.8');
+  audio.volume = savedVol;
+  const detailVolSlider = document.getElementById('detail-vol');
+  const detailVolBtn = document.getElementById('detail-vol-btn');
+  if (detailVolSlider) {
+    detailVolSlider.value = Math.round(savedVol * 100);
+    const updateVolIcon = (v) => {
+      if (!detailVolBtn) return;
+      detailVolBtn.innerHTML = v === 0 ? '<i class="fas fa-volume-mute"></i>' : v < 50 ? '<i class="fas fa-volume-down"></i>' : '<i class="fas fa-volume-up"></i>';
+    };
+    updateVolIcon(Math.round(savedVol * 100));
+    detailVolSlider.addEventListener('input', e => {
+      const v = parseInt(e.target.value);
+      audio.volume = v / 100;
+      localStorage.setItem('demlik_volume', v / 100);
+      updateVolIcon(v);
+    });
+    detailVolBtn?.addEventListener('click', () => {
+      if (audio.volume > 0) {
+        audio.volume = 0; detailVolSlider.value = 0;
+        localStorage.setItem('demlik_volume', '0');
+        if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
+      } else {
+        audio.volume = 0.8; detailVolSlider.value = 80;
+        localStorage.setItem('demlik_volume', '0.8');
+        if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
+      }
+    });
+  }
 
   // Şarkı düzenleme butonu (sadece yükleyene gösterilir)
   const editBtn = document.getElementById('song-edit-btn');

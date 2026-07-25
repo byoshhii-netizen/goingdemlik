@@ -1,4 +1,4 @@
-﻿const { Pool } = require('pg');
+const { Pool } = require('pg');
 const crypto = require('crypto');
 
 const pool = new Pool({
@@ -78,6 +78,59 @@ async function initDb() {
       value TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS store_products (
+      id BIGSERIAL PRIMARY KEY,
+      product_key TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      features TEXT DEFAULT '[]',
+      price NUMERIC(12,2) NOT NULL DEFAULT 0,
+      compare_at_price NUMERIC(12,2),
+      currency TEXT NOT NULL DEFAULT 'TRY',
+      active INTEGER DEFAULT 1,
+      visible INTEGER DEFAULT 1,
+      shopier_product_id TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS store_orders (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      product_id BIGINT NOT NULL,
+      merchant_order_id TEXT UNIQUE NOT NULL,
+      shopier_product_id TEXT DEFAULT '',
+      shopier_order_id TEXT UNIQUE,
+      amount NUMERIC(12,2) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'TRY',
+      status TEXT NOT NULL DEFAULT 'pending',
+      webhook_id TEXT DEFAULT '',
+      raw_payload JSONB DEFAULT '{}',
+      created_at TIMESTAMP DEFAULT NOW(),
+      paid_at TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id) REFERENCES store_products(id) ON DELETE RESTRICT
+    );
+
+    CREATE TABLE IF NOT EXISTS store_entitlements (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      product_id BIGINT NOT NULL,
+      order_id BIGINT NOT NULL,
+      entitlement_type TEXT NOT NULL,
+      starts_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL,
+      revoked_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(order_id, entitlement_type),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id) REFERENCES store_products(id) ON DELETE RESTRICT,
+      FOREIGN KEY(order_id) REFERENCES store_orders(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_store_orders_user ON store_orders(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_store_entitlements_user ON store_entitlements(user_id, entitlement_type, expires_at);
+
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,
@@ -126,97 +179,6 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS videos (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      video_url TEXT NOT NULL,
-      banner_image TEXT DEFAULT '',
-      slug TEXT UNIQUE,
-      allow_comments INTEGER DEFAULT 1,
-      views INTEGER DEFAULT 0,
-      active INTEGER DEFAULT 1,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS video_likes (
-      id BIGSERIAL PRIMARY KEY,
-      video_id BIGINT,
-      user_id BIGINT,
-      UNIQUE(video_id, user_id),
-      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS video_saves (
-      id BIGSERIAL PRIMARY KEY,
-      video_id BIGINT,
-      user_id BIGINT,
-      UNIQUE(video_id, user_id),
-      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS video_comments (
-      id BIGSERIAL PRIMARY KEY,
-      video_id BIGINT,
-      user_id BIGINT,
-      content TEXT NOT NULL,
-      is_pinned INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS video_comment_likes (
-      id BIGSERIAL PRIMARY KEY,
-      comment_id BIGINT,
-      user_id BIGINT,
-      UNIQUE(comment_id, user_id),
-      FOREIGN KEY(comment_id) REFERENCES video_comments(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS video_ads (
-      id BIGSERIAL PRIMARY KEY,
-      title TEXT NOT NULL,
-      video_url TEXT NOT NULL,
-      site_url TEXT DEFAULT '',
-      position TEXT DEFAULT 'bottom-right',
-      priority INTEGER DEFAULT 0,
-      display_after_seconds INTEGER DEFAULT 0,
-      active INTEGER DEFAULT 1,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-
-    -- Reals flag for videos
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_reals INTEGER DEFAULT 0;
-
-    -- Track resends (user reposts) for videos
-    CREATE TABLE IF NOT EXISTS video_resends (
-      id BIGSERIAL PRIMARY KEY,
-      video_id BIGINT NOT NULL,
-      user_id BIGINT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS user_follows (
-      id BIGSERIAL PRIMARY KEY,
-      follower_id BIGINT NOT NULL,
-      followed_id BIGINT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(follower_id, followed_id),
-      FOREIGN KEY(follower_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(followed_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
     CREATE TABLE IF NOT EXISTS tags (
       id BIGSERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
@@ -243,6 +205,7 @@ async function initDb() {
       cover_image TEXT DEFAULT '',
       slug TEXT UNIQUE,
       page_count INTEGER DEFAULT 0,
+      is_hidden INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -251,6 +214,8 @@ async function initDb() {
     ALTER TABLE books ADD COLUMN IF NOT EXISTS karakterler TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS kadro TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS is_hidden INTEGER DEFAULT 0;
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS author TEXT DEFAULT '';
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_download INTEGER DEFAULT 1;
 
     CREATE TABLE IF NOT EXISTS book_chapters (
       id BIGSERIAL PRIMARY KEY,
@@ -301,6 +266,21 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS group_join_requests (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT,
+      user_id BIGINT,
+      status TEXT DEFAULT 'pending',
+      rejection_reason TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      reviewed_at TIMESTAMP,
+      reviewed_by BIGINT,
+      UNIQUE(group_id, user_id),
+      FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS moderator_permissions (
       id BIGSERIAL PRIMARY KEY,
       group_id BIGINT,
@@ -330,6 +310,56 @@ async function initDb() {
       created_by BIGINT,
       created_at TIMESTAMP DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS photos (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      url TEXT NOT NULL,
+      caption TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+      CREATE TABLE IF NOT EXISTS photo_likes (
+        id BIGSERIAL PRIMARY KEY,
+        photo_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(photo_id, user_id),
+        FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS photo_comments (
+        id BIGSERIAL PRIMARY KEY,
+        photo_id BIGINT NOT NULL,
+        user_id BIGINT,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+        FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS badges (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT '',
+        color TEXT DEFAULT '#6b7280',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS gifts (
+        id BIGSERIAL PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        sender_id BIGINT NOT NULL,
+        recipient_id BIGINT,
+        recipient_username TEXT DEFAULT '',
+        type TEXT NOT NULL,
+        redeemed INTEGER DEFAULT 0,
+        redeemed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY(recipient_id) REFERENCES users(id) ON DELETE SET NULL
+      );
 
     CREATE TABLE IF NOT EXISTS system_logs (
       id BIGSERIAL PRIMARY KEY,
@@ -378,6 +408,19 @@ async function initDb() {
       FOREIGN KEY(user2_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS videos (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      video_url TEXT NOT NULL,
+      thumbnail_url TEXT DEFAULT '',
+      slug TEXT UNIQUE,
+      views INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS dm_messages (
       id BIGSERIAL PRIMARY KEY,
       conversation_id BIGINT NOT NULL,
@@ -385,6 +428,7 @@ async function initDb() {
       content TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
       shared_forum_id BIGINT,
+      shared_video_id BIGINT,
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
@@ -393,14 +437,21 @@ async function initDb() {
       FOREIGN KEY(conversation_id) REFERENCES dm_conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(shared_forum_id) REFERENCES forums(id) ON DELETE SET NULL,
+      FOREIGN KEY(shared_video_id) REFERENCES videos(id) ON DELETE SET NULL,
       FOREIGN KEY(reply_to_id) REFERENCES dm_messages(id) ON DELETE SET NULL
     );
 
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
-    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
-    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_shares INTEGER DEFAULT 1;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS like_count INTEGER DEFAULT 0;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS comment_count INTEGER DEFAULT 0;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
@@ -452,28 +503,21 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_bio TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_genre TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_website TEXT DEFAULT '';
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_name TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_icon TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_color TEXT DEFAULT '#6b7280';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_display TEXT DEFAULT 'level';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_mentions INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS banner_fit TEXT DEFAULT 'cover';
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS images TEXT DEFAULT '[]';
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS user_id BIGINT;
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS video_url TEXT DEFAULT '';
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS banner_image TEXT DEFAULT '';
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS slug TEXT DEFAULT '';
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS views INTEGER DEFAULT 0;
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS active INTEGER DEFAULT 1;
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
-    ALTER TABLE video_ads ADD COLUMN IF NOT EXISTS display_after_seconds INTEGER DEFAULT 0;
-    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS is_pinned INTEGER DEFAULT 0;
-    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_vip INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_plus INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_admin INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
@@ -522,7 +566,22 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
     );
+
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
   `);
+
+  const { rows: storeRows } = await query('SELECT COUNT(*) as c FROM store_products');
+  if (parseInt(storeRows[0].c) === 0) {
+    await query(
+      `INSERT INTO store_products
+        (product_key,title,description,features,price,compare_at_price,currency,active,visible)
+       VALUES
+        ('vip','VIP Üyelik','Demlik deneyimini daha güçlü ve kişisel hale getir.','["VIP rozeti ve profil görünümü","Özel isim rengi","VIP içerik ve günlük limitler"]',99.90,149.90,'TRY',1,1),
+        ('plus','Plus Üyelik','Daha fazla kişiselleştirme ve daha yüksek limitler.','["Plus rozeti ve ayrıcalıkları","Gelişmiş isim gradyanı","Plus içerik ve günlük limitler"]',149.90,199.90,'TRY',1,1),
+        ('admin','Admin Yetkisi','Demlik yönetim araçlarına 30 günlük erişim.','["Admin paneli erişimi","Topluluk yönetim araçları","30 gün boyunca aktif yetki"]',249.90,399.90,'TRY',1,1)`
+    );
+  }
 
   // Seed default levels
   const { rows: lvRows } = await query('SELECT COUNT(*) as c FROM levels');
@@ -561,10 +620,10 @@ async function initDb() {
   if (kvkkRows.length === 0) {
     await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['kvkk_text', `KİŞİSEL VERİLERİN KORUNMASI KANUNU (KVKK) AYDINLATMA METNİ
 
-Demlik Forum olarak, 6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında kişisel verilerinizin işlenmesine ilişkin sizi bilgilendirmek isteriz.
+TeaTube olarak, 6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında kişisel verilerinizin işlenmesine ilişkin sizi bilgilendirmek isteriz.
 
 1. VERİ SORUMLUSU
-Demlik Forum platformu, veri sorumlusu sıfatıyla hareket etmektedir.
+TeaTube platformu, veri sorumlusu sıfatıyla hareket etmektedir.
 
 2. İŞLENEN KİŞİSEL VERİLER
 Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) işlenmektedir.
