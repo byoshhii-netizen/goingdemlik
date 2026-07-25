@@ -234,7 +234,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
 }
 .book-card:hover { transform: translateY(-2px); border-color: rgba(220,38,38,0.25); box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
-.book-cover { height: 190px; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); display: flex; align-items: center; justify-content: center; }
+.book-cover { aspect-ratio: 2/3; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); display: flex; align-items: center; justify-content: center; }
 .book-cover img { width: 100%; height: 100%; object-fit: cover; }
 .book-cover-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 32px; }
 .video-list-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
@@ -388,7 +388,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 }
 
 @media (max-width: 768px) {
-  .book-cover { height: 160px; }
+  .book-cover { aspect-ratio: 2/3; height: auto; }
 }
 
 /* ===== HERO ===== */
@@ -478,7 +478,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 }
 .book-card:hover { border-color: var(--border-hover); box-shadow: var(--glow); transform: translateY(-2px); }
 .book-cover {
-  aspect-ratio: 3/4;
+  aspect-ratio: 2/3;
   background: var(--bg-card2);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden; flex-shrink: 0; position: relative;
