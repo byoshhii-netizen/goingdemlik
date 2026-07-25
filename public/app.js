@@ -1176,9 +1176,9 @@ async function renderBookList(app) {
   updatePageMeta('Kitaplar – Demlik', 'Topluluğun yazdığı eserleri keşfet.', '');
   app.innerHTML = `
     <div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div><div class="page-title">Kitaplar</div><div class="page-subtitle">Topluluğun eserleri</div></div>
-        ${currentUser ? `<button class="btn btn-primary" id="new-book-btn"><i class="fas fa-plus"></i> Yeni Kitap</button>` : ''}
+      <div class="books-list-header">
+        <span class="page-subtitle" style="display:block;font-size:15px;font-weight:600;color:var(--text-secondary)">Topluluğun eserleri</span>
+        ${currentUser ? `<button class="btn btn-primary btn-sm" id="new-book-btn"><i class="fas fa-plus"></i> Yeni Kitap</button>` : ''}
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
       <div id="books-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -2543,28 +2543,8 @@ async function renderProfile(app, username) {
       overallPct = metrics.length > 0 ? Math.round(metrics.reduce((a, b) => a + b, 0) / metrics.length) : 100;
     }
 
-    let hint = '';
-    if (remaining.length > 0) {
-      if (reqAny) {
-        // "Bunlardan birini tamamlayarak seviye atlayabilirsin"
-        hint = `<div style="font-size:12px;color:var(--text-secondary);margin-top:6px;padding:8px 10px;background:rgba(220,38,38,0.06);border-radius:8px;border:1px solid rgba(220,38,38,0.12)">
-          <i class="fas fa-info-circle" style="color:var(--accent-red2);margin-right:5px"></i>
-          <strong>Şunlardan birini tamamlayarak seviye atlayabilirsin:</strong>
-          <ul style="margin:6px 0 0 16px;list-style:disc">
-            ${remaining.map(r => `<li style="margin:2px 0">${r}</li>`).join('')}
-          </ul>
-        </div>`;
-      } else {
-        hint = `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">${remaining.join(', ')} kaldı</div>`;
-      }
-    }
-
-    progressHTML = `<div style="margin-top:12px">
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">
-        ${escHtml(nextLevel.name)} seviyesine ${overallPct}% tamamlandı
-      </div>
+    progressHTML = `<div style="margin-top:10px">
       <div class="progress-bar"><div class="progress-fill" style="width:${overallPct}%"></div></div>
-      ${hint}
     </div>`;
   }
 
