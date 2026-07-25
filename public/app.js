@@ -3665,7 +3665,7 @@ function dmMessageHTML(m, myId, selMode) {
               ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
               <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title||'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
             </div>` : ''}
-            ${m.content ? `<span>${escHtml(m.content)}</span>` : ''}
+            ${m.content ? `<span>${escHtml(m.content.trim())}</span>` : ''}
           </div>`}
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
