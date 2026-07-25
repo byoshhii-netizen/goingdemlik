@@ -1253,7 +1253,7 @@ function showNewBookModal(existing = null) {
         </div>
       </div>
       <label class="toggle-switch">
-        <input type="checkbox" id="bk-allow-download" ${!existing || existing.allow_download ? 'checked' : ''} />
+        <input type="checkbox" id="bk-allow-download" ${!existing || existing.allow_download !== 0 ? 'checked' : ''} />
         <span class="toggle-slider"></span>
       </label>
     </div>
@@ -1370,7 +1370,7 @@ async function renderBookDetail(app, slug) {
           <button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>
           <button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>
         </div>` : ''}
-        ${book.allow_download ? `<div style="margin-top:12px">
+        ${(book.allow_download !== 0 && book.allow_download !== false) ? `<div style="margin-top:12px">
           <button class="btn btn-outline btn-sm" id="download-pdf-btn"><i class="fas fa-file-pdf" style="color:#ef4444"></i> PDF İndir</button>
         </div>` : ''}
       </div>
