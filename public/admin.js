@@ -1,3 +1,26 @@
+// ===== TEMA RENGİ SİSTEMİ =====
+function applyThemeColor(hex) {
+  if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+  const l = (v) => Math.min(255, Math.round(v * 1.28));
+  const d = (v) => Math.max(0, Math.round(v * 0.6));
+  const toHex = (v) => v.toString(16).padStart(2,'0');
+  const hex2 = '#' + toHex(l(r)) + toHex(l(g)) + toHex(l(b));
+  const hexDark = '#' + toHex(d(r)) + toHex(d(g)) + toHex(d(b));
+  const root = document.documentElement.style;
+  root.setProperty('--red', hex);
+  root.setProperty('--red2', hex2);
+  root.setProperty('--red-glow', `rgba(${r},${g},${b},0.25)`);
+  root.setProperty('--border-red', `rgba(${r},${g},${b},0.2)`);
+  root.setProperty('--theme-hex', hex);
+  root.setProperty('--theme-dark', hexDark);
+  window.__themeColor = hex;
+  // Btn-primary arka planlarını güncelle
+  document.querySelectorAll('.btn-primary').forEach(el => {
+    el.style.background = `linear-gradient(135deg, ${hex}, ${hexDark})`;
+  });
+}
+
 // ===== DEMLIK ADMIN PANEL =====
 let adminToken = sessionStorage.getItem('admin_token') || '';
 let currentSection = 'dashboard';
@@ -1921,6 +1944,45 @@ async function renderSettings(main) {
           <div id="s-music-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card" style="grid-column: 1 / -1">
+        <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Ana Hat Rengi</span></div>
+        <div class="card-body">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Sitenin genel tema rengini buradan ayarlayabilirsiniz. Bu renk butonlar, kenarlıklar ve vurgular gibi tüm ana elemanlara otomatik olarak uygulanır.</p>
+          <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
+            <div>
+              <label style="margin-bottom:8px">Renk Seçici</label>
+              <div style="display:flex;align-items:center;gap:12px">
+                <input type="color" id="s-color-picker" value="${settings['primary_color']||'#BDA275'}"
+                  style="width:64px;height:48px;border-radius:10px;border:2px solid var(--border);padding:4px;cursor:pointer;background:var(--bg4);flex-shrink:0" />
+                <div>
+                  <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Seçili renk</div>
+                  <div id="s-color-preview" style="width:120px;height:36px;border-radius:8px;border:1px solid var(--border);background:${settings['primary_color']||'#BDA275'}"></div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;min-width:200px">
+              <label style="margin-bottom:8px">Hex Kodu</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="s-color-hex" value="${settings['primary_color']||'#BDA275'}"
+                  placeholder="#BDA275" maxlength="7"
+                  style="font-family:monospace;font-size:15px;letter-spacing:2px;max-width:160px" />
+                <button class="btn btn-outline btn-sm" id="s-color-apply-hex" style="flex-shrink:0"><i class="fas fa-eye"></i> Önizle</button>
+              </div>
+              <div style="margin-top:12px">
+                <div style="font-size:11px;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Hazır Renkler</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap" id="s-color-presets">
+                  ${[['#BDA275','Kahve-Amber'],['#dc2626','Kırmızı'],['#5865F2','Mavi'],['#22c55e','Yeşil'],['#a855f7','Mor'],['#f97316','Turuncu'],['#06b6d4','Cyan'],['#eab308','Altın'],['#ec4899','Pembe'],['#64748b','Gri']].map(([c,n])=>`<button class="s-color-preset" data-color="${c}" title="${n}" style="width:28px;height:28px;border-radius:6px;border:2px solid ${(settings['primary_color']||'#BDA275')===c?'var(--text)':'transparent'};background:${c};cursor:pointer;transition:all 0.15s"></button>`).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="s-color-save"><i class="fas fa-save"></i> Kaydet ve Uygula</button>
+            <button class="btn btn-outline" id="s-color-reset"><i class="fas fa-undo"></i> Varsayılan</button>
+            <div id="s-color-msg" class="form-error"></div>
+          </div>
+        </div>
+      </div>
     </div>`;
 
   // Logo upload
@@ -2009,6 +2071,79 @@ async function renderSettings(main) {
       await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg);
       msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
     } catch (e) { msg.textContent=e.message; }
+  });
+
+  // ===== TEMA RENGİ =====
+  const colorPicker = document.getElementById('s-color-picker');
+  const colorHex = document.getElementById('s-color-hex');
+  const colorPreview = document.getElementById('s-color-preview');
+  const colorMsg = document.getElementById('s-color-msg');
+
+  function syncColorUI(hex) {
+    if (colorPicker) colorPicker.value = hex;
+    if (colorHex) colorHex.value = hex;
+    if (colorPreview) colorPreview.style.background = hex;
+    document.querySelectorAll('.s-color-preset').forEach(btn => {
+      btn.style.border = btn.dataset.color === hex ? '2px solid var(--text)' : '2px solid transparent';
+    });
+    applyThemeColor(hex);
+  }
+
+  if (colorPicker) {
+    colorPicker.addEventListener('input', () => syncColorUI(colorPicker.value));
+  }
+
+  document.getElementById('s-color-apply-hex')?.addEventListener('click', () => {
+    let hex = colorHex.value.trim();
+    if (!hex.startsWith('#')) hex = '#' + hex;
+    if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+      syncColorUI(hex);
+    } else {
+      colorMsg.textContent = 'Geçerli bir hex kodu girin (örn: #BDA275)';
+    }
+  });
+
+  colorHex?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('s-color-apply-hex')?.click();
+  });
+
+  document.querySelectorAll('.s-color-preset').forEach(btn => {
+    btn.addEventListener('click', () => syncColorUI(btn.dataset.color));
+  });
+
+  document.getElementById('s-color-save')?.addEventListener('click', async () => {
+    colorMsg.textContent = '';
+    const hex = colorHex ? colorHex.value.trim() : colorPicker.value;
+    const finalHex = hex.startsWith('#') ? hex : '#' + hex;
+    if (!/^#[0-9A-Fa-f]{6}$/.test(finalHex)) {
+      colorMsg.style.color='var(--red2)'; colorMsg.textContent='Geçersiz renk kodu';
+      return;
+    }
+    try {
+      await fetch('/api/admin/settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Admin-Token':adminToken},
+        body:JSON.stringify({key:'primary_color', value:finalHex})
+      });
+      applyThemeColor(finalHex);
+      syncColorUI(finalHex);
+      toast('Tema rengi kaydedildi!');
+      colorMsg.style.color='var(--green)'; colorMsg.textContent='✓ Kaydedildi';
+    } catch(e) { colorMsg.style.color='var(--red2)'; colorMsg.textContent=e.message; }
+  });
+
+  document.getElementById('s-color-reset')?.addEventListener('click', async () => {
+    const defaultColor = '#BDA275';
+    syncColorUI(defaultColor);
+    try {
+      await fetch('/api/admin/settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Admin-Token':adminToken},
+        body:JSON.stringify({key:'primary_color', value:defaultColor})
+      });
+      toast('Varsayılan renge döndürüldü');
+      colorMsg.style.color='var(--green)'; colorMsg.textContent='✓ Sıfırlandı';
+    } catch(e) { colorMsg.style.color='var(--red2)'; colorMsg.textContent=e.message; }
   });
 }
 

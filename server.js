@@ -1815,7 +1815,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['footer_created_visible', 'footer_copyright_text'];
+  const keys = ['footer_created_visible', 'footer_copyright_text', 'primary_color'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -2239,7 +2239,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description','primary_color')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   res.json(obj);

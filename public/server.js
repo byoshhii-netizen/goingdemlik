@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -73,7 +73,7 @@ app.get('/ads.txt', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'ads.txt'));
 });
 
-const SITE_URL = process.env.SITE_URL || 'https://cigcig.up.railway.app';
+const SITE_URL = process.env.SITE_URL || 'https://demlikforum.up.railway.app';
 
 // ===== RATE LIMITERS =====
 
@@ -430,15 +430,8 @@ app.post('/api/auth/register', async (req, res) => {
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
-    // Kullanıcı adı kontrolü (boşluk normalize dahil)
-    const { rows: existingUser } = await query(
-      "SELECT id FROM users WHERE LOWER(REPLACE(username,' ',''))=LOWER(REPLACE($1,' ',''))",
-      [username]
-    );
-    if (existingUser.length) return res.status(400).json({ error: 'Bu isim zaten var' });
-    // E-posta kontrolü
-    const { rows: existingEmail } = await query('SELECT id FROM users WHERE email=$1', [email]);
-    if (existingEmail.length) return res.status(400).json({ error: 'Bu e-posta adresi zaten kullanılıyor' });
+    const { rows: existing } = await query('SELECT id FROM users WHERE username=$1 OR email=$2', [username, email]);
+    if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     const { rows } = await query(
       'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip) VALUES ($1,$2,$3,$4,$5) RETURNING *',
       [username, email, hashPassword(password), 1, ip]);
@@ -636,11 +629,7 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
   )];
   for (const username of mentions) {
     if (username.toLowerCase() === actorUser.username.toLowerCase()) continue;
-    // Önce tam eşleşme, bulamazsa boşlukları kaldırarak eşleşme dene
-    const { rows } = await query(
-      "SELECT id, allow_mentions FROM users WHERE (LOWER(username)=$1 OR LOWER(REPLACE(username,' ',''))=$1) AND is_deleted=0",
-      [username.toLowerCase()]
-    );
+    const { rows } = await query('SELECT id, allow_mentions FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
     if (!rows.length) continue;
     // allow_mentions NULL ise varsayılan olarak açık say (1)
     if (rows[0].allow_mentions !== null && rows[0].allow_mentions == 0) continue;
@@ -1367,15 +1356,7 @@ app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), asyn
 
 // ===== PROFILE =====
 app.get('/api/profile/:username', async (req, res) => {
-  // Önce tam eşleşme, bulamazsa boşluksuz normalize eşleşme (ör: @İsimliİsim → İsimli İsim)
-  let { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
-  if (!users.length) {
-    const res2 = await query(
-      "SELECT * FROM users WHERE LOWER(REPLACE(username,' ',''))=LOWER(REPLACE($1,' ','')) AND is_deleted=0 LIMIT 1",
-      [req.params.username]
-    );
-    users = res2.rows;
-  }
+  const { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = users[0];
   const [forums, books, groups, level, levels, bpCount] = await Promise.all([
@@ -1834,7 +1815,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['footer_created_visible', 'footer_copyright_text', 'site_name', 'other_songs_enabled'];
+  const keys = ['footer_created_visible', 'footer_copyright_text', 'primary_color'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -2009,15 +1990,6 @@ app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
      genre ?? song.genre, lyrics ?? song.lyrics, parseInt(play_count) || song.play_count,
      status || song.status, audio_url, cover_url, req.params.id]
   );
-  res.json({ ok: true });
-});
-
-// Kullanıcı kendi şarkısını sil
-app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM songs WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
-  if (rows[0].uploader_id !== req.user.id) return res.status(403).json({ error: 'Bu şarkıyı silme yetkiniz yok' });
-  await query("UPDATE songs SET status='deleted' WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 
@@ -2267,7 +2239,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description','primary_color')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   res.json(obj);
@@ -2421,7 +2393,7 @@ app.get('/panel', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 
 
 function injectMeta(title, desc, url, imageUrl) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const img = imageUrl || `${SITE_URL}/cigcig.png`;
+  const img = imageUrl || `${SITE_URL}/teatube.png`;
   const meta = `<title>${escapeHtml(title)}</title>
     <meta name="description" content="${escapeHtml(desc)}" />
     <link rel="canonical" href="${escapeHtml(url)}" />
@@ -2459,7 +2431,7 @@ app.get('/forum/:slug', async (req, res) => {
   const desc = escapeHtml((forum.content || '').substring(0, 160).replace(/\n/g, ' '));
   const imgTag = forum.banner_image
     ? `<meta property="og:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:card" content="summary_large_image" />`
-    : `<meta property="og:image" content="${SITE_URL}/cigcig.png" />`;
+    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const meta = `<title>${escapeHtml(forum.title)} – TeaTube</title>
     <meta name="description" content="${desc}" />
     <link rel="canonical" href="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
@@ -2481,7 +2453,7 @@ app.get('/kitap/:slug', async (req, res) => {
   const desc = escapeHtml((book.preface || book.title + ' – TeaTube').substring(0, 160));
   const imgTag = book.cover_image
     ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
-    : `<meta property="og:image" content="${SITE_URL}/cigcig.png" />`;
+    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const meta = `<title>${escapeHtml(book.title)} – TeaTube</title>
     <meta name="description" content="${desc}" />
     <link rel="canonical" href="${SITE_URL}/kitap/${escapeHtml(book.slug)}" />
@@ -2502,7 +2474,7 @@ app.get('/grup/:slug', async (req, res) => {
   const desc = escapeHtml((group.description || group.name + ' – TeaTube topluluğu grubu.').substring(0, 160));
   const imgTag = group.cover_image
     ? `<meta property="og:image" content="${escapeHtml(group.cover_image)}" />`
-    : `<meta property="og:image" content="${SITE_URL}/cigcig.png" />`;
+    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const meta = `<title>${escapeHtml(group.name)} – TeaTube</title>
     <meta name="description" content="${desc}" />
     <link rel="canonical" href="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
@@ -2522,7 +2494,7 @@ app.get('/profil/:username', async (req, res) => {
   const desc = escapeHtml((user.bio || `${user.username} adlı kullanıcının TeaTube profili.`).substring(0, 160));
   const imgTag = user.avatar
     ? `<meta property="og:image" content="${escapeHtml(user.avatar)}" />`
-    : `<meta property="og:image" content="${SITE_URL}/cigcig.png" />`;
+    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const meta = `<title>${escapeHtml(user.username)} – TeaTube</title>
     <meta name="description" content="${desc}" />
     <link rel="canonical" href="${SITE_URL}/profil/${escapeHtml(user.username)}" />
