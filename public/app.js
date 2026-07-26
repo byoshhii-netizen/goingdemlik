@@ -1,6 +1,7 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
+let siteName = 'Demlik';
 
 const SITE_URL = 'https://demlik.up.railway.app';
 
@@ -151,6 +152,11 @@ function renderRoute(fullPath) {
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
   updateNavActive(path);
+  // Mesajlar sayfasında footer gizle
+  const siteFooter = document.getElementById('site-footer');
+  if (siteFooter) {
+    siteFooter.style.display = (path === '/mesajlar' || path.startsWith('/mesajlar/')) ? 'none' : '';
+  }
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
 
@@ -235,8 +241,8 @@ function generateVideoPoster(file) {
 }
 
 async function renderRealsFeed(app) {
-  document.title = 'Reals – Demlik';
-  updatePageMeta('Reals – Demlik', 'Kısa dikey videolar', '');
+  document.title = 'Reals – ' + siteName;
+  updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
   app.innerHTML = `
     <div class="reals-container">
       <div id="reals-list" class="reals-list"></div>
@@ -400,7 +406,7 @@ function updateNavUI() {
     $('#dropdown-profile').setAttribute('href', '/profil/' + currentUser.username);
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
-      navBrand.setAttribute('href', '/');
+      navBrand.setAttribute('href', '/profil/' + currentUser.username);
       navBrand.style.cursor = 'pointer';
     }
 
@@ -561,8 +567,8 @@ document.addEventListener('click', e => {
 });
 
 async function renderHome(app) {
-  document.title = 'Demlik – Topluluk Platformu';
-  updatePageMeta('Demlik – Topluluk Platformu', 'Çay kadar sıcak topluluk platformu.', '');
+  document.title = siteName + ' – Topluluk Platformu';
+  updatePageMeta(siteName + ' – Topluluk Platformu', 'Çay kadar sıcak topluluk platformu.', '');
   app.innerHTML = `
     <div class="container page">
       <div class="section">
@@ -613,8 +619,8 @@ async function renderHome(app) {
 }
 
 async function renderForumList(app, queryString) {
-  document.title = 'Konular – Demlik';
-  updatePageMeta('Konular – Demlik', 'Toplulukla fikir paylaş, tartış, keşfet.', '');
+  document.title = 'Konular – ' + siteName;
+  updatePageMeta('Konular – ' + siteName, 'Toplulukla fikir paylaş, tartış, keşfet.', '');
 
   // URL'den ?tag= parametresini oku — önce argüman, yoksa location.search
   const qs = queryString !== undefined ? queryString : location.search;
@@ -955,7 +961,7 @@ async function renderForumDetail(app, slug) {
   let forum, liked = false, comments = [];
   try {
     forum = await api('/forum/' + slug);
-    document.title = forum.title + ' – Demlik';
+    document.title = forum.title + ' – ' + siteName;
     updatePageMeta(
       forum.title + ' – Demlik',
       forum.content.substring(0, 155).replace(/\n/g, ' '),
@@ -973,7 +979,7 @@ async function renderForumDetail(app, slug) {
       'datePublished': forum.created_at,
       'dateModified': forum.updated_at || forum.created_at,
       'author': { '@type': 'Person', 'name': forum.username || 'Anonim' },
-      'publisher': { '@type': 'Organization', 'name': 'Demlik', 'url': SITE_URL },
+      'publisher': { '@type': 'Organization', 'name': siteName, 'url': SITE_URL },
       'interactionStatistic': [
         { '@type': 'InteractionCounter', 'interactionType': 'https://schema.org/LikeAction', 'userInteractionCount': forum.like_count || 0 },
         { '@type': 'InteractionCounter', 'interactionType': 'https://schema.org/CommentAction', 'userInteractionCount': forum.comment_count || 0 }
@@ -1172,8 +1178,8 @@ function commentHTML(c) {
 }
 
 async function renderBookList(app) {
-  document.title = 'Kitaplar – Demlik';
-  updatePageMeta('Kitaplar – Demlik', 'Topluluğun yazdığı eserleri keşfet.', '');
+  document.title = 'Kitaplar – ' + siteName;
+  updatePageMeta('Kitaplar – ' + siteName, 'Topluluğun yazdığı eserleri keşfet.', '');
   app.innerHTML = `
     <div class="container page">
       <div class="books-list-header">
@@ -1311,8 +1317,8 @@ async function renderBookDetail(app, slug) {
   try { data = await api('/book/' + slug); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Kitap bulunamadı.</p></div></div>'; return; }
 
   const { book, chapters, pages } = data;
-  document.title = book.title + ' – Demlik';
-  updatePageMeta(book.title + ' – Demlik', book.preface ? book.preface.substring(0,155) : book.title + ' – Demlik\'te yayınlanan kitap.', book.cover_image || '');
+  document.title = book.title + ' – ' + siteName;
+  updatePageMeta(book.title + ' – ' + siteName, book.preface ? book.preface.substring(0,155) : book.title + ' – Demlik\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
 
   const sortedPages = [...pages].sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
@@ -1777,7 +1783,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
 }
 
 async function renderGroupList(app) {
-  document.title = 'Gruplar - Demlik';
+  document.title = 'Gruplar - ' + siteName;
   app.innerHTML = `
     <div class="container page">
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
@@ -1898,7 +1904,7 @@ async function renderGroupDetail(app, slug) {
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>'; return; }
 
   const { group, isMember, role } = groupData;
-  document.title = group.name + ' - Demlik';
+  document.title = group.name + ' - ' + siteName;
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
   const canSend = currentUser && isMember && group.allow_chat;
@@ -2270,8 +2276,8 @@ async function renderVideoList(app) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   try {
     const videos = await api('/videos');
-    document.title = 'Videolar – Demlik';
-    updatePageMeta('Videolar – Demlik', 'Topluluk videolarını keşfet.', '');
+    document.title = 'Videolar – ' + siteName;
+    updatePageMeta('Videolar – ' + siteName, 'Topluluk videolarını keşfet.', '');
     app.innerHTML = `<div class="container page">
       <div class="video-list-header">
         <div>
@@ -2307,8 +2313,8 @@ async function renderVideoDetail(app, slug) {
   } catch {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Video bulunamadı.</p></div></div>'; return;
   }
-  document.title = video.title + ' – Demlik';
-  updatePageMeta(video.title + ' – Demlik', video.description || 'Demlik videoları', video.banner_image || '');
+  document.title = video.title + ' – ' + siteName;
+  updatePageMeta(video.title + ' – ' + siteName, video.description || 'Demlik videoları', video.banner_image || '');
   const isOwner = currentUser && currentUser.id === video.user_id;
   let followState = false;
   if (currentUser && currentUser.username !== video.username) {
@@ -2512,7 +2518,7 @@ async function renderProfile(app, username) {
           <div class="song-card-meta">${s.play_count || 0} dinlenme</div>
         </div>
       </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok</p></div>';
-  document.title = user.username + ' - Demlik';
+  document.title = user.username + ' - ' + siteName;
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
   let progressHTML = '';
@@ -2646,7 +2652,7 @@ async function renderProfile(app, username) {
 
 async function renderSettings(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Ayarlar - Demlik';
+  document.title = 'Ayarlar - ' + siteName;
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title">Ayarlar</div></div>
@@ -2994,7 +3000,7 @@ function renderSettingsSection(section) {
 
 function renderLogin(app) {
   if (currentUser) { navigate('/'); return; }
-  document.title = 'Giriş Yap - Demlik';
+  document.title = 'Giriş Yap - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card card card-body">
       <div class="auth-title">Giriş Yap</div>
@@ -3085,7 +3091,7 @@ function renderLogin(app) {
 
 function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
-  document.title = 'Kayıt Ol - Demlik';
+  document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card card card-body">
       <div class="auth-title">Kayıt Ol</div>
@@ -3154,7 +3160,7 @@ function renderRegister(app) {
 }
 
 function renderNotFound(app) {
-  document.title = 'Sayfa Bulunamadı - Demlik';
+  document.title = 'Sayfa Bulunamadı - ' + siteName;
   app.innerHTML = `<div class="container page" style="text-align:center;padding:80px 20px">
     <div style="font-size:72px;font-weight:900;color:var(--accent-red);opacity:0.3">404</div>
     <div style="font-size:24px;font-weight:700;margin-bottom:12px">Sayfa Bulunamadı</div>
@@ -3178,6 +3184,9 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
+    siteName = ps.site_name || 'Demlik';
+    const brandSpan = document.querySelector('.nav-brand span');
+    if (brandSpan) brandSpan.textContent = siteName.toUpperCase();
     const footer = document.getElementById('site-footer');
     if (footer) {
       const createdVisible = ps.footer_created_visible !== '0';
@@ -3298,7 +3307,7 @@ async function showForwardForumModal(forum) {
 // ===== MESAJLAR SAYFASI =====
 async function renderMessages(app, targetUsername) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Mesajlar - Demlik';
+  document.title = 'Mesajlar - ' + siteName;
   let convs = [];
   let hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
@@ -3310,6 +3319,8 @@ async function renderMessages(app, targetUsername) {
         <span style="font-size:13px;font-weight:700">Mesajlar</span>
         <div style="display:flex;align-items:center;gap:6px">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
+          <button class="btn btn-ghost btn-sm" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 7px"><i class="fas fa-user-friends"></i></button>
+          <button class="btn btn-ghost btn-sm" id="dm-groups-btn" title="Gruplar" style="padding:5px 7px"><i class="fas fa-users"></i></button>
           <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
         </div>
       </div>
@@ -3353,6 +3364,9 @@ async function renderMessages(app, targetUsername) {
   $('#dm-hidden-toggle-btn')?.addEventListener('click', () => {
     $('#dm-hidden-panel')?.classList.toggle('hidden');
   });
+
+  $('#dm-friends-btn')?.addEventListener('click', () => { navigate('/arkadaslar'); });
+  $('#dm-groups-btn')?.addEventListener('click', () => { navigate('/gruplar'); });
 
   $$('.dm-conv-item').forEach(el => {
     el.addEventListener('click', () => {
@@ -3494,7 +3508,7 @@ async function renderDMChat(username) {
     <div class="dm-messages" id="dm-messages">
       ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
     </div>
-    <div id="dm-reply-bar" style="display:none;padding:6px 14px;background:var(--bg-card2);border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);display:flex;align-items:center;justify-content:space-between">
+    <div id="dm-reply-bar" style="display:none;padding:6px 14px;background:var(--bg-card2);border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);align-items:center;justify-content:space-between">
       <span id="dm-reply-text"></span>
       <button onclick="clearReply()" style="background:none;color:var(--text-muted)">✕</button>
     </div>
@@ -3776,7 +3790,7 @@ function showDmOptionsMenu(username, convId) {
 // ===== ARKADAŞLAR SAYFASI =====
 async function renderFriends(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Arkadaşlar - Demlik';
+  document.title = 'Arkadaşlar - ' + siteName;
   let friends = [];
   try { friends = await api('/friends'); } catch {}
   let blocks = [];
@@ -4187,7 +4201,7 @@ async function renderSpotifyWidget(username, containerId) {
 
 // ===== MÜZİK LİSTESİ =====
 async function renderMusicList(app) {
-  document.title = 'Müzikler – Demlik';
+  document.title = 'Müzikler – ' + siteName;
   app.innerHTML = `<div class="container page">
     <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
       <div class="page-title" style="display:flex;align-items:center;gap:10px">
@@ -4384,7 +4398,7 @@ async function renderMusicDetail(app, slug) {
   try { song = await api('/songs/' + slug); } catch {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Şarkı bulunamadı.</p></div></div>'; return;
   }
-  document.title = `${song.title} – ${song.artist_name} | Demlik`;
+  document.title = `${song.title} – ${song.artist_name} | ${siteName}`;
   const isOwn = song.song_type === 'own';
   const hasLyrics = !!song.lyrics?.trim();
   const isUploader = currentUser && currentUser.id === song.uploader_id;
@@ -4564,7 +4578,7 @@ async function renderMusicDetail(app, slug) {
 }
 async function renderArtistApply(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  document.title = 'Artist Başvurusu – Demlik';
+  document.title = 'Artist Başvurusu – ' + siteName;
   let existing = null;
   try { existing = await api('/artist/my-application'); } catch {}
 
@@ -4659,7 +4673,7 @@ async function renderArtistApply(app) {
 async function renderArtistPanel(app) {
   if (!currentUser) { navigate('/giris'); return; }
   if (!currentUser.is_artist) { navigate('/artist-basvuru'); return; }
-  document.title = 'Artist Panel – Demlik';
+  document.title = 'Artist Panel – ' + siteName;
 
   let rules = { own_rules: '', other_rules: '' };
   try { rules = await api('/music-rules'); } catch {}
@@ -4757,7 +4771,7 @@ async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
   // Artist olanlar kendi panelini kullansın
   if (currentUser.is_artist) { navigate('/artist-panel'); return; }
-  document.title = 'Şarkı Paylaş – Demlik';
+  document.title = 'Şarkı Paylaş – ' + siteName;
 
   let rules = { other_rules: '' };
   try { rules = await api('/music-rules'); } catch {}
