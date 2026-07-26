@@ -1833,7 +1833,7 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Genel</span></div>
         <div class="card-body">
-          <div class="form-group"><label>Site Adı</label><input id="s-sitename" value="${escHtml(settings['site_name']||'Demlik')}" /></div>
+          <div class="form-group"><label>Site Adı</label><input id="s-sitename" value="${escHtml(settings['site_name']||'CigCig')}" /></div>
           <div class="form-group">
             <label>Site Logosu</label>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
@@ -1911,6 +1911,11 @@ async function renderSettings(main) {
         <div class="card-body">
           <div class="form-group"><label>Kendi Şarkım – Kurallar</label><textarea id="s-music-own" rows="4">${escHtml(settings['music_own_rules']||'')}</textarea></div>
           <button class="btn btn-primary btn-sm" id="s-music-own-save" style="width:100%;justify-content:center;margin-bottom:16px"><i class="fas fa-save"></i> Kaydet</button>
+          <label class="checkbox-label" style="margin-bottom:12px">
+            <input type="checkbox" id="s-other-songs-enabled" ${settings['other_songs_enabled']!=='0'?'checked':''} />
+            "Başkasının Şarkısı" özelliğini etkinleştir
+          </label>
+          <button class="btn btn-primary btn-sm" id="s-other-toggle-save" style="width:100%;justify-content:center;margin-bottom:16px"><i class="fas fa-save"></i> Kaydet</button>
           <div class="form-group"><label>Başkasının Şarkısı – Kurallar</label><textarea id="s-music-other" rows="4">${escHtml(settings['music_other_rules']||'')}</textarea></div>
           <button class="btn btn-primary btn-sm" id="s-music-other-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-music-msg" class="form-error mt-4"></div>
@@ -1976,6 +1981,9 @@ async function renderSettings(main) {
   });
   document.getElementById('s-music-own-save').addEventListener('click', async () => {
     await saveSetting('music_own_rules', document.getElementById('s-music-own').value.trim(), document.getElementById('s-music-msg'));
+  });
+  document.getElementById('s-other-toggle-save').addEventListener('click', async () => {
+    await saveSetting('other_songs_enabled', document.getElementById('s-other-songs-enabled').checked ? '1' : '0', document.getElementById('s-music-msg'));
   });
   document.getElementById('s-music-other-save').addEventListener('click', async () => {
     await saveSetting('music_other_rules', document.getElementById('s-music-other').value.trim(), document.getElementById('s-music-msg'));

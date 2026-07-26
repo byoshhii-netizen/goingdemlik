@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -7,7 +7,6 @@ const multer = require('multer');
 const slugify = require('slugify');
 const rateLimit = require('express-rate-limit');
 const cloudinary = require('cloudinary').v2;
-const { ShopierApiClient, ShopierPaymentFlow, verifyAndParseWebhook } = require('@nopeion/shopier');
 const { query, initDb } = require('./database');
 
 const app = express();
@@ -34,11 +33,7 @@ if (!USE_CLOUDINARY) {
   try { if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) {}
 }
 
-app.use(express.json({
-  verify: (req, res, buffer) => {
-    if (req.originalUrl === '/api/shopier/webhook') req.rawBody = buffer.toString('utf8');
-  }
-}));
+app.use(express.json());
 if (!USE_CLOUDINARY) app.use('/uploads', express.static(UPLOAD_DIR));
 
 // Cloudflare proxy arkasındaysa gerçek IP'yi al
@@ -78,7 +73,7 @@ app.get('/ads.txt', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'ads.txt'));
 });
 
-const SITE_URL = process.env.SITE_URL || 'https://demlikforum.up.railway.app';
+const SITE_URL = process.env.SITE_URL || 'https://cigcig.up.railway.app';
 
 // ===== RATE LIMITERS =====
 
@@ -151,151 +146,6 @@ function sanitizeUser(u) {
   return rest;
 }
 
-const STORE_SECRET_KEYS = new Set(['shopier_pat', 'shopier_webhook_token']);
-const STORE_SETTING_KEYS = [
-  'shopier_pat',
-  'shopier_shop_slug',
-  'shopier_webhook_token',
-  'shopier_webhook_url',
-  'shopier_image_url',
-  'shopier_enabled',
-];
-
-function settingCipherKey() {
-  return crypto.createHash('sha256')
-    .update(String(process.env.SESSION_SECRET || 'demlik-shopier-settings'))
-    .digest();
-}
-
-function encryptStoreSecret(value) {
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', settingCipherKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
-  return `enc:v1:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${encrypted.toString('base64')}`;
-}
-
-function decryptStoreSecret(value) {
-  if (!value) return '';
-  if (!String(value).startsWith('enc:v1:')) return String(value);
-  try {
-    const [, version, iv, tag, body] = String(value).split(':');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', settingCipherKey(), Buffer.from(iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(tag, 'base64'));
-    return Buffer.concat([decipher.update(Buffer.from(body, 'base64')), decipher.final()]).toString('utf8');
-  } catch {
-    return '';
-  }
-}
-
-async function getSettingsMap(keys = null) {
-  const { rows } = keys
-    ? await query('SELECT key,value FROM settings WHERE key = ANY($1)', [keys])
-    : await query('SELECT key,value FROM settings');
-  return Object.fromEntries(rows.map(row => [row.key, row.value || '']));
-}
-
-async function refreshUserAccess(userId) {
-  const { rows: active } = await query(
-    `SELECT entitlement_type
-       FROM store_entitlements
-      WHERE user_id=$1 AND revoked_at IS NULL AND expires_at > NOW()`,
-    [userId]
-  );
-  const activeTypes = new Set(active.map(item => item.entitlement_type));
-  const vip = activeTypes.has('vip') ? 1 : 0;
-  const plus = activeTypes.has('plus') ? 1 : 0;
-  const admin = activeTypes.has('admin') ? 1 : 0;
-  await query(
-    `UPDATE users
-        SET paid_vip=$1,
-            paid_plus=$2,
-            paid_admin=$3,
-            is_vip=CASE WHEN $1=1 THEN 1 WHEN paid_vip=1 THEN 0 ELSE is_vip END,
-            is_plus=CASE WHEN $2=1 THEN 1 WHEN paid_plus=1 THEN 0 ELSE is_plus END,
-            is_admin=CASE WHEN $3=1 THEN 1 WHEN paid_admin=1 THEN 0 ELSE is_admin END
-      WHERE id=$4`,
-    [vip, plus, admin, userId]
-  );
-  const { rows } = await query('SELECT * FROM users WHERE id=$1', [userId]);
-  return rows[0] || null;
-}
-
-function parseProductFeatures(product) {
-  try {
-    return Array.isArray(product.features) ? product.features : JSON.parse(product.features || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function publicProduct(product) {
-  return {
-    ...product,
-    features: parseProductFeatures(product),
-    price: Number(product.price),
-    compare_at_price: product.compare_at_price == null ? null : Number(product.compare_at_price),
-  };
-}
-
-async function getShopierConfig() {
-  const settings = await getSettingsMap(STORE_SETTING_KEYS);
-  return {
-    pat: decryptStoreSecret(settings.shopier_pat),
-    shopSlug: settings.shopier_shop_slug || '',
-    webhookToken: decryptStoreSecret(settings.shopier_webhook_token),
-    webhookUrl: settings.shopier_webhook_url || `${SITE_URL}/api/shopier/webhook`,
-    imageUrl: settings.shopier_image_url || `${SITE_URL}/demlik.png`,
-    enabled: settings.shopier_enabled === '1',
-  };
-}
-
-async function saveSettingValue(key, value) {
-  const stored = STORE_SECRET_KEYS.has(key) && value ? encryptStoreSecret(value) : value;
-  await query(
-    'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()',
-    [key, stored]
-  );
-}
-
-async function activateShopier() {
-  const config = await getShopierConfig();
-  if (!config.pat || !config.shopSlug) throw new Error('Shopier PAT ve mağaza kodu zorunludur');
-  const client = new ShopierApiClient({ pat: config.pat });
-  await client.shop.getOwner();
-  let webhookToken = config.webhookToken;
-  if (!webhookToken) {
-    const webhook = await client.webhooks.create({ event: 'order.created', url: config.webhookUrl });
-    webhookToken = webhook.token || '';
-    if (!webhookToken) throw new Error('Shopier webhook token döndürmedi');
-    await saveSettingValue('shopier_webhook_token', webhookToken);
-  }
-  await saveSettingValue('shopier_enabled', '1');
-  return { enabled: true, webhookUrl: config.webhookUrl, webhookConfigured: !!webhookToken };
-}
-
-async function grantPaidEntitlement(order, product, payload, webhookId) {
-  const entitlementType = product.product_key;
-  if (!['vip', 'plus', 'admin'].includes(entitlementType)) return false;
-  const { rows: updated } = await query(
-    `UPDATE store_orders
-        SET status='paid', shopier_order_id=COALESCE(shopier_order_id,$1),
-            webhook_id=COALESCE(NULLIF(webhook_id,''),$2), raw_payload=$3, paid_at=COALESCE(paid_at,NOW())
-      WHERE id=$4 AND status <> 'paid'
-      RETURNING id`,
-    [String(order.shopierOrderId || ''), String(webhookId || ''), JSON.stringify(payload || {}), order.localId]
-  );
-  if (!updated.length) return true;
-  await query(
-    `INSERT INTO store_entitlements
-      (user_id,product_id,order_id,entitlement_type,starts_at,expires_at)
-     VALUES ($1,$2,$3,$4,NOW(),NOW()+INTERVAL '30 days')
-     ON CONFLICT (order_id,entitlement_type) DO NOTHING`,
-    [order.userId, product.id, order.localId, entitlementType]
-  );
-  await refreshUserAccess(order.userId);
-  return true;
-}
-
 function makeSlug(title, id) {
   const base = slugify(title, { lower: true, strict: false, locale: 'tr', replacement: '-' })
     .replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').substring(0, 60);
@@ -315,7 +165,7 @@ async function authMiddleware(req, res, next) {
   const { rows: users } = await query('SELECT * FROM users WHERE id=$1', [rows[0].user_id]);
   if (!users.length) return res.status(401).json({ error: 'Kullanıcı bulunamadı' });
   if (users[0].banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
-  req.user = await refreshUserAccess(users[0].id);
+  req.user = users[0];
   next();
 }
 
@@ -325,7 +175,7 @@ async function optionalAuth(req, res, next) {
     const { rows } = await query('SELECT user_id FROM sessions WHERE token=$1', [token]);
     if (rows.length) {
       const { rows: users } = await query('SELECT * FROM users WHERE id=$1', [rows[0].user_id]);
-      if (users.length && !users[0].banned) req.user = await refreshUserAccess(users[0].id);
+      if (users.length && !users[0].banned) req.user = users[0];
     }
   }
   next();
@@ -637,162 +487,41 @@ app.post('/api/auth/logout', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ===== STORE / SHOPIER =====
+// ===== PURCHASE (demo) =====
 app.post('/api/purchase', authMiddleware, async (req, res) => {
-  return res.status(410).json({ error: 'Üyelikler yalnızca Shopier ödeme akışı üzerinden satın alınabilir.' });
+  // Backward-compatible purchase endpoint.
+  // Membership is only granted when payments are enabled (ENABLE_PAYMENTS=1).
+  try {
+    const { type } = req.body;
+    if (!type || (type !== 'vip' && type !== 'plus')) return res.status(400).json({ error: 'Geçersiz paket' });
+    if (process.env.ENABLE_PAYMENTS !== '1') return res.status(502).json({ error: 'Ödeme hizmeti şu an devre dışı. Üyelik aktif edilemedi.' });
+    const userId = req.user.id;
+    if (type === 'vip') {
+      await query('UPDATE users SET is_vip=1 WHERE id=$1', [userId]);
+    } else if (type === 'plus') {
+      await query('UPDATE users SET is_plus=1 WHERE id=$1', [userId]);
+    }
+    const { rows } = await query('SELECT * FROM users WHERE id=$1', [userId]);
+    res.json(sanitizeUser(rows[0]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/store/products', async (req, res) => {
-  const { rows } = await query(
-    `SELECT * FROM store_products
-      WHERE visible=1 AND active=1
-      ORDER BY CASE product_key WHEN 'vip' THEN 1 WHEN 'plus' THEN 2 WHEN 'admin' THEN 3 ELSE 4 END`
-  );
-  res.json(rows.map(publicProduct));
-});
-
-app.get('/api/store/me', authMiddleware, async (req, res) => {
-  const { rows } = await query(
-    `SELECT e.*, p.product_key, p.title, p.description, p.features, p.currency
-       FROM store_entitlements e
-       JOIN store_products p ON p.id=e.product_id
-      WHERE e.user_id=$1 AND e.revoked_at IS NULL AND e.expires_at > NOW()
-      ORDER BY e.expires_at ASC`,
-    [req.user.id]
-  );
-  res.json(rows.map(item => ({ ...item, features: parseProductFeatures(item) })));
-});
-
+// Create payment session (frontend calls this to start checkout)
 app.post('/api/create-payment-session', authMiddleware, async (req, res) => {
-  let localOrderId = null;
   try {
-    const productKey = String(req.body?.product_key || req.body?.type || '').toLowerCase();
-    if (!['vip', 'plus', 'admin'].includes(productKey)) return res.status(400).json({ error: 'Geçersiz ürün' });
-
-    const config = await getShopierConfig();
-    if (!config.enabled || !config.pat || !config.shopSlug) {
-      return res.status(503).json({ error: 'Shopier ödeme sistemi henüz yapılandırılmadı.' });
+    const { type } = req.body || {};
+    if (!type || (type !== 'vip' && type !== 'plus')) return res.status(400).json({ error: 'Geçersiz paket' });
+    // If payments are disabled, return a friendly failure so frontend can show error
+    if (process.env.ENABLE_PAYMENTS !== '1') {
+      return res.status(502).json({ error: 'Ödeme hizmeti şu an devre dışı (test modunda). Ödeme gerçekleştirilemedi.' });
     }
-
-    const { rows: products } = await query(
-      'SELECT * FROM store_products WHERE product_key=$1 AND visible=1 AND active=1',
-      [productKey]
-    );
-    if (!products.length) return res.status(404).json({ error: 'Ürün satışta değil' });
-    const product = products[0];
-    const merchantOrderId = `demlik-${req.user.id}-${uuidv4()}`;
-    const { rows: orders } = await query(
-      `INSERT INTO store_orders
-        (user_id,product_id,merchant_order_id,amount,currency,status)
-       VALUES ($1,$2,$3,$4,$5,'pending')
-       RETURNING id`,
-      [req.user.id, product.id, merchantOrderId, Number(product.price), product.currency]
-    );
-    localOrderId = orders[0].id;
-
-    const client = new ShopierApiClient({ pat: config.pat });
-    const payments = new ShopierPaymentFlow({ client });
-    const payment = await payments.createPaymentLink({
-      title: product.title,
-      amount: Number(product.price).toFixed(2),
-      currency: product.currency || 'TRY',
-      description: product.description || product.title,
-      imageUrl: config.imageUrl,
-      orderId: merchantOrderId,
-      hostedCheckout: true,
-      shopSlug: config.shopSlug,
-    });
-    await query('UPDATE store_orders SET shopier_product_id=$1 WHERE id=$2', [String(payment.productId), localOrderId]);
-    res.json({
-      orderId: merchantOrderId,
-      checkoutHtml: payment.checkoutHtml || payment.hostedCheckoutHtml,
-      paymentUrl: payment.paymentUrl,
-    });
-  } catch (e) {
-    if (localOrderId) await query("UPDATE store_orders SET status='failed' WHERE id=$1", [localOrderId]).catch(() => {});
-    console.error('Shopier checkout error:', e.message);
-    res.status(502).json({ error: 'Shopier ödeme oturumu oluşturulamadı: ' + e.message });
-  }
-});
-
-app.post('/api/shopier/webhook', async (req, res) => {
-  try {
-    const config = await getShopierConfig();
-    if (!config.webhookToken) return res.status(503).json({ error: 'Shopier webhook token yapılandırılmadı' });
-    const event = verifyAndParseWebhook({
-      webhookToken: config.webhookToken,
-      headers: req.headers,
-      body: req.rawBody || '',
-    });
-    if (event.type !== 'order.created') return res.json({ ok: true, ignored: true });
-
-    const shopierOrder = event.data || {};
-    const lineItems = Array.isArray(shopierOrder.lineItems) ? shopierOrder.lineItems : [];
-    if (!shopierOrder.id || !lineItems.length) return res.status(400).json({ error: 'Shopier siparişi eksik' });
-
-    for (const lineItem of lineItems) {
-      const shopierProductId = String(lineItem.productId || '');
-      if (!shopierProductId) continue;
-      const { rows: localRows } = await query(
-        `SELECT so.*, sp.product_key, sp.title, sp.price AS product_price
-           FROM store_orders so
-           JOIN store_products sp ON sp.id=so.product_id
-          WHERE so.shopier_product_id=$1
-            AND (so.status='pending' OR so.status='paid')
-          ORDER BY so.created_at DESC`,
-        [shopierProductId]
-      );
-      if (!localRows.length) continue;
-      const paidMatches = localRows.filter(row => row.status === 'paid');
-      if (paidMatches.length > 1) {
-        console.error('Shopier product matched multiple paid orders', { shopierProductId });
-        continue;
-      }
-      if (paidMatches.length === 1) continue;
-      if (localRows.length !== 1) {
-        console.error('Shopier product matched multiple pending orders', { shopierProductId });
-        continue;
-      }
-      const local = localRows[0];
-      const quantity = Number(lineItem.quantity ?? 1);
-      if (!Number.isInteger(quantity) || quantity !== 1) {
-        await query(
-          `UPDATE store_orders SET status='rejected', raw_payload=$1, webhook_id=$2 WHERE id=$3 AND status='pending'`,
-          [JSON.stringify(shopierOrder), String(event.id || ''), local.id]
-        );
-        console.error('Shopier quantity mismatch', { localOrder: local.id, quantity });
-        continue;
-      }
-
-      const receivedAmount = Number(lineItem.total ?? lineItem.price ?? '');
-      const expectedAmount = Number(local.amount);
-      if (!Number.isFinite(receivedAmount) || Math.abs(receivedAmount - expectedAmount) > 0.01) {
-        await query(
-          `UPDATE store_orders SET status='rejected', raw_payload=$1, webhook_id=$2 WHERE id=$3`,
-          [JSON.stringify(shopierOrder), String(event.id || ''), local.id]
-        );
-        console.error('Shopier amount mismatch', { localOrder: local.id, expectedAmount, receivedAmount });
-        continue;
-      }
-      if (shopierOrder.paymentStatus !== 'paid') {
-        await query(
-          `UPDATE store_orders SET status='failed', raw_payload=$1, webhook_id=$2 WHERE id=$3 AND status='pending'`,
-          [JSON.stringify(shopierOrder), String(event.id || ''), local.id]
-        );
-        continue;
-      }
-
-      await grantPaidEntitlement({
-        localId: local.id,
-        shopierOrderId: String(shopierOrder.id),
-        userId: local.user_id,
-      }, { ...local, id: local.product_id }, shopierOrder, event.id);
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('Shopier webhook rejected:', e.message);
-    res.status(400).json({ error: 'Geçersiz Shopier webhook' });
-  }
+    // If ENABLE_PAYMENTS=1 and STRIPE_SECRET is set, you can integrate real provider here.
+    // Example (commented):
+    // const stripe = require('stripe')(process.env.STRIPE_SECRET);
+    // const session = await stripe.checkout.sessions.create({ ... });
+    // res.json({ url: session.url });
+    return res.status(500).json({ error: 'Ödeme sağlayıcı yapılandırılmamış. Lütfen yöneticiyle iletişime geçin.' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== GIFTS =====
@@ -1191,14 +920,13 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
 
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
-    const { title, preface, karakterler, kadro, cover_image, is_hidden, author, allow_download } = req.body;
+    const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
     if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
-    if (!author || !author.trim()) return res.status(400).json({ error: 'Yazar adı zorunlu' });
     const limitErr = await checkDailyLimit(req.user.id, req.user, 'books');
     if (limitErr) return res.status(429).json({ error: limitErr });
     const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,author,allow_download) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
-      [req.user.id, title, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, is_hidden?1:0, author.trim(), allow_download!==false?1:0]);
+    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
+      [req.user.id, title, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, is_hidden?1:0]);
     const id = rows[0].id;
     const realSlug = makeSlug(title, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -1215,11 +943,9 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, preface, karakterler, kadro, cover_image, is_hidden, author, allow_download } = req.body;
-  if (author !== undefined && !author.trim()) return res.status(400).json({ error: 'Yazar adı zorunlu' });
-  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,author=$7,allow_download=$8,updated_at=NOW() WHERE id=$9',
-    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden,
-     author!==undefined ? author.trim() : (book.author||''), allow_download!==undefined ? (allow_download?1:0) : (book.allow_download??1), book.id]);
+  const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
+  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,updated_at=NOW() WHERE id=$7',
+    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, book.id]);
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(rows[0]);
 });
@@ -1629,26 +1355,19 @@ app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), asyn
 });
 
 // ===== PROFILE =====
-app.get('/api/profile/:username', optionalAuth, async (req, res) => {
+app.get('/api/profile/:username', async (req, res) => {
   const { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-  const user = await refreshUserAccess(users[0].id);
-  const [forums, books, groups, level, levels, bpCount, memberships] = await Promise.all([
+  const user = users[0];
+  const [forums, books, groups, level, levels, bpCount] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
-    req.user?.id === user.id
-      ? query(`SELECT e.*, p.product_key, p.title, p.features
-                FROM store_entitlements e
-                JOIN store_products p ON p.id=e.product_id
-               WHERE e.user_id=$1 AND e.revoked_at IS NULL AND e.expires_at > NOW()
-               ORDER BY e.expires_at ASC`, [user.id]).then(r => r.rows.map(item => ({ ...item, features: parseProductFeatures(item) })))
-      : Promise.resolve([]),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount, memberships });
+  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
@@ -1946,21 +1665,6 @@ app.get('/api/admin/books', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-app.put('/api/admin/book/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM books WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
-  const book = rows[0];
-  const { author, allow_download, is_hidden } = req.body;
-  await query('UPDATE books SET author=$1,allow_download=$2,is_hidden=$3,updated_at=NOW() WHERE id=$4',
-    [author!==undefined ? author : (book.author||''),
-     allow_download!==undefined ? (allow_download?1:0) : (book.allow_download??1),
-     is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden,
-     book.id]);
-  const { rows: updated } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
-  await logAction('admin', 'edit_book', book.slug);
-  res.json(updated[0]);
-});
-
 app.delete('/api/admin/book/:id', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
@@ -2078,122 +1782,16 @@ app.get('/api/admin/logs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/admin/store/products', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM store_products ORDER BY id ASC');
-  res.json(rows.map(publicProduct));
-});
-
-app.put('/api/admin/store/products/:key', adminMiddleware, async (req, res) => {
-  const key = String(req.params.key || '').toLowerCase();
-  if (!['vip', 'plus', 'admin'].includes(key)) return res.status(400).json({ error: 'Geçersiz ürün' });
-  const { rows } = await query('SELECT * FROM store_products WHERE product_key=$1', [key]);
-  if (!rows.length) return res.status(404).json({ error: 'Ürün bulunamadı' });
-  const current = rows[0];
-  const body = req.body || {};
-  const price = Number(body.price);
-  const compareAt = body.compare_at_price === '' || body.compare_at_price == null
-    ? null
-    : Number(body.compare_at_price);
-  if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: 'Geçerli bir fiyat girin' });
-  if (compareAt !== null && (!Number.isFinite(compareAt) || compareAt < price)) {
-    return res.status(400).json({ error: 'İndirimli karşılaştırma fiyatı satış fiyatından küçük olamaz' });
-  }
-  let features = body.features;
-  if (typeof features === 'string') {
-    try { features = JSON.parse(features); } catch { features = features.split('\n'); }
-  }
-  if (!Array.isArray(features)) features = parseProductFeatures(current);
-  features = features.map(item => String(item).trim()).filter(Boolean).slice(0, 20);
-  const { rows: updated } = await query(
-    `UPDATE store_products
-        SET title=$1, description=$2, features=$3, price=$4, compare_at_price=$5,
-            currency=$6, active=$7, visible=$8, updated_at=NOW()
-      WHERE product_key=$9
-      RETURNING *`,
-    [
-      String(body.title || current.title).trim(),
-      String(body.description ?? current.description ?? '').trim(),
-      JSON.stringify(features),
-      price,
-      compareAt,
-      ['TRY', 'USD', 'EUR'].includes(String(body.currency)) ? String(body.currency) : current.currency,
-      body.active === undefined ? current.active : (body.active ? 1 : 0),
-      body.visible === undefined ? current.visible : (body.visible ? 1 : 0),
-      key,
-    ]
-  );
-  await logAction('admin', 'update_store_product', key);
-  res.json(publicProduct(updated[0]));
-});
-
-app.get('/api/admin/store/orders', adminMiddleware, async (req, res) => {
-  const { rows } = await query(
-    `SELECT so.*, sp.product_key, sp.title, u.username, u.email
-       FROM store_orders so
-       JOIN store_products sp ON sp.id=so.product_id
-       JOIN users u ON u.id=so.user_id
-      ORDER BY so.created_at DESC LIMIT 500`
-  );
-  res.json(rows);
-});
-
-app.get('/api/admin/store/settings', adminMiddleware, async (req, res) => {
-  const settings = await getSettingsMap(STORE_SETTING_KEYS);
-  res.json({
-    shopier_shop_slug: settings.shopier_shop_slug || '',
-    shopier_webhook_url: settings.shopier_webhook_url || `${SITE_URL}/api/shopier/webhook`,
-    shopier_image_url: settings.shopier_image_url || `${SITE_URL}/demlik.png`,
-    shopier_enabled: settings.shopier_enabled === '1',
-    shopier_pat_configured: !!decryptStoreSecret(settings.shopier_pat),
-    shopier_webhook_token_configured: !!decryptStoreSecret(settings.shopier_webhook_token),
-  });
-});
-
-app.post('/api/admin/store/settings', adminMiddleware, async (req, res) => {
-  const body = req.body || {};
-  for (const key of ['shopier_pat', 'shopier_webhook_token', 'shopier_shop_slug', 'shopier_webhook_url', 'shopier_image_url']) {
-    if (body[key] !== undefined && String(body[key]).trim() !== '') {
-      await saveSettingValue(key, String(body[key]).trim());
-    }
-  }
-  if (body.shopier_enabled === false) await saveSettingValue('shopier_enabled', '0');
-  res.json(await getShopierConfig().then(config => ({
-    enabled: config.enabled,
-    webhookUrl: config.webhookUrl,
-    patConfigured: !!config.pat,
-    webhookTokenConfigured: !!config.webhookToken,
-  })));
-});
-
-app.post('/api/admin/store/activate', adminMiddleware, async (req, res) => {
-  try {
-    res.json(await activateShopier());
-  } catch (e) {
-    await saveSettingValue('shopier_enabled', '0');
-    res.status(400).json({ error: 'Shopier etkinleştirilemedi: ' + e.message });
-  }
-});
-
 app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM settings');
-  const result = Object.fromEntries(rows.map(s => [s.key, s.value]));
-  for (const key of STORE_SECRET_KEYS) {
-    if (result[key]) result[key] = '••••••••••••';
-  }
-  res.json(result);
+  res.json(Object.fromEntries(rows.map(s => [s.key, s.value])));
 });
 
 app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key, value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (STORE_SECRET_KEYS.has(key) && (!value || String(value).includes('••••'))) {
-    return res.json({ ok: true });
-  }
-  if (STORE_SECRET_KEYS.has(key)) {
-    await saveSettingValue(key, value);
-  } else {
-    await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, value]);
-  }
+  // admin_password için hash işlemi client tarafında yapılıyor, server direkt kaydeder
+  await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, value]);
   res.json({ ok: true });
 });
 
@@ -2217,7 +1815,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['footer_created_visible', 'footer_copyright_text'];
+  const keys = ['footer_created_visible', 'footer_copyright_text', 'site_name', 'other_songs_enabled'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -2392,6 +1990,15 @@ app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
      genre ?? song.genre, lyrics ?? song.lyrics, parseInt(play_count) || song.play_count,
      status || song.status, audio_url, cover_url, req.params.id]
   );
+  res.json({ ok: true });
+});
+
+// Kullanıcı kendi şarkısını sil
+app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM songs WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (rows[0].uploader_id !== req.user.id) return res.status(403).json({ error: 'Bu şarkıyı silme yetkiniz yok' });
+  await query("UPDATE songs SET status='deleted' WHERE id=$1", [req.params.id]);
   res.json({ ok: true });
 });
 

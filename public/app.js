@@ -1,9 +1,9 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
-let siteName = 'Demlik';
+let siteName = 'CigCig';
 
-const SITE_URL = 'https://demlik.up.railway.app';
+const SITE_URL = 'https://cigcig.up.railway.app';
 
 function $(sel) { return document.querySelector(sel); }
 function $$(sel) { return document.querySelectorAll(sel); }
@@ -14,14 +14,14 @@ function updatePageMeta(title, description, imageUrl) {
   if (!desc) { desc = document.createElement('meta'); desc.setAttribute('name','description'); document.head.appendChild(desc); }
   desc.setAttribute('content', description);
 
-  const ogFields = { 'og:title': title, 'og:description': description, 'og:image': imageUrl || (SITE_URL + '/demlik.png'), 'og:url': location.href };
+  const ogFields = { 'og:title': title, 'og:description': description, 'og:image': imageUrl || (SITE_URL + '/cigcig.png'), 'og:url': location.href };
   Object.entries(ogFields).forEach(([prop, content]) => {
     let el = document.querySelector(`meta[property="${prop}"]`);
     if (!el) { el = document.createElement('meta'); el.setAttribute('property', prop); document.head.appendChild(el); }
     el.setAttribute('content', content);
   });
 
-  const twFields = { 'twitter:title': title, 'twitter:description': description, 'twitter:image': imageUrl || (SITE_URL + '/demlik.png') };
+  const twFields = { 'twitter:title': title, 'twitter:description': description, 'twitter:image': imageUrl || (SITE_URL + '/cigcig.png') };
   Object.entries(twFields).forEach(([name, content]) => {
     let el = document.querySelector(`meta[name="${name}"]`);
     if (!el) { el = document.createElement('meta'); el.setAttribute('name', name); document.head.appendChild(el); }
@@ -107,7 +107,7 @@ function closeMobileMenu() {
 function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.show_level_color !== 0 && u.name_color) ? `style="color:${escHtml(u.name_color)}"` : '';
-  const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="Demlik Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
+  const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
   return `<span class="user-badge" ${color}>${escHtml(u.username)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
 
@@ -402,11 +402,11 @@ function updateNavUI() {
     userEl.classList.remove('hidden');
     const nav = currentUser.avatar ? `<img src="${escHtml(currentUser.avatar)}" class="nav-avatar" />` : `<div class="nav-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:12px"></i></div>`;
     const btn = $('#nav-user-btn');
-    btn.innerHTML = `${nav}<i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted)"></i>`;
+    btn.innerHTML = `<a href="/profil/${escHtml(currentUser.username)}" data-link class="nav-avatar-link" onclick="event.stopPropagation()">${nav}</a><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
     $('#dropdown-profile').setAttribute('href', '/profil/' + currentUser.username);
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
-      navBrand.setAttribute('href', '/profil/' + currentUser.username);
+      navBrand.setAttribute('href', '/');
       navBrand.style.cursor = 'pointer';
     }
 
@@ -963,7 +963,7 @@ async function renderForumDetail(app, slug) {
     forum = await api('/forum/' + slug);
     document.title = forum.title + ' – ' + siteName;
     updatePageMeta(
-      forum.title + ' – Demlik',
+      forum.title + ' – CigCig',
       forum.content.substring(0, 155).replace(/\n/g, ' '),
       forum.banner_image || ''
     );
@@ -1318,7 +1318,7 @@ async function renderBookDetail(app, slug) {
 
   const { book, chapters, pages } = data;
   document.title = book.title + ' – ' + siteName;
-  updatePageMeta(book.title + ' – ' + siteName, book.preface ? book.preface.substring(0,155) : book.title + ' – Demlik\'te yayınlanan kitap.', book.cover_image || '');
+  updatePageMeta(book.title + ' – ' + siteName, book.preface ? book.preface.substring(0,155) : book.title + ' – CigCig\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
 
   const sortedPages = [...pages].sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
@@ -1326,7 +1326,7 @@ async function renderBookDetail(app, slug) {
   const unassigned = sortedPages.filter(p => !p.chapter_id);
   const chapPages = {};
   chapters.forEach(c => { chapPages[c.id] = sortedPages.filter(p => p.chapter_id === c.id); });
-  const lastReadSlug = localStorage.getItem('demlik_book_last_page_' + slug);
+  const lastReadSlug = localStorage.getItem('cigcig_book_last_page_' + slug);
   const lastReadPage = sortedPages.find(p => p.slug === lastReadSlug);
   const resumeHTML = lastReadPage ? `<div class="resume-card" style="margin-bottom:20px;padding:18px 20px;border:1px solid var(--border);border-radius:16px;background:rgba(59,130,246,0.05);display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div style="flex:1;min-width:0">
@@ -1730,7 +1730,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
     </div>
   </div>`;
 
-  localStorage.setItem('demlik_book_last_page_' + bookSlug, pageSlug);
+  localStorage.setItem('cigcig_book_last_page_' + bookSlug, pageSlug);
 
   // Font boyutu kontrolleri
   const contentEl = $('#ebook-content');
@@ -2314,7 +2314,7 @@ async function renderVideoDetail(app, slug) {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Video bulunamadı.</p></div></div>'; return;
   }
   document.title = video.title + ' – ' + siteName;
-  updatePageMeta(video.title + ' – ' + siteName, video.description || 'Demlik videoları', video.banner_image || '');
+  updatePageMeta(video.title + ' – ' + siteName, video.description || 'CigCig videoları', video.banner_image || '');
   const isOwner = currentUser && currentUser.id === video.user_id;
   let followState = false;
   if (currentUser && currentUser.username !== video.username) {
@@ -2583,7 +2583,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="Demlik Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
+          ${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -3184,7 +3184,8 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
-    siteName = ps.site_name || 'Demlik';
+    siteName = ps.site_name || 'CigCig';
+    window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     const brandSpan = document.querySelector('.nav-brand span');
     if (brandSpan) brandSpan.textContent = siteName.toUpperCase();
     const footer = document.getElementById('site-footer');
@@ -4146,7 +4147,7 @@ document.addEventListener('click', e => {
   const popup = document.createElement('div');
   popup.id = 'admin-shield-popup';
   popup.style.cssText = `position:fixed;z-index:99999;background:#1a1a2e;border:1px solid #5865F2;border-radius:10px;padding:12px 16px;max-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.6);animation:fadeIn 0.15s ease`;
-  popup.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="fas fa-shield" style="color:#5865F2;font-size:16px"></i><span style="font-weight:700;color:#e0e0ff;font-size:14px">Demlik Yetkilisi</span></div><div style="font-size:13px;font-weight:600;color:#c0c8ff;margin-bottom:4px">Demlik yetkili hesabı.</div><div style="font-size:12px;color:#8888aa">Bu kullanıcı ${sinceText} tarihinde yetkili oldu.</div>`;
+  popup.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><i class="fas fa-shield" style="color:#5865F2;font-size:16px"></i><span style="font-weight:700;color:#e0e0ff;font-size:14px">CigCig Yetkilisi</span></div><div style="font-size:13px;font-weight:600;color:#c0c8ff;margin-bottom:4px">CigCig yetkili hesabı.</div><div style="font-size:12px;color:#8888aa">Bu kullanıcı ${sinceText} tarihinde yetkili oldu.</div>`;
   const rect = shield.getBoundingClientRect();
   document.body.appendChild(popup);
   const pw = popup.offsetWidth, ph = popup.offsetHeight;
@@ -4329,7 +4330,7 @@ function openMiniPlayer(audioUrl, slug, song) {
     </div>`;
   player.style.display = 'block';
   // localStorage'dan ses seviyesini oku
-  const savedVol = parseFloat(localStorage.getItem('demlik_volume') ?? '0.8');
+  const savedVol = parseFloat(localStorage.getItem('cigcig_volume') ?? '0.8');
   audio.volume = savedVol;
 
   function fmtTime(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
@@ -4367,7 +4368,7 @@ function openMiniPlayer(audioUrl, slug, song) {
     volSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
       audio.volume = v / 100;
-      localStorage.setItem('demlik_volume', v / 100);
+      localStorage.setItem('cigcig_volume', v / 100);
       updateVolIcon(v);
     });
   }
@@ -4375,11 +4376,11 @@ function openMiniPlayer(audioUrl, slug, song) {
     volBtn.addEventListener('click', () => {
       if (audio.volume > 0) {
         audio.volume = 0; if(volSlider) volSlider.value = 0;
-        localStorage.setItem('demlik_volume', '0');
+        localStorage.setItem('cigcig_volume', '0');
         volBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
       } else {
         audio.volume = 0.8; if(volSlider) volSlider.value = 80;
-        localStorage.setItem('demlik_volume', '0.8');
+        localStorage.setItem('cigcig_volume', '0.8');
         volBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
       }
     });
@@ -4403,59 +4404,78 @@ async function renderMusicDetail(app, slug) {
   const hasLyrics = !!song.lyrics?.trim();
   const isUploader = currentUser && currentUser.id === song.uploader_id;
 
-  app.innerHTML = `<div class="container page">
-    <div class="music-detail-header">
-      <div class="music-detail-cover-wrap">
-        ${song.cover_url
-          ? `<img src="${escHtml(song.cover_url)}" class="music-detail-cover" />`
-          : `<div class="music-detail-cover music-detail-cover-ph"><i class="fas fa-music"></i></div>`}
-      </div>
-      <div class="music-detail-info">
-        <div class="music-detail-top">
-          <div>
-            <div class="music-detail-type-badge">${isOwn ? '<i class="fas fa-microphone"></i> Sanatçı Şarkısı' : '<i class="fas fa-share"></i> Paylaşılan Şarkı'}</div>
-            <div class="music-detail-title">${escHtml(song.title)}</div>
-            <div class="music-detail-artist">${escHtml(song.artist_name)}</div>
+  app.innerHTML = `
+    <div class="song-detail-page">
+      <div class="song-detail-hero">
+        <div class="song-detail-cover-wrap">
+          ${song.cover_url
+            ? `<img src="${escHtml(song.cover_url)}" class="song-detail-cover" />`
+            : `<div class="song-detail-cover song-detail-cover-ph"><i class="fas fa-music"></i></div>`}
+        </div>
+        <div class="song-detail-meta-col">
+          <div class="song-detail-type">${isOwn ? '<i class="fas fa-microphone-alt"></i> Sanatçı Şarkısı' : '<i class="fas fa-share-alt"></i> Paylaşılan Şarkı'}</div>
+          <div class="song-detail-title">${escHtml(song.title)}</div>
+          <div class="song-detail-artist">${escHtml(song.artist_name)}</div>
+          <div class="song-detail-info-row">
+            ${song.genre ? `<span class="song-detail-tag"><i class="fas fa-tag"></i> ${escHtml(song.genre)}</span>` : ''}
+            ${song.distributor ? `<span class="song-detail-tag"><i class="fas fa-building"></i> ${escHtml(song.distributor)}</span>` : ''}
+            <span class="song-detail-tag"><i class="fas fa-headphones"></i> ${song.play_count} dinlenme</span>
+            <span class="song-detail-tag"><i class="fas fa-calendar-alt"></i> ${formatDate(song.published_at)}</span>
           </div>
-          ${isUploader ? `<div class="music-detail-actions"><button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button></div>` : ''}
-        </div>
-        <div class="music-detail-meta">
-          ${song.genre ? `<span><i class="fas fa-tag"></i> ${escHtml(song.genre)}</span>` : ''}
-          ${song.distributor ? `<span><i class="fas fa-building"></i> ${escHtml(song.distributor)}</span>` : ''}
-          <span><i class="fas fa-headphones"></i> ${song.play_count} dinlenme</span>
-          <span><i class="fas fa-calendar"></i> ${formatDate(song.published_at)}</span>
-        </div>
-        <div class="music-player-box" id="music-player-box">
-          <audio id="detail-audio" src="${escHtml(song.audio_url)}" preload="metadata"></audio>
-          <div class="music-player-controls">
-            <button class="music-play-btn" id="detail-play-btn"><i class="fas fa-play"></i> Oynat</button>
-            <div class="music-vol-wrap">
-              <button id="detail-vol-btn" class="music-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
-              <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="music-vol-slider" title="Ses seviyesi" />
+
+          <div class="song-detail-player" id="song-detail-player">
+            <audio id="detail-audio" src="${escHtml(song.audio_url)}" preload="metadata"></audio>
+            <div class="sdp-top-row">
+              <button class="sdp-play-btn" id="detail-play-btn"><i class="fas fa-play"></i></button>
+              <div class="sdp-progress-wrap">
+                <span class="sdp-time" id="dp-cur">0:00</span>
+                <div class="sdp-bar-bg">
+                  <div class="sdp-bar-fill" id="dp-fill"></div>
+                  <input type="range" class="sdp-seek" id="dp-seek" min="0" max="100" value="0" step="0.1" />
+                </div>
+                <span class="sdp-time" id="dp-dur">0:00</span>
+              </div>
+              <div class="sdp-vol-wrap">
+                <button id="detail-vol-btn" class="sdp-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
+                <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" />
+              </div>
             </div>
           </div>
-          <div class="music-progress-wrap">
-            <span class="music-time" id="dp-cur">0:00</span>
-            <div class="music-bar-bg">
-              <div class="music-bar-fill" id="dp-fill"></div>
-              <input type="range" class="music-seek" id="dp-seek" min="0" max="100" value="0" step="0.1" />
-            </div>
-            <span class="music-time" id="dp-dur">0:00</span>
+
+          <div class="song-detail-actions-row">
+            ${isUploader ? `
+              <button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>
+              <button class="btn btn-sm" id="song-delete-btn" style="background:rgba(220,38,38,0.12);color:var(--accent-red2);border:1px solid rgba(220,38,38,0.25)"><i class="fas fa-trash"></i> Sil</button>
+            ` : ''}
           </div>
+
+          ${song.uploader_username ? `
+            <div class="song-detail-uploader">
+              <span style="font-size:12px;color:var(--text-muted)">Yükleyen: </span>
+              <a href="/profil/${escHtml(song.uploader_username)}" data-link class="song-detail-uploader-link">
+                ${song.uploader_avatar ? `<img src="${escHtml(song.uploader_avatar)}" class="avatar-xs" />` : `<div class="avatar-xs avatar-placeholder"><i class="fas fa-user" style="font-size:9px"></i></div>`}
+                ${escHtml(song.uploader_username)}
+              </a>
+            </div>
+          ` : ''}
+
+          ${!isOwn && song.share_reason ? `
+            <div class="song-share-note">
+              <i class="fas fa-comment-dots"></i>
+              <span>${escHtml(song.share_reason)}</span>
+            </div>
+          ` : ''}
         </div>
-        ${!isOwn && song.share_reason ? `
-          <div class="music-share-reason">
-            <div class="music-share-reason-label"><i class="fas fa-question-circle"></i> Neden paylaştınız?</div>
-            <div class="music-share-reason-text">Cevap: ${escHtml(song.share_reason)}</div>
-          </div>` : ''}
       </div>
+
+      ${hasLyrics ? `
+        <div class="song-lyrics-section">
+          <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
+          <div class="song-lyrics-text">${escHtml(song.lyrics)}</div>
+        </div>
+      ` : ''}
     </div>
-    ${hasLyrics ? `
-      <div class="music-lyrics-box">
-        <div class="music-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
-        <div class="music-lyrics-text">${escHtml(song.lyrics)}</div>
-      </div>` : ''}
-  </div>`;
+  `;
 
   const audio = document.getElementById('detail-audio');
   const playBtn = document.getElementById('detail-play-btn');
@@ -4473,16 +4493,18 @@ async function renderMusicDetail(app, slug) {
     if(seek) seek.value = pct;
     if(curEl) curEl.textContent = fmt(audio.currentTime);
   });
-  audio.addEventListener('ended', () => { playBtn.innerHTML = '<i class="fas fa-play"></i> Oynat'; });
+  audio.addEventListener('ended', () => {
+    playBtn.innerHTML = '<i class="fas fa-play"></i>';
+  });
 
   let halfCounted = false;
   playBtn.addEventListener('click', () => {
     if (audio.paused) {
       audio.play();
-      playBtn.innerHTML = '<i class="fas fa-pause"></i> Durdur';
+      playBtn.innerHTML = '<i class="fas fa-pause"></i>';
     } else {
       audio.pause();
-      playBtn.innerHTML = '<i class="fas fa-play"></i> Oynat';
+      playBtn.innerHTML = '<i class="fas fa-play"></i>';
     }
   });
 
@@ -4495,8 +4517,7 @@ async function renderMusicDetail(app, slug) {
 
   seek?.addEventListener('input', e => { if(audio.duration) audio.currentTime=(parseFloat(e.target.value)/100)*audio.duration; });
 
-  // Detail page ses kontrolü (localStorage'dan başlat)
-  const savedVol = parseFloat(localStorage.getItem('demlik_volume') ?? '0.8');
+  const savedVol = parseFloat(localStorage.getItem('cigcig_volume') ?? '0.8');
   audio.volume = savedVol;
   const detailVolSlider = document.getElementById('detail-vol');
   const detailVolBtn = document.getElementById('detail-vol-btn');
@@ -4510,23 +4531,36 @@ async function renderMusicDetail(app, slug) {
     detailVolSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
       audio.volume = v / 100;
-      localStorage.setItem('demlik_volume', v / 100);
+      localStorage.setItem('cigcig_volume', v / 100);
       updateVolIcon(v);
     });
     detailVolBtn?.addEventListener('click', () => {
       if (audio.volume > 0) {
         audio.volume = 0; detailVolSlider.value = 0;
-        localStorage.setItem('demlik_volume', '0');
+        localStorage.setItem('cigcig_volume', '0');
         if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
       } else {
         audio.volume = 0.8; detailVolSlider.value = 80;
-        localStorage.setItem('demlik_volume', '0.8');
+        localStorage.setItem('cigcig_volume', '0.8');
         if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
       }
     });
   }
 
-  // Şarkı düzenleme butonu (sadece yükleyene gösterilir)
+  // Sil butonu
+  const deleteBtn = document.getElementById('song-delete-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
+      try {
+        await api('/songs/' + song.id, { method: 'DELETE' });
+        toast('Şarkı silindi');
+        navigate('/muzikler');
+      } catch(e) { toast(e.message, 'error'); }
+    });
+  }
+
+  // Düzenle butonu
   const editBtn = document.getElementById('song-edit-btn');
   if (editBtn) {
     editBtn.addEventListener('click', () => {
@@ -4576,6 +4610,7 @@ async function renderMusicDetail(app, slug) {
     });
   }
 }
+
 async function renderArtistApply(app) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Artist Başvurusu – ' + siteName;
@@ -4619,7 +4654,7 @@ async function renderArtistApply(app) {
     <div class="card">
       <div class="card-body">
         <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">
-          Artist rozeti alarak kendi şarkılarınızı Demlik'te yayınlayabilirsiniz.
+          Artist rozeti alarak kendi şarkılarınızı CigCig'te yayınlayabilirsiniz.
         </p>
         <div class="form-group"><label>Müzik Türünüz *</label>
           <input id="apply-genre" placeholder="Pop, Rock, Hip-Hop, Elektronik..." />
@@ -4688,9 +4723,9 @@ async function renderArtistPanel(app) {
             <label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
               <input type="radio" name="song-type" id="st-own" value="own" checked style="width:auto" /> Kendi Şarkım
             </label>
-            <label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
+            ${window.otherSongsEnabled !== false ? `<label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
               <input type="radio" name="song-type" id="st-other" value="other" style="width:auto" /> Başkasının Şarkısı
-            </label>
+            </label>` : ''}
           </div>
         </div>
         <div id="own-fields">
@@ -4769,6 +4804,7 @@ async function renderArtistPanel(app) {
 // ===== BAŞKASININ ŞARKISINI PAYLAŞ (artist rozeti gerekmez) =====
 async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
+  if (window.otherSongsEnabled === false) { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-ban"></i><p>Başkasının şarkısı paylaşma özelliği şu an kapalı.</p></div></div>'; return; }
   // Artist olanlar kendi panelini kullansın
   if (currentUser.is_artist) { navigate('/artist-panel'); return; }
   document.title = 'Şarkı Paylaş – ' + siteName;
