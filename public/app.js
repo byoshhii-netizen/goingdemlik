@@ -3446,305 +3446,352 @@ async function showForwardForumModal(forum) {
 async function renderMessages(app, targetUsername) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - ' + siteName;
-  let convs = [];
-  let hiddenConvs = [];
+
+  let convs = [], hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
   try { hiddenConvs = await api('/conversations/hidden'); } catch {}
 
-  const sidebarHTML = `
+  function convItemHTML(c, isHidden) {
+    const unread = c.unread_count || 0;
+    return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}">
+      ${c.other_avatar
+        ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
+        : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+      <div class="dm-conv-info">
+        <div class="dm-conv-name-row">
+          <span class="dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}>${escHtml(c.other_username)}${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}</span>
+          ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
+        </div>
+        <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
+      </div>
+    </div>`;
+  }
+
+  app.innerHTML = `<div class="dm-layout${targetUsername ? ' dm-mobile-chat-open' : ''}">
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
-        <span style="font-size:13px;font-weight:700">Mesajlar</span>
-        <div style="display:flex;align-items:center;gap:6px">
-          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" type="button" title="Kilitli mesajlar">•</button>
-          <button class="btn btn-ghost btn-sm" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 7px"><i class="fas fa-user-friends"></i></button>
-          <button class="btn btn-ghost btn-sm" id="dm-groups-btn" title="Gruplar" style="padding:5px 7px"><i class="fas fa-users"></i></button>
-          <button class="btn btn-primary btn-sm" id="new-dm-btn"><i class="fas fa-edit"></i></button>
+        <span class="dm-sidebar-title">Mesajlar</span>
+        <div class="dm-sidebar-actions">
+          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button">•</button>
+          <button class="btn btn-ghost btn-sm" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 8px"><i class="fas fa-user-friends"></i></button>
+          <button class="btn btn-primary btn-sm" id="new-dm-btn" title="Yeni mesaj" style="padding:5px 9px"><i class="fas fa-edit"></i></button>
         </div>
       </div>
-      <div class="dm-search-wrap"><input id="dm-search" type="text" placeholder="Ara..." class="dm-search" /></div>
+      <div class="dm-search-wrap">
+        <input id="dm-search" type="text" placeholder="Konuşma ara..." class="dm-search" />
+      </div>
       <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
         <div class="dm-hidden-panel-content">
           <div class="dm-hidden-panel-header">Kilitli mesajlar</div>
           <div id="dm-hidden-list" class="dm-hidden-list">
-            ${hiddenConvs.length ? hiddenConvs.map(c => dmConvItemHTML(c, true)).join('') : `<div class="dm-empty-small">Kilitli konuşma yok</div>`}
+            ${hiddenConvs.length
+              ? hiddenConvs.map(c => convItemHTML(c, true)).join('')
+              : '<div class="dm-empty-small">Kilitli konuşma yok</div>'}
           </div>
         </div>
       </div>
       <div id="dm-conv-list" class="dm-conv-list">
-        ${convs.map(c => dmConvItemHTML(c)).join('') || `<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>`}
+        ${convs.length
+          ? convs.map(c => convItemHTML(c, false)).join('')
+          : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'}
       </div>
-    </div>`;
-
-  app.innerHTML = `<div class="dm-layout${targetUsername && window.innerWidth <= 768 ? ' dm-mobile-chat-open' : ''}">
-    ${sidebarHTML}
+    </div>
     <div class="dm-main" id="dm-main">
-      ${targetUsername ? '' : `<div class="dm-empty"><i class="fas fa-comments" style="font-size:48px;color:var(--text-muted);margin-bottom:16px"></i><p style="color:var(--text-muted)">Bir konuşma seçin</p></div>`}
+      ${!targetUsername ? `<div class="dm-empty">
+        <i class="fas fa-comments" style="font-size:44px;opacity:0.25"></i>
+        <p style="color:var(--text-muted);margin-top:8px">Bir konuşma seçin</p>
+      </div>` : ''}
     </div>
   </div>`;
 
-  const syncDmMobileView = () => {
-    const layout = $('.dm-layout');
-    if (!layout) return;
-    const isMobile = window.innerWidth <= 768;
-    layout.classList.toggle('dm-mobile-chat-open', isMobile && !!targetUsername);
-  };
-  syncDmMobileView();
-  window.removeEventListener('resize', window.__dmMobileViewHandler);
-  window.__dmMobileViewHandler = syncDmMobileView;
-  window.addEventListener('resize', window.__dmMobileViewHandler);
-
-  $('#dm-search')?.addEventListener('input', e => {
+  // Search filter
+  document.getElementById('dm-search')?.addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
-    $$('.dm-conv-item').forEach(el => { el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none'; });
+    document.querySelectorAll('.dm-conv-item').forEach(el => {
+      el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none';
+    });
   });
 
-  $('#dm-hidden-toggle-btn')?.addEventListener('click', () => {
-    $('#dm-hidden-panel')?.classList.toggle('hidden');
+  // Hidden toggle
+  document.getElementById('dm-hidden-toggle-btn')?.addEventListener('click', () => {
+    document.getElementById('dm-hidden-panel')?.classList.toggle('hidden');
   });
 
-  $('#dm-friends-btn')?.addEventListener('click', () => { navigate('/arkadaslar'); });
-  $('#dm-groups-btn')?.addEventListener('click', () => { navigate('/gruplar'); });
+  // Friends nav
+  document.getElementById('dm-friends-btn')?.addEventListener('click', () => navigate('/arkadaslar'));
 
-  $$('.dm-conv-item').forEach(el => {
+  // New DM
+  document.getElementById('new-dm-btn')?.addEventListener('click', async () => {
+    const friends = await api('/friends').catch(() => []);
+    const accepted = (friends || []).filter(f => f.status === 'accepted');
+    showModal('Yeni Mesaj', `
+      <div class="form-group">
+        <label>Kullanıcı adı</label>
+        <input id="new-dm-username" type="text" placeholder="kullanici_adi" />
+      </div>
+      ${accepted.length ? `<div class="form-group">
+        <label>Arkadaşlar</label>
+        <div id="new-dm-friends" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+          ${accepted.map(f => `<button class="btn btn-outline btn-sm" style="justify-content:flex-start;gap:8px" data-action="open-dm" data-username="${escHtml(f.other_username)}">
+            ${f.other_avatar ? `<img src="${escHtml(f.other_avatar)}" class="avatar-sm" style="width:24px;height:24px" />` : `<div class="avatar-sm avatar-placeholder" style="width:24px;height:24px"><i class="fas fa-user" style="font-size:10px"></i></div>`}
+            ${escHtml(f.other_username)}
+          </button>`).join('')}
+        </div>
+      </div>` : ''}
+      <button class="btn btn-primary" style="width:100%;margin-top:8px" id="new-dm-go"><i class="fas fa-paper-plane"></i> Mesaja Git</button>
+    `);
+    document.getElementById('new-dm-go')?.addEventListener('click', () => {
+      const u = document.getElementById('new-dm-username')?.value.trim();
+      if (!u) return;
+      hideModal(); navigate('/mesajlar/' + u);
+    });
+    document.querySelectorAll('#new-dm-friends [data-action="open-dm"]').forEach(btn => {
+      btn.addEventListener('click', () => { hideModal(); navigate('/mesajlar/' + btn.dataset.username); });
+    });
+  });
+
+  // Conv item clicks
+  document.querySelectorAll('.dm-conv-item').forEach(el => {
     el.addEventListener('click', () => {
-      $$('.dm-conv-item').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.dm-conv-item').forEach(x => x.classList.remove('active'));
       el.classList.add('active');
       navigate('/mesajlar/' + el.dataset.username);
     });
   });
 
-  $('#new-dm-btn')?.addEventListener('click', async () => {
-    const friends = await api('/friends').catch(() => []);
-    const accepted = (friends || []).filter(f => f.status === 'accepted');
-    showModal('Yeni Mesaj', `
-      <div class="form-group"><label>Kullanıcı adı</label><input id="new-dm-username" type="text" placeholder="kullanici_adi" /></div>
-      <div class="form-group">
-        <label>Arkadaşlardan seç</label>
-        <div id="new-dm-friends" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:8px">
-          ${accepted.length ? accepted.map(f => {
-            const other_username = f.other_username || (f.requester_id === currentUser.id ? (f.addressee_username || f.requester_username) : (f.requester_username || f.addressee_username)) || 'Kullanıcı';
-            const avatar = f.other_avatar || (f.requester_id === currentUser.id ? f.addressee_avatar : f.requester_avatar) || '';
-            const nameColor = f.other_name_color || '';
-            return `<button class="btn btn-ghost" type="button" style="justify-content:flex-start" data-username="${escHtml(other_username)}" data-action="open-dm">
-              ${avatar ? `<img src="${escHtml(avatar)}" class="avatar-sm" style="margin-right:8px" />` : `<div class="avatar-sm avatar-placeholder" style="margin-right:8px"><i class="fas fa-user"></i></div>`}
-              <span style="${nameColor ? `color:${escHtml(nameColor)}` : ''}">${escHtml(other_username)}</span>
-            </button>`;
-          }).join('') : '<div style="font-size:13px;color:var(--text-muted)">Henüz arkadaşın yok</div>'}
-        </div>
-      </div>
-      <button class="btn btn-primary" style="width:100%" id="new-dm-go">Mesaja Git</button>
-    `);
-    $('#new-dm-go').addEventListener('click', () => {
-      const u = $('#new-dm-username').value.trim();
-      if (!u) return;
-      hideModal();
-      navigate('/mesajlar/' + u);
-    });
-    $$('#new-dm-friends button[data-action="open-dm"]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        hideModal();
-        navigate('/mesajlar/' + btn.dataset.username);
-      });
-    });
-  });
-
   if (targetUsername) {
-    const activeEl = $(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
-    if (activeEl) { activeEl.classList.add('active'); }
+    const activeEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
+    if (activeEl) activeEl.classList.add('active');
     await renderDMChat(targetUsername);
   }
 }
 
-function dmConvItemHTML(c, isHidden = false) {
-  const unread = parseInt(c.unread_count) || 0;
-  return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}">
-    ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
-    <div class="dm-conv-info">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span class="dm-conv-name" style="${c.other_name_color ? `color:${escHtml(c.other_name_color)}` : ''}">${escHtml(c.other_username)}${isHidden ? '<i class="fas fa-lock dm-conv-lock"></i>' : ''}</span>
-        ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
-      </div>
-      <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
-    </div>
-  </div>`;
-}
-
-let dmSelectedIds = new Set();
+// ────────────────────────────────────
 let dmSelectionMode = false;
+let dmSelectedIds = new Set();
+let dmPollTimer = null;
 
 async function renderDMChat(username) {
-  const mainEl = $('#dm-main');
+  // Önceki poll'u temizle
+  if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
+
+  const mainEl = document.getElementById('dm-main');
   if (!mainEl) return;
   mainEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%"><div class="spinner"></div></div>`;
+
   let data;
   try { data = await api(`/conversation/${encodeURIComponent(username)}`); }
-  catch (e) { mainEl.innerHTML = `<div class="dm-empty"><p style="color:var(--accent-red2)">${e.message}</p></div>`; return; }
+  catch (e) {
+    mainEl.innerHTML = `<div class="dm-empty"><i class="fas fa-exclamation-circle" style="font-size:32px;opacity:0.4"></i><p style="color:var(--accent-red2);margin-top:8px">${escHtml(e.message)}</p></div>`;
+    return;
+  }
 
-  // Mesajlar okundu → badge'i hemen güncelle
-  setTimeout(() => checkUnreadMessages(), 300);
-  // Karşı tarafın mesajlarını okundu işaretle
+  // Okundu işaretle + badge güncelle
+  setTimeout(() => checkUnreadMessages(), 200);
   try { api(`/conversation/${encodeURIComponent(username)}/mark-read`, { method: 'POST' }); } catch {}
-
-  // Sidebar'daki bu konuşmanın unread badge'ini kaldır
-  const convItem = $(`.dm-conv-item[data-username="${CSS.escape(username)}"]`);
+  const convItem = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(username)}"]`);
   if (convItem) {
     convItem.classList.remove('dm-unread');
-    const badge = convItem.querySelector('.dm-unread-badge');
-    if (badge) badge.remove();
+    convItem.querySelector('.dm-unread-badge')?.remove();
   }
 
   const { conv, other, messages, isHidden, hasPassword } = data;
+
+  // Kilitli konuşma
   if (isHidden) {
     mainEl.innerHTML = `<div class="dm-chat">
       <div class="dm-chat-header">
-        <div style="display:flex;align-items:center;gap:10px">
+        <div class="dm-chat-header-left">
+          <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
           <i class="fas fa-lock" style="color:var(--accent-red2)"></i>
-          <span style="font-weight:600">${escHtml(other.username)}</span>
+          <span class="dm-chat-username">${escHtml(other.username)}</span>
         </div>
       </div>
-      <div class="dm-empty" style="flex:1">
-        <i class="fas fa-lock" style="font-size:36px;color:var(--text-muted);margin-bottom:12px"></i>
-        <p style="color:var(--text-muted)">Bu konuşma kilitli</p>
-        ${hasPassword ? `<div style="margin-top:16px;display:flex;gap:8px">
-          <input id="dm-unlock-pass" type="password" placeholder="Şifre" style="padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary)" />
-          <button class="btn btn-primary" id="dm-unlock-btn">Aç</button>
-        </div>` : `<button class="btn btn-primary" style="margin-top:12px" id="dm-unlock-btn">Kilidi Aç</button>`}
-        <div id="dm-unlock-err" style="color:var(--accent-red2);font-size:12px;margin-top:6px"></div>
+      <div class="dm-empty">
+        <i class="fas fa-lock" style="font-size:36px;opacity:0.3"></i>
+        <p style="color:var(--text-muted);margin-top:10px">Bu konuşma kilitli</p>
+        ${hasPassword
+          ? `<div style="margin-top:16px;display:flex;gap:8px;width:100%;max-width:280px">
+               <input id="dm-unlock-pass" type="password" placeholder="Şifre" style="flex:1;padding:9px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px" />
+               <button class="btn btn-primary" id="dm-unlock-btn" style="flex-shrink:0">Aç</button>
+             </div>`
+          : `<button class="btn btn-primary" style="margin-top:14px" id="dm-unlock-btn">Kilidi Aç</button>`}
+        <div id="dm-unlock-err" style="color:var(--accent-red2);font-size:12px;margin-top:8px"></div>
       </div>
     </div>`;
-    $('#dm-unlock-btn')?.addEventListener('click', async () => {
-      const pass = $('#dm-unlock-pass')?.value || '';
+    document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
+    document.getElementById('dm-unlock-btn')?.addEventListener('click', async () => {
+      const pass = document.getElementById('dm-unlock-pass')?.value || '';
       try {
         await api(`/conversation/${encodeURIComponent(username)}/unhide`, { method: 'POST', body: JSON.stringify({ password: pass }) });
         sessionStorage.setItem('dm_unlocked_' + username, '1');
         renderDMChat(username);
-      } catch (e) { $('#dm-unlock-err').textContent = e.message; }
+      } catch (e) { document.getElementById('dm-unlock-err').textContent = e.message; }
     });
+    const layout = document.querySelector('.dm-layout');
+    if (layout) layout.classList.add('dm-mobile-chat-open');
     return;
   }
 
   dmSelectedIds = new Set();
   dmSelectionMode = false;
-
-  mainEl.innerHTML = `<div class="dm-chat">
-    <div class="dm-chat-header">
-      <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none"><i class="fas fa-arrow-left"></i></button>
-        ${other.avatar ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <a href="/profil/${escHtml(other.username)}" data-link style="font-weight:600;font-size:14px;color:${other.name_color || 'var(--text-primary)'}">${escHtml(other.username)}</a>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <div id="dm-sel-actions" style="display:none;gap:6px">
-          <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
-          <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
-          <button class="btn btn-ghost btn-sm" id="dm-sel-cancel">İptal</button>
-        </div>
-        <button class="btn btn-ghost btn-sm" id="dm-options-btn"><i class="fas fa-ellipsis-v"></i></button>
-      </div>
-    </div>
-    <div class="dm-messages" id="dm-messages">
-      ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
-    </div>
-    <div id="dm-reply-bar" style="display:none;padding:6px 14px;background:var(--bg-card2);border-top:1px solid var(--border);font-size:12px;color:var(--text-secondary);align-items:center;justify-content:space-between">
-      <span id="dm-reply-text"></span>
-      <button onclick="clearReply()" style="background:none;color:var(--text-muted)">✕</button>
-    </div>
-    <div class="dm-input-bar">
-      <label class="btn btn-ghost btn-sm" for="dm-img-input" title="Fotoğraf ekle" style="cursor:pointer;padding:6px"><i class="fas fa-image"></i></label>
-      <input type="file" id="dm-img-input" accept="image/*" style="display:none" />
-      <div id="dm-img-preview" style="display:none;position:relative">
-        <img id="dm-img-thumb" style="height:48px;border-radius:6px;object-fit:cover" />
-        <button onclick="clearDmImg()" style="position:absolute;top:-6px;right:-6px;background:var(--accent-red);color:#fff;border-radius:50%;width:16px;height:16px;font-size:10px;display:flex;align-items:center;justify-content:center">✕</button>
-      </div>
-      <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1" style="flex:1;background:transparent;border:none;resize:none;color:var(--text-primary);font-size:14px;padding:8px 0;outline:none;max-height:120px;overflow-y:auto"></textarea>
-      <button class="btn btn-primary btn-sm" id="dm-send-btn"><i class="fas fa-paper-plane"></i></button>
-    </div>
-  </div>`;
-
-  $('#dm-mobile-back-btn')?.addEventListener('click', () => {
-    navigate('/mesajlar');
-  });
-
-  const dmMessagesContainer = $('#dm-messages');
-  if (dmMessagesContainer) dmMessagesContainer.scrollTop = dmMessagesContainer.scrollHeight;
-
-  // Scroll to bottom
-  const msgsEl = $('#dm-messages');
-  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
-
   let replyToId = null;
   let pendingImg = null;
 
-  window.clearReply = () => {
+  mainEl.innerHTML = `<div class="dm-chat">
+    <!-- Header -->
+    <div class="dm-chat-header">
+      <div class="dm-chat-header-left">
+        <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
+        ${other.avatar
+          ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
+          : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
+        <a href="/profil/${escHtml(other.username)}" data-link class="dm-chat-username" style="color:${other.name_color || 'var(--text-primary)'}">
+          ${escHtml(other.username)}
+        </a>
+      </div>
+      <div class="dm-chat-header-right">
+        <div class="dm-sel-actions-bar" id="dm-sel-actions-bar">
+          <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
+          <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
+          <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i></button>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="dm-options-btn" style="padding:5px 8px"><i class="fas fa-ellipsis-v"></i></button>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="dm-messages" id="dm-messages">
+      ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
+    </div>
+
+    <!-- Reply bar -->
+    <div class="dm-reply-bar" id="dm-reply-bar">
+      <div style="display:flex;align-items:center;gap:6px;min-width:0">
+        <i class="fas fa-reply" style="font-size:11px;color:var(--accent-red2)"></i>
+        <span id="dm-reply-text" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      </div>
+      <button onclick="window.__dmClearReply && window.__dmClearReply()" style="background:none;border:none;color:var(--text-muted);padding:2px 6px;cursor:pointer;font-size:14px">✕</button>
+    </div>
+
+    <!-- Input bar -->
+    <div class="dm-input-bar">
+      <div class="dm-input-wrap">
+        <button class="dm-input-img-btn" id="dm-img-btn" type="button" title="Fotoğraf ekle"><i class="fas fa-image"></i></button>
+        <input type="file" id="dm-img-input" accept="image/*" style="display:none" />
+        <div class="dm-img-preview-wrap" id="dm-img-preview-wrap">
+          <img id="dm-img-thumb" />
+          <button class="dm-img-clear" onclick="window.__dmClearImg && window.__dmClearImg()" type="button">✕</button>
+        </div>
+        <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
+      </div>
+      <button class="dm-send-btn" id="dm-send-btn" type="button"><i class="fas fa-paper-plane"></i></button>
+    </div>
+  </div>`;
+
+  // Mobile back
+  document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
+  const layout = document.querySelector('.dm-layout');
+  if (layout) layout.classList.add('dm-mobile-chat-open');
+
+  // Scroll to bottom
+  const msgsEl = document.getElementById('dm-messages');
+  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+
+  // Reply management
+  const setReply = (id) => { replyToId = id; };
+  window.__dmClearReply = () => {
     replyToId = null;
-    const rb = $('#dm-reply-bar');
-    if (rb) { rb.style.display = 'none'; $('#dm-reply-text').textContent = ''; }
+    const rb = document.getElementById('dm-reply-bar');
+    if (rb) rb.classList.remove('visible');
+    const rt = document.getElementById('dm-reply-text');
+    if (rt) rt.textContent = '';
   };
 
-  window.clearDmImg = () => {
+  // Image management
+  window.__dmClearImg = () => {
     pendingImg = null;
-    const preview = $('#dm-img-preview');
-    if (preview) preview.style.display = 'none';
-    const input = $('#dm-img-input');
-    if (input) input.value = '';
+    const pw = document.getElementById('dm-img-preview-wrap');
+    if (pw) pw.style.display = 'none';
+    const inp = document.getElementById('dm-img-input');
+    if (inp) inp.value = '';
   };
 
-  $('#dm-img-input')?.addEventListener('change', e => {
+  document.getElementById('dm-img-btn')?.addEventListener('click', () => {
+    document.getElementById('dm-img-input')?.click();
+  });
+  document.getElementById('dm-img-input')?.addEventListener('change', e => {
     const file = e.target.files[0];
     if (!file) return;
     pendingImg = file;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const thumb = $('#dm-img-thumb');
-      const preview = $('#dm-img-preview');
-      if (thumb) thumb.src = ev.target.result;
-      if (preview) preview.style.display = 'flex';
-    };
-    reader.readAsDataURL(file);
+    const pw = document.getElementById('dm-img-preview-wrap');
+    const thumb = document.getElementById('dm-img-thumb');
+    if (pw && thumb) {
+      const reader = new FileReader();
+      reader.onload = ev => { thumb.src = ev.target.result; pw.style.display = 'block'; };
+      reader.readAsDataURL(file);
+    }
   });
 
-  let sending = false;
-  async function sendDmMessage() {
-    if (sending) return;
-    const content = $('#dm-input')?.value.trim();
-    if (!content && !pendingImg) return;
-    sending = true;
-    const sendBtn = $('#dm-send-btn');
-    if (sendBtn) sendBtn.disabled = true;
-    const fd = new FormData();
-    if (content) fd.append('content', content);
-    if (replyToId) fd.append('reply_to_id', replyToId);
-    if (pendingImg) fd.append('image', pendingImg);
-    if ($('#dm-input')) $('#dm-input').value = '';
-    clearReply();
-    clearDmImg();
-    try {
-      const msg = await apiForm(`/conversation/${encodeURIComponent(username)}/messages`, fd);
-      const msgsEl = $('#dm-messages');
-      if (msgsEl) {
-        msgsEl.insertAdjacentHTML('beforeend', dmMessageHTML(msg, currentUser.id, false));
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      }
-      const convItem = $(`.dm-conv-item[data-username="${CSS.escape(username)}"]`);
-      if (convItem) convItem.querySelector('.dm-conv-last').textContent = content || '📷 Fotoğraf';
-    } catch (e) { toast(e.message, 'error'); }
-    finally { sending = false; if (sendBtn) sendBtn.disabled = false; }
+  // Auto-resize textarea
+  const textareaEl = document.getElementById('dm-input');
+  if (textareaEl) {
+    textareaEl.addEventListener('input', () => {
+      textareaEl.style.height = 'auto';
+      textareaEl.style.height = Math.min(textareaEl.scrollHeight, 120) + 'px';
+    });
   }
 
-  $('#dm-send-btn')?.addEventListener('click', sendDmMessage);
-  $('#dm-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); } });
+  // Send message
+  const sendDmMessage = async () => {
+    const inputEl = document.getElementById('dm-input');
+    const content = inputEl?.value.trim();
+    if (!content && !pendingImg) return;
+    const sendBtn = document.getElementById('dm-send-btn');
+    if (sendBtn) sendBtn.disabled = true;
 
-  // Otomatik büyüyen textarea
-  $('#dm-input')?.addEventListener('input', e => {
-    e.target.style.height = 'auto';
-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+    try {
+      let imageUrl = null;
+      if (pendingImg) {
+        const fd = new FormData();
+        fd.append('image', pendingImg);
+        const uploadRes = await apiForm('/upload-image', fd);
+        imageUrl = uploadRes.url;
+        window.__dmClearImg();
+      }
+      const payload = { content: content || '', reply_to_id: replyToId };
+      if (imageUrl) payload.image_url = imageUrl;
+      const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
+        method: 'POST', body: JSON.stringify(payload)
+      });
+      if (inputEl) { inputEl.value = ''; inputEl.style.height = 'auto'; }
+      window.__dmClearReply?.();
+      const el = document.getElementById('dm-messages');
+      if (el) {
+        el.insertAdjacentHTML('beforeend', dmMessageHTML(msg, currentUser.id, false));
+        el.scrollTop = el.scrollHeight;
+      }
+      lastPollMsgId = msg.id;
+    } catch (e) { toast(e.message, 'error'); }
+    finally { if (sendBtn) sendBtn.disabled = false; }
+  };
+
+  document.getElementById('dm-send-btn')?.addEventListener('click', sendDmMessage);
+  textareaEl?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); }
   });
 
-  // Mesaj aksiyonları (üç nokta, seç, yanıtla, sil)
-  msgsEl?.addEventListener('click', e => {
-    const btn = e.target.closest('.dm-msg-menu-btn');
-    if (btn) { showDmMsgMenu(btn, btn.dataset.id, btn.dataset.own === '1', username, replyToId, (id) => { replyToId = id; }); return; }
+  // Msg menu button clicks
+  let lastPollMsgId = messages.length > 0 ? messages[messages.length - 1].id : 0;
+  document.getElementById('dm-messages')?.addEventListener('click', e => {
+    const menuBtn = e.target.closest('.dm-msg-menu-btn');
+    if (menuBtn) {
+      const msgId = menuBtn.dataset.id;
+      const isOwn = menuBtn.dataset.own === '1';
+      showDmMsgMenu(menuBtn, msgId, isOwn, username, replyToId, setReply);
+      return;
+    }
+    // Checkbox
     const cb = e.target.closest('.dm-msg-cb');
     if (cb) {
       const id = cb.dataset.id;
@@ -3753,44 +3800,61 @@ async function renderDMChat(username) {
     }
   });
 
-  // Options menu
-  $('#dm-options-btn')?.addEventListener('click', e => {
+  // Options
+  document.getElementById('dm-options-btn')?.addEventListener('click', e => {
     e.stopPropagation();
     showDmOptionsMenu(username, conv.id);
   });
 
-  // Seçim aksiyonları
-  $('#dm-sel-cancel')?.addEventListener('click', exitDmSelection);
-  $('#dm-sel-delete-me')?.addEventListener('click', async () => {
+  // Sel actions
+  document.getElementById('dm-sel-cancel')?.addEventListener('click', exitDmSelection);
+  document.getElementById('dm-sel-delete-me')?.addEventListener('click', async () => {
     if (!dmSelectedIds.size) return;
     try {
       await api('/messages/delete-bulk', { method: 'POST', body: JSON.stringify({ ids: [...dmSelectedIds], mode: 'me' }) });
-      exitDmSelection();
-      renderDMChat(username);
+      exitDmSelection(); renderDMChat(username);
     } catch (e) { toast(e.message, 'error'); }
   });
-  $('#dm-sel-delete-all')?.addEventListener('click', async () => {
+  document.getElementById('dm-sel-delete-all')?.addEventListener('click', async () => {
     if (!dmSelectedIds.size) return;
     try {
       await api('/messages/delete-bulk', { method: 'POST', body: JSON.stringify({ ids: [...dmSelectedIds], mode: 'all' }) });
-      exitDmSelection();
-      renderDMChat(username);
+      exitDmSelection(); renderDMChat(username);
     } catch (e) { toast(e.message, 'error'); }
   });
+
+  // Poll for new messages
+  dmPollTimer = setInterval(async () => {
+    if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
+    try {
+      const newMsgs = await api(`/conversation/${encodeURIComponent(username)}/messages?after_id=${lastPollMsgId}`);
+      if (!newMsgs || !newMsgs.length) return;
+      const el = document.getElementById('dm-messages');
+      if (!el) return;
+      const wasBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      newMsgs.forEach(m => {
+        if (!document.querySelector(`.dm-msg-wrap[data-id="${m.id}"]`)) {
+          el.insertAdjacentHTML('beforeend', dmMessageHTML(m, currentUser.id, dmSelectionMode));
+          lastPollMsgId = Math.max(lastPollMsgId, m.id);
+        }
+      });
+      if (wasBottom) el.scrollTop = el.scrollHeight;
+    } catch {}
+  }, 2500);
 }
 
 function exitDmSelection() {
   dmSelectionMode = false;
   dmSelectedIds = new Set();
-  $$('.dm-msg-cb-wrap').forEach(el => el.style.display = 'none');
-  $$('.dm-msg-cb').forEach(el => el.checked = false);
-  const sa = $('#dm-sel-actions');
-  if (sa) sa.style.display = 'none';
+  document.querySelectorAll('.dm-msg-cb-wrap').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.dm-msg-cb').forEach(el => el.checked = false);
+  const bar = document.getElementById('dm-sel-actions-bar');
+  if (bar) bar.classList.remove('visible');
 }
 
 function updateDmSelActions() {
-  const sa = $('#dm-sel-actions');
-  if (sa) sa.style.display = dmSelectedIds.size > 0 ? 'flex' : 'none';
+  const bar = document.getElementById('dm-sel-actions-bar');
+  if (bar) { if (dmSelectedIds.size > 0) bar.classList.add('visible'); else bar.classList.remove('visible'); }
 }
 
 function dmMessageHTML(m, myId, selMode) {
@@ -3799,83 +3863,56 @@ function dmMessageHTML(m, myId, selMode) {
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe && !deleted) return '';
 
-  return `<div class="dm-msg-wrap ${isOwn ? 'dm-own' : ''}" data-id="${m.id}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}" data-id="${m.id}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
-    ${!isOwn ? (m.sender_avatar ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0" />` : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`) : ''}
+    ${!isOwn
+      ? (m.sender_avatar
+          ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0;align-self:flex-end" />`
+          : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0;align-self:flex-end"><i class="fas fa-user"></i></div>`)
+      : ''}
     <div class="dm-msg-content">
-      ${m.reply_to_id && m.reply_content ? `<div class="dm-reply-preview"><span style="color:var(--text-muted);font-size:11px">${escHtml(m.reply_username || '')}</span><div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content||'').substring(0,60))}</div></div>` : ''}
-      ${deleted ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> !!! Mesaj silindi</div>`
+      ${m.reply_to_id && m.reply_content
+        ? `<div class="dm-reply-preview">
+             <span style="color:var(--text-muted);font-size:11px;font-weight:600">${escHtml(m.reply_username || '')}</span>
+             <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content || '').substring(0, 60))}</div>
+           </div>`
+        : ''}
+      ${deleted
+        ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
         : `<div class="dm-msg-bubble">
-            ${m.image_url ? `<img src="${escHtml(m.image_url)}" style="max-width:220px;border-radius:8px;display:block;margin-bottom:6px;cursor:pointer" onclick="window.open('${escHtml(m.image_url)}','_blank')" />` : ''}
-            ${m.shared_forum_id ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
-              ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
-              <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title||'')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
-            </div>` : ''}
-            ${m.shared_video_id ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
-              ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:80px;object-fit:cover;border-radius:6px 6px 0 0" />` : ''}
-              <div style="padding:8px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title||'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
-            </div>` : ''}
-            ${m.content ? `<span>${escHtml(m.content.trim())}</span>` : ''}
-          </div>`}
+             ${m.image_url
+               ? `<img src="${escHtml(m.image_url)}" style="max-width:200px;width:100%;border-radius:8px;display:block;margin-bottom:${m.content ? '6px' : '0'};cursor:pointer" onclick="window.open('${escHtml(m.image_url)}','_blank')" />`
+               : ''}
+             ${m.shared_forum_id
+               ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
+                    ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
+                    <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title || '')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
+                  </div>`
+               : ''}
+             ${m.shared_video_id
+               ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
+                    ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
+                    <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title || 'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
+                  </div>`
+               : ''}
+             ${m.content ? `<span>${escHtml(m.content.trim())}</span>` : ''}
+           </div>`}
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
-        ${isOwn && !deleted ? `<span style="font-size:11px;margin-left:3px">${m.read_at ? '<i class="fas fa-check-double" style="color:#1ED760" title="Okundu"></i>' : '<i class="fas fa-check" style="color:var(--text-muted)" title="Gönderildi"></i>'}</span>` : ''}
-        <button class="dm-msg-menu-btn" data-id="${m.id}" data-own="${isOwn ? 1 : 0}" style="background:none;color:var(--text-muted);font-size:12px;padding:0 4px;opacity:0;transition:opacity 0.15s"><i class="fas fa-ellipsis-h"></i></button>
+        ${isOwn && !deleted
+          ? `<span style="font-size:11px;margin-left:2px">${m.read_at
+              ? '<i class="fas fa-check-double" style="color:#1ED760" title="Okundu"></i>'
+              : '<i class="fas fa-check" style="color:var(--text-muted)" title="Gönderildi"></i>'}</span>`
+          : ''}
+        <button class="dm-msg-menu-btn btn btn-ghost" data-id="${m.id}" data-own="${isOwn ? 1 : 0}" style="padding:0 4px;font-size:12px;color:var(--text-muted)"><i class="fas fa-ellipsis-h"></i></button>
       </div>
     </div>
   </div>`;
 }
 
-function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
-  const existing = $('#dm-msg-ctx');
-  if (existing) existing.remove();
-  const rect = btn.getBoundingClientRect();
-  const menu = document.createElement('div');
-  menu.id = 'dm-msg-ctx';
-  menu.style.cssText = `position:fixed;left:${rect.left - 120}px;top:${rect.bottom + 4}px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden`;
-  const items = [
-    { label: '<i class="fas fa-reply"></i> Yanıtla', action: 'reply' },
-    { label: '<i class="fas fa-check-square"></i> Seç', action: 'select' },
-    { label: '<i class="fas fa-trash"></i> Benden Sil', action: 'delete-me' },
-    ...(isOwn ? [{ label: '<i class="fas fa-trash-alt"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
-  ];
-  items.forEach(item => {
-    const el = document.createElement('div');
-    el.innerHTML = item.label;
-    el.style.cssText = `padding:8px 14px;font-size:13px;cursor:pointer;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-secondary)'};display:flex;align-items:center;gap:8px`;
-    el.addEventListener('mouseenter', () => el.style.background = 'var(--bg-hover)');
-    el.addEventListener('mouseleave', () => el.style.background = '');
-    el.addEventListener('click', async () => {
-      menu.remove();
-      if (item.action === 'reply') {
-        const msgEl = $(`.dm-msg-wrap[data-id="${msgId}"]`);
-        const content = msgEl?.querySelector('.dm-msg-bubble span')?.textContent || '';
-        setReply(msgId);
-        const rb = $('#dm-reply-bar');
-        const rt = $('#dm-reply-text');
-        if (rb && rt) { rb.style.display = 'flex'; rt.textContent = content.substring(0, 60); }
-      } else if (item.action === 'select') {
-        dmSelectionMode = true;
-        dmSelectedIds.add(String(msgId));
-        $$('.dm-msg-cb-wrap').forEach(el => el.style.display = 'flex');
-        const cb = $(`.dm-msg-cb[data-id="${msgId}"]`);
-        if (cb) cb.checked = true;
-        updateDmSelActions();
-      } else if (item.action === 'delete-me') {
-        try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'me' }) }); renderDMChat(username); } catch (e) { toast(e.message, 'error'); }
-      } else if (item.action === 'delete-all') {
-        try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'all' }) }); renderDMChat(username); } catch (e) { toast(e.message, 'error'); }
-      }
-    });
-    menu.appendChild(el);
-  });
-  document.body.appendChild(menu);
-  setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }), 0);
-}
-
-// Mesaj üç noktası hover göster
+// Hover: show/hide menu btn on desktop
 document.addEventListener('mouseover', e => {
   const wrap = e.target.closest('.dm-msg-wrap');
   if (wrap) { const btn = wrap.querySelector('.dm-msg-menu-btn'); if (btn) btn.style.opacity = '1'; }
@@ -3885,6 +3922,57 @@ document.addEventListener('mouseout', e => {
   if (wrap) { const btn = wrap.querySelector('.dm-msg-menu-btn'); if (btn) btn.style.opacity = '0'; }
 });
 
+function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
+  document.getElementById('dm-msg-ctx')?.remove();
+  const rect = btn.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.id = 'dm-msg-ctx';
+  const leftPos = Math.max(8, rect.left - 160);
+  const topPos = Math.min(rect.bottom + 4, window.innerHeight - 160);
+  menu.style.cssText = `position:fixed;left:${leftPos}px;top:${topPos}px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden`;
+  const items = [
+    { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
+    { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
+    { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
+    ...(isOwn ? [{ label: '<i class="fas fa-trash-alt fa-fw"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
+  ];
+  items.forEach(item => {
+    const el = document.createElement('div');
+    el.innerHTML = item.label;
+    el.style.cssText = `padding:9px 14px;font-size:13px;cursor:pointer;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-secondary)'};display:flex;align-items:center;gap:8px;transition:background 0.15s`;
+    el.addEventListener('mouseenter', () => el.style.background = 'var(--bg-hover)');
+    el.addEventListener('mouseleave', () => el.style.background = '');
+    el.addEventListener('click', async () => {
+      menu.remove();
+      if (item.action === 'reply') {
+        const msgEl = document.querySelector(`.dm-msg-wrap[data-id="${msgId}"]`);
+        const content = msgEl?.querySelector('.dm-msg-bubble span')?.textContent || '';
+        if (setReply) setReply(msgId);
+        const rb = document.getElementById('dm-reply-bar');
+        const rt = document.getElementById('dm-reply-text');
+        if (rb) rb.classList.add('visible');
+        if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
+      } else if (item.action === 'select') {
+        dmSelectionMode = true;
+        dmSelectedIds.add(String(msgId));
+        document.querySelectorAll('.dm-msg-cb-wrap').forEach(el => el.style.display = 'flex');
+        const cb = document.querySelector(`.dm-msg-cb[data-id="${msgId}"]`);
+        if (cb) cb.checked = true;
+        updateDmSelActions();
+      } else if (item.action === 'delete-me') {
+        try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'me' }) }); renderDMChat(username); }
+        catch (e) { toast(e.message, 'error'); }
+      } else if (item.action === 'delete-all') {
+        try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'all' }) }); renderDMChat(username); }
+        catch (e) { toast(e.message, 'error'); }
+      }
+    });
+    menu.appendChild(el);
+  });
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
+}
+
 function showDmOptionsMenu(username, convId) {
   showModal('Konuşma Seçenekleri', `
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -3893,7 +3981,7 @@ function showDmOptionsMenu(username, convId) {
       <button class="btn btn-danger" id="dm-opt-delete"><i class="fas fa-trash"></i> Konuşmayı Sil</button>
     </div>
   `);
-  $('#dm-opt-hide').addEventListener('click', () => {
+  document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
     showModal('Konuşmayı Gizle', `
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Şifre koyarsanız açmak için şifre gerekecek.</p>
@@ -3903,25 +3991,28 @@ function showDmOptionsMenu(username, convId) {
         <button class="btn btn-outline" onclick="hideModal()" style="flex:1">İptal</button>
       </div>
     `);
-    $('#dm-hide-confirm').addEventListener('click', async () => {
-      const pass = $('#dm-hide-pass').value;
-      try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); } catch (e) { toast(e.message, 'error'); }
+    document.getElementById('dm-hide-confirm')?.addEventListener('click', async () => {
+      const pass = document.getElementById('dm-hide-pass')?.value || '';
+      try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); }
+      catch (e) { toast(e.message, 'error'); }
     });
   });
-  $('#dm-opt-setpass').addEventListener('click', () => {
+  document.getElementById('dm-opt-setpass')?.addEventListener('click', () => {
     hideModal();
     showModal('Şifre Değiştir', `
       <div class="form-group"><label>Yeni Şifre (boş = şifresiz)</label><input id="dm-newpass" type="password" /></div>
       <button class="btn btn-primary" style="width:100%" id="dm-setpass-confirm">Kaydet</button>
     `);
-    $('#dm-setpass-confirm').addEventListener('click', async () => {
-      const pass = $('#dm-newpass').value;
-      try { await api(`/conversation/${encodeURIComponent(username)}/set-password`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); toast('Şifre güncellendi'); } catch (e) { toast(e.message, 'error'); }
+    document.getElementById('dm-setpass-confirm')?.addEventListener('click', async () => {
+      const pass = document.getElementById('dm-newpass')?.value || '';
+      try { await api(`/conversation/${encodeURIComponent(username)}/set-password`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); toast('Şifre güncellendi'); }
+      catch (e) { toast(e.message, 'error'); }
     });
   });
-  $('#dm-opt-delete').addEventListener('click', async () => {
+  document.getElementById('dm-opt-delete')?.addEventListener('click', async () => {
     if (!confirm('Konuşma silinsin mi?')) return;
-    try { await api(`/conversation/${encodeURIComponent(username)}`, { method: 'DELETE' }); hideModal(); navigate('/mesajlar'); toast('Konuşma silindi'); } catch (e) { toast(e.message, 'error'); }
+    try { await api(`/conversation/${encodeURIComponent(username)}`, { method: 'DELETE' }); hideModal(); navigate('/mesajlar'); toast('Konuşma silindi'); }
+    catch (e) { toast(e.message, 'error'); }
   });
 }
 

@@ -191,7 +191,7 @@
   </nav>
 
   <script>
-// ===== DİNAMİK TEMA RENGİ (ANA SİTE) =====
+// ===== DİNAMİK TEMA RENGİ + LOGO + SİTE ADI (ANA SİTE) =====
 (function() {
   function applyThemeColor(hex) {
     if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
@@ -202,18 +202,40 @@
     const hex2    = '#'+toHex(lighter(r,1.15))+toHex(lighter(g,1.15))+toHex(lighter(b,1.15));
     const hexDark = '#'+toHex(darker(r,0.65))+toHex(darker(g,0.65))+toHex(darker(b,0.65));
     const root = document.documentElement.style;
+    // Accent / brand
     root.setProperty('--accent-red',      hex);
     root.setProperty('--accent-red2',     hex2);
     root.setProperty('--accent-red-dark', hexDark);
     root.setProperty('--grad-red',        `linear-gradient(135deg,${hex},${hexDark})`);
     root.setProperty('--bg-active',       `rgba(${r},${g},${b},0.08)`);
+    // Hat / çizgi / border renkleri (tüm site)
     root.setProperty('--border',          `rgba(${r},${g},${b},0.18)`);
     root.setProperty('--border-hover',    `rgba(${r},${g},${b},0.5)`);
+    root.setProperty('--border-accent',   `rgba(${r},${g},${b},0.35)`);
+    root.setProperty('--accent-line',     hex);
     root.setProperty('--glow',            `0 0 20px rgba(${r},${g},${b},0.15)`);
+    // Mesaj balonu renkleri
+    root.setProperty('--dm-own-bg',       `rgba(${r},${g},${b},0.15)`);
+    root.setProperty('--dm-own-border',   `rgba(${r},${g},${b},0.3)`);
+    root.setProperty('--dm-reply-bg',     `rgba(${r},${g},${b},0.08)`);
   }
   fetch('/api/settings/public')
     .then(r=>r.json())
-    .then(d=>{ if(d.primary_color) applyThemeColor(d.primary_color); })
+    .then(d=>{
+      if(d.primary_color) applyThemeColor(d.primary_color);
+      // Logo güncelle
+      if(d.site_logo) {
+        const navLogo = document.querySelector('.nav-brand img');
+        if(navLogo) navLogo.src = d.site_logo;
+        const favicon = document.querySelector('link[rel="icon"]');
+        if(favicon) favicon.href = d.site_logo;
+      }
+      // Site adı güncelle
+      if(d.site_name) {
+        const navSpan = document.querySelector('.nav-brand span');
+        if(navSpan) navSpan.textContent = d.site_name;
+      }
+    })
     .catch(()=>{});
 })();
 </script>
