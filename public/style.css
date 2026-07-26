@@ -110,9 +110,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   gap: 8px;
   font-weight: 800;
   font-size: 18px;
-  letter-spacing: 2px;
-  min-width: 0;
-  overflow: hidden;
+  letter-spacing: 0;
+  flex-shrink: 0;
+  overflow: visible;
 }
 .brand-icon {
   width: 32px; height: 32px;
@@ -297,7 +297,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 }
 
 /* Ensure flex children can shrink so titles don't force overflow */
-.forum-card-body, .card-body, .video-card-body, .book-detail-info, .page-header, .nav-brand {
+.forum-card-body, .card-body, .video-card-body, .book-detail-info, .page-header {
   min-width: 0;
 }
 .video-author-row, .video-stats-row, .video-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
@@ -1165,8 +1165,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 /* ===== NAVBAR MOBİL OVERFLOW FIX ===== */
 @media (max-width: 768px) {
-  .nav-container { padding: 0 12px; gap: 0; height: 54px; overflow: hidden; }
-  .nav-brand { flex: 1; min-width: 0; }
+  .nav-container { padding: 0 12px; gap: 0; height: 54px; overflow: visible; }
+  .nav-brand { flex-shrink: 0; min-width: 0; }
   .nav-auth { display: none !important; }
   #new-btn-wrap { display: none !important; }
   .nav-user-btn span { display: none; }
