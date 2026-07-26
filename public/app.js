@@ -2753,6 +2753,7 @@ async function renderSettings(app) {
     <div class="settings-layout">
       <div class="settings-nav">
         <div class="settings-nav-item active" data-section="profile"><i class="fas fa-user"></i> Profil</div>
+        <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
@@ -2795,8 +2796,6 @@ function renderSettingsSection(section) {
             </div>
           </div>
           <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="3">${escHtml(currentUser.bio || '')}</textarea></div>
-          <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" placeholder="Örn: Yazar, Öğrenci, Mühendis..." value="${escHtml(currentUser.title || '')}" /></div>
-          <div class="form-group"><label>Konum (opsiyonel)</label><input type="text" id="s-location" placeholder="Örn: İstanbul, Türkiye" value="${escHtml(currentUser.location || '')}" /></div>
           <div class="form-row">
             <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
             <div class="form-group"><label>Konum <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-location" value="${escHtml(currentUser.location || '')}" placeholder="Örn: İstanbul, Türkiye" /></div>
@@ -2865,6 +2864,50 @@ function renderSettingsSection(section) {
         $('#profile-msg').textContent = '';
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
+
+  } else if (section === 'username') {
+    const changes = currentUser.username_changes || 0;
+    const resetAt = currentUser.username_change_reset_at ? new Date(currentUser.username_change_reset_at) : null;
+    const remaining = 2 - changes;
+    const now = new Date();
+    const isBlocked = changes >= 2 && resetAt && resetAt > now;
+    const resetDateStr = resetAt ? resetAt.toLocaleDateString('tr-TR') : '';
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span>Kullanıcı Adını Değiştir</span></div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Mevcut Kullanıcı Adı</label>
+            <div style="padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:14px">@${escHtml(currentUser.username)}</div>
+          </div>
+          <div style="padding:10px 14px;background:var(--bg-card2);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--text-muted)">
+            <i class="fas fa-info-circle" style="color:var(--accent-red)"></i>
+            Kullanıcı adını <strong>2 kez</strong> değiştirebilirsin. 2 değişim sonrası <strong>7 gün</strong> beklemen gerekir.
+            ${isBlocked
+              ? `<br><span style="color:var(--accent-red2);margin-top:6px;display:block"><i class="fas fa-clock"></i> Kalan değişim hakkın tükendi. ${resetDateStr} tarihinde yeniden kullanabilirsin.</span>`
+              : `<br><span style="color:var(--accent-red);margin-top:4px;display:block">Kalan hak: <strong>${remaining}/2</strong>${resetAt ? ` · Pencere ${resetDateStr} tarihinde sıfırlanır` : ''}</span>`
+            }
+          </div>
+          ${isBlocked ? '' : `
+          <div class="form-group"><label>Yeni Kullanıcı Adı</label><input type="text" id="new-username" placeholder="3-30 karakter, harf/rakam/alt çizgi" maxlength="30" /></div>
+          <button class="btn btn-primary" id="save-username-btn">Kullanıcı Adını Değiştir</button>
+          <div id="username-msg" class="form-error mt-4"></div>
+          `}
+        </div>
+      </div>`;
+    if (!isBlocked) {
+      $('#save-username-btn').addEventListener('click', async () => {
+        const val = ($('#new-username').value || '').trim();
+        if (!val) { $('#username-msg').textContent = 'Kullanıcı adı zorunlu'; return; }
+        try {
+          const updated = await api('/profile/username', { method: 'PUT', body: JSON.stringify({ username: val }) });
+          currentUser = updated;
+          updateNavUI();
+          toast('Kullanıcı adı güncellendi!');
+          renderSettingsSection('username');
+        } catch (e) { $('#username-msg').textContent = e.message; }
+      });
+    }
 
   } else if (section === 'password') {
     el.innerHTML = `
@@ -4007,10 +4050,20 @@ async function renderFriends(app) {
     const reject = e.target.closest('.friend-reject');
     const remove = e.target.closest('.friend-remove');
     const unblock = e.target.closest('.friend-unblock');
+    const block = e.target.closest('.friend-block');
     const msgBtn = e.target.closest('.friend-msg');
     if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
     if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (remove) { if (!confirm('Arkadaşlıktan çıkart?')) return; try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
+    if (remove) {
+      const isOutgoing = remove.title === 'İsteği İptal Et';
+      const msg = isOutgoing ? 'Arkadaşlık isteğini iptal et?' : 'Arkadaşlıktan çıkart?';
+      if (!confirm(msg)) return;
+      try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); }
+    }
+    if (block) {
+      if (!confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
+      try { await api(`/block/${encodeURIComponent(block.dataset.username)}`, { method: 'POST' }); renderFriends(app); } catch (e) { toast(e.message,'error'); }
+    }
     if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
     if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
   });
@@ -4039,8 +4092,9 @@ function friendItemHTML(f, type, myId) {
     </div>
     <div style="display:flex;gap:6px">
       ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-check"></i></button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-times"></i></button>` : ''}
-      ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="${type === 'outgoing' ? 'İptal' : 'Sil'}" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-times"></i> Reddet</button>` : ''}
+      ${type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="İsteği İptal Et" onclick="event.stopPropagation()"><i class="fas fa-ban"></i> İptal</button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Arkadaşlıktan Çıkar" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button><button class="btn btn-ghost btn-sm friend-block" data-username="${escHtml(other_username)}" title="Engelle" onclick="event.stopPropagation()" style="color:var(--accent-red2)"><i class="fas fa-ban"></i></button>` : ''}
     </div>
   </div>`;
 }

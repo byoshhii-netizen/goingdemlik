@@ -452,26 +452,6 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_icon TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_color TEXT DEFAULT '#6b7280';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_display TEXT DEFAULT 'level';
-    CREATE TABLE IF NOT EXISTS songs (
-      id BIGSERIAL PRIMARY KEY,
-      uploader_id BIGINT NOT NULL,
-      song_type TEXT NOT NULL DEFAULT 'own',
-      title TEXT NOT NULL,
-      artist_name TEXT NOT NULL,
-      distributor TEXT DEFAULT '',
-      genre TEXT DEFAULT '',
-      lyrics TEXT DEFAULT '',
-      cover_url TEXT DEFAULT '',
-      audio_url TEXT NOT NULL,
-      share_reason TEXT DEFAULT '',
-      play_count INTEGER DEFAULT 0,
-      slug TEXT UNIQUE,
-      status TEXT DEFAULT 'active',
-      published_at TIMESTAMP DEFAULT NOW(),
-      created_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;
@@ -482,6 +462,8 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
@@ -511,6 +493,25 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS songs (
+      id BIGSERIAL PRIMARY KEY,
+      uploader_id BIGINT NOT NULL,
+      song_type TEXT NOT NULL DEFAULT 'own',
+      title TEXT NOT NULL,
+      artist_name TEXT NOT NULL,
+      distributor TEXT DEFAULT '',
+      genre TEXT DEFAULT '',
+      lyrics TEXT DEFAULT '',
+      cover_url TEXT DEFAULT '',
+      audio_url TEXT NOT NULL,
+      share_reason TEXT DEFAULT '',
+      play_count INTEGER DEFAULT 0,
+      slug TEXT UNIQUE,
+      status TEXT DEFAULT 'active',
+      published_at TIMESTAMP DEFAULT NOW(),
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
+    );
   `);
 
   // Seed default levels
