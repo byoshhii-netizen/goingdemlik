@@ -1684,7 +1684,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
   /* DM layout düzeltme */
   .dm-layout { height: calc(100vh - 60px - 60px); }
-  .dm-sidebar { max-height: 200px; }
+  .dm-sidebar { max-height: 350px; }
   .dm-chat { height: 100%; min-height: 260px; }
 
   /* Modal tam genişlik + bottom sheet */
@@ -1777,4 +1777,32 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .song-detail-actions-row { justify-content:center; }
   .sdp-vol-wrap { display:none; }
   .song-lyrics-section { padding:20px 16px; }
+}
+
+/* ===== ARKADAŞLAR GRID ===== */
+.friends-page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 768px) {
+  .friends-page-grid { grid-template-columns: 1fr; gap: 16px; }
+  /* Arkadaş kartı adı taşmasın */
+  .friend-card .card-body, .friend-card { overflow: hidden; }
+  .friend-card [style*="flex:1"] { min-width: 0; overflow: hidden; }
+  .friend-card a, .friend-card div { word-break: break-word; overflow-wrap: break-word; }
+}
+
+/* ===== BİLDİRİMLER SAYFASI ===== */
+.notif-page-item { transition: background 0.15s; }
+.notif-page-item:hover { background: var(--bg-hover) !important; }
+.notif-page-unread { background: rgba(189,162,117,0.06) !important; border-left: 3px solid var(--accent-red) !important; }
+
+/* ===== MOBİL PAGE-HEADER TAŞMA DÜZELTMESİ ===== */
+@media (max-width: 768px) {
+  /* Inline style'ları override et */
+  .page-header { flex-direction: column !important; align-items: flex-start !important; justify-content: flex-start !important; flex-wrap: wrap !important; gap: 10px !important; }
+  .page-header > * { max-width: 100% !important; flex-shrink: 1 !important; }
+  .page-header > div[style] { width: 100% !important; }
+  /* Butonlar sola yaslanmış grupla */
+  .page-header > div > .btn,
+  .page-header > div[style*="display:flex"] { flex-wrap: wrap !important; gap: 8px !important; }
+  /* Bildirim dropdown mobilde gizle */
+  #notif-btn-wrap .dropdown-menu { display: none !important; }
 }

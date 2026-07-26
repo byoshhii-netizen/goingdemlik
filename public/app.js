@@ -186,6 +186,7 @@ function renderRoute(fullPath) {
   if (path === '/mesajlar') return renderMessages(app, null);
   if (path.startsWith('/mesajlar/')) return renderMessages(app, segs[1]);
   if (path === '/arkadaslar') return renderFriends(app);
+  if (path === '/bildirimler') return renderNotifications(app);
   if (path === '/muzikler') return renderMusicList(app);
   if (path.startsWith('/muzik/')) return renderMusicDetail(app, segs[1]);
   if (path === '/artist-basvuru') return renderArtistApply(app);
@@ -531,6 +532,7 @@ async function openNotifDropdown() {
 
 $('#nav-notif-btn')?.addEventListener('click', e => {
   e.stopPropagation();
+  if (window.innerWidth <= 768) { navigate('/bildirimler'); return; }
   openNotifDropdown();
 });
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => { if (currentUser) showNewForumModal(); else navigate('/giris'); }, 100); });
@@ -1210,7 +1212,7 @@ function renderBookGrid(books) {
 
 function bookCardHTML(b) {
   const previewText = b.preface ? b.preface.substring(0, 80) : '';
-  const authorDisplay = b.author || b.username || 'Bilinmiyor';
+  const authorDisplay = b.author || b.username || '';
   return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
@@ -1218,7 +1220,7 @@ function bookCardHTML(b) {
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
-      <div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${escHtml(authorDisplay)}</div>
+      ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${escHtml(authorDisplay)}</div>` : ''}
       <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
       ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}
     </div>
@@ -1359,7 +1361,7 @@ async function renderBookDetail(app, slug) {
       </div>
       <div class="book-detail-info">
         <div class="book-detail-title">${escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
-        <div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> <span style="font-weight:600">${escHtml(book.author || book.username || 'Bilinmiyor')}</span></div>
+        ${(book.author || book.username) ? `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> <span style="font-weight:600">${escHtml(book.author || book.username)}</span></div>` : ''}
         <div class="book-detail-meta">
           <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
           <span><i class="fas fa-file-alt"></i> ${book.page_count || 0} sayfa</span>
@@ -1375,9 +1377,6 @@ async function renderBookDetail(app, slug) {
           <button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>
           <button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>
           <button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>
-        </div>` : ''}
-        ${(book.allow_download !== 0 && book.allow_download !== false) ? `<div style="margin-top:12px">
-          <button class="btn btn-outline btn-sm" id="download-pdf-btn"><i class="fas fa-file-pdf" style="color:#ef4444"></i> PDF İndir</button>
         </div>` : ''}
       </div>
     </div>
@@ -1564,7 +1563,6 @@ async function renderBookDetail(app, slug) {
 function pageItemHTML(p, bookSlug) {
   const canEdit = currentUser && !!bookSlug;
   return `<div class="page-item">
-    <span class="page-num">${p.page_num}</span>
     <a href="/kitap/${escHtml(bookSlug)}/sayfa/${escHtml(p.slug)}" data-link class="page-title">${escHtml(p.title)}</a>
   </div>`;
 }
@@ -3789,6 +3787,37 @@ function showDmOptionsMenu(username, convId) {
 }
 
 // ===== ARKADAŞLAR SAYFASI =====
+async function renderNotifications(app) {
+  if (!currentUser) { navigate('/giris'); return; }
+  document.title = 'Bildirimler - ' + siteName;
+  app.innerHTML = `<div class="container page">
+    <div class="page-header"><div class="page-title"><i class="fas fa-bell" style="color:var(--accent-red)"></i> Bildirimler</div></div>
+    <div id="notif-page-list"><div class="loading-center"><div class="spinner"></div></div></div>
+  </div>`;
+  try {
+    const notifs = await api('/notifications');
+    await api('/notifications/read-all', { method: 'POST' });
+    const badge = $('#nav-notif-badge'); if (badge) badge.style.display = 'none';
+    const list = $('#notif-page-list');
+    if (!notifs || !notifs.length) {
+      list.innerHTML = '<div class="empty-state"><i class="fas fa-bell-slash"></i><p>Bildirim yok</p></div>';
+      return;
+    }
+    list.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">${notifs.map(n => `
+      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}" onclick="${n.link ? `navigate('${escHtml(n.link)}')` : ''}" style="display:flex;align-items:flex-start;gap:14px;cursor:${n.link ? 'pointer' : 'default'}">
+        ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0" />` : `<div style="width:40px;height:40px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-bell" style="color:var(--accent-red2)"></i></div>`}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;line-height:1.5;color:var(--text-primary)">${escHtml(n.body)}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${timeAgo(n.created_at)}</div>
+        </div>
+        ${!n.is_read ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-red);flex-shrink:0;margin-top:6px"></span>` : ''}
+      </div>`).join('')}</div>`;
+  } catch(e) {
+    const list = $('#notif-page-list');
+    if (list) list.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${e.message}</p></div>`;
+  }
+}
+
 async function renderFriends(app) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Arkadaşlar - ' + siteName;
@@ -3803,7 +3832,7 @@ async function renderFriends(app) {
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div class="friends-page-grid">
       <div>
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Arkadaşlar (${accepted.length})</button>
