@@ -75,8 +75,7 @@ app.get('/ads.txt', (req, res) => {
 
 const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
 if (!process.env.SITE_URL) {
-  console.warn('[SEO] ⚠️  SITE_URL env ayarlanmamış! Sitemap/canonical URL yanlış domain gösterebilir.');
-  console.warn('[SEO]    Railway panelinde: SITE_URL=https://cigcig.xyz');
+  console.warn('[SEO] ⚠️  SITE_URL env ayarlanmamış! Railway panelinde: SITE_URL=https://cigcig.xyz');
 }
 
 // ===== RATE LIMITERS =====
@@ -328,7 +327,6 @@ app.get('/robots.txt', (req, res) => {
     'Disallow: /ayarlar',
     'Disallow: /api/',
     '',
-    '# Sitemap',
     `Sitemap: ${SITE_URL}/sitemap.xml`,
   ].join('\n'));
 });
@@ -2171,7 +2169,7 @@ app.get('/api/music-rules', async (req, res) => {
 });
 
 // SEO route'ları müzik için
-app.get('/muzikler', (req, res) => res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe şarkılar, artist müzikleri ve keşfet.', `${SITE_URL}/muzikler`, '')));
+app.get('/muzikler', (req, res) => res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe şarkılar, artist müzikleri.', `${SITE_URL}/muzikler`, '')));
 app.get('/muzik/:slug', async (req, res) => {
   const { rows } = await query('SELECT * FROM songs WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -2186,10 +2184,9 @@ app.get('/muzik/:slug', async (req, res) => {
     'datePublished': s.published_at||undefined,
     'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL}
   });
-  const musicDesc = `${s.artist_name} - ${s.title} | CigCig müzik platformunda dinle ve keşfet.`;
   res.send(injectMeta(
     `${s.title} – ${s.artist_name} | CigCig Müzik`,
-    musicDesc,
+    `${s.artist_name} - ${s.title} | CigCig müzik platformunda dinle ve keşfet.`,
     `${SITE_URL}/muzik/${s.slug}`,
     s.cover_url,
     `<meta name="keywords" content="${musicKw}" />\n    <script type="application/ld+json">${musicLd}</script>`
@@ -2477,11 +2474,11 @@ function injectMeta(title, desc, url, imageUrl, extraMeta) {
     <meta name="twitter:description" content="${escapeHtml(desc)}" />
     <meta name="twitter:image" content="${escapeHtml(img)}" />
     ${extra}`;
-  // SEO_START/SEO_END arasını değiştir — başlıktan bağımsız çalışır
+  // SEO_START/SEO_END arasını değiştir — index.html başlığından bağımsız
   const injected = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,
     `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
   if (injected !== html) return injected;
-  // Yedek: regex ile title tag'ını değiştir
+  // Yedek: regex ile herhangi bir title tag'ını değiştir
   return html.replace(/<title>[^<]*<\/title>/, meta);
 }
 
@@ -2490,10 +2487,10 @@ app.get('/kayit', (req, res) => res.send(injectMeta('Kayıt Ol – CigCig', 'Cig
 app.get('/forum', (req, res) => {
   const tag = req.query.tag || '';
   res.send(injectMeta(tag ? `${tag} Konuları – CigCig Forum` : 'Konular – CigCig Forum',
-    tag ? `CigCig Forum'da ${tag} etiketli konular.` : 'CigCig Forum – konular, tartışmalar, haberler ve daha fazlası.',
+    tag ? `CigCig Forum'da ${tag} etiketli konular.` : 'CigCig Forum – konular, tartışmalar ve haberler.',
     `${SITE_URL}/forum${tag ? '?tag='+encodeURIComponent(tag) : ''}`, ''));
 });
-app.get('/kitaplar', (req, res) => res.send(injectMeta('E-Kitaplar – CigCig', 'CigCig\'deki e-kitapları ücretsiz oku. Kitap ismi yazarak ara.', `${SITE_URL}/kitaplar`, '')));
+app.get('/kitaplar', (req, res) => res.send(injectMeta('E-Kitaplar – CigCig', 'CigCig e-kitaplarını ücretsiz oku. Kitap adını aratarak bul.', `${SITE_URL}/kitaplar`, '')));
 app.get('/gruplar', (req, res) => res.send(injectMeta('Gruplar – CigCig', 'CigCig topluluğundaki gruplara katıl.', `${SITE_URL}/gruplar`, '')));
 app.get('/ayarlar', (req, res) => res.send(injectMeta('Ayarlar – CigCig', 'Hesap ayarlarını düzenle.', `${SITE_URL}/ayarlar`, '')));
 app.get('/mesajlar', (req, res) => res.send(injectMeta('Mesajlar – CigCig', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar`, '')));
@@ -2531,8 +2528,8 @@ app.get('/forum/:slug', async (req, res) => {
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}
     <script type="application/ld+json">${forumLd}</script>`;
-  const rep1 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m, `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(rep1 !== html ? rep1 : html.replace(/<title>[^<]*<\/title>/, meta));
+  const r1 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r1!==html?r1:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 app.get('/kitap/:slug', async (req, res) => {
@@ -2566,8 +2563,8 @@ app.get('/kitap/:slug', async (req, res) => {
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}
     <script type="application/ld+json">${bookLd}</script>`;
-  const rep2 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m, `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(rep2 !== html ? rep2 : html.replace(/<title>[^<]*<\/title>/, meta));
+  const r2 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 app.get('/grup/:slug', async (req, res) => {
@@ -2587,8 +2584,8 @@ app.get('/grup/:slug', async (req, res) => {
     <meta property="og:url" content="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
-  const rep3 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m, `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(rep3 !== html ? rep3 : html.replace(/<title>[^<]*<\/title>/, meta));
+  const r3 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r3!==html?r3:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 app.get('/profil/:username', async (req, res) => {
@@ -2608,8 +2605,8 @@ app.get('/profil/:username', async (req, res) => {
     <meta property="og:url" content="${SITE_URL}/profil/${escapeHtml(user.username)}" />
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
-  const rep4 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m, `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(rep4 !== html ? rep4 : html.replace(/<title>[^<]*<\/title>/, meta));
+  const r4 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r4!==html?r4:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 

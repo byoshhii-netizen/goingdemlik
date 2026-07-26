@@ -73,7 +73,10 @@ app.get('/ads.txt', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'ads.txt'));
 });
 
-const SITE_URL = process.env.SITE_URL || 'https://demlikforum.up.railway.app';
+const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
+if (!process.env.SITE_URL) {
+  console.warn('[SEO] ⚠️  SITE_URL env ayarlanmamış! Railway panelinde: SITE_URL=https://cigcig.xyz');
+}
 
 // ===== RATE LIMITERS =====
 
@@ -317,7 +320,15 @@ async function handleUpload(file) {
 // ===== ROBOTS & SITEMAP =====
 app.get('/robots.txt', (req, res) => {
   res.type('text/plain');
-  res.send(`User-agent: *\nAllow: /\nDisallow: /panel-giris\nDisallow: /ayarlar\nSitemap: ${SITE_URL}/sitemap.xml`);
+  res.send([
+    'User-agent: *',
+    'Allow: /',
+    'Disallow: /panel-giris',
+    'Disallow: /ayarlar',
+    'Disallow: /api/',
+    '',
+    `Sitemap: ${SITE_URL}/sitemap.xml`,
+  ].join('\n'));
 });
 
 app.get('/sitemap.xml', async (req, res) => {
@@ -2158,16 +2169,32 @@ app.get('/api/music-rules', async (req, res) => {
 });
 
 // SEO route'ları müzik için
-app.get('/muzikler', (req, res) => res.send(injectMeta('Müzikler – TeaTube', 'TeaTube müzik platformu', `${SITE_URL}/muzikler`, '')));
+app.get('/muzikler', (req, res) => res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe şarkılar, artist müzikleri.', `${SITE_URL}/muzikler`, '')));
 app.get('/muzik/:slug', async (req, res) => {
   const { rows } = await query('SELECT * FROM songs WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const s = rows[0];
-  res.send(injectMeta(`${s.title} – ${s.artist_name} | TeaTube`, `${s.artist_name} - ${s.title}`, `${SITE_URL}/muzik/${s.slug}`, s.cover_url));
+  const musicKw = `${s.title}, ${s.artist_name}, müzik, cigcig müzik, cig forum müzik, teatube müzik, türkçe müzik`;
+  const musicLd = JSON.stringify({
+    '@context':'https://schema.org','@type':'MusicRecording',
+    'name': s.title,
+    'byArtist':{'@type':'MusicGroup','name':s.artist_name},
+    'url': `${SITE_URL}/muzik/${s.slug}`,
+    'image': s.cover_url||undefined,
+    'datePublished': s.published_at||undefined,
+    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL}
+  });
+  res.send(injectMeta(
+    `${s.title} – ${s.artist_name} | CigCig Müzik`,
+    `${s.artist_name} - ${s.title} | CigCig müzik platformunda dinle ve keşfet.`,
+    `${SITE_URL}/muzik/${s.slug}`,
+    s.cover_url,
+    `<meta name="keywords" content="${musicKw}" />\n    <script type="application/ld+json">${musicLd}</script>`
+  ));
 });
-app.get('/artist-basvuru', (req, res) => res.send(injectMeta('Artist Başvurusu – TeaTube', 'TeaTube artist rozetine başvur', `${SITE_URL}/artist-basvuru`, '')));
-app.get('/artist-panel', (req, res) => res.send(injectMeta('Artist Panel – TeaTube', 'Şarkı yükle ve yönet', `${SITE_URL}/artist-panel`, '')));
-app.get('/sarki-yukle', (req, res) => res.send(injectMeta('Şarkı Paylaş – TeaTube', 'Başkasının şarkısını topluluğa paylaş', `${SITE_URL}/sarki-yukle`, '')));
+app.get('/artist-basvuru', (req, res) => res.send(injectMeta('Artist Başvurusu – CigCig Müzik', 'CigCig Müzik platformu artist rozetine başvur', `${SITE_URL}/artist-basvuru`, '')));
+app.get('/artist-panel', (req, res) => res.send(injectMeta('Artist Panel – CigCig Müzik', 'CigCig Müzik artist panelinde şarkı yükle ve yönet', `${SITE_URL}/artist-panel`, '')));
+app.get('/sarki-yukle', (req, res) => res.send(injectMeta('Şarkı Paylaş – CigCig Müzik', 'CigCig topluluğuyla müzik paylaş', `${SITE_URL}/sarki-yukle`, '')));
 
 // ===== ADMIN YETKİ SİSTEMİ =====
 app.get('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => {
@@ -2430,37 +2457,45 @@ function adminIPCheck(req, res, next) {
 app.get('/panel-giris', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 app.get('/panel', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
 
-function injectMeta(title, desc, url, imageUrl) {
+function injectMeta(title, desc, url, imageUrl, extraMeta) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const img = imageUrl || `${SITE_URL}/teatube.png`;
+  const img = imageUrl || `${SITE_URL}/cigcig.png`;
+  const extra = extraMeta || '';
   const meta = `<title>${escapeHtml(title)}</title>
     <meta name="description" content="${escapeHtml(desc)}" />
     <link rel="canonical" href="${escapeHtml(url)}" />
     <meta property="og:title" content="${escapeHtml(title)}" />
     <meta property="og:description" content="${escapeHtml(desc)}" />
     <meta property="og:url" content="${escapeHtml(url)}" />
-    <meta property="og:site_name" content="TeaTube" />
+    <meta property="og:site_name" content="CigCig" />
     <meta property="og:image" content="${escapeHtml(img)}" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtml(title)}" />
     <meta name="twitter:description" content="${escapeHtml(desc)}" />
-    <meta name="twitter:image" content="${escapeHtml(img)}" />`;
-  return html.replace('<title>TeaTube</title>', meta);
+    <meta name="twitter:image" content="${escapeHtml(img)}" />
+    ${extra}`;
+  // SEO_START/SEO_END arasını değiştir — index.html başlığından bağımsız
+  const injected = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,
+    `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  if (injected !== html) return injected;
+  // Yedek: regex ile herhangi bir title tag'ını değiştir
+  return html.replace(/<title>[^<]*<\/title>/, meta);
 }
 
-app.get('/giris', (req, res) => res.send(injectMeta('Giriş – TeaTube', 'TeaTube hesabına giriş yap.', `${SITE_URL}/giris`, '')));
-app.get('/kayit', (req, res) => res.send(injectMeta('Kayıt Ol – TeaTube', "TeaTube'a ücretsiz kaydol.", `${SITE_URL}/kayit`, '')));
+app.get('/giris', (req, res) => res.send(injectMeta('Giriş – CigCig', 'CigCig hesabına giriş yap.', `${SITE_URL}/giris`, '')));
+app.get('/kayit', (req, res) => res.send(injectMeta('Kayıt Ol – CigCig', 'CigCig\'e ücretsiz kaydol.', `${SITE_URL}/kayit`, '')));
 app.get('/forum', (req, res) => {
   const tag = req.query.tag || '';
-  res.send(injectMeta(tag ? `${tag} Konuları – TeaTube` : 'Konular – TeaTube',
-    tag ? `TeaTube'de ${tag} etiketli konular.` : 'TeaTube topluluğunun konularını keşfet.',
+  res.send(injectMeta(tag ? `${tag} Konuları – CigCig Forum` : 'Konular – CigCig Forum',
+    tag ? `CigCig Forum'da ${tag} etiketli konular.` : 'CigCig Forum – konular, tartışmalar ve haberler.',
     `${SITE_URL}/forum${tag ? '?tag='+encodeURIComponent(tag) : ''}`, ''));
 });
-app.get('/kitaplar', (req, res) => res.send(injectMeta('E-Kitaplar – TeaTube', "TeaTube yazarlarının e-kitaplarını oku.", `${SITE_URL}/kitaplar`, '')));
-app.get('/gruplar', (req, res) => res.send(injectMeta('Gruplar – TeaTube', "TeaTube'daki gruplara katıl.", `${SITE_URL}/gruplar`, '')));
-app.get('/ayarlar', (req, res) => res.send(injectMeta('Ayarlar – TeaTube', 'Hesap ayarlarını düzenle.', `${SITE_URL}/ayarlar`, '')));
-app.get('/mesajlar', (req, res) => res.send(injectMeta('Mesajlar – TeaTube', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar`, '')));
-app.get('/mesajlar/:username', (req, res) => res.send(injectMeta('Mesajlar – TeaTube', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar/${req.params.username}`, '')));
-app.get('/arkadaslar', (req, res) => res.send(injectMeta('Arkadaşlar – TeaTube', 'Arkadaş listesi.', `${SITE_URL}/arkadaslar`, '')));
+app.get('/kitaplar', (req, res) => res.send(injectMeta('E-Kitaplar – CigCig', 'CigCig e-kitaplarını ücretsiz oku. Kitap adını aratarak bul.', `${SITE_URL}/kitaplar`, '')));
+app.get('/gruplar', (req, res) => res.send(injectMeta('Gruplar – CigCig', 'CigCig topluluğundaki gruplara katıl.', `${SITE_URL}/gruplar`, '')));
+app.get('/ayarlar', (req, res) => res.send(injectMeta('Ayarlar – CigCig', 'Hesap ayarlarını düzenle.', `${SITE_URL}/ayarlar`, '')));
+app.get('/mesajlar', (req, res) => res.send(injectMeta('Mesajlar – CigCig', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar`, '')));
+app.get('/mesajlar/:username', (req, res) => res.send(injectMeta('Mesajlar – CigCig', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar/${req.params.username}`, '')));
+app.get('/arkadaslar', (req, res) => res.send(injectMeta('Arkadaşlar – CigCig', 'Arkadaş listesi.', `${SITE_URL}/arkadaslar`, '')));
 
 app.get('/forum/:slug', async (req, res) => {
   const { rows } = await query('SELECT * FROM forums WHERE slug=$1', [req.params.slug]);
@@ -2471,17 +2506,30 @@ app.get('/forum/:slug', async (req, res) => {
   const imgTag = forum.banner_image
     ? `<meta property="og:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:card" content="summary_large_image" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const meta = `<title>${escapeHtml(forum.title)} – TeaTube</title>
+  const forumKw = `${escapeHtml(forum.title)}, cig forum, cigcig, cigcig forum, cig, forum konusu`;
+  const forumLd = JSON.stringify({
+    '@context':'https://schema.org','@type':'DiscussionForumPosting',
+    'headline': forum.title,
+    'url': `${SITE_URL}/forum/${forum.slug}`,
+    'datePublished': forum.created_at,
+    'dateModified': forum.updated_at || forum.created_at,
+    'description': (forum.content||'').substring(0,200),
+    'author':{'@type':'Person','name':forum.username||'Anonim'},
+    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL,'logo':{'@type':'ImageObject','url':`${SITE_URL}/cigcig.png`}}
+  });
+  const meta = `<title>${escapeHtml(forum.title)} – CigCig Forum</title>
     <meta name="description" content="${desc}" />
+    <meta name="keywords" content="${forumKw}" />
     <link rel="canonical" href="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
-    <meta property="og:title" content="${escapeHtml(forum.title)} – TeaTube" />
+    <meta property="og:title" content="${escapeHtml(forum.title)} – CigCig Forum" />
     <meta property="og:description" content="${desc}" />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
-    <meta property="og:site_name" content="TeaTube" />
+    <meta property="og:site_name" content="CigCig" />
     ${imgTag}
-    <script type="application/ld+json">${JSON.stringify({ '@context':'https://schema.org','@type':'DiscussionForumPosting','headline':forum.title,'url':`${SITE_URL}/forum/${forum.slug}`,'datePublished':forum.created_at,'author':{'@type':'Person','name':forum.username||'Anonim'},'publisher':{'@type':'Organization','name':'TeaTube','url':SITE_URL} })}</script>`;
-  res.send(html.replace('<title>TeaTube</title>', meta));
+    <script type="application/ld+json">${forumLd}</script>`;
+  const r1 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r1!==html?r1:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 app.get('/kitap/:slug', async (req, res) => {
@@ -2489,20 +2537,34 @@ app.get('/kitap/:slug', async (req, res) => {
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const book = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const desc = escapeHtml((book.preface || book.title + ' – TeaTube').substring(0, 160));
+  const desc = escapeHtml((book.preface || book.title + ' – CigCig Kitap').substring(0, 160));
   const imgTag = book.cover_image
     ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const meta = `<title>${escapeHtml(book.title)} – TeaTube</title>
+  const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, cigcig kitap, cig forum kitap, ücretsiz kitap oku`;
+  const bookLd = JSON.stringify({
+    '@context':'https://schema.org','@type':'Book',
+    'name': book.title,
+    'url': `${SITE_URL}/kitap/${book.slug}`,
+    'description': (book.preface||book.title).substring(0,200),
+    'author': book.author?{'@type':'Person','name':book.author}:undefined,
+    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL},
+    'image': book.cover_image||undefined,
+    'inLanguage':'tr'
+  });
+  const meta = `<title>${escapeHtml(book.title)} – CigCig Kitap</title>
     <meta name="description" content="${desc}" />
+    <meta name="keywords" content="${bookKw}" />
     <link rel="canonical" href="${SITE_URL}/kitap/${escapeHtml(book.slug)}" />
-    <meta property="og:title" content="${escapeHtml(book.title)} – TeaTube" />
+    <meta property="og:title" content="${escapeHtml(book.title)} – CigCig Kitap" />
     <meta property="og:description" content="${desc}" />
     <meta property="og:type" content="book" />
     <meta property="og:url" content="${SITE_URL}/kitap/${escapeHtml(book.slug)}" />
-    <meta property="og:site_name" content="TeaTube" />
-    ${imgTag}`;
-  res.send(html.replace('<title>TeaTube</title>', meta));
+    <meta property="og:site_name" content="CigCig" />
+    ${imgTag}
+    <script type="application/ld+json">${bookLd}</script>`;
+  const r2 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 app.get('/grup/:slug', async (req, res) => {
@@ -2510,19 +2572,20 @@ app.get('/grup/:slug', async (req, res) => {
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const group = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const desc = escapeHtml((group.description || group.name + ' – TeaTube topluluğu grubu.').substring(0, 160));
+  const desc = escapeHtml((group.description || group.name + ' – CigCig topluluğu grubu.').substring(0, 160));
   const imgTag = group.cover_image
     ? `<meta property="og:image" content="${escapeHtml(group.cover_image)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const meta = `<title>${escapeHtml(group.name)} – TeaTube</title>
+  const meta = `<title>${escapeHtml(group.name)} – CigCig Grup</title>
     <meta name="description" content="${desc}" />
     <link rel="canonical" href="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
-    <meta property="og:title" content="${escapeHtml(group.name)} – TeaTube" />
+    <meta property="og:title" content="${escapeHtml(group.name)} – CigCig Grup" />
     <meta property="og:description" content="${desc}" />
     <meta property="og:url" content="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
-    <meta property="og:site_name" content="TeaTube" />
+    <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
-  res.send(html.replace('<title>TeaTube</title>', meta));
+  const r3 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r3!==html?r3:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 app.get('/profil/:username', async (req, res) => {
@@ -2530,19 +2593,20 @@ app.get('/profil/:username', async (req, res) => {
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const user = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const desc = escapeHtml((user.bio || `${user.username} adlı kullanıcının TeaTube profili.`).substring(0, 160));
+  const desc = escapeHtml((user.bio || `${user.username} adlı kullanıcının CigCig profili.`).substring(0, 160));
   const imgTag = user.avatar
     ? `<meta property="og:image" content="${escapeHtml(user.avatar)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const meta = `<title>${escapeHtml(user.username)} – TeaTube</title>
+  const meta = `<title>${escapeHtml(user.username)} – CigCig</title>
     <meta name="description" content="${desc}" />
     <link rel="canonical" href="${SITE_URL}/profil/${escapeHtml(user.username)}" />
-    <meta property="og:title" content="${escapeHtml(user.username)} – TeaTube" />
+    <meta property="og:title" content="${escapeHtml(user.username)} – CigCig" />
     <meta property="og:description" content="${desc}" />
     <meta property="og:url" content="${SITE_URL}/profil/${escapeHtml(user.username)}" />
-    <meta property="og:site_name" content="TeaTube" />
+    <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
-  res.send(html.replace('<title>TeaTube</title>', meta));
+  const r4 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+  res.send(r4!==html?r4:html.replace(/<title>[^<]*<\/title>/,meta));
 });
 
 
@@ -3006,7 +3070,7 @@ app.get('*', (req, res) => {
 
 // ===== BAŞLAT =====
 initDb().then(() => {
-  app.listen(PORT, () => console.log(`TeaTube calisiyor: http://localhost:${PORT}`));
+  app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
 }).catch(err => {
   console.error('DB başlatma hatası:', err);
   process.exit(1);

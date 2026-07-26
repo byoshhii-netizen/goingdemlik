@@ -1355,13 +1355,15 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 .dm-msg-wrap:not(.dm-own) .dm-msg-bubble {
   background: var(--bg-card2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-hover);
   border-radius: 4px 14px 14px 14px;
   color: var(--text-primary);
 }
 .dm-msg-wrap.dm-own .dm-msg-bubble {
-  background: var(--dm-own-bg, rgba(189,162,117,0.15));
-  border: 1px solid var(--dm-own-border, rgba(189,162,117,0.3));
+  /* Baz olarak her zaman card2 (#242424) kullan, üstüne accent overlay */
+  background: var(--bg-card2);
+  background-image: linear-gradient(var(--dm-own-bg, rgba(189,162,117,0.45)), var(--dm-own-bg, rgba(189,162,117,0.45)));
+  border: 1px solid var(--dm-own-border, rgba(189,162,117,0.5));
   border-radius: 14px 4px 14px 14px;
   color: var(--text-primary);
 }
@@ -1373,7 +1375,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 .dm-msg-meta { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .dm-reply-preview {
-  background: var(--dm-reply-bg, rgba(189,162,117,0.08));
+  background: var(--bg-card); background-image: linear-gradient(var(--dm-reply-bg, rgba(189,162,117,0.15)), var(--dm-reply-bg, rgba(189,162,117,0.15)));
   border-left: 3px solid var(--accent-line, var(--accent-red));
   border-radius: 4px; padding: 4px 8px; margin-bottom: 4px;
   max-width: 100%;
