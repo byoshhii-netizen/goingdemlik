@@ -2597,6 +2597,21 @@ async function renderProfile(app, username) {
   let data;
   try { data = await api('/profile/' + username); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-user-slash"></i><p>Kullanıcı bulunamadı.</p></div></div>'; return; }
 
+  // Engellenen profil: içerik gizli
+  if (data.blocked_profile) {
+    app.innerHTML = `<div class="container page">
+      <div class="profile-header">
+        <div class="profile-avatar-wrap"><div class="profile-avatar-placeholder"><i class="fas fa-user-slash"></i></div></div>
+        <div class="profile-info">
+          <div class="profile-username">${escHtml(data.user.username)}</div>
+          <div style="margin-top:12px;color:var(--text-muted);font-size:14px"><i class="fas fa-ban" style="color:var(--accent-red2)"></i> Bu kullanıcının profili görüntülenemiyor.</div>
+          <div style="margin-top:8px;font-size:13px;color:var(--text-muted)">Ad: <strong>Bilinmiyor</strong> · Konum: <strong>Bilinmiyor</strong> · Forum: <strong>Bilinmiyor</strong></div>
+        </div>
+      </div>
+    </div>`;
+    return;
+  }
+
   const { user, forums, books, groups, videos, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
@@ -2696,6 +2711,11 @@ async function renderProfile(app, username) {
           <div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/panel-giris" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
+        ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
+          <button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>
+          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
+          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
+        </div>` : ''}
         <div id="spotify-widget-${escHtml(user.username)}"></div>
       </div>
     </div>
@@ -2742,6 +2762,96 @@ async function renderProfile(app, username) {
 
   // Spotify widget yükle
   renderSpotifyWidget(username, `spotify-widget-${username}`);
+
+  // Profil 3-nokta menüsü
+  if (!isOwn && currentUser) {
+    let friendStatus = null;
+    try { friendStatus = await api('/friend-status/' + encodeURIComponent(username)); } catch {}
+
+    const moreBtn = document.getElementById('profile-more-btn');
+    const moreMenu = document.getElementById('profile-more-menu');
+    if (moreBtn && moreMenu) {
+      function buildMenuItems(fs) {
+        const items = [];
+        const f = fs?.friendship;
+        const blockedByMe = fs?.blocked_by_me;
+        const blockedByThem = fs?.blocked_by_them;
+        if (!blockedByMe) {
+          if (!f) {
+            items.push({ icon: 'fa-user-plus', label: 'Arkadaşlık İsteği Gönder', action: 'friend-req' });
+          } else if (f.status === 'pending' && f.requester_id == currentUser.id) {
+            items.push({ icon: 'fa-user-clock', label: 'İsteği İptal Et', action: 'friend-cancel', id: f.id });
+          } else if (f.status === 'pending' && f.addressee_id == currentUser.id) {
+            items.push({ icon: 'fa-check', label: 'İsteği Kabul Et', action: 'friend-accept', id: f.id });
+            items.push({ icon: 'fa-times', label: 'İsteği Reddet', action: 'friend-reject', id: f.id });
+          } else if (f.status === 'accepted') {
+            items.push({ icon: 'fa-user-minus', label: 'Arkadaşlıktan Çıkar', action: 'friend-remove', id: f.id });
+          }
+        }
+        if (!blockedByMe) {
+          items.push({ icon: 'fa-ban', label: 'Engelle', action: 'block-user', danger: true });
+        } else {
+          items.push({ icon: 'fa-ban', label: 'Engeli Kaldır', action: 'unblock-user' });
+        }
+        return items;
+      }
+
+      function renderMenu(fs) {
+        const items = buildMenuItems(fs);
+        moreMenu.innerHTML = items.map(item =>
+          `<div class="profile-menu-item${item.danger ? ' danger' : ''}" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:10px;padding:11px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'}">
+            <i class="fas ${item.icon}" style="width:16px;text-align:center"></i> ${item.label}
+          </div>`
+        ).join('');
+        moreMenu.querySelectorAll('.profile-menu-item').forEach(el => {
+          el.addEventListener('mouseover', () => el.style.background = 'var(--bg-hover)');
+          el.addEventListener('mouseout', () => el.style.background = '');
+          el.addEventListener('click', async () => {
+            moreMenu.style.display = 'none';
+            const action = el.dataset.action;
+            const fid = el.dataset.id;
+            try {
+              if (action === 'friend-req') {
+                await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
+                toast('Arkadaşlık isteği gönderildi');
+              } else if (action === 'friend-cancel') {
+                if (!confirm('Arkadaşlık isteğini iptal et?')) return;
+                await api('/friends/' + fid, { method: 'DELETE' });
+                toast('İstek iptal edildi');
+              } else if (action === 'friend-accept') {
+                await api('/friends/respond/' + fid, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
+                toast('Arkadaşlık isteği kabul edildi');
+              } else if (action === 'friend-reject') {
+                await api('/friends/respond/' + fid, { method: 'POST', body: JSON.stringify({ action: 'reject' }) });
+                toast('Arkadaşlık isteği reddedildi');
+              } else if (action === 'friend-remove') {
+                if (!confirm('Arkadaşlıktan çıkart?')) return;
+                await api('/friends/' + fid, { method: 'DELETE' });
+                toast('Arkadaşlıktan çıkarıldı');
+              } else if (action === 'block-user') {
+                if (!confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
+                await api('/block/' + encodeURIComponent(username), { method: 'POST' });
+                toast('Kullanıcı engellendi');
+              } else if (action === 'unblock-user') {
+                await api('/block/' + encodeURIComponent(username), { method: 'DELETE' });
+                toast('Engel kaldırıldı');
+              }
+              try { friendStatus = await api('/friend-status/' + encodeURIComponent(username)); } catch {}
+              renderMenu(friendStatus);
+            } catch(e) { toast(e.message || 'Hata oluştu', 'error'); }
+          });
+        });
+      }
+
+      renderMenu(friendStatus);
+
+      moreBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        moreMenu.style.display = moreMenu.style.display === 'none' ? 'block' : 'none';
+      });
+      document.addEventListener('click', () => { if (moreMenu) moreMenu.style.display = 'none'; }, { once: false });
+    }
+  }
 }
 
 async function renderSettings(app) {
@@ -4135,7 +4245,7 @@ async function renderFriends(app) {
     } catch (e) { res.innerHTML = `<p style="color:var(--accent-red2);font-size:13px">${e.message}</p>`; }
   }
 
-  // Arkadaş aksiyonları
+  // Arkadaş aksiyonları (delegated - stopPropagation yok, buton-önce kontrol)
   app.addEventListener('click', async e => {
     const accept = e.target.closest('.friend-accept');
     const reject = e.target.closest('.friend-reject');
@@ -4143,20 +4253,29 @@ async function renderFriends(app) {
     const unblock = e.target.closest('.friend-unblock');
     const block = e.target.closest('.friend-block');
     const msgBtn = e.target.closest('.friend-msg');
-    if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (remove) {
-      const isOutgoing = remove.title === 'İsteği İptal Et';
-      const msg = isOutgoing ? 'Arkadaşlık isteğini iptal et?' : 'Arkadaşlıktan çıkart?';
-      if (!confirm(msg)) return;
-      try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); }
+    // Aksiyon butonu varsa önce onu işle, kart navigasyonunu engelle
+    if (accept || reject || remove || block || unblock || msgBtn) {
+      if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (err) { toast(err.message,'error'); } }
+      if (reject) { try { await api(`/friends/respond/${reject.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'reject' }) }); renderFriends(app); } catch (err) { toast(err.message,'error'); } }
+      if (remove) {
+        const isOutgoing = remove.title === 'İsteği İptal Et';
+        const msg = isOutgoing ? 'Arkadaşlık isteğini iptal et?' : 'Arkadaşlıktan çıkart?';
+        if (!confirm(msg)) return;
+        try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (err) { toast(err.message,'error'); }
+      }
+      if (block) {
+        if (!confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
+        try { await api(`/block/${encodeURIComponent(block.dataset.username)}`, { method: 'POST' }); renderFriends(app); } catch (err) { toast(err.message,'error'); }
+      }
+      if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (err) { toast(err.message,'error'); } }
+      if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
+      return; // Kart navigasyonunu engelle
     }
-    if (block) {
-      if (!confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
-      try { await api(`/block/${encodeURIComponent(block.dataset.username)}`, { method: 'POST' }); renderFriends(app); } catch (e) { toast(e.message,'error'); }
+    // Kart tıklaması (accepted) → mesajlara git
+    const card = e.target.closest('.friend-card');
+    if (card && card.dataset.type === 'accepted') {
+      navigate('/mesajlar/' + card.dataset.username);
     }
-    if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (e) { toast(e.message,'error'); } }
-    if (msgBtn) { navigate('/mesajlar/' + msgBtn.dataset.username); }
   });
 }
 
@@ -4174,7 +4293,7 @@ function friendItemHTML(f, type, myId) {
       ${type === 'accepted' || type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Sil"><i class="fas fa-user-minus"></i></button>` : ''}
     </div>`;
   }
-  return `<div class="card card-body friend-card" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}" ${type === 'accepted' ? `onclick="navigate('/mesajlar/${escHtml(other_username)}')"` : ''}>
+  return `<div class="card card-body friend-card" data-type="${type}" data-username="${escHtml(other_username)}" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
       <a href="/profil/${escHtml(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
@@ -4182,10 +4301,10 @@ function friendItemHTML(f, type, myId) {
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
     <div style="display:flex;gap:6px">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}" onclick="event.stopPropagation()"><i class="fas fa-envelope"></i></button>` : ''}
-      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}" onclick="event.stopPropagation()"><i class="fas fa-times"></i> Reddet</button>` : ''}
-      ${type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="İsteği İptal Et" onclick="event.stopPropagation()"><i class="fas fa-ban"></i> İptal</button>` : ''}
-      ${type === 'accepted' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Arkadaşlıktan Çıkar" onclick="event.stopPropagation()"><i class="fas fa-user-minus"></i></button><button class="btn btn-ghost btn-sm friend-block" data-username="${escHtml(other_username)}" title="Engelle" onclick="event.stopPropagation()" style="color:var(--accent-red2)"><i class="fas fa-ban"></i></button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}"><i class="fas fa-times"></i> Reddet</button>` : ''}
+      ${type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="İsteği İptal Et"><i class="fas fa-ban"></i> İptal</button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Arkadaşlıktan Çıkar"><i class="fas fa-user-minus"></i></button><button class="btn btn-ghost btn-sm friend-block" data-username="${escHtml(other_username)}" title="Engelle" style="color:var(--accent-red2)"><i class="fas fa-ban"></i></button>` : ''}
     </div>
   </div>`;
 }
@@ -4207,203 +4326,6 @@ function blockItemHTML(b) {
   </div>`;
 }
 
-// ===== FLOATING DM WIDGET =====
-(function() {
-  let fdmOpen = false;
-  let fdmUsername = null;
-  let fdmMinimized = false;
-  let fdmSending = false;
-  let fdmReplyId = null;
-  let fdmPendingImg = null;
-
-  function fdm$$(sel) { return document.querySelectorAll(sel); }
-  function fdm$(sel) { return document.querySelector(sel); }
-
-  function getContainer() { return fdm$('#floating-dm'); }
-
-  function renderToggleBtn() {
-    const container = getContainer();
-    if (!container) return;
-    if (!currentUser) { container.style.display = 'none'; return; }
-    container.style.display = 'flex';
-    if (!fdm$('#fdm-toggle')) {
-      const btn = document.createElement('button');
-      btn.id = 'fdm-toggle';
-      btn.className = 'fdm-toggle-btn';
-      btn.innerHTML = '<i class="fas fa-comments"></i>';
-      btn.title = 'Mesajlar';
-      btn.addEventListener('click', () => {
-        if (fdmOpen) closeFdm();
-        else openFdmList();
-      });
-      document.body.appendChild(btn);
-    }
-  }
-
-  function closeFdm() {
-    fdmOpen = false;
-    fdmUsername = null;
-    const container = getContainer();
-    if (container) container.innerHTML = '';
-  }
-
-  async function openFdmList() {
-    fdmOpen = true;
-    fdmUsername = null;
-    const container = getContainer();
-    if (!container) return;
-    let convs = [];
-    try { convs = await api('/conversations'); } catch {}
-    container.innerHTML = `<div class="fdm-bubble">
-      <div class="fdm-header" id="fdm-header-list">
-        <i class="fas fa-comments" style="color:var(--accent-red);font-size:14px"></i>
-        <span class="fdm-name">Mesajlar</span>
-        <div class="fdm-actions">
-          <button id="fdm-new" title="Yeni mesaj"><i class="fas fa-edit"></i></button>
-          <button id="fdm-close" title="Kapat"><i class="fas fa-times"></i></button>
-        </div>
-      </div>
-      <div class="fdm-messages" id="fdm-list" style="padding:0">
-        ${convs.length === 0
-          ? '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'
-          : convs.map(c => `<div class="fdm-conv-row" data-username="${escHtml(c.other_username)}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);transition:background 0.15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
-            ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="fdm-avatar" />` : `<div class="fdm-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:11px"></i></div>`}
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(c.other_username)}</div>
-              <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml((c.last_message||'').substring(0,30))}</div>
-            </div>
-            ${parseInt(c.unread_count) > 0 ? `<span style="background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px">${c.unread_count}</span>` : ''}
-          </div>`).join('')}
-      </div>
-    </div>`;
-
-    fdm$('#fdm-close')?.addEventListener('click', closeFdm);
-    fdm$('#fdm-new')?.addEventListener('click', () => {
-      const u = prompt('Kullanıcı adı:');
-      if (u) openFdmChat(u.trim());
-    });
-    fdm$$('.fdm-conv-row').forEach(el => {
-      el.addEventListener('click', () => openFdmChat(el.dataset.username));
-    });
-  }
-
-  async function openFdmChat(username) {
-    fdmUsername = username;
-    fdmMinimized = false;
-    const container = getContainer();
-    if (!container) return;
-    container.innerHTML = `<div class="fdm-bubble" id="fdm-bubble">
-      <div class="fdm-header" id="fdm-header-chat">
-        <div class="fdm-avatar avatar-placeholder" id="fdm-other-avatar"><i class="fas fa-user" style="font-size:11px"></i></div>
-        <span class="fdm-name" id="fdm-other-name">${escHtml(username)}</span>
-        <div class="fdm-actions">
-          <button id="fdm-minimize" title="Küçült"><i class="fas fa-minus"></i></button>
-          <button id="fdm-back" title="Geri"><i class="fas fa-arrow-left"></i></button>
-          <button id="fdm-fullscreen" title="Tam ekran"><i class="fas fa-expand"></i></button>
-          <button id="fdm-close" title="Kapat"><i class="fas fa-times"></i></button>
-        </div>
-      </div>
-      <div class="fdm-messages" id="fdm-msgs"><div style="text-align:center;padding:20px"><div class="spinner"></div></div></div>
-      <div class="fdm-input-bar">
-        <textarea id="fdm-input" placeholder="Mesaj..." rows="1"></textarea>
-        <button class="btn btn-primary btn-sm" id="fdm-send"><i class="fas fa-paper-plane"></i></button>
-      </div>
-    </div>`;
-
-    fdm$('#fdm-close')?.addEventListener('click', closeFdm);
-    fdm$('#fdm-back')?.addEventListener('click', openFdmList);
-    fdm$('#fdm-fullscreen')?.addEventListener('click', () => { navigate('/mesajlar/' + username); closeFdm(); });
-    fdm$('#fdm-minimize')?.addEventListener('click', () => {
-      fdmMinimized = !fdmMinimized;
-      const bubble = fdm$('#fdm-bubble');
-      if (bubble) bubble.classList.toggle('minimized', fdmMinimized);
-      const icon = fdm$('#fdm-minimize i');
-      if (icon) icon.className = fdmMinimized ? 'fas fa-chevron-up' : 'fas fa-minus';
-    });
-    fdm$('#fdm-header-chat')?.addEventListener('click', e => {
-      if (e.target.closest('.fdm-actions')) return;
-      fdmMinimized = !fdmMinimized;
-      const bubble = fdm$('#fdm-bubble');
-      if (bubble) bubble.classList.toggle('minimized', fdmMinimized);
-    });
-
-    // Mesajları yükle
-    try {
-      const data = await api(`/conversation/${encodeURIComponent(username)}`);
-      const { other, messages } = data;
-      if (other.avatar) {
-        const av = fdm$('#fdm-other-avatar');
-        if (av) av.outerHTML = `<img src="${escHtml(other.avatar)}" class="fdm-avatar" id="fdm-other-avatar" />`;
-      }
-      const msgsEl = fdm$('#fdm-msgs');
-      if (msgsEl) {
-        msgsEl.innerHTML = messages.map(m => fdmMsgHTML(m)).join('');
-        msgsEl.scrollTop = msgsEl.scrollHeight;
-      }
-    } catch (e) {
-      const msgsEl = fdm$('#fdm-msgs');
-      if (msgsEl) msgsEl.innerHTML = `<div style="color:var(--accent-red2);font-size:12px;padding:12px">${e.message}</div>`;
-    }
-
-    async function fdmSendMsg() {
-      if (fdmSending) return;
-      const input = fdm$('#fdm-input');
-      const content = input?.value.trim();
-      if (!content) return;
-      fdmSending = true;
-      input.value = '';
-      try {
-        const fd = new FormData();
-        fd.append('content', content);
-        const msg = await apiForm(`/conversation/${encodeURIComponent(username)}/messages`, fd);
-        const msgsEl = fdm$('#fdm-msgs');
-        if (msgsEl) {
-          msgsEl.insertAdjacentHTML('beforeend', fdmMsgHTML(msg));
-          msgsEl.scrollTop = msgsEl.scrollHeight;
-        }
-      } catch (e) { toast(e.message, 'error'); }
-      finally { fdmSending = false; }
-    }
-
-    fdm$('#fdm-send')?.addEventListener('click', fdmSendMsg);
-    fdm$('#fdm-input')?.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); fdmSendMsg(); }
-    });
-    fdm$('#fdm-input')?.addEventListener('input', e => {
-      e.target.style.height = 'auto';
-      e.target.style.height = Math.min(e.target.scrollHeight, 80) + 'px';
-    });
-  }
-
-  function fdmMsgHTML(m) {
-    const isOwn = currentUser && m.sender_id == currentUser.id;
-    const deleted = m.deleted_for_all;
-    if (!deleted && ((isOwn && m.deleted_by_sender) || (!isOwn && m.deleted_by_receiver))) return '';
-    return `<div style="display:flex;flex-direction:column;align-items:${isOwn ? 'flex-end' : 'flex-start'};gap:2px;margin-bottom:4px">
-      <div style="max-width:80%;padding:7px 11px;border-radius:${isOwn ? '12px 4px 12px 12px' : '4px 12px 12px 12px'};font-size:13px;word-break:break-word;
-        background:${isOwn ? 'rgba(220,38,38,0.15)' : 'var(--bg-card2)'};
-        border:1px solid ${isOwn ? 'rgba(220,38,38,0.3)' : 'var(--border)'};
-        color:${deleted ? 'var(--text-muted)' : 'var(--text-primary)'}">
-        ${deleted ? '<i>Mesaj silindi</i>' : (m.shared_forum_id ? `<span style="color:var(--accent-red2);cursor:pointer" onclick="navigate('/forum/${escHtml(m.forum_slug||'')}');closeFdm()">📎 ${escHtml(m.forum_title||'Forum')}</span>` : escHtml(m.content || ''))}
-      </div>
-      <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
-    </div>`;
-  }
-
-  // Auth değişince toggle butonunu güncelle
-  const origUpdateNav = window.updateNavUI;
-  window.updateNavUI = function() {
-    if (origUpdateNav) origUpdateNav.apply(this, arguments);
-    setTimeout(renderToggleBtn, 100);
-  };
-
-  // İlk yüklemede
-  setTimeout(renderToggleBtn, 500);
-
-  // Dışarıya aç
-  window.openFdmChat = openFdmChat;
-  window.closeFdm = closeFdm;
-})();
 
 // ===== ADMİN KALKAN POPUP =====
 document.addEventListener('click', e => {

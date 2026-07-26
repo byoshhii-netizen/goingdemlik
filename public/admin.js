@@ -1907,6 +1907,17 @@ async function renderSettings(main) {
           <div class="form-group"><textarea id="s-kvkk" rows="5">${escHtml(settings['kvkk_text']||'')}</textarea></div>
           <button class="btn btn-primary" id="s-kvkk-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-kvkk-msg" class="form-error mt-4"></div>
+        </div></div>
+        <div class="card"><div class="card-header"><span><i class="fas fa-ban" style="color:var(--accent-red2)"></i> Engelleme Ayarları</span></div><div class="card-body">
+          <div class="form-group" style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
+            <input type="checkbox" id="s-block-new-accounts" ${settings['block_new_accounts']==='1'?'checked':''} style="width:18px;height:18px;cursor:pointer" />
+            <div>
+              <label for="s-block-new-accounts" style="cursor:pointer;font-weight:600">Yeni Hesap Koruması</label>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Açıksa, engellenen kişinin IP adresiyle yeni açılmış hesaplar da engellenen kişiyle aynı muameleyi görür (mesaj gönderemez).</div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="s-block-new-save" style="margin-top:12px"><i class="fas fa-save"></i> Kaydet</button>
+          <div id="s-block-new-msg" class="form-error mt-4"></div>
         </div>
       </div>
       <div class="card">
@@ -2040,6 +2051,15 @@ async function renderSettings(main) {
   });
   document.getElementById('s-kvkk-save').addEventListener('click', async () => {
     await saveSetting('kvkk_text', document.getElementById('s-kvkk').value.trim(), document.getElementById('s-kvkk-msg'));
+
+  document.getElementById('s-block-new-save')?.addEventListener('click', async () => {
+    const val = document.getElementById('s-block-new-accounts').checked ? '1' : '0';
+    const msg = document.getElementById('s-block-new-msg');
+    await saveSetting('block_new_accounts', val, msg);
+    msg.style.color = 'var(--accent-green)';
+    msg.textContent = 'Kaydedildi';
+    setTimeout(() => { msg.textContent = ''; }, 2000);
+  });
   });
   document.getElementById('s-music-own-save').addEventListener('click', async () => {
     await saveSetting('music_own_rules', document.getElementById('s-music-own').value.trim(), document.getElementById('s-music-msg'));
