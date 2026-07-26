@@ -78,59 +78,6 @@ async function initDb() {
       value TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS store_products (
-      id BIGSERIAL PRIMARY KEY,
-      product_key TEXT UNIQUE NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT DEFAULT '',
-      features TEXT DEFAULT '[]',
-      price NUMERIC(12,2) NOT NULL DEFAULT 0,
-      compare_at_price NUMERIC(12,2),
-      currency TEXT NOT NULL DEFAULT 'TRY',
-      active INTEGER DEFAULT 1,
-      visible INTEGER DEFAULT 1,
-      shopier_product_id TEXT DEFAULT '',
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS store_orders (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL,
-      product_id BIGINT NOT NULL,
-      merchant_order_id TEXT UNIQUE NOT NULL,
-      shopier_product_id TEXT DEFAULT '',
-      shopier_order_id TEXT UNIQUE,
-      amount NUMERIC(12,2) NOT NULL,
-      currency TEXT NOT NULL DEFAULT 'TRY',
-      status TEXT NOT NULL DEFAULT 'pending',
-      webhook_id TEXT DEFAULT '',
-      raw_payload JSONB DEFAULT '{}',
-      created_at TIMESTAMP DEFAULT NOW(),
-      paid_at TIMESTAMP,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(product_id) REFERENCES store_products(id) ON DELETE RESTRICT
-    );
-
-    CREATE TABLE IF NOT EXISTS store_entitlements (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL,
-      product_id BIGINT NOT NULL,
-      order_id BIGINT NOT NULL,
-      entitlement_type TEXT NOT NULL,
-      starts_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      expires_at TIMESTAMP NOT NULL,
-      revoked_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(order_id, entitlement_type),
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(product_id) REFERENCES store_products(id) ON DELETE RESTRICT,
-      FOREIGN KEY(order_id) REFERENCES store_orders(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_store_orders_user ON store_orders(user_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_store_entitlements_user ON store_entitlements(user_id, entitlement_type, expires_at);
-
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,
@@ -214,8 +161,6 @@ async function initDb() {
     ALTER TABLE books ADD COLUMN IF NOT EXISTS karakterler TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS kadro TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS is_hidden INTEGER DEFAULT 0;
-    ALTER TABLE books ADD COLUMN IF NOT EXISTS author TEXT DEFAULT '';
-    ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_download INTEGER DEFAULT 1;
 
     CREATE TABLE IF NOT EXISTS book_chapters (
       id BIGSERIAL PRIMARY KEY,
@@ -507,6 +452,28 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_icon TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_color TEXT DEFAULT '#6b7280';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_display TEXT DEFAULT 'level';
+    CREATE TABLE IF NOT EXISTS songs (
+      id BIGSERIAL PRIMARY KEY,
+      uploader_id BIGINT NOT NULL,
+      song_type TEXT NOT NULL DEFAULT 'own',
+      title TEXT NOT NULL,
+      artist_name TEXT NOT NULL,
+      distributor TEXT DEFAULT '',
+      genre TEXT DEFAULT '',
+      lyrics TEXT DEFAULT '',
+      cover_url TEXT DEFAULT '',
+      audio_url TEXT NOT NULL,
+      share_reason TEXT DEFAULT '',
+      play_count INTEGER DEFAULT 0,
+      slug TEXT UNIQUE,
+      status TEXT DEFAULT 'active',
+      published_at TIMESTAMP DEFAULT NOW(),
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_mentions INTEGER DEFAULT 1;
@@ -515,9 +482,6 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_vip INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_plus INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_admin INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
@@ -547,41 +511,7 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
-    CREATE TABLE IF NOT EXISTS songs (
-      id BIGSERIAL PRIMARY KEY,
-      uploader_id BIGINT NOT NULL,
-      song_type TEXT NOT NULL DEFAULT 'own',
-      title TEXT NOT NULL,
-      artist_name TEXT NOT NULL,
-      distributor TEXT DEFAULT '',
-      genre TEXT DEFAULT '',
-      lyrics TEXT DEFAULT '',
-      cover_url TEXT DEFAULT '',
-      audio_url TEXT NOT NULL,
-      share_reason TEXT DEFAULT '',
-      play_count INTEGER DEFAULT 0,
-      slug TEXT UNIQUE,
-      status TEXT DEFAULT 'active',
-      published_at TIMESTAMP DEFAULT NOW(),
-      created_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
-    );
-
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
   `);
-
-  const { rows: storeRows } = await query('SELECT COUNT(*) as c FROM store_products');
-  if (parseInt(storeRows[0].c) === 0) {
-    await query(
-      `INSERT INTO store_products
-        (product_key,title,description,features,price,compare_at_price,currency,active,visible)
-       VALUES
-        ('vip','VIP Üyelik','Demlik deneyimini daha güçlü ve kişisel hale getir.','["VIP rozeti ve profil görünümü","Özel isim rengi","VIP içerik ve günlük limitler"]',99.90,149.90,'TRY',1,1),
-        ('plus','Plus Üyelik','Daha fazla kişiselleştirme ve daha yüksek limitler.','["Plus rozeti ve ayrıcalıkları","Gelişmiş isim gradyanı","Plus içerik ve günlük limitler"]',149.90,199.90,'TRY',1,1),
-        ('admin','Admin Yetkisi','Demlik yönetim araçlarına 30 günlük erişim.','["Admin paneli erişimi","Topluluk yönetim araçları","30 gün boyunca aktif yetki"]',249.90,399.90,'TRY',1,1)`
-    );
-  }
 
   // Seed default levels
   const { rows: lvRows } = await query('SELECT COUNT(*) as c FROM levels');

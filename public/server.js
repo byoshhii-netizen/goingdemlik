@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -1429,6 +1429,41 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
      allowedBadgeDisplay,
      req.user.id]);
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+  res.json(sanitizeUser(rows[0]));
+});
+
+app.put('/api/profile/username', authMiddleware, async (req, res) => {
+  const { new_username } = req.body;
+  if (!new_username) return res.status(400).json({ error: 'Yeni kullanıcı adı zorunlu' });
+  const uname = new_username.trim();
+  if (uname.length < 3 || uname.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
+  if (!/^[a-zA-Z0-9_]+$/.test(uname)) return res.status(400).json({ error: 'Kullanıcı adı sadece harf, rakam ve _ içerebilir' });
+
+  // Kolon yoksa ekle
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_count INT DEFAULT 0`).catch(() => {});
+  await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changed_at TIMESTAMPTZ`).catch(() => {});
+
+  const user = req.user;
+  const changeCount = parseInt(user.username_change_count) || 0;
+  const changedAt = user.username_changed_at ? new Date(user.username_changed_at) : null;
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  // 7 gün geçtiyse sayacı sıfırla
+  const activeCount = (changedAt && changedAt >= sevenDaysAgo) ? changeCount : 0;
+  if (activeCount >= 2) {
+    const resetDate = new Date(changedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const daysLeft = Math.ceil((resetDate - now) / (24 * 60 * 60 * 1000));
+    return res.status(429).json({ error: `Bu hafta kullanıcı adı değiştirme hakkınızı kullandınız. ${daysLeft} gün sonra tekrar deneyebilirsiniz.` });
+  }
+
+  const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=$1 AND id!=$2', [uname.toLowerCase(), user.id]);
+  if (existing.length) return res.status(409).json({ error: 'Bu kullanıcı adı zaten kullanılıyor' });
+
+  await query('UPDATE users SET username=$1, username_change_count=$2, username_changed_at=NOW() WHERE id=$3',
+    [uname, activeCount + 1, user.id]);
+  const { rows } = await query('SELECT * FROM users WHERE id=$1', [user.id]);
+  await logAction(user.username, 'username_change', uname);
   res.json(sanitizeUser(rows[0]));
 });
 
