@@ -1984,8 +1984,8 @@ async function renderGroupDetail(app, slug) {
           ${!isMember && currentUser && group.type === 'public' && !group.invite_only ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
-            <button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>
-            ${group.type === 'private' ? `<button class="btn btn-outline btn-sm" id="join-requests-btn"><i class="fas fa-user-plus"></i> Katılım İstekleri</button>` : ''}` : ''}
+            ${(group.type === 'private' || group.invite_only) ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}
+            ${(group.type === 'private' || group.invite_only) ? `<button class="btn btn-outline btn-sm" id="join-requests-btn"><i class="fas fa-user-plus"></i> Katılım İstekleri</button>` : ''}` : ''}
         </div>
       </div>
     </div>
