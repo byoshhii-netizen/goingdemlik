@@ -3187,7 +3187,7 @@ async function init() {
     siteName = ps.site_name || 'CigCig';
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     const brandSpan = document.querySelector('.nav-brand span');
-    if (brandSpan) brandSpan.textContent = siteName.toUpperCase();
+    if (brandSpan) brandSpan.textContent = siteName;
     const footer = document.getElementById('site-footer');
     if (footer) {
       const createdVisible = ps.footer_created_visible !== '0';

@@ -1166,7 +1166,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 /* ===== NAVBAR MOBİL OVERFLOW FIX ===== */
 @media (max-width: 768px) {
   .nav-container { padding: 0 12px; gap: 0; height: 54px; overflow: visible; }
-  .nav-brand { flex-shrink: 0; min-width: 0; }
+  .nav-brand { flex: 1; min-width: 0; }
   .nav-auth { display: none !important; }
   #new-btn-wrap { display: none !important; }
   .nav-user-btn span { display: none; }
