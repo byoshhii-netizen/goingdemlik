@@ -1,4 +1,4 @@
-﻿const { Pool } = require('pg');
+const { Pool } = require('pg');
 const crypto = require('crypto');
 
 const pool = new Pool({
@@ -509,6 +509,26 @@ async function initDb() {
       published_at TIMESTAMP DEFAULT NOW(),
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS playlists (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_songs (
+      id BIGSERIAL PRIMARY KEY,
+      playlist_id BIGINT NOT NULL,
+      song_id BIGINT NOT NULL,
+      position INTEGER DEFAULT 0,
+      added_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(playlist_id) REFERENCES playlists(id) ON DELETE CASCADE,
+      FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
+      UNIQUE(playlist_id, song_id)
     );
   `);
 

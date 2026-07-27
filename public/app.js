@@ -192,6 +192,8 @@ function renderRoute(fullPath) {
   if (path === '/artist-basvuru') return renderArtistApply(app);
   if (path === '/artist-panel') return renderArtistPanel(app);
   if (path === '/sarki-yukle') return renderShareSong(app);
+  if (path === '/playlistlerim') return renderMyPlaylists(app);
+  if (path.startsWith('/playlist/')) return renderPlaylistDetail(app, segs[1]);
   renderNotFound(app);
 }
 
@@ -4401,6 +4403,7 @@ async function renderMusicList(app) {
         <i class="fas fa-music" style="color:var(--accent-red2)"></i> Müzikler
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${currentUser ? `<a href="/playlistlerim" data-link class="btn btn-outline btn-sm"><i class="fas fa-list"></i> Playlistlerim</a>` : ''}
         ${currentUser && !currentUser.is_artist ? `<a href="/artist-basvuru" data-link class="btn btn-outline btn-sm"><i class="fas fa-microphone"></i> Artist Başvurusu</a>` : ''}
         ${currentUser?.is_artist ? `<a href="/artist-panel" data-link class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Şarkı Yükle</a>` : ''}
         ${currentUser && !currentUser.is_artist ? `<a href="/sarki-yukle" data-link class="btn btn-outline btn-sm"><i class="fas fa-share"></i> Şarkı Paylaş</a>` : ''}
@@ -4416,6 +4419,37 @@ async function renderMusicList(app) {
   </div>`;
 
   let songs = [];
+  let userPlaylists = [];
+  if (currentUser) {
+    try { userPlaylists = await api('/playlists'); } catch {}
+  }
+
+  const showAddToPlaylistMenu = (songId, btnEl) => {
+    document.querySelectorAll('.pl-add-dropdown').forEach(d => d.remove());
+    if (!userPlaylists.length) {
+      toast('Önce bir playlist oluşturun!', 'error'); return;
+    }
+    const menu = document.createElement('div');
+    menu.className = 'pl-add-dropdown dropdown-menu';
+    menu.style.cssText = 'position:absolute;right:0;top:calc(100% + 4px);z-index:9999;min-width:180px';
+    menu.innerHTML = userPlaylists.map(pl =>
+      `<button class="dropdown-item" data-plid="${pl.id}" data-songid="${songId}"><i class="fas fa-list"></i> ${escHtml(pl.name)}</button>`
+    ).join('');
+    btnEl.style.position = 'relative';
+    btnEl.appendChild(menu);
+    menu.querySelectorAll('.dropdown-item').forEach(item => {
+      item.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        menu.remove();
+        try {
+          await api('/playlists/' + item.dataset.plid + '/songs', { method: 'POST', body: JSON.stringify({ song_id: item.dataset.songid }) });
+          toast('Playlist\'e eklendi!');
+        } catch(err) { toast(err.message, 'error'); }
+      });
+    });
+    setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 10);
+  };
+
   const loadSongs = async (q = '') => {
     const el = document.getElementById('music-list');
     if (!el) return;
@@ -4431,14 +4465,15 @@ async function renderMusicList(app) {
           <div style="width:160px;display:none" class="col-dist">Dağıtıcı</div>
           <div style="width:120px">Eklenme</div>
           <div style="width:80px;text-align:right">Dinlenme</div>
+          ${currentUser ? '<div style="width:36px"></div>' : ''}
         </div>
         ${songs.map((s, i) => `
-          <div class="music-row" data-slug="${escHtml(s.slug)}">
+          <div class="music-row" data-slug="${escHtml(s.slug)}" data-id="${s.id}">
             <div class="music-num">${i+1}</div>
             <div class="music-info">
               <div class="music-cover-wrap">
                 ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="music-cover" />` : `<div class="music-cover music-cover-ph"><i class="fas fa-music"></i></div>`}
-                <button class="music-play-mini" data-slug="${escHtml(s.slug)}" data-audio="${escHtml(s.audio_url)}"><i class="fas fa-play"></i></button>
+                <button class="music-play-mini" data-slug="${escHtml(s.slug)}" data-audio="${escHtml(s.audio_url)}" data-idx="${i}"><i class="fas fa-play"></i></button>
               </div>
               <div>
                 <div class="music-title">${escHtml(s.title)}</div>
@@ -4448,17 +4483,25 @@ async function renderMusicList(app) {
             <div class="music-dist col-dist">${escHtml(s.distributor||'-')}</div>
             <div class="music-date">${timeAgo(s.published_at)}</div>
             <div class="music-plays" style="text-align:right;font-size:12px;color:var(--text-muted)">${s.play_count} <i class="fas fa-headphones" style="font-size:10px"></i></div>
+            ${currentUser ? `<div style="width:36px;text-align:right"><button class="btn-pl-add" data-song-id="${s.id}" title="Playliste ekle"><i class="fas fa-plus"></i></button></div>` : ''}
           </div>`).join('')}
       </div>`;
       el.querySelectorAll('.music-row').forEach(row => {
         row.addEventListener('click', e => {
-          if (!e.target.closest('.music-play-mini')) navigate('/muzik/' + row.dataset.slug);
+          if (!e.target.closest('.music-play-mini') && !e.target.closest('.btn-pl-add')) navigate('/muzik/' + row.dataset.slug);
         });
       });
       el.querySelectorAll('.music-play-mini').forEach(btn => {
         btn.addEventListener('click', e => {
           e.stopPropagation();
-          openMiniPlayer(btn.dataset.audio, btn.dataset.slug, songs.find(s => s.slug === btn.dataset.slug));
+          const idx = parseInt(btn.dataset.idx);
+          openMiniPlayer(btn.dataset.audio, btn.dataset.slug, songs[idx], songs, idx);
+        });
+      });
+      el.querySelectorAll('.btn-pl-add').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          showAddToPlaylistMenu(btn.dataset.songId, btn.parentElement);
         });
       });
     } catch(err) { el.innerHTML = `<div class="empty-state"><p>${escHtml(err.message)}</p></div>`; }
@@ -4473,9 +4516,34 @@ async function renderMusicList(app) {
 // ===== MÜZİK DETAY =====
 let currentAudio = null;
 let currentSlug = null;
+// Playlist queue state
+let currentQueue = [];         // [{id, slug, title, artist_name, cover_url, audio_url}, ...]
+let currentQueueIndex = -1;
+let playerShuffle = false;
+let playerRepeatOne = false;
+let shuffledIndices = [];      // shuffled order of indices
 
-function openMiniPlayer(audioUrl, slug, song) {
-  // Global player
+function buildShuffledOrder(len, startIdx) {
+  const arr = [];
+  for (let i = 0; i < len; i++) if (i !== startIdx) arr.push(i);
+  for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
+  arr.unshift(startIdx);
+  return arr;
+}
+
+function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
+  // If queue provided, update global queue state
+  if (queue && queue.length > 0) {
+    currentQueue = queue;
+    currentQueueIndex = queueIndex !== undefined ? queueIndex : 0;
+    if (playerShuffle) shuffledIndices = buildShuffledOrder(queue.length, currentQueueIndex);
+  } else if (!queue && currentQueue.length === 0) {
+    // Single song – create a one-item queue
+    currentQueue = [song || { slug, audio_url: audioUrl }];
+    currentQueueIndex = 0;
+    shuffledIndices = [0];
+  }
+
   let player = document.getElementById('global-music-player');
   if (!player) {
     player = document.createElement('div');
@@ -4483,13 +4551,16 @@ function openMiniPlayer(audioUrl, slug, song) {
     document.body.appendChild(player);
   }
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
-  // Update play buttons
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
   const audio = new Audio(audioUrl);
   currentAudio = audio; currentSlug = slug;
   fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
 
   const title = song?.title || '', artist = song?.artist_name || '', cover = song?.cover_url || '';
+
+  const shuffleActive = playerShuffle ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
+  const repeatActive  = playerRepeatOne ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
+
   player.innerHTML = `
     <div class="gplayer-inner">
       <div class="gplayer-info">
@@ -4500,9 +4571,11 @@ function openMiniPlayer(audioUrl, slug, song) {
         </div>
       </div>
       <div class="gplayer-controls">
+        <button class="${shuffleActive}" id="gp-shuffle" title="Karışık çal"><i class="fas fa-random"></i></button>
         <button class="gplayer-btn" id="gp-prev" title="Önceki"><i class="fas fa-step-backward"></i></button>
         <button class="gplayer-btn gplayer-play" id="gp-play"><i class="fas fa-pause"></i></button>
         <button class="gplayer-btn" id="gp-next" title="Sonraki"><i class="fas fa-step-forward"></i></button>
+        <button class="${repeatActive}" id="gp-repeat" title="Tekrarla (bu şarkı)"><i class="fas fa-redo-alt"></i></button>
       </div>
       <div class="gplayer-progress-wrap">
         <span class="gplayer-time" id="gp-cur">0:00</span>
@@ -4521,20 +4594,34 @@ function openMiniPlayer(audioUrl, slug, song) {
       <button class="gplayer-close" id="gp-close"><i class="fas fa-times"></i></button>
     </div>`;
   player.style.display = 'block';
-  // localStorage'dan ses seviyesini oku
   const savedVol = parseFloat(localStorage.getItem('cigcig_volume') ?? '0.8');
   audio.volume = savedVol;
 
   function fmtTime(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
-  audio.addEventListener('loadedmetadata', () => { document.getElementById('gp-dur').textContent = fmtTime(audio.duration); });
+  audio.addEventListener('loadedmetadata', () => { const el=document.getElementById('gp-dur'); if(el) el.textContent = fmtTime(audio.duration); });
   audio.addEventListener('timeupdate', () => {
     const pct = audio.duration ? (audio.currentTime/audio.duration)*100 : 0;
     const fill = document.getElementById('gp-fill'); if(fill) fill.style.width = pct+'%';
     const seek = document.getElementById('gp-seek'); if(seek) seek.value = pct;
     const cur = document.getElementById('gp-cur'); if(cur) cur.textContent = fmtTime(audio.currentTime);
   });
-  audio.addEventListener('ended', () => { const pb=document.getElementById('gp-play'); if(pb) pb.innerHTML='<i class="fas fa-play"></i>'; });
+
+  // Şarkı bitince: repeat one, sıradaki çal veya dur
+  audio.addEventListener('ended', () => {
+    if (playerRepeatOne) {
+      audio.currentTime = 0; audio.play().catch(()=>{});
+      return;
+    }
+    const next = getNextQueueIndex(1);
+    if (next !== null) {
+      const s = currentQueue[next];
+      currentQueueIndex = next;
+      openMiniPlayer(s.audio_url, s.slug, s);
+    } else {
+      const pb=document.getElementById('gp-play'); if(pb) pb.innerHTML='<i class="fas fa-play"></i>';
+    }
+  });
 
   document.getElementById('gp-play').addEventListener('click', () => {
     if (audio.paused) { audio.play(); document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>'; }
@@ -4544,7 +4631,30 @@ function openMiniPlayer(audioUrl, slug, song) {
     if (audio.duration) audio.currentTime = (parseFloat(e.target.value)/100)*audio.duration;
   });
   document.getElementById('gp-close').addEventListener('click', () => {
-    audio.pause(); currentAudio=null; player.style.display='none';
+    audio.pause(); currentAudio=null; currentQueue=[]; currentQueueIndex=-1; player.style.display='none';
+  });
+
+  // Önceki / sonraki
+  document.getElementById('gp-prev').addEventListener('click', () => {
+    const prev = getNextQueueIndex(-1);
+    if (prev !== null) { const s = currentQueue[prev]; currentQueueIndex = prev; openMiniPlayer(s.audio_url, s.slug, s); }
+  });
+  document.getElementById('gp-next').addEventListener('click', () => {
+    const next = getNextQueueIndex(1);
+    if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
+  });
+
+  // Karışık modunu aç/kapat
+  document.getElementById('gp-shuffle').addEventListener('click', () => {
+    playerShuffle = !playerShuffle;
+    document.getElementById('gp-shuffle').classList.toggle('active', playerShuffle);
+    if (playerShuffle) shuffledIndices = buildShuffledOrder(currentQueue.length, currentQueueIndex);
+  });
+
+  // Tekrar modunu aç/kapat
+  document.getElementById('gp-repeat').addEventListener('click', () => {
+    playerRepeatOne = !playerRepeatOne;
+    document.getElementById('gp-repeat').classList.toggle('active', playerRepeatOne);
   });
 
   // Ses kontrolü
@@ -4578,11 +4688,25 @@ function openMiniPlayer(audioUrl, slug, song) {
     });
   }
 
-  // Sync play button on detail page
   const detailPlay = document.getElementById('detail-play-btn');
   if (detailPlay) detailPlay.innerHTML = '<i class="fas fa-pause"></i> Durdur';
 
   audio.play().catch(() => {});
+}
+
+// Kuyrukta önceki/sonraki indeksi hesapla
+function getNextQueueIndex(dir) { // dir: +1 ileri, -1 geri
+  if (currentQueue.length <= 1) return null;
+  if (playerShuffle && shuffledIndices.length > 0) {
+    const pos = shuffledIndices.indexOf(currentQueueIndex);
+    const newPos = pos + dir;
+    if (newPos < 0 || newPos >= shuffledIndices.length) return null;
+    return shuffledIndices[newPos];
+  } else {
+    const newIdx = currentQueueIndex + dir;
+    if (newIdx < 0 || newIdx >= currentQueue.length) return null;
+    return newIdx;
+  }
 }
 
 async function renderMusicDetail(app, slug) {
@@ -5102,5 +5226,330 @@ async function renderShareSong(app) {
       btn.disabled = false;
       btn.innerHTML = '<i class="fas fa-share"></i> Paylaş';
     }
+  });
+}
+
+// ===== PLAYLİSTLERİM =====
+async function renderMyPlaylists(app) {
+  if (!currentUser) { navigate('/giris'); return; }
+  document.title = 'Playlistlerim – ' + siteName;
+  app.innerHTML = `<div class="container page">
+    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
+      <div class="page-title" style="display:flex;align-items:center;gap:10px">
+        <i class="fas fa-list" style="color:var(--accent-red2)"></i> Playlistlerim
+      </div>
+      <button class="btn btn-primary btn-sm" id="pl-create-btn"><i class="fas fa-plus"></i> Playlist Oluştur</button>
+    </div>
+    <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
+  </div>`;
+
+  const renderList = async () => {
+    const el = document.getElementById('pl-list');
+    if (!el) return;
+    try {
+      const playlists = await api('/playlists');
+      if (!playlists.length) {
+        el.innerHTML = `<div class="empty-state"><i class="fas fa-list"></i><p>Henüz playlist yok.</p><p style="font-size:13px;color:var(--text-muted)">Yeni bir playlist oluşturun ve şarkılar ekleyin.</p></div>`;
+        return;
+      }
+      el.innerHTML = `<div class="pl-grid">
+        ${playlists.map(pl => `
+          <div class="pl-card" data-id="${pl.id}" style="cursor:pointer">
+            <div class="pl-card-icon"><i class="fas fa-music"></i></div>
+            <div class="pl-card-body">
+              <div class="pl-card-name">${escHtml(pl.name)}</div>
+              <div class="pl-card-meta">${pl.song_count} şarkı</div>
+              ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
+            </div>
+            <div class="pl-card-actions">
+              <button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" data-name="${escHtml(pl.name)}" data-desc="${escHtml(pl.description||'')}" title="Düzenle"><i class="fas fa-edit"></i></button>
+              <button class="btn btn-ghost btn-sm pl-del-btn" data-id="${pl.id}" data-name="${escHtml(pl.name)}" title="Sil" style="color:var(--accent-red2)"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>`).join('')}
+      </div>`;
+      el.querySelectorAll('.pl-card').forEach(card => {
+        card.addEventListener('click', e => {
+          if (!e.target.closest('.pl-edit-btn') && !e.target.closest('.pl-del-btn')) {
+            navigate('/playlist/' + card.dataset.id);
+          }
+        });
+      });
+      el.querySelectorAll('.pl-edit-btn').forEach(btn => {
+        btn.addEventListener('click', e => {
+          e.stopPropagation();
+          showCreatePlaylistModal('edit', btn.dataset.id, btn.dataset.name, btn.dataset.desc, renderList);
+        });
+      });
+      el.querySelectorAll('.pl-del-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm(`"${btn.dataset.name}" playlistini silmek istediğinize emin misiniz?`)) return;
+          try {
+            await api('/playlists/' + btn.dataset.id, { method: 'DELETE' });
+            toast('Playlist silindi');
+            renderList();
+          } catch(err) { toast(err.message, 'error'); }
+        });
+      });
+    } catch(err) { el.innerHTML = `<div class="empty-state"><p>${escHtml(err.message)}</p></div>`; }
+  };
+
+  renderList();
+
+  document.getElementById('pl-create-btn')?.addEventListener('click', () => {
+    showCreatePlaylistModal('create', null, '', '', renderList);
+  });
+}
+
+function showCreatePlaylistModal(mode, plId, name, desc, onSave) {
+  showModal(mode === 'create' ? '➕ Playlist Oluştur' : '✏️ Playlist Düzenle', `
+    <div class="form-group"><label>Playlist Adı *</label><input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn: Sabah Müzikleri" /></div>
+    <div class="form-group"><label>Açıklama (isteğe bağlı)</label><input id="plm-desc" value="${escHtml(desc||'')}" placeholder="Kısa açıklama..." /></div>
+    <button class="btn btn-primary" id="plm-save" style="width:100%;justify-content:center">${mode === 'create' ? '<i class="fas fa-plus"></i> Oluştur' : '<i class="fas fa-save"></i> Kaydet'}</button>
+    <div id="plm-msg" style="margin-top:8px;font-size:12px;color:var(--accent-red2)"></div>
+  `);
+  document.getElementById('plm-save')?.addEventListener('click', async () => {
+    const n = document.getElementById('plm-name').value.trim();
+    const d = document.getElementById('plm-desc').value.trim();
+    const msg = document.getElementById('plm-msg');
+    const btn = document.getElementById('plm-save');
+    if (!n) { msg.textContent = 'Playlist adı zorunlu'; return; }
+    btn.disabled = true;
+    try {
+      if (mode === 'create') {
+        await api('/playlists', { method: 'POST', body: JSON.stringify({ name: n, description: d }) });
+        toast('Playlist oluşturuldu!');
+      } else {
+        await api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify({ name: n, description: d }) });
+        toast('Playlist güncellendi!');
+      }
+      hideModal();
+      if (onSave) onSave();
+    } catch(err) { msg.textContent = err.message; btn.disabled = false; }
+  });
+}
+
+// ===== PLAYLİST DETAY =====
+async function renderPlaylistDetail(app, plId) {
+  if (!currentUser) { navigate('/giris'); return; }
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let playlist;
+  try { playlist = await api('/playlists/' + plId); } catch(e) {
+    app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-list"></i><p>${escHtml(e.message)}</p></div></div>`; return;
+  }
+
+  document.title = escHtml(playlist.name) + ' – Playlist | ' + siteName;
+  let songs = playlist.songs || [];
+
+  const render = () => {
+    app.innerHTML = `<div class="container page">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
+        <div>
+          <a href="/playlistlerim" data-link style="font-size:13px;color:var(--text-muted);text-decoration:none;display:flex;align-items:center;gap:6px;margin-bottom:6px"><i class="fas fa-chevron-left"></i> Playlistlerim</a>
+          <div class="page-title" style="display:flex;align-items:center;gap:10px;margin:0">
+            <i class="fas fa-list" style="color:var(--accent-red2)"></i> ${escHtml(playlist.name)}
+          </div>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:4px">${songs.length} şarkı</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${songs.length ? `
+            <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
+            <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
+          <button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>
+          <button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>
+        </div>
+      </div>
+
+      ${songs.length ? `
+      <div class="pl-songs-table" id="pl-songs-table">
+        ${songs.map((s, i) => `
+          <div class="pl-song-row" data-id="${s.id}" draggable="true">
+            <div class="pl-drag-handle" title="Sürükle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="pl-song-num">${i+1}</div>
+            <div class="pl-song-info">
+              <div class="music-cover-wrap">
+                ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="music-cover" />` : `<div class="music-cover music-cover-ph"><i class="fas fa-music"></i></div>`}
+                <button class="music-play-mini pl-play-mini" data-idx="${i}" title="Çal"><i class="fas fa-play"></i></button>
+              </div>
+              <div>
+                <div class="music-title">${escHtml(s.title)}</div>
+                <div class="music-artist">${escHtml(s.artist_name)}</div>
+              </div>
+            </div>
+            <button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>
+          </div>`).join('')}
+      </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Şarkı eklemek için "Şarkı Ekle" butonuna tıklayın.</p></div>`}
+    </div>`;
+
+    // Sırayla çal
+    document.getElementById('pl-play-seq')?.addEventListener('click', () => {
+      if (!songs.length) return;
+      playerShuffle = false;
+      currentQueue = songs;
+      currentQueueIndex = 0;
+      shuffledIndices = songs.map((_, i) => i);
+      openMiniPlayer(songs[0].audio_url, songs[0].slug, songs[0], songs, 0);
+    });
+
+    // Karışık çal
+    document.getElementById('pl-play-shuf')?.addEventListener('click', () => {
+      if (!songs.length) return;
+      playerShuffle = true;
+      const shuffled = [...songs];
+      for (let i = shuffled.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
+      currentQueue = shuffled;
+      currentQueueIndex = 0;
+      shuffledIndices = shuffled.map((_, i) => i);
+      openMiniPlayer(shuffled[0].audio_url, shuffled[0].slug, shuffled[0], shuffled, 0);
+    });
+
+    // Tekil çal
+    app.querySelectorAll('.pl-play-mini').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.idx);
+        openMiniPlayer(songs[idx].audio_url, songs[idx].slug, songs[idx], songs, idx);
+      });
+    });
+
+    // Şarkı kaldır
+    app.querySelectorAll('.pl-remove-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
+        try {
+          await api('/playlists/' + plId + '/songs/' + btn.dataset.id, { method: 'DELETE' });
+          toast('Şarkı listeden çıkarıldı');
+          songs = songs.filter(s => String(s.id) !== String(btn.dataset.id));
+          render();
+        } catch(err) { toast(err.message, 'error'); }
+      });
+    });
+
+    // Playlist düzenle
+    document.getElementById('pl-edit-btn')?.addEventListener('click', () => {
+      showCreatePlaylistModal('edit', plId, playlist.name, playlist.description || '', async () => {
+        try { playlist = await api('/playlists/' + plId); render(); } catch {}
+      });
+    });
+
+    // Şarkı ekle butonu – müzik listesinden seçme modalı
+    document.getElementById('pl-add-songs-btn')?.addEventListener('click', () => showAddSongsModal(plId, songs, (newSongs) => {
+      songs = newSongs;
+      render();
+    }));
+
+    // Drag & Drop sıralama
+    setupPlaylistDnD(app.querySelector('#pl-songs-table'), songs, plId, (reordered) => {
+      songs = reordered;
+    });
+  };
+
+  render();
+}
+
+function showAddSongsModal(plId, existingSongs, onAdded) {
+  showModal('🎵 Şarkı Ekle', `
+    <div class="search-bar" style="margin:0 0 12px 0">
+      <i class="fas fa-search"></i>
+      <input type="text" id="plsearch" placeholder="Şarkı ara..." style="width:100%" />
+    </div>
+    <div id="plsearch-list" style="max-height:320px;overflow-y:auto"></div>
+  `);
+
+  const existingIds = new Set(existingSongs.map(s => String(s.id)));
+
+  const loadSearch = async (q = '') => {
+    const el = document.getElementById('plsearch-list');
+    if (!el) return;
+    el.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+    try {
+      const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
+      const allSongs = await api(url);
+      if (!allSongs.length) { el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Şarkı bulunamadı</div>'; return; }
+      el.innerHTML = allSongs.map(s => `
+        <div class="pl-search-row ${existingIds.has(String(s.id)) ? 'pl-search-row-added' : ''}" data-id="${s.id}">
+          <div style="display:flex;align-items:center;gap:10px;flex:1">
+            ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover" />` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--bg-card2);display:flex;align-items:center;justify-content:center"><i class="fas fa-music" style="font-size:12px;color:var(--text-muted)"></i></div>`}
+            <div>
+              <div style="font-size:14px;font-weight:600">${escHtml(s.title)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${escHtml(s.artist_name)}</div>
+            </div>
+          </div>
+          <button class="btn btn-sm ${existingIds.has(String(s.id)) ? 'btn-outline' : 'btn-primary'} pl-search-add" data-id="${s.id}" ${existingIds.has(String(s.id)) ? 'disabled' : ''}>
+            ${existingIds.has(String(s.id)) ? '<i class="fas fa-check"></i>' : '<i class="fas fa-plus"></i>'}
+          </button>
+        </div>`).join('');
+      el.querySelectorAll('.pl-search-add:not([disabled])').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const sid = btn.dataset.id;
+          btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:12px;height:12px"></div>';
+          try {
+            await api('/playlists/' + plId + '/songs', { method: 'POST', body: JSON.stringify({ song_id: sid }) });
+            existingIds.add(sid);
+            btn.innerHTML = '<i class="fas fa-check"></i>';
+            btn.classList.remove('btn-primary'); btn.classList.add('btn-outline');
+            toast('Eklendi!');
+            // refresh playlist songs in background
+            try {
+              const updated = await api('/playlists/' + plId);
+              if (onAdded) onAdded(updated.songs || []);
+            } catch {}
+          } catch(err) { toast(err.message, 'error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i>'; }
+        });
+      });
+    } catch(err) { el.innerHTML = `<div style="padding:16px;color:var(--accent-red2)">${escHtml(err.message)}</div>`; }
+  };
+
+  loadSearch();
+  let t;
+  document.getElementById('plsearch')?.addEventListener('input', e => {
+    clearTimeout(t); t = setTimeout(() => loadSearch(e.target.value.trim()), 300);
+  });
+}
+
+function setupPlaylistDnD(table, songs, plId, onReorder) {
+  if (!table) return;
+  let dragSrc = null;
+
+  table.querySelectorAll('.pl-song-row').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      dragSrc = row;
+      row.classList.add('pl-dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('pl-dragging');
+      table.querySelectorAll('.pl-drag-over').forEach(r => r.classList.remove('pl-drag-over'));
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (row !== dragSrc) {
+        table.querySelectorAll('.pl-drag-over').forEach(r => r.classList.remove('pl-drag-over'));
+        row.classList.add('pl-drag-over');
+      }
+    });
+    row.addEventListener('drop', async e => {
+      e.preventDefault();
+      if (!dragSrc || dragSrc === row) return;
+      // Reorder DOM
+      const rows = [...table.querySelectorAll('.pl-song-row')];
+      const fromIdx = rows.indexOf(dragSrc);
+      const toIdx = rows.indexOf(row);
+      if (fromIdx < toIdx) row.after(dragSrc);
+      else row.before(dragSrc);
+      // Update songs array
+      const newRows = [...table.querySelectorAll('.pl-song-row')];
+      const reordered = newRows.map(r => songs.find(s => String(s.id) === r.dataset.id)).filter(Boolean);
+      // Update row numbers
+      newRows.forEach((r, i) => { const num = r.querySelector('.pl-song-num'); if (num) num.textContent = i + 1; });
+      // Update play-mini indices
+      newRows.forEach((r, i) => { const pm = r.querySelector('.pl-play-mini'); if (pm) pm.dataset.idx = i; });
+      // Persist
+      try {
+        await api('/playlists/' + plId + '/reorder', { method: 'PUT', body: JSON.stringify({ order: reordered.map(s => s.id) }) });
+        if (onReorder) onReorder(reordered);
+      } catch(err) { toast(err.message, 'error'); }
+    });
   });
 }

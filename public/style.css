@@ -1920,3 +1920,100 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   /* Bildirim dropdown mobilde gizle */
   #notif-btn-wrap .dropdown-menu { display: none !important; }
 }
+
+/* ===== PLAYLİST STİLLERİ ===== */
+.pl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+@media (max-width: 600px) { .pl-grid { grid-template-columns: 1fr; } }
+
+.pl-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  position: relative;
+}
+.pl-card:hover { border-color: var(--border-hover); box-shadow: var(--glow); }
+.pl-card-icon {
+  width: 52px; height: 52px; border-radius: 10px;
+  background: var(--grad-red);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 20px; flex-shrink: 0;
+}
+.pl-card-body { flex: 1; min-width: 0; }
+.pl-card-name { font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-card-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.pl-card-desc { font-size: 12px; color: var(--text-secondary); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* Playlist songs table */
+.pl-songs-table { display: flex; flex-direction: column; gap: 2px; }
+.pl-song-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s;
+  cursor: grab;
+}
+.pl-song-row:hover { background: var(--bg-hover); border-color: var(--border); }
+.pl-song-row.pl-dragging { opacity: 0.4; border-color: var(--accent-red); }
+.pl-song-row.pl-drag-over { border-color: var(--accent-red); background: var(--bg-active); }
+.pl-drag-handle { color: var(--text-muted); font-size: 13px; cursor: grab; padding: 0 4px; opacity: 0.5; }
+.pl-song-row:hover .pl-drag-handle { opacity: 1; }
+.pl-song-num { width: 24px; text-align: center; font-size: 13px; color: var(--text-muted); flex-shrink: 0; }
+.pl-song-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+
+/* Add to playlist button on music list */
+.btn-pl-add {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 4px 7px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.btn-pl-add:hover { color: var(--accent-red2); border-color: var(--accent-red2); background: var(--bg-active); }
+
+/* Add-to-playlist dropdown */
+.pl-add-dropdown { box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+
+/* Playlist search modal row */
+.pl-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.pl-search-row:hover { background: var(--bg-hover); }
+.pl-search-row-added { opacity: 0.6; }
+
+/* Global player: mode buttons (shuffle, repeat) */
+.gplayer-mode-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.gplayer-mode-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.08); }
+.gplayer-mode-btn.active { color: var(--accent-red2); }
+
+@media (max-width: 600px) {
+  .gplayer-mode-btn { display: none; }
+  .gplayer-mode-btn#gp-shuffle, .gplayer-mode-btn#gp-repeat { display: inline-block; font-size: 11px; padding: 4px 6px; }
+}

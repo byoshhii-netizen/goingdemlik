@@ -2195,6 +2195,114 @@ app.get('/muzik/:slug', async (req, res) => {
 app.get('/artist-basvuru', (req, res) => res.send(injectMeta('Artist Başvurusu – CigCig Müzik', 'CigCig Müzik platformu artist rozetine başvur', `${SITE_URL}/artist-basvuru`, '')));
 app.get('/artist-panel', (req, res) => res.send(injectMeta('Artist Panel – CigCig Müzik', 'CigCig Müzik artist panelinde şarkı yükle ve yönet', `${SITE_URL}/artist-panel`, '')));
 app.get('/sarki-yukle', (req, res) => res.send(injectMeta('Şarkı Paylaş – CigCig Müzik', 'CigCig topluluğuyla müzik paylaş', `${SITE_URL}/sarki-yukle`, '')));
+app.get('/playlistlerim', (req, res) => res.send(injectMeta('Playlistlerim – CigCig Müzik', 'Kendi müzik playlistlerini oluştur ve yönet', `${SITE_URL}/playlistlerim`, '')));
+app.get('/playlist/:id', (req, res) => res.send(injectMeta('Playlist – CigCig Müzik', 'CigCig Müzik playlist', `${SITE_URL}/playlist/${req.params.id}`, '')));
+
+// ===== PLAYLIST API =====
+app.get('/api/playlists', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT p.*, CAST(COUNT(ps.id) AS INTEGER) as song_count
+       FROM playlists p
+       LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id
+       WHERE p.user_id = $1
+       GROUP BY p.id
+       ORDER BY p.created_at DESC`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/playlists', authMiddleware, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
+    const { rows } = await query(
+      'INSERT INTO playlists (user_id, name, description) VALUES ($1, $2, $3) RETURNING *',
+      [req.user.id, name.trim(), description?.trim() || '']
+    );
+    res.json(rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/playlists/:id', authMiddleware, async (req, res) => {
+  try {
+    const { rows: pl } = await query('SELECT * FROM playlists WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    const { rows: songs } = await query(
+      `SELECT ps.id as ps_id, ps.position, s.id, s.slug, s.title, s.artist_name, s.cover_url, s.audio_url, s.play_count
+       FROM playlist_songs ps
+       JOIN songs s ON s.id = ps.song_id
+       WHERE ps.playlist_id = $1 AND s.status = 'active'
+       ORDER BY ps.position ASC, ps.added_at ASC`,
+      [req.params.id]
+    );
+    res.json({ ...pl[0], songs });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/playlists/:id', authMiddleware, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
+    const { rows } = await query(
+      'UPDATE playlists SET name=$1, description=$2 WHERE id=$3 AND user_id=$4 RETURNING *',
+      [name.trim(), description?.trim() || '', req.params.id, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    res.json(rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/playlists/:id', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('DELETE FROM playlists WHERE id=$1 AND user_id=$2 RETURNING id', [req.params.id, req.user.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/playlists/:id/songs', authMiddleware, async (req, res) => {
+  try {
+    const { song_id } = req.body;
+    const { rows: pl } = await query('SELECT id FROM playlists WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    const { rows: song } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [song_id]);
+    if (!song.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+    const { rows: maxPos } = await query('SELECT COALESCE(MAX(position), -1) as mp FROM playlist_songs WHERE playlist_id=$1', [req.params.id]);
+    const pos = parseInt(maxPos[0].mp) + 1;
+    try {
+      await query('INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES ($1, $2, $3)', [req.params.id, song_id, pos]);
+    } catch(e2) {
+      if (e2.code === '23505') return res.status(400).json({ error: 'Bu şarkı zaten playlistte' });
+      throw e2;
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/playlists/:id/songs/:songId', authMiddleware, async (req, res) => {
+  try {
+    const { rows: pl } = await query('SELECT id FROM playlists WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    await query('DELETE FROM playlist_songs WHERE playlist_id=$1 AND song_id=$2', [req.params.id, req.params.songId]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/playlists/:id/reorder', authMiddleware, async (req, res) => {
+  try {
+    const { order } = req.body;
+    if (!Array.isArray(order)) return res.status(400).json({ error: 'order array gerekli' });
+    const { rows: pl } = await query('SELECT id FROM playlists WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    for (let i = 0; i < order.length; i++) {
+      await query('UPDATE playlist_songs SET position=$1 WHERE playlist_id=$2 AND song_id=$3', [i, req.params.id, order[i]]);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // ===== ADMIN YETKİ SİSTEMİ =====
 app.get('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => {
