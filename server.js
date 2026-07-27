@@ -1444,42 +1444,44 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
 });
 
 app.put('/api/profile/username', authMiddleware, async (req, res) => {
-  const { username } = req.body;
-  if (!username) return res.status(400).json({ error: 'Kullanıcı adı zorunlu' });
-  if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
-  if (!/^[a-zA-Z0-9_]+$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı yalnızca harf, rakam ve alt çizgi içerebilir' });
-  if (username.toLowerCase() === req.user.username.toLowerCase()) return res.status(400).json({ error: 'Bu zaten mevcut kullanıcı adınız' });
+  try {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: 'Kullanıcı adı zorunlu' });
+    if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
+    if (!/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı yalnızca harf, rakam ve alt çizgi içerebilir' });
+    if (username.toLowerCase() === req.user.username.toLowerCase()) return res.status(400).json({ error: 'Bu zaten mevcut kullanıcı adınız' });
 
-  const now = new Date();
-  let changes = req.user.username_changes || 0;
-  let resetAt = req.user.username_change_reset_at ? new Date(req.user.username_change_reset_at) : null;
+    const now = new Date();
+    let changes = req.user.username_changes || 0;
+    let resetAt = req.user.username_change_reset_at ? new Date(req.user.username_change_reset_at) : null;
 
-  // Süre dolmuşsa sıfırla
-  if (resetAt && resetAt <= now) {
-    changes = 0;
-    resetAt = null;
-    await query('UPDATE users SET username_changes=0, username_change_reset_at=NULL WHERE id=$1', [req.user.id]);
-  }
+    // Süre dolmuşsa sıfırla
+    if (resetAt && resetAt <= now) {
+      changes = 0;
+      resetAt = null;
+      await query('UPDATE users SET username_changes=0, username_change_reset_at=NULL WHERE id=$1', [req.user.id]);
+    }
 
-  if (changes >= 2) {
-    const resetDateStr = resetAt ? resetAt.toLocaleDateString('tr-TR') : '?';
-    return res.status(429).json({ error: `Kullanıcı adını 2 kez değiştirdiniz. ${resetDateStr} tarihinde tekrar değiştirebilirsiniz.` });
-  }
+    if (changes >= 2) {
+      const resetDateStr = resetAt ? resetAt.toLocaleDateString('tr-TR') : '?';
+      return res.status(429).json({ error: `Kullanıcı adını 2 kez değiştirdiniz. ${resetDateStr} tarihinde tekrar değiştirebilirsiniz.` });
+    }
 
-  const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) AND id!=$2', [username, req.user.id]);
-  if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı zaten kullanımda' });
+    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) AND id!=$2', [username, req.user.id]);
+    if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı zaten kullanımda' });
 
-  const newChanges = changes + 1;
-  // 2. değişimde 7 günlük bekleme başlar; 1. değişimde de 7 günlük pencere başlat
-  const newResetAt = newChanges === 1
-    ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-    : (resetAt || new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000));
+    const newChanges = changes + 1;
+    // 2. değişimde 7 günlük bekleme başlar; 1. değişimde de 7 günlük pencere başlat
+    const newResetAt = newChanges === 1
+      ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+      : (resetAt || new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000));
 
-  await query('UPDATE users SET username=$1, username_changes=$2, username_change_reset_at=$3 WHERE id=$4',
-    [username, newChanges, newResetAt, req.user.id]);
-  await logAction(req.user.username, 'change_username', username);
-  const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
-  res.json(sanitizeUser(rows[0]));
+    await query('UPDATE users SET username=$1, username_changes=$2, username_change_reset_at=$3 WHERE id=$4',
+      [username, newChanges, newResetAt, req.user.id]);
+    await logAction(req.user.username, 'change_username', username);
+    const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+    res.json(sanitizeUser(rows[0]));
+  } catch (e) { res.status(500).json({ error: 'Güncelleme hatası: ' + e.message }); }
 });
 
 app.put('/api/profile/password', authMiddleware, async (req, res) => {
@@ -2041,6 +2043,19 @@ app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
      status || song.status, audio_url, cover_url, req.params.id]
   );
   res.json({ ok: true });
+});
+
+// Kullanıcı: kendi şarkısını sil
+app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM songs WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+    const song = rows[0];
+    if (song.uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu şarkıyı silme yetkiniz yok' });
+    await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
+    await logAction(req.user.username, 'delete_song', song.slug);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'Silme hatası: ' + e.message }); }
 });
 
 // Admin: şarkı sil

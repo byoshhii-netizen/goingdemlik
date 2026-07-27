@@ -1188,7 +1188,7 @@ async function renderBookList(app) {
     <div class="container page">
       <div class="books-list-header">
         <span class="page-subtitle" style="display:block;font-size:15px;font-weight:600;color:var(--text-secondary)">Topluluğun eserleri</span>
-        ${currentUser ? `<button class="btn btn-primary btn-sm" id="new-book-btn"><i class="fas fa-plus"></i> Yeni Kitap</button>` : ''}
+        ${currentUser ? `<button class="btn btn-primary btn-sm" id="new-book-btn"><i class="fas fa-plus"></i></button>` : ''}
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
       <div id="books-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
