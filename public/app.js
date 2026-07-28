@@ -3571,6 +3571,15 @@ async function init() {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     siteName = ps.site_name || 'CigCig';
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
+    // Kitap arka plan rengi CSS değişkeni olarak ayarla
+    if (ps.book_bg_color) {
+      document.documentElement.style.setProperty('--book-bg', ps.book_bg_color);
+      // Açık renk için koyu metin, koyu renk için açık metin
+      const hex = ps.book_bg_color.replace('#','');
+      const r = parseInt(hex.slice(0,2),16), g = parseInt(hex.slice(2,4),16), b = parseInt(hex.slice(4,6),16);
+      const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+      document.documentElement.style.setProperty('--book-text', luminance > 0.5 ? '#2c1a0e' : '#f5f0e8');
+    }
     const brandSpan = document.querySelector('.nav-brand span');
     if (brandSpan) brandSpan.textContent = siteName;
     const footer = document.getElementById('site-footer');

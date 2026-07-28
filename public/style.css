@@ -362,14 +362,14 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.08);
 }
 .ebook-page-counter { color: var(--text-secondary); font-size: 13px; }
-.ebook-page-content { background: linear-gradient(180deg, #3f2415 0%, #26130a 100%); border: 1px solid rgba(0,0,0,0.12); border-radius: var(--radius); padding: 24px; min-height: 360px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06); }
-.book-title-heading { font-size: 26px; font-weight: 800; margin-bottom: 18px; }
+.ebook-page-content { background: var(--book-bg, #F4ECD8); border: 1px solid rgba(0,0,0,0.12); border-radius: var(--radius); padding: 40px 48px; min-height: 360px; box-shadow: 0 2px 12px rgba(0,0,0,0.10), inset 0 0 0 1px rgba(0,0,0,0.06); }
+.book-title-heading { font-size: 26px; font-weight: 700; margin-bottom: 18px; font-family: 'Literata', Georgia, serif; color: var(--book-text, #2c1a0e); }
 
 /* Hide H1 headings inside ebook pages (e.g. 'Giriş') since page titles are managed elsewhere */
 .ebook-page-content h1, .ebook-page-content .book-title-heading {
   display: none !important;
 }
-.book-text { font-size: inherit; color: var(--text-primary); line-height: 1.9; white-space: pre-wrap; }
+.book-text { font-size: inherit; color: var(--book-text, #2c1a0e); line-height: 2.0; white-space: pre-wrap; font-family: 'Literata', Georgia, serif; }
 .ebook-page-image { width: 100%; max-height: 320px; border-radius: 16px; margin-bottom: 18px; object-fit: cover; }
 .ebook-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
 .ebook-nav-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; width: calc(50% - 6px); padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); text-decoration: none; }

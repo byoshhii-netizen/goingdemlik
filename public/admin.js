@@ -2002,6 +2002,47 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card" style="grid-column: 1 / -1">
+        <div class="card-header"><span><i class="fas fa-book-open" style="color:#a16207;margin-right:8px"></i>Kitap Sayfası Arka Plan Rengi</span></div>
+        <div class="card-body">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Okuyucu ekranındaki sayfa arka plan rengini ayarlayın. Varsayılan: <code>#F4ECD8</code> (eski kitap sayfası)</p>
+          <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
+            <div>
+              <label style="margin-bottom:8px">Renk Seçici</label>
+              <div style="display:flex;align-items:center;gap:12px">
+                <input type="color" id="s-book-bg-picker" value="${settings['book_bg_color']||'#F4ECD8'}"
+                  style="width:64px;height:48px;border-radius:10px;border:2px solid var(--border);padding:4px;cursor:pointer;background:var(--bg4);flex-shrink:0" />
+                <div>
+                  <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Önizleme</div>
+                  <div id="s-book-bg-preview" style="width:220px;height:54px;border-radius:8px;border:1px solid var(--border);background:${settings['book_bg_color']||'#F4ECD8'};display:flex;align-items:center;justify-content:center">
+                    <span style="font-family:'Literata',Georgia,serif;font-size:14px;color:#2c1a0e;opacity:0.75">Kitap metni önizleme</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;min-width:200px">
+              <label style="margin-bottom:8px">Hex Kodu</label>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="s-book-bg-hex" value="${settings['book_bg_color']||'#F4ECD8'}"
+                  placeholder="#F4ECD8" maxlength="7"
+                  style="font-family:monospace;font-size:15px;letter-spacing:2px;max-width:160px" />
+                <button class="btn btn-outline btn-sm" id="s-book-bg-apply-hex"><i class="fas fa-eye"></i> Önizle</button>
+              </div>
+              <div style="margin-top:12px">
+                <div style="font-size:11px;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Hazır Renkler</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap" id="s-book-bg-presets">
+                  ${[['#F4ECD8','Eski Kitap'],['#FFFDF5','Krem'],['#FFF8E7','Sıcak Beyaz'],['#E8F4E8','Yeşilimsi'],['#E8F0F8','Mavi Ton'],['#2c1a0e','Koyu Kahve'],['#1a1a2e','Gece'],['#0f0f0f','Siyah']].map(([c,n])=>`<button class="s-book-bg-preset" data-color="${c}" title="${n}" style="width:28px;height:28px;border-radius:6px;border:2px solid ${(settings['book_bg_color']||'#F4ECD8')===c?'var(--text)':'transparent'};background:${c};cursor:pointer;transition:all 0.15s"></button>`).join('')}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="s-book-bg-save"><i class="fas fa-save"></i> Kaydet</button>
+            <button class="btn btn-outline" id="s-book-bg-reset"><i class="fas fa-undo"></i> Varsayılan</button>
+            <div id="s-book-bg-msg" class="form-error"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="grid-column: 1 / -1">
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Ana Hat Rengi</span></div>
         <div class="card-body">
           <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Sitenin genel tema rengini buradan ayarlayabilirsiniz. Bu renk butonlar, kenarlıklar ve vurgular gibi tüm ana elemanlara otomatik olarak uygulanır.</p>
@@ -2210,6 +2251,71 @@ async function renderSettings(main) {
       toast('Varsayılan renge döndürüldü');
       colorMsg.style.color='var(--green)'; colorMsg.textContent='✓ Sıfırlandı';
     } catch(e) { colorMsg.style.color='var(--red2)'; colorMsg.textContent=e.message; }
+  });
+
+  // ===== KİTAP ARKA PLAN RENGİ =====
+  const bookBgPicker = document.getElementById('s-book-bg-picker');
+  const bookBgHex    = document.getElementById('s-book-bg-hex');
+  const bookBgPreview = document.getElementById('s-book-bg-preview');
+  const bookBgMsg    = document.getElementById('s-book-bg-msg');
+
+  function syncBookBgUI(hex) {
+    if (bookBgPicker)  bookBgPicker.value = hex;
+    if (bookBgHex)     bookBgHex.value    = hex;
+    if (bookBgPreview) bookBgPreview.style.background = hex;
+    document.querySelectorAll('.s-book-bg-preset').forEach(btn => {
+      btn.style.border = btn.dataset.color === hex ? '2px solid var(--text)' : '2px solid transparent';
+    });
+  }
+
+  bookBgPicker?.addEventListener('input', () => syncBookBgUI(bookBgPicker.value));
+
+  document.getElementById('s-book-bg-apply-hex')?.addEventListener('click', () => {
+    let hex = bookBgHex.value.trim();
+    if (!hex.startsWith('#')) hex = '#' + hex;
+    if (/^#[0-9A-Fa-f]{6}$/.test(hex)) syncBookBgUI(hex);
+    else { bookBgMsg.style.color='var(--red2)'; bookBgMsg.textContent='Geçerli bir hex kodu girin (örn: #F4ECD8)'; }
+  });
+
+  bookBgHex?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('s-book-bg-apply-hex')?.click();
+  });
+
+  document.querySelectorAll('.s-book-bg-preset').forEach(btn => {
+    btn.addEventListener('click', () => syncBookBgUI(btn.dataset.color));
+  });
+
+  document.getElementById('s-book-bg-save')?.addEventListener('click', async () => {
+    bookBgMsg.textContent = '';
+    let hex = (bookBgHex ? bookBgHex.value.trim() : bookBgPicker.value);
+    if (!hex.startsWith('#')) hex = '#' + hex;
+    if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+      bookBgMsg.style.color='var(--red2)'; bookBgMsg.textContent='Geçersiz renk kodu'; return;
+    }
+    try {
+      await fetch('/api/admin/settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Admin-Token':adminToken},
+        body:JSON.stringify({key:'book_bg_color', value:hex})
+      });
+      syncBookBgUI(hex);
+      toast('Kitap arka plan rengi kaydedildi!');
+      bookBgMsg.style.color='var(--green)'; bookBgMsg.textContent='✓ Kaydedildi';
+    } catch(e) { bookBgMsg.style.color='var(--red2)'; bookBgMsg.textContent=e.message; }
+  });
+
+  document.getElementById('s-book-bg-reset')?.addEventListener('click', async () => {
+    const def = '#F4ECD8';
+    syncBookBgUI(def);
+    try {
+      await fetch('/api/admin/settings', {
+        method:'POST',
+        headers:{'Content-Type':'application/json','X-Admin-Token':adminToken},
+        body:JSON.stringify({key:'book_bg_color', value:def})
+      });
+      toast('Kitap arka plan varsayılana döndürüldü');
+      bookBgMsg.style.color='var(--green)'; bookBgMsg.textContent='✓ Sıfırlandı';
+    } catch(e) { bookBgMsg.style.color='var(--red2)'; bookBgMsg.textContent=e.message; }
   });
 }
 
