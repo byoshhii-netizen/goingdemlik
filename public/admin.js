@@ -504,23 +504,35 @@ async function renderBooks(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Başlık</th><th>Hesap</th><th>Yazar</th><th>Sayfa</th><th>İndir/Yaz</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Banner</th><th>Başlık</th><th>Hesap</th><th>Sayfa</th><th>Durum</th><th>PDF</th><th>İşlem</th></tr></thead>
           <tbody id="books-tbody"></tbody>
         </table>
       </div>
     </div>`;
   const renderTable = (list) => {
     const tbody = $('#books-tbody'); if (!tbody) return;
-    if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">Kitap bulunamadı</td></tr>'; return; }
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:32px">Kitap bulunamadı</td></tr>'; return; }
     tbody.innerHTML = list.map(b => `<tr>
       <td style="color:var(--text3);font-size:12px">#${b.id}</td>
-      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(b.title)}">${escHtml(b.title)}</td>
+      <td>
+        ${b.cover_image
+          ? `<img src="${escHtml(b.cover_image)}" style="width:40px;height:54px;object-fit:cover;border-radius:4px;border:1px solid var(--border)" onerror="this.style.display='none'" />`
+          : `<div style="width:40px;height:54px;background:var(--bg4);border:1px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--text3);font-size:10px"><i class="fas fa-image"></i></div>`}
+      </td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(b.title)}">${escHtml(b.title)}</td>
       <td><span style="color:var(--blue2)">${escHtml(b.username||'—')}</span></td>
-      <td style="color:var(--text2);font-size:12px">${escHtml(b.author||'—')}</td>
       <td style="color:var(--text3);font-size:12px">${b.page_count||0}</td>
-      <td>${b.allow_download ? '<span class="badge badge-green"><i class="fas fa-check"></i> Açık</span>' : '<span class="badge badge-gray"><i class="fas fa-ban"></i> Kapalı</span>'}</td>
+      <td>${b.is_hidden ? '<span class="badge badge-red"><i class="fas fa-eye-slash"></i> Gizli</span>' : '<span class="badge badge-green"><i class="fas fa-eye"></i> Açık</span>'}</td>
+      <td>${(b.allow_download !== 0 && b.allow_pdf !== 0) ? '<span class="badge badge-green"><i class="fas fa-file-pdf"></i> Açık</span>' : '<span class="badge badge-gray"><i class="fas fa-ban"></i> Kapalı</span>'}</td>
       <td style="display:flex;gap:6px">
-        <button class="btn btn-blue btn-xs edit-book-btn" data-id="${b.id}" data-author="${escHtml(b.author||b.username||'')}" data-allow="${b.allow_download?1:0}" data-hidden="${b.is_hidden?1:0}" data-title="${escHtml(b.title)}"><i class="fas fa-edit"></i> Düzenle</button>
+        <button class="btn btn-blue btn-xs edit-book-btn"
+          data-id="${b.id}"
+          data-title="${escHtml(b.title)}"
+          data-cover="${escHtml(b.cover_image||'')}"
+          data-hidden="${b.is_hidden?1:0}"
+          data-allow-download="${(b.allow_download!==undefined?b.allow_download:1)?1:0}"
+          data-allow-pdf="${(b.allow_pdf!==undefined?b.allow_pdf:1)?1:0}"
+        ><i class="fas fa-edit"></i> Düzenle</button>
         <button class="btn btn-danger btn-xs del-book-btn" data-id="${b.id}"><i class="fas fa-trash"></i> Sil</button>
       </td>
     </tr>`).join('');
@@ -535,49 +547,83 @@ async function renderBooks(main) {
       btn.addEventListener('click', () => {
         const bookId = btn.dataset.id;
         const bookTitle = btn.dataset.title;
-        const bookAuthor = btn.dataset.author;
-        const allowDownload = btn.dataset.allow === '1';
+        const bookCover = btn.dataset.cover || '';
         const isHidden = btn.dataset.hidden === '1';
+        const allowDownload = btn.dataset.allowDownload !== '0';
+        const allowPdf = btn.dataset.allowPdf !== '0';
         showModal('Kitabı Düzenle', `
-          <div style="margin-bottom:14px;padding:10px 14px;background:var(--bg4);border-radius:8px;font-size:13px;color:var(--text2)">
+          <div style="margin-bottom:16px;padding:10px 14px;background:var(--bg4);border-radius:8px;font-size:13px;color:var(--text2)">
             <i class="fas fa-book" style="color:var(--blue2)"></i> <strong style="color:var(--text)">${escHtml(bookTitle)}</strong>
           </div>
+
           <div class="form-group">
-            <label>Kitap Yazarı <span style="color:var(--red2)">*</span></label>
-            <input id="adm-bk-author" type="text" value="${escHtml(bookAuthor)}" placeholder="Yazar adı (zorunlu)" />
+            <label>Kitap Başlığı</label>
+            <input id="adm-bk-title" type="text" value="${escHtml(bookTitle)}" placeholder="Kitap başlığı" />
           </div>
+
           <div class="form-group">
-            <label style="margin-bottom:10px">PDF İndir / Yazdır</label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="adm-bk-allow-download" ${allowDownload ? 'checked' : ''} />
-              Okuyucular bu kitabı indirebilir / yazdırabilir
-            </label>
+            <label>Banner / Kapak Görseli (URL)</label>
+            <input id="adm-bk-cover" type="text" value="${escHtml(bookCover)}" placeholder="https://... (resim URL'si)" />
+            <div id="adm-bk-cover-preview" style="margin-top:10px;${bookCover ? '' : 'display:none'}">
+              <img id="adm-bk-cover-img" src="${escHtml(bookCover)}" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid var(--border);object-fit:cover" onerror="this.parentElement.style.display='none'" />
+            </div>
           </div>
-          <div class="form-group">
-            <label style="margin-bottom:10px">Gizlilik</label>
+
+          <div style="background:var(--bg4);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px">
+            <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">Görünürlük</div>
             <label class="checkbox-label">
               <input type="checkbox" id="adm-bk-hidden" ${isHidden ? 'checked' : ''} />
-              Gizli kitap (sadece sahip ve admin görebilir)
+              <span>Kitabı gizle <span style="color:var(--text3);font-size:11px">(sadece sahip ve admin görebilir)</span></span>
             </label>
           </div>
-          <button class="btn btn-primary" id="adm-bk-save-btn" style="width:100%;margin-top:8px">Kaydet</button>
+
+          <div style="background:var(--bg4);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:16px">
+            <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">PDF / İndirme Ayarları</div>
+            <label class="checkbox-label" style="margin-bottom:8px">
+              <input type="checkbox" id="adm-bk-allow-download" ${allowDownload ? 'checked' : ''} />
+              <span>İndirmeye izin ver</span>
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="adm-bk-allow-pdf" ${allowPdf ? 'checked' : ''} />
+              <span>PDF oluşturmaya / yazdırmaya izin ver</span>
+            </label>
+          </div>
+
+          <button class="btn btn-primary" id="adm-bk-save-btn" style="width:100%;justify-content:center;padding:10px">
+            <i class="fas fa-save"></i> Kaydet
+          </button>
           <div id="adm-bk-error" style="color:var(--red2);font-size:12px;margin-top:6px"></div>
         `);
+
+        // Banner önizleme
+        $('#adm-bk-cover').addEventListener('input', e => {
+          const url = e.target.value.trim();
+          const preview = $('#adm-bk-cover-preview');
+          const img = $('#adm-bk-cover-img');
+          if (url) {
+            img.src = url;
+            preview.style.display = '';
+          } else {
+            preview.style.display = 'none';
+          }
+        });
+
         $('#adm-bk-save-btn').addEventListener('click', async () => {
-          const author = $('#adm-bk-author').value.trim();
-          if (!author) { $('#adm-bk-error').textContent = 'Yazar adı zorunlu'; return; }
+          const title = $('#adm-bk-title').value.trim();
+          if (!title) { $('#adm-bk-error').textContent = 'Başlık boş olamaz'; return; }
           try {
             const updated = await adminApi('/book/' + bookId, {
               method: 'PUT',
               body: JSON.stringify({
-                author,
+                title,
+                cover_image: $('#adm-bk-cover').value.trim(),
+                is_hidden: $('#adm-bk-hidden').checked,
                 allow_download: $('#adm-bk-allow-download').checked,
-                is_hidden: $('#adm-bk-hidden').checked
+                allow_pdf: $('#adm-bk-allow-pdf').checked
               })
             });
-            // Kitap listesini güncelle
             const idx = books.findIndex(b => b.id == bookId);
-            if (idx >= 0) books[idx] = { ...books[idx], author: updated.author, allow_download: updated.allow_download, is_hidden: updated.is_hidden };
+            if (idx >= 0) books[idx] = { ...books[idx], title: updated.title, cover_image: updated.cover_image, is_hidden: updated.is_hidden, allow_download: updated.allow_download, allow_pdf: updated.allow_pdf };
             toast('Kitap güncellendi');
             hideModal();
             renderTable(books);

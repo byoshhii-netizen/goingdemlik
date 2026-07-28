@@ -931,15 +931,17 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
 
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
-    const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
-    if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
+    const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed } = req.body;
+    const finalTitle = is_unnamed ? ('İsimsiz Kitap #' + Date.now().toString().slice(-6)) : title;
+    if (!is_unnamed && !title) return res.status(400).json({ error: 'Başlık zorunlu' });
     const limitErr = await checkDailyLimit(req.user.id, req.user, 'books');
     if (limitErr) return res.status(429).json({ error: limitErr });
-    const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id',
-      [req.user.id, title, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, is_hidden?1:0]);
+    const finalHidden = is_unnamed ? 1 : (is_hidden ? 1 : 0);
+    const tempSlug = slugify(finalTitle, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
+    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
+      [req.user.id, finalTitle, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0]);
     const id = rows[0].id;
-    const realSlug = makeSlug(title, id);
+    const realSlug = makeSlug(finalTitle, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
     await query('UPDATE users SET book_count=book_count+1 WHERE id=$1', [req.user.id]);
     await updateUserLevel(req.user.id);
@@ -954,9 +956,10 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, preface, karakterler, kadro, cover_image, is_hidden } = req.body;
-  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,updated_at=NOW() WHERE id=$7',
-    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, book.id]);
+  const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed } = req.body;
+  const newIsUnnamed = is_unnamed !== undefined ? (is_unnamed ? 1 : 0) : book.is_unnamed;
+  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,updated_at=NOW() WHERE id=$8',
+    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, book.id]);
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(rows[0]);
 });
@@ -1713,6 +1716,27 @@ app.delete('/api/admin/forum/:id', adminMiddleware, async (req, res) => {
 app.get('/api/admin/books', adminMiddleware, async (req, res) => {
   const { rows } = await query(`SELECT b.*, u.username FROM books b LEFT JOIN users u ON b.user_id=u.id ORDER BY b.created_at DESC`);
   res.json(rows);
+});
+
+app.put('/api/admin/book/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM books WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = rows[0];
+  const { title, cover_image, is_hidden, allow_download, allow_pdf } = req.body;
+  await query(
+    'UPDATE books SET title=$1, cover_image=$2, is_hidden=$3, allow_download=$4, allow_pdf=$5, updated_at=NOW() WHERE id=$6',
+    [
+      title !== undefined ? title : book.title,
+      cover_image !== undefined ? cover_image : book.cover_image,
+      is_hidden !== undefined ? (is_hidden ? 1 : 0) : book.is_hidden,
+      allow_download !== undefined ? (allow_download ? 1 : 0) : (book.allow_download !== undefined ? book.allow_download : 1),
+      allow_pdf !== undefined ? (allow_pdf ? 1 : 0) : (book.allow_pdf !== undefined ? book.allow_pdf : 1),
+      book.id
+    ]
+  );
+  await logAction('admin', 'edit_book', book.slug);
+  const { rows: updated } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
+  res.json(updated[0]);
 });
 
 app.delete('/api/admin/book/:id', adminMiddleware, async (req, res) => {

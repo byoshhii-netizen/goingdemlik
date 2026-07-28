@@ -1230,8 +1230,24 @@ function bookCardHTML(b) {
 }
 
 function showNewBookModal(existing = null) {
+  const isUnnamedBook = existing && existing.is_unnamed;
   showModal(existing ? 'Kitabı Düzenle' : 'Yeni Kitap', `
-    <div class="form-group"><label>Başlık <span style="color:var(--accent-red2)">*</span></label><input id="bk-title" type="text" value="${existing ? escHtml(existing.title) : ''}" /></div>
+    ${!existing ? `
+    <div id="bk-unnamed-banner" style="margin-bottom:14px;background:linear-gradient(135deg,rgba(234,179,8,0.12),rgba(249,115,22,0.08));border:1px solid rgba(234,179,8,0.3);border-radius:12px;padding:14px 16px">
+      <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin:0">
+        <div style="position:relative;flex-shrink:0">
+          <input type="checkbox" id="bk-no-name" style="width:18px;height:18px;cursor:pointer;accent-color:#eab308" />
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#facc15;margin-bottom:2px"><i class="fas fa-clock" style="margin-right:6px"></i>İsim koymadan oluştur</div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.5)">Kitap otomatik gizli olur, isim koyuncaya kadar kimse göremez</div>
+        </div>
+      </label>
+    </div>` : ''}
+    <div id="bk-title-group" class="form-group">
+      <label>Başlık ${!existing ? '<span id="bk-title-required" style="color:var(--accent-red2)">*</span>' : ''}</label>
+      <input id="bk-title" type="text" value="${existing ? escHtml(existing.is_unnamed ? '' : existing.title) : ''}" placeholder="${isUnnamedBook ? 'Yeni isim gir...' : 'Kitap başlığı'}" />
+    </div>
     <div class="form-group"><label>Kitap Yazarı <span style="color:var(--accent-red2)">*</span></label><input id="bk-author" type="text" placeholder="Yazar adı (zorunlu)" value="${existing ? escHtml(existing.author || existing.username || '') : (currentUser ? escHtml(currentUser.username) : '')}" /></div>
     <div class="form-group"><label>Tanıtım / Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
     <div class="form-group"><label>Karakterler (opsiyonel)</label><textarea id="bk-karakterler" rows="3" placeholder="Karakter isimleri, kısa notlar...">${existing ? escHtml(existing.karakterler || '') : ''}</textarea></div>
@@ -1241,7 +1257,7 @@ function showNewBookModal(existing = null) {
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
       ${existing && existing.cover_image ? `<img id="bk-cover-preview" src="${escHtml(existing.cover_image)}" style="width:100px;height:133px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="bk-cover-preview" style="display:none"></div>`}
     </div>
-    <div class="book-privacy-toggle" style="margin-bottom:12px">
+    <div id="bk-hidden-wrap" class="book-privacy-toggle" style="margin-bottom:12px">
       <div class="toggle-header">
         <i class="fas fa-lock" style="color:var(--accent-red2);font-size:16px"></i>
         <div class="toggle-label">
@@ -1267,9 +1283,41 @@ function showNewBookModal(existing = null) {
         <span class="toggle-slider"></span>
       </label>
     </div>
-    <button class="btn btn-primary" id="bk-submit" style="width:100%;margin-top:16px">${existing ? 'Güncelle' : 'Oluştur'}</button>
+    <button class="btn btn-primary" id="bk-submit" style="width:100%;margin-top:16px">${existing ? (isUnnamedBook ? '<i class="fas fa-tag"></i> İsim Ekle ve Yayınla' : 'Güncelle') : 'Oluştur'}</button>
     <div id="bk-error" class="form-error mt-4"></div>
   `);
+
+  // "İsim koymadan oluştur" checkbox davranışı
+  const noNameCb = $('#bk-no-name');
+  if (noNameCb) {
+    const applyNoName = (checked) => {
+      const titleGroup = $('#bk-title-group');
+      const hiddenWrap = $('#bk-hidden-wrap');
+      const titleInput = $('#bk-title');
+      const hiddenCb = $('#bk-is-hidden');
+      const submitBtn = $('#bk-submit');
+      if (checked) {
+        titleGroup.style.opacity = '0.4';
+        titleGroup.style.pointerEvents = 'none';
+        titleInput.value = '';
+        titleInput.placeholder = '(sonra eklenecek)';
+        hiddenWrap.style.opacity = '0.4';
+        hiddenWrap.style.pointerEvents = 'none';
+        hiddenCb.checked = true;
+        submitBtn.innerHTML = '<i class="fas fa-clock"></i> İsimsiz Oluştur (Gizli)';
+        submitBtn.style.background = 'linear-gradient(135deg,#ca8a04,#92400e)';
+      } else {
+        titleGroup.style.opacity = '';
+        titleGroup.style.pointerEvents = '';
+        titleInput.placeholder = 'Kitap başlığı';
+        hiddenWrap.style.opacity = '';
+        hiddenWrap.style.pointerEvents = '';
+        submitBtn.innerHTML = 'Oluştur';
+        submitBtn.style.background = '';
+      }
+    };
+    noNameCb.addEventListener('change', e => applyNoName(e.target.checked));
+  }
 
   $('#bk-cover-file').addEventListener('change', e => {
     const file = e.target.files[0]; if (!file) return;
@@ -1282,9 +1330,10 @@ function showNewBookModal(existing = null) {
   });
 
   $('#bk-submit').addEventListener('click', async () => {
+    const noName = $('#bk-no-name')?.checked || false;
     const title = $('#bk-title').value.trim();
     const author = $('#bk-author').value.trim();
-    if (!title) { $('#bk-error').textContent = 'Başlık zorunlu'; return; }
+    if (!noName && !title) { $('#bk-error').textContent = 'Başlık zorunlu'; return; }
     if (!author) { $('#bk-error').textContent = 'Yazar adı zorunlu'; return; }
     try {
       let cover_image = existing ? (existing.cover_image || '') : '';
@@ -1295,24 +1344,57 @@ function showNewBookModal(existing = null) {
         cover_image = r.url;
       }
       const payload = {
-        title,
+        title: noName ? '' : title,
         author,
         preface: $('#bk-preface').value.trim(),
         karakterler: $('#bk-karakterler').value.trim(),
         kadro: $('#bk-kadro').value.trim(),
         cover_image,
-        is_hidden: $('#bk-is-hidden').checked,
-        allow_download: $('#bk-allow-download').checked
+        is_hidden: noName ? true : $('#bk-is-hidden').checked,
+        allow_download: $('#bk-allow-download').checked,
+        is_unnamed: noName ? true : false
       };
       if (existing) {
+        // İsimsiz bir kitaba isim ekliyorsa is_unnamed=false, is_hidden'i kullanıcı seçimine bırak
+        if (existing.is_unnamed && title) {
+          payload.is_unnamed = false;
+          payload.is_hidden = $('#bk-is-hidden').checked;
+        }
         await api('/book/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
-        toast('Kitap güncellendi'); hideModal(); renderRoute(location.pathname);
+        toast(existing.is_unnamed && title ? '✅ Kitaba isim eklendi, artık herkese açık olabilir!' : 'Kitap güncellendi');
+        hideModal(); renderRoute(location.pathname);
       } else {
         const b = await api('/books', { method: 'POST', body: JSON.stringify(payload) });
-        toast('Kitap oluşturuldu'); hideModal(); navigate('/kitap/' + b.slug);
+        if (noName) {
+          toast('📖 İsimsiz kitap oluşturuldu — isim ekleyene kadar gizli kalacak!');
+          // Her 60 saniyede hatırlatma
+          _startUnnamedBookReminder(b.slug);
+        } else {
+          toast('Kitap oluşturuldu');
+        }
+        hideModal(); navigate('/kitap/' + b.slug);
       }
     } catch (e) { $('#bk-error').textContent = e.message; }
   });
+}
+
+// İsimsiz kitap için periyodik hatırlatma (sayfa yenilenene kadar)
+let _unnamedReminderInterval = null;
+function _startUnnamedBookReminder(slug) {
+  if (_unnamedReminderInterval) clearInterval(_unnamedReminderInterval);
+  _unnamedReminderInterval = setInterval(() => {
+    // Sadece o kitabın sayfasındaysak hatırlat
+    if (location.pathname === '/kitap/' + slug) {
+      _showUnnamedPulse();
+    }
+  }, 60000); // her 60 saniye
+}
+function _showUnnamedPulse() {
+  const banner = document.getElementById('unnamed-book-reminder');
+  if (!banner) return;
+  banner.style.animation = 'none';
+  banner.offsetHeight; // reflow
+  banner.style.animation = 'unnamedPulse 0.6s ease 3';
 }
 
 async function renderBookDetail(app, slug) {
@@ -1356,13 +1438,52 @@ async function renderBookDetail(app, slug) {
 
   const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug)).join('');
 
+  // İsimsiz kitap hatırlatma banner'ı
+  const unnamedBannerHTML = (isOwner && book.is_unnamed) ? `
+    <div id="unnamed-book-reminder" style="
+      margin-bottom:18px;
+      background:linear-gradient(135deg,rgba(234,179,8,0.15),rgba(249,115,22,0.10));
+      border:1.5px solid rgba(234,179,8,0.45);
+      border-radius:14px;
+      padding:16px 18px;
+      display:flex;
+      align-items:center;
+      gap:14px;
+      animation:unnamedPulse 0.7s ease 2;
+    ">
+      <div style="flex-shrink:0;width:42px;height:42px;border-radius:50%;background:rgba(234,179,8,0.18);display:flex;align-items:center;justify-content:center;font-size:20px">
+        ⏰
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:700;color:#facc15;margin-bottom:3px">Bu kitabın henüz ismi yok!</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.55)">İsim ekleyene kadar sadece sen görebilirsin. Herkese açmak için bir isim koy.</div>
+      </div>
+      <button id="unnamed-add-name-btn" class="btn btn-sm" style="
+        flex-shrink:0;
+        background:linear-gradient(135deg,#ca8a04,#92400e);
+        color:#fff;
+        border:none;
+        white-space:nowrap;
+        font-weight:700;
+      "><i class="fas fa-tag"></i> İsim Ekle</button>
+    </div>
+  ` : '';
+
   app.innerHTML = `<div class="container page">
+    <style>
+      @keyframes unnamedPulse {
+        0%   { box-shadow: 0 0 0 0 rgba(234,179,8,0.5); }
+        50%  { box-shadow: 0 0 0 10px rgba(234,179,8,0); }
+        100% { box-shadow: 0 0 0 0 rgba(234,179,8,0); }
+      }
+    </style>
+    ${unnamedBannerHTML}
     <div class="book-detail-header">
       <div class="book-detail-cover">
         ${book.cover_image ? `<img src="${escHtml(book.cover_image)}" alt="" />` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-card2)"><i class="fas fa-book" style="font-size:40px;color:var(--text-muted)"></i></div>`}
       </div>
       <div class="book-detail-info">
-        <div class="book-detail-title">${escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
+        <div class="book-detail-title">${book.is_unnamed ? '<span style="color:rgba(255,255,255,0.3);font-style:italic">İsimsiz Kitap</span>' : escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
         ${(book.author || book.username) ? `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> <span style="font-weight:600">${escHtml(book.author || book.username)}</span></div>` : ''}
         <div class="book-detail-meta">
           <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
@@ -1405,6 +1526,21 @@ async function renderBookDetail(app, slug) {
         try { await api(`/book/${slug}/chapter/${btn.dataset.id}`, { method: 'DELETE' }); toast('Bölüm silindi'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
       });
     });
+
+    // İsimsiz kitap: "İsim Ekle" butonu ve her-dakika hatırlatma
+    if (book.is_unnamed) {
+      $('#unnamed-add-name-btn')?.addEventListener('click', () => showNewBookModal(book));
+
+      // Her 60 saniyede bir banner'ı pulse et ve mini toast göster
+      if (_unnamedReminderInterval) clearInterval(_unnamedReminderInterval);
+      _unnamedReminderInterval = setInterval(() => {
+        _showUnnamedPulse();
+        toast('⏰ Kitabının henüz ismi yok! İsim ekleyene kadar gizli kalıyor.', 'error');
+      }, 60000);
+    } else {
+      // Kitaba isim eklendiyse temizle
+      if (_unnamedReminderInterval) { clearInterval(_unnamedReminderInterval); _unnamedReminderInterval = null; }
+    }
   }
 
   $('#download-pdf-btn')?.addEventListener('click', async () => {
