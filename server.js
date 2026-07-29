@@ -1536,15 +1536,22 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
 });
 
 app.put('/api/photos/:id', authMiddleware, async (req, res) => {
-  const { url, caption, show_likes, allow_comments, allow_shares } = req.body;
-  if (!url || typeof url !== 'string') return res.status(400).json({ error: 'Fotoğraf URL gerekli' });
+  const { caption, allow_likes, allow_comments, allow_sharing } = req.body;
   const { rows } = await query('SELECT user_id FROM photos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu fotoğrafı düzenleme yetkiniz yok' });
-  await query('UPDATE photos SET url=$1, caption=$2, show_likes=COALESCE($3, show_likes), allow_comments=COALESCE($4, allow_comments), allow_shares=COALESCE($5, allow_shares) WHERE id=$6',
-    [url, caption||'', show_likes !== undefined ? (show_likes?1:0) : null, allow_comments !== undefined ? (allow_comments?1:0) : null, allow_shares !== undefined ? (allow_shares?1:0) : null, req.params.id]);
+  await query(
+    'UPDATE photos SET caption=COALESCE($1,caption), allow_likes=COALESCE($2,allow_likes), allow_comments=COALESCE($3,allow_comments), allow_sharing=COALESCE($4,allow_sharing) WHERE id=$5',
+    [
+      caption !== undefined ? (caption||'') : null,
+      allow_likes !== undefined ? (allow_likes?1:0) : null,
+      allow_comments !== undefined ? (allow_comments?1:0) : null,
+      allow_sharing !== undefined ? (allow_sharing?1:0) : null,
+      req.params.id
+    ]
+  );
   const { rows: updated } = await query(
-    'SELECT p.id, p.url, p.caption, p.created_at, p.show_likes, p.allow_comments, p.allow_shares, u.username, u.avatar FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1',
+    'SELECT p.id, p.image_url, p.caption, p.created_at, p.allow_likes, p.allow_comments, p.allow_sharing, p.likes_count, p.comments_count, u.username, u.avatar FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1',
     [req.params.id]
   );
   res.json(updated[0]);

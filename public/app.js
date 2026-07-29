@@ -593,7 +593,11 @@ async function renderHome(app) {
     return '<button class="home-tab-btn' + (isFirst ? ' active' : '') + '" data-section="' + s + '" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:' + (isFirst ? 'rgba(189,162,117,0.15)' : 'transparent') + ';border:1px solid ' + (isFirst ? 'rgba(189,162,117,0.4)' : 'transparent') + ';border-radius:20px;color:' + (isFirst ? 'var(--accent-red2)' : 'var(--text-muted)') + ';cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;transition:all 0.2s"><i class="' + cfg.icon + '"></i> ' + cfg.label + '</button>';
   }).join('');
 
-  app.innerHTML = '<div class="container page"><div style="display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -20px 20px -20px;padding:0 20px 12px 20px;border-bottom:1px solid var(--border);scrollbar-width:none;-ms-overflow-style:none">' + tabsHTML + '</div><div id="home-section-content"><div class="loading-center"><div class="spinner"></div></div></div></div>';
+  app.innerHTML =
+    '<div id="home-tabs-bar" style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 20px;border-bottom:1px solid var(--border);scrollbar-width:none;-ms-overflow-style:none">' +
+      '<div style="display:flex;gap:8px;flex-wrap:nowrap;padding-bottom:12px;padding-top:4px">' + tabsHTML + '</div>' +
+    '</div>' +
+    '<div class="container page" style="padding-top:20px"><div id="home-section-content"><div class="loading-center"><div class="spinner"></div></div></div></div>';
 
   const renderSection = async (section) => {
     const el = document.getElementById('home-section-content');
@@ -2930,6 +2934,7 @@ async function renderProfile(app, username) {
       <button class="tab active" data-tab="forums">Forumlar</button>
       <button class="tab" data-tab="books">Kitaplar</button>
       <button class="tab" data-tab="groups">Gruplar</button>
+      <button class="tab" data-tab="photos">Fotoğraflar</button>
       <button class="tab" data-tab="videos">Videolar</button>
       <button class="tab" data-tab="saved">Kaydedilenler</button>
       <button class="tab" data-tab="songs">Müzikler</button>
@@ -2943,6 +2948,9 @@ async function renderProfile(app, username) {
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
+    </div>
+    <div id="tab-photos" class="hidden">
+      <div class="loading-center"><div class="spinner"></div></div>
     </div>
     <div id="tab-videos" class="hidden">
       ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
@@ -2969,14 +2977,19 @@ async function renderProfile(app, username) {
       }
     }
   }
+  let photosLoaded = false;
   $$('.tab').forEach(btn => {
     btn.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
-      ['forums', 'books', 'groups', 'videos', 'saved', 'songs'].forEach(name => {
+      ['forums', 'books', 'groups', 'photos', 'videos', 'saved', 'songs'].forEach(name => {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
       });
+      if (btn.dataset.tab === 'photos' && !photosLoaded) {
+        photosLoaded = true;
+        loadProfilePhotos(user.id, $('#tab-photos'), isOwn);
+      }
     });
   });
 
@@ -3072,6 +3085,102 @@ async function renderProfile(app, username) {
       document.addEventListener('click', () => { if (moreMenu) moreMenu.style.display = 'none'; }, { once: false });
     }
   }
+}
+
+function profilePhotoThumbHTML(p, isOwn) {
+  const imgSrc = escHtml(p.image_url || p.url || '');
+  const controls = isOwn ? `
+    <div style="position:absolute;top:4px;right:4px;display:flex;gap:4px;opacity:0;transition:opacity 0.2s" class="photo-controls">
+      <button class="photo-edit-btn" data-id="${p.id}" style="background:rgba(0,0,0,0.7);border:none;color:#fff;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:12px"><i class="fas fa-pen"></i></button>
+      <button class="photo-delete-btn" data-id="${p.id}" style="background:rgba(200,0,0,0.8);border:none;color:#fff;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:12px"><i class="fas fa-trash"></i></button>
+    </div>` : '';
+  return `<div class="profile-photo-thumb" style="position:relative;aspect-ratio:1;overflow:hidden;border-radius:8px;background:var(--bg-card2);cursor:pointer" data-id="${p.id}">
+    <img src="${imgSrc}" alt="" style="width:100%;height:100%;object-fit:cover" loading="lazy" />
+    <div style="position:absolute;bottom:0;left:0;right:0;padding:4px 6px;background:linear-gradient(transparent,rgba(0,0,0,0.5));font-size:11px;color:#fff;opacity:0;transition:opacity 0.2s" class="photo-caption-overlay">${p.likes_count||0} <i class="fas fa-heart"></i> · ${p.comments_count||0} <i class="fas fa-comment"></i></div>
+    ${controls}
+  </div>`;
+}
+
+async function loadProfilePhotos(userId, container, isOwn) {
+  if (!container) return;
+  try {
+    const photos = await api('/photos?user_id=' + userId + '&limit=60');
+    const list = Array.isArray(photos) ? photos : (photos.photos || photos.data || []);
+    if (!list.length) { container.innerHTML = '<div class="empty-state"><i class="fas fa-camera"></i><p>Henüz fotoğraf yok.</p></div>'; return; }
+    container.innerHTML = `<div class="grid-3" style="gap:6px">${list.map(p => profilePhotoThumbHTML(p, isOwn)).join('')}</div>`;
+    // hover show controls
+    container.querySelectorAll('.profile-photo-thumb').forEach(el => {
+      el.addEventListener('mouseenter', () => {
+        const c = el.querySelector('.photo-controls'); if (c) c.style.opacity = '1';
+        const o = el.querySelector('.photo-caption-overlay'); if (o) o.style.opacity = '1';
+      });
+      el.addEventListener('mouseleave', () => {
+        const c = el.querySelector('.photo-controls'); if (c) c.style.opacity = '0';
+        const o = el.querySelector('.photo-caption-overlay'); if (o) o.style.opacity = '0';
+      });
+    });
+    if (isOwn) {
+      container.querySelectorAll('.photo-delete-btn').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          e.stopPropagation();
+          if (!confirm('Bu fotoğrafı silmek istiyor musun?')) return;
+          try {
+            await api('/photos/' + btn.dataset.id, { method: 'DELETE' });
+            toast('Fotoğraf silindi');
+            loadProfilePhotos(userId, container, isOwn);
+          } catch(err) { toast(err.message || 'Silinemedi', 'error'); }
+        });
+      });
+      container.querySelectorAll('.photo-edit-btn').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          e.stopPropagation();
+          const photoId = btn.dataset.id;
+          try {
+            const photo = await api('/photos/' + photoId);
+            showPhotoEditModal(photo, async (updates) => {
+              await api('/photos/' + photoId, { method: 'PUT', body: JSON.stringify(updates) });
+              toast('Fotoğraf güncellendi');
+              loadProfilePhotos(userId, container, isOwn);
+            });
+          } catch(err) { toast(err.message || 'Yüklenemedi', 'error'); }
+        });
+      });
+    }
+  } catch(err) {
+    container.innerHTML = '<div class="empty-state"><i class="fas fa-camera"></i><p>Fotoğraflar yüklenemedi.</p></div>';
+  }
+}
+
+function showPhotoEditModal(photo, onSave) {
+  const existing = document.getElementById('photo-edit-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.id = 'photo-edit-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:400px;position:relative">
+    <button id="pem-close" style="position:absolute;top:12px;right:12px;background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer"><i class="fas fa-times"></i></button>
+    <div style="font-size:16px;font-weight:700;margin-bottom:16px">Fotoğrafı Düzenle</div>
+    <div style="margin-bottom:12px"><label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px">Açıklama</label>
+      <textarea id="pem-caption" style="width:100%;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text-primary);font-size:13px;resize:vertical;min-height:60px;box-sizing:border-box">${escHtml(photo.caption||'')}</textarea></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px"><input type="checkbox" id="pem-likes" ${photo.allow_likes!==0?'checked':''}> Beğenilere izin ver</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px"><input type="checkbox" id="pem-comments" ${photo.allow_comments!==0?'checked':''}> Yorumlara izin ver</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px"><input type="checkbox" id="pem-sharing" ${photo.allow_sharing!==0?'checked':''}> Paylaşıma izin ver</label>
+    </div>
+    <button id="pem-save" class="btn btn-primary" style="width:100%">Kaydet</button>
+  </div>`;
+  document.body.appendChild(modal);
+  document.getElementById('pem-close').onclick = () => modal.remove();
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.getElementById('pem-save').onclick = async () => {
+    const updates = {
+      caption: document.getElementById('pem-caption').value,
+      allow_likes: document.getElementById('pem-likes').checked ? 1 : 0,
+      allow_comments: document.getElementById('pem-comments').checked ? 1 : 0,
+      allow_sharing: document.getElementById('pem-sharing').checked ? 1 : 0
+    };
+    try { await onSave(updates); modal.remove(); } catch(err) { toast(err.message || 'Kaydedilemedi', 'error'); }
+  };
 }
 
 async function renderSettings(app) {
