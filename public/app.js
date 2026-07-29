@@ -593,7 +593,7 @@ async function renderHome(app) {
     return '<button class="home-tab-btn' + (isFirst ? ' active' : '') + '" data-section="' + s + '" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:' + (isFirst ? 'rgba(189,162,117,0.15)' : 'transparent') + ';border:1px solid ' + (isFirst ? 'rgba(189,162,117,0.4)' : 'transparent') + ';border-radius:20px;color:' + (isFirst ? 'var(--accent-red2)' : 'var(--text-muted)') + ';cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;transition:all 0.2s"><i class="' + cfg.icon + '"></i> ' + cfg.label + '</button>';
   }).join('');
 
-  app.innerHTML = '<div class="container page"><div style="display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid var(--border);scrollbar-width:none">' + tabsHTML + '</div><div id="home-section-content"><div class="loading-center"><div class="spinner"></div></div></div></div>';
+  app.innerHTML = '<div class="container page"><div style="display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -20px 20px -20px;padding:0 20px 12px 20px;border-bottom:1px solid var(--border);scrollbar-width:none;-ms-overflow-style:none">' + tabsHTML + '</div><div id="home-section-content"><div class="loading-center"><div class="spinner"></div></div></div></div>';
 
   const renderSection = async (section) => {
     const el = document.getElementById('home-section-content');
@@ -3489,12 +3489,12 @@ function renderLogin(app) {
       }
       .auth-logo-wrap { text-align: center; margin-bottom: 28px; }
       .auth-logo-circle {
-        width: 68px; height: 68px;
-        background: linear-gradient(135deg, #BDA275, #7a5c30);
+        width: 80px; height: 80px;
         border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-        font-size: 26px; color: #fff; box-shadow: 0 0 28px rgba(189,162,117,0.35);
+        overflow: hidden; box-shadow: 0 0 28px rgba(189,162,117,0.35);
         margin-bottom: 14px;
       }
+      .auth-logo-circle img { width: 100%; height: 100%; object-fit: contain; }
       .auth-heading { font-size: 26px; font-weight: 800; text-align: center; margin-bottom: 4px; letter-spacing: -0.5px; }
       .auth-sub { font-size: 13px; color: var(--text-muted, #888); text-align: center; margin-bottom: 28px; }
       .auth-field { margin-bottom: 16px; }
@@ -3532,7 +3532,7 @@ function renderLogin(app) {
     <div class="auth-outer">
       <div class="auth-glass">
         <div class="auth-logo-wrap">
-          <div class="auth-logo-circle"><i class="fas fa-mug-hot"></i></div>
+          <div class="auth-logo-circle"><img src="/cigcig.png" alt="CigCig" /></div>
           <div class="auth-heading">Tekrar Hosgeldin</div>
           <div class="auth-sub">Hesabina giris yap</div>
         </div>
@@ -3626,7 +3626,7 @@ function renderRegister(app) {
     <div class="auth-outer">
       <div class="auth-glass">
         <div class="auth-logo-wrap">
-          <div class="auth-logo-circle"><i class="fas fa-user-plus"></i></div>
+          <div class="auth-logo-circle"><img src="/cigcig.png" alt="CigCig" /></div>
           <div class="auth-heading">Topluluğa Katıl</div>
           <div class="auth-sub">Ucretsiz hesap olustur</div>
         </div>

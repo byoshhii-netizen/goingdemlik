@@ -74,9 +74,6 @@ app.get('/ads.txt', (req, res) => {
 });
 
 const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
-if (!process.env.SITE_URL) {
-  console.warn('[SEO] ⚠️  SITE_URL env ayarlanmamış! Railway panelinde: SITE_URL=https://cigcig.xyz');
-}
 
 // ===== RATE LIMITERS =====
 
