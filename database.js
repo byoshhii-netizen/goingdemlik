@@ -524,6 +524,52 @@ async function initDb() {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
+    -- Varsayılan mağaza ürünleri (sadece yoksa ekle)
+    INSERT INTO store_products (name, description, features, type, price, original_price, duration_days, visible, badge_color, badge_icon, sort_order)
+    SELECT * FROM (VALUES
+      (
+        'VIP Üyelik',
+        '30 günlük VIP üyelik. Özel rozet, öncelikli destek ve daha fazlası.',
+        '["Özel VIP rozeti","Öncelikli destek","VIP üye kanallarına erişim","Özel profil çerçevesi"]',
+        'vip',
+        49.99::NUMERIC,
+        NULL::NUMERIC,
+        30,
+        1,
+        '#f59e0b',
+        'fas fa-star',
+        1
+      ),
+      (
+        'Plus Üyelik',
+        '30 günlük Plus üyelik. Gelişmiş özellikler ve ayrıcalıklar.',
+        '["Özel Plus rozeti","Reklamsız deneyim","Plus üye ayrıcalıkları","Özel profil teması"]',
+        'plus',
+        29.99::NUMERIC,
+        NULL::NUMERIC,
+        30,
+        1,
+        '#8b5cf6',
+        'fas fa-gem',
+        2
+      ),
+      (
+        'Admin Üyelik',
+        '30 günlük yönetici erişimi. Tüm yönetim araçlarına tam erişim.',
+        '["Tam yönetici erişimi","Tüm üye özelliklerini içerir","Gelişmiş moderasyon araçları","Özel Admin rozeti"]',
+        'admin',
+        99.99::NUMERIC,
+        NULL::NUMERIC,
+        30,
+        1,
+        '#ef4444',
+        'fas fa-shield-alt',
+        3
+      )
+    ) AS v(name, description, features, type, price, original_price, duration_days, visible, badge_color, badge_icon, sort_order)
+    WHERE NOT EXISTS (SELECT 1 FROM store_products LIMIT 1);
+
+
 
     CREATE TABLE IF NOT EXISTS artist_applications (
       id BIGSERIAL PRIMARY KEY,
