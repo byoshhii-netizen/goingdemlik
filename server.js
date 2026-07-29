@@ -3626,6 +3626,31 @@ app.get('/api/admin/shop/subscriptions', adminMiddleware, async (req, res) => {
 });
 
 // ===== BAŞLAT =====
+
+// ===== KULLANICININ SİPARİŞ GEÇMİŞİ =====
+app.get('/api/shop/my-orders', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT o.*, p.name as product_name, p.badge_icon, p.badge_color
+       FROM store_orders o
+       LEFT JOIN store_products p ON o.product_id = p.id
+       WHERE o.user_id = $1
+       ORDER BY o.created_at DESC
+       LIMIT 50`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== SPA FALLBACK — Tüm API dışı route'lar index.html'e yönlendirilir =====
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 initDb().then(() => {
   app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
 }).catch(err => {

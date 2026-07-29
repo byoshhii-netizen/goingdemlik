@@ -195,6 +195,7 @@ function renderRoute(fullPath) {
   if (path === '/playlistlerim') return renderMyPlaylists(app);
   if (path.startsWith('/playlist/')) return renderPlaylistDetail(app, segs[1]);
     if (path === '/magaza') return renderStore(app);
+  if (path === '/siparislerim') return renderMyOrders(app);
   renderNotFound(app);
 }
 
@@ -5982,4 +5983,106 @@ async function renderProfileSubscriptions(container, username) {
     </button>
   `;
   container.appendChild(wrap);
+}
+
+// ===================================================================
+// SİPARİŞLERİM SAYFASI
+// ===================================================================
+async function renderMyOrders(app) {
+  if (!currentUser) { navigate('/giris'); return; }
+  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
+  document.title = 'Siparişlerim – ' + siteName;
+
+  let orders = [];
+  let subs = [];
+  try { orders = await api('/shop/my-orders'); } catch(e) {}
+  try { subs = await api('/shop/my-subscriptions'); } catch(e) {}
+
+  const statusLabel = {
+    pending: { text: 'Beklemede', color: '#f59e0b', icon: 'fas fa-clock' },
+    completed: { text: 'Tamamlandı', color: '#22c55e', icon: 'fas fa-check-circle' },
+    failed: { text: 'Başarısız', color: '#ef4444', icon: 'fas fa-times-circle' },
+    refunded: { text: 'İade Edildi', color: '#6366f1', icon: 'fas fa-undo' },
+  };
+
+  const typeConfig = {
+    vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
+    plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
+    admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
+  };
+
+  function daysLeft(expiresAt) {
+    const diff = new Date(expiresAt) - new Date();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }
+
+  const activeSubs = subs.filter(s => s.is_active && new Date(s.expires_at) > new Date());
+
+  const subsHTML = activeSubs.length ? `
+    <div class="card card-body" style="margin-bottom:24px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px">
+        <i class="fas fa-crown" style="color:#fbbf24"></i> Aktif Üyeliklerim
+      </div>
+      ${activeSubs.map(s => {
+        const cfg = typeConfig[s.type] || typeConfig.vip;
+        const dl = daysLeft(s.expires_at);
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid var(--border);border-left:3px solid ${cfg.color};border-radius:12px;margin-bottom:10px;background:var(--bg-secondary)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="width:36px;height:36px;border-radius:10px;background:${cfg.color}22;color:${cfg.color};display:flex;align-items:center;justify-content:center;font-size:17px"><i class="${cfg.icon}"></i></div>
+            <div>
+              <div style="font-weight:700;font-size:14px">${escHtml(s.product_name || cfg.label)}</div>
+              <div style="font-size:12px;color:var(--text-muted)">Bitiş: ${new Date(s.expires_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})}</div>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:14px;font-weight:700;color:${dl <= 5 ? '#ef4444' : cfg.color}"><i class="fas fa-clock"></i> ${dl} gün</div>
+            <div style="font-size:11px;color:var(--text-muted)">kaldı</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  ` : '';
+
+  const ordersHTML = orders.length ? orders.map(o => {
+    const st = statusLabel[o.status] || statusLabel.pending;
+    const cfg = typeConfig[o.product_type] || typeConfig.vip;
+    return `<div class="card card-body" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+        <div style="width:40px;height:40px;border-radius:10px;background:${cfg.color}22;color:${cfg.color};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0"><i class="${cfg.icon}"></i></div>
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(o.product_name || o.product_type)}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${new Date(o.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Sipariş No: ${escHtml(o.platform_order_id || String(o.id))}</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;flex-shrink:0">
+        <div style="font-size:15px;font-weight:700">${parseFloat(o.amount||0).toFixed(2)} ₺</div>
+        <div style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;background:${st.color}18;color:${st.color};border:1px solid ${st.color}30">
+          <i class="${st.icon}"></i> ${st.text}
+        </div>
+      </div>
+    </div>`;
+  }).join('') : `<div class="empty-state"><i class="fas fa-receipt"></i><p>Henüz siparişiniz bulunmuyor.</p><a href="/magaza" data-link class="btn btn-primary" style="margin-top:12px"><i class="fas fa-store"></i> Mağazaya Git</a></div>`;
+
+  app.innerHTML = `
+    <div class="container page" style="max-width:700px;margin:0 auto;padding:24px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:10px">
+        <div>
+          <h1 style="font-size:22px;font-weight:800;margin:0">Siparişlerim</h1>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:2px">Ödeme geçmişiniz ve aktif üyelikleriniz</div>
+        </div>
+        <a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a>
+      </div>
+      ${subsHTML}
+      <div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+        <i class="fas fa-receipt" style="color:var(--accent-red2)"></i> Sipariş Geçmişi
+      </div>
+      ${ordersHTML}
+    </div>
+  `;
+
+  // data-link linkleri SPA navigate'e bağla
+  app.querySelectorAll('[data-link]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); navigate(a.getAttribute('href')); });
+  });
 }
