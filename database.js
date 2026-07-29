@@ -479,6 +479,51 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS store_products (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      features TEXT DEFAULT '[]',
+      type TEXT NOT NULL,
+      price NUMERIC(10,2) NOT NULL DEFAULT 0,
+      original_price NUMERIC(10,2) DEFAULT NULL,
+      duration_days INTEGER NOT NULL DEFAULT 30,
+      visible INTEGER NOT NULL DEFAULT 1,
+      badge_color TEXT DEFAULT '#fbbf24',
+      badge_icon TEXT DEFAULT 'fas fa-gem',
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id BIGINT REFERENCES store_products(id) ON DELETE SET NULL,
+      type TEXT NOT NULL,
+      started_at TIMESTAMP DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL,
+      is_active INTEGER DEFAULT 1,
+      order_id BIGINT,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS store_orders (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      product_id BIGINT REFERENCES store_products(id) ON DELETE SET NULL,
+      product_name TEXT NOT NULL,
+      product_type TEXT NOT NULL,
+      amount NUMERIC(10,2) NOT NULL,
+      currency TEXT DEFAULT 'TRY',
+      status TEXT NOT NULL DEFAULT 'pending',
+      shopier_order_id TEXT DEFAULT '',
+      platform_order_id TEXT UNIQUE NOT NULL,
+      payment_data TEXT DEFAULT '{}',
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
 
     CREATE TABLE IF NOT EXISTS artist_applications (
       id BIGSERIAL PRIMARY KEY,

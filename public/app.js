@@ -194,6 +194,7 @@ function renderRoute(fullPath) {
   if (path === '/sarki-yukle') return renderShareSong(app);
   if (path === '/playlistlerim') return renderMyPlaylists(app);
   if (path.startsWith('/playlist/')) return renderPlaylistDetail(app, segs[1]);
+    if (path === '/magaza') return renderStore(app);
   renderNotFound(app);
 }
 
@@ -2887,6 +2888,20 @@ async function renderProfile(app, username) {
     </div>
   </div>`;
 
+
+  // Kendi profilimizde abonelik bölümünü göster
+  if (isOwn) {
+    const profileContainer = app.querySelector('.container.page');
+    if (profileContainer) {
+      // .tabs div'inden önce abonelik bölümü ekle
+      const tabsDiv = profileContainer.querySelector('.tabs');
+      if (tabsDiv) {
+        const subsWrapper = document.createElement('div');
+        profileContainer.insertBefore(subsWrapper, tabsDiv);
+        renderProfileSubscriptions(subsWrapper, username);
+      }
+    }
+  }
   $$('.tab').forEach(btn => {
     btn.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
@@ -5697,4 +5712,274 @@ function setupPlaylistDnD(table, songs, plId, onReorder) {
       } catch(err) { toast(err.message, 'error'); }
     });
   });
+}
+
+
+
+// ===================================================================
+// MAĞAZA (STORE) FRONTEND - app.js'ye eklenecek
+// renderRoute() içine ve renderProfile() içine eklemeler var
+// ===================================================================
+
+// ---- renderRoute() içine ekle (renderNotFound(app) satırından önce) ----
+// if (path === '/magaza') return renderStore(app);
+// if (path === '/magaza/basarili') return renderStoreSuccess(app);
+
+// ===================================================================
+// MAĞAZA SAYFASI
+// ===================================================================
+async function renderStore(app) {
+  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
+  document.title = 'Mağaza – ' + siteName;
+
+  const urlParams = new URLSearchParams(location.search);
+  const durum = urlParams.get('durum');
+
+  let products = [];
+  try { products = await api('/shop/products'); } catch(e) { }
+
+  let mySubscriptions = [];
+  if (currentUser) {
+    try { mySubscriptions = await api('/shop/my-subscriptions'); } catch {}
+  }
+
+  const typeConfig = {
+    vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
+    plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
+    admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
+  };
+
+  function daysLeft(expiresAt) {
+    const diff = new Date(expiresAt) - new Date();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }
+
+  function myActiveSub(type) {
+    return mySubscriptions.find(s => s.type === type && s.is_active);
+  }
+
+  function productCardHTML(p) {
+    const cfg = typeConfig[p.type] || typeConfig.vip;
+    const features = (() => { try { return JSON.parse(p.features || '[]'); } catch { return []; } })();
+    const hasSale = p.original_price && parseFloat(p.original_price) > parseFloat(p.price);
+    const discountPct = hasSale ? Math.round((1 - parseFloat(p.price)/parseFloat(p.original_price)) * 100) : 0;
+    const activeSub = myActiveSub(p.type);
+
+    return `<div class="store-card" data-product-id="${p.id}" data-product-type="${p.type}">
+      <div class="store-card-header" style="background:${cfg.gradient}">
+        ${hasSale ? `<div class="store-badge-sale">%${discountPct} İNDİRİM</div>` : ''}
+        <div class="store-card-icon"><i class="${escHtml(p.badge_icon || cfg.icon)}"></i></div>
+        <div class="store-card-type">${escHtml(p.name)}</div>
+        <div class="store-card-price-row">
+          ${hasSale ? `<span class="store-price-old">${parseFloat(p.original_price).toFixed(2)} ₺</span>` : ''}
+          <span class="store-price-new">${parseFloat(p.price).toFixed(2)} ₺</span>
+        </div>
+        <div class="store-card-duration"><i class="fas fa-clock"></i> ${p.duration_days} günlük üyelik</div>
+      </div>
+      <div class="store-card-body">
+        ${p.description ? `<p class="store-card-desc">${escHtml(p.description)}</p>` : ''}
+        ${features.length ? `<ul class="store-features">${features.map(f=>`<li><i class="fas fa-check-circle" style="color:${cfg.color}"></i> ${escHtml(f)}</li>`).join('')}</ul>` : ''}
+        ${activeSub ? `
+          <div class="store-active-badge"><i class="fas fa-check-circle"></i> Aktif Üyeliğin Var</div>
+          <div class="store-active-info"><i class="fas fa-calendar-alt"></i> ${daysLeft(activeSub.expires_at)} gün kaldı · ${new Date(activeSub.expires_at).toLocaleDateString('tr-TR')} bitiyor</div>
+          <button class="btn btn-outline store-buy-btn" style="width:100%;margin-top:12px;opacity:0.6;cursor:default" disabled>Aktif Üyelik</button>
+        ` : currentUser ? `
+          <button class="btn btn-primary store-buy-btn" data-product-id="${p.id}" style="width:100%;margin-top:12px;background:${cfg.gradient};border:none">
+            <i class="fas fa-shopping-cart"></i> Satın Al
+          </button>
+        ` : `
+          <button class="btn btn-outline store-buy-btn" style="width:100%;margin-top:12px" onclick="navigate('/giris')">
+            <i class="fas fa-sign-in-alt"></i> Giriş Yap & Satın Al
+          </button>
+        `}
+      </div>
+    </div>`;
+  }
+
+  const alertHTML = durum === 'basarili'
+    ? `<div class="store-alert success"><i class="fas fa-check-circle"></i> Ödemeniz başarıyla tamamlandı! Üyeliğiniz birkaç saniye içinde aktif edilecektir.</div>`
+    : durum === 'basarisiz'
+    ? `<div class="store-alert error"><i class="fas fa-times-circle"></i> Ödeme tamamlanamadı. Lütfen tekrar deneyin.</div>`
+    : '';
+
+  const mySubsHTML = (currentUser && mySubscriptions.length) ? `
+    <div class="store-section">
+      <h2 class="store-section-title"><i class="fas fa-crown" style="color:#fbbf24"></i> Aktif Üyeliklerim</h2>
+      <div class="store-my-subs">
+        ${mySubscriptions.map(s => {
+          const cfg = typeConfig[s.type] || typeConfig.vip;
+          const feats = (() => { try { return JSON.parse(s.features || '[]'); } catch { return []; } })();
+          const dl = daysLeft(s.expires_at);
+          const pct = Math.min(100, Math.round((dl / 30) * 100));
+          return `<div class="store-sub-card" style="border-left:3px solid ${cfg.color}">
+            <div class="store-sub-header">
+              <div style="display:flex;align-items:center;gap:10px">
+                <div class="store-sub-icon" style="background:${cfg.color}22;color:${cfg.color}"><i class="${cfg.icon}"></i></div>
+                <div>
+                  <div class="store-sub-name">${escHtml(s.product_name || cfg.label)}</div>
+                  <div class="store-sub-type" style="color:${cfg.color}">${cfg.label} Üyeliği</div>
+                </div>
+              </div>
+              <div class="store-sub-days" style="color:${dl <= 5 ? '#ef4444' : cfg.color}">
+                <i class="fas fa-clock"></i> ${dl} gün kaldı
+              </div>
+            </div>
+            <div class="store-sub-progress-bar">
+              <div class="store-sub-progress-fill" style="width:${pct}%;background:${cfg.gradient || cfg.color}"></div>
+            </div>
+            <div class="store-sub-meta">Bitiş: ${new Date(s.expires_at).toLocaleDateString('tr-TR', {day:'2-digit',month:'long',year:'numeric'})}</div>
+            ${feats.length ? `<ul class="store-features small">${feats.map(f=>`<li><i class="fas fa-check" style="color:${cfg.color}"></i> ${escHtml(f)}</li>`).join('')}</ul>` : ''}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : '';
+
+  app.innerHTML = `
+  <div class="container page">
+    <style>
+      .store-hero { text-align:center; padding:48px 0 32px; }
+      .store-hero-title { font-size:32px; font-weight:800; letter-spacing:-0.5px; margin-bottom:10px; }
+      .store-hero-sub { color:var(--text-muted); font-size:15px; max-width:500px; margin:0 auto; }
+      .store-section { margin-bottom:40px; }
+      .store-section-title { font-size:18px; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:8px; }
+      .store-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:20px; }
+      .store-card { background:var(--bg2); border:1px solid var(--border); border-radius:16px; overflow:hidden; transition:transform .2s,box-shadow .2s; }
+      .store-card:hover { transform:translateY(-2px); box-shadow:0 12px 40px rgba(0,0,0,0.3); }
+      .store-card-header { padding:28px 24px 20px; position:relative; text-align:center; }
+      .store-badge-sale { position:absolute; top:12px; right:12px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:.5px; }
+      .store-card-icon { font-size:36px; color:#fff; margin-bottom:10px; filter:drop-shadow(0 2px 8px rgba(0,0,0,0.3)); }
+      .store-card-type { font-size:22px; font-weight:800; color:#fff; margin-bottom:8px; text-shadow:0 1px 3px rgba(0,0,0,0.3); }
+      .store-card-price-row { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:6px; }
+      .store-price-old { font-size:14px; color:rgba(255,255,255,0.65); text-decoration:line-through; }
+      .store-price-new { font-size:28px; font-weight:800; color:#fff; text-shadow:0 1px 4px rgba(0,0,0,0.4); }
+      .store-card-duration { font-size:12px; color:rgba(255,255,255,0.75); display:flex; align-items:center; justify-content:center; gap:5px; }
+      .store-card-body { padding:20px 24px; }
+      .store-card-desc { font-size:13px; color:var(--text-muted); margin-bottom:14px; line-height:1.5; }
+      .store-features { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
+      .store-features li { font-size:13px; display:flex; align-items:center; gap:8px; color:var(--text); }
+      .store-features.small li { font-size:12px; color:var(--text-muted); }
+      .store-active-badge { background:#22c55e15; color:#22c55e; border:1px solid #22c55e33; border-radius:8px; padding:7px 12px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; margin-top:14px; }
+      .store-active-info { font-size:12px; color:var(--text-muted); margin-top:6px; display:flex; align-items:center; gap:6px; }
+      .store-alert { padding:14px 18px; border-radius:12px; margin-bottom:24px; font-size:14px; display:flex; align-items:center; gap:10px; font-weight:500; }
+      .store-alert.success { background:#22c55e18; border:1px solid #22c55e33; color:#22c55e; }
+      .store-alert.error { background:#ef444418; border:1px solid #ef444433; color:#ef4444; }
+      .store-my-subs { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
+      .store-sub-card { background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px; }
+      .store-sub-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+      .store-sub-icon { width:40px; height:40px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+      .store-sub-name { font-size:15px; font-weight:700; }
+      .store-sub-type { font-size:12px; font-weight:600; margin-top:2px; }
+      .store-sub-days { font-size:13px; font-weight:700; display:flex; align-items:center; gap:6px; }
+      .store-sub-progress-bar { height:5px; background:var(--bg4); border-radius:99px; overflow:hidden; margin-bottom:8px; }
+      .store-sub-progress-fill { height:100%; border-radius:99px; transition:width .3s; }
+      .store-sub-meta { font-size:12px; color:var(--text-muted); margin-bottom:10px; }
+      .store-empty { text-align:center; padding:60px 0; color:var(--text-muted); }
+      .store-empty i { font-size:48px; display:block; margin-bottom:16px; opacity:0.3; }
+      .store-buy-btn { transition:opacity .15s,transform .1s; }
+      .store-buy-btn:active { transform:scale(0.97); }
+    </style>
+
+    ${alertHTML}
+
+    <div class="store-hero">
+      <div class="store-hero-title"><i class="fas fa-store" style="color:var(--accent-red)"></i> Mağaza</div>
+      <div class="store-hero-sub">VIP, Plus ve Admin üyeliklerini satın alarak platformun tüm özelliklerine erişin.</div>
+    </div>
+
+    ${mySubsHTML}
+
+    <div class="store-section">
+      <h2 class="store-section-title"><i class="fas fa-box-open"></i> Üyelik Paketleri</h2>
+      ${products.length ? `<div class="store-grid">${products.map(productCardHTML).join('')}</div>` :
+        `<div class="store-empty"><i class="fas fa-store-alt-slash"></i><p>Henüz ürün yok.</p></div>`}
+    </div>
+  </div>`;
+
+  // Satın al butonları
+  app.querySelectorAll('.store-buy-btn[data-product-id]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!currentUser) { navigate('/giris'); return; }
+      const pid = btn.dataset.productId;
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yönlendiriliyor...';
+      try {
+        const result = await api('/shop/checkout', {
+          method: 'POST',
+          body: JSON.stringify({ product_id: parseInt(pid) })
+        });
+        if (result.payment_url) {
+          window.location.href = result.payment_url;
+        } else {
+          throw new Error('Ödeme linki alınamadı');
+        }
+      } catch(e) {
+        toast(e.message || 'Ödeme başlatılamadı', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-shopping-cart"></i> Satın Al';
+      }
+    });
+  });
+}
+
+// ===================================================================
+// PROFİL SAYFASINDA ABONELİK BİLGİSİ GÖSTER
+// renderProfile() içinde .tabs div'inden önce eklenecek
+// ===================================================================
+async function renderProfileSubscriptions(container, username) {
+  if (!currentUser || currentUser.username !== username) return;
+  let subs = [];
+  try { subs = await api('/shop/my-subscriptions'); } catch {}
+  if (!subs.length) return;
+
+  const typeConfig = {
+    vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
+    plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
+    admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
+  };
+
+  function daysLeft(expiresAt) {
+    const diff = new Date(expiresAt) - new Date();
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }
+
+  const subsHTML = subs.map(s => {
+    const cfg = typeConfig[s.type] || typeConfig.vip;
+    const dl = daysLeft(s.expires_at);
+    const feats = (() => { try { return JSON.parse(s.features || '[]'); } catch { return []; } })();
+    return `<div class="profile-sub-card" style="border-left:3px solid ${cfg.color};background:var(--bg2);border:1px solid var(--border);border-left:3px solid ${cfg.color};border-radius:12px;padding:14px 16px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:34px;height:34px;border-radius:9px;background:${cfg.color}22;color:${cfg.color};display:flex;align-items:center;justify-content:center;font-size:16px"><i class="${cfg.icon}"></i></div>
+          <div>
+            <div style="font-weight:700;font-size:14px">${escHtml(s.product_name || cfg.label)}</div>
+            <div style="font-size:11px;color:${cfg.color};font-weight:600">${cfg.label} Üyeliği</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:13px;font-weight:700;color:${dl <= 5 ? '#ef4444' : cfg.color}"><i class="fas fa-clock"></i> ${dl} gün</div>
+          <div style="font-size:11px;color:var(--text-muted)">kaldı</div>
+        </div>
+      </div>
+      <div style="height:4px;background:var(--bg4);border-radius:99px;overflow:hidden;margin-bottom:8px">
+        <div style="height:100%;width:${Math.min(100,Math.round((dl/30)*100))}%;background:${cfg.gradient};border-radius:99px"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted)">
+        <i class="fas fa-calendar-alt"></i> Bitiş tarihi: <strong>${new Date(s.expires_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})}</strong>
+      </div>
+      ${feats.length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">${feats.map(f=>`<span style="font-size:11px;background:${cfg.color}15;color:${cfg.color};padding:2px 8px;border-radius:20px;border:1px solid ${cfg.color}30">${escHtml(f)}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'margin-bottom:24px';
+  wrap.innerHTML = `
+    <div style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:12px">
+      <i class="fas fa-crown" style="color:#fbbf24;margin-right:6px"></i> Aktif Üyeliklerim
+    </div>
+    ${subsHTML}
+    <button onclick="navigate('/magaza')" class="btn btn-outline btn-sm" style="width:100%;margin-top:4px">
+      <i class="fas fa-store"></i> Mağazaya Git
+    </button>
+  `;
+  container.appendChild(wrap);
 }

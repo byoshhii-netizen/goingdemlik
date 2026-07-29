@@ -141,7 +141,10 @@ function loadSection(section) {
     levels: renderLevels, tags: renderTags, logs: renderLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
-    songs: renderAdminSongs, 'artist-apps': renderArtistApps
+    songs: renderAdminSongs, 'artist-apps': renderArtistApps,
+    'shop': renderShop,
+    'shop-orders': renderShopOrders,
+    'shop-settings': renderShopSettings
   };
   if (map[section]) map[section](main);
 }
@@ -2319,3 +2322,523 @@ async function renderSettings(main) {
   });
 }
 
+
+
+
+// ===================================================================
+// MAĞAZA (STORE) ADMIN SECTIONS - admin.js'ye eklenecek
+// loadSection() map'ine şunları ekle:
+//   'shop': renderShop,
+//   'shop-orders': renderShopOrders,
+//   'shop-settings': renderShopSettings,
+// ===================================================================
+
+// ===== MAĞAZA ÜRÜN YÖNETİMİ =====
+async function renderShop(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  let products = [];
+  try { products = await adminApi('/shop/products'); } catch(e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-store"></i></div> Mağaza</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+
+  main.innerHTML = `
+  <div class="adm-section-header" style="align-items:center">
+    <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-store"></i></div> Mağaza Ürünleri <span style="font-size:13px;font-weight:400;color:var(--text2)">(${products.length})</span></div>
+    <button class="btn btn-primary" id="shop-add-btn"><i class="fas fa-plus"></i> Yeni Ürün</button>
+  </div>
+  <div id="shop-products-list">
+    ${products.length === 0 ? `<div class="card"><div class="card-body" style="padding:40px;text-align:center;color:var(--text2)"><i class="fas fa-store-alt-slash" style="font-size:40px;opacity:.3;display:block;margin-bottom:12px"></i>Henüz ürün yok.</div></div>` : ''}
+  </div>`;
+
+  function renderProductList(list) {
+    const container = document.getElementById('shop-products-list');
+    if (!container) return;
+    if (!list.length) {
+      container.innerHTML = `<div class="card"><div class="card-body" style="padding:40px;text-align:center;color:var(--text2)"><i class="fas fa-store-alt-slash" style="font-size:40px;opacity:.3;display:block;margin-bottom:12px"></i>Henüz ürün yok.</div></div>`;
+      return;
+    }
+    const typeColors = { vip: '#fbbf24', plus: '#818cf8', admin: '#22c55e' };
+    const typeIcons  = { vip: 'fas fa-gem', plus: 'fas fa-plus-circle', admin: 'fas fa-shield-alt' };
+    container.innerHTML = `<div class="card"><div class="card-body" style="padding:0">
+      <table class="admin-table">
+        <thead><tr>
+          <th>Ürün</th><th>Tür</th><th>Fiyat</th><th>Orijinal</th><th>Süre</th><th>Durum</th><th>Sıra</th><th>İşlem</th>
+        </tr></thead>
+        <tbody>
+          ${list.map(p => {
+            const color = typeColors[p.type] || '#aaa';
+            const icon  = typeIcons[p.type]  || 'fas fa-box';
+            const hasSale = p.original_price && parseFloat(p.original_price) > parseFloat(p.price);
+            const discountPct = hasSale ? Math.round((1 - parseFloat(p.price)/parseFloat(p.original_price)) * 100) : 0;
+            return `<tr>
+              <td>
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div style="width:32px;height:32px;border-radius:8px;background:${color}22;color:${color};display:flex;align-items:center;justify-content:center"><i class="${escHtml(p.badge_icon||icon)}"></i></div>
+                  <div>
+                    <div style="font-weight:600;font-size:13px">${escHtml(p.name)}</div>
+                    ${p.description ? `<div style="font-size:11px;color:var(--text2)">${escHtml(p.description.substring(0,50))}${p.description.length>50?'...':''}</div>` : ''}
+                  </div>
+                </div>
+              </td>
+              <td><span style="color:${color};font-weight:600;text-transform:uppercase;font-size:12px">${escHtml(p.type)}</span></td>
+              <td>
+                <span style="font-weight:700;font-size:15px">${parseFloat(p.price).toFixed(2)} ₺</span>
+                ${hasSale ? `<span style="margin-left:4px;background:#ef444422;color:#ef4444;font-size:10px;font-weight:700;padding:1px 6px;border-radius:20px">-%${discountPct}</span>` : ''}
+              </td>
+              <td>${p.original_price ? `<span style="text-decoration:line-through;color:var(--text2);font-size:13px">${parseFloat(p.original_price).toFixed(2)} ₺</span>` : '-'}</td>
+              <td>${p.duration_days} gün</td>
+              <td>
+                <span class="toggle-visible" data-id="${p.id}" data-visible="${p.visible}" style="cursor:pointer;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;${p.visible?'background:#22c55e18;color:#22c55e;border:1px solid #22c55e33':'background:#ef444418;color:#ef4444;border:1px solid #ef444433'}">
+                  ${p.visible ? '<i class="fas fa-eye"></i> Görünür' : '<i class="fas fa-eye-slash"></i> Gizli'}
+                </span>
+              </td>
+              <td>${p.sort_order}</td>
+              <td>
+                <div style="display:flex;gap:6px">
+                  <button class="btn btn-outline btn-sm shop-edit-btn" data-id="${p.id}"><i class="fas fa-edit"></i></button>
+                  <button class="btn btn-sm shop-del-btn" data-id="${p.id}" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430"><i class="fas fa-trash"></i></button>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div></div>`;
+
+    // Toggle görünürlük
+    container.querySelectorAll('.toggle-visible').forEach(el => {
+      el.addEventListener('click', async () => {
+        const id = el.dataset.id;
+        const newVisible = el.dataset.visible === '1' ? 0 : 1;
+        try {
+          const updated = await adminApi('/shop/products/' + id, { method: 'PUT', body: JSON.stringify({ visible: newVisible }) });
+          const idx = products.findIndex(p => String(p.id) === String(id));
+          if (idx !== -1) products[idx] = updated;
+          renderProductList(products);
+          toast(newVisible ? 'Ürün görünür yapıldı' : 'Ürün gizlendi');
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+
+    // Düzenle
+    container.querySelectorAll('.shop-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = products.find(x => String(x.id) === String(btn.dataset.id));
+        if (!p) return;
+        showProductModal(p, async (data) => {
+          try {
+            const updated = await adminApi('/shop/products/' + p.id, { method: 'PUT', body: JSON.stringify(data) });
+            const idx = products.findIndex(x => x.id === p.id);
+            if (idx !== -1) products[idx] = updated;
+            renderProductList(products);
+            hideModal();
+            toast('Ürün güncellendi');
+          } catch(e) { toast(e.message, 'error'); }
+        });
+      });
+    });
+
+    // Sil
+    container.querySelectorAll('.shop-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Bu ürün silinsin mi?')) return;
+        try {
+          await adminApi('/shop/products/' + btn.dataset.id, { method: 'DELETE' });
+          const idx = products.findIndex(p => String(p.id) === String(btn.dataset.id));
+          if (idx !== -1) products.splice(idx, 1);
+          renderProductList(products);
+          toast('Ürün silindi');
+        } catch(e) { toast(e.message, 'error'); }
+      });
+    });
+  }
+
+  function showProductModal(existing, onSave) {
+    const features = existing ? (() => { try { return JSON.parse(existing.features || '[]'); } catch { return []; } })() : [];
+    showModal(existing ? 'Ürün Düzenle' : 'Yeni Ürün Ekle', `
+      <style>
+        .shop-form-group { margin-bottom:14px; }
+        .shop-form-group label { display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px }
+        .shop-feat-row { display:flex;gap:6px;margin-bottom:6px }
+        .shop-feat-row input { flex:1 }
+      </style>
+      <div class="shop-form-group">
+        <label>Ürün Adı *</label>
+        <input id="sp-name" type="text" value="${escHtml(existing?.name||'')}">
+      </div>
+      <div class="shop-form-group">
+        <label>Açıklama</label>
+        <textarea id="sp-desc" rows="2">${escHtml(existing?.description||'')}</textarea>
+      </div>
+      <div class="shop-form-group">
+        <label>Tür *</label>
+        <select id="sp-type">
+          <option value="vip" ${existing?.type==='vip'?'selected':''}>VIP</option>
+          <option value="plus" ${existing?.type==='plus'?'selected':''}>Plus</option>
+          <option value="admin" ${existing?.type==='admin'?'selected':''}>Admin</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="shop-form-group">
+          <label>Fiyat (₺) *</label>
+          <input id="sp-price" type="number" step="0.01" min="0" value="${existing?.price||''}">
+        </div>
+        <div class="shop-form-group">
+          <label>Orijinal Fiyat (₺) <small style="text-transform:none;font-weight:400">(indirim için)</small></label>
+          <input id="sp-orig" type="number" step="0.01" min="0" value="${existing?.original_price||''}">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="shop-form-group">
+          <label>Süre (gün)</label>
+          <input id="sp-days" type="number" min="1" value="${existing?.duration_days||30}">
+        </div>
+        <div class="shop-form-group">
+          <label>Sıra</label>
+          <input id="sp-sort" type="number" value="${existing?.sort_order||0}">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="shop-form-group">
+          <label>Rozet İkonu (Font Awesome)</label>
+          <input id="sp-icon" type="text" value="${escHtml(existing?.badge_icon||'fas fa-gem')}" placeholder="fas fa-gem">
+        </div>
+        <div class="shop-form-group">
+          <label>Rozet Rengi</label>
+          <input id="sp-color" type="color" value="${existing?.badge_color||'#fbbf24'}" style="width:100%;height:38px;padding:2px;cursor:pointer">
+        </div>
+      </div>
+      <div class="shop-form-group">
+        <label>Özellikler</label>
+        <div id="sp-feats-list">
+          ${features.map((f,i)=>`<div class="shop-feat-row"><input class="sp-feat-input" type="text" value="${escHtml(f)}"><button type="button" class="btn-remove-feat btn btn-sm" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:0 10px"><i class="fas fa-times"></i></button></div>`).join('')}
+        </div>
+        <button type="button" id="sp-add-feat" class="btn btn-outline btn-sm" style="margin-top:6px"><i class="fas fa-plus"></i> Özellik Ekle</button>
+      </div>
+      <div class="shop-form-group">
+        <label>Görünürlük</label>
+        <select id="sp-visible">
+          <option value="1" ${existing?.visible!=0?'selected':''}>Görünür</option>
+          <option value="0" ${existing?.visible==0?'selected':''}>Gizli</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:16px">
+        <button id="sp-save" class="btn btn-primary" style="flex:1"><i class="fas fa-save"></i> Kaydet</button>
+        <button onclick="hideModal()" class="btn btn-outline" style="flex:1">İptal</button>
+      </div>
+    `);
+
+    document.getElementById('sp-add-feat')?.addEventListener('click', () => {
+      const list = document.getElementById('sp-feats-list');
+      const row = document.createElement('div');
+      row.className = 'shop-feat-row';
+      row.innerHTML = `<input class="sp-feat-input" type="text" placeholder="özellik..."><button type="button" class="btn-remove-feat btn btn-sm" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:0 10px"><i class="fas fa-times"></i></button>`;
+      list.appendChild(row);
+      row.querySelector('.btn-remove-feat').addEventListener('click', () => row.remove());
+    });
+
+    document.getElementById('sp-feats-list')?.querySelectorAll('.btn-remove-feat').forEach(btn => {
+      btn.addEventListener('click', () => btn.closest('.shop-feat-row').remove());
+    });
+
+    document.getElementById('sp-save')?.addEventListener('click', () => {
+      const name = document.getElementById('sp-name')?.value.trim();
+      const type = document.getElementById('sp-type')?.value;
+      const price = parseFloat(document.getElementById('sp-price')?.value);
+      if (!name || !type || isNaN(price)) { toast('Ad, tür ve fiyat zorunlu', 'error'); return; }
+      const origVal = document.getElementById('sp-orig')?.value;
+      const feats = Array.from(document.querySelectorAll('.sp-feat-input')).map(i=>i.value.trim()).filter(Boolean);
+      onSave({
+        name, description: document.getElementById('sp-desc')?.value||'',
+        features: feats, type, price,
+        original_price: origVal ? parseFloat(origVal) : null,
+        duration_days: parseInt(document.getElementById('sp-days')?.value)||30,
+        visible: parseInt(document.getElementById('sp-visible')?.value),
+        badge_icon: document.getElementById('sp-icon')?.value.trim()||'fas fa-gem',
+        badge_color: document.getElementById('sp-color')?.value||'#fbbf24',
+        sort_order: parseInt(document.getElementById('sp-sort')?.value)||0
+      });
+    });
+  }
+
+  renderProductList(products);
+
+  document.getElementById('shop-add-btn')?.addEventListener('click', () => {
+    showProductModal(null, async (data) => {
+      try {
+        const created = await adminApi('/shop/products', { method: 'POST', body: JSON.stringify(data) });
+        products.push(created);
+        renderProductList(products);
+        hideModal();
+        toast('Ürün eklendi');
+      } catch(e) { toast(e.message, 'error'); }
+    });
+  });
+}
+
+// ===== MAĞAZA SİPARİŞLERİ =====
+async function renderShopOrders(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+
+  const statusMap = {
+    pending:   { label:'Bekliyor',   color:'#f59e0b', bg:'#f59e0b18', border:'#f59e0b30' },
+    completed: { label:'Tamamlandı', color:'#22c55e', bg:'#22c55e18', border:'#22c55e30' },
+    failed:    { label:'Başarısız',  color:'#ef4444', bg:'#ef444418', border:'#ef444430' },
+    refunded:  { label:'İade',       color:'#818cf8', bg:'#818cf818', border:'#818cf830' },
+  };
+
+  let orders = [];
+  try { orders = await adminApi('/shop/orders?limit=200'); } catch(e) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-receipt"></i></div> Siparişler</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px">${escHtml(e.message)}</div></div>`;
+    return;
+  }
+
+  const filterHTML = (status='') => `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+      ${['','pending','completed','failed','refunded'].map(s => {
+        const m = statusMap[s] || { label:'Tümü', color:'var(--text)', bg:'var(--bg4)', border:'var(--border)' };
+        const active = s === status;
+        return `<button class="shop-order-filter-btn btn btn-sm" data-status="${s}" style="background:${active?m.bg:'transparent'};color:${active?m.color:'var(--text2)'};border:1px solid ${active?m.border:'var(--border)'};font-weight:${active?700:400}">${s?m.label:'Tümü'} ${s?`(${orders.filter(o=>o.status===s).length})`:''}</button>`;
+      }).join('')}
+    </div>`;
+
+  function renderOrderTable(filteredOrders) {
+    const tbody = document.getElementById('shop-orders-tbody');
+    if (!tbody) return;
+    if (!filteredOrders.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text2)">Sipariş bulunamadı</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = filteredOrders.map(o => {
+      const sm = statusMap[o.status] || { label:o.status, color:'var(--text)', bg:'var(--bg4)', border:'var(--border)' };
+      const typeColors = { vip:'#fbbf24', plus:'#818cf8', admin:'#22c55e' };
+      const tc = typeColors[o.product_type] || '#aaa';
+      return `<tr>
+        <td style="font-weight:600;font-size:13px">#${o.id}</td>
+        <td>
+          <div style="font-weight:600">${escHtml(o.username||'—')}</div>
+          <div style="font-size:11px;color:var(--text2)">${escHtml(o.email||'')}</div>
+        </td>
+        <td>
+          <div style="font-weight:600">${escHtml(o.product_name)}</div>
+          <span style="color:${tc};font-size:11px;font-weight:700;text-transform:uppercase">${escHtml(o.product_type)}</span>
+        </td>
+        <td style="font-weight:700;font-size:15px">${parseFloat(o.amount||0).toFixed(2)} ₺</td>
+        <td><span style="background:${sm.bg};color:${sm.color};border:1px solid ${sm.border};padding:3px 9px;border-radius:20px;font-size:11px;font-weight:600">${sm.label}</span></td>
+        <td style="font-size:12px;color:var(--text2)">${o.shopier_order_id||'—'}</td>
+        <td style="font-size:12px">${formatDate(o.created_at)}</td>
+        <td>
+          <select class="order-status-select" data-id="${o.id}" style="font-size:11px;padding:4px 8px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:6px;cursor:pointer">
+            <option value="pending"   ${o.status==='pending'?'selected':''}>Bekliyor</option>
+            <option value="completed" ${o.status==='completed'?'selected':''}>Tamamlandı</option>
+            <option value="failed"    ${o.status==='failed'?'selected':''}>Başarısız</option>
+            <option value="refunded"  ${o.status==='refunded'?'selected':''}>İade</option>
+          </select>
+        </td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.order-status-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const id = sel.dataset.id;
+        const newStatus = sel.value;
+        try {
+          await adminApi('/shop/orders/' + id, { method: 'PUT', body: JSON.stringify({ status: newStatus }) });
+          const idx = orders.findIndex(o => String(o.id) === String(id));
+          if (idx !== -1) orders[idx].status = newStatus;
+          toast('Sipariş durumu güncellendi');
+          const activeFilter = document.querySelector('.shop-order-filter-btn.active-filter')?.dataset.status || '';
+          renderOrderTable(activeFilter ? orders.filter(o=>o.status===activeFilter) : orders);
+        } catch(e) { toast(e.message, 'error'); sel.value = orders.find(o=>String(o.id)===String(id))?.status || sel.value; }
+      });
+    });
+  }
+
+  const statsCompleted = orders.filter(o=>o.status==='completed');
+  const totalRevenue = statsCompleted.reduce((s,o)=>s+parseFloat(o.amount||0),0);
+
+  main.innerHTML = `
+  <div class="adm-section-header">
+    <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-receipt"></i></div> Siparişler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${orders.length})</span></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px;margin-bottom:20px">
+    <div class="card" style="text-align:center;padding:16px">
+      <div style="font-size:22px;font-weight:800;color:#22c55e">${statsCompleted.length}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Tamamlanan</div>
+    </div>
+    <div class="card" style="text-align:center;padding:16px">
+      <div style="font-size:22px;font-weight:800;color:#f59e0b">${orders.filter(o=>o.status==='pending').length}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Bekleyen</div>
+    </div>
+    <div class="card" style="text-align:center;padding:16px">
+      <div style="font-size:22px;font-weight:800;color:var(--red2)">${totalRevenue.toFixed(2)} ₺</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">Toplam Gelir</div>
+    </div>
+    <div class="card" style="text-align:center;padding:16px">
+      <div style="font-size:22px;font-weight:800">${orders.filter(o=>o.status==='refunded').length}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:4px">İade</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-body">
+      <div id="shop-order-filter-wrap">${filterHTML()}</div>
+      <div style="overflow-x:auto">
+        <table class="admin-table">
+          <thead><tr>
+            <th>#</th><th>Kullanıcı</th><th>Ürün</th><th>Tutar</th><th>Durum</th><th>Shopier ID</th><th>Tarih</th><th>Güncelle</th>
+          </tr></thead>
+          <tbody id="shop-orders-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+
+  renderOrderTable(orders);
+
+  document.getElementById('shop-order-filter-wrap')?.addEventListener('click', e => {
+    const btn = e.target.closest('.shop-order-filter-btn');
+    if (!btn) return;
+    document.querySelectorAll('.shop-order-filter-btn').forEach(b => {
+      b.classList.remove('active-filter');
+      const s = b.dataset.status;
+      const m = statusMap[s] || { color:'var(--text)', bg:'transparent', border:'var(--border)' };
+      b.style.background = 'transparent'; b.style.color = 'var(--text2)'; b.style.border = '1px solid var(--border)'; b.style.fontWeight = '400';
+    });
+    btn.classList.add('active-filter');
+    const s = btn.dataset.status;
+    const m = statusMap[s] || { color:'var(--text)', bg:'var(--bg4)', border:'var(--border)' };
+    btn.style.background = s ? m.bg : 'var(--bg4)';
+    btn.style.color = s ? m.color : 'var(--text)';
+    btn.style.border = '1px solid ' + (s ? m.border : 'var(--border)');
+    btn.style.fontWeight = '700';
+    renderOrderTable(s ? orders.filter(o=>o.status===s) : orders);
+  });
+}
+
+// ===== SHOPIER ÖDEME AYARLARI =====
+async function renderShopSettings(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  let setts = {};
+  try { setts = await adminApi('/shop/settings'); } catch {}
+
+  main.innerHTML = `
+  <div class="adm-section-header">
+    <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-credit-card"></i></div> Ödeme Sistemi (Shopier)</div>
+  </div>
+  <style>
+    .pay-section { background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:20px }
+    .pay-section h3 { font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px }
+    .pay-field { margin-bottom:14px }
+    .pay-field label { display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px }
+    .pay-field input, .pay-field select { width:100%;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:13px;outline:none }
+    .pay-field input:focus { border-color:rgba(189,162,117,.5) }
+    .pay-status { display:flex;align-items:center;gap:8px;padding:12px 16px;border-radius:10px;margin-bottom:20px;font-size:13px;font-weight:600 }
+    .pay-status.active { background:#22c55e18;border:1px solid #22c55e30;color:#22c55e }
+    .pay-status.inactive { background:#ef444418;border:1px solid #ef444430;color:#ef4444 }
+  </style>
+
+  <div class="${setts.shopier_enabled==='1'?'pay-status active':'pay-status inactive'}" id="pay-status-banner">
+    <i class="fas fa-${setts.shopier_enabled==='1'?'check-circle':'exclamation-circle'}"></i>
+    ${setts.shopier_enabled==='1'?'Ödeme sistemi aktif — Shopier entegrasyonu çalışıyor.':'Ödeme sistemi pasif — Aşağıdaki bilgileri girerek aktifleştirin.'}
+  </div>
+
+  <div class="pay-section">
+    <h3><i class="fas fa-key" style="color:#fbbf24"></i> Shopier API Bilgileri</h3>
+    <p style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.5">
+      Shopier hesabınızdan API Ayarları sayfasına gidin. <strong>API Key</strong>, <strong>API Secret</strong> ve <strong>Website Index</strong> bilgilerini buraya girin.
+      Tüm bilgileri doldurduktan sonra sistemi aktifleştirin.
+    </p>
+
+    <div class="pay-field">
+      <label>Shopier API Key</label>
+      <input id="ss-api-key" type="text" value="${escHtml(setts.shopier_api_key||'')}" placeholder="Shopier API Key'inizi girin">
+    </div>
+    <div class="pay-field">
+      <label>Shopier API Secret</label>
+      <input id="ss-api-secret" type="password" value="${escHtml(setts.shopier_api_secret||'')}" placeholder="Shopier API Secret'inizi girin">
+    </div>
+    <div class="pay-field">
+      <label>Website Index</label>
+      <input id="ss-website-index" type="text" value="${escHtml(setts.shopier_website_index||'1')}" placeholder="Genellikle 1">
+    </div>
+
+    <div class="pay-field">
+      <label>Sistem Durumu</label>
+      <select id="ss-enabled">
+        <option value="1" ${setts.shopier_enabled==='1'?'selected':''}>✅ Aktif — Ödemeler alınıyor</option>
+        <option value="0" ${setts.shopier_enabled!=='1'?'selected':''}>❌ Pasif — Ödemeler devre dışı</option>
+      </select>
+    </div>
+
+    <button id="ss-save" class="btn btn-primary" style="width:100%;margin-top:8px">
+      <i class="fas fa-save"></i> Ayarları Kaydet & Aktifleştir
+    </button>
+    <div id="ss-msg" style="margin-top:10px;font-size:12px;text-align:center"></div>
+  </div>
+
+  <div class="pay-section">
+    <h3><i class="fas fa-info-circle" style="color:#5865F2"></i> Webhook Bilgisi</h3>
+    <p style="font-size:12px;color:var(--text2);line-height:1.6;margin-bottom:10px">
+      Shopier panelinde <strong>Geri Bildirim URL'si</strong> (callback/IPN) olarak aşağıdaki adresi girin:
+    </p>
+    <div style="background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px;font-family:monospace;font-size:13px;word-break:break-all;user-select:all;color:var(--text)">
+      <span id="webhook-url">${location.origin}/api/shop/webhook</span>
+    </div>
+    <button onclick="navigator.clipboard.writeText(document.getElementById('webhook-url').textContent);window.adminToastFn&&window.adminToastFn('Kopyalandı!')" class="btn btn-outline btn-sm" style="margin-top:10px">
+      <i class="fas fa-copy"></i> Kopyala
+    </button>
+  </div>
+
+  <div class="pay-section">
+    <h3><i class="fas fa-question-circle" style="color:#06b6d4"></i> Nasıl Ayarlanır?</h3>
+    <ol style="font-size:13px;color:var(--text2);line-height:2;padding-left:20px">
+      <li>Shopier hesabınıza giriş yapın → <strong>Ayarlar</strong> → <strong>API Entegrasyonu</strong></li>
+      <li>API Key ve API Secret bilgilerini kopyalayın</li>
+      <li>Website Index'i öğrenin (genellikle 1)</li>
+      <li>Yukarıdaki webhook URL'sini Shopier'daki <strong>Callback URL</strong> alanına girin</li>
+      <li>Tüm bilgileri doldurun → <strong>Kaydet & Aktifleştir</strong> butonuna tıklayın</li>
+      <li>Sistem otomatik olarak aktif hale gelir ✅</li>
+    </ol>
+  </div>`;
+
+  document.getElementById('ss-save')?.addEventListener('click', async () => {
+    const apiKey     = document.getElementById('ss-api-key')?.value.trim();
+    const apiSecret  = document.getElementById('ss-api-secret')?.value.trim();
+    const webIdx     = document.getElementById('ss-website-index')?.value.trim() || '1';
+    const enabled    = document.getElementById('ss-enabled')?.value;
+    const msg        = document.getElementById('ss-msg');
+
+    if (enabled === '1' && (!apiKey || !apiSecret)) {
+      msg.style.color = 'var(--red2)';
+      msg.textContent = '⚠️ Sistemi aktifleştirmek için API Key ve API Secret zorunludur!';
+      return;
+    }
+
+    try {
+      await adminApi('/shop/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          shopier_api_key: apiKey,
+          shopier_api_secret: apiSecret,
+          shopier_website_index: webIdx,
+          shopier_enabled: enabled
+        })
+      });
+      msg.style.color = '#22c55e';
+      msg.textContent = '✅ Ayarlar kaydedildi! Ödeme sistemi ' + (enabled==='1'?'aktif edildi.':'pasif yapıldı.');
+      const banner = document.getElementById('pay-status-banner');
+      if (banner) {
+        banner.className = enabled==='1' ? 'pay-status active' : 'pay-status inactive';
+        banner.innerHTML = `<i class="fas fa-${enabled==='1'?'check-circle':'exclamation-circle'}"></i> ${enabled==='1'?'Ödeme sistemi aktif — Shopier entegrasyonu çalışıyor.':'Ödeme sistemi pasif — Ödemeler devre dışı.'}`;
+      }
+      toast('Ödeme ayarları kaydedildi');
+    } catch(e) {
+      msg.style.color = 'var(--red2)';
+      msg.textContent = '❌ Hata: ' + e.message;
+    }
+  });
+
+  // toast referansı
+  window.adminToastFn = toast;
+}
