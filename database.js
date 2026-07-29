@@ -465,6 +465,8 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,

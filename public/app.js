@@ -587,18 +587,44 @@ async function renderHome(app) {
     kitaplar:   { icon: 'fas fa-book',     label: 'Kitaplar' }
   };
 
-  const tabsHTML = sections.map((s, i) => {
+  const sectionRoutes = {
+    konular:    '/forum',
+    fotograflar:'/fotograflar',
+    muzikler:   '/muzikler',
+    gruplar:    '/gruplar',
+    kitaplar:   '/kitaplar'
+  };
+
+  const tabsHTML = sections.map((s) => {
     const cfg = sectionLabels[s] || { icon: 'fas fa-star', label: s };
-    const isFirst = i === 0;
-    return '<button class="home-tab-btn' + (isFirst ? ' active' : '') + '" data-section="' + s + '" style="display:flex;align-items:center;gap:6px;padding:8px 16px;background:' + (isFirst ? 'rgba(189,162,117,0.15)' : 'transparent') + ';border:1px solid ' + (isFirst ? 'rgba(189,162,117,0.4)' : 'transparent') + ';border-radius:20px;color:' + (isFirst ? 'var(--accent-red2)' : 'var(--text-muted)') + ';cursor:pointer;font-size:13px;font-weight:600;white-space:nowrap;transition:all 0.2s"><i class="' + cfg.icon + '"></i> ' + cfg.label + '</button>';
+    const route = sectionRoutes[s] || ('/' + s);
+    return '<a href="' + route + '" data-link class="home-tab-btn" title="' + cfg.label + '" style="display:flex;align-items:center;justify-content:center;width:42px;height:42px;background:transparent;border:1px solid transparent;border-radius:50%;color:var(--text-muted);font-size:17px;transition:all 0.2s;text-decoration:none;flex-shrink:0"><i class="' + cfg.icon + '"></i></a>';
   }).join('');
 
   app.innerHTML =
     '<div id="home-tabs-bar" style="overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 20px;border-bottom:1px solid var(--border);scrollbar-width:none;-ms-overflow-style:none">' +
-      '<div style="display:flex;gap:8px;flex-wrap:nowrap;padding-bottom:12px;padding-top:4px">' + tabsHTML + '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:nowrap;padding-bottom:10px;padding-top:4px">' + tabsHTML + '</div>' +
     '</div>' +
     '<div class="container page" style="padding-top:20px"><div id="home-section-content"><div class="loading-center"><div class="spinner"></div></div></div></div>';
 
+  // Aktif sekmeyi URL'e göre işaretle
+  const path = location.pathname;
+  document.querySelectorAll('.home-tab-btn').forEach(a => {
+    const href = a.getAttribute('href');
+    if (href && path.startsWith(href) && href !== '/') {
+      a.style.background = 'rgba(189,162,117,0.15)';
+      a.style.border = '1px solid rgba(189,162,117,0.4)';
+      a.style.color = 'var(--accent-red2)';
+    }
+    a.addEventListener('click', e => { e.preventDefault(); navigate(a.getAttribute('href')); });
+    a.addEventListener('mouseenter', () => { a.style.background = 'rgba(189,162,117,0.1)'; a.style.color = 'var(--accent-red2)'; });
+    a.addEventListener('mouseleave', () => {
+      const isActive = a.style.border === '1px solid rgba(189,162,117,0.4)';
+      if (!isActive) { a.style.background = 'transparent'; a.style.color = 'var(--text-muted)'; }
+    });
+  });
+
+  // Ana sayfada varsayılan olarak konular listesini göster
   const renderSection = async (section) => {
     const el = document.getElementById('home-section-content');
     if (!el) return;
@@ -625,70 +651,12 @@ async function renderHome(app) {
         if (!filtered.length) { fEl.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Konu bulunamadi.</p></div>'; return; }
         fEl.innerHTML = '<div style="display:flex;flex-direction:column;gap:12px">' + filtered.map(f => forumCardHTML(f)).join('') + '</div>';
       });
-
-    } else if (section === 'fotograflar') {
-      let addBtn = currentUser ? '<button class="btn btn-primary btn-sm" id="home-photo-btn"><i class="fas fa-camera"></i> Foto At</button>' : '';
-      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div class="page-title">Son Fotograflar</div><div style="display:flex;gap:8px">' + addBtn + '<a href="/fotograflar" data-link class="btn btn-ghost btn-sm">Tumunu Gor <i class="fas fa-arrow-right"></i></a></div></div><div id="home-photos"><div class="loading-center"><div class="spinner"></div></div></div>';
-      document.getElementById('home-photo-btn')?.addEventListener('click', () => showNewPhotoModal());
-      try {
-        const photos = await api('/photos?page=1');
-        const pEl = document.getElementById('home-photos');
-        if (!pEl) return;
-        if (!photos.length) { pEl.innerHTML = '<div class="empty-state"><i class="fas fa-camera"></i><p>Henuz foto yok.</p></div>'; return; }
-        const wrap = document.createElement('div');
-        wrap.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px';
-        wrap.innerHTML = photos.slice(0,6).map(p => photoCardHTML(p)).join('');
-        pEl.appendChild(wrap);
-        initPhotoCardActions(wrap);
-      } catch {}
-
-    } else if (section === 'muzikler') {
-      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div class="page-title">Son Muzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tumunu Gor <i class="fas fa-arrow-right"></i></a></div><div id="home-songs"><div class="loading-center"><div class="spinner"></div></div></div>';
-      try {
-        const songs = await api('/songs');
-        const sEl = document.getElementById('home-songs');
-        if (!sEl) return;
-        if (!songs.length) { sEl.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henuz muzik yok.</p></div>'; return; }
-        sEl.innerHTML = '<div class="grid-3">' + songs.slice(0,6).map(s => '<div class="song-card" onclick="navigate(\'/muzik/' + escHtml(s.slug) + '\')" style="cursor:pointer">' + (s.cover_url ? '<img src="' + escHtml(s.cover_url) + '" class="song-card-cover" />' : '<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>') + '<div class="song-card-body"><div class="song-card-title">' + escHtml(s.title) + '</div><div class="song-card-subtitle">' + escHtml(s.artist_name || s.uploader_name || '') + '</div><div class="song-card-meta">' + (s.play_count || 0) + ' dinlenme</div></div></div>').join('') + '</div>';
-      } catch {}
-
-    } else if (section === 'gruplar') {
-      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div class="page-title">Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tumunu Gor <i class="fas fa-arrow-right"></i></a></div><div id="home-groups"><div class="loading-center"><div class="spinner"></div></div></div>';
-      try {
-        const groups = await api('/groups');
-        const gEl = document.getElementById('home-groups');
-        if (!gEl) return;
-        if (!groups.length) { gEl.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henuz grup yok.</p></div>'; return; }
-        gEl.innerHTML = '<div class="grid-3">' + groups.slice(0,6).map(g => groupCardHTML(g)).join('') + '</div>';
-      } catch {}
-
-    } else if (section === 'kitaplar') {
-      el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px"><div class="page-title">Kitaplar</div><a href="/kitaplar" data-link class="btn btn-ghost btn-sm">Tumunu Gor <i class="fas fa-arrow-right"></i></a></div><div id="home-books" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>';
-      try {
-        const books = await api('/books');
-        const bEl = document.getElementById('home-books');
-        if (!bEl) return;
-        if (!books.length) { bEl.innerHTML = '<div class="empty-state"><i class="fas fa-book"></i><p>Henuz kitap yok.</p></div>'; return; }
-        bEl.innerHTML = books.slice(0,6).map(b => bookCardHTML(b)).join('');
-      } catch {}
     }
 
     if (el) el.querySelectorAll('[data-link]').forEach(a => {
       a.addEventListener('click', e => { e.preventDefault(); navigate(a.getAttribute('href')); });
     });
   };
-
-  document.querySelectorAll('.home-tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.home-tab-btn').forEach(b => {
-        b.classList.remove('active');
-        b.style.background = 'transparent'; b.style.border = '1px solid transparent'; b.style.color = 'var(--text-muted)';
-      });
-      btn.classList.add('active');
-      btn.style.background = 'rgba(189,162,117,0.15)'; btn.style.border = '1px solid rgba(189,162,117,0.4)'; btn.style.color = 'var(--accent-red2)';
-      renderSection(btn.dataset.section);
-    });
-  });
 
   if (sections.length) renderSection(sections[0]);
 }
@@ -3625,8 +3593,9 @@ function renderLogin(app) {
         box-shadow: 0 4px 20px rgba(189,162,117,0.35);
         transition: all 0.2s; letter-spacing: 0.3px; margin-top: 6px;
       }
-      .auth-btn-main:hover { box-shadow: 0 6px 28px rgba(189,162,117,0.5); transform: translateY(-1px); }
-      .auth-btn-main:active { transform: translateY(0); }
+      .auth-btn-main:hover:not(:disabled) { box-shadow: 0 6px 28px rgba(189,162,117,0.5); transform: translateY(-1px); }
+      .auth-btn-main:active:not(:disabled) { transform: translateY(0); }
+      .auth-btn-main:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
       .auth-error { font-size: 12px; color: #f87171; margin-top: 10px; text-align: center; min-height: 18px; }
       .auth-divider { display: flex; align-items: center; gap: 12px; margin: 22px 0; }
       .auth-divider span { font-size: 12px; color: rgba(255,255,255,0.25); white-space: nowrap; }
