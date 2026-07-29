@@ -144,7 +144,9 @@ function loadSection(section) {
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
     'shop': renderShop,
     'shop-orders': renderShopOrders,
-    'shop-settings': renderShopSettings
+    'shop-settings': renderShopSettings,
+    'photos': renderAdminPhotos,
+    'homepage-sections': renderHomepageSections
   };
   if (map[section]) map[section](main);
 }
@@ -2842,3 +2844,87 @@ async function renderShopSettings(main) {
   // toast referansı
   window.adminToastFn = toast;
 }
+
+// ===== ADMIN: FOTOGRAFLAR =====
+async function renderAdminPhotos(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  try {
+    const photos = await adminApi('/photos');
+    main.innerHTML = '<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-camera"></i></div> Fotograflar</div></div>' +
+      '<div class="card"><div class="table-wrap"><table><thead><tr><th>ID</th><th>Foto</th><th>Kullanici</th><th>Aciklama</th><th>Tarih</th><th>Islem</th></tr></thead><tbody id="photos-tbody"></tbody></table></div></div>';
+    const tbody = document.getElementById('photos-tbody');
+    if (!Array.isArray(photos) || !photos.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3)">Foto yok</td></tr>'; return; }
+    tbody.innerHTML = photos.slice(0,100).map(p => '<tr><td>#' + p.id + '</td><td><img src="' + (p.image_url || '') + '" style="width:50px;height:50px;object-fit:cover;border-radius:8px" /></td><td>' + (p.username || '-') + '</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (p.caption || '') + '</td><td>' + new Date(p.created_at).toLocaleDateString('tr-TR') + '</td><td><button class="btn btn-danger btn-xs photo-adm-del" data-id="' + p.id + '"><i class="fas fa-trash"></i></button></td></tr>').join('');
+    tbody.querySelectorAll('.photo-adm-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Foto silinsin mi?')) return;
+        try { await adminApi('/photos/' + btn.dataset.id, { method: 'DELETE' }); btn.closest('tr').remove(); toast('Silindi'); } catch (e) { toast(e.message, 'error'); }
+      });
+    });
+  } catch (e) { main.innerHTML = '<div class="adm-error">' + e.message + '</div>'; }
+}
+
+// ===== ADMIN: ANA SAYFA BOLUMLERI =====
+async function renderHomepageSections(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  try {
+    const data = await adminApi('/homepage-sections');
+    const allSections = ['konular','fotograflar','muzikler','gruplar','kitaplar'];
+    const labels = { konular:'Konular', fotograflar:'Fotograflar', muzikler:'Muzikler', gruplar:'Gruplar', kitaplar:'Kitaplar' };
+    const icons  = { konular:'fas fa-comments', fotograflar:'fas fa-camera', muzikler:'fas fa-music', gruplar:'fas fa-users', kitaplar:'fas fa-book' };
+    const current = Array.isArray(data.sections) ? data.sections : allSections;
+
+    main.innerHTML = '<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-home"></i></div> Ana Sayfa Bolumleri</div></div>' +
+      '<div class="card card-body"><p style="color:var(--text2);font-size:13px;margin-bottom:20px">Isaretli bolumler ana sayfada gorunur. Siralamayi drag ile degistirebilirsiniz. Ilk bolum varsayilan olarak acilir.</p>' +
+      '<div id="sections-list" style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">' +
+      allSections.map(s => {
+        const checked = current.includes(s);
+        const idx = current.indexOf(s);
+        return '<div class="section-row" data-section="' + s + '" data-order="' + (idx >= 0 ? idx : 99) + '" style="display:flex;align-items:center;gap:12px;padding:14px;background:var(--bg4);border:1px solid var(--border);border-radius:10px;cursor:grab">' +
+          '<i class="fas fa-grip-vertical" style="color:var(--text3);cursor:grab"></i>' +
+          '<input type="checkbox" class="section-check" data-s="' + s + '" ' + (checked ? 'checked' : '') + ' style="width:auto;cursor:pointer" />' +
+          '<i class="' + icons[s] + '" style="color:var(--red2);width:18px"></i>' +
+          '<span style="font-weight:600;font-size:14px">' + labels[s] + '</span>' +
+          (idx === 0 ? '<span style="font-size:11px;background:rgba(189,162,117,0.2);color:var(--red2);padding:2px 8px;border-radius:10px;margin-left:4px">Varsayilan</span>' : '') +
+          '</div>';
+      }).sort((a,b) => { const da = parseInt(a.match(/data-order="(\d+)"/)[1]); const db = parseInt(b.match(/data-order="(\d+)"/)[1]); return da-db; }).join('') +
+      '</div>' +
+      '<button class="btn btn-primary" id="sections-save"><i class="fas fa-save"></i> Kaydet</button>' +
+      '<span id="sections-msg" style="margin-left:12px;font-size:13px"></span>' +
+      '</div>';
+
+    // Simple drag-to-reorder
+    const list = document.getElementById('sections-list');
+    let dragEl = null;
+    list.querySelectorAll('.section-row').forEach(row => {
+      row.setAttribute('draggable', 'true');
+      row.addEventListener('dragstart', () => { dragEl = row; row.style.opacity = '0.4'; });
+      row.addEventListener('dragend', () => { dragEl = null; row.style.opacity = '1'; });
+      row.addEventListener('dragover', e => { e.preventDefault(); const after = getDragAfterElement(list, e.clientY); if (!dragEl) return; if (!after) list.appendChild(dragEl); else list.insertBefore(dragEl, after); });
+    });
+    function getDragAfterElement(container, y) {
+      const draggables = [...container.querySelectorAll('.section-row:not(.dragging)')];
+      return draggables.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        if (offset < 0 && offset > closest.offset) return { offset, element: child };
+        return closest;
+      }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    document.getElementById('sections-save').addEventListener('click', async () => {
+      const rows = [...document.querySelectorAll('.section-row')];
+      const sections = rows.filter(r => r.querySelector('.section-check').checked).map(r => r.dataset.section);
+      const msg = document.getElementById('sections-msg');
+      if (!sections.length) { msg.style.color = 'var(--red2)'; msg.textContent = 'En az 1 bolum secin'; return; }
+      try {
+        await adminApi('/homepage-sections', { method: 'POST', body: JSON.stringify({ sections }) });
+        msg.style.color = '#22c55e'; msg.textContent = 'Kaydedildi!';
+        toast('Ana sayfa bolumleri guncellendi');
+        setTimeout(() => { msg.textContent = ''; }, 3000);
+      } catch (e) { msg.style.color = 'var(--red2)'; msg.textContent = e.message; }
+    });
+  } catch (e) { main.innerHTML = '<div style="color:var(--red2)">' + e.message + '</div>'; }
+}
+
+

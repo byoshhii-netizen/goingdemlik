@@ -1894,7 +1894,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['footer_created_visible', 'footer_copyright_text', 'primary_color', 'book_bg_color'];
+  const keys = ['footer_created_visible', 'footer_copyright_text', 'primary_color', 'book_bg_color', 'site_name', 'site_logo', 'homepage_sections', 'other_songs_enabled'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -3641,6 +3641,246 @@ app.get('/api/shop/my-orders', authMiddleware, async (req, res) => {
     );
     res.json(rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+
+// ===== FOTO SISTEMI =====
+
+// Foto yükle
+app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res) => {
+  try {
+    const { caption, music_id, allow_likes, allow_comments, allow_sharing } = req.body;
+    if (!req.file) return res.status(400).json({ error: 'Resim gerekli' });
+    const imageUrl = await handleUpload(req.file);
+    const { rows } = await query(
+      `INSERT INTO photos (user_id, image_url, caption, music_id, allow_likes, allow_comments, allow_sharing)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [req.user.id, imageUrl, caption || '', music_id || null,
+       allow_likes !== '0' ? 1 : 0, allow_comments !== '0' ? 1 : 0, allow_sharing !== '0' ? 1 : 0]
+    );
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto listesi
+app.get('/api/photos', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = 20;
+    const offset = (page - 1) * limit;
+    const userId = req.query.user_id ? parseInt(req.query.user_id) : null;
+    let q, params;
+    if (userId) {
+      q = `SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus,
+             s.title as music_title, s.artist_name as music_artist, s.audio_url as music_url, s.cover_url as music_cover, s.slug as music_slug,
+             (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id=p.id) as likes_count,
+             (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id=p.id) as comments_count,
+             (SELECT COUNT(*) FROM photo_saves ps WHERE ps.photo_id=p.id) as saves_count
+           FROM photos p
+           LEFT JOIN users u ON p.user_id=u.id
+           LEFT JOIN songs s ON p.music_id=s.id
+           WHERE p.user_id=$1
+           ORDER BY p.created_at DESC LIMIT $2 OFFSET $3`;
+      params = [userId, limit, offset];
+    } else {
+      q = `SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus,
+             s.title as music_title, s.artist_name as music_artist, s.audio_url as music_url, s.cover_url as music_cover, s.slug as music_slug,
+             (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id=p.id) as likes_count,
+             (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id=p.id) as comments_count,
+             (SELECT COUNT(*) FROM photo_saves ps WHERE ps.photo_id=p.id) as saves_count
+           FROM photos p
+           LEFT JOIN users u ON p.user_id=u.id
+           LEFT JOIN songs s ON p.music_id=s.id
+           ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`;
+      params = [limit, offset];
+    }
+    const { rows } = await query(q, params);
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Tek foto
+app.get('/api/photos/:id', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus,
+         s.title as music_title, s.artist_name as music_artist, s.audio_url as music_url, s.cover_url as music_cover, s.slug as music_slug,
+         (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id=p.id) as likes_count,
+         (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id=p.id) as comments_count,
+         (SELECT COUNT(*) FROM photo_saves ps WHERE ps.photo_id=p.id) as saves_count
+       FROM photos p
+       LEFT JOIN users u ON p.user_id=u.id
+       LEFT JOIN songs s ON p.music_id=s.id
+       WHERE p.id=$1`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Foto bulunamadı' });
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto sil
+app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM photos WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Foto bulunamadı' });
+    if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yetki yok' });
+    await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto begeni / begeniyi kaldir
+app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
+  try {
+    const { rows: existing } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (existing.length) {
+      await query('DELETE FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+      const { rows } = await query('SELECT COUNT(*) as c FROM photo_likes WHERE photo_id=$1', [req.params.id]);
+      return res.json({ liked: false, count: parseInt(rows[0].c) });
+    }
+    await query('INSERT INTO photo_likes (photo_id, user_id) VALUES ($1, $2)', [req.params.id, req.user.id]);
+    const { rows } = await query('SELECT COUNT(*) as c FROM photo_likes WHERE photo_id=$1', [req.params.id]);
+    res.json({ liked: true, count: parseInt(rows[0].c) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto begeni durumu
+app.get('/api/photos/:id/like-status', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    const { rows: cnt } = await query('SELECT COUNT(*) as c FROM photo_likes WHERE photo_id=$1', [req.params.id]);
+    res.json({ liked: rows.length > 0, count: parseInt(cnt[0].c) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto yorumları
+app.get('/api/photos/:id/comments', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT pc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus
+       FROM photo_comments pc
+       LEFT JOIN users u ON pc.user_id=u.id
+       WHERE pc.photo_id=$1
+       ORDER BY pc.created_at ASC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto yorum ekle
+app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
+    const { rows: photo } = await query('SELECT * FROM photos WHERE id=$1', [req.params.id]);
+    if (!photo.length) return res.status(404).json({ error: 'Foto bulunamadı' });
+    if (!photo[0].allow_comments) return res.status(403).json({ error: 'Yorumlar kapalı' });
+    const { rows } = await query(
+      'INSERT INTO photo_comments (photo_id, user_id, content) VALUES ($1, $2, $3) RETURNING *',
+      [req.params.id, req.user.id, content.trim()]
+    );
+    const { rows: full } = await query(
+      `SELECT pc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus
+       FROM photo_comments pc LEFT JOIN users u ON pc.user_id=u.id WHERE pc.id=$1`,
+      [rows[0].id]
+    );
+    res.json(full[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto yorum sil
+app.delete('/api/photos/:id/comments/:cid', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM photo_comments WHERE id=$1', [req.params.cid]);
+    if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+    if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yetki yok' });
+    await query('DELETE FROM photo_comments WHERE id=$1', [req.params.cid]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto kaydet / kaydi kaldir
+app.post('/api/photos/:id/save', authMiddleware, async (req, res) => {
+  try {
+    const { rows: existing } = await query('SELECT id FROM photo_saves WHERE photo_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    if (existing.length) {
+      await query('DELETE FROM photo_saves WHERE photo_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+      const { rows } = await query('SELECT COUNT(*) as c FROM photo_saves WHERE photo_id=$1', [req.params.id]);
+      return res.json({ saved: false, count: parseInt(rows[0].c) });
+    }
+    await query('INSERT INTO photo_saves (photo_id, user_id) VALUES ($1, $2)', [req.params.id, req.user.id]);
+    const { rows } = await query('SELECT COUNT(*) as c FROM photo_saves WHERE photo_id=$1', [req.params.id]);
+    res.json({ saved: true, count: parseInt(rows[0].c) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Foto kayit durumu
+app.get('/api/photos/:id/save-status', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT id FROM photo_saves WHERE photo_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    const { rows: cnt } = await query('SELECT COUNT(*) as c FROM photo_saves WHERE photo_id=$1', [req.params.id]);
+    res.json({ saved: rows.length > 0, count: parseInt(cnt[0].c) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Kaydedilen fotolar
+app.get('/api/photos/saved/list', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT p.*, u.username, u.avatar,
+         s.title as music_title, s.artist_name as music_artist, s.audio_url as music_url, s.cover_url as music_cover, s.slug as music_slug,
+         (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id=p.id) as likes_count,
+         (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id=p.id) as comments_count
+       FROM photo_saves ps
+       JOIN photos p ON ps.photo_id=p.id
+       LEFT JOIN users u ON p.user_id=u.id
+       LEFT JOIN songs s ON p.music_id=s.id
+       WHERE ps.user_id=$1
+       ORDER BY ps.id DESC`,
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== ADMİN: ANA SAYFA BOLUMLERI =====
+app.get('/api/admin/homepage-sections', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+    const sections = rows[0]?.value ? JSON.parse(rows[0].value) : ['konular','fotograflar','muzikler','gruplar','kitaplar'];
+    res.json({ sections });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/admin/homepage-sections', adminMiddleware, async (req, res) => {
+  try {
+    const { sections } = req.body;
+    if (!Array.isArray(sections)) return res.status(400).json({ error: 'sections array gerekli' });
+    const val = JSON.stringify(sections);
+    await query("INSERT INTO settings (key,value) VALUES ('homepage_sections',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [val]);
+    res.json({ ok: true, sections });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+
+// ===== ADMIN: FOTO LISTESI =====
+app.get('/api/admin/photos', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT p.*, u.username, u.avatar FROM photos p LEFT JOIN users u ON p.user_id=u.id ORDER BY p.created_at DESC LIMIT 200`
+    );
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/admin/photos/:id', adminMiddleware, async (req, res) => {
+  try {
+    await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ===== SPA FALLBACK — Tüm API dışı route'lar index.html'e yönlendirilir =====

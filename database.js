@@ -684,6 +684,57 @@ KVKK'nın 11. maddesi kapsamında; kişisel verilerinize erişim, düzeltme, sil
 Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
   }
 
+
+    CREATE TABLE IF NOT EXISTS photos (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT,
+      image_url TEXT NOT NULL,
+      caption TEXT DEFAULT '',
+      music_id BIGINT DEFAULT NULL,
+      allow_likes INTEGER DEFAULT 1,
+      allow_comments INTEGER DEFAULT 1,
+      allow_sharing INTEGER DEFAULT 1,
+      likes_count INTEGER DEFAULT 0,
+      comments_count INTEGER DEFAULT 0,
+      saves_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_likes (
+      id BIGSERIAL PRIMARY KEY,
+      photo_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      UNIQUE(photo_id, user_id),
+      FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_comments (
+      id BIGSERIAL PRIMARY KEY,
+      photo_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS photo_saves (
+      id BIGSERIAL PRIMARY KEY,
+      photo_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      UNIQUE(photo_id, user_id),
+      FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+  // Seed homepage_sections
+  const { rows: hpRows } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+  if (hpRows.length === 0) {
+    await query("INSERT INTO settings (key,value) VALUES ('homepage_sections','[\"konular\",\"fotograflar\",\"muzikler\",\"gruplar\",\"kitaplar\"]')");
+  }
+
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 
