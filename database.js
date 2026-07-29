@@ -467,6 +467,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'public';
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,

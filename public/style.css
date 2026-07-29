@@ -1214,8 +1214,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .mobile-bottom-bar a.active,
   .mobile-bottom-bar a:hover { color: var(--accent-red2); }
   .mobile-bottom-bar i { font-size: 18px; }
-  body { padding-bottom: 60px; }
-  #toast-container { bottom: 72px; }
+  body { padding-bottom: 0; }
+  #toast-container { bottom: 16px; }
 }
 @media (min-width: 769px) {
   .mobile-bottom-bar { display: none; }
@@ -1759,7 +1759,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .gplayer-artist { max-width: 100px; }
   .gplayer-btn:not(.gplayer-play):not(#gp-close) { display: none; }
   .gplayer-vol-wrap { display: none; }
-  #global-music-player { bottom: 56px; } /* bottom bar yüksekliği */
+  #global-music-player { bottom: 16px; }
 }
 
 
@@ -2077,3 +2077,9 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 @media (max-width:480px) { .auth-glass { padding:28px 18px; border-radius:18px; } .auth-heading { font-size:22px; } }
 /* ===== HOME TABS ===== */
 .home-tab-btn { font-family:inherit; }
+
+/* Auth input-wrap alanı */
+.auth-field .input-wrap { position: relative; }
+.auth-field .input-wrap > i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.28); font-size: 13px; pointer-events: none; z-index: 1; }
+.auth-field .input-wrap input { width: 100%; padding: 13px 14px 13px 40px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: var(--text, #f0f0f5); font-size: 14px; outline: none; transition: all 0.2s; font-family: inherit; box-sizing: border-box; }
+.auth-field .input-wrap input:focus { border-color: rgba(189,162,117,0.55); background: rgba(189,162,117,0.05); box-shadow: 0 0 0 3px rgba(189,162,117,0.1); }
