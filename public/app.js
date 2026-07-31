@@ -162,7 +162,7 @@ function renderRoute(fullPath) {
   const segs = path.split('/').filter(Boolean);
 
   if (path === '/') return renderHome(app);
-  if (path === '/forum') {
+  if (path === '/forum' || path === '/konular') {
     // query string'i de geçir
     const qs = queryStr ? '?' + queryStr : '';
     return renderForumList(app, qs);
@@ -580,7 +580,9 @@ async function renderHome(app) {
 
   let settings = {};
   try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
-  const sections = settings.homepage_sections ? JSON.parse(settings.homepage_sections) : ['konular','kitaplar'];
+  const raw = settings.homepage_sections;
+  const sections = raw ? (function() { try { return JSON.parse(raw); } catch { return raw; } })() : 'konular';
+  const chosen = Array.isArray(sections) ? sections[0] : (sections || 'konular');
 
   // Helpers to render each section into a container
   async function renderForumsSection() {
@@ -609,27 +611,25 @@ async function renderHome(app) {
     try { const books = await api('/books'); const el = $('#home-books'); if (!books.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-book"></i><p>Henüz kitap yok.</p></div>'; else el.innerHTML = books.slice(0, 6).map(b => bookCardHTML(b)).join(''); } catch {}
   }
 
-  // Render sections in order
-  for (const s of sections) {
-    if (s === 'konular') await renderForumsSection();
-    else if (s === 'kitaplar') await renderBooksSection();
-    else if (s === 'gruplar') {
-      // simple groups preview
-      const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Popüler Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-groups" class="grid-3"></div></div>`;
-      $('#home-sections').insertAdjacentHTML('beforeend', html);
-      try { const gs = await api('/groups'); const el = $('#home-groups'); if (!gs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>'; else el.innerHTML = gs.slice(0,6).map(g=>`<div class="card"><div style="padding:12px"><div style="font-weight:700">${escHtml(g.name)}</div><div style="font-size:13px;color:var(--text-muted)">${g.member_count||0} üye</div></div></div>`).join(''); } catch {}
-    }
-    else if (s === 'muzikler') {
-      const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Yeni Müzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-songs" class="grid-3"></div></div>`;
-      $('#home-sections').insertAdjacentHTML('beforeend', html);
-      try { const songs = await api('/songs'); const el = $('#home-songs'); if (!songs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; else el.innerHTML = songs.slice(0,6).map(s=>songCardHTML(s)).join(''); } catch {}
-    }
-    else if (s === 'magaza') {
-      $('#home-sections').insertAdjacentHTML('beforeend', `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Mağaza</div><a href="/magaza" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-shop" class="grid-3"></div></div>`);
-      try { const items = await api('/shop/items'); const el = $('#home-shop'); if (!items.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-store"></i><p>Mağaza boş.</p></div>'; else el.innerHTML = items.slice(0,6).map(i=>shopCardHTML(i)).join(''); } catch {}
-    }
+  // Render only the selected homepage section
+  if (chosen === 'konular') await renderForumsSection();
+  else if (chosen === 'kitaplar') await renderBooksSection();
+  else if (chosen === 'gruplar') {
+    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Popüler Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-groups" class="grid-3"></div></div>`;
+    $('#home-sections').insertAdjacentHTML('beforeend', html);
+    try { const gs = await api('/groups'); const el = $('#home-groups'); if (!gs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>'; else el.innerHTML = gs.slice(0,6).map(g=>`<div class="card"><div style="padding:12px"><div style="font-weight:700">${escHtml(g.name)}</div><div style="font-size:13px;color:var(--text-muted)">${g.member_count||0} üye</div></div></div>`).join(''); } catch {}
+  }
+  else if (chosen === 'muzikler') {
+    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Yeni Müzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-songs" class="grid-3"></div></div>`;
+    $('#home-sections').insertAdjacentHTML('beforeend', html);
+    try { const songs = await api('/songs'); const el = $('#home-songs'); if (!songs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; else el.innerHTML = songs.slice(0,6).map(s=>songCardHTML(s)).join(''); } catch {}
+  }
+  else if (chosen === 'magaza') {
+    $('#home-sections').insertAdjacentHTML('beforeend', `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Mağaza</div><a href="/magaza" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-shop" class="grid-3"></div></div>`);
+    try { const items = await api('/shop/items'); const el = $('#home-shop'); if (!items.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-store"></i><p>Mağaza boş.</p></div>'; else el.innerHTML = items.slice(0,6).map(i=>shopCardHTML(i)).join(''); } catch {}
   }
 }
+
 
 async function renderForumList(app, queryString) {
   document.title = 'Konular – ' + siteName;
@@ -2048,6 +2048,14 @@ async function renderGroupDetail(app, slug) {
     try { messages = await api('/group/' + slug + '/messages'); } catch {}
   } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>'; return; }
 
+  if (currentUser && members.length) {
+    try {
+      const friends = await api('/friends');
+      const friendSet = new Set(friends.map(f => f.other_username));
+      members = members.map(m => ({ ...m, is_friend: friendSet.has(m.username) }));
+    } catch {}
+  }
+
   const { group, isMember, role, joinRequestStatus } = groupData;
   document.title = group.name + ' - ' + siteName;
   const isOwner = currentUser && currentUser.id === group.owner_id;
@@ -2072,9 +2080,9 @@ async function renderGroupDetail(app, slug) {
         ${currentUser
           ? (group.type === 'public' && !group.invite_only
               ? `<button class="btn btn-primary" id="join-preview-btn" style="min-width:160px;font-size:15px"><i class="fas fa-plus"></i> Katıl</button>`
-              : (hasPending
+              : hasPending
                   ? `<button class="btn btn-outline" id="request-preview-btn" style="min-width:160px;font-size:15px;opacity:0.7" disabled><i class="fas fa-clock"></i> Bekliyor</button>`
-                  : `<button class="btn btn-primary" id="request-preview-btn" style="min-width:160px;font-size:15px"><i class="fas fa-paper-plane"></i> İstek Gönder</button>`))
+                  : `<button class="btn btn-primary" id="request-preview-btn" style="min-width:160px;font-size:15px"><i class="fas fa-paper-plane"></i> İstek Gönder</button>`)
           : `<a href="/giris" data-link class="btn btn-primary" style="min-width:160px;font-size:15px"><i class="fas fa-sign-in-alt"></i> Giriş Yap</a>`}
         <div id="group-preview-error" class="form-error mt-4" style="text-align:center"></div>
       </div>
@@ -2372,11 +2380,12 @@ function chatMsgHTML(m, canModDelete = false) {
 
 function memberItemHTML(m, isOwner, groupSlug) {
   const roleLabel = m.role === 'owner' ? '<span class="badge badge-red">Sahip</span>' : m.role === 'moderator' ? '<span class="badge badge-orange">Mod</span>' : '';
+  const friendBadge = m.is_friend ? '<span title="Arkadaş" style="margin-left:6px;color:var(--accent-green);font-size:13px"><i class="fas fa-user-friends"></i></span>' : '';
   const canAct = isOwner && m.role !== 'owner' && currentUser && currentUser.id !== m.user_id;
   return `<div class="member-item">
     ${m.avatar ? `<img src="${escHtml(m.avatar)}" class="member-avatar" alt="" />` : `<div class="member-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:14px"></i></div>`}
     <div style="flex:1">
-      <div style="font-size:13px;font-weight:600">${escHtml(m.username)}</div>
+      <div style="font-size:13px;font-weight:600">${escHtml(m.username)}${friendBadge}</div>
       ${roleLabel}
     </div>
     ${canAct ? `<div style="display:flex;gap:4px">
@@ -2823,6 +2832,9 @@ async function renderProfile(app, username) {
   }
   if (user.is_artist) {
     badgeItems.push(`<span class="profile-badge" style="color:#a855f7;border-color:#a855f733;background:#a855f715" title="Artist"><i class="fas fa-microphone-alt"></i> Artist</span>`);
+  }
+  if (user.badge_name) {
+    badgeItems.push(`<span class="profile-badge" style="color:${escHtml(user.badge_color||'#6b7280')};border-color:${escHtml(user.badge_color||'#6b7280')}33;background:${escHtml(user.badge_color||'#6b7280')}15" title="${escHtml(user.badge_name)}">${user.badge_icon ? `<i class="${escHtml(user.badge_icon)}"></i> ` : ''}${escHtml(user.badge_name)}</span>`);
   }
   if (user.is_vip) {
     badgeItems.push(`<span class="profile-badge" style="color:#fbbf24;border-color:#fbbf2433;background:#fbbf2415" title="VIP"><i class="fas fa-gem"></i> VIP</span>`);

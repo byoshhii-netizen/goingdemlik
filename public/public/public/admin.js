@@ -24,7 +24,7 @@ async function renderHomepageSections(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   let settings = {};
   try { settings = await adminApi('/settings'); } catch (e) { settings = {}; }
-  const current = settings.homepage_sections ? JSON.parse(settings.homepage_sections) : ['konular','kitaplar','gruplar','muzikler'];
+  const current = settings.homepage_sections ? (function(){ try { return JSON.parse(settings.homepage_sections); } catch { return settings.homepage_sections; } })() : 'konular';
   const available = [
     { id: 'konular', label: 'Konular' },
     { id: 'kitaplar', label: 'Kitaplar' },
@@ -34,52 +34,18 @@ async function renderHomepageSections(main) {
     { id: 'reals', label: 'Reals' }
   ];
 
-  function renderList() {
-    return current.map((id, idx) => {
-      const label = (available.find(a=>a.id===id)||{label:id}).label;
-      return `<div class="hp-item" data-id="${escHtml(id)}" style="display:flex;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px"><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:700">${idx+1}.</span><span style="margin-left:6px">${escHtml(label)}</span></div><div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm hp-up">↑</button><button class="btn btn-outline btn-sm hp-down">↓</button><button class="btn btn-danger btn-sm hp-remove">Kaldır</button></div></div>`;
-    }).join('');
-  }
-
   main.innerHTML = `
-    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümleri</div><div><button class="btn btn-primary" id="hp-save">Kaydet</button></div></div>
-    <div class="card" style="padding:12px;margin-bottom:12px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${available.map(a=>`<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="hp-available" data-id="${a.id}" ${current.includes(a.id)?'checked':''} /> ${escHtml(a.label)}</label>`).join('')}
-      </div>
+    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümü</div><div><button class="btn btn-primary" id="hp-save">Kaydet</button></div></div>
+    <div class="card" style="padding:12px">
+      ${available.map(a => `<label style="display:block;margin-bottom:10px"><input type="radio" name="hp-single" value="${a.id}" ${current === a.id ? 'checked' : ''} /> ${escHtml(a.label)}</label>`).join('')}
     </div>
-    <div class="card"><div class="card-header"><span>Sıralama</span></div><div class="card-body" id="hp-order">${renderList()}</div></div>
-    <div style="margin-top:12px;display:flex;gap:8px"><select id="hp-add-select">${available.filter(a=>!current.includes(a.id)).map(a=>`<option value="${a.id}">${escHtml(a.label)}</option>`).join('')}</select><button class="btn btn-primary" id="hp-add">Ekle</button></div>
   `;
 
-  function refreshOrder() { $('#hp-order').innerHTML = renderList(); }
-
-  $('#hp-order').addEventListener('click', e => {
-    const up = e.target.closest('.hp-up');
-    const down = e.target.closest('.hp-down');
-    const rem = e.target.closest('.hp-remove');
-    const item = e.target.closest('.hp-item');
-    if (!item) return;
-    const id = item.dataset.id;
-    const i = current.indexOf(id);
-    if (up && i > 0) { [current[i-1], current[i]] = [current[i], current[i-1]]; refreshOrder(); }
-    if (down && i < current.length-1) { [current[i+1], current[i]] = [current[i], current[i+1]]; refreshOrder(); }
-    if (rem) { current.splice(i,1); // uncheck checkbox
-      const cb = document.querySelector(`.hp-available[data-id="${id}"]`); if (cb) cb.checked = false; refreshOrder(); }
-  });
-
-  $$('#admin-main .hp-available').forEach(cb => cb.addEventListener('change', e => {
-    const id = e.target.dataset.id; if (e.target.checked) { if (!current.includes(id)) current.push(id); } else { const idx = current.indexOf(id); if (idx !== -1) current.splice(idx,1); }
-    refreshOrder();
-  }));
-
-  $('#hp-add')?.addEventListener('click', () => {
-    const sel = $('#hp-add-select'); if (!sel) return; const id = sel.value; if (!id) return; current.push(id); sel.querySelector(`option[value="${id}"]`)?.remove(); const cb = document.querySelector(`.hp-available[data-id="${id}"]`); if (cb) cb.checked = true; refreshOrder();
-  });
-
   $('#hp-save')?.addEventListener('click', async () => {
+    const sel = document.querySelector('input[name="hp-single"]:checked');
+    if (!sel) { toast('Bir bölüm seçin','error'); return; }
     try {
-      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: JSON.stringify(current) }) });
+      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: sel.value }) });
       toast('Kaydedildi');
     } catch (e) { toast(e.message,'error'); }
   });
