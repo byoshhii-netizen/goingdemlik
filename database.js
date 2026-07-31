@@ -465,9 +465,6 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT DEFAULT 'public';
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
@@ -685,32 +682,6 @@ KVKK'nın 11. maddesi kapsamında; kişisel verilerinize erişim, düzeltme, sil
 
 6. İLETİŞİM
 Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
-  }
-
-
-  await query(`
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS music_id BIGINT DEFAULT NULL;
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_likes INTEGER DEFAULT 1;
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS likes_count INTEGER DEFAULT 0;
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS comments_count INTEGER DEFAULT 0;
-    ALTER TABLE photos ADD COLUMN IF NOT EXISTS saves_count INTEGER DEFAULT 0;
-
-    CREATE TABLE IF NOT EXISTS photo_saves (
-      id BIGSERIAL PRIMARY KEY,
-      photo_id BIGINT NOT NULL,
-      user_id BIGINT NOT NULL,
-      UNIQUE(photo_id, user_id),
-      FOREIGN KEY(photo_id) REFERENCES photos(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-  `);
-
-  // Seed homepage_sections
-  const { rows: hpRows } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
-  if (hpRows.length === 0) {
-    await query("INSERT INTO settings (key,value) VALUES ('homepage_sections','[\"konular\",\"fotograflar\",\"muzikler\",\"gruplar\",\"kitaplar\"]')");
   }
 
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
