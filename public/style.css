@@ -508,6 +508,15 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .group-card:hover { border-color: var(--border-hover); box-shadow: var(--glow); transform: translateY(-2px); }
 .group-cover { aspect-ratio: 16/9; background: var(--bg-card2); overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .group-cover img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Fotoğraflar doğal en-boy oranını korur; telefonda taşma yapmaz. */
+.photos-feed { columns: 3 260px; column-gap: 16px; }
+.photo-card { break-inside: avoid; margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); }
+.photo-card-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:13px; font-weight:700; }
+.photo-card-head .avatar-sm { width:28px; height:28px; }
+.photo-native { display:block; width:100%; height:auto; max-height:none; border-radius:10px; object-fit:contain; }
+.photo-card h3 { margin:10px 0 4px; font-size:15px; }.photo-card p { margin:0 0 7px; color:var(--text-secondary); font-size:13px; line-height:1.45; }.photo-card small { color:var(--text-muted); }
+@media (max-width: 600px) { .photos-feed { columns: 1; } .photo-card { border-radius:12px; padding:10px; } }
 .group-cover-placeholder { font-size: 40px; color: var(--text-muted); }
 .group-info { padding: 14px; overflow: hidden; min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .group-name { font-size: 16px; font-weight: 700; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

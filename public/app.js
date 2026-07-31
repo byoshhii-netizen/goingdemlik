@@ -175,6 +175,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/kitap/') && segs.length === 2) return renderBookDetail(app, segs[1]);
   if (path.startsWith('/kitap/') && segs.length === 4 && segs[2] === 'sayfa') return renderPageReader(app, segs[1], segs[3]);
   if (path === '/gruplar') return renderGroupList(app);
+  if (path === '/fotograflar') return renderPhotos(app);
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
   if (path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
@@ -5483,6 +5484,18 @@ async function renderShareSong(app) {
 }
 
 // ===== PLAYLİSTLERİM =====
+async function renderPhotos(app) {
+  document.title = 'Fotoğraflar – ' + siteName;
+  app.innerHTML = `<div class="container page"><div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Paylaş, konum ve müzik ekle.</div></div>${currentUser ? '<button class="btn btn-primary" id="photo-upload-btn"><i class="fas fa-camera"></i> Fotoğraf At</button>' : ''}</div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
+  const feed = document.getElementById('photos-feed');
+  try { const photos = await api('/photos'); feed.innerHTML = photos.length ? photos.map(p => `<article class="photo-card"><div class="photo-card-head">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a></div><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title || p.caption || '')}" />${p.title ? `<h3>${escHtml(p.title)}</h3>` : ''}${p.caption ? `<p>${escHtml(p.caption)}</p>` : ''}${p.location ? `<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>` : ''}</article>`).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
+  document.getElementById('photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
+}
+function showPhotoUploadModal() {
+  showModal('Fotoğraf At', `<div class="form-group"><label>Fotoğraf *</label><input id="photo-file" type="file" accept="image/*" /></div><div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" /></div><div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3"></textarea></div><div class="form-group"><label>Konum</label><input id="photo-location" /></div><div class="form-group"><label>Müzik ID (isteğe bağlı)</label><input id="photo-song" type="number" min="1" /></div><button class="btn btn-primary" id="photo-save" style="width:100%">Paylaş</button><div id="photo-error" class="form-error mt-4"></div>`);
+  document.getElementById('photo-save')?.addEventListener('click', async () => { const file=document.getElementById('photo-file').files[0]; if(!file){document.getElementById('photo-error').textContent='Fotoğraf seçin';return;} const fd=new FormData(); fd.append('image',file); ['title','caption','location','song'].forEach(k=>fd.append(k === 'song' ? 'song_id' : k, document.getElementById('photo-'+k).value.trim())); try { await apiForm('/photos',fd); hideModal(); toast('Fotoğraf paylaşıldı'); renderRoute('/fotograflar'); } catch(e){document.getElementById('photo-error').textContent=e.message;} });
+}
+
 async function renderMyPlaylists(app) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Playlistlerim – ' + siteName;
@@ -5507,7 +5520,7 @@ async function renderMyPlaylists(app) {
       }
       el.innerHTML = `<div class="pl-grid">
         ${playlists.map(pl => `
-          <div class="pl-card" data-id="${pl.id}" style="cursor:pointer">
+          <div class="pl-card" data-id="${escHtml(pl.public_id || pl.id)}" style="cursor:pointer">
             <div class="pl-card-icon"><i class="fas fa-music"></i></div>
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>

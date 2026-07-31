@@ -465,6 +465,9 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS thumbnail TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_color_mode TEXT DEFAULT 'solid';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS name_gradient TEXT DEFAULT '';
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS song_id BIGINT;
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
@@ -637,8 +640,12 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS playlists (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL,
+      public_id TEXT UNIQUE,
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
+      emoji TEXT DEFAULT '🎵',
+      cover_url TEXT DEFAULT '',
+      is_public INTEGER DEFAULT 1,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -653,6 +660,11 @@ async function initDb() {
       FOREIGN KEY(song_id) REFERENCES songs(id) ON DELETE CASCADE,
       UNIQUE(playlist_id, song_id)
     );
+    ALTER TABLE playlists ADD COLUMN IF NOT EXISTS public_id TEXT;
+    ALTER TABLE playlists ADD COLUMN IF NOT EXISTS emoji TEXT DEFAULT '🎵';
+    ALTER TABLE playlists ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
+    ALTER TABLE playlists ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 1;
+    CREATE UNIQUE INDEX IF NOT EXISTS playlists_public_id_unique ON playlists(public_id) WHERE public_id IS NOT NULL;
   `);
 
   // Seed default levels
