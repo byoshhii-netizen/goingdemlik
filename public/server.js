@@ -323,7 +323,6 @@ app.get('/robots.txt', (req, res) => {
   res.send([
     'User-agent: *',
     'Allow: /',
-    'Disallow: /panel-giris',
     'Disallow: /ayarlar',
     'Disallow: /api/',
     '',
@@ -2604,8 +2603,8 @@ function adminIPCheck(req, res, next) {
   return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
 }
 
-app.get('/panel-giris', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/panel', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/panel-giris', (req, res) => res.status(404).end());
+app.get('/panel', (req, res) => res.status(404).end());
 
 function injectMeta(title, desc, url, imageUrl, extraMeta) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');

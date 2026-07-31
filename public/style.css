@@ -752,6 +752,12 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .chat-msg-time { font-size: 11px; color: var(--text-muted); }
 .chat-msg-text { font-size: 14px; color: var(--text-primary); background: var(--bg-card2); padding: 8px 12px; border-radius: 0 8px 8px 8px; display: inline-block; max-width: 100%; word-break: break-word; }
 .chat-msg-img { max-width: 200px; border-radius: 8px; margin-top: 4px; cursor: pointer; }
+
+/* Own messages: right-align and different bubble style */
+.chat-msg.own { flex-direction: row-reverse; }
+.chat-msg.own .chat-msg-body { text-align: right; }
+.chat-msg.own .chat-msg-text { border-radius: 8px 0 8px 8px; background: linear-gradient(135deg,var(--red) 0%, var(--theme-dark) 100%); color: #fff; }
+.chat-msg.own .chat-msg-avatar { box-shadow: 0 0 0 2px rgba(255,255,255,0.02); }
 .chat-input-bar { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .chat-input-bar input { flex: 1; min-width: 0; }
 .chat-input-bar button { flex-shrink: 0; }

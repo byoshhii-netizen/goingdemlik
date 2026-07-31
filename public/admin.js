@@ -21,6 +21,70 @@ function applyThemeColor(hex) {
   });
 }
 
+// ===== BADGES (ROZETLER) =====
+async function renderBadges(main) {
+  let badges = [];
+  try { badges = await adminApi('/badges'); } catch (e) { /* ignore */ }
+  let users = [];
+  try { users = await adminApi('/users'); } catch (e) { users = []; }
+
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-award"></i></div> Rozetler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${badges.length})</span></div>
+      <div><button class="btn btn-primary" id="adm-badges-refresh">Yenile</button></div>
+    </div>
+    <div class="card" style="margin-bottom:16px;padding:16px">
+      <div style="display:flex;gap:12px;align-items:center">
+        <input id="new-badge-name" placeholder="Rozet adı (ör: Katılımcı)" />
+        <input id="new-badge-icon" placeholder="ikon (fas fa-award) veya URL" />
+        <input id="new-badge-color" type="color" value="#6b7280" style="height:38px" />
+        <button class="btn btn-primary" id="create-badge">Oluştur</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><span>Mevcut Rozetler</span></div>
+      <div class="card-body" id="badges-list">
+        ${badges.length ? badges.map(b => `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border)"><div><strong style="margin-right:8px;color:${escHtml(b.color||'#6b7280')}">${escHtml(b.name)}</strong> ${b.icon ? `<span style="margin-left:6px">${escHtml(b.icon)}</span>` : ''}</div><div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm assign-badge" data-id="${escHtml(b.id)}">Kullanıcıya Ver</button><button class="btn btn-danger btn-sm delete-badge" data-id="${escHtml(b.id)}">Sil</button></div></div>`).join('') : '<div style="padding:12px;color:var(--text-muted)">Rozet yok</div>'}
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><span>Kullanıcılara Rozet Ver</span></div>
+      <div class="card-body">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <select id="badge-select">${badges.map(b=>`<option value="${escHtml(b.id)}">${escHtml(b.name)}</option>`).join('')}</select>
+          <select id="user-select">${users.map(u=>`<option value="${u.id}">${escHtml(u.username)}</option>`).join('')}</select>
+          <button class="btn btn-primary" id="assign-badge-btn">Ver</button>
+        </div>
+        <div id="badge-assign-msg" style="color:var(--text-muted)"></div>
+      </div>
+    </div>
+  `;
+
+  $('#adm-badges-refresh')?.addEventListener('click', () => loadSection('badges'));
+  $('#create-badge')?.addEventListener('click', async () => {
+    const name = $('#new-badge-name').value.trim(); const icon = $('#new-badge-icon').value.trim(); const color = $('#new-badge-color').value;
+    if (!name) return toast('Rozet adı gerekli','error');
+    try { await adminApi('/badges', { method: 'POST', body: JSON.stringify({ name, icon, color }) }); toast('Rozet oluşturuldu'); loadSection('badges'); } catch (e) { toast(e.message,'error'); }
+  });
+  $('#badges-list')?.addEventListener('click', async e => {
+    const del = e.target.closest('.delete-badge');
+    const assign = e.target.closest('.assign-badge');
+    if (del) { if (!confirm('Rozeti silmek istediğinize emin misiniz?')) return; try { await adminApi('/badges/' + del.dataset.id, { method: 'DELETE' }); toast('Silindi'); loadSection('badges'); } catch (e) { toast(e.message,'error'); } }
+    if (assign) {
+      const bId = assign.dataset.id; const sel = $('#user-select'); if (!sel) return; const uid = sel.value; try {
+        const b = badges.find(x=>String(x.id)===String(bId)); if (!b) return toast('Rozet bulunamadı','error');
+        await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) });
+        toast('Rozet verildi');
+      } catch (e) { toast(e.message,'error'); }
+    }
+  });
+
+  $('#assign-badge-btn')?.addEventListener('click', async () => {
+    const bid = $('#badge-select').value; const uid = $('#user-select').value; if (!bid || !uid) return;
+    try { const b = badges.find(x=>String(x.id)===String(bid)); await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) }); $('#badge-assign-msg').textContent = 'Rozet verildi'; } catch (e) { $('#badge-assign-msg').textContent = e.message; }
+  });
+}
+
 // ===== DEMLIK ADMIN PANEL =====
 let adminToken = sessionStorage.getItem('admin_token') || '';
 let currentSection = 'dashboard';
@@ -145,8 +209,76 @@ function loadSection(section) {
     'shop': renderShop,
     'shop-orders': renderShopOrders,
     'shop-settings': renderShopSettings
+    , badges: renderBadges
+    , 'homepage-sections': renderHomepageSections
   };
   if (map[section]) map[section](main);
+}
+
+// ===== HOMEPAGE SECTIONS =====
+async function renderHomepageSections(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  let settings = {};
+  try { settings = await adminApi('/settings'); } catch (e) { settings = {}; }
+  const current = settings.homepage_sections ? JSON.parse(settings.homepage_sections) : ['konular','kitaplar','gruplar','muzikler'];
+  const available = [
+    { id: 'konular', label: 'Konular' },
+    { id: 'kitaplar', label: 'Kitaplar' },
+    { id: 'gruplar', label: 'Gruplar' },
+    { id: 'muzikler', label: 'Müzikler' },
+    { id: 'magaza', label: 'Mağaza' },
+    { id: 'reals', label: 'Reals' }
+  ];
+
+  function renderList() {
+    return current.map((id, idx) => {
+      const label = (available.find(a=>a.id===id)||{label:id}).label;
+      return `<div class="hp-item" data-id="${escHtml(id)}" style="display:flex;align-items:center;justify-content:space-between;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px"><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:700">${idx+1}.</span><span style="margin-left:6px">${escHtml(label)}</span></div><div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm hp-up">↑</button><button class="btn btn-outline btn-sm hp-down">↓</button><button class="btn btn-danger btn-sm hp-remove">Kaldır</button></div></div>`;
+    }).join('');
+  }
+
+  main.innerHTML = `
+    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümleri</div><div><button class="btn btn-primary" id="hp-save">Kaydet</button></div></div>
+    <div class="card" style="padding:12px;margin-bottom:12px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${available.map(a=>`<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" class="hp-available" data-id="${a.id}" ${current.includes(a.id)?'checked':''} /> ${escHtml(a.label)}</label>`).join('')}
+      </div>
+    </div>
+    <div class="card"><div class="card-header"><span>Sıralama</span></div><div class="card-body" id="hp-order">${renderList()}</div></div>
+    <div style="margin-top:12px;display:flex;gap:8px"><select id="hp-add-select">${available.filter(a=>!current.includes(a.id)).map(a=>`<option value="${a.id}">${escHtml(a.label)}</option>`).join('')}</select><button class="btn btn-primary" id="hp-add">Ekle</button></div>
+  `;
+
+  function refreshOrder() { $('#hp-order').innerHTML = renderList(); }
+
+  $('#hp-order').addEventListener('click', e => {
+    const up = e.target.closest('.hp-up');
+    const down = e.target.closest('.hp-down');
+    const rem = e.target.closest('.hp-remove');
+    const item = e.target.closest('.hp-item');
+    if (!item) return;
+    const id = item.dataset.id;
+    const i = current.indexOf(id);
+    if (up && i > 0) { [current[i-1], current[i]] = [current[i], current[i-1]]; refreshOrder(); }
+    if (down && i < current.length-1) { [current[i+1], current[i]] = [current[i], current[i+1]]; refreshOrder(); }
+    if (rem) { current.splice(i,1); // uncheck checkbox
+      const cb = document.querySelector(`.hp-available[data-id="${id}"]`); if (cb) cb.checked = false; refreshOrder(); }
+  });
+
+  $$('#admin-main .hp-available').forEach(cb => cb.addEventListener('change', e => {
+    const id = e.target.dataset.id; if (e.target.checked) { if (!current.includes(id)) current.push(id); } else { const idx = current.indexOf(id); if (idx !== -1) current.splice(idx,1); }
+    refreshOrder();
+  }));
+
+  $('#hp-add')?.addEventListener('click', () => {
+    const sel = $('#hp-add-select'); if (!sel) return; const id = sel.value; if (!id) return; current.push(id); sel.querySelector(`option[value="${id}"]`)?.remove(); const cb = document.querySelector(`.hp-available[data-id="${id}"]`); if (cb) cb.checked = true; refreshOrder();
+  });
+
+  $('#hp-save')?.addEventListener('click', async () => {
+    try {
+      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: JSON.stringify(current) }) });
+      toast('Kaydedildi');
+    } catch (e) { toast(e.message,'error'); }
+  });
 }
 
 // ===== DASHBOARD =====
@@ -316,6 +448,14 @@ function showEditUserModal(user) {
       <div class="form-group"><label>Ünvan</label><input id="eu-title" value="${escHtml(user.title||'')}" placeholder="Örn: Yazılımcı" /></div>
       <div class="form-group"><label>İsim Rengi</label><input id="eu-color" type="color" value="${user.name_color||'#f5f5f5'}" style="height:38px;cursor:pointer" /></div>
     </div>
+    <div class="form-row">
+      <div class="form-group"><label>Rozet Adı</label><input id="eu-badge-name" value="${escHtml(user.badge_name||'')}" placeholder="Örn: Katılımcı" /></div>
+      <div class="form-group"><label>Rozet İkonu</label><input id="eu-badge-icon" value="${escHtml(user.badge_icon||'fas fa-award')}" placeholder="fas fa-award veya ⭐" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Rozet Rengi</label><input id="eu-badge-color" type="color" value="${user.badge_color||'#6b7280'}" style="height:38px;cursor:pointer" /></div>
+      <div class="form-group"></div>
+    </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
       <label class="checkbox-label"><input type="checkbox" id="eu-vip" ${user.is_vip?'checked':''} /> VIP</label>
       <label class="checkbox-label"><input type="checkbox" id="eu-plus" ${user.is_plus?'checked':''} /> Plus</label>
@@ -329,7 +469,8 @@ function showEditUserModal(user) {
     const body = { username: $('#eu-username').value.trim(), email: $('#eu-email').value.trim(),
       is_vip: $('#eu-vip').checked, is_plus: $('#eu-plus').checked,
       name_color: $('#eu-color').value, level_id: parseInt($('#eu-level').value)||1,
-      title: $('#eu-title').value.trim() };
+      title: $('#eu-title').value.trim(),
+      badge_name: $('#eu-badge-name').value.trim(), badge_icon: $('#eu-badge-icon').value.trim(), badge_color: $('#eu-badge-color').value };
     const pw = $('#eu-pw').value; if (pw) body.password = pw;
     try {
       await adminApi('/user/'+user.id, {method:'PUT', body:JSON.stringify(body)});

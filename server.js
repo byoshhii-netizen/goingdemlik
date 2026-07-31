@@ -323,7 +323,6 @@ app.get('/robots.txt', (req, res) => {
   res.send([
     'User-agent: *',
     'Allow: /',
-    'Disallow: /panel-giris',
     'Disallow: /ayarlar',
     'Disallow: /api/',
     '',
@@ -392,6 +391,15 @@ app.get('/sitemap.xml', async (req, res) => {
     '</urlset>'
   ].join('\n'));
 });
+
+// Redirect legacy /konular to /forum (friendly route)
+app.get('/konular', (req, res) => { res.redirect(301, '/forum'); });
+
+// Prevent direct access to legacy admin entry paths
+app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); });
+
+// New admin entry path
+app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -1267,10 +1275,10 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     params = [group.id, before_id, limit];
   } else {
-    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
+    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
     params = [group.id, limit];
   }
   const { rows } = await query(sql, params);
@@ -1288,7 +1296,7 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
     [group.id, req.user.id, content||'', image_url||'']);
-  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
 
@@ -2455,7 +2463,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description','primary_color')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description','primary_color','homepage_sections')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   res.json(obj);
@@ -2604,8 +2612,8 @@ function adminIPCheck(req, res, next) {
   return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
 }
 
-app.get('/panel-giris', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
-app.get('/panel', adminIPCheck, (req, res) => res.sendFile(path.join(__dirname, 'public', 'admin.html')));
+app.get('/panel-giris', (req, res) => res.status(404).end());
+app.get('/panel', (req, res) => res.status(404).end());
 
 function injectMeta(title, desc, url, imageUrl, extraMeta) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
