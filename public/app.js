@@ -1942,7 +1942,7 @@ async function renderGroupList(app) {
         </div>` : ''}
       </div>
       <div class="search-bar" style="margin-bottom:24px"><i class="fas fa-search"></i><input type="text" id="group-search" placeholder="Grup ara (isim veya açıklama)..." /></div>
-      <div id="groups-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
+      <div id="groups-grid" class="groups-grid"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
 
   if (currentUser) {
@@ -2128,14 +2128,15 @@ async function renderGroupDetail(app, slug) {
   }
 
   app.innerHTML = `<div class="container page">
-    <div style="margin-bottom:20px">
-      ${group.cover_image ? `<img src="${escHtml(group.cover_image)}" style="width:100%;border-radius:var(--radius);aspect-ratio:16/5;object-fit:cover;margin-bottom:16px" alt="" />` : ''}
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div>
-          <h1 style="font-size:28px;font-weight:800">${escHtml(group.name)}</h1>
-          <p style="color:var(--text-secondary);margin-top:4px">${escHtml(group.description || '')}</p>
+    <div class="group-hero">
+      ${group.cover_image ? `<img src="${escHtml(group.cover_image)}" class="group-hero-cover" alt="" />` : `<div class="group-hero-cover group-hero-cover-placeholder"><i class="fas fa-users"></i></div>`}
+      <div class="group-hero-content">
+        <div class="group-hero-copy">
+          <div class="group-hero-eyebrow"><i class="fas fa-users"></i> TOPLULUK</div>
+          <h1 class="group-hero-title">${escHtml(group.name)}</h1>
+          ${group.description ? `<p class="group-hero-desc">${escHtml(group.description)}</p>` : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="group-hero-actions">
           ${!isMember && currentUser && group.type === 'public' && !group.invite_only ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
