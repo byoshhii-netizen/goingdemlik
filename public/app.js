@@ -190,6 +190,7 @@ function renderRoute(fullPath) {
   if (path === '/bildirimler') return renderNotifications(app);
   if (path === '/muzikler') return renderMusicList(app);
   if (path.startsWith('/muzik/')) return renderMusicDetail(app, segs[1]);
+  if (path === '/reklampanel') return renderAdPortal(app);
   if (path === '/artist-basvuru') return renderArtistApply(app);
   if (path === '/artist-panel') return renderArtistPanel(app);
   if (path === '/sarki-yukle') return renderShareSong(app);
@@ -4576,6 +4577,19 @@ async function renderSpotifyWidget(username, containerId) {
 }
 
 // ===== MÜZİK LİSTESİ =====
+async function renderAdPortal(app) {
+  document.title = 'Reklam Paneli – ' + siteName;
+  app.innerHTML = `<div class="container page" style="max-width:760px"><div class="page-header"><div class="page-title"><i class="fas fa-bullhorn" style="color:var(--accent-red)"></i> Reklam Paneli</div><div class="page-subtitle">6 haneli reklam paneli kodunuzu girin.</div></div><div class="card card-body"><div style="display:flex;gap:8px"><input id="ad-portal-code" inputmode="numeric" maxlength="6" placeholder="123456" /><button class="btn btn-primary" id="ad-portal-open">Panele Gir</button></div><div id="ad-portal-error" class="form-error mt-4"></div></div><div id="ad-portal-content" style="margin-top:16px"></div></div>`;
+  const open = async () => { const code=$('#ad-portal-code').value.trim(); if(!/^\d{6}$/.test(code)) return $('#ad-portal-error').textContent='6 haneli reklam kodunu girin.'; try { renderAdPortalEditor(await api('/reklampanel/'+code),code); } catch(e) { $('#ad-portal-error').textContent=e.message; } };
+  $('#ad-portal-open').addEventListener('click',open); $('#ad-portal-code').addEventListener('keydown',e=>{if(e.key==='Enter')open();});
+}
+function renderAdPortalEditor(ad, code) {
+  const el=$('#ad-portal-content'); if(!el)return;
+  el.innerHTML=`<div class="card"><div class="card-body"><div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">${ad.cover_url?`<img src="${escHtml(ad.cover_url)}" style="width:72px;height:72px;border-radius:12px;object-fit:cover"/>`:''}<div><div style="font-size:12px;color:var(--text-muted)">Panel ID: <b>${escHtml(code)}</b></div><div style="font-size:18px;font-weight:700">${escHtml(ad.title)}</div><div style="font-size:13px;color:var(--text-secondary)">${ad.play_count} dinlenme · ${ad.click_count} site tıklaması</div></div></div><div class="form-group"><label>Reklam adı</label><input id="ap-title" value="${escHtml(ad.title)}" /></div><div class="form-group"><label>Site adresi</label><input id="ap-site" value="${escHtml(ad.site_url||'')}" /></div><div class="form-row"><div class="form-group"><label>Yeni ses dosyası</label><input id="ap-audio" type="file" accept="audio/*" /></div><div class="form-group"><label>Yeni kapak</label><input id="ap-cover" type="file" accept="image/*" /></div></div><button class="btn btn-primary" id="ap-save">Değişiklikleri Kaydet</button>${currentUser ? `<button class="btn btn-outline" id="ap-boost" style="margin-left:8px"><i class="fas fa-bolt"></i> Boost Satın Al</button>` : '<a href="/giris" data-link class="btn btn-outline" style="margin-left:8px">Boost için giriş yap</a>'}<div id="ap-error" class="form-error mt-4"></div></div></div>`;
+  $('#ap-save').addEventListener('click',async()=>{const fd=new FormData();fd.append('title',$('#ap-title').value.trim());fd.append('site_url',$('#ap-site').value.trim());const au=$('#ap-audio').files[0],co=$('#ap-cover').files[0];if(au)fd.append('audio',au);if(co)fd.append('cover',co);try{const r=await fetch('/api/reklampanel/'+code,{method:'PUT',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Hata');renderAdPortalEditor(d,code);toast('Reklam güncellendi');}catch(e){$('#ap-error').textContent=e.message;}});
+  $('#ap-boost')?.addEventListener('click', async () => { try { const products=await api('/shop/products'); const p=products.find(x=>x.type==='ad_boost'); if(!p) throw new Error('Boost ürünü mağazada etkin değil.'); const r=await api('/shop/checkout',{method:'POST',body:JSON.stringify({product_id:p.id,music_ad_code:code})}); location.href=r.payment_url; } catch(e) { $('#ap-error').textContent=e.message; } });
+}
+
 async function renderMusicList(app) {
   document.title = 'Müzikler – ' + siteName;
   app.innerHTML = `<div class="container page">
@@ -4703,6 +4717,35 @@ let currentQueueIndex = -1;
 let playerShuffle = false;
 let playerRepeatOne = false;
 let shuffledIndices = [];      // shuffled order of indices
+let musicAdBypass = false;
+
+function playMusicAd(ad, onComplete) {
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  let player = document.getElementById('global-music-player');
+  if (!player) { player = document.createElement('div'); player.id = 'global-music-player'; document.body.appendChild(player); }
+  const audio = new Audio(ad.audio_url);
+  currentAudio = audio;
+  player.innerHTML = `<div class="gplayer-inner" style="justify-content:center">
+    <div class="gplayer-info" style="flex:0 1 460px">
+      ${ad.cover_url ? `<img src="${escHtml(ad.cover_url)}" class="gplayer-cover" />` : `<div class="gplayer-cover gplayer-cover-ph"><i class="fas fa-bullhorn"></i></div>`}
+      <div style="min-width:0;flex:1"><div class="gplayer-title">Reklam · ${escHtml(ad.title)}</div><div class="gplayer-artist">Reklam bitene kadar müzik oynatılamaz</div></div>
+      ${ad.site_url ? `<button id="music-ad-link" class="btn btn-outline btn-sm" style="flex-shrink:0">Siteye Git</button>` : ''}
+    </div>
+  </div>`;
+  player.style.display = 'block';
+  api('/music-ads/' + ad.id + '/start', { method:'POST' }).catch(() => {});
+  document.getElementById('music-ad-link')?.addEventListener('click', () => {
+    api('/music-ads/' + ad.id + '/click', { method:'POST' }).catch(() => {});
+    window.open(ad.site_url, '_blank', 'noopener');
+  });
+  audio.addEventListener('ended', async () => {
+    await api('/music-ads/' + ad.id + '/complete', { method:'POST' }).catch(() => {});
+    currentAudio = null;
+    if (onComplete) onComplete(); else player.style.display = 'none';
+  });
+  audio.addEventListener('error', () => toast('Reklam ses dosyası yüklenemedi. Reklam tamamlanana kadar müzik duraklatıldı.', 'error'));
+  audio.play().catch(() => toast('Reklamı başlatmak için tarayıcıda oynatmaya izin verin.', 'error'));
+}
 
 function buildShuffledOrder(len, startIdx) {
   const arr = [];
@@ -4713,6 +4756,14 @@ function buildShuffledOrder(len, startIdx) {
 }
 
 function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
+  // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
+  if (currentUser && !musicAdBypass && !song?.is_music_ad) {
+    api('/music-ads/pending').then(result => {
+      if (result?.ad) return playMusicAd(result.ad, () => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
+      musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false;
+    }).catch(() => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
+    return;
+  }
   // If queue provided, update global queue state
   if (queue && queue.length > 0) {
     currentQueue = queue;
@@ -4789,7 +4840,19 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   });
 
   // Şarkı bitince: repeat one, sıradaki çal veya dur
-  audio.addEventListener('ended', () => {
+  audio.addEventListener('ended', async () => {
+    const continueQueue = () => {
+      if (playerRepeatOne) { audio.currentTime = 0; audio.play().catch(()=>{}); return; }
+      const next = getNextQueueIndex(1);
+      if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
+      else { const pb=document.getElementById('gp-play'); if(pb) pb.innerHTML='<i class="fas fa-play"></i>'; }
+    };
+    if (currentUser && !song?.is_music_ad) {
+      const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
+      if (result?.ad) return playMusicAd(result.ad, continueQueue);
+    }
+    continueQueue();
+    /*
     if (playerRepeatOne) {
       audio.currentTime = 0; audio.play().catch(()=>{});
       return;
@@ -4802,6 +4865,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     } else {
       const pb=document.getElementById('gp-play'); if(pb) pb.innerHTML='<i class="fas fa-play"></i>';
     }
+    */
   });
 
   document.getElementById('gp-play').addEventListener('click', () => {
@@ -4990,13 +5054,21 @@ async function renderMusicDetail(app, slug) {
     if(seek) seek.value = pct;
     if(curEl) curEl.textContent = fmt(audio.currentTime);
   });
-  audio.addEventListener('ended', () => {
+  audio.addEventListener('ended', async () => {
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
+    if (currentUser) {
+      const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
+      if (result?.ad) playMusicAd(result.ad);
+    }
   });
 
   let halfCounted = false;
-  playBtn.addEventListener('click', () => {
+  playBtn.addEventListener('click', async () => {
     if (audio.paused) {
+      if (currentUser) {
+        const pending = await api('/music-ads/pending').catch(() => null);
+        if (pending?.ad) return playMusicAd(pending.ad, () => { audio.play().catch(() => {}); playBtn.innerHTML = '<i class="fas fa-pause"></i>'; });
+      }
       audio.play();
       playBtn.innerHTML = '<i class="fas fa-pause"></i>';
     } else {

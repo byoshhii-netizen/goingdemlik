@@ -201,7 +201,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers,
-    forums: renderForums, books: renderBooks, videos: renderVideos, 'video-ads': renderVideoAds, groups: renderGroups, artists: renderArtists,
+    forums: renderForums, books: renderBooks, videos: renderVideos, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
@@ -890,6 +890,27 @@ function showVideoEditModal(video) {
     } catch (e) { document.getElementById('ve-msg').textContent = e.message; }
     finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> Kaydet'; }
   });
+}
+
+// ===== MÜZİK REKLAMLARI =====
+async function renderMusicAds(main) {
+  let ads = [];
+  try { ads = await adminApi('/music-ads'); } catch (e) { main.innerHTML = `<p style="padding:20px;color:var(--red2)">${escHtml(e.message)}</p>`; return; }
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-headphones"></i></div> Müzik Reklamları</div><button class="btn btn-primary" id="ma-new"><i class="fas fa-plus"></i> Reklam Ekle</button></div>
+    <div class="card"><div class="table-wrap"><table><thead><tr><th>Panel ID</th><th>Başlık</th><th>Öncelik</th><th>Boost</th><th>Dinlenme</th><th>Tıklama</th><th>Durum</th><th></th></tr></thead><tbody>
+      ${ads.length ? ads.map(a => `<tr><td><code>${escHtml(a.portal_code)}</code></td><td>${escHtml(a.title)}</td><td>${a.priority}</td><td>${a.boost_points}</td><td>${a.play_count}</td><td>${a.click_count}</td><td>${a.active ? 'Aktif' : 'Pasif'}</td><td><button class="btn btn-outline btn-xs ma-edit" data-id="${a.id}">Düzenle</button> <button class="btn btn-danger btn-xs ma-delete" data-id="${a.id}">Sil</button></td></tr>`).join('') : '<tr><td colspan="8" style="text-align:center;padding:28px">Henüz ses reklamı yok.</td></tr>'}
+    </tbody></table></div></div>`;
+  $('#ma-new')?.addEventListener('click', () => showMusicAdModal());
+  main.querySelectorAll('.ma-edit').forEach(btn => btn.addEventListener('click', () => showMusicAdModal(ads.find(a => String(a.id) === btn.dataset.id))));
+  main.querySelectorAll('.ma-delete').forEach(btn => btn.addEventListener('click', async () => { if (!confirm('Reklam silinsin mi?')) return; try { await adminApi('/music-ads/'+btn.dataset.id,{method:'DELETE'}); renderMusicAds(main); } catch(e) { toast(e.message,'error'); } }));
+}
+function showMusicAdModal(ad = null) {
+  showModal(ad ? 'Ses Reklamını Düzenle' : 'Yeni Ses Reklamı', `<div class="form-group"><label>Reklam başlığı</label><input id="ma-title" value="${escHtml(ad?.title||'')}" /></div>
+    <div class="form-group"><label>Site adresi</label><input id="ma-site" value="${escHtml(ad?.site_url||'')}" placeholder="https://ornek.com" /></div>
+    <div class="form-row"><div class="form-group"><label>Öncelik</label><input id="ma-priority" type="number" value="${ad?.priority||0}" /></div><div class="form-group"><label>Boost puanı</label><input id="ma-boost" type="number" value="${ad?.boost_points||0}" /></div></div>
+    <div class="form-group"><label>Ses dosyası ${ad ? '(değiştirmek için seçin)' : ''}</label><input id="ma-audio" type="file" accept="audio/*" /></div><div class="form-group"><label>Kapak görseli</label><input id="ma-cover" type="file" accept="image/*" /></div>
+    <label class="checkbox-label" style="margin-bottom:16px"><input id="ma-active" type="checkbox" ${!ad || ad.active ? 'checked':''} /> Aktif</label><button id="ma-save" class="btn btn-primary" style="width:100%">Kaydet</button><div id="ma-err" class="form-error mt-4"></div>`);
+  $('#ma-save')?.addEventListener('click', async () => { const fd=new FormData(); fd.append('title',$('#ma-title').value.trim()); fd.append('site_url',$('#ma-site').value.trim()); fd.append('priority',$('#ma-priority').value); fd.append('boost_points',$('#ma-boost').value); fd.append('active',$('#ma-active').checked); const au=$('#ma-audio').files[0], co=$('#ma-cover').files[0]; if(au)fd.append('audio',au); if(co)fd.append('cover',co); try { const r=await fetch('/api/admin/music-ads'+(ad?'/'+ad.id:''),{method:ad?'PUT':'POST',headers:{'X-Admin-Token':adminToken},body:fd}); const d=await r.json(); if(!r.ok)throw new Error(d.error||'Hata'); hideModal(); loadSection('music-ads'); }catch(e){$('#ma-err').textContent=e.message;} });
 }
 
 // ===== VIDEO ADS =====

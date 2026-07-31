@@ -571,6 +571,10 @@ async function initDb() {
 
 
 
+    INSERT INTO store_products (name, description, features, type, price, duration_days, visible, badge_color, badge_icon, sort_order)
+    SELECT 'Müzik Reklamı Boost', 'Ses reklamını reklam havuzunda öne çıkarır.', '["Reklam havuzunda öncelik","Daha fazla gösterim"]', 'ad_boost', 39.99, 30, 1, '#dc2626', 'fas fa-bolt', 4
+    WHERE NOT EXISTS (SELECT 1 FROM store_products WHERE type='ad_boost');
+
     CREATE TABLE IF NOT EXISTS artist_applications (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL,
@@ -603,6 +607,31 @@ async function initDb() {
       published_at TIMESTAMP DEFAULT NOW(),
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    -- Müzik içi ses reklamları ve kullanıcı başına zorunlu reklam durumu
+    CREATE TABLE IF NOT EXISTS music_ads (
+      id BIGSERIAL PRIMARY KEY,
+      portal_code CHAR(6) UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      site_url TEXT DEFAULT '',
+      audio_url TEXT NOT NULL,
+      cover_url TEXT DEFAULT '',
+      priority INTEGER DEFAULT 0,
+      boost_points INTEGER DEFAULT 0,
+      active INTEGER DEFAULT 1,
+      play_count INTEGER DEFAULT 0,
+      click_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS music_ad_states (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      completed_song_count INTEGER DEFAULT 0,
+      pending_ad_id BIGINT REFERENCES music_ads(id) ON DELETE SET NULL,
+      ad_started_at TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS playlists (

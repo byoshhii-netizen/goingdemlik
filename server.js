@@ -3221,13 +3221,6 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api/') || req.path.startsWith('/uploads/')) return res.status(404).json({ error: 'Not found' });
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-
-
 // ===================================================================
 // MAĞAZA (STORE) API ROUTES - server.js'ye eklenecek
 // adminMiddleware, authMiddleware ve query zaten tanımlı
@@ -3305,12 +3298,17 @@ app.get('/api/shop/my-subscriptions', authMiddleware, async (req, res) => {
 // ===== AUTH: Ödeme başlat (Shopier) =====
 app.post('/api/shop/checkout', authMiddleware, async (req, res) => {
   try {
-    const { product_id } = req.body || {};
+    const { product_id, music_ad_code } = req.body || {};
     if (!product_id) return res.status(400).json({ error: 'Ürün ID gerekli' });
 
     const { rows: prods } = await query('SELECT * FROM store_products WHERE id=$1 AND visible=1', [product_id]);
     if (!prods.length) return res.status(404).json({ error: 'Ürün bulunamadı' });
     const product = prods[0];
+    if (product.type === 'ad_boost') {
+      if (!/^\d{6}$/.test(String(music_ad_code || ''))) return res.status(400).json({ error: 'Boost için 6 haneli reklam kodu gerekli.' });
+      const { rows: ads } = await query('SELECT id FROM music_ads WHERE portal_code=$1 AND active=1', [String(music_ad_code)]);
+      if (!ads.length) return res.status(404).json({ error: 'Aktif reklam bulunamadı.' });
+    }
 
     // Shopier ayarlarını al
     const { rows: settRows } = await query(
@@ -3328,9 +3326,9 @@ app.post('/api/shop/checkout', authMiddleware, async (req, res) => {
     // Sipariş oluştur
     const platformOrderId = 'ORD-' + Date.now() + '-' + req.user.id;
     await query(
-      `INSERT INTO store_orders (user_id, product_id, product_name, product_type, amount, currency, status, platform_order_id)
-       VALUES ($1,$2,$3,$4,$5,'TRY','pending',$6)`,
-      [req.user.id, product.id, product.name, product.type, product.price, platformOrderId]
+      `INSERT INTO store_orders (user_id, product_id, product_name, product_type, amount, currency, status, platform_order_id, payment_data)
+       VALUES ($1,$2,$3,$4,$5,'TRY','pending',$6,$7)`,
+      [req.user.id, product.id, product.name, product.type, product.price, platformOrderId, JSON.stringify({ music_ad_code: music_ad_code || '' })]
     );
 
     const randomNr = Math.floor(Math.random() * 999999) + 100000;
@@ -3456,6 +3454,13 @@ app.post('/api/shop/webhook', express.urlencoded({ extended: true }), async (req
       const { rows: prods } = await query('SELECT * FROM store_products WHERE id=$1', [order.product_id]);
       const durDays = prods.length ? prods[0].duration_days : 30;
       const expiresAt = new Date(Date.now() + durDays * 24 * 3600 * 1000);
+
+      const orderMeta = (() => { try { return JSON.parse(order.payment_data || '{}'); } catch { return {}; } })();
+      if (order.product_type === 'ad_boost' && orderMeta.music_ad_code) {
+        await query('UPDATE music_ads SET boost_points=boost_points+$1, updated_at=NOW() WHERE portal_code=$2', [Math.max(1, durDays || 30), orderMeta.music_ad_code]);
+        await logAction('system', 'music_ad_boost_complete', orderMeta.music_ad_code, 'user:' + order.user_id, '');
+        return res.status(200).send('OK');
+      }
 
       const { rows: newSub } = await query(
         `INSERT INTO subscriptions (user_id, product_id, type, expires_at, is_active, order_id)
@@ -3652,6 +3657,93 @@ app.get('/api/shop/my-orders', authMiddleware, async (req, res) => {
 });
 
 // ===== SPA FALLBACK — Tüm API dışı route'lar index.html'e yönlendirilir =====
+// ===== MÜZİK SES REKLAMLARI =====
+function newMusicAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+function isAdFreeUser(user) { return !!(user && (user.is_vip || user.is_plus)); }
+async function pickMusicAd() {
+  const { rows } = await query('SELECT * FROM music_ads WHERE active=1 ORDER BY boost_points DESC, priority DESC, created_at ASC LIMIT 1');
+  return rows[0] || null;
+}
+
+app.get('/api/music-ads/pending', authMiddleware, async (req, res) => {
+  try {
+    if (isAdFreeUser(req.user)) return res.json({ ad: null });
+    const { rows } = await query(`SELECT a.* FROM music_ad_states s JOIN music_ads a ON a.id=s.pending_ad_id
+      WHERE s.user_id=$1 AND a.active=1`, [req.user.id]);
+    res.json({ ad: rows[0] || null });
+  } catch (e) { res.status(500).json({ error:e.message }); }
+});
+app.post('/api/music-ads/song-finished', authMiddleware, async (req, res) => {
+  try {
+    if (isAdFreeUser(req.user)) return res.json({ ad:null, songs_until_ad:null });
+    const state = (await query('SELECT * FROM music_ad_states WHERE user_id=$1', [req.user.id])).rows[0];
+    if (state?.pending_ad_id) {
+      const { rows } = await query('SELECT * FROM music_ads WHERE id=$1 AND active=1', [state.pending_ad_id]);
+      return res.json({ ad:rows[0] || null, songs_until_ad:0 });
+    }
+    const completed = (state?.completed_song_count || 0) + 1;
+    const ad = completed >= 2 ? await pickMusicAd() : null;
+    await query(`INSERT INTO music_ad_states (user_id,completed_song_count,pending_ad_id,updated_at) VALUES ($1,$2,$3,NOW())
+      ON CONFLICT (user_id) DO UPDATE SET completed_song_count=EXCLUDED.completed_song_count,pending_ad_id=EXCLUDED.pending_ad_id,updated_at=NOW()`,
+      [req.user.id, ad ? 0 : completed, ad?.id || null]);
+    res.json({ ad, songs_until_ad:ad ? 0 : 2-completed });
+  } catch (e) { res.status(500).json({ error:e.message }); }
+});
+app.post('/api/music-ads/:id/start', authMiddleware, async (req, res) => {
+  try {
+    if (isAdFreeUser(req.user)) return res.json({ ok:true });
+    const { rows } = await query(`UPDATE music_ad_states SET ad_started_at=COALESCE(ad_started_at,NOW()),updated_at=NOW()
+      WHERE user_id=$1 AND pending_ad_id=$2 RETURNING ad_started_at`, [req.user.id,req.params.id]);
+    if (!rows.length) return res.status(403).json({ error:'Bu reklam oynatma sıranızda değil.' });
+    await query('UPDATE music_ads SET play_count=play_count+1 WHERE id=$1', [req.params.id]);
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+app.post('/api/music-ads/:id/complete', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(`UPDATE music_ad_states SET pending_ad_id=NULL,ad_started_at=NULL,completed_song_count=0,updated_at=NOW()
+      WHERE user_id=$1 AND pending_ad_id=$2 RETURNING user_id`, [req.user.id,req.params.id]);
+    if (!rows.length && !isAdFreeUser(req.user)) return res.status(403).json({ error:'Reklam tamamlanamadı.' });
+    res.json({ ok:true });
+  } catch(e) { res.status(500).json({ error:e.message }); }
+});
+app.post('/api/music-ads/:id/click', async (req,res) => {
+  try { await query('UPDATE music_ads SET click_count=click_count+1 WHERE id=$1 AND active=1',[req.params.id]); res.json({ok:true}); }
+  catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.get('/api/admin/music-ads', adminMiddleware, async (req,res) => {
+  const { rows } = await query('SELECT * FROM music_ads ORDER BY boost_points DESC,priority DESC,created_at DESC'); res.json(rows);
+});
+app.post('/api/admin/music-ads', adminMiddleware, upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
+  try {
+    const b=req.body, audio_url=req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : '', cover_url=req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : '';
+    if (!b.title?.trim() || !audio_url) return res.status(400).json({error:'Başlık ve ses dosyası zorunlu.'});
+    let code=newMusicAdPortalCode(); while ((await query('SELECT id FROM music_ads WHERE portal_code=$1',[code])).rows.length) code=newMusicAdPortalCode();
+    const {rows}=await query(`INSERT INTO music_ads (portal_code,title,site_url,audio_url,cover_url,priority,boost_points,active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [code,b.title.trim(),b.site_url||'',audio_url,cover_url,parseInt(b.priority)||0,parseInt(b.boost_points)||0,b.active==='false'?0:1]);
+    res.json(rows[0]);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+app.put('/api/admin/music-ads/:id', adminMiddleware, upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
+  try {
+    const old=(await query('SELECT * FROM music_ads WHERE id=$1',[req.params.id])).rows[0]; if(!old) return res.status(404).json({error:'Reklam bulunamadı.'});
+    const b=req.body, audio=req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : old.audio_url, cover=req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : old.cover_url;
+    const {rows}=await query(`UPDATE music_ads SET title=$1,site_url=$2,audio_url=$3,cover_url=$4,priority=$5,boost_points=$6,active=$7,updated_at=NOW() WHERE id=$8 RETURNING *`,
+      [b.title?.trim()||old.title,b.site_url??old.site_url,audio,cover,b.priority??old.priority,b.boost_points??old.boost_points,b.active===undefined?old.active:(b.active==='false'?0:1),old.id]); res.json(rows[0]);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+app.delete('/api/admin/music-ads/:id', adminMiddleware, async (req,res) => { await query('DELETE FROM music_ads WHERE id=$1',[req.params.id]); res.json({ok:true}); });
+
+// 6 haneli kod reklamverenin gizli panel anahtarıdır.
+app.get('/api/reklampanel/:code', async (req,res) => { const {rows}=await query('SELECT * FROM music_ads WHERE portal_code=$1',[req.params.code]); if(!rows.length)return res.status(404).json({error:'Reklam kodu bulunamadı.'}); res.json(rows[0]); });
+app.put('/api/reklampanel/:code', upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
+  try { const old=(await query('SELECT * FROM music_ads WHERE portal_code=$1',[req.params.code])).rows[0]; if(!old)return res.status(404).json({error:'Reklam kodu bulunamadı.'}); const b=req.body;
+    const audio=req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : old.audio_url, cover=req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : old.cover_url;
+    const {rows}=await query('UPDATE music_ads SET title=$1,site_url=$2,audio_url=$3,cover_url=$4,updated_at=NOW() WHERE id=$5 RETURNING *',[b.title?.trim()||old.title,b.site_url??old.site_url,audio,cover,old.id]); res.json(rows[0]);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Not found' });
