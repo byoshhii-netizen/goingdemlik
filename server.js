@@ -1520,11 +1520,11 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
 app.get('/api/photos', optionalAuth, async (req, res) => {
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
-  const base = `SELECT p.id, p.url, p.caption, p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
+  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
-    FROM photos p LEFT JOIN users u ON u.id=p.user_id`;
+    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id`;
   const queryText = username
     ? `${base} WHERE u.username = $2 ORDER BY p.created_at DESC LIMIT 100`
     : `${base} ORDER BY p.created_at DESC LIMIT 100`;
@@ -1651,6 +1651,32 @@ app.delete('/api/admin/photos/:id', adminMiddleware, async (req, res) => {
   await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 });
+
+// ===== PHOTO ADVERTISING =====
+function normalizedExternalUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try { return new URL(candidate).href; } catch { return ''; }
+}
+function newAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
+async function uniqueAdPortalCode(table) { let code = newAdPortalCode(); while ((await query(`SELECT id FROM ${table} WHERE portal_code=$1`, [code])).rows.length) code = newAdPortalCode(); return code; }
+
+app.get('/api/photo-ads/random', async (req,res) => res.json((await query('SELECT * FROM photo_ads WHERE active=1 ORDER BY priority DESC,created_at ASC LIMIT 1')).rows[0] || null));
+app.post('/api/photo-ads/:id/click', async (req,res) => { await query('UPDATE photo_ads SET click_count=click_count+1 WHERE id=$1 AND active=1',[req.params.id]); res.json({ok:true}); });
+app.get('/api/admin/photo-ads', adminMiddleware, async (req,res) => res.json((await query('SELECT * FROM photo_ads ORDER BY priority DESC,created_at DESC')).rows));
+app.put('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => {
+  const old=(await query('SELECT * FROM photo_ads WHERE id=$1',[req.params.id])).rows[0]; if(!old) return res.status(404).json({error:'Reklam bulunamadı'});
+  const b=req.body,site=normalizedExternalUrl(b.site_url??old.site_url); if(!site)return res.status(400).json({error:'Geçerli site adresi girin'});
+  const {rows}=await query('UPDATE photo_ads SET title=$1,description=$2,site_url=$3,show_likes=$4,allow_comments=$5,allow_shares=$6,active=$7,priority=$8,updated_at=NOW() WHERE id=$9 RETURNING *',[b.title||old.title,b.description??old.description,site,b.show_likes===undefined?old.show_likes:(b.show_likes?1:0),b.allow_comments===undefined?old.allow_comments:(b.allow_comments?1:0),b.allow_shares===undefined?old.allow_shares:(b.allow_shares?1:0),b.active===undefined?old.active:(b.active?1:0),b.priority??old.priority,old.id]);res.json(rows[0]);
+});
+app.delete('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => { await query('DELETE FROM photo_ads WHERE id=$1',[req.params.id]);res.json({ok:true}); });
+app.post('/api/ad-submissions', authMiddleware, upload.fields([{name:'media',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
+  try { const b=req.body;if(!['music','photo'].includes(b.type)||!b.title?.trim()||!req.files?.media?.[0])return res.status(400).json({error:'Reklam türü, başlık ve dosya zorunlu.'});const site=normalizedExternalUrl(b.site_url);if(!site)return res.status(400).json({error:'Geçerli site adresi girin.'});const media=await handleUpload(req.files.media[0]),cover=req.files?.cover?.[0]?await handleUpload(req.files.cover[0]):'',code=await uniqueAdPortalCode('ad_submissions');const {rows}=await query(`INSERT INTO ad_submissions (user_id,type,title,description,site_url,media_url,cover_url,show_likes,allow_comments,allow_shares,portal_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[req.user.id,b.type,b.title.trim(),b.description||'',site,media,cover,b.show_likes==='false'?0:1,b.allow_comments==='false'?0:1,b.allow_shares==='false'?0:1,code]);res.json(rows[0]); } catch(e){res.status(500).json({error:e.message});}
+});
+app.get('/api/admin/ad-submissions', adminMiddleware, async (req,res) => res.json((await query('SELECT a.*,u.username FROM ad_submissions a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC')).rows));
+app.post('/api/admin/ad-submissions/:id/approve', adminMiddleware, async (req,res) => { const ad=(await query("SELECT * FROM ad_submissions WHERE id=$1 AND status='pending'",[req.params.id])).rows[0];if(!ad)return res.status(404).json({error:'Bekleyen reklam bulunamadı'});if(ad.type==='photo')await query('INSERT INTO photo_ads (portal_code,title,description,site_url,image_url,show_likes,allow_comments,allow_shares) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',[ad.portal_code,ad.title,ad.description,ad.site_url,ad.media_url,ad.show_likes,ad.allow_comments,ad.allow_shares]);else await query('INSERT INTO music_ads (portal_code,title,site_url,audio_url,cover_url,active) VALUES ($1,$2,$3,$4,$5,1)',[ad.portal_code,ad.title,ad.site_url,ad.media_url,ad.cover_url]);await query("UPDATE ad_submissions SET status='approved' WHERE id=$1",[ad.id]);res.json({ok:true}); });
+app.post('/api/admin/ad-submissions/:id/reject', adminMiddleware, async (req,res) => {await query("UPDATE ad_submissions SET status='rejected' WHERE id=$1",[req.params.id]);res.json({ok:true});});
 
 // ===== ADMIN =====
 app.get('/api/admin/users', adminMiddleware, async (req, res) => {

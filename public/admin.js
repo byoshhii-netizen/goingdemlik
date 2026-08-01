@@ -201,7 +201,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers,
-    forums: renderForums, books: renderBooks, videos: renderVideos, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
+    forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
@@ -216,6 +216,17 @@ function loadSection(section) {
 }
 
 // ===== HOMEPAGE SECTIONS =====
+async function renderAdminPhotos(main) {
+  const photos = await adminApi('/photos');
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Fotoğraflar</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
+  main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
+}
+async function renderAdSubmissions(main) {
+  const ads = await adminApi('/ad-submissions');
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Reklam Havuzu</div></div><div class="card"><table class="adm-table"><thead><tr><th>Tür</th><th>Reklam</th><th>Gönderen</th><th>Durum</th><th>İşlem</th></tr></thead><tbody>${ads.map(a=>`<tr><td>${escHtml(a.type)}</td><td>${escHtml(a.title)}</td><td>${escHtml(a.username||'')}</td><td>${escHtml(a.status)}</td><td>${a.status==='pending'?`<button class="btn btn-primary btn-xs ad-approve" data-id="${a.id}">Onayla</button> <button class="btn btn-danger btn-xs ad-reject" data-id="${a.id}">Reddet</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+  main.querySelectorAll('.ad-approve').forEach(b=>b.onclick=async()=>{await adminApi('/ad-submissions/'+b.dataset.id+'/approve',{method:'POST'});renderAdSubmissions(main);});
+  main.querySelectorAll('.ad-reject').forEach(b=>b.onclick=async()=>{await adminApi('/ad-submissions/'+b.dataset.id+'/reject',{method:'POST'});renderAdSubmissions(main);});
+}
 async function renderHomepageSections(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   let settings = {};
@@ -227,7 +238,8 @@ async function renderHomepageSections(main) {
     { id: 'gruplar', label: 'Gruplar' },
     { id: 'muzikler', label: 'Müzikler' },
     { id: 'magaza', label: 'Mağaza' },
-    { id: 'reals', label: 'Reals' }
+    { id: 'reals', label: 'Reals' },
+    { id: 'fotograflar', label: 'Fotoğraflar' }
   ];
 
   main.innerHTML = `

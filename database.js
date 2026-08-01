@@ -469,6 +469,40 @@ async function initDb() {
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS song_id BIGINT;
 
+    CREATE TABLE IF NOT EXISTS photo_ads (
+      id BIGSERIAL PRIMARY KEY,
+      portal_code TEXT UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      site_url TEXT NOT NULL,
+      image_url TEXT NOT NULL,
+      show_likes INTEGER DEFAULT 1,
+      allow_comments INTEGER DEFAULT 1,
+      allow_shares INTEGER DEFAULT 1,
+      active INTEGER DEFAULT 1,
+      priority INTEGER DEFAULT 0,
+      click_count INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS ad_submissions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      type TEXT NOT NULL CHECK (type IN ('music','photo')),
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      site_url TEXT DEFAULT '',
+      media_url TEXT NOT NULL,
+      cover_url TEXT DEFAULT '',
+      show_likes INTEGER DEFAULT 1,
+      allow_comments INTEGER DEFAULT 1,
+      allow_shares INTEGER DEFAULT 1,
+      status TEXT DEFAULT 'pending',
+      portal_code TEXT UNIQUE NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL,
