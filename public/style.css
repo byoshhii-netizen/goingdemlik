@@ -795,6 +795,46 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .chat-msg-text { font-size: 14px; line-height: 1.45; color: var(--text-primary); background: var(--bg-card2); padding: 8px 12px; border-radius: 0 10px 10px 10px; display: inline-block; max-width:100%; word-break: break-word; overflow-wrap:anywhere; white-space:pre-wrap; }
 .chat-msg-img { max-width: 200px; border-radius: 8px; margin-top: 4px; cursor: pointer; }
 
+/* Mesajların avatarı, başlığı ve balonu tek satır düzeninde kalır. */
+.chat-msg { display:grid !important; grid-template-columns:34px minmax(0,1fr) !important; flex-wrap:nowrap !important; }
+.chat-msg-avatar { grid-column:1; grid-row:1 / span 2; }
+.chat-msg-body { grid-column:2; min-width:0 !important; }
+.chat-msg-meta { min-width:0; flex-wrap:wrap; }
+.chat-msg-name { overflow-wrap:anywhere; }
+.chat-msg-text { margin-top:2px; width:fit-content; max-width:100%; }
+
+/* Reklam oynatıcısı normal müzik oynatıcısının mobil daraltma kurallarını kullanmaz. */
+.music-ad-player .gplayer-inner { justify-content:center; }
+.music-ad-player .gplayer-info { flex:0 1 560px; min-width:0; }
+.music-ad-player .gplayer-title, .music-ad-player .gplayer-artist { max-width:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+@media (max-width: 768px) {
+  .music-ad-player .gplayer-inner { padding:8px 10px; }
+  .music-ad-player .gplayer-info { flex:1 1 auto !important; gap:8px; }
+  .music-ad-player .gplayer-cover, .music-ad-player .gplayer-cover-ph { width:36px; height:36px; }
+  .music-ad-player .gplayer-title { max-width:none; font-size:12px; }
+  .music-ad-player .gplayer-artist { display:none; }
+  .music-ad-player #music-ad-link { padding:6px 8px; font-size:11px; white-space:nowrap; }
+  .music-ad-player #music-ad-toggle { display:flex !important; width:34px; height:34px; flex:0 0 34px; }
+
+  .chat-container { height:min(560px, calc(100svh - 150px)); border-radius:12px; }
+  .chat-messages { padding:12px 10px; gap:12px; }
+  .chat-msg { grid-template-columns:32px minmax(0,1fr) !important; gap:8px; }
+  .chat-msg-avatar { width:32px !important; height:32px !important; }
+  .chat-msg-meta { gap:5px; margin-bottom:3px; }
+  .chat-msg-name { font-size:13px; }
+  .chat-msg-time { font-size:10px; }
+  .chat-msg-text { padding:8px 10px; font-size:14px; }
+  .chat-input-bar { padding:8px; gap:6px; }
+
+  .dm-messages { padding:12px 10px 8px; gap:8px; }
+  .dm-msg-wrap { gap:6px; align-items:flex-end; }
+  .dm-msg-content { max-width:calc(100% - 40px) !important; }
+  .dm-msg-bubble { max-width:100%; width:fit-content; font-size:14px; line-height:1.4; padding:8px 10px; }
+  .dm-chat-header-right { max-width:42%; overflow:hidden; }
+  .dm-chat-header-right .btn { padding:5px 7px; font-size:0; }
+  .dm-chat-header-right .btn i { font-size:13px; }
+}
+
 /* Discord-style group chat: avatar, name and message always share the left edge. */
 .chat-msg.own { flex-direction: row; }
 .chat-msg.own .chat-msg-body { text-align: left; }

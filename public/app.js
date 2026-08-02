@@ -4746,12 +4746,13 @@ function playMusicAd(ad, onComplete) {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   let player = document.getElementById('global-music-player');
   if (!player) { player = document.createElement('div'); player.id = 'global-music-player'; document.body.appendChild(player); }
+  player.classList.add('music-ad-player');
   const audio = new Audio(ad.audio_url);
   currentAudio = audio;
   player.innerHTML = `<div class="gplayer-inner" style="justify-content:center">
     <div class="gplayer-info" style="flex:0 1 460px">
       ${ad.cover_url ? `<img src="${escHtml(ad.cover_url)}" class="gplayer-cover" />` : `<div class="gplayer-cover gplayer-cover-ph"><i class="fas fa-bullhorn"></i></div>`}
-      <div style="min-width:0;flex:1"><div class="gplayer-title">Reklam · ${escHtml(ad.title)}</div><div class="gplayer-artist">Her 2 şarkıda bir reklam · <span class="music-ad-counter">1/${Number(ad.ad_total)||1}</span></div></div>
+      <div style="min-width:0;flex:1"><div class="gplayer-title">Reklam · ${escHtml(ad.title)}</div><div class="gplayer-artist">Sponsorlu içerik</div></div>
       <button id="music-ad-toggle" class="gplayer-btn gplayer-play" type="button" title="Durdur"><i class="fas fa-pause"></i></button>
       ${ad.site_url ? `<button id="music-ad-link" class="btn btn-outline btn-sm" style="flex-shrink:0">Siteye Git</button>` : ''}
     </div>
@@ -4815,6 +4816,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     player.id = 'global-music-player';
     document.body.appendChild(player);
   }
+  player.classList.remove('music-ad-player');
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
   const audio = new Audio(audioUrl);
