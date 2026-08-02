@@ -245,16 +245,16 @@ async function renderHomepageSections(main) {
   main.innerHTML = `
     <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümü</div><div><button class="btn btn-primary" id="hp-save">Kaydet</button></div></div>
     <div class="card" style="padding:12px">
-      ${available.map(a => `<label style="display:block;margin-bottom:10px"><input type="checkbox" name="hp-section" value="${a.id}" ${(Array.isArray(current) ? current : [current]).includes(a.id) ? 'checked' : ''} /> ${escHtml(a.label)}</label>`).join('')}
+      ${available.map(a => `<label style="display:block;margin-bottom:10px"><input type="radio" name="hp-section" value="${a.id}" ${(Array.isArray(current) ? current[0] : current) === a.id ? 'checked' : ''} /> ${escHtml(a.label)}</label>`).join('')}
     </div>
   `;
 
   $('#hp-save')?.addEventListener('click', async () => {
-    const sel = Array.from(document.querySelectorAll('input[name="hp-section"]:checked')).map(x => x.value);
-    if (!sel.length) { toast('En az bir bölüm seçin', 'error'); return; }
+    const sel = document.querySelector('input[name="hp-section"]:checked')?.value;
+    if (!sel) { toast('Bir bölüm seçin', 'error'); return; }
     if (!sel) { toast('Bir bölüm seçin','error'); return; }
     try {
-      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: JSON.stringify(sel) }) });
+      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: sel }) });
       toast('Kaydedildi');
     } catch (e) { toast(e.message,'error'); }
   });

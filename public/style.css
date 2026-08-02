@@ -521,6 +521,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .photo-comments { display:grid; gap:7px; margin-bottom:10px; }
 .photo-comments p { padding:8px 10px; margin:0; background:var(--bg-card2); border-radius:8px; overflow-wrap:anywhere; }
 .photo-comment-form { display:flex; gap:8px; }.photo-comment-form input { flex:1; min-width:0; }
+#photo-audio-control { position:fixed; right:20px; bottom:82px; z-index:90; display:flex; align-items:center; gap:8px; padding:7px; border:1px solid var(--border); border-radius:22px; background:var(--bg-card); box-shadow:0 8px 24px rgba(0,0,0,.28); }
+#photo-audio-control input { width:96px; accent-color:var(--accent-red); }
+@media (max-width:768px) { #photo-audio-control { right:12px; bottom:70px; padding:5px; } #photo-audio-control input { display:none; } }
 @media (max-width: 600px) { .photos-feed { columns: 1; } .photo-card { border-radius:12px; padding:10px; } }
 .group-cover-placeholder { font-size: 40px; color: var(--text-muted); }
 .group-info { padding: 14px; overflow: hidden; min-width: 0; flex: 1; display: flex; flex-direction: column; }

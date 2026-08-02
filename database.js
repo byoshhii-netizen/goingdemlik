@@ -392,6 +392,7 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
