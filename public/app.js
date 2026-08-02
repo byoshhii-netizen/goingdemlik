@@ -4752,6 +4752,7 @@ function playMusicAd(ad, onComplete) {
     <div class="gplayer-info" style="flex:0 1 460px">
       ${ad.cover_url ? `<img src="${escHtml(ad.cover_url)}" class="gplayer-cover" />` : `<div class="gplayer-cover gplayer-cover-ph"><i class="fas fa-bullhorn"></i></div>`}
       <div style="min-width:0;flex:1"><div class="gplayer-title">Reklam · ${escHtml(ad.title)}</div><div class="gplayer-artist">Her 2 şarkıda bir reklam · <span class="music-ad-counter">1/${Number(ad.ad_total)||1}</span></div></div>
+      <button id="music-ad-toggle" class="gplayer-btn gplayer-play" type="button" title="Durdur"><i class="fas fa-pause"></i></button>
       ${ad.site_url ? `<button id="music-ad-link" class="btn btn-outline btn-sm" style="flex-shrink:0">Siteye Git</button>` : ''}
     </div>
   </div>`;
@@ -4760,6 +4761,15 @@ function playMusicAd(ad, onComplete) {
   document.getElementById('music-ad-link')?.addEventListener('click', () => {
     api('/music-ads/' + ad.id + '/click', { method:'POST' }).catch(() => {});
     window.open(normalizeExternalUrl(ad.site_url), '_blank', 'noopener,noreferrer');
+  });
+  document.getElementById('music-ad-toggle')?.addEventListener('click', e => {
+    const btn = e.currentTarget;
+    if (audio.paused) {
+      audio.play().then(() => { btn.title='Durdur'; btn.innerHTML='<i class="fas fa-pause"></i>'; }).catch(() => toast('Reklamı devam ettirmek için oynatmaya izin verin.', 'error'));
+    } else {
+      audio.pause();
+      btn.title='Devam Et'; btn.innerHTML='<i class="fas fa-play"></i>';
+    }
   });
   audio.addEventListener('ended', async () => {
     await api('/music-ads/' + ad.id + '/complete', { method:'POST' }).catch(() => {});
