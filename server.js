@@ -1520,7 +1520,7 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
 app.get('/api/photos', optionalAuth, async (req, res) => {
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
-  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
+  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
@@ -1551,10 +1551,11 @@ app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res)
   try {
     const url = await handleUpload(req.file);
     const b = req.body;
-    const { rows } = await query(`INSERT INTO photos (user_id,url,title,caption,location,song_id,show_likes,allow_comments,allow_shares)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`, [
+    const songStart = Math.max(0, parseInt(b.song_start_seconds, 10) || 0);
+    const { rows } = await query(`INSERT INTO photos (user_id,url,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [
       req.user.id, url, (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
-      b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.allow_shares === 'false' ? 0 : 1
+      songStart, b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.allow_shares === 'false' ? 0 : 1
     ]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1587,8 +1588,9 @@ app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
 app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user.id;
-  const { rows } = await query('SELECT id FROM photos WHERE id=$1', [photoId]);
+  const { rows } = await query('SELECT id, show_likes FROM photos WHERE id=$1', [photoId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
+  if (rows[0].show_likes !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
   const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
   if (exists.length) {
     await query('DELETE FROM photo_likes WHERE id=$1', [exists[0].id]);
@@ -3715,14 +3717,15 @@ app.get('/api/shop/my-orders', authMiddleware, async (req, res) => {
 function newMusicAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 function isAdFreeUser(user) { return !!(user && (user.is_vip || user.is_plus)); }
 async function pickMusicAd() {
-  const { rows } = await query('SELECT * FROM music_ads WHERE active=1 ORDER BY boost_points DESC, priority DESC, created_at ASC LIMIT 1');
+  const { rows } = await query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
+    FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT 1`);
   return rows[0] || null;
 }
 
 app.get('/api/music-ads/pending', authMiddleware, async (req, res) => {
   try {
     if (isAdFreeUser(req.user)) return res.json({ ad: null });
-    const { rows } = await query(`SELECT a.* FROM music_ad_states s JOIN music_ads a ON a.id=s.pending_ad_id
+    const { rows } = await query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total FROM music_ad_states s JOIN music_ads a ON a.id=s.pending_ad_id
       WHERE s.user_id=$1 AND a.active=1`, [req.user.id]);
     res.json({ ad: rows[0] || null });
   } catch (e) { res.status(500).json({ error:e.message }); }
@@ -3732,7 +3735,7 @@ app.post('/api/music-ads/song-finished', authMiddleware, async (req, res) => {
     if (isAdFreeUser(req.user)) return res.json({ ad:null, songs_until_ad:null });
     const state = (await query('SELECT * FROM music_ad_states WHERE user_id=$1', [req.user.id])).rows[0];
     if (state?.pending_ad_id) {
-      const { rows } = await query('SELECT * FROM music_ads WHERE id=$1 AND active=1', [state.pending_ad_id]);
+      const { rows } = await query('SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total FROM music_ads a WHERE a.id=$1 AND a.active=1', [state.pending_ad_id]);
       return res.json({ ad:rows[0] || null, songs_until_ad:0 });
     }
     const completed = (state?.completed_song_count || 0) + 1;
