@@ -5534,7 +5534,86 @@ async function renderPhotos(app) {
 }
 function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}${p.song_title?`<button class="btn btn-ghost btn-sm photo-song" data-audio="${escHtml(p.song_audio_url||'')}" data-start="${Number(p.song_start_seconds)||0}" style="display:block;margin-top:8px"><i class="fas fa-music"></i> ${escHtml(p.song_title)} · ${escHtml(p.song_artist||'')}</button>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
-function bindPhotoFeed(feed) { const sharePhoto=async c=>{const url=location.origin+'/fotograflar#foto-'+c.dataset.photoId;const data={title:'CigCig fotoğrafı',text:'Bu fotoğrafa göz at',url};if(navigator.share) await navigator.share(data);else {await navigator.clipboard.writeText(url);toast('Fotoğraf bağlantısı kopyalandı');}}; const renderComments=async(c,box)=>{const cs=await api('/photos/'+c.dataset.photoId+'/comments');box.innerHTML=`<div class="photo-comments">${cs.map(v=>`<p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p>`).join('')||'<small>Henüz yorum yok.</small>'}</div>${currentUser?'<div class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz"/><button class="btn btn-primary btn-sm photo-comment-send">Gönder</button></div>':'<small>Yorum yapmak için giriş yapın.</small>'}`;box.querySelector('.photo-comment-send')?.addEventListener('click',async()=>{const input=box.querySelector('input');if(!input.value.trim())return;await api('/photos/'+c.dataset.photoId+'/comments',{method:'POST',body:JSON.stringify({content:input.value.trim()})});await renderComments(c,box);const count=c.querySelector('.photo-comment span');if(count)count.textContent=Number(count.textContent)+1;});}; feed.querySelectorAll('.photo-ad-card').forEach(x=>x.onclick=()=>{const id=x.dataset.adId;api('/photo-ads/'+id+'/click',{method:'POST'}).catch(()=>{});api('/photo-ads/random').then(a=>{if(a&&a.id==id)window.open(normalizeExternalUrl(a.site_url),'_blank','noopener,noreferrer');});}); feed.querySelectorAll('.photo-delete').forEach(x=>x.onclick=async e=>{const c=e.target.closest('[data-photo-id]');if(confirm('Fotoğraf silinsin mi?')){await api('/photos/'+c.dataset.photoId,{method:'DELETE'});c.remove();}}); feed.querySelectorAll('.photo-like').forEach(x=>x.onclick=async e=>{if(!currentUser)return toast('Giriş yapın','error');const c=e.target.closest('[data-photo-id]'),r=await api('/photos/'+c.dataset.photoId+'/like',{method:'POST'}),n=x.querySelector('span');n.textContent=Number(n.textContent)+(r.liked?1:-1);x.querySelector('i').className=(r.liked?'fas':'far')+' fa-heart';}); feed.querySelectorAll('.photo-share,.photo-forward').forEach(x=>x.onclick=e=>sharePhoto(e.target.closest('[data-photo-id]')).catch(()=>{})); feed.querySelectorAll('.photo-comment').forEach(x=>x.onclick=async e=>{const c=e.target.closest('[data-photo-id]'),box=c.querySelector('.photo-comment-box');box.hidden=!box.hidden;if(!box.hidden)await renderComments(c,box);}); feed.querySelectorAll('.photo-song').forEach(x=>x.onclick=()=>{if(!x.dataset.audio)return;openMiniPlayer(x.dataset.audio,'',{title:x.textContent,artist_name:'',cover_url:'',start_seconds:Number(x.dataset.start)||0});}); }
+function bindPhotoFeed(feed) {
+  const sharePhoto = async c => {
+    const url = location.origin + '/fotograflar#foto-' + c.dataset.photoId;
+    const data = { title: 'CigCig fotoğrafı', text: 'Bu fotoğrafa göz at', url };
+    if (navigator.share) await navigator.share(data);
+    else {
+      await navigator.clipboard.writeText(url);
+      toast('Fotoğraf bağlantısı kopyalandı');
+    }
+  };
+
+  const renderComments = async (c, box) => {
+    const cs = await api('/photos/' + c.dataset.photoId + '/comments');
+    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<div class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz"/><button class="btn btn-primary btn-sm photo-comment-send">Gönder</button></div>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
+    box.querySelector('.photo-comment-send')?.addEventListener('click', async () => {
+      const input = box.querySelector('input');
+      if (!input?.value.trim()) return;
+      await api('/photos/' + c.dataset.photoId + '/comments', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) });
+      await renderComments(c, box);
+      const count = c.querySelector('.photo-comment span');
+      if (count) count.textContent = String(Number(count.textContent) + 1);
+    });
+  };
+
+  feed.querySelectorAll('.photo-ad-card').forEach(x => x.onclick = () => {
+    const id = x.dataset.adId;
+    api('/photo-ads/' + id + '/click', { method: 'POST' }).catch(() => {});
+    api('/photo-ads/random').then(a => {
+      if (a && a.id == id) window.open(normalizeExternalUrl(a.site_url), '_blank', 'noopener,noreferrer');
+    });
+  });
+
+  feed.querySelectorAll('.photo-delete').forEach(x => x.onclick = async e => {
+    const c = e.target.closest('[data-photo-id]');
+    if (!c) return;
+    if (confirm('Fotoğraf silinsin mi?')) {
+      await api('/photos/' + c.dataset.photoId, { method: 'DELETE' });
+      c.remove();
+    }
+  });
+
+  feed.querySelectorAll('.photo-comment').forEach(x => x.onclick = async e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const c = e.target.closest('[data-photo-id]');
+    if (!c) return;
+    const box = c.querySelector('.photo-comment-box');
+    if (!box) return;
+    box.hidden = !box.hidden;
+    if (!box.hidden) await renderComments(c, box);
+  });
+
+  feed.querySelectorAll('.photo-share').forEach(x => x.onclick = async e => {
+    e.preventDefault();
+    e.stopPropagation();
+    const c = e.target.closest('[data-photo-id]');
+    if (c) await sharePhoto(c);
+  });
+
+  feed.querySelectorAll('.photo-like').forEach(x => x.onclick = async e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!currentUser) return toast('Giriş yapın', 'error');
+    const c = e.target.closest('[data-photo-id]');
+    if (!c) return;
+    const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
+    const n = x.querySelector('span');
+    if (n) n.textContent = String(Number(n.textContent) + (r.liked ? 1 : -1));
+    const icon = x.querySelector('i');
+    if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
+  });
+
+  feed.querySelectorAll('.photo-song').forEach(x => x.onclick = e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!x.dataset.audio) return;
+    openMiniPlayer(x.dataset.audio, '', { title: x.textContent, artist_name: '', cover_url: '', start_seconds: Number(x.dataset.start) || 0 });
+  });
+}
+
 
 let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed) {
@@ -5549,9 +5628,9 @@ function setupPhotoAudio(feed) {
   document.body.appendChild(control);
   const stop=()=>{activePhotoAudio?.pause();activePhotoAudio=null;};
   const sync=()=>{document.querySelector('#photo-audio-toggle i').className='fas '+(enabled?'fa-volume-up':'fa-volume-mute'); if(!enabled)stop();};
-  $('#photo-audio-toggle').onclick=()=>{enabled=!enabled;localStorage.setItem('cigcig_photo_audio_enabled',enabled?'1':'0');sync();};
+  $('#photo-audio-toggle').onclick=()=>{enabled=!enabled;localStorage.setItem('cigcig_photo_audio_enabled',enabled?'1':'0');sync(); if (enabled) photoAudioObserver?.takeRecords?.();};
   $('#photo-audio-volume')?.addEventListener('input',e=>{volume=Number(e.target.value)/100;localStorage.setItem('cigcig_photo_audio_volume',String(volume));if(activePhotoAudio)activePhotoAudio.volume=volume;});
-  const play=card=>{const b=card.querySelector('.photo-song');if(!enabled||!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.volume=isPhone?1:volume;a.currentTime=Number(b.dataset.start)||0;a.play().catch(()=>{});activePhotoAudio=a;};
+  const play=card=>{const b=card.querySelector('.photo-song');if(!enabled||!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.volume=isPhone?1:volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
   photoAudioObserver=new IntersectionObserver(entries=>entries.forEach(x=>{if(x.isIntersecting&&x.intersectionRatio>.7)play(x.target);}),{threshold:[.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
 }
@@ -5563,15 +5642,115 @@ document.addEventListener('click', e => {
   showForwardPhotoModal(btn.closest('[data-photo-id]')?.dataset.photoId);
 }, true);
 function showPhotoUploadModal() {
-  showModal('Fotoğraf At', `<div class="form-group"><label>Fotoğraf *</label><input id="photo-file" type="file" accept="image/*" /></div><div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" /></div><div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3"></textarea></div><div class="form-group"><label>Konum</label><input id="photo-location" /></div><div class="form-group"><label>Müzik</label><select id="photo-song"><option value="">Müzik seçilmedi</option></select><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Dinleyerek seç</button></div><div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div><label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label><label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label><label class="checkbox-label"><input id="photo-shares" type="checkbox" checked/> Paylaşım ve iletme açık</label><button class="btn btn-primary" id="photo-save" style="width:100%">Paylaş</button><div id="photo-error" class="form-error mt-4"></div>`);
-  let songs=[]; let preview=null;
-  api('/songs').then(s=>{songs=s;document.getElementById('photo-song').innerHTML='<option value="">Müzik seçilmedi</option>'+s.map(v=>`<option value="${v.id}">${escHtml(v.title)} · ${escHtml(v.artist_name)}</option>`).join('');});
-  const select=document.getElementById('photo-song'), previewBtn=document.getElementById('photo-song-preview'), start=document.getElementById('photo-song-start'), time=document.getElementById('photo-song-time');
-  const showTime=()=>{const seconds=Number(start.value)||0;time.textContent=Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');};
-  select.onchange=()=>{const song=songs.find(s=>String(s.id)===select.value), enabled=!!song;previewBtn.disabled=!enabled;start.disabled=!enabled;start.value=0;start.max=0;showTime();if(song?.audio_url){const probe=new Audio(song.audio_url);probe.onloadedmetadata=()=>{start.max=Math.floor(probe.duration)||0;};}};
-  start.oninput=showTime;
-  previewBtn.onclick=()=>{const song=songs.find(s=>String(s.id)===select.value);if(!song?.audio_url)return; if(preview){preview.pause();preview=null;previewBtn.innerHTML='<i class="fas fa-play"></i> Dinleyerek seç';return;} preview=new Audio(song.audio_url);preview.currentTime=Math.max(0,Number(start.value)||0);preview.play();previewBtn.innerHTML='<i class="fas fa-pause"></i> Önizlemeyi durdur';preview.onended=()=>{preview=null;previewBtn.innerHTML='<i class="fas fa-play"></i> Dinleyerek seç';};};
-  document.getElementById('photo-save')?.addEventListener('click', async e => { const save=e.currentTarget; if(save.disabled)return; const file=document.getElementById('photo-file').files[0]; if(!file){document.getElementById('photo-error').textContent='Fotoğraf seçin';return;} save.disabled=true; const fd=new FormData();fd.append('image',file);['title','caption','location'].forEach(k=>fd.append(k,document.getElementById('photo-'+k).value.trim()));fd.append('song_id',select.value);fd.append('song_start_seconds',start.value);fd.append('show_likes',document.getElementById('photo-likes').checked);fd.append('allow_comments',document.getElementById('photo-comments').checked);fd.append('allow_shares',document.getElementById('photo-shares').checked);try{await apiForm('/photos',fd);preview?.pause();hideModal();toast('Fotoğraf paylaşıldı');renderRoute('/fotograflar');}catch(err){save.disabled=false;document.getElementById('photo-error').textContent=err.message;}});
+  showModal('Fotoğraf At', `
+    <div class="form-group"><label>Fotoğraf *</label><input id="photo-file" type="file" accept="image/*" /></div>
+    <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" /></div>
+    <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3"></textarea></div>
+    <div class="form-group"><label>Konum</label><input id="photo-location" /></div>
+    <div class="form-group"><label>Müzik</label><select id="photo-song"><option value="">Müzik seçilmedi</option></select><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
+    <div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div>
+    <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
+    <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
+    <label class="checkbox-label"><input id="photo-shares" type="checkbox" checked/> Paylaşım ve iletme açık</label>
+    <button class="btn btn-primary" id="photo-save" style="width:100%">Paylaş</button>
+    <div id="photo-error" class="form-error mt-4"></div>
+  `);
+
+  let songs = [];
+  const select = document.getElementById('photo-song');
+  const previewBtn = document.getElementById('photo-song-preview');
+  const previewPlayer = document.getElementById('photo-song-preview-player');
+  const start = document.getElementById('photo-song-start');
+  const time = document.getElementById('photo-song-time');
+
+  api('/songs').then(s => {
+    songs = s;
+    select.innerHTML = '<option value="">Müzik seçilmedi</option>' + s.map(v => `<option value="${v.id}">${escHtml(v.title)} · ${escHtml(v.artist_name)}</option>`).join('');
+  });
+
+  const showTime = () => {
+    const seconds = Number(start.value) || 0;
+    time.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    if (previewPlayer && !previewPlayer.paused) {
+      previewPlayer.currentTime = Math.max(0, seconds);
+    }
+  };
+
+  const updatePreviewUi = () => {
+    if (previewPlayer && previewPlayer.src) {
+      previewPlayer.style.display = 'block';
+    } else {
+      previewPlayer.style.display = 'none';
+      previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+    }
+  };
+
+  select.onchange = () => {
+    const song = songs.find(s => String(s.id) === select.value);
+    const enabled = !!song;
+    previewBtn.disabled = !enabled;
+    start.disabled = !enabled;
+    start.value = 0;
+    start.max = 0;
+    showTime();
+    if (song?.audio_url) {
+      previewPlayer.src = song.audio_url;
+      previewPlayer.currentTime = 0;
+      previewPlayer.load();
+      previewPlayer.onended = () => {
+        previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+      };
+      const probe = new Audio(song.audio_url);
+      probe.addEventListener('loadedmetadata', () => {
+        start.max = Math.floor(probe.duration) || 0;
+      });
+    } else {
+      previewPlayer.pause();
+      previewPlayer.src = '';
+    }
+    updatePreviewUi();
+  };
+
+  start.oninput = showTime;
+
+  previewBtn.onclick = () => {
+    if (!previewPlayer?.src) return;
+    const targetTime = Math.max(0, Number(start.value) || 0);
+    previewPlayer.currentTime = targetTime;
+    if (previewPlayer.paused) {
+      previewPlayer.play();
+      previewBtn.innerHTML = '<i class="fas fa-pause"></i> Önizlemeyi durdur';
+    } else {
+      previewPlayer.pause();
+      previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+    }
+  };
+
+  document.getElementById('photo-save')?.addEventListener('click', async e => {
+    const save = e.currentTarget;
+    if (save.disabled) return;
+    const file = document.getElementById('photo-file').files[0];
+    if (!file) { document.getElementById('photo-error').textContent = 'Fotoğraf seçin'; return; }
+    save.disabled = true;
+    const fd = new FormData();
+    fd.append('image', file);
+    ['title', 'caption', 'location'].forEach(k => fd.append(k, document.getElementById('photo-' + k).value.trim()));
+    fd.append('song_id', select.value);
+    fd.append('song_start_seconds', start.value);
+    fd.append('show_likes', document.getElementById('photo-likes').checked);
+    fd.append('allow_comments', document.getElementById('photo-comments').checked);
+    fd.append('allow_shares', document.getElementById('photo-shares').checked);
+    try {
+      await apiForm('/photos', fd);
+      previewPlayer?.pause();
+      hideModal();
+      toast('Fotoğraf paylaşıldı');
+      renderRoute('/fotograflar');
+    } catch (err) {
+      save.disabled = false;
+      document.getElementById('photo-error').textContent = err.message;
+    }
+  });
 }
 
 async function renderMyPlaylists(app) {

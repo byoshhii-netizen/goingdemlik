@@ -263,6 +263,7 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL,
       url TEXT NOT NULL,
+      public_id TEXT DEFAULT '',
       caption TEXT DEFAULT '',
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -400,6 +401,7 @@ async function initDb() {
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS like_count INTEGER DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS comment_count INTEGER DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS public_id TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;

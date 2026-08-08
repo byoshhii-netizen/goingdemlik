@@ -307,6 +307,7 @@ async function handleUpload(file) {
         (err, result) => {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
           if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));
+          file.cloudinary_public_id = result.public_id || '';
           resolve(result.secure_url);
         }
       );
@@ -1552,9 +1553,9 @@ app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res)
     const url = await handleUpload(req.file);
     const b = req.body;
     const songStart = Math.max(0, parseInt(b.song_start_seconds, 10) || 0);
-    const { rows } = await query(`INSERT INTO photos (user_id,url,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [
-      req.user.id, url, (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
+    const { rows } = await query(`INSERT INTO photos (user_id,url,public_id,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [
+      req.user.id, url, req.file.cloudinary_public_id || '', (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
       songStart, b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.allow_shares === 'false' ? 0 : 1
     ]);
     res.json(rows[0]);
@@ -1577,9 +1578,17 @@ app.put('/api/photos/:id', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT user_id FROM photos WHERE id=$1', [req.params.id]);
+  const { rows } = await query('SELECT user_id, public_id FROM photos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu fotoğrafı silme yetkiniz yok' });
+  const publicId = rows[0].public_id;
+  if (USE_CLOUDINARY && publicId) {
+    try {
+      await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true });
+    } catch (err) {
+      console.warn('Cloudinary photo destroy failed:', err.message || err);
+    }
+  }
   await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 });
@@ -1650,6 +1659,15 @@ app.put('/api/admin/photos/:id', adminMiddleware, async (req, res) => {
 });
 
 app.delete('/api/admin/photos/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT public_id FROM photos WHERE id=$1', [req.params.id]);
+  const publicId = rows.length ? rows[0].public_id : null;
+  if (USE_CLOUDINARY && publicId) {
+    try {
+      await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true });
+    } catch (err) {
+      console.warn('Cloudinary admin photo destroy failed:', err.message || err);
+    }
+  }
   await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 });
