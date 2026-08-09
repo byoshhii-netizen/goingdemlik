@@ -615,9 +615,17 @@ async function renderHome(app) {
   if (chosen === 'konular') await renderForumsSection();
   else if (chosen === 'kitaplar') await renderBooksSection();
   else if (chosen === 'gruplar') {
-      const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Popüler Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-groups" class="grid-3"></div></div>`;
+      const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Popüler Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-groups" class="groups-grid"></div></div>`;
       $('#home-sections').insertAdjacentHTML('beforeend', html);
-      try { const gs = await api('/groups'); const el = $('#home-groups'); if (!gs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>'; else el.innerHTML = gs.slice(0,6).map(g=>`<div class="card"><div style="padding:12px"><div style="font-weight:700">${escHtml(g.name)}</div><div style="font-size:13px;color:var(--text-muted)">${g.member_count||0} üye</div></div></div>`).join(''); } catch {}
+      try {
+        const gs = await api('/groups');
+        const el = $('#home-groups');
+        if (!gs.length) {
+          el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>';
+        } else {
+          el.innerHTML = gs.slice(0, 6).map(g => groupCardHTML(g)).join('');
+        }
+      } catch {}
     }
     else if (chosen === 'muzikler') {
       const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Yeni Müzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-songs"></div></div>`;
@@ -626,6 +634,7 @@ async function renderHome(app) {
       try {
         const songs = await api('/songs');
         if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; return; }
+        songs.sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
         el.innerHTML = `<div class="music-table">
           <div class="music-table-header">
             <div style="width:40px">#</div>
@@ -4679,6 +4688,7 @@ async function renderMusicList(app) {
     try {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
       songs = await api(url);
+      songs.sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
       if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok.</p></div>'; return; }
       el.innerHTML = `<div class="music-table">
         <div class="music-table-header">
