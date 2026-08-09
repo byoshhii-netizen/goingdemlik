@@ -1,7 +1,7 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
-let siteName = 'CigCig';
+let siteName = '';
 
 const SITE_URL = 'https://cigcig.xyz';
 
@@ -3733,7 +3733,7 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
-    siteName = ps.site_name || 'CigCig';
+    siteName = ps.site_name || '';
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     // Kitap arka plan rengi CSS değişkeni olarak ayarla
     if (ps.book_bg_color) {

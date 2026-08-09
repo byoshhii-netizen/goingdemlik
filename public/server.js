@@ -1375,15 +1375,16 @@ app.get('/api/profile/:username', async (req, res) => {
   const { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = users[0];
-  const [forums, books, groups, level, levels, bpCount] = await Promise.all([
+  const [forums, books, groups, songs, level, levels, bpCount] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
+    query(`SELECT s.*, u.username AS uploader_username, u.avatar AS uploader_avatar, u.is_artist FROM songs s LEFT JOIN users u ON s.uploader_id=u.id WHERE s.uploader_id=$1 AND s.status != 'deleted' ORDER BY s.created_at DESC LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount });
+  res.json({ user: sanitizeUser(user), forums, books, groups, songs, level, levels, book_page_count: bpCount });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
@@ -1893,7 +1894,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['footer_created_visible', 'footer_copyright_text', 'primary_color', 'book_bg_color'];
+  const keys = ['site_name', 'footer_created_visible', 'footer_copyright_text', 'primary_color', 'book_bg_color'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
