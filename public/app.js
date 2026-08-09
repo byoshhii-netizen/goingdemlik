@@ -158,6 +158,13 @@ document.addEventListener('click', e => {
 });
 
 function renderRoute(fullPath) {
+  // Sayfa değişiminde fotoğraf ses kontrolünü kaldır
+  document.getElementById('photo-audio-control')?.remove();
+  photoAudioObserver?.disconnect();
+  activePhotoAudio?.pause();
+  activePhotoAudio = null;
+  photoAudioObserver = null;
+
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
   updateNavActive(path);
@@ -637,7 +644,7 @@ async function renderHome(app) {
   async function renderPhotosSection() {
     const html = `<div class="section"><div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Paylaş, konum ve müzik ekle.</div></div>${currentUser?'<button class="btn btn-primary" id="home-photo-upload-btn"><i class="fas fa-camera"></i> Fotoğraf At</button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
-    try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); setupPhotoAudio(el); } catch {}
+    try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); } catch {}
     $('#home-photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
   }
 
