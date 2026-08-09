@@ -581,8 +581,10 @@ async function renderHome(app) {
   let settings = {};
   try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
   const raw = settings.homepage_sections;
-  const sections = raw ? (function() { try { return JSON.parse(raw); } catch { return raw; } })() : 'konular';
-  const chosen = Array.isArray(sections) ? sections[0] : (sections || 'konular');
+  let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
+  if (!Array.isArray(sections)) sections = [sections];
+  sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
+  if (!sections.length) sections = ['konular'];
 
   async function renderForumsSection() {
     const html = `

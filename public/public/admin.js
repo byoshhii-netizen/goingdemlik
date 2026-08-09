@@ -156,28 +156,56 @@ async function renderHomepageSections(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   let settings = {};
   try { settings = await adminApi('/settings'); } catch (e) { settings = {}; }
-  const current = settings.homepage_sections ? (function(){ try { return JSON.parse(settings.homepage_sections); } catch { return settings.homepage_sections; } })() : 'konular';
+  const current = settings.homepage_sections ? (function(){ try { return JSON.parse(settings.homepage_sections); } catch { return settings.homepage_sections; } })() : ['konular'];
+  const currentArr = Array.isArray(current) ? current : [current];
   const available = [
     { id: 'konular', label: 'Konular' },
     { id: 'kitaplar', label: 'Kitaplar' },
     { id: 'gruplar', label: 'Gruplar' },
     { id: 'muzikler', label: 'Müzikler' },
+    { id: 'playlistler', label: 'Playlistler' },
     { id: 'magaza', label: 'Mağaza' },
-    { id: 'reals', label: 'Reals' }
+    { id: 'reals', label: 'Reals' },
+    { id: 'fotograflar', label: 'Fotoğraflar' }
   ];
 
   main.innerHTML = `
     <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümü</div><div><button class="btn btn-primary" id="hp-save">Kaydet</button></div></div>
     <div class="card" style="padding:12px">
-      ${available.map(a => `<label style="display:block;margin-bottom:10px"><input type="radio" name="hp-single" value="${a.id}" ${current === a.id ? 'checked' : ''} /> ${escHtml(a.label)}</label>`).join('')}
+      <div id="hp-sections-list" style="display:grid;gap:10px">
+        ${available.map(a => `
+          <div class="hp-section-row" data-id="${a.id}" style="display:flex;align-items:center;gap:8px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card2)">
+            <button type="button" class="btn btn-ghost btn-xs hp-move-up" title="Yukarı taşı"><i class="fas fa-chevron-up"></i></button>
+            <button type="button" class="btn btn-ghost btn-xs hp-move-down" title="Aşağı taşı"><i class="fas fa-chevron-down"></i></button>
+            <label style="flex:1;display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
+              <input type="checkbox" class="hp-section-checkbox" value="${a.id}" ${currentArr.includes(a.id) ? 'checked' : ''} /> ${escHtml(a.label)}
+            </label>
+          </div>`).join('')}
+      </div>
     </div>
+    <div style="font-size:13px;color:var(--text-muted);margin-top:10px">Sekmeleri seçin ve yukarı/aşağı taşıma butonlarıyla ana sayfa sıralamasını belirleyin.</div>
   `;
 
+  const list = document.getElementById('hp-sections-list');
+  list?.addEventListener('click', e => {
+    const up = e.target.closest('.hp-move-up');
+    const down = e.target.closest('.hp-move-down');
+    if (!up && !down) return;
+    const row = (up || down).closest('.hp-section-row');
+    if (!row) return;
+    if (up && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
+    if (down && row.nextElementSibling) row.parentElement.insertBefore(row, row.nextElementSibling.nextElementSibling);
+  });
+
   $('#hp-save')?.addEventListener('click', async () => {
-    const sel = document.querySelector('input[name="hp-single"]:checked');
-    if (!sel) { toast('Bir bölüm seçin','error'); return; }
+    if (!list) return;
+    const selected = Array.from(list.querySelectorAll('.hp-section-row')).map(row => {
+      const input = row.querySelector('input.hp-section-checkbox');
+      return input && input.checked ? row.dataset.id : null;
+    }).filter(Boolean);
+    if (!selected.length) { toast('Bir bölüm seçin','error'); return; }
     try {
-      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: sel.value }) });
+      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: JSON.stringify(selected) }) });
       toast('Kaydedildi');
     } catch (e) { toast(e.message,'error'); }
   });
