@@ -620,9 +620,60 @@ async function renderHome(app) {
       try { const gs = await api('/groups'); const el = $('#home-groups'); if (!gs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>'; else el.innerHTML = gs.slice(0,6).map(g=>`<div class="card"><div style="padding:12px"><div style="font-weight:700">${escHtml(g.name)}</div><div style="font-size:13px;color:var(--text-muted)">${g.member_count||0} üye</div></div></div>`).join(''); } catch {}
     }
     else if (chosen === 'muzikler') {
-      const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Yeni Müzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-songs" class="grid-3"></div></div>`;
+      const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Yeni Müzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-songs"></div></div>`;
       $('#home-sections').insertAdjacentHTML('beforeend', html);
-      try { const songs = await api('/songs'); const el = $('#home-songs'); if (!songs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; else el.innerHTML = songs.slice(0,6).map(s=>songCardHTML(s)).join(''); } catch {}
+      const el = $('#home-songs');
+      try {
+        const songs = await api('/songs');
+        if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; return; }
+        el.innerHTML = `<div class="music-table">
+          <div class="music-table-header">
+            <div style="width:40px">#</div>
+            <div style="flex:1">Başlık</div>
+            <div style="width:160px;display:none" class="col-dist">Dağıtıcı</div>
+            <div style="width:120px">Eklenme</div>
+            <div style="width:80px;text-align:right">Dinlenme</div>
+            ${currentUser ? '<div style="width:36px"></div>' : ''}
+          </div>
+          ${songs.map((s, i) => `
+            <div class="music-row" data-slug="${escHtml(s.slug)}" data-id="${s.id}">
+              <div class="music-num">${i+1}</div>
+              <div class="music-info">
+                <div class="music-cover-wrap">
+                  ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="music-cover" />` : `<div class="music-cover music-cover-ph"><i class="fas fa-music"></i></div>`}
+                  <button class="music-play-mini" data-slug="${escHtml(s.slug)}" data-audio="${escHtml(s.audio_url)}" data-idx="${i}"><i class="fas fa-play"></i></button>
+                </div>
+                <div>
+                  <div class="music-title">${escHtml(s.title)}</div>
+                  <div class="music-artist">${escHtml(s.artist_name)}</div>
+                </div>
+              </div>
+              <div class="music-dist col-dist">${escHtml(s.distributor||'-')}</div>
+              <div class="music-date">${timeAgo(s.published_at)}</div>
+              <div class="music-plays" style="text-align:right;font-size:12px;color:var(--text-muted)">${s.play_count} <i class="fas fa-headphones" style="font-size:10px"></i></div>
+              ${currentUser ? `<div style="width:36px;text-align:right"><button class="btn-pl-add" data-song-id="${s.id}" title="Playliste ekle"><i class="fas fa-plus"></i></button></div>` : ''}
+            </div>`).join('')}
+        </div>`;
+
+        el.querySelectorAll('.music-row').forEach(row => {
+          row.addEventListener('click', e => {
+            if (!e.target.closest('.music-play-mini') && !e.target.closest('.btn-pl-add')) navigate('/muzik/' + row.dataset.slug);
+          });
+        });
+        el.querySelectorAll('.music-play-mini').forEach(btn => {
+          btn.addEventListener('click', e => {
+            e.stopPropagation();
+            const idx = parseInt(btn.dataset.idx);
+            openMiniPlayer(btn.dataset.audio, btn.dataset.slug, songs[idx], songs, idx);
+          });
+        });
+        el.querySelectorAll('.btn-pl-add').forEach(btn => {
+          btn.addEventListener('click', e => {
+            e.stopPropagation();
+            showAddToPlaylistMenu(btn.dataset.songId, btn.parentElement);
+          });
+        });
+      } catch {}
     }
     else if (chosen === 'magaza') {
       $('#home-sections').insertAdjacentHTML('beforeend', `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Mağaza</div><a href="/magaza" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-shop" class="grid-3"></div></div>`);
