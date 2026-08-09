@@ -177,7 +177,7 @@ async function renderHomepageSections(main) {
           <div class="hp-section-row" data-id="${a.id}" style="display:flex;align-items:center;gap:8px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card2)">
             <button type="button" class="btn btn-ghost btn-xs hp-move-up" title="Yukarı taşı"><i class="fas fa-chevron-up"></i></button>
             <button type="button" class="btn btn-ghost btn-xs hp-move-down" title="Aşağı taşı"><i class="fas fa-chevron-down"></i></button>
-            <label style="flex:1;display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
+            <label class="checkbox-label" style="flex:1;display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
               <input type="checkbox" class="hp-section-checkbox" value="${a.id}" ${currentArr.includes(a.id) ? 'checked' : ''} /> ${escHtml(a.label)}
             </label>
           </div>`).join('')}

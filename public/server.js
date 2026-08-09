@@ -2257,27 +2257,28 @@ app.get('/api/playlists', authMiddleware, async (req, res) => {
 
 app.post('/api/playlists', authMiddleware, async (req, res) => {
   try {
-    const { name, description } = req.body;
+    const { name, description, emoji, cover_url, is_public } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
     const { rows } = await query(
-      'INSERT INTO playlists (user_id, name, description) VALUES ($1, $2, $3) RETURNING *',
-      [req.user.id, name.trim(), description?.trim() || '']
+      'INSERT INTO playlists (user_id, public_id, name, description, emoji, cover_url, is_public) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [req.user.id, 'pl_' + crypto.randomBytes(9).toString('base64url').toLowerCase(), name.trim(), description?.trim() || '', (emoji || '🎵').slice(0, 8), cover_url || '', is_public === false ? 0 : 1]
     );
     res.json(rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/playlists/:id', authMiddleware, async (req, res) => {
+app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
   try {
-    const { rows: pl } = await query('SELECT * FROM playlists WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+    const { rows: pl } = await query('SELECT * FROM playlists WHERE public_id=$1 OR id::text=$1', [req.params.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    if (!pl[0].is_public && (!req.user || pl[0].user_id !== req.user.id)) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const { rows: songs } = await query(
       `SELECT ps.id as ps_id, ps.position, s.id, s.slug, s.title, s.artist_name, s.cover_url, s.audio_url, s.play_count
        FROM playlist_songs ps
        JOIN songs s ON s.id = ps.song_id
        WHERE ps.playlist_id = $1 AND s.status = 'active'
        ORDER BY ps.position ASC, ps.added_at ASC`,
-      [req.params.id]
+      [pl[0].id]
     );
     res.json({ ...pl[0], songs });
   } catch(e) { res.status(500).json({ error: e.message }); }
