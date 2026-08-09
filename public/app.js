@@ -591,10 +591,11 @@ async function renderHome(app) {
   let settings = {};
   try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
   const raw = settings.homepage_sections;
-  const sections = raw ? (function() { try { return JSON.parse(raw); } catch { return raw; } })() : 'konular';
-  const chosen = Array.isArray(sections) ? (sections[0] || 'konular') : (sections || 'konular');
+  let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
+  if (!Array.isArray(sections)) sections = [sections];
+  sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
+  if (!sections.length) sections = ['konular'];
 
-  // Helpers to render each section into a container
   async function renderForumsSection() {
     const html = `
       <div class="section">
@@ -621,26 +622,72 @@ async function renderHome(app) {
     try { const books = await api('/books'); const el = $('#home-books'); if (!books.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-book"></i><p>Henüz kitap yok.</p></div>'; else el.innerHTML = books.slice(0, 6).map(b => bookCardHTML(b)).join(''); } catch {}
   }
 
-  if (chosen === 'konular') await renderForumsSection();
-  else if (chosen === 'kitaplar') await renderBooksSection();
-  else if (chosen === 'gruplar') {
+  async function renderGroupsSection() {
     const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Popüler Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-groups" class="grid-3"></div></div>`;
-    $('#home-sections').insertAdjacentHTML('beforeend', html);
+    const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try { const gs = await api('/groups'); const el = $('#home-groups'); if (!gs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>'; else el.innerHTML = gs.slice(0,6).map(g=>`<div class="card"><div style="padding:12px"><div style="font-weight:700">${escHtml(g.name)}</div><div style="font-size:13px;color:var(--text-muted)">${g.member_count||0} üye</div></div></div>`).join(''); } catch {}
   }
-  else if (chosen === 'muzikler') {
+
+  async function renderMusicSection() {
     const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Yeni Müzikler</div><a href="/muzikler" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-songs" class="grid-3"></div></div>`;
-    $('#home-sections').insertAdjacentHTML('beforeend', html);
+    const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try { const songs = await api('/songs'); const el = $('#home-songs'); if (!songs.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; else el.innerHTML = songs.slice(0,6).map(s=>songCardHTML(s)).join(''); } catch {}
   }
-  else if (chosen === 'fotograflar') {
-    $('#home-sections').insertAdjacentHTML('beforeend', `<div class="section"><div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Paylaş, konum ve müzik ekle.</div></div>${currentUser?'<button class="btn btn-primary" id="home-photo-upload-btn"><i class="fas fa-camera"></i> Fotoğraf At</button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`);
-    try { const ps=await api('/photos'); const el=$('#home-photos'); el.innerHTML=ps.length?ps.slice(0,6).map(photoCardHTML).join(''):'<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); setupPhotoAudio(el); } catch {}
+
+  async function renderPhotosSection() {
+    const html = `<div class="section"><div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Paylaş, konum ve müzik ekle.</div></div>${currentUser?'<button class="btn btn-primary" id="home-photo-upload-btn"><i class="fas fa-camera"></i> Fotoğraf At</button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`;
+    const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
+    try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); setupPhotoAudio(el); } catch {}
     $('#home-photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
   }
-  else if (chosen === 'magaza') {
-    $('#home-sections').insertAdjacentHTML('beforeend', `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Mağaza</div><a href="/magaza" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-shop" class="grid-3"></div></div>`);
+
+  async function renderShopSection() {
+    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Mağaza</div><a href="/magaza" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-shop" class="grid-3"></div></div>`;
+    const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try { const items = await api('/shop/items'); const el = $('#home-shop'); if (!items.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-store"></i><p>Mağaza boş.</p></div>'; else el.innerHTML = items.slice(0,6).map(i=>shopCardHTML(i)).join(''); } catch {}
+  }
+
+  async function renderPlaylistsSection() {
+    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Playlistler</div><a href="/playlistlerim" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-playlists" class="grid-3"></div></div>`;
+    const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
+    const el = $('#home-playlists');
+    if (!currentUser) {
+      el.innerHTML = '<div class="empty-state"><i class="fas fa-list"></i><p>Playlistlerini görmek için giriş yap.</p></div>';
+      return;
+    }
+    try {
+      const playlists = await api('/playlists');
+      if (!playlists.length) {
+        el.innerHTML = '<div class="empty-state"><i class="fas fa-list"></i><p>Henüz playlist yok.</p></div>';
+        return;
+      }
+      el.innerHTML = playlists.slice(0,6).map(pl => `
+        <a href="/playlist/${escHtml(pl.public_id || pl.id)}" data-link class="card card-body" style="display:block;text-decoration:none;color:inherit">
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="width:54px;height:54px;border-radius:16px;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;font-size:20px">${escHtml(pl.emoji || '🎵')}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(pl.name)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${pl.song_count} şarkı · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
+            </div>
+          </div>
+        </a>`).join('');
+    } catch {}
+  }
+
+  const sectionMap = {
+    konular: renderForumsSection,
+    kitaplar: renderBooksSection,
+    gruplar: renderGroupsSection,
+    muzikler: renderMusicSection,
+    fotograflar: renderPhotosSection,
+    magaza: renderShopSection,
+    playlistler: renderPlaylistsSection
+  };
+
+  for (const section of sections) {
+    if (sectionMap[section]) {
+      await sectionMap[section]();
+    }
   }
 }
 
@@ -5781,11 +5828,11 @@ async function renderMyPlaylists(app) {
             <div class="pl-card-icon"><i class="fas fa-music"></i></div>
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>
-              <div class="pl-card-meta">${pl.song_count} şarkı</div>
+              <div class="pl-card-meta">${pl.song_count} şarkı · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
               ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
             </div>
             <div class="pl-card-actions">
-              <button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" data-name="${escHtml(pl.name)}" data-desc="${escHtml(pl.description||'')}" title="Düzenle"><i class="fas fa-edit"></i></button>
+              <button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" data-public="${pl.is_public ? '1' : '0'}" data-name="${escHtml(pl.name)}" data-desc="${escHtml(pl.description||'')}" title="Düzenle"><i class="fas fa-edit"></i></button>
               <button class="btn btn-ghost btn-sm pl-del-btn" data-id="${pl.id}" data-name="${escHtml(pl.name)}" title="Sil" style="color:var(--accent-red2)"><i class="fas fa-trash"></i></button>
             </div>
           </div>`).join('')}
@@ -5800,7 +5847,7 @@ async function renderMyPlaylists(app) {
       el.querySelectorAll('.pl-edit-btn').forEach(btn => {
         btn.addEventListener('click', e => {
           e.stopPropagation();
-          showCreatePlaylistModal('edit', btn.dataset.id, btn.dataset.name, btn.dataset.desc, renderList);
+          showCreatePlaylistModal('edit', btn.dataset.id, btn.dataset.name, btn.dataset.desc, btn.dataset.public === '1', renderList);
         });
       });
       el.querySelectorAll('.pl-del-btn').forEach(btn => {
@@ -5820,30 +5867,32 @@ async function renderMyPlaylists(app) {
   renderList();
 
   document.getElementById('pl-create-btn')?.addEventListener('click', () => {
-    showCreatePlaylistModal('create', null, '', '', renderList);
+    showCreatePlaylistModal('create', null, '', '', true, renderList);
   });
 }
 
-function showCreatePlaylistModal(mode, plId, name, desc, onSave) {
+function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave) {
   showModal(mode === 'create' ? '➕ Playlist Oluştur' : '✏️ Playlist Düzenle', `
     <div class="form-group"><label>Playlist Adı *</label><input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn: Sabah Müzikleri" /></div>
     <div class="form-group"><label>Açıklama (isteğe bağlı)</label><input id="plm-desc" value="${escHtml(desc||'')}" placeholder="Kısa açıklama..." /></div>
+    <div class="form-group"><label><input type="checkbox" id="plm-public" ${isPublic ? 'checked' : ''} /> Herkese açık</label></div>
     <button class="btn btn-primary" id="plm-save" style="width:100%;justify-content:center">${mode === 'create' ? '<i class="fas fa-plus"></i> Oluştur' : '<i class="fas fa-save"></i> Kaydet'}</button>
     <div id="plm-msg" style="margin-top:8px;font-size:12px;color:var(--accent-red2)"></div>
   `);
   document.getElementById('plm-save')?.addEventListener('click', async () => {
     const n = document.getElementById('plm-name').value.trim();
     const d = document.getElementById('plm-desc').value.trim();
+    const isPublicValue = document.getElementById('plm-public').checked;
     const msg = document.getElementById('plm-msg');
     const btn = document.getElementById('plm-save');
     if (!n) { msg.textContent = 'Playlist adı zorunlu'; return; }
     btn.disabled = true;
     try {
       if (mode === 'create') {
-        await api('/playlists', { method: 'POST', body: JSON.stringify({ name: n, description: d }) });
+        await api('/playlists', { method: 'POST', body: JSON.stringify({ name: n, description: d, is_public: isPublicValue }) });
         toast('Playlist oluşturuldu!');
       } else {
-        await api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify({ name: n, description: d }) });
+        await api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify({ name: n, description: d, is_public: isPublicValue }) });
         toast('Playlist güncellendi!');
       }
       hideModal();
@@ -5854,7 +5903,6 @@ function showCreatePlaylistModal(mode, plId, name, desc, onSave) {
 
 // ===== PLAYLİST DETAY =====
 async function renderPlaylistDetail(app, plId) {
-  if (!currentUser) { navigate('/giris'); return; }
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let playlist;
   try { playlist = await api('/playlists/' + plId); } catch(e) {
@@ -5872,14 +5920,15 @@ async function renderPlaylistDetail(app, plId) {
           <div class="page-title" style="display:flex;align-items:center;gap:10px;margin:0">
             <i class="fas fa-list" style="color:var(--accent-red2)"></i> ${escHtml(playlist.name)}
           </div>
-          <div style="font-size:13px;color:var(--text-muted);margin-top:4px">${songs.length} şarkı</div>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:4px">${songs.length} şarkı · ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
             <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
-          <button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>
-          <button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>
+          ${playlist.is_owner ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
+          ${playlist.is_owner ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
+          ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kaydet"><i class="fas fa-save"></i> Kaydet</button>` : ''}
         </div>
       </div>
 
@@ -5950,7 +5999,7 @@ async function renderPlaylistDetail(app, plId) {
 
     // Playlist düzenle
     document.getElementById('pl-edit-btn')?.addEventListener('click', () => {
-      showCreatePlaylistModal('edit', plId, playlist.name, playlist.description || '', async () => {
+      showCreatePlaylistModal('edit', plId, playlist.name, playlist.description || '', playlist.is_public, async () => {
         try { playlist = await api('/playlists/' + plId); render(); } catch {}
       });
     });
@@ -5962,6 +6011,14 @@ async function renderPlaylistDetail(app, plId) {
     }));
 
     // Drag & Drop sıralama
+    document.getElementById('pl-save-btn')?.addEventListener('click', async () => {
+      try {
+        await api('/playlists/' + plId + '/save', { method: 'POST' });
+        toast('Playlist kaydedildi');
+        navigate('/playlistlerim');
+      } catch(err) { toast(err.message, 'error'); }
+    });
+
     setupPlaylistDnD(app.querySelector('#pl-songs-table'), songs, plId, (reordered) => {
       songs = reordered;
     });
