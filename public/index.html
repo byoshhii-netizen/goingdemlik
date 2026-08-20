@@ -110,10 +110,18 @@
         <a href="/fotograflar" data-link class="nav-link">Fotoğraflar</a>
       </div>
       <div class="nav-auth" id="nav-auth">
+        <div class="theme-mode-switch" aria-label="Tema seçimi">
+          <button type="button" class="theme-mode-btn" data-theme-mode="light" title="Açık tema" aria-label="Açık tema"><i class="fas fa-sun"></i></button>
+          <button type="button" class="theme-mode-btn" data-theme-mode="dark" title="Koyu tema" aria-label="Koyu tema"><i class="fas fa-moon"></i></button>
+        </div>
         <a href="/kayit" data-link class="btn btn-primary btn-sm">Kayıt Ol</a>
         <a href="/giris" data-link class="btn btn-outline btn-sm">Giriş Yap</a>
       </div>
       <div class="nav-user hidden" id="nav-user" style="display:flex;align-items:center;gap:8px">
+        <div class="theme-mode-switch" aria-label="Tema seçimi">
+          <button type="button" class="theme-mode-btn" data-theme-mode="light" title="Açık tema" aria-label="Açık tema"><i class="fas fa-sun"></i></button>
+          <button type="button" class="theme-mode-btn" data-theme-mode="dark" title="Koyu tema" aria-label="Koyu tema"><i class="fas fa-moon"></i></button>
+        </div>
         <div style="position:relative" id="new-btn-wrap">
           <button class="btn btn-primary btn-sm" id="nav-new-btn"><i class="fas fa-plus"></i> Yeni</button>
           <div id="new-dropdown" class="dropdown-menu hidden" style="right:0;top:calc(100% + 8px);min-width:180px">
@@ -152,6 +160,10 @@
       </button>
     </div>
     <div class="mobile-menu hidden" id="mobile-menu">
+      <div class="theme-mode-switch mobile-theme-switch" aria-label="Tema seçimi">
+        <button type="button" class="theme-mode-btn" data-theme-mode="light" title="Açık tema" aria-label="Açık tema"><i class="fas fa-sun"></i> Açık</button>
+        <button type="button" class="theme-mode-btn" data-theme-mode="dark" title="Koyu tema" aria-label="Koyu tema"><i class="fas fa-moon"></i> Koyu</button>
+      </div>
       <!-- Giriş yapmamışsa auth butonları -->
       <div class="mobile-menu-auth" id="mobile-menu-auth">
         <a href="/kayit" data-link class="btn btn-primary btn-sm"><i class="fas fa-user-plus"></i> Kayıt Ol</a>

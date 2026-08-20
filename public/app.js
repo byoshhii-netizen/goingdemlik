@@ -18,10 +18,20 @@ function applyCigCigTheme(themeId) {
   document.body.dataset.theme = theme;
   localStorage.setItem('cigcig-theme', theme);
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f8f9fa' : '#080808');
+  document.querySelectorAll('[data-theme-mode]').forEach(button => {
+    button.classList.toggle('active', button.dataset.themeMode === (theme === 'light' ? 'light' : 'dark'));
+  });
   return theme;
 }
 
 applyCigCigTheme(localStorage.getItem('cigcig-theme') || 'dark');
+
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-theme-mode]');
+  if (!button) return;
+  event.preventDefault();
+  applyCigCigTheme(button.dataset.themeMode === 'light' ? 'light' : 'dark');
+});
 
 const SITE_URL = 'https://cigcig.xyz';
 
