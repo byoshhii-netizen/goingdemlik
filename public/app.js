@@ -3,6 +3,26 @@ let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
 let siteName = '';
 
+const CIGCIG_THEMES = [
+  { id: 'dark', name: 'Gece Karanlığı', color: '#BDA275' },
+  { id: 'light', name: 'Gün Işığı', color: '#dc2626' },
+  { id: 'ocean-blue', name: 'Okyanus Mavisi', color: '#00b4d8' },
+  { id: 'forest-green', name: 'Yeşil Orman', color: '#00cc66' },
+  { id: 'fire-red', name: 'Ateş Kırmızısı', color: '#ff3333' },
+  { id: 'midnight-blue', name: 'Gece Mavisi', color: '#89b4fa' },
+  { id: 'gold', name: 'Altın Sarısı', color: '#ffd700' },
+];
+
+function applyCigCigTheme(themeId) {
+  const theme = CIGCIG_THEMES.some(item => item.id === themeId) ? themeId : 'dark';
+  document.body.dataset.theme = theme;
+  localStorage.setItem('cigcig-theme', theme);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f8f9fa' : '#080808');
+  return theme;
+}
+
+applyCigCigTheme(localStorage.getItem('cigcig-theme') || 'dark');
+
 const SITE_URL = 'https://cigcig.xyz';
 
 function $(sel) { return document.querySelector(sel); }
@@ -3344,10 +3364,22 @@ function renderSettingsSection(section) {
     });
 
   } else if (section === 'appearance') {
+    const activeTheme = localStorage.getItem('cigcig-theme') || 'dark';
     el.innerHTML = `
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
+          <div class="form-group">
+            <label>Arayüz Teması</label>
+            <div class="theme-picker" id="cigcig-theme-picker">
+              ${CIGCIG_THEMES.map(theme => `
+                <button type="button" class="theme-option ${theme.id === activeTheme ? 'active' : ''}" data-theme-id="${theme.id}">
+                  <span class="theme-swatch" style="background:${theme.color}"></span>
+                  <span>${theme.name}</span>
+                  <i class="fas fa-check theme-check"></i>
+                </button>`).join('')}
+            </div>
+          </div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
@@ -3355,6 +3387,14 @@ function renderSettingsSection(section) {
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    $$('#cigcig-theme-picker .theme-option').forEach(button => {
+      button.addEventListener('click', () => {
+        applyCigCigTheme(button.dataset.themeId);
+        $$('#cigcig-theme-picker .theme-option').forEach(item => item.classList.remove('active'));
+        button.classList.add('active');
+        toast('Tema uygulandı');
+      });
+    });
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_badge: $('#s-show-badge').checked,

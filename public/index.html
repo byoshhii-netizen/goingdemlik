@@ -80,6 +80,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Nunito:wght@700;800&family=Literata:ital,opsz,wght@0,7..72,300;0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,300;1,7..72,400;1,7..72,500;1,7..72,600;1,7..72,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link rel="stylesheet" href="/style.css" />
+  <style>
+    .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
+    .user-icons{display:inline-flex;gap:6px;margin-left:8px}
+    .user-icon{width:20px;height:20px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;color:#fff}
+    .badge-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
+    .badge-info small{display:block;color:#bbb}
+    .modal-body .badge-manager-top{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+  </style>
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2328160993003590" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -133,6 +141,7 @@
             <a href="/arkadaslar" data-link class="dropdown-item"><i class="fas fa-user-friends"></i> Arkadaşlar</a>
             <a href="/siparislerim" data-link class="dropdown-item"><i class="fas fa-receipt"></i> Siparişlerim</a>
             <a href="/ayarlar" data-link class="dropdown-item"><i class="fas fa-cog"></i> Ayarlar</a>
+            <a href="#" id="dropdown-badges" class="dropdown-item"><i class="fas fa-award"></i> Rozetler</a>
             <div class="dropdown-divider"></div>
             <button class="dropdown-item text-danger" id="logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış Yap</button>
           </div>
@@ -249,6 +258,68 @@
 })();
 </script>
   <script src="/app.js"></script>
+
+  <script>
+  // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---
+  (function(){
+    function setModalTitle(t){document.getElementById('modal-title').innerText = t}
+    function setModalBody(html){document.getElementById('modal-body').innerHTML = html}
+    function showModal(){document.getElementById('modal-overlay').classList.remove('hidden')}
+    function closeModal(){document.getElementById('modal-overlay').classList.add('hidden')}
+    document.getElementById('modal-close').addEventListener('click',closeModal);
+
+    function getAllUsersLocal(){
+      const users=[];
+      for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(k && k.startsWith('cigcig_user_')){try{const s=JSON.parse(localStorage.getItem(k)); if(s && s.nickname) users.push(s)}catch(e){} }}
+      return users.sort((a,b)=>a.nickname.localeCompare(b,'tr'));
+    }
+
+    function getAllBadges(){const raw=localStorage.getItem('cigcig_badges'); return raw?JSON.parse(raw):[]}
+    function saveBadges(b){localStorage.setItem('cigcig_badges',JSON.stringify(b))}
+
+    function openBadgeManagerModal(){
+      setModalTitle('Rozetleri Yönet');
+      setModalBody('<div class="badge-manager-top"><input id="cig_badge_search" placeholder="Rozet ara..."></div><div id="cig_badge_list"></div>');
+      const body = document.getElementById('modal-body');
+      const search = document.getElementById('cig_badge_search'); search.addEventListener('input',renderBadgeManagerBody);
+      renderBadgeManagerBody(); showModal();
+    }
+
+    function renderBadgeManagerBody(){
+      const list=document.getElementById('cig_badge_list'); if(!list) return;
+      const filter=document.getElementById('cig_badge_search').value.trim().toLowerCase();
+      const badges=getAllBadges().filter(b=>b.name.toLowerCase().includes(filter)||(b.description||'').toLowerCase().includes(filter));
+      list.innerHTML='';
+      const top=document.createElement('div'); top.style.display='flex'; top.style.gap='8px'; top.style.marginBottom='8px';
+      const newBtn=document.createElement('button'); newBtn.className='btn btn-primary'; newBtn.innerText='Yeni Rozet'; newBtn.onclick=openCreateBadgeModal; top.appendChild(newBtn);
+      list.appendChild(top);
+      if(!badges.length){list.innerHTML+='<div class="history-item"><span class="history-title">Rozet yok.</span></div>'; return}
+      badges.forEach(b=>{const row=document.createElement('div'); row.className='badge-row'; row.innerHTML=`<div class="badge-info"><strong>${b.name}</strong><small>${b.description||''}</small></div><div style="display:flex;gap:8px"><span class="badge-chip" style="background:${b.color?b.color+'33':'rgba(255,255,255,0.06)'};border:1px solid ${b.color||'#ffffff22'}">${b.name}</span><button class="btn btn-outline" data-id="${b.id}">Sil</button></div>`; row.querySelector('button').onclick=()=>{ if(confirm('Silinsin mi?')){ deleteBadge(b.id); } }; list.appendChild(row)});
+    }
+
+    function deleteBadge(id){ const badges=getAllBadges().filter(x=>x.id!==id); saveBadges(badges); // remove from users
+      getAllUsersLocal().forEach(u=>{ if(Array.isArray(u.badges) && u.badges.includes(id)){ u.badges=u.badges.filter(x=>x!==id); localStorage.setItem('cigcig_user_'+u.nickname,JSON.stringify(u)) }}); renderBadgeManagerBody(); }
+
+    function openCreateBadgeModal(){ setModalTitle('Yeni Rozet Oluştur'); setModalBody('<label>Rozet Adı</label><input id="cig_new_name" type="text"><label>Renk (#hex)</label><input id="cig_new_color" type="text"><label>Açıklama</label><textarea id="cig_new_desc"></textarea><div style="margin-top:8px"><button class="btn btn-outline" id="cig_new_cancel">İptal</button> <button class="btn btn-primary" id="cig_new_create">Oluştur</button></div>'); document.getElementById('cig_new_cancel').onclick=closeModal; document.getElementById('cig_new_create').onclick=createBadge; showModal(); }
+
+    function createBadge(){ const name=document.getElementById('cig_new_name').value.trim(); const color=document.getElementById('cig_new_color').value.trim()||'#ffd633'; const desc=document.getElementById('cig_new_desc').value.trim(); if(!name){ alert('İsim girin'); return } const badges=getAllBadges(); const id='badge_'+Date.now(); badges.push({id,name,color,description:desc}); saveBadges(badges); renderBadgeManagerBody(); alert('Oluşturuldu'); }
+
+    function getAvailableIconsForUser(user){ const icons=[]; const roles=Array.isArray(user.roles)?user.roles:(user.role? [user.role]:[]); if(roles.includes('admin')) icons.push({id:'role_admin',name:'Admin',color:'#e74c3c',char:'A'}); if(roles.includes('vip')) icons.push({id:'role_vip',name:'VIP',color:'#9b59b6',char:'V'}); if(roles.includes('plus')) icons.push({id:'role_plus',name:'Plus',color:'#f1c40f',char:'+'}); const all=getAllBadges(); if(Array.isArray(user.badges)) user.badges.forEach(bid=>{ const b=all.find(x=>x.id===bid); if(b) icons.push({id:b.id,name:b.name,color:b.color||'#777',char:(b.name&&b.name[0])||'R'}) }); return icons }
+
+    function openConfigureIconsModal(user){ const available=getAvailableIconsForUser(user); setModalTitle(user.nickname+' - Simge Ayarları'); const container=document.createElement('div'); const instruct=document.createElement('div'); instruct.style.marginBottom='8px'; instruct.style.color='#bbb'; instruct.innerText='Gösterilecek en fazla 3 simge seçin.'; container.appendChild(instruct); const grid=document.createElement('div'); grid.style.display='flex'; grid.style.flexWrap='wrap'; grid.style.gap='8px'; const selected=Array.isArray(user.displayIcons)?user.displayIcons.slice(0):[]; available.forEach(icon=>{ const btn=document.createElement('button'); btn.className='badge-chip'; btn.style.cursor='pointer'; btn.style.border='1px solid '+(icon.color||'#ffffff22'); btn.style.background=icon.color?(icon.color+'33'):'rgba(255,255,255,0.06)'; btn.dataset.id=icon.id; btn.innerText=icon.name+' '+(icon.char||''); if(selected.includes(icon.id)) btn.style.transform='scale(0.98)'; btn.onclick=()=>{ const idx=selected.indexOf(icon.id); if(idx===-1){ if(selected.length>=3){ alert('En fazla 3'); return } selected.push(icon.id); btn.style.opacity='0.9'; btn.style.transform='scale(0.98)'; } else { selected.splice(idx,1); btn.style.opacity='1'; btn.style.transform=''; } }; grid.appendChild(btn) }); container.appendChild(grid); setModalBody(''); document.getElementById('modal-body').appendChild(container); const saveBtn=document.createElement('button'); saveBtn.className='btn btn-primary'; saveBtn.innerText='Kaydet'; saveBtn.onclick=()=>{ user.displayIcons=selected; localStorage.setItem('cigcig_user_'+user.nickname,JSON.stringify(user)); renderUserListCig(); closeModal() }; const cancel=document.createElement('button'); cancel.className='btn btn-outline'; cancel.innerText='İptal'; cancel.style.marginRight='8px'; cancel.onclick=closeModal; const actions=document.createElement('div'); actions.style.marginTop='8px'; actions.appendChild(cancel); actions.appendChild(saveBtn); document.getElementById('modal-body').appendChild(actions); showModal(); }
+
+    function renderUserListCig(){
+      // create simple list in modal showing users and their icons
+      const users=getAllUsersLocal(); const container=document.createElement('div'); if(!users.length){ container.innerHTML='<div>Hiç kullanıcı yok.</div>'; } users.forEach(user=>{ const row=document.createElement('div'); row.style.display='flex'; row.style.justifyContent='space-between'; row.style.alignItems='center'; row.style.padding='6px 0'; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const name=document.createElement('span'); name.innerText=user.nickname; left.appendChild(name); const iconsDiv=document.createElement('div'); iconsDiv.className='user-icons'; const display=Array.isArray(user.displayIcons)?user.displayIcons:[]; const avail=getAvailableIconsForUser(user); display.forEach(id=>{ const icon=avail.find(a=>a.id===id); if(!icon) return; const el=document.createElement('span'); el.className='user-icon'; el.style.background=icon.color||'#666'; el.title=icon.name; el.innerText=icon.char||icon.name[0]||'?'; iconsDiv.appendChild(el); }); left.appendChild(iconsDiv); row.appendChild(left); const actions=document.createElement('div'); const cfg=document.createElement('button'); cfg.className='btn btn-outline'; cfg.innerText='Simge Ayarla'; cfg.onclick=()=>openConfigureIconsModal(user); actions.appendChild(cfg); row.appendChild(actions); container.appendChild(row); }); setModalTitle('Kullanıcılar'); setModalBody(''); document.getElementById('modal-body').appendChild(container); showModal(); }
+
+    // wire dropdown button
+    const dbg=document.getElementById('dropdown-badges'); if(dbg){ dbg.addEventListener('click',function(e){ e.preventDefault(); openBadgeManagerModal(); }); }
+
+    // expose for console (optional)
+    window.cigcig_openBadgeManager = openBadgeManagerModal;
+    window.renderUserListCig = renderUserListCig;
+  })();
+  </script>
 
   <!-- FLOATING DM WIDGET -->
 </body>
