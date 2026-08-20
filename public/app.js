@@ -722,7 +722,7 @@ async function renderHome(app) {
   }
 
   async function renderPhotosSection() {
-    const html = `<div class="section"><div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Paylaş, konum ve müzik ekle.</div></div>${currentUser?'<button class="btn btn-primary" id="home-photo-upload-btn"><i class="fas fa-camera"></i> Fotoğraf At</button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`;
+    const html = `<div class="section"><div class="page-header" style="display:flex;justify-content:flex-end;align-items:center;gap:12px">${currentUser?'<button class="btn btn-primary photo-add-btn" id="home-photo-upload-btn" aria-label="Fotoğraf ekle" title="Fotoğraf ekle"><i class="fas fa-plus"></i></button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); } catch {}
     $('#home-photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
@@ -2208,6 +2208,7 @@ async function renderGroupDetail(app, slug) {
   document.title = group.name + ' - ' + siteName;
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
+  const isOpenGroup = group.type !== 'private' && !group.invite_only;
   const canSend = currentUser && isMember && group.allow_chat;
 
   // Üye olmayan kullanıcılar için önizleme sayfası göster
@@ -2221,12 +2222,12 @@ async function renderGroupDetail(app, slug) {
         <h1 style="font-size:26px;font-weight:800;margin-bottom:10px">${escHtml(group.name)}</h1>
         ${group.description ? `<p style="color:var(--text-secondary);font-size:15px;margin-bottom:18px;line-height:1.65">${escHtml(group.description)}</p>` : ''}
         <div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:24px;flex-wrap:wrap">
-          ${group.type === 'private' ? `<span class="badge badge-red"><i class="fas fa-lock"></i> Özel Grup</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Açık Grup</span>`}
+          ${!isOpenGroup ? `<span class="badge badge-red"><i class="fas fa-lock"></i> Özel Grup</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Açık Grup</span>`}
           <span style="font-size:13px;color:var(--text-muted)"><i class="fas fa-users" style="color:var(--accent-red)"></i> ${group.member_count} üye</span>
           <span style="font-size:13px;color:var(--text-muted)"><i class="fas fa-user-shield" style="color:var(--accent-red)"></i> ${escHtml(group.owner_name || '')}</span>
         </div>
         ${currentUser
-          ? (group.type === 'public' && !group.invite_only
+          ? (isOpenGroup
               ? `<button class="btn btn-primary" id="join-preview-btn" style="min-width:160px;font-size:15px"><i class="fas fa-plus"></i> Katıl</button>`
               : hasPending
                   ? `<button class="btn btn-outline" id="request-preview-btn" style="min-width:160px;font-size:15px;opacity:0.7" disabled><i class="fas fa-clock"></i> Bekliyor</button>`
@@ -2285,7 +2286,7 @@ async function renderGroupDetail(app, slug) {
           ${group.description ? `<p class="group-hero-desc">${escHtml(group.description)}</p>` : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
         </div>
         <div class="group-hero-actions">
-          ${!isMember && currentUser && group.type === 'public' && !group.invite_only ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
+          ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
             ${(group.type === 'private' || group.invite_only) ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}
@@ -5682,7 +5683,7 @@ async function renderShareSong(app) {
 // ===== PLAYLİSTLERİM =====
 async function renderPhotos(app) {
   document.title = 'Fotoğraflar – ' + siteName;
-  app.innerHTML = `<div class="container page"><div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><div class="page-title">Fotoğraflar</div><div class="page-subtitle">Paylaş, konum ve müzik ekle.</div></div>${currentUser ? '<button class="btn btn-primary" id="photo-upload-btn"><i class="fas fa-camera"></i> Fotoğraf At</button>' : ''}</div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
+  app.innerHTML = `<div class="container page"><div class="page-header" style="display:flex;justify-content:flex-end;align-items:center;gap:12px">${currentUser ? '<button class="btn btn-primary photo-add-btn" id="photo-upload-btn" aria-label="Fotoğraf ekle" title="Fotoğraf ekle"><i class="fas fa-plus"></i></button>' : ''}</div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; photos.forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
   document.getElementById('photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
