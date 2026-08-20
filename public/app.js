@@ -550,6 +550,7 @@ async function openNotifDropdown() {
   dd.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)"><div class="spinner" style="margin:0 auto"></div></div>';
   try {
     const notifs = await api('/notifications');
+    const followRequests = await api('/follow-requests').catch(() => []);
     await api('/notifications/read-all', { method: 'POST' });
     const badge = $('#nav-notif-badge'); if (badge) badge.style.display = 'none';
     if (!notifs.length) {
@@ -732,8 +733,9 @@ async function renderHome(app) {
   }
 
   async function renderPhotosSection() {
-    const html = `<div class="section"><div class="page-header" style="display:flex;justify-content:flex-end;align-items:center;gap:12px">${currentUser?'<button class="btn btn-primary photo-add-btn" id="home-photo-upload-btn" aria-label="Fotoğraf ekle" title="Fotoğraf ekle"><i class="fas fa-plus"></i></button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`;
+    const html = `<div class="section"><div id="home-stories-bar"></div><div class="page-header" style="display:flex;justify-content:flex-end;align-items:center;gap:12px">${currentUser?'<button class="btn btn-primary photo-add-btn" id="home-photo-upload-btn" aria-label="Fotoğraf ekle" title="Fotoğraf ekle"><i class="fas fa-plus"></i></button>':''}</div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
+    loadStoriesBar($('#home-stories-bar'));
     try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); } catch {}
     $('#home-photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
   }
@@ -2931,6 +2933,37 @@ async function renderProfile(app, username) {
   const { user, forums, books, groups, videos, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
+  const isOwn = currentUser && currentUser.id === user.id;
+  let followState = { following: !!data.following, pending: false };
+  if (!isOwn && currentUser) {
+    try { followState = await api('/users/' + encodeURIComponent(username) + '/follow-status'); } catch {}
+  }
+  const bindFollowButton = () => {
+    const button = document.getElementById('profile-follow-btn');
+    if (!button) return;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        followState = followState.following || followState.pending
+          ? await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'DELETE' })
+          : await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
+        button.textContent = followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et');
+        button.classList.toggle('btn-outline', followState.following || followState.pending);
+        button.classList.toggle('btn-primary', !followState.following && !followState.pending);
+        button.disabled = false;
+      } catch (e) { toast(e.message, 'error'); button.disabled = false; }
+    });
+  };
+  if (data.private_profile && !isOwn) {
+    app.innerHTML = `<div class="container page"><div class="profile-header">
+      <div class="profile-avatar-wrap">${user.avatar ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
+      <div class="profile-info"><div class="profile-username">${escHtml(user.username)}</div>
+      <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
+      <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
+      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et')}</button>` : ''}</div></div></div>`;
+    bindFollowButton();
+    return;
+  }
   let savedVideos = [];
   try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
@@ -2983,8 +3016,6 @@ async function renderProfile(app, username) {
   const levelBadge = level && user.show_level_badge ? `<span class="level-badge" style="color:${levelColor};border-color:${levelColor};background:${levelColor}20"><i class="${escHtml(level.icon)}"></i> ${escHtml(level.name)}</span>` : '';
 
   const links = (() => { try { return JSON.parse(user.links || '[]'); } catch { return []; } })();
-  const isOwn = currentUser && currentUser.id === user.id;
-
   // Rozet satırı
   const badgeItems = [];
   if (level && user.show_level_badge) {
@@ -3024,6 +3055,8 @@ async function renderProfile(app, username) {
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
         <div class="profile-stats" style="margin-top:12px">
+          <button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>
+          <button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>
           <div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>
           <div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>
           ${profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
@@ -3031,6 +3064,7 @@ async function renderProfile(app, username) {
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
+          <button id="profile-follow-btn" class="btn ${followState.following ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.following ? 'Takip ediliyor' : 'Takip et'}</button>
           <button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
@@ -3067,6 +3101,14 @@ async function renderProfile(app, username) {
       ${profileSongsHTML}
     </div>
   </div>`;
+
+  bindFollowButton();
+  app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
+    try {
+      const list = await api('/users/' + encodeURIComponent(username) + '/' + button.dataset.followList);
+      showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="/profil/${escHtml(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
+    } catch (e) { toast(e.message, 'error'); }
+  }));
 
 
   // Kendi profilimizde abonelik bölümünü göster
@@ -3391,6 +3433,7 @@ function renderSettingsSection(section) {
                 </button>`).join('')}
             </div>
           </div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
@@ -3412,6 +3455,7 @@ function renderSettingsSection(section) {
         show_level_color: $('#s-show-color').checked,
       };
       if (currentUser.is_vip || currentUser.is_plus) body.name_color = $('#s-name-color')?.value || '';
+      body.is_private = $('#s-private')?.checked || false;
       try {
         const fd = new FormData();
         Object.entries(body).forEach(([k, v]) => fd.append(k, v));
@@ -4515,14 +4559,21 @@ async function renderNotifications(app) {
       return;
     }
     list.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">${notifs.map(n => `
-      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}" onclick="${n.link ? `navigate('${escHtml(n.link)}')` : ''}" style="display:flex;align-items:flex-start;gap:14px;cursor:${n.link ? 'pointer' : 'default'}">
+      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}" style="display:flex;align-items:flex-start;gap:14px;cursor:default">
         ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0" />` : `<div style="width:40px;height:40px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-bell" style="color:var(--accent-red2)"></i></div>`}
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;line-height:1.5;color:var(--text-primary)">${escHtml(n.body)}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${timeAgo(n.created_at)}</div>
         </div>
+        ${n.type === 'follow_request' ? (() => { const request = followRequests.find(item => item.username === n.actor_username); return request ? `<div class="notification-actions"><button type="button" class="btn btn-primary btn-sm follow-request-action" data-request-id="${request.id}" data-action="accept">Kabul</button><button type="button" class="btn btn-outline btn-sm follow-request-action" data-request-id="${request.id}" data-action="reject">Reddet</button></div>` : ''; })() : n.link ? `<button type="button" class="btn btn-ghost btn-sm notification-open" data-link="${escHtml(n.link)}" title="Aç"><i class="fas fa-arrow-right"></i></button>` : ''}
         ${!n.is_read ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-red);flex-shrink:0;margin-top:6px"></span>` : ''}
       </div>`).join('')}</div>`;
+    list.querySelectorAll('.follow-request-action').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await api('/follow-requests/' + button.dataset.requestId + '/respond', { method: 'POST', body: JSON.stringify({ action: button.dataset.action }) }); toast(button.dataset.action === 'accept' ? 'Takip isteği kabul edildi' : 'Takip isteği reddedildi'); renderNotifications(app); }
+      catch (e) { button.disabled = false; toast(e.message, 'error'); }
+    }));
+    list.querySelectorAll('.notification-open').forEach(button => button.addEventListener('click', () => navigate(button.dataset.link)));
   } catch(e) {
     const list = $('#notif-page-list');
     if (list) list.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${e.message}</p></div>`;
@@ -5691,9 +5742,52 @@ async function renderShareSong(app) {
 }
 
 // ===== PLAYLİSTLERİM =====
+async function loadStoriesBar(container) {
+  if (!container) return;
+  try {
+    const stories = await api('/stories');
+    const groups = [];
+    stories.forEach(story => {
+      let group = groups.find(item => item.user_id === story.user_id);
+      if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, stories: [] }; groups.push(group); }
+      group.stories.push(story);
+    });
+    if (!groups.length) { container.innerHTML = ''; return; }
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${groups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
+    const openGroup = index => {
+      const group = groups[index];
+      let storyIndex = group.stories.findIndex(story => !story.viewed);
+      if (storyIndex < 0) storyIndex = 0;
+      const render = () => {
+        const story = group.stories[storyIndex];
+        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}<div class="story-viewer-actions">${storyIndex > 0 ? '<button type="button" class="btn btn-outline" id="story-prev"><i class="fas fa-chevron-left"></i></button>' : ''}${storyIndex < group.stories.length - 1 ? '<button type="button" class="btn btn-outline" id="story-next"><i class="fas fa-chevron-right"></i></button>' : ''}</div></div>`);
+        api('/stories/' + story.id + '/view', { method: 'POST' }).catch(() => {});
+        $('#story-prev')?.addEventListener('click', () => { storyIndex--; render(); });
+        $('#story-next')?.addEventListener('click', () => { storyIndex++; render(); });
+      };
+      render();
+    };
+    container.querySelectorAll('[data-story-group]').forEach(button => button.addEventListener('click', () => openGroup(Number(button.dataset.storyGroup))));
+    container.querySelector('#story-add-btn')?.addEventListener('click', showStoryUploadModal);
+  } catch { container.innerHTML = ''; }
+}
+
+function showStoryUploadModal() {
+  showModal('Hikaye ekle', `<div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" /></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div>`);
+  $('#story-save').addEventListener('click', async event => {
+    const file = $('#story-media').files[0];
+    if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
+    event.currentTarget.disabled = true;
+    const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim());
+    try { await apiForm('/stories', form); hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar); }
+    catch (error) { event.currentTarget.disabled = false; $('#story-error').textContent = error.message; }
+  });
+}
+
 async function renderPhotos(app) {
   document.title = 'Fotoğraflar – ' + siteName;
-  app.innerHTML = `<div class="container page"><div class="page-header" style="display:flex;justify-content:flex-end;align-items:center;gap:12px">${currentUser ? '<button class="btn btn-primary photo-add-btn" id="photo-upload-btn" aria-label="Fotoğraf ekle" title="Fotoğraf ekle"><i class="fas fa-plus"></i></button>' : ''}</div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
+  app.innerHTML = `<div class="container page"><div id="stories-bar"></div><div class="page-header" style="display:flex;justify-content:flex-end;align-items:center;gap:12px">${currentUser ? '<button class="btn btn-primary photo-add-btn" id="photo-upload-btn" aria-label="Fotoğraf ekle" title="Fotoğraf ekle"><i class="fas fa-plus"></i></button>' : ''}</div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
+  loadStoriesBar($('#stories-bar'));
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; photos.forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
   document.getElementById('photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);

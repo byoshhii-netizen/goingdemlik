@@ -1380,11 +1380,90 @@ app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), asyn
   }
 });
 
+// ===== TAKIP =====
+app.get('/api/users/:username/follow-status', optionalAuth, async (req, res) => {
+  const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private });
+  const { rows } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
+  res.json({ following: rows[0]?.status === 'accepted', pending: rows[0]?.status === 'pending', is_private: !!target[0].is_private });
+});
+
+app.post('/api/users/:username/follow', authMiddleware, async (req, res) => {
+  const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (target[0].id === req.user.id) return res.status(400).json({ error: 'Kendinizi takip edemezsiniz' });
+  const status = target[0].is_private ? 'pending' : 'accepted';
+  await query(`INSERT INTO follows (follower_id, following_id, status) VALUES ($1,$2,$3)
+    ON CONFLICT (follower_id, following_id) DO UPDATE SET status=EXCLUDED.status`, [req.user.id, target[0].id, status]);
+  await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
+    VALUES ($1,$2,$3,$4,$5,$6,$7)`, [target[0].id, status === 'pending' ? 'follow_request' : 'follow', req.user.username, req.user.avatar || '', status === 'pending' ? 'Yeni takip isteği' : 'Yeni takipçi', '@' + req.user.username + (status === 'pending' ? ' seni takip etmek istiyor.' : ' seni takip etti.'), '/profil/' + req.user.username]);
+  res.json({ following: status === 'accepted', pending: status === 'pending' });
+});
+
+app.delete('/api/users/:username/follow', authMiddleware, async (req, res) => {
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  await query('DELETE FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
+  res.json({ following: false, pending: false });
+});
+
+async function canViewFollowList(username, viewer) {
+  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [username]);
+  if (!target.length) return null;
+  if (!target[0].is_private || (viewer && viewer.id === target[0].id)) return target[0].id;
+  if (!viewer) return false;
+  const { rows } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [viewer.id, target[0].id]);
+  return rows.length ? target[0].id : false;
+}
+
+app.get('/api/users/:username/followers', optionalAuth, async (req, res) => {
+  const userId = await canViewFollowList(req.params.username, req.user);
+  if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
+  const { rows } = await query("SELECT u.id,u.username,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.follower_id WHERE f.following_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
+  res.json(rows);
+});
+
+app.get('/api/users/:username/following', optionalAuth, async (req, res) => {
+  const userId = await canViewFollowList(req.params.username, req.user);
+  if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
+  const { rows } = await query("SELECT u.id,u.username,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.following_id WHERE f.follower_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
+  res.json(rows);
+});
+
+app.get('/api/follow-requests', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT f.id,f.created_at,u.id AS user_id,u.username,u.avatar,u.title
+    FROM follows f JOIN users u ON u.id=f.follower_id
+    WHERE f.following_id=$1 AND f.status='pending' ORDER BY f.created_at DESC`, [req.user.id]);
+  res.json(rows);
+});
+
+app.post('/api/follow-requests/:id/respond', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT f.* FROM follows f WHERE f.id=$1 AND f.following_id=$2 AND f.status='pending'`, [req.params.id, req.user.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Takip isteği bulunamadı' });
+  if (req.body.action === 'accept') {
+    await query("UPDATE follows SET status='accepted' WHERE id=$1", [rows[0].id]);
+    await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
+      VALUES ($1,'follow_accepted',$2,$3,'Takip isteği kabul edildi','Takip isteğin kabul edildi.',$4)`, [rows[0].follower_id, req.user.username, req.user.avatar || '', '/profil/' + req.user.username]);
+  } else await query('DELETE FROM follows WHERE id=$1', [rows[0].id]);
+  res.json({ ok: true });
+});
+
 // ===== PROFILE =====
-app.get('/api/profile/:username', async (req, res) => {
+app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   const { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = users[0];
+  const isOwner = req.user && req.user.id === user.id;
+  const isFollower = req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length > 0;
+  const { rows: followCounts } = await query(`SELECT
+    (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
+    (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
+  if (user.is_private && !isOwner && !isFollower) {
+    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: 0, following_count: 0, following: false });
+  }
   const [forums, books, groups, level, levels, bpCount] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
@@ -1393,7 +1472,7 @@ app.get('/api/profile/:username', async (req, res) => {
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount });
+  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
@@ -1440,7 +1519,7 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
   const allowedBadgeDisplay = ['level','none'].includes(selectedBadgeDisplay)
     ? selectedBadgeDisplay
     : (canSetBadge && ['vip','plus','custom'].includes(selectedBadgeDisplay) ? selectedBadgeDisplay : req.user.badge_display || 'level');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,title=$9,location=$10,allow_mentions=$11,badge_name=$12,badge_icon=$13,badge_color=$14,badge_display=$15 WHERE id=$16',
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,title=$9,location=$10,allow_mentions=$11,badge_name=$12,badge_icon=$13,badge_color=$14,badge_display=$15,is_private=$16 WHERE id=$17',
     [bio??req.user.bio, newLinks,
      canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
      canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
@@ -1452,8 +1531,9 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
      canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,
      canSetBadge ? (badge_icon??req.user.badge_icon) : req.user.badge_icon,
      canSetBadge ? (badge_color??req.user.badge_color) : req.user.badge_color,
-     allowedBadgeDisplay,
-     req.user.id]);
+    allowedBadgeDisplay,
+    is_private!==undefined?(parseBool(is_private)?1:0):(req.user.is_private??0),
+    req.user.id]);
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
   res.json(sanitizeUser(rows[0]));
 });
@@ -1526,9 +1606,10 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id`;
+  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted'))`;
   const queryText = username
-    ? `${base} WHERE u.username = $2 ORDER BY p.created_at DESC LIMIT 100`
-    : `${base} ORDER BY p.created_at DESC LIMIT 100`;
+    ? `${base} WHERE u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
+    : `${base} WHERE ${visibility} ORDER BY p.created_at DESC LIMIT 100`;
   const { rows } = username ? await query(queryText, [userId, username]) : await query(queryText, [userId]);
   res.json(rows);
 });
@@ -1593,6 +1674,38 @@ app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
     }
   }
   await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ===== HIKAYELER =====
+app.get('/api/stories', optionalAuth, async (req, res) => {
+  const viewerId = req.user?.id || 0;
+  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.created_at,s.expires_at,
+      u.username,u.avatar,
+      EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
+      CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
+    FROM stories s JOIN users u ON u.id=s.user_id
+    WHERE s.expires_at > NOW() AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
+      SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
+    ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
+      SELECT 1 FROM follows f2 WHERE f2.follower_id=$1 AND f2.following_id=s.user_id AND f2.status='accepted') THEN 1 ELSE 2 END), s.created_at DESC`, [viewerId]);
+  res.json(rows);
+});
+
+app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Hikaye medyası seçin' });
+  try {
+    const mediaUrl = await handleUpload(req.file);
+    const mediaType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
+    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption) VALUES ($1,$2,$3,$4) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim()]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
+});
+
+app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.expires_at>NOW() AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
+  if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW()', [req.params.id, req.user.id]);
   res.json({ ok: true });
 });
 

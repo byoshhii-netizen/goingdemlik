@@ -44,6 +44,38 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       last_active TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+
+    CREATE TABLE IF NOT EXISTS follows (
+      id BIGSERIAL PRIMARY KEY,
+      follower_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      following_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'accepted',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(follower_id, following_id),
+      CHECK (follower_id <> following_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
+    CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id);
+
+    CREATE TABLE IF NOT EXISTS stories (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      media_url TEXT NOT NULL,
+      media_type TEXT NOT NULL DEFAULT 'image',
+      caption TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
+    );
+    CREATE INDEX IF NOT EXISTS idx_stories_active ON stories(expires_at, user_id);
+
+    CREATE TABLE IF NOT EXISTS story_views (
+      id BIGSERIAL PRIMARY KEY,
+      story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      viewer_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      viewed_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(story_id, viewer_id)
+    );
 
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
