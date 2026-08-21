@@ -322,7 +322,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .nav-brand span { display: none; }
   #nav-user { display: none !important; }
   .mobile-header-action { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; font-size: 17px; }
-  .mobile-notif-btn { margin-left: auto; }
+  .mobile-groups-btn { order: 1; }
+  .mobile-new-wrap { order: 2; }
+  .mobile-notif-btn { order: 3; margin-left: auto; }
+  .nav-mobile-toggle { order: 4; }
   .mobile-new-wrap { display: block; position: relative; }
   .nav-mobile-new-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-card); color: var(--text-primary); font-size: 16px; }
   .mobile-new-dropdown:not(.hidden) { display: grid; }
@@ -1459,6 +1462,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .mobile-bottom-bar { display: none; }
 }
 .mobile-bottom-avatar { display: none; width: 26px !important; height: 26px !important; min-width: 26px; max-width: 26px; aspect-ratio: 1 / 1; border-radius: 50%; object-fit: cover !important; object-position: center; border: 1px solid var(--border); flex: 0 0 26px; }
+.mobile-bottom-avatar.avatar-fallback-logo { object-fit: contain !important; border-radius: 0; border: 0; }
 #mobile-notif-badge { display: none; position: absolute; top: 3px; right: 2px; min-width: 14px; padding: 1px 4px; border-radius: 8px; background: var(--accent-red); color: var(--accent-contrast); font-size: 9px; line-height: 1.2; }
 
 /* ===== DM / MESAJLAŞMA ===== */

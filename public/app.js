@@ -470,7 +470,12 @@ function updateNavUI() {
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
       mbbAuth.querySelector('i').style.display = 'none';
       const avatar = $('#mbb-avatar');
-      if (avatar && currentUser.avatar && !currentUser.avatar_removed) { avatar.src = currentUser.avatar; avatar.style.display = 'block'; } else if (avatar) avatar.style.display = 'none';
+      if (avatar) {
+        const hasAvatar = currentUser.avatar && !currentUser.avatar_removed;
+        avatar.src = hasAvatar ? currentUser.avatar : '/cigcig.png';
+        avatar.classList.toggle('avatar-fallback-logo', !hasAvatar);
+        avatar.style.display = 'block';
+      }
     }
   } else {
     authEl.classList.remove('hidden');
@@ -491,7 +496,7 @@ function updateNavUI() {
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
       mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
       mbbAuth.querySelector('i').style.display = '';
-      const avatar = $('#mbb-avatar'); if (avatar) avatar.style.display = 'none';
+      const avatar = $('#mbb-avatar'); if (avatar) { avatar.style.display = 'none'; avatar.classList.remove('avatar-fallback-logo'); }
       $('#mobile-new-dropdown')?.classList.add('hidden');
       $('#new-dropdown')?.classList.add('hidden');
     }
