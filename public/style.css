@@ -1665,6 +1665,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-msg-bubble { display: inline-block; width: fit-content; height: fit-content !important; min-height: 0 !important; align-self: flex-start; text-align: left; }
 .dm-msg-bubble img { display: block; max-width: min(200px, 100%); max-height: 180px; height: auto; object-fit: contain; }
 .dm-message-image { width: auto !important; max-width: min(200px, 100%) !important; max-height: 180px !important; }
+.dm-image-link { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--border); border-radius:7px; background:var(--bg-tertiary); color:var(--text-secondary); font:inherit; font-size:11px; cursor:pointer; }
+.dm-image-link:hover { color:var(--text-primary); border-color:var(--border-hover); }
 .dm-msg-wrap:not(.dm-own) .dm-msg-bubble { border-top-left-radius: 5px; }
 .dm-msg-wrap.dm-own .dm-msg-bubble { border-top-right-radius: 5px; }
 .dm-msg-bubble.dm-deleted {

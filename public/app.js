@@ -4503,8 +4503,8 @@ function dmMessageHTML(m, myId, selMode) {
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
         : `<div class="dm-msg-bubble">
-             ${m.image_url
-               ? `<img src="${escHtml(m.image_url)}" class="dm-message-image" alt="" onerror="this.remove()" style="max-width:200px;width:auto;height:auto;max-height:180px;border-radius:8px;display:block;margin-bottom:${m.content ? '6px' : '0'};cursor:pointer" onclick="window.open('${escHtml(m.image_url)}','_blank')" />`
+             ${m.image_url && !m.content?.trim()
+               ? `<button type="button" class="dm-image-link" onclick="window.open('${escHtml(m.image_url)}','_blank')"><i class="fas fa-image"></i> Fotoğrafı aç</button>`
                : ''}
              ${m.shared_forum_id
                ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
