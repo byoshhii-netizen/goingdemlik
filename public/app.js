@@ -5879,14 +5879,16 @@ async function loadStoriesBar(container) {
       group.stories.push(story);
     });
     groups.forEach(group => group.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
-    groups.sort((a, b) => {
+    const ownUserId = currentUser?.id;
+    const visibleGroups = groups.filter(group => group.user_id === ownUserId || group.stories.some(story => !story.viewed));
+    visibleGroups.sort((a, b) => {
       const aViewed = a.stories.every(story => story.viewed);
       const bViewed = b.stories.every(story => story.viewed);
       return Number(aViewed) - Number(bViewed);
     });
-    if (!groups.length) { container.innerHTML = ''; return; }
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${groups.map((group, index) => { const viewed = group.stories.every(story => story.viewed); return `<button type="button" class="story-user ${viewed ? 'viewed' : ''}" data-story-group="${index}" ${viewed ? 'disabled aria-label="Tüm hikayeler izlendi"' : ''}><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`; }).join('')}</div></div>`;
-    const ownGroupIndex = currentUser ? groups.findIndex(group => group.user_id === currentUser.id) : -1;
+    if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${visibleGroups.map((group, index) => `<button type="button" class="story-user" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
+    const ownGroupIndex = currentUser ? visibleGroups.findIndex(group => group.user_id === currentUser.id) : -1;
     if (ownGroupIndex >= 0) {
       const ownButton = container.querySelector(`[data-story-group="${ownGroupIndex}"]`);
       const addButton = container.querySelector('#story-add-btn');
@@ -5922,7 +5924,7 @@ async function loadStoriesBar(container) {
       render();
     };
     container.querySelectorAll('[data-story-group]').forEach(button => button.addEventListener('click', () => {
-      const group = groups[Number(button.dataset.storyGroup)];
+      const group = visibleGroups[Number(button.dataset.storyGroup)];
       const story = group?.stories?.find(item => !item.viewed);
       if (story) navigate('/hikaye/' + encodeURIComponent(story.public_id || story.id));
     }));
