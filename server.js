@@ -666,6 +666,13 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
   }
 }
 
+async function notifyFollowersOfContent(actorUser, type, title, body, link) {
+  const { rows: followers } = await query("SELECT follower_id FROM follows WHERE following_id=$1 AND status='accepted' AND follower_id<>$1", [actorUser.id]);
+  for (const follower of followers) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [follower.follower_id, type, actorUser.username, actorUser.avatar || '', title, body, link]);
+  }
+}
+
 // ===== BİLDİRİM ENDPOİNTLERİ =====
 app.get('/api/notifications', authMiddleware, async (req, res) => {
   const { rows } = await query(
@@ -782,6 +789,7 @@ app.post('/api/forums', authMiddleware, async (req, res) => {
     await query('UPDATE users SET forum_count=forum_count+1 WHERE id=$1', [req.user.id]);
     await updateUserLevel(req.user.id);
     await logAction(req.user.username, 'create_forum', realSlug);
+      await notifyFollowersOfContent(req.user, 'new_forum', 'Yeni forum konusu', `@${req.user.username} yeni bir forum konusu paylaştı: ${title}`, '/forum/' + realSlug).catch(() => {});
     // @mention bildirimleri
     await parseMentionsAndNotify(content + ' ' + title, req.user, 'forum_mention', '/forum/' + realSlug, title).catch(() => {});
     const { rows: fRows } = await query('SELECT * FROM forums WHERE id=$1', [id]);
@@ -869,6 +877,9 @@ app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
   if (!content?.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO forum_comments (forum_id,user_id,content) VALUES ($1,$2,$3) RETURNING id', [forum.id, req.user.id, content.trim()]);
   await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
+  if (forum.user_id && forum.user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [forum.user_id, 'forum_comment', req.user.username, req.user.avatar || '', 'Konuna yorum geldi', `@${req.user.username} konuna yorum yaptı.`, '/forum/' + req.params.slug]).catch(() => {});
+  }
   await updateUserLevel(req.user.id);
   // @mention bildirimleri
   await parseMentionsAndNotify(content, req.user, 'comment_mention', '/forum/' + req.params.slug, forum.title).catch(() => {});
@@ -1667,6 +1678,7 @@ app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res)
       req.user.id, url, req.file.cloudinary_public_id || '', (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
       songStart, b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.allow_shares === 'false' ? 0 : 1
     ]);
+    await notifyFollowersOfContent(req.user, 'new_photo', 'Yeni fotoğraf', `@${req.user.username} yeni bir fotoğraf paylaştı.`, '/foto/' + rows[0].id).catch(() => {});
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1749,6 +1761,7 @@ app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
     const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW() + ($8 * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
+    await notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(() => {});
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
 });
@@ -1872,6 +1885,10 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
     return res.json({ liked: false });
   } else {
     await query('INSERT INTO photo_likes (photo_id,user_id) VALUES ($1,$2)', [photoId, userId]);
+    const { rows: owner } = await query('SELECT user_id FROM photos WHERE id=$1', [photoId]);
+    if (owner[0] && owner[0].user_id !== userId) {
+        await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner[0].user_id, 'photo_like', req.user.username, req.user.avatar || '', 'Fotoğrafın beğenildi', `@${req.user.username} fotoğrafını beğendi.`, '/foto/' + photoId]).catch(() => {});
+    }
     return res.json({ liked: true });
   }
 });
@@ -1893,6 +1910,10 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].allow_comments) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
   await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
+  const { rows: photoOwner } = await query('SELECT p.user_id,p.title FROM photos p WHERE p.id=$1', [photoId]);
+  if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
+  }
   const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
   res.json(c.rows[c.rows.length-1]);
 });
@@ -2294,6 +2315,7 @@ app.post('/api/songs', authMiddleware, upload.fields([
   const slug = makeSongSlug(title, id);
   await query('UPDATE songs SET slug=$1 WHERE id=$2', [slug, id]);
   await logAction(req.user.username, 'upload_song', slug);
+  await notifyFollowersOfContent(req.user, 'new_song', 'Yeni şarkı', `@${req.user.username} yeni bir şarkı paylaştı: ${title}`, '/muzik/' + slug).catch(() => {});
   res.json({ ok: true, slug });
 });
 
