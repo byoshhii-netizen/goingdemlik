@@ -5960,7 +5960,7 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; photos.forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><div class="photo-media-wrap"><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url||'')}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><div class="photo-media-wrap"><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Fotoğraf müziğini aç/kapat" aria-label="Fotoğraf müziğini aç/kapat"><i class="fas fa-volume-mute"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   const sharePhoto = async c => {
@@ -6049,12 +6049,6 @@ function bindPhotoFeed(feed) {
     } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
   });
 
-  feed.querySelectorAll('.photo-song').forEach(x => x.onclick = e => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!x.dataset.audio) return;
-    openMiniPlayer(x.dataset.audio, '', { title: x.textContent, artist_name: '', cover_url: '', start_seconds: Number(x.dataset.start) || 0 });
-  });
 }
 
 
@@ -6073,15 +6067,17 @@ async function renderPhotoDetail(app, photoId) {
 let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed) {
   photoAudioObserver?.disconnect(); activePhotoAudio?.pause(); activePhotoAudio=null;
-  const isPhone=matchMedia('(max-width: 768px)').matches;
-  let enabled=localStorage.getItem('cigcig_photo_audio_enabled');
-  enabled=enabled===null ? true : enabled==='1';
+  let muted=localStorage.getItem('cigcig_photo_audio_muted');
+  muted=muted===null ? true : muted==='1';
   let volume=Math.min(1,Math.max(0,Number(localStorage.getItem('cigcig_photo_audio_volume')||'0.8')));
   document.getElementById('photo-audio-control')?.remove();
   const stop=()=>{activePhotoAudio?.pause();activePhotoAudio=null;};
-  const play=card=>{const b=card.querySelector('.photo-song');if(!enabled||!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.volume=isPhone?1:volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
+  const syncMuteButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{button.classList.toggle('muted',muted);button.querySelector('i').className='fas '+(muted?'fa-volume-mute':'fa-volume-up');});
+  const play=card=>{const b=card.querySelector('.photo-song');if(!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.muted=muted;a.volume=volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
+  feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();muted=!muted;localStorage.setItem('cigcig_photo_audio_muted',muted?'1':'0');if(activePhotoAudio){activePhotoAudio.muted=muted;activePhotoAudio.volume=volume;}syncMuteButtons();}));
+  syncMuteButtons();
   const ratios = new Map();
-  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else if(![...ratios.values()].some(ratio=>ratio>0))stop();},{threshold:[0,.7]});
+  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible){play(visible[0]);if(location.pathname==='/fotograflar')history.replaceState({},'', '/foto/'+visible[0].dataset.photoId);}else if(![...ratios.values()].some(ratio=>ratio>0))stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
 }
 
