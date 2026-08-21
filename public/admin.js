@@ -387,7 +387,7 @@ async function renderUsers(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Kullanıcı</th><th>E-posta</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Kullanıcı</th><th>E-posta</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
           <tbody id="users-tbody"></tbody>
         </table>
       </div>
@@ -401,7 +401,7 @@ async function renderUsers(main) {
 
 function renderUsersTable(users) {
   const tbody = $('#users-tbody'); if (!tbody) return;
-  if (!users.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
   tbody.innerHTML = users.map(u => `<tr>
     <td style="color:var(--text3);font-size:11px">#${u.id}</td>
     <td>
@@ -414,6 +414,7 @@ function renderUsersTable(users) {
       </div>
     </td>
     <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
+    <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
     <td><span class="badge badge-gray">${u.level_id||1}</span></td>
     <td style="font-size:12px;color:var(--text2)">
       <span title="Forum"><i class="fas fa-comments" style="color:var(--red2)"></i> ${u.forum_count}</span>

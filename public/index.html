@@ -250,6 +250,19 @@
     root.setProperty('--dm-own-bg',       `rgba(${r},${g},${b},0.15)`);
     root.setProperty('--dm-own-border',   `rgba(${r},${g},${b},0.3)`);
     root.setProperty('--dm-reply-bg',     `rgba(${r},${g},${b},0.08)`);
+    const themeTarget = document.body || root;
+    themeTarget.style.setProperty('--accent-red', hex);
+    themeTarget.style.setProperty('--accent-red2', hex2);
+    themeTarget.style.setProperty('--accent-red-dark', hexDark);
+    themeTarget.style.setProperty('--accent-contrast', luminance > 0.62 ? '#202124' : '#ffffff');
+    themeTarget.style.setProperty('--grad-red', `linear-gradient(135deg,${hex},${hexDark})`);
+    themeTarget.style.setProperty('--bg-active', `rgba(${r},${g},${b},0.08)`);
+    themeTarget.style.setProperty('--border', `rgba(${r},${g},${b},0.18)`);
+    themeTarget.style.setProperty('--border-hover', `rgba(${r},${g},${b},0.5)`);
+    themeTarget.style.setProperty('--glow', `0 0 20px rgba(${r},${g},${b},0.15)`);
+    themeTarget.style.setProperty('--dm-own-bg', `rgba(${r},${g},${b},0.15)`);
+    themeTarget.style.setProperty('--dm-own-border', `rgba(${r},${g},${b},0.3)`);
+    themeTarget.style.setProperty('--dm-reply-bg', `rgba(${r},${g},${b},0.08)`);
   }
   function applyBackgroundColor(hex) {
     if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;

@@ -878,7 +878,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .profile-avatar-wrap { position: relative; flex-shrink: 0; }
 .profile-avatar { width: 100px !important; height: 100px !important; min-width: 100px; max-width: 100px; aspect-ratio: 1 / 1; display: block; border-radius: 50%; object-fit: cover !important; object-position: center; overflow: hidden; background: var(--bg-card2); border: 3px solid var(--border); }
 .profile-avatar-placeholder { width: 100px; height: 100px; border-radius: 50%; background: var(--bg-card2); border: 3px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 40px; color: var(--text-muted); }
-.profile-info { flex: 1; text-align: center; }
+.profile-info { flex: 1; min-width: 0; text-align: center; }
+.profile-info > * { max-width: 100%; }
 .profile-username { font-size: 26px; font-weight: 800; margin-bottom: 2px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .profile-title { font-size: 13px; font-weight: 600; color: var(--accent-red2); margin-top: 4px; margin-bottom: 4px; }
 .profile-bio { color: var(--text-secondary); font-size: 14px; margin-bottom: 12px; }
@@ -895,6 +896,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .profile-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; background: var(--bg-card2); border: 1px solid var(--border); border-radius: 20px; font-size: 12px; color: var(--text-secondary); transition: all 0.2s; }
 .profile-link:hover { border-color: var(--border-hover); color: var(--text-primary); }
 .profile-stats { display: flex; gap: 24px; flex-wrap: wrap; }
+.profile-stats { align-items: center; justify-content: center; }
+.profile-actions { max-width: 100%; flex-wrap: wrap; justify-content: center; }
+.profile-actions .btn { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .profile-stat { text-align: center; }
 .profile-stat-num { font-size: 22px; font-weight: 700; color: var(--accent-red2); }
 .profile-stat-label { font-size: 12px; color: var(--text-muted); }

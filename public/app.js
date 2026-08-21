@@ -119,7 +119,7 @@ function closeMobileMenu() {
 
 function userDisplayName(u) {
   if (!u) return 'Silindi';
-  const color = (u.show_level_color !== 0 && u.name_color) ? `style="color:${escHtml(u.name_color)}"` : '';
+  const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
   const customBadge = u.badge_name ? ` <span class="badge" style="background:${escHtml(u.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${u.badge_icon ? `<i class="${escHtml(u.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(u.badge_name)}</span>` : '';
   return `<span class="user-badge" ${color}>${escHtml(u.username)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}${customBadge}</span>`;
@@ -2975,8 +2975,8 @@ async function renderProfile(app, username) {
       button.disabled = true;
       try {
         if (user.is_private) {
-          await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
-          button.textContent = 'Arkadaş isteği gönderildi';
+          await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
+          button.textContent = 'Takip isteği gönderildi';
           button.classList.remove('btn-primary');
           button.classList.add('btn-outline');
           button.disabled = true;
@@ -2985,7 +2985,7 @@ async function renderProfile(app, username) {
         followState = followState.following || followState.pending
           ? await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'DELETE' })
           : await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
-        button.textContent = user.is_private ? 'Arkadaş isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et'));
+        button.textContent = user.is_private ? 'Takip isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et'));
         button.classList.toggle('btn-outline', followState.following || followState.pending);
         button.classList.toggle('btn-primary', !followState.following && !followState.pending);
         button.disabled = false;
@@ -2998,7 +2998,7 @@ async function renderProfile(app, username) {
       <div class="profile-info"><div class="profile-username">${escHtml(user.username)}</div>
       <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">Arkadaş İsteği Gönder</button>` : ''}</div></div></div>`;
+      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
     bindFollowButton();
     return;
   }
@@ -3079,7 +3079,7 @@ async function renderProfile(app, username) {
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
       <div class="profile-info">
-        <div class="profile-username" style="${user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
+        <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
           ${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
@@ -3102,10 +3102,9 @@ async function renderProfile(app, username) {
           ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Fotoğraf</div></div>` : ''}
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
-        ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
-          <button id="profile-follow-btn" class="btn ${followState.following ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? 'Arkadaş İsteği Gönder' : (followState.following ? 'Takip ediliyor' : 'Takip et')}</button>
+        ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
+          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takip ediliyor' : 'Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
-          <button id="profile-friend-btn" class="btn btn-ghost btn-sm"><i class="fas fa-user-friends"></i> Arkadaşlık</button>
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
         </div>` : ''}
@@ -3184,30 +3183,16 @@ async function renderProfile(app, username) {
 
   // Profil 3-nokta menüsü
   if (!isOwn && currentUser) {
-    let friendStatus = null;
-    try { friendStatus = await api('/friend-status/' + encodeURIComponent(username)); } catch {}
-
     const moreBtn = document.getElementById('profile-more-btn');
     const moreMenu = document.getElementById('profile-more-menu');
     if (moreBtn && moreMenu) {
+      const getBlockStatus = async () => {
+        const blocks = await api('/blocks').catch(() => []);
+        return { blocked_by_me: Array.isArray(blocks) && blocks.some(block => block.username === username) };
+      };
       function buildMenuItems(fs) {
         const items = [];
-        const f = fs?.friendship;
-        const blockedByMe = fs?.blocked_by_me;
-        const blockedByThem = fs?.blocked_by_them;
-        if (!blockedByMe) {
-          if (!f) {
-            items.push({ icon: 'fa-user-plus', label: 'Arkadaşlık İsteği Gönder', action: 'friend-req' });
-          } else if (f.status === 'pending' && f.requester_id == currentUser.id) {
-            items.push({ icon: 'fa-user-clock', label: 'İsteği İptal Et', action: 'friend-cancel', id: f.id });
-          } else if (f.status === 'pending' && f.addressee_id == currentUser.id) {
-            items.push({ icon: 'fa-check', label: 'İsteği Kabul Et', action: 'friend-accept', id: f.id });
-            items.push({ icon: 'fa-times', label: 'İsteği Reddet', action: 'friend-reject', id: f.id });
-          } else if (f.status === 'accepted') {
-            items.push({ icon: 'fa-user-minus', label: 'Arkadaşlıktan Çıkar', action: 'friend-remove', id: f.id });
-          }
-        }
-        if (!blockedByMe) {
+        if (!fs?.blocked_by_me) {
           items.push({ icon: 'fa-ban', label: 'Engelle', action: 'block-user', danger: true });
         } else {
           items.push({ icon: 'fa-ban', label: 'Engeli Kaldır', action: 'unblock-user' });
@@ -3230,24 +3215,7 @@ async function renderProfile(app, username) {
             const action = el.dataset.action;
             const fid = el.dataset.id;
             try {
-              if (action === 'friend-req') {
-                await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
-                toast('Arkadaşlık isteği gönderildi');
-              } else if (action === 'friend-cancel') {
-                if (!confirm('Arkadaşlık isteğini iptal et?')) return;
-                await api('/friends/' + fid, { method: 'DELETE' });
-                toast('İstek iptal edildi');
-              } else if (action === 'friend-accept') {
-                await api('/friends/respond/' + fid, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
-                toast('Arkadaşlık isteği kabul edildi');
-              } else if (action === 'friend-reject') {
-                await api('/friends/respond/' + fid, { method: 'POST', body: JSON.stringify({ action: 'reject' }) });
-                toast('Arkadaşlık isteği reddedildi');
-              } else if (action === 'friend-remove') {
-                if (!confirm('Arkadaşlıktan çıkart?')) return;
-                await api('/friends/' + fid, { method: 'DELETE' });
-                toast('Arkadaşlıktan çıkarıldı');
-              } else if (action === 'block-user') {
+              if (action === 'block-user') {
                 if (!confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
                 await api('/block/' + encodeURIComponent(username), { method: 'POST' });
                 toast('Kullanıcı engellendi');
@@ -3255,14 +3223,14 @@ async function renderProfile(app, username) {
                 await api('/block/' + encodeURIComponent(username), { method: 'DELETE' });
                 toast('Engel kaldırıldı');
               }
-              try { friendStatus = await api('/friend-status/' + encodeURIComponent(username)); } catch {}
-              renderMenu(friendStatus);
+              const blockStatus = await getBlockStatus();
+              renderMenu(blockStatus);
             } catch(e) { toast(e.message || 'Hata oluştu', 'error'); }
           });
         });
       }
 
-      renderMenu(friendStatus);
+      getBlockStatus().then(renderMenu).catch(() => renderMenu({}));
 
       document.getElementById('profile-friend-btn')?.addEventListener('click', e => {
         e.stopPropagation();
@@ -3545,15 +3513,12 @@ async function renderSettingsSection(section) {
         <div class="card-header"><span><i class="fas fa-bell" style="color:var(--accent-red2);margin-right:6px"></i>Bildirim Ayarları</span></div>
         <div class="card-body">
           <div class="form-group">
-            <label class="checkbox-label" style="align-items:flex-start;gap:12px">
-              <input type="checkbox" id="s-allow-mentions" style="width:auto;margin-top:3px" ${(currentUser.allow_mentions ?? 1) ? 'checked' : ''} />
-              <div>
-                <div style="font-weight:600;font-size:14px">Beni etiketleyen kişilere bildirim gönder</div>
-                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">
-                  Kapatırsan kimse seni @etiketleyemez ve bildirim almaz, profil linki de açılmaz
-                </div>
-              </div>
-            </label>
+            <label for="s-tag-permission">Beni kimler etiketleyebilir?</label>
+            <select id="s-tag-permission">
+              <option value="friends" ${(currentUser.tag_permission || 'everyone') === 'friends' ? 'selected' : ''}>Arkadaşlarım (takipleştiklerim)</option>
+              <option value="everyone" ${(currentUser.tag_permission || 'everyone') === 'everyone' ? 'selected' : ''}>Herkes</option>
+              <option value="nobody" ${(currentUser.tag_permission || 'everyone') === 'nobody' ? 'selected' : ''}>Hiç kimse</option>
+            </select>
           </div>
           <button class="btn btn-primary" id="save-notif-btn">Kaydet</button>
           <div id="notif-settings-msg" class="form-error mt-4"></div>
@@ -3561,7 +3526,7 @@ async function renderSettingsSection(section) {
       </div>`;
     $('#save-notif-btn').addEventListener('click', async () => {
       const fd = new FormData();
-      fd.append('allow_mentions', $('#s-allow-mentions').checked ? '1' : '0');
+      fd.append('tag_permission', $('#s-tag-permission').value);
       try {
         const updated = await apiForm('/profile', fd, 'PUT');
         currentUser = updated; updateNavUI();
@@ -3833,6 +3798,31 @@ function renderRegister(app) {
         </div>
       </div>
       <div class="form-group">
+        <label>Doğum tarihi</label>
+        <input type="date" id="reg-birth-date" max="${new Date(new Date().setFullYear(new Date().getFullYear() - 15)).toISOString().slice(0, 10)}" />
+        <div class="form-hint">15 yaş altı kabul edilmez (¬‿¬) hııhıı</div>
+        <div class="form-hint">Doğum tarihi bir daha değiştirilemez.</div>
+      </div>
+      <div class="form-group">
+        <label>Hesap gizliliği</label>
+        <label class="checkbox-label"><input type="checkbox" id="reg-private" /> Hesabımı gizli yap</label>
+      </div>
+      <div class="form-group">
+        <label>Beni kimler etiketleyebilir?</label>
+        <label class="radio-label"><input type="radio" name="reg-tags" value="friends" /> Arkadaşlarım (takipleştiklerim)</label>
+        <label class="radio-label"><input type="radio" name="reg-tags" value="everyone" checked /> Herkes</label>
+        <label class="radio-label"><input type="radio" name="reg-tags" value="nobody" /> Hiç kimse</label>
+      </div>
+      <details class="register-preferences">
+        <summary>Profil sayılarını seç</summary>
+        <p class="form-hint">Ana sayfada seçili olan bölümler varsayılan olarak açık gelir.</p>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="forums" checked /> Konu sayısı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="books" /> Kitap sayısı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="comments" /> Yorum sayısı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="photos" /> Fotoğraf sayısı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="music" /> Müzik sayısı</label>
+      </details>
+      <div class="form-group">
         <label class="checkbox-label">
           <input type="checkbox" id="reg-kvkk" />
           <span>KVKK aydınlatma metnini okudum ve kabul ediyorum. <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button></span>
@@ -3843,6 +3833,13 @@ function renderRegister(app) {
       <div class="auth-footer">Zaten hesabın var mı? <a href="/giris" data-link class="auth-link">Giriş Yap</a></div>
     </div>
   </div>`;
+
+  fetch('/api/settings/public').then(response => response.json()).then(settings => {
+    let sections = [];
+    try { sections = JSON.parse(settings.homepage_sections || '[]'); } catch { sections = []; }
+    const defaults = new Set((Array.isArray(sections) ? sections : []).map(section => ({ konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' }[section] || section)));
+    if (defaults.size) document.querySelectorAll('[data-reg-stat]').forEach(input => { input.checked = defaults.has(input.dataset.regStat); });
+  }).catch(() => {});
 
   $('#reg-pw-toggle').addEventListener('click', () => {
     const pw = $('#reg-pw');
@@ -3863,11 +3860,26 @@ function renderRegister(app) {
     const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
     const kvkk_accepted = $('#reg-kvkk').checked;
-    if (!username || !email || !password) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    const birth_date = $('#reg-birth-date').value;
+    const is_private = $('#reg-private').checked;
+    const tag_permission = document.querySelector('input[name="reg-tags"]:checked')?.value || 'everyone';
+    const profile_visibility = {};
+    const sectionNames = { forums: 'konular', books: 'kitaplar', comments: 'yorumlar', photos: 'fotograflar', music: 'muzikler' };
+    const homepage_sections = [];
+    document.querySelectorAll('[data-reg-stat]').forEach(input => {
+      profile_visibility[input.dataset.regStat] = input.checked;
+      if (input.checked) homepage_sections.push(sectionNames[input.dataset.regStat]);
+    });
+    if (!username || !email || !password || !birth_date) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    const birth = new Date(`${birth_date}T00:00:00`);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
+    if (age < 15 || birth > today) { $('#reg-error').textContent = '15 yaş altı kabul edilmez (¬‿¬) hııhıı'; return; }
     if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
-      const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password, kvkk_accepted }) });
+      const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility }) });
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
@@ -4113,11 +4125,7 @@ async function renderMessages(app, targetUsername) {
 
   // Hidden toggle
   document.getElementById('dm-hidden-toggle-btn')?.addEventListener('click', () => {
-    if (hiddenConvs.length) {
-      document.getElementById('dm-hidden-panel')?.classList.toggle('hidden');
-      return;
-    }
-    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için şifreni gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Şifre" autocomplete="current-password" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
+    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için şifreni gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Şifre" autocomplete="off" autocapitalize="none" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
     $('#dm-global-unlock-btn')?.addEventListener('click', async () => {
       const button = $('#dm-global-unlock-btn');
       const password = $('#dm-global-unlock-pass')?.value || '';
@@ -4236,6 +4244,7 @@ async function renderDMChat(username) {
              </div>`
           : `<button class="btn btn-primary" style="margin-top:14px" id="dm-unlock-btn">Kilidi Aç</button>`}
         <div id="dm-unlock-err" style="color:var(--accent-red2);font-size:12px;margin-top:8px"></div>
+
       </div>
     </div>`;
     document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
@@ -4504,8 +4513,8 @@ function dmMessageHTML(m, myId, selMode) {
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
         : `<div class="dm-msg-bubble">
-             ${m.image_url && !messageText
-               ? `<button type="button" class="dm-image-link" onclick="window.open('${escHtml(m.image_url)}','_blank')"><i class="fas fa-image"></i> Fotoğrafı aç</button>`
+             ${m.image_url
+               ? `<img src="${escHtml(m.image_url)}" class="dm-message-image" alt="" onerror="this.remove()" onclick="window.open('${escHtml(m.image_url)}','_blank')" />`
                : ''}
              ${m.shared_forum_id
                ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
@@ -4697,23 +4706,13 @@ async function renderFriends(app) {
     <div class="friends-page-grid">
       <div>
         <div class="tabs" style="margin-bottom:16px">
-          <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Arkadaşlar (${accepted.length})</button>
-          <button class="tab" id="tab-requests" onclick="showFriendsTab('requests')">İstekler ${pending_in.length > 0 ? `<span style="background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px">${pending_in.length}</span>` : ''}</button>
-          <button class="tab" id="tab-sent" onclick="showFriendsTab('sent')">Gönderilenler (${pending_out.length})</button>
+          <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Takipleştiklerin (${accepted.length})</button>
           <button class="tab" id="tab-blocked" onclick="showFriendsTab('blocked')">Engellenenler (${blocks.length})</button>
         </div>
         <div id="friends-content">
           <div id="tab-content-friends">
             ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
               : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
-          </div>
-          <div id="tab-content-requests" style="display:none">
-            ${pending_in.length === 0 ? '<div class="empty-state"><i class="fas fa-inbox"></i><p>Gelen istek yok</p></div>'
-              : pending_in.map(f => friendItemHTML(f, 'incoming', currentUser.id)).join('')}
-          </div>
-          <div id="tab-content-sent" style="display:none">
-            ${pending_out.length === 0 ? '<div class="empty-state"><i class="fas fa-paper-plane"></i><p>Gönderilen istek yok</p></div>'
-              : pending_out.map(f => friendItemHTML(f, 'outgoing', currentUser.id)).join('')}
           </div>
           <div id="tab-content-blocked" style="display:none">
             ${blocks.length === 0 ? '<div class="empty-state"><i class="fas fa-ban"></i><p>Engellenen yok</p></div>'
@@ -4757,11 +4756,16 @@ async function renderFriends(app) {
       res.innerHTML = users.map(u => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
         <a href="/profil/${escHtml(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
-        <button class="btn btn-primary btn-sm send-req-btn" data-username="${escHtml(u.username)}"><i class="fas fa-user-plus"></i></button>
+            <button class="btn btn-primary btn-sm send-follow-btn" data-username="${escHtml(u.username)}"><i class="fas fa-user-plus"></i> Takip et</button>
       </div>`).join('');
-      $$('.send-req-btn').forEach(btn => {
+      $$('.send-follow-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
-          try { await api(`/friends/request/${encodeURIComponent(btn.dataset.username)}`, { method: 'POST' }); btn.textContent = '✓ Gönderildi'; btn.disabled = true; btn.classList.remove('btn-primary'); } catch (e) { toast(e.message, 'error'); }
+          try {
+            const result = await api(`/users/${encodeURIComponent(btn.dataset.username)}/follow`, { method: 'POST' });
+            btn.textContent = result.pending ? 'İstek gönderildi' : 'Takip ediliyor';
+            btn.disabled = true;
+            btn.classList.remove('btn-primary');
+          } catch (e) { toast(e.message, 'error'); }
         });
       });
     } catch (e) { res.innerHTML = `<p style="color:var(--accent-red2);font-size:13px">${e.message}</p>`; }
@@ -4823,10 +4827,10 @@ function friendItemHTML(f, type, myId) {
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
     <div style="display:flex;gap:6px">
-      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i></button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-outline btn-sm friend-msg" data-username="${escHtml(other_username)}"><i class="fas fa-envelope"></i> Mesaj</button>` : ''}
       ${type === 'incoming' ? `<button class="btn btn-primary btn-sm friend-accept" data-id="${f.id}"><i class="fas fa-check"></i> Kabul</button><button class="btn btn-danger btn-sm friend-reject" data-id="${f.id}"><i class="fas fa-times"></i> Reddet</button>` : ''}
       ${type === 'outgoing' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="İsteği İptal Et"><i class="fas fa-ban"></i> İptal</button>` : ''}
-      ${type === 'accepted' ? `<button class="btn btn-ghost btn-sm friend-remove" data-id="${f.id}" title="Arkadaşlıktan Çıkar"><i class="fas fa-user-minus"></i></button><button class="btn btn-ghost btn-sm friend-block" data-username="${escHtml(other_username)}" title="Engelle" style="color:var(--accent-red2)"><i class="fas fa-ban"></i></button>` : ''}
+      ${type === 'accepted' ? `<button class="btn btn-ghost btn-sm friend-block" data-username="${escHtml(other_username)}" title="Engelle" style="color:var(--accent-red2)"><i class="fas fa-ban"></i></button>` : ''}
     </div>
   </div>`;
 }

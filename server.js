@@ -442,20 +442,41 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 // ===== AUTH =====
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, email, password, kvkk_accepted } = req.body;
+    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility } = req.body;
     if (!username || !email || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
+    if (!birth_date || !/^\d{4}-\d{2}-\d{2}$/.test(birth_date)) return res.status(400).json({ error: 'Doğum tarihi zorunlu' });
+    const birth = new Date(`${birth_date}T00:00:00Z`);
+    const today = new Date();
+    let age = today.getUTCFullYear() - birth.getUTCFullYear();
+    const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
+    if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
+    const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
+    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false };
+    if (profile_visibility && typeof profile_visibility === 'object') {
+      Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = profile_visibility[key] !== false; });
+    } else {
+      const { rows: homepageSettings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+      let sections = [];
+      try { sections = JSON.parse(homepageSettings[0]?.value || '[]'); } catch {}
+      const sectionMap = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
+      (Array.isArray(sections) ? sections : []).forEach(section => {
+        const key = sectionMap[section] || section;
+        if (key in defaultVisibility) defaultVisibility[key] = true;
+      });
+    }
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
     const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, email]);
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [username, email, hashPassword(password), 1, ip]);
+      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(homepage_sections) ? homepage_sections : []), JSON.stringify(defaultVisibility)]);
     const user = rows[0];
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -650,10 +671,14 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
   )];
   for (const username of mentions) {
     if (username.toLowerCase() === actorUser.username.toLowerCase()) continue;
-    const { rows } = await query('SELECT id, allow_mentions FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
+    const { rows } = await query('SELECT id, allow_mentions, tag_permission FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
     if (!rows.length) continue;
-    // allow_mentions NULL ise varsayılan olarak açık say (1)
-    if (rows[0].allow_mentions !== null && rows[0].allow_mentions == 0) continue;
+    const permission = rows[0].tag_permission || (rows[0].allow_mentions === 0 ? 'nobody' : 'everyone');
+    if (permission === 'nobody') continue;
+    if (permission === 'friends') {
+      const { rows: mutual } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [actorUser.id, rows[0].id]);
+      if (!mutual.length) continue;
+    }
     const body = type === 'forum_mention'
       ? `@${actorUser.username} sizi "${contextTitle}" başlıklı konuda etiketledi`
       : type === 'comment_mention'
@@ -1497,6 +1522,14 @@ app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT profile_visibility FROM users WHERE id=$1', [req.user.id]);
   let visibility = {};
   try { visibility = rows[0]?.profile_visibility ? JSON.parse(rows[0].profile_visibility) : {}; } catch {}
+  if (!Object.keys(visibility).length) {
+    const { rows: settings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+    let sections = [];
+    try { sections = JSON.parse(settings[0]?.value || '[]'); } catch {}
+    const map = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
+    visibility = { forums: false, books: false, comments: false, photos: false, music: false };
+    (Array.isArray(sections) ? sections : []).forEach(section => { const key = map[section] || section; if (key in visibility) visibility[key] = true; });
+  }
   res.json({ visibility });
 });
 
@@ -1510,7 +1543,7 @@ app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
   let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
@@ -1554,7 +1587,8 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
   const allowedBadgeDisplay = ['level','none'].includes(selectedBadgeDisplay)
     ? selectedBadgeDisplay
     : (canSetBadge && ['vip','plus','custom'].includes(selectedBadgeDisplay) ? selectedBadgeDisplay : req.user.badge_display || 'level');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,avatar_removed=$9,title=$10,location=$11,allow_mentions=$12,badge_name=$13,badge_icon=$14,badge_color=$15,badge_display=$16,is_private=$17 WHERE id=$18',
+  const resolvedTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : (req.user.tag_permission || 'everyone');
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,avatar_removed=$9,title=$10,location=$11,allow_mentions=$12,tag_permission=$13,badge_name=$14,badge_icon=$15,badge_color=$16,badge_display=$17,is_private=$18 WHERE id=$19',
     [bio??req.user.bio, newLinks,
      canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
      canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
@@ -1562,10 +1596,11 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
      show_level_badge!==undefined?(parseBool(show_level_badge)?1:0):req.user.show_level_badge,
      show_level_color!==undefined?(parseBool(show_level_color)?1:0):req.user.show_level_color,
     newAvatar, avatarRemoved, title??req.user.title??'', location??req.user.location??'',
-     allow_mentions!==undefined?(parseBool(allow_mentions)?1:0):(req.user.allow_mentions??1),
-     canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,
-     canSetBadge ? (badge_icon??req.user.badge_icon) : req.user.badge_icon,
-     canSetBadge ? (badge_color??req.user.badge_color) : req.user.badge_color,
+    allow_mentions!==undefined?(parseBool(allow_mentions)?1:0):(req.user.allow_mentions??1),
+    resolvedTagPermission,
+    canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,
+    canSetBadge ? (badge_icon??req.user.badge_icon) : req.user.badge_icon,
+    canSetBadge ? (badge_color??req.user.badge_color) : req.user.badge_color,
     allowedBadgeDisplay,
     is_private!==undefined?(parseBool(is_private)?1:0):(req.user.is_private??0),
     req.user.id]);
@@ -3166,16 +3201,14 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/friends', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
-    SELECT f.*, 
-      CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END as other_id,
-      CASE WHEN f.requester_id=$1 THEN u2.username ELSE u1.username END as other_username,
-      CASE WHEN f.requester_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
-      CASE WHEN f.requester_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      CASE WHEN f.requester_id=$1 THEN COALESCE(u2.is_deleted,0) ELSE COALESCE(u1.is_deleted,0) END as other_is_deleted
-    FROM friendships f
-    LEFT JOIN users u1 ON f.requester_id=u1.id
-    LEFT JOIN users u2 ON f.addressee_id=u2.id
-    WHERE (f.requester_id=$1 OR f.addressee_id=$1)
+    SELECT f.id, f.created_at, 'accepted' AS status,
+      f.following_id AS other_id, u.username AS other_username, u.avatar AS other_avatar,
+      u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted
+    FROM follows f
+    JOIN users u ON u.id=f.following_id
+    WHERE f.follower_id=$1 AND f.status='accepted'
+      AND EXISTS (SELECT 1 FROM follows mutual WHERE mutual.follower_id=f.following_id
+        AND mutual.following_id=$1 AND mutual.status='accepted')
   `, [uid]);
   res.json(rows);
 });
