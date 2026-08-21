@@ -1474,13 +1474,13 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    color: var(--text-muted);
+    color: #fff;
     font-size: 0;
     padding: 4px 0;
     transition: color 0.15s;
   }
-  .mobile-bottom-bar a.active { color: #fff !important; background: var(--accent-red); border-radius: 8px; }
-  .mobile-bottom-bar a:hover { color: var(--accent-red2); }
+  .mobile-bottom-bar a.active,
+  .mobile-bottom-bar a:hover { color: #fff !important; background: transparent; }
   .mobile-bottom-bar i { font-size: 18px; }
   body { padding-bottom: 60px; }
   #toast-container { bottom: 72px; }
