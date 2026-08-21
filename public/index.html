@@ -118,6 +118,10 @@
           <button class="btn btn-primary btn-sm" id="nav-new-btn"><i class="fas fa-plus"></i> Yeni</button>
           <div id="new-dropdown" class="dropdown-menu hidden" style="right:0;top:calc(100% + 8px);min-width:180px">
             <button class="dropdown-item" id="nav-new-forum"><i class="fas fa-comments"></i> Konu</button>
+            <button class="dropdown-item" id="nav-new-photo"><i class="fas fa-camera"></i> Fotoğraf</button>
+            <button class="dropdown-item" id="nav-new-story"><i class="fas fa-circle"></i> Hikaye</button>
+            <button class="dropdown-item" id="nav-new-video"><i class="fas fa-video"></i> Video</button>
+            <button class="dropdown-item" id="nav-new-music"><i class="fas fa-music"></i> Müzik</button>
             <button class="dropdown-item" id="nav-new-book"><i class="fas fa-book"></i> Kitap</button>
             <button class="dropdown-item" id="nav-new-group"><i class="fas fa-users"></i> Grup</button>
           </div>
@@ -160,6 +164,10 @@
       <!-- Giriş yapmışsa yeni butonları -->
       <div class="mobile-menu-new hidden" id="mobile-menu-new">
         <button class="btn btn-primary btn-sm" id="mob-new-forum"><i class="fas fa-comments"></i> Konu</button>
+        <button class="btn btn-outline btn-sm" id="mob-new-photo"><i class="fas fa-camera"></i> Fotoğraf</button>
+        <button class="btn btn-outline btn-sm" id="mob-new-story"><i class="fas fa-circle"></i> Hikaye</button>
+        <button class="btn btn-outline btn-sm" id="mob-new-video"><i class="fas fa-video"></i> Video</button>
+        <button class="btn btn-outline btn-sm" id="mob-new-music"><i class="fas fa-music"></i> Müzik</button>
         <button class="btn btn-outline btn-sm" id="mob-new-book"><i class="fas fa-book"></i> Kitap</button>
         <button class="btn btn-outline btn-sm" id="mob-new-group"><i class="fas fa-users"></i> Grup</button>
       </div>
@@ -242,12 +250,10 @@
     .then(d=>{
       if(d.primary_color) applyThemeColor(d.primary_color);
       // Logo güncelle
-      if(d.site_logo) {
-        const navLogo = document.querySelector('.nav-brand img');
-        if(navLogo) navLogo.src = d.site_logo;
-        const favicon = document.querySelector('link[rel="icon"]');
-        if(favicon) favicon.href = d.site_logo;
-      }
+      const navLogo = document.querySelector('.nav-brand img');
+      if(navLogo) navLogo.src = '/cigcig.png';
+      const favicon = document.querySelector('link[rel="icon"]');
+      if(favicon) favicon.href = '/cigcig.png';
       // Site adı güncelle
       if(d.site_name) {
         const navSpan = document.querySelector('.nav-brand span');

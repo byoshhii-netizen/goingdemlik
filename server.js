@@ -1623,7 +1623,8 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
-     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE p.id=$1`,
+    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
+    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`,
     [req.params.id, userId]
   );
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -1713,7 +1714,8 @@ app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
 app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user.id;
-  const { rows } = await query('SELECT id, show_likes FROM photos WHERE id=$1', [photoId]);
+  const { rows } = await query(`SELECT p.id, p.show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
+    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
   const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
@@ -1729,6 +1731,8 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
 // Photo comments
 app.get('/api/photos/:id/comments', async (req, res) => {
   const photoId = req.params.id;
+  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR COALESCE(p.user_id,0)=0)`, [photoId]);
+  if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   const { rows } = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
   res.json(rows);
 });
@@ -1737,9 +1741,9 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const { content } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-  const { rows } = await query('SELECT allow_comments FROM photos WHERE id=$1', [photoId]);
+  const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, req.user.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  if (rows[0].allow_comments !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
+  if (Number(rows[0].allow_comments) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
   await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
   const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
   res.json(c.rows[c.rows.length-1]);
@@ -2060,16 +2064,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
 
 // Logo dosya yükleme (cihazdan)
 app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Dosya bulunamadı' });
-  const mime = req.file.mimetype;
-  if (!mime.startsWith('image/')) return res.status(400).json({ error: 'Sadece resim dosyası yükleyebilirsiniz' });
-  try {
-    const url = await handleUpload(req.file);
-    await query("INSERT INTO settings (key,value) VALUES ('site_logo',$1) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", [url]);
-    res.json({ ok: true, url });
-  } catch (e) {
-    res.status(500).json({ error: 'Logo yükleme hatası: ' + e.message });
-  }
+  res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
 });
 
 app.get('/api/kvkk', async (req, res) => {
@@ -2653,7 +2648,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_logo','site_name','site_description','primary_color','homepage_sections')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','homepage_sections','footer_created_visible','footer_copyright_text')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   res.json(obj);
@@ -3156,6 +3151,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const isUser1 = conv.user1_id == uid;
   const isHidden = isUser1 ? conv.hidden_by_user1 : conv.hidden_by_user2;
   const hiddenPass = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
+  if (isHidden) return res.json({ conv, other, messages: [], isHidden: true, hasPassword: !!hiddenPass });
   const { rows: msgs } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
@@ -3197,8 +3193,10 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   const other = target[0];
   const uid = req.user.id;
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
-  const { rows: convRows } = await query('SELECT id FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
+  const { rows: convRows } = await query('SELECT id,user1_id,hidden_by_user1,hidden_by_user2 FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) return res.json({ ok: true });
+  const isUser1 = convRows[0].user1_id == uid;
+  if (isUser1 ? convRows[0].hidden_by_user1 : convRows[0].hidden_by_user2) return res.json({ ok: true });
   // Karşı tarafın mesajlarını okundu yap
   await query('UPDATE dm_messages SET read_at=NOW() WHERE conversation_id=$1 AND sender_id=$2 AND read_at IS NULL',
     [convRows[0].id, other.id]);

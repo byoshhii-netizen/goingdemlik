@@ -85,7 +85,7 @@ async function renderBadges(main) {
   });
 }
 
-// ===== DEMLIK ADMIN PANEL =====
+// ===== CIGCIG ADMIN PANEL =====
 let adminToken = sessionStorage.getItem('admin_token') || '';
 let currentSection = 'dashboard';
 
@@ -2073,24 +2073,6 @@ async function renderSettings(main) {
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Genel</span></div>
         <div class="card-body">
           <div class="form-group"><label>Site Adı</label><input id="s-sitename" value="${escHtml(settings['site_name']||'')}" /></div>
-          <div class="form-group">
-            <label>Site Logosu</label>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-              <div id="logo-preview" style="width:52px;height:52px;border-radius:10px;border:1px solid var(--border);overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--bg4)">
-                ${settings['site_logo'] ? `<img src="${escHtml(settings['site_logo'])}" style="width:100%;height:100%;object-fit:contain" />` : `<i class="fas fa-image" style="color:var(--text3)"></i>`}
-              </div>
-              <div style="flex:1">
-                <div style="font-size:12px;color:var(--text2);margin-bottom:6px">PNG, JPG veya SVG yükleyin</div>
-                <label for="logo-file-input" class="btn btn-outline btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
-                  <i class="fas fa-upload"></i> Dosya Seç
-                </label>
-                <input type="file" id="logo-file-input" accept="image/*" style="display:none" />
-              </div>
-            </div>
-            <div id="logo-filename" style="font-size:11px;color:var(--text3);margin-bottom:6px"></div>
-            <button class="btn btn-primary btn-sm" id="logo-upload-btn" style="display:none"><i class="fas fa-check"></i> Logoyu Kaydet</button>
-            <div id="logo-msg" class="form-error mt-4"></div>
-          </div>
           <div class="form-group"><label>Site Açıklaması</label><textarea id="s-desc" rows="3">${escHtml(settings['site_description']||'')}</textarea></div>
           <button class="btn btn-primary" id="s-general-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-general-msg" class="form-error mt-4"></div>
@@ -2252,32 +2234,6 @@ async function renderSettings(main) {
         </div>
       </div>
     </div>`;
-
-  // Logo upload
-  const logoInput = document.getElementById('logo-file-input');
-  logoInput.addEventListener('change', () => {
-    const file = logoInput.files[0]; if (!file) return;
-    document.getElementById('logo-filename').textContent = file.name + ' (' + (file.size/1024).toFixed(1) + ' KB)';
-    document.getElementById('logo-upload-btn').style.display = 'inline-flex';
-    const reader = new FileReader();
-    reader.onload = e => { const p=document.getElementById('logo-preview'); if(p) p.innerHTML=`<img src="${e.target.result}" style="width:100%;height:100%;object-fit:contain" />`; };
-    reader.readAsDataURL(file);
-  });
-  document.getElementById('logo-upload-btn').addEventListener('click', async () => {
-    const file = logoInput.files[0]; const msgEl = document.getElementById('logo-msg');
-    if (!file) { msgEl.textContent='Dosya seçin'; return; }
-    const btn = document.getElementById('logo-upload-btn');
-    btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Yükleniyor...';
-    msgEl.textContent='';
-    try {
-      const fd = new FormData(); fd.append('logo', file);
-      const res = await fetch('/api/admin/upload-logo', { method:'POST', headers:{'X-Admin-Token':adminToken}, body:fd });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error||'Hata');
-      toast('Logo güncellendi!'); msgEl.style.color='var(--green)'; msgEl.textContent='✓ Kaydedildi';
-    } catch(e) { msgEl.style.color='var(--red2)'; msgEl.textContent=e.message; }
-    finally { btn.disabled=false; btn.innerHTML='<i class="fas fa-check"></i> Logoyu Kaydet'; }
-  });
 
   async function saveSetting(key, value, msgEl) {
     try {

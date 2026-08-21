@@ -562,6 +562,9 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => { if (currentUser) showNewForumModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
+$('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
+$('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
+$('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
 $('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
 $('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(null, true), 120); } else { navigate('/giris'); } });
 $('#logout-btn').addEventListener('click', async () => {
@@ -587,9 +590,17 @@ document.addEventListener('click', e => {
   const mobNewForum = e.target.closest('#mob-new-forum');
   const mobNewBook = e.target.closest('#mob-new-book');
   const mobNewGroup = e.target.closest('#mob-new-group');
+  const mobNewPhoto = e.target.closest('#mob-new-photo');
+  const mobNewStory = e.target.closest('#mob-new-story');
+  const mobNewVideo = e.target.closest('#mob-new-video');
+  const mobNewMusic = e.target.closest('#mob-new-music');
   if (mobNewForum) { $('#mobile-menu').classList.add('hidden'); navigate('/forum'); setTimeout(() => showNewForumModal(), 100); }
   if (mobNewBook) { $('#mobile-menu').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
   if (mobNewGroup) { $('#mobile-menu').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
+  if (mobNewPhoto) { $('#mobile-menu').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
+  if (mobNewStory) { $('#mobile-menu').classList.add('hidden'); if (currentUser) showStoryUploadModal(); }
+  if (mobNewVideo) { $('#mobile-menu').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
+  if (mobNewMusic) { $('#mobile-menu').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); }
 });
 
 async function renderHome(app) {
