@@ -247,8 +247,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .mobile-nav-link:hover { color: var(--text-primary); background: rgba(189,162,117,0.08); }
 .nav-mobile-toggle { display: none; background: none; border: none; color: var(--text-primary); font-size: 20px; }
 .mobile-new-wrap, .nav-mobile-new-toggle, .mobile-new-dropdown { display: none; }
-.mobile-new-dropdown { position: absolute; right: 0; top: calc(100% + 8px); width: min(250px, calc(100vw - 24px)); padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; z-index: 110; }
-.mobile-new-dropdown .btn { min-width: 0; justify-content: center; padding: 7px 5px; font-size: 12px; }
+.mobile-new-dropdown { position: fixed; right: 12px; top: 62px; width: 240px; max-width: calc(100vw - 24px); padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; z-index: 110; }
+.mobile-new-dropdown .btn { width: 100%; min-width: 0; justify-content: center; padding: 7px 5px; font-size: 12px; white-space: nowrap; }
 @media (max-width: 768px) {
   .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
