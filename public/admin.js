@@ -2233,6 +2233,22 @@ async function renderSettings(main) {
           </div>
         </div>
       </div>
+      <div class="card" style="grid-column: 1 / -1">
+        <div class="card-header"><span><i class="fas fa-fill-drip" style="color:var(--red2);margin-right:8px"></i>Site Arka Plan Rengi</span></div>
+        <div class="card-body">
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Siyah ana arka plan yerine kullanılacak rengi belirleyin. Varsayılan renk: <code>#2596be</code>.</p>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <input type="color" id="s-bg-color-picker" value="${settings['background_color']||'#2596be'}" style="width:64px;height:48px;border-radius:10px;border:2px solid var(--border);padding:4px;cursor:pointer;background:var(--bg4)" />
+            <input type="text" id="s-bg-color-hex" value="${settings['background_color']||'#2596be'}" maxlength="7" placeholder="#2596be" style="font-family:monospace;font-size:15px;letter-spacing:2px;max-width:160px" />
+            <div id="s-bg-color-preview" style="width:120px;height:36px;border-radius:8px;border:1px solid var(--border);background:${settings['background_color']||'#2596be'}"></div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="s-bg-color-save"><i class="fas fa-save"></i> Kaydet ve Uygula</button>
+            <button class="btn btn-outline" id="s-bg-color-reset"><i class="fas fa-undo"></i> #2596be Yap</button>
+            <div id="s-bg-color-msg" class="form-error"></div>
+          </div>
+        </div>
+      </div>
     </div>`;
 
   async function saveSetting(key, value, msgEl) {
@@ -2377,6 +2393,29 @@ async function renderSettings(main) {
       toast('Varsayılan renge döndürüldü');
       colorMsg.style.color='var(--green)'; colorMsg.textContent='✓ Sıfırlandı';
     } catch(e) { colorMsg.style.color='var(--red2)'; colorMsg.textContent=e.message; }
+  });
+
+  const bgPicker = document.getElementById('s-bg-color-picker');
+  const bgHex = document.getElementById('s-bg-color-hex');
+  const bgPreview = document.getElementById('s-bg-color-preview');
+  const bgMsg = document.getElementById('s-bg-color-msg');
+  const syncBackgroundUI = hex => {
+    if (bgPicker) bgPicker.value = hex;
+    if (bgHex) bgHex.value = hex;
+    if (bgPreview) bgPreview.style.background = hex;
+    document.documentElement.style.setProperty('--bg-primary', hex);
+  };
+  bgPicker?.addEventListener('input', () => syncBackgroundUI(bgPicker.value));
+  bgHex?.addEventListener('input', () => { if (/^#[0-9A-Fa-f]{6}$/.test(bgHex.value.trim())) syncBackgroundUI(bgHex.value.trim()); });
+  document.getElementById('s-bg-color-save')?.addEventListener('click', async () => {
+    const hex = (bgHex?.value || '').trim();
+    if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) { bgMsg.textContent = 'Geçerli bir hex kodu girin.'; return; }
+    await saveSetting('background_color', hex, bgMsg);
+    syncBackgroundUI(hex); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Kaydedildi';
+  });
+  document.getElementById('s-bg-color-reset')?.addEventListener('click', async () => {
+    await saveSetting('background_color', '#2596be', bgMsg);
+    syncBackgroundUI('#2596be'); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Sıfırlandı';
   });
 
   // ===== KİTAP ARKA PLAN RENGİ =====

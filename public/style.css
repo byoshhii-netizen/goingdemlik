@@ -1,5 +1,5 @@
 :root {
-  --bg-primary: #000000;
+  --bg-primary: #2596be;
   --bg-secondary: #050505;
   --bg-card: #0b0b0b;
   --bg-card2: #151515;
@@ -239,6 +239,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   flex-shrink: 0;
   overflow: visible;
 }
+.site-logo { width: 32px !important; height: 32px !important; min-width: 32px; max-width: 32px; flex: 0 0 32px; object-fit: contain !important; object-position: center; aspect-ratio: 1 / 1; border-radius: 6px; }
 .brand-icon {
   width: 32px; height: 32px;
   background: var(--grad-red);

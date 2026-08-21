@@ -1699,7 +1699,7 @@ app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
 });
 
 // ===== HIKAYELER =====
-app.get('/api/stories', optionalAuth, async (req, res) => {
+app.get('/api/stories', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.created_at,s.expires_at,
       u.username,u.avatar,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
@@ -1716,7 +1716,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/stories/:id', optionalAuth, async (req, res) => {
+app.get('/api/stories/:id', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.created_at,s.expires_at,
       u.username,u.avatar,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
@@ -2722,7 +2722,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','homepage_sections','footer_created_visible','footer_copyright_text')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','homepage_sections','footer_created_visible','footer_copyright_text')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';

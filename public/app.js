@@ -198,7 +198,10 @@ function renderRoute(fullPath) {
   if (path.startsWith('/kitap/') && segs.length === 4 && segs[2] === 'sayfa') return renderPageReader(app, segs[1], segs[3]);
   if (path === '/gruplar') return renderGroupList(app);
   if (path === '/fotograflar') return renderPhotos(app);
-  if (path.startsWith('/hikaye/')) return renderStoryRoute(app, segs[1]);
+  if (path.startsWith('/hikaye/')) {
+    if (!currentUser) return navigate('/giris', false);
+    return renderStoryRoute(app, segs[1]);
+  }
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
   if (path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);

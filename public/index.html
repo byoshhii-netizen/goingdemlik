@@ -96,7 +96,7 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="/" data-link class="nav-brand">
-        <img src="/cigcig.png" alt="CigCig" style="height:32px;width:32px;object-fit:contain;flex-shrink:0;border-radius:6px" />
+        <img src="/cigcig.png" alt="CigCig" class="site-logo" />
         <span style="font-size:16px;font-weight:800;letter-spacing:0;color:var(--text-primary);white-space:nowrap;font-family:'Nunito',sans-serif">CigCig</span>
       </a>
       <div class="nav-links">
@@ -251,10 +251,15 @@
     root.setProperty('--dm-own-border',   `rgba(${r},${g},${b},0.3)`);
     root.setProperty('--dm-reply-bg',     `rgba(${r},${g},${b},0.08)`);
   }
+  function applyBackgroundColor(hex) {
+    if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
+    document.documentElement.style.setProperty('--bg-primary', hex);
+  }
   fetch('/api/settings/public')
     .then(r=>r.json())
     .then(d=>{
       if(d.primary_color) applyThemeColor(d.primary_color);
+      applyBackgroundColor(d.background_color || '#2596be');
       // Logo güncelle
       const navLogo = document.querySelector('.nav-brand img');
       if(navLogo) navLogo.src = '/cigcig.png';
