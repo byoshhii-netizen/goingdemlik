@@ -1479,17 +1479,20 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   }
   .mobile-bottom-bar a {
     flex: 1;
+    min-width: 0;
+    width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 3px;
-    color: #fff;
+    color: var(--text-muted);
     font-size: 0;
     padding: 4px 0;
     transition: color 0.15s;
   }
-  .mobile-bottom-bar a.active,
-  .mobile-bottom-bar a:hover { color: #fff !important; background: transparent; }
+  .mobile-bottom-bar a.active { color: #fff !important; background: transparent; }
+  .mobile-bottom-bar a:hover { color: var(--text-muted); background: transparent; }
   .mobile-bottom-bar i { font-size: 18px; }
   body { padding-bottom: 60px; }
   #toast-container { bottom: 72px; }
