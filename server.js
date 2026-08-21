@@ -284,9 +284,10 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (audio için)
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+    const allowedVideos = ['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'];
     const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
-    if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
-    else cb(new Error('Sadece resim veya ses dosyaları kabul edilir'));
+    if (allowedImages.includes(file.mimetype) || allowedVideos.includes(file.mimetype) || file.mimetype.startsWith('video/') || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
+    else cb(new Error('Sadece resim, video veya ses dosyaları kabul edilir'));
   }
 });
 
@@ -300,9 +301,10 @@ async function handleUpload(file) {
       const ext = path.extname(file.originalname).replace('.', '') || 'jpg';
       const public_id = 'teatube/' + uuidv4();
       const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
+      const isVideo = file.mimetype && file.mimetype.startsWith('video/');
       const stream = cloudinary.uploader.upload_stream(
-        isAudio
-          ? { public_id, resource_type: 'video' } // Cloudinary audio için 'video' resource type kullanır
+        isAudio || isVideo
+          ? { public_id, resource_type: 'video' }
           : { public_id, resource_type: 'image', quality: 'auto', fetch_format: 'auto' },
         (err, result) => {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
