@@ -132,6 +132,7 @@ async function initDb() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,

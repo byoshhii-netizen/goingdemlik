@@ -468,7 +468,9 @@ function updateNavUI() {
     if (mbbAuth) {
       mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
-      mbbAuth.querySelector('i').className = 'fas fa-user-circle';
+      mbbAuth.querySelector('i').style.display = 'none';
+      const avatar = $('#mbb-avatar');
+      if (avatar) { avatar.src = currentUser.avatar || '/cigcig.png'; avatar.style.display = 'block'; }
     }
   } else {
     authEl.classList.remove('hidden');
@@ -488,6 +490,8 @@ function updateNavUI() {
       mbbAuth.setAttribute('href', '/giris');
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
       mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
+      mbbAuth.querySelector('i').style.display = '';
+      const avatar = $('#mbb-avatar'); if (avatar) avatar.style.display = 'none';
       $('#mobile-new-dropdown')?.classList.add('hidden');
       $('#new-dropdown')?.classList.add('hidden');
     }

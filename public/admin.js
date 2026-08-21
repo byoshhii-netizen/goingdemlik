@@ -2236,15 +2236,15 @@ async function renderSettings(main) {
       <div class="card" style="grid-column: 1 / -1">
         <div class="card-header"><span><i class="fas fa-fill-drip" style="color:var(--red2);margin-right:8px"></i>Site Arka Plan Rengi</span></div>
         <div class="card-body">
-          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Siyah ana arka plan yerine kullanılacak rengi belirleyin. Varsayılan renk: <code>#2596be</code>.</p>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Siyah ana arka plan yerine kullanılacak rengi belirleyin. Varsayılan renk: <code>#121212</code>.</p>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <input type="color" id="s-bg-color-picker" value="${settings['background_color']||'#2596be'}" style="width:64px;height:48px;border-radius:10px;border:2px solid var(--border);padding:4px;cursor:pointer;background:var(--bg4)" />
-            <input type="text" id="s-bg-color-hex" value="${settings['background_color']||'#2596be'}" maxlength="7" placeholder="#2596be" style="font-family:monospace;font-size:15px;letter-spacing:2px;max-width:160px" />
-            <div id="s-bg-color-preview" style="width:120px;height:36px;border-radius:8px;border:1px solid var(--border);background:${settings['background_color']||'#2596be'}"></div>
+            <input type="color" id="s-bg-color-picker" value="${settings['background_color']||'#121212'}" style="width:64px;height:48px;border-radius:10px;border:2px solid var(--border);padding:4px;cursor:pointer;background:var(--bg4)" />
+            <input type="text" id="s-bg-color-hex" value="${settings['background_color']||'#121212'}" maxlength="7" placeholder="#121212" style="font-family:monospace;font-size:15px;letter-spacing:2px;max-width:160px" />
+            <div id="s-bg-color-preview" style="width:120px;height:36px;border-radius:8px;border:1px solid var(--border);background:${settings['background_color']||'#121212'}"></div>
           </div>
           <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <button class="btn btn-primary" id="s-bg-color-save"><i class="fas fa-save"></i> Kaydet ve Uygula</button>
-            <button class="btn btn-outline" id="s-bg-color-reset"><i class="fas fa-undo"></i> #2596be Yap</button>
+            <button class="btn btn-outline" id="s-bg-color-reset"><i class="fas fa-undo"></i> #121212 Yap</button>
             <div id="s-bg-color-msg" class="form-error"></div>
           </div>
         </div>
@@ -2414,8 +2414,8 @@ async function renderSettings(main) {
     syncBackgroundUI(hex); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Kaydedildi';
   });
   document.getElementById('s-bg-color-reset')?.addEventListener('click', async () => {
-    await saveSetting('background_color', '#2596be', bgMsg);
-    syncBackgroundUI('#2596be'); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Sıfırlandı';
+    await saveSetting('background_color', '#121212', bgMsg);
+    syncBackgroundUI('#121212'); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Sıfırlandı';
   });
 
   // ===== KİTAP ARKA PLAN RENGİ =====
