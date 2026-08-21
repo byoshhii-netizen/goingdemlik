@@ -209,11 +209,11 @@
 
   <!-- MOBİL BOTTOM BAR -->
   <nav class="mobile-bottom-bar" id="mobile-bottom-bar">
-    <a href="/" data-link id="mbb-home"><i class="fas fa-home"></i>Ana Sayfa</a>
-    <a href="/mesajlar" data-link id="mbb-forum"><i class="fas fa-envelope"></i>Mesajlar</a>
-    <a href="/kitaplar" data-link id="mbb-books"><i class="fas fa-book"></i>Kitaplar</a>
-    <a href="/muzikler" data-link id="mbb-music"><i class="fas fa-music"></i>Müzikler</a>
-    <a href="/giris" data-link id="mbb-auth"><i class="fas fa-user"></i><span id="mbb-auth-label">Giriş</span></a>
+    <a href="/" data-link id="mbb-home" aria-label="Ana Sayfa" title="Ana Sayfa"><i class="fas fa-home"></i></a>
+    <a href="/reals" data-link id="mbb-reals" aria-label="Reals" title="Reals"><i class="fas fa-clapperboard"></i></a>
+    <a href="/mesajlar" data-link id="mbb-messages" aria-label="Mesajlar" title="Mesajlar"><i class="fas fa-paper-plane"></i></a>
+    <a href="/muzikler" data-link id="mbb-music" aria-label="Müzikler" title="Müzikler"><i class="fas fa-music"></i></a>
+    <a href="/giris" data-link id="mbb-auth" aria-label="Giriş" title="Profil"><i class="fas fa-user"></i></a>
   </nav>
 
   <script>
@@ -255,7 +255,7 @@
       const favicon = document.querySelector('link[rel="icon"]');
       if(favicon) favicon.href = '/cigcig.png';
       // Site adı güncelle
-      if(d.site_name) {
+      if(d.site_name && d.site_name.toLowerCase() !== 'demlik') {
         const navSpan = document.querySelector('.nav-brand span');
         if(navSpan) navSpan.textContent = d.site_name;
       }

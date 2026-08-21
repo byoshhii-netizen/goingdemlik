@@ -1,7 +1,7 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
-let siteName = '';
+let siteName = 'CigCig';
 
 const SITE_URL = 'https://cigcig.xyz';
 
@@ -3048,6 +3048,7 @@ async function renderProfile(app, username) {
         ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.following ? 'Takip ediliyor' : 'Takip et'}</button>
           <button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>
+          <button id="profile-friend-btn" class="btn btn-ghost btn-sm"><i class="fas fa-user-friends"></i> Arkadaşlık</button>
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
         </div>` : ''}
@@ -3201,6 +3202,11 @@ async function renderProfile(app, username) {
       }
 
       renderMenu(friendStatus);
+
+      document.getElementById('profile-friend-btn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        moreMenu.style.display = moreMenu.style.display === 'none' ? 'block' : 'none';
+      });
 
       moreBtn.addEventListener('click', e => {
         e.stopPropagation();
@@ -3790,7 +3796,7 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
-    siteName = ps.site_name || '';
+    siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     // Kitap arka plan rengi CSS değişkeni olarak ayarla
     if (ps.book_bg_color) {

@@ -1105,7 +1105,7 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
     const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
     if (m.length) { isMember = true; role = m[0].role; }
     // Check if user has pending join request for private group
-    if (!isMember && group.type === 'private') {
+    if (!isMember && (group.type === 'private' || group.invite_only)) {
       const { rows: jr } = await query('SELECT status, rejection_reason FROM group_join_requests WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
       if (jr.length) joinRequestStatus = { status: jr[0].status, rejectionReason: jr[0].rejection_reason };
     }
@@ -1213,7 +1213,7 @@ app.post('/api/group/:slug/join-request', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
-  if (group.type !== 'private') return res.status(400).json({ error: 'Bu grup için istek gerekli değil' });
+  if (group.type !== 'private' && !group.invite_only) return res.status(400).json({ error: 'Bu grup için istek gerekli değil' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   const { rows: existing } = await query('SELECT id FROM group_join_requests WHERE group_id=$1 AND user_id=$2 AND status=$3', [group.id, req.user.id, 'pending']);
@@ -2651,6 +2651,7 @@ app.get('/api/settings/public', async (req, res) => {
   const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','homepage_sections','footer_created_visible','footer_copyright_text')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
+  if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';
   res.json(obj);
 });
 
