@@ -447,7 +447,7 @@ function updateNavUI() {
     }
 
     if (mobAuth) mobAuth.classList.add('hidden');
-    if (mobNew) mobNew.classList.remove('hidden');
+    if (mobNew) mobNew.classList.add('hidden');
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="/profil/${escHtml(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
