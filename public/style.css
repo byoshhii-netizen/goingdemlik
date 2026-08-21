@@ -111,6 +111,12 @@ body[data-theme="gold"] {
 .story-volume, .story-route-song input { width: 90px; min-height: 0; padding: 0; accent-color: var(--accent-red); }
 .story-route { max-width: 620px; margin: 0 auto; padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 .story-route > img, .story-route > video { width: 100%; max-height: 72vh; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
+.story-route-media { position: relative; width: min(100%, 760px); height: calc(100svh - 190px); display: flex; align-items: center; justify-content: center; }
+.story-route-media > img, .story-route-media > video { width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
+.story-route-tap { position: absolute; top: 0; bottom: 0; width: 32%; z-index: 2; border: 0; background: transparent; cursor: pointer; }
+.story-route-tap-left { left: 0; }
+.story-route-tap-right { right: 0; }
+.story-route-tap:disabled { cursor: default; }
 .story-route-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .story-route-head > div { display: flex; flex-direction: column; }
 .story-route-head small, .story-route-note { color: var(--text-muted); font-size: 12px; }

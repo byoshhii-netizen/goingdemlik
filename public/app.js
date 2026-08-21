@@ -593,6 +593,7 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => { if (currentUser) showNewForumModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
+$('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
 $('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
@@ -621,7 +622,8 @@ async function showMyGroupsModal() {
   showModal('Gruplarım', '<div class="loading-center"><div class="spinner"></div></div>');
   try {
     const groups = await api('/my-groups');
-    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz bir gruba katılmadınız.</p></div>';
+    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
+    $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
 $('#mobile-groups-btn')?.addEventListener('click', showMyGroupsModal);
@@ -4275,7 +4277,7 @@ async function renderDMChat(username) {
           ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
         <a href="/profil/${escHtml(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
-          <strong>${escHtml(other.username)}</strong><small>Özel mesajlaşma</small>
+          <strong>${escHtml(other.username)}</strong>
         </a>
       </div>
       <div class="dm-chat-header-right">
@@ -5883,7 +5885,7 @@ async function loadStoriesBar(container) {
       return Number(aViewed) - Number(bViewed);
     });
     if (!groups.length) { container.innerHTML = ''; return; }
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${groups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${groups.map((group, index) => { const viewed = group.stories.every(story => story.viewed); return `<button type="button" class="story-user ${viewed ? 'viewed' : ''}" data-story-group="${index}" ${viewed ? 'disabled aria-label="Tüm hikayeler izlendi"' : ''}><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`; }).join('')}</div></div>`;
     const ownGroupIndex = currentUser ? groups.findIndex(group => group.user_id === currentUser.id) : -1;
     if (ownGroupIndex >= 0) {
       const ownButton = container.querySelector(`[data-story-group="${ownGroupIndex}"]`);
@@ -5892,7 +5894,6 @@ async function loadStoriesBar(container) {
         ownButton.classList.add('story-add', 'story-owner-story');
         ownButton.classList.remove('story-user');
         ownButton.querySelector('small').textContent = 'Hikayen';
-        addButton?.remove();
         ownButton.parentElement.prepend(ownButton);
       }
     }
@@ -5957,7 +5958,7 @@ async function renderStoryRoute(app, storyId) {
     const previousStory = groupStories[storyIndex - 1];
     const nextStory = groupStories.slice(storyIndex + 1).find(item => !item.viewed);
     document.title = '@' + story.username + ' hikayesi - ' + siteName;
-    app.innerHTML = `<div class="container page"><div class="story-route"><div class="story-route-head">${avatarImg(story)}<div><b>@${escHtml(story.username)}</b><small>${timeAgo(story.created_at)} · ${storyIndex + 1}/${groupStories.length}</small></div></div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="Hikaye" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<div class="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><input id="story-route-volume" type="range" min="0" max="100" value="80" aria-label="Hikaye sesi" /></div>` : ''}<div class="story-route-actions"><button class="btn btn-ghost" id="story-route-prev" ${previousStory ? '' : 'disabled'}><i class="fas fa-chevron-left"></i> Önceki</button><button class="btn btn-ghost" id="story-route-next" ${nextStory ? '' : 'disabled'}>Sonraki <i class="fas fa-chevron-right"></i></button><button class="btn btn-ghost" id="story-route-share"><i class="fas fa-share-alt"></i> Paylaş</button>${story.is_owner ? `<button class="btn btn-ghost" id="story-route-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button class="btn btn-ghost" id="story-route-edit"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-ghost text-danger" id="story-route-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div><div class="story-route-note">Bu hikaye artık akışta görünmüyor olabilir, ancak bağlantısından izlenebilir.</div></div></div>`;
+    app.innerHTML = `<div class="container page"><div class="story-route"><div class="story-route-head">${avatarImg(story)}<div><b>@${escHtml(story.username)}</b><small>${timeAgo(story.created_at)} · ${storyIndex + 1}/${groupStories.length}</small></div></div><div class="story-route-media"><button class="story-route-tap story-route-tap-left" id="story-route-prev" aria-label="Önceki hikaye"></button>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="Hikaye" />`}<button class="story-route-tap story-route-tap-right" id="story-route-next" aria-label="Sonraki hikaye"></button></div>${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<div class="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><input id="story-route-volume" type="range" min="0" max="100" value="80" aria-label="Hikaye sesi" /></div>` : ''}<div class="story-route-actions"><button class="btn btn-ghost" id="story-route-share"><i class="fas fa-share-alt"></i> Paylaş</button>${story.is_owner ? `<button class="btn btn-ghost" id="story-route-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button class="btn btn-ghost" id="story-route-edit"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-ghost text-danger" id="story-route-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div><div class="story-route-note">Bu hikaye artık akışta görünmüyor olabilir, ancak bağlantısından izlenebilir.</div></div></div>`;
     $('#story-route-prev')?.addEventListener('click', () => previousStory && navigate('/hikaye/' + encodeURIComponent(previousStory.public_id || previousStory.id)));
     $('#story-route-next')?.addEventListener('click', () => nextStory && navigate('/hikaye/' + encodeURIComponent(nextStory.public_id || nextStory.id)));
     $('#story-route-share')?.addEventListener('click', () => shareStory(story));

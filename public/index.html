@@ -96,7 +96,7 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="/" data-link class="nav-brand">
-        <img src="/cigcig.png" alt="CigCig" class="site-logo" />
+        <img src="/cigcig2.png" alt="CigCig" class="site-logo" />
         <span style="font-size:16px;font-weight:800;letter-spacing:0;color:var(--text-primary);white-space:nowrap;font-family:'Nunito',sans-serif">CigCig</span>
       </a>
       <div class="nav-links">
@@ -106,7 +106,7 @@
         <a href="/kitaplar" data-link class="nav-link">Kitaplar</a>
         <a href="/muzikler" data-link class="nav-link">Müzikler</a>
         <a href="/magaza" data-link class="nav-link">Mağaza</a>
-        <a href="/gruplar" data-link class="nav-link">Gruplar</a>
+        <a href="/gruplar" data-link class="nav-link" id="nav-groups-btn">Gruplar</a>
         <a href="/fotograflar" data-link class="nav-link">Fotoğraflar</a>
       </div>
       <div class="nav-auth" id="nav-auth">
@@ -275,7 +275,7 @@
       applyBackgroundColor(d.background_color || '#121212');
       // Logo güncelle
       const navLogo = document.querySelector('.nav-brand img');
-      if(navLogo) navLogo.src = '/cigcig.png';
+      if(navLogo) navLogo.src = '/cigcig2.png';
       const favicon = document.querySelector('link[rel="icon"]');
       if(favicon) favicon.href = '/cigcig.png';
       // Site adı güncelle
