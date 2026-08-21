@@ -3212,6 +3212,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   // Engel kontrolü
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
+  const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
+  if (!friendship.length) return res.status(403).json({ error: 'Yalnızca arkadaşlarınıza mesaj gönderebilirsiniz' });
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
@@ -3231,7 +3233,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
   if (shared_photo_id && !content) content = ' ';
-  if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
     'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_photo_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
     [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, reply_to_id||null]
