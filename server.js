@@ -1476,7 +1476,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display, is_private } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
   let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
@@ -1715,7 +1715,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const userId = req.user.id;
   const { rows } = await query('SELECT id, show_likes FROM photos WHERE id=$1', [photoId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  if (rows[0].show_likes !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
+  if (Number(rows[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
   const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
   if (exists.length) {
     await query('DELETE FROM photo_likes WHERE id=$1', [exists[0].id]);

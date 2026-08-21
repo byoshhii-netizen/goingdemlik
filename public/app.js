@@ -3,36 +3,6 @@ let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
 let siteName = '';
 
-const CIGCIG_THEMES = [
-  { id: 'dark', name: 'Gece Karanlığı', color: '#BDA275' },
-  { id: 'light', name: 'Gün Işığı', color: '#dc2626' },
-  { id: 'ocean-blue', name: 'Okyanus Mavisi', color: '#00b4d8' },
-  { id: 'forest-green', name: 'Yeşil Orman', color: '#00cc66' },
-  { id: 'fire-red', name: 'Ateş Kırmızısı', color: '#ff3333' },
-  { id: 'midnight-blue', name: 'Gece Mavisi', color: '#89b4fa' },
-  { id: 'gold', name: 'Altın Sarısı', color: '#ffd700' },
-];
-
-function applyCigCigTheme(themeId) {
-  const theme = CIGCIG_THEMES.some(item => item.id === themeId) ? themeId : 'dark';
-  document.body.dataset.theme = theme;
-  localStorage.setItem('cigcig-theme', theme);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f8f9fa' : '#080808');
-  document.querySelectorAll('[data-theme-mode]').forEach(button => {
-    button.classList.toggle('active', button.dataset.themeMode === (theme === 'light' ? 'light' : 'dark'));
-  });
-  return theme;
-}
-
-applyCigCigTheme(localStorage.getItem('cigcig-theme') || 'dark');
-
-document.addEventListener('click', event => {
-  const button = event.target.closest('[data-theme-mode]');
-  if (!button) return;
-  event.preventDefault();
-  applyCigCigTheme(button.dataset.themeMode === 'light' ? 'light' : 'dark');
-});
-
 const SITE_URL = 'https://cigcig.xyz';
 
 function $(sel) { return document.querySelector(sel); }
@@ -226,6 +196,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
   if (path === '/reals') return renderRealsFeed(app);
   if (path.startsWith('/reals/')) return renderVideoDetail(app, segs[1]);
+  if (path.startsWith('/foto/')) return renderPhotoDetail(app, segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
@@ -3417,22 +3388,10 @@ function renderSettingsSection(section) {
     });
 
   } else if (section === 'appearance') {
-    const activeTheme = localStorage.getItem('cigcig-theme') || 'dark';
     el.innerHTML = `
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
-          <div class="form-group">
-            <label>Arayüz Teması</label>
-            <div class="theme-picker" id="cigcig-theme-picker">
-              ${CIGCIG_THEMES.map(theme => `
-                <button type="button" class="theme-option ${theme.id === activeTheme ? 'active' : ''}" data-theme-id="${theme.id}">
-                  <span class="theme-swatch" style="background:${theme.color}"></span>
-                  <span>${theme.name}</span>
-                  <i class="fas fa-check theme-check"></i>
-                </button>`).join('')}
-            </div>
-          </div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
@@ -3441,14 +3400,6 @@ function renderSettingsSection(section) {
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
-    $$('#cigcig-theme-picker .theme-option').forEach(button => {
-      button.addEventListener('click', () => {
-        applyCigCigTheme(button.dataset.themeId);
-        $$('#cigcig-theme-picker .theme-option').forEach(item => item.classList.remove('active'));
-        button.classList.add('active');
-        toast('Tema uygulandı');
-      });
-    });
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_badge: $('#s-show-badge').checked,
@@ -5792,7 +5743,7 @@ async function renderPhotos(app) {
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; photos.forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
   document.getElementById('photo-upload-btn')?.addEventListener('click', showPhotoUploadModal);
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}${p.song_title?`<button class="btn btn-ghost btn-sm photo-song" data-audio="${escHtml(p.song_audio_url||'')}" data-start="${Number(p.song_start_seconds)||0}" style="display:block;margin-top:8px"><i class="fas fa-music"></i> ${escHtml(p.song_title)} · ${escHtml(p.song_artist||'')}</button>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}${p.song_title?`<button class="btn btn-ghost btn-sm photo-song" data-audio="${escHtml(p.song_audio_url||'')}" data-start="${Number(p.song_start_seconds)||0}" style="display:block;margin-top:8px"><i class="fas fa-music"></i> ${escHtml(p.song_title)} · ${escHtml(p.song_artist||'')}</button>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   const sharePhoto = async c => {
@@ -5811,10 +5762,12 @@ function bindPhotoFeed(feed) {
     box.querySelector('.photo-comment-send')?.addEventListener('click', async () => {
       const input = box.querySelector('input');
       if (!input?.value.trim()) return;
-      await api('/photos/' + c.dataset.photoId + '/comments', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) });
-      await renderComments(c, box);
-      const count = c.querySelector('.photo-comment span');
-      if (count) count.textContent = String(Number(count.textContent) + 1);
+      try {
+        await api('/photos/' + c.dataset.photoId + '/comments', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) });
+        await renderComments(c, box);
+        const count = c.querySelector('.photo-comment span');
+        if (count) count.textContent = String(Number(count.textContent) + 1);
+      } catch (error) { toast(error.message || 'Yorum gönderilemedi', 'error'); }
     });
   };
 
@@ -5843,7 +5796,10 @@ function bindPhotoFeed(feed) {
     const box = c.querySelector('.photo-comment-box');
     if (!box) return;
     box.hidden = !box.hidden;
-    if (!box.hidden) await renderComments(c, box);
+    if (!box.hidden) {
+      try { await renderComments(c, box); }
+      catch (error) { box.innerHTML = `<small class="form-error">${escHtml(error.message || 'Yorumlar yüklenemedi')}</small>`; }
+    }
   });
 
   feed.querySelectorAll('.photo-share').forEach(x => x.onclick = async e => {
@@ -5859,11 +5815,20 @@ function bindPhotoFeed(feed) {
     if (!currentUser) return toast('Giriş yapın', 'error');
     const c = e.target.closest('[data-photo-id]');
     if (!c) return;
-    const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
-    const n = x.querySelector('span');
-    if (n) n.textContent = String(Number(n.textContent) + (r.liked ? 1 : -1));
-    const icon = x.querySelector('i');
-    if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
+    try {
+      const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
+      const n = x.querySelector('span');
+      if (n) n.textContent = String(Number(n.textContent) + (r.liked ? 1 : -1));
+      const icon = x.querySelector('i');
+      if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
+      if (r.liked) {
+        const burst = document.createElement('span');
+        burst.className = 'photo-like-burst';
+        burst.textContent = '❤';
+        c.appendChild(burst);
+        setTimeout(() => burst.remove(), 850);
+      }
+    } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
   });
 
   feed.querySelectorAll('.photo-song').forEach(x => x.onclick = e => {
@@ -5874,6 +5839,16 @@ function bindPhotoFeed(feed) {
   });
 }
 
+
+async function renderPhotoDetail(app, photoId) {
+  try {
+    const photo = await api('/photos/' + encodeURIComponent(photoId));
+    app.innerHTML = `<div class="container page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
+    bindPhotoFeed(app.querySelector('.photo-detail-shell'));
+  } catch (error) {
+    app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-image"></i><p>${escHtml(error.message || 'Fotoğraf bulunamadı')}</p></div></div>`;
+  }
+}
 
 let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed) {
