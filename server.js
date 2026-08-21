@@ -1276,7 +1276,7 @@ app.post('/api/group/:slug/join-request/:requestId/respond', authMiddleware, asy
 app.get('/api/group/:slug/members', async (req, res) => {
   const { rows: gRows } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.level_id FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
+  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.level_id FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
   res.json(rows);
 });
 
@@ -1293,10 +1293,10 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     params = [group.id, before_id, limit];
   } else {
-    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
+    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
     params = [group.id, limit];
   }
   const { rows } = await query(sql, params);
@@ -1314,7 +1314,7 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
     [group.id, req.user.id, content||'', image_url||'']);
-  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
 
@@ -1637,7 +1637,7 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
 app.get('/api/photos', optionalAuth, async (req, res) => {
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
-  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
+  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
@@ -1655,7 +1655,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   const { rows } = await query(
     `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds,
       s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
-      p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
+      p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
@@ -1875,7 +1875,7 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
 app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user.id;
-  const { rows } = await query(`SELECT p.id, p.show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
+  const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
     WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
@@ -1894,9 +1894,10 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
 });
 
 // Photo comments
-app.get('/api/photos/:id/comments', async (req, res) => {
+app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
   const photoId = req.params.id;
-  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR COALESCE(p.user_id,0)=0)`, [photoId]);
+  const userId = req.user ? req.user.id : 0;
+  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   const { rows } = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
   res.json(rows);
@@ -3259,6 +3260,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     SELECT c.*,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message,
@@ -3282,6 +3284,7 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
     SELECT c.*,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
@@ -3310,7 +3313,7 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
-  const { rows: target } = await query('SELECT id,username,avatar,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
   if (other.is_private && other.id !== uid) {
@@ -3331,7 +3334,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: msgs } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
+      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
@@ -3426,7 +3429,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   const { rows: full } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
+      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,

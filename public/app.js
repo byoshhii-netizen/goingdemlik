@@ -129,6 +129,10 @@ function avatarImg(u, cls = 'avatar-sm') {
   return `<div class="${cls} avatar-placeholder" aria-label="Profil fotoğrafı yok"><i class="fas fa-user"></i></div>`;
 }
 
+function hasUsableAvatar(u) {
+  return Boolean(u && u.avatar && !u.avatar_removed && u.avatar !== '?' && u.avatar !== 'null' && u.avatar !== 'undefined');
+}
+
 // ===== IÇERIK RENDER (hashtag + mention) =====
 function renderContent(text) {
   if (!text) return '';
@@ -471,9 +475,9 @@ function updateNavUI() {
       mbbAuth.querySelector('i').style.display = 'none';
       const avatar = $('#mbb-avatar');
       if (avatar) {
-        const hasAvatar = currentUser.avatar && !currentUser.avatar_removed;
-        avatar.src = hasAvatar ? currentUser.avatar : '/cigcig.png';
-        avatar.classList.toggle('avatar-fallback-logo', !hasAvatar);
+        const hasAvatar = hasUsableAvatar(currentUser);
+        avatar.src = hasAvatar ? currentUser.avatar : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Ccircle cx="32" cy="32" r="32" fill="%23353535"/%3E%3Ccircle cx="32" cy="23" r="11" fill="%23909090"/%3E%3Cpath d="M14 51c1-11 8-17 18-17s17 6 18 17" fill="%23909090"/%3E%3C/svg%3E';
+        avatar.classList.toggle('avatar-fallback-logo', false);
         avatar.style.display = 'block';
       }
     }
@@ -2553,7 +2557,7 @@ function chatMsgHTML(m, canModDelete = false) {
   const isOwn = currentUser && currentUser.id === m.user_id;
   const canDel = isOwn || canModDelete;
   return `<div class="chat-msg ${isOwn ? 'own' : ''}">
-    ${m.avatar ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder" style="font-size:11px;font-weight:700">?</div>`}
+    ${hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
         <span class="chat-msg-name">${escHtml(m.username || 'Silindi')}${m.badge_name ? ` <span class="badge" style="background:${escHtml(m.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${m.badge_icon ? `<i class="${escHtml(m.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(m.badge_name)}</span>` : ''}</span>
@@ -2571,7 +2575,7 @@ function memberItemHTML(m, isOwner, groupSlug) {
   const friendBadge = m.is_friend ? '<span title="Arkadaş" style="margin-left:6px;color:var(--accent-green);font-size:13px"><i class="fas fa-user-friends"></i></span>' : '';
   const canAct = isOwner && m.role !== 'owner' && currentUser && currentUser.id !== m.user_id;
   return `<div class="member-item">
-    ${m.avatar ? `<img src="${escHtml(m.avatar)}" class="member-avatar" alt="" />` : `<div class="member-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:14px"></i></div>`}
+    ${hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="member-avatar" alt="" />` : `<div class="member-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:14px"></i></div>`}
     <div style="flex:1">
       <div style="font-size:13px;font-weight:600">${escHtml(m.username)}${friendBadge}</div>
       ${roleLabel}
@@ -4052,7 +4056,7 @@ async function renderMessages(app, targetUsername) {
   function convItemHTML(c, isHidden) {
     const unread = c.unread_count || 0;
     return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}">
-      ${c.other_avatar
+      ${hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed })
         ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
         : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
       <div class="dm-conv-info">
@@ -4131,7 +4135,7 @@ async function renderMessages(app, targetUsername) {
         <label>Arkadaşlar</label>
         <div id="new-dm-friends" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
           ${accepted.map(f => `<button class="btn btn-outline btn-sm" style="justify-content:flex-start;gap:8px" data-action="open-dm" data-username="${escHtml(f.other_username)}">
-            ${f.other_avatar ? `<img src="${escHtml(f.other_avatar)}" class="avatar-sm" style="width:24px;height:24px" />` : `<div class="avatar-sm avatar-placeholder" style="width:24px;height:24px"><i class="fas fa-user" style="font-size:10px"></i></div>`}
+            ${hasUsableAvatar({ avatar: f.other_avatar, avatar_removed: f.other_avatar_removed }) ? `<img src="${escHtml(f.other_avatar)}" class="avatar-sm" style="width:24px;height:24px" />` : `<div class="avatar-sm avatar-placeholder" style="width:24px;height:24px"><i class="fas fa-user" style="font-size:10px"></i></div>`}
             ${escHtml(f.other_username)}
           </button>`).join('')}
         </div>
@@ -4241,7 +4245,7 @@ async function renderDMChat(username) {
     <div class="dm-chat-header">
       <div class="dm-chat-header-left">
         <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
-        ${other.avatar
+        ${hasUsableAvatar(other)
           ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
         <a href="/profil/${escHtml(other.username)}" data-link class="dm-chat-username" style="color:${other.name_color || 'var(--text-primary)'}">
@@ -4466,7 +4470,7 @@ function dmMessageHTML(m, myId, selMode) {
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
     ${!isOwn
-      ? (m.sender_avatar
+      ? (hasUsableAvatar({ avatar: m.sender_avatar, avatar_removed: m.sender_avatar_removed })
           ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0;align-self:flex-end" />`
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0;align-self:flex-end"><i class="fas fa-user"></i></div>`)
       : ''}
@@ -5924,7 +5928,7 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; photos.forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}${p.song_title?`<button class="btn btn-ghost btn-sm photo-song" data-audio="${escHtml(p.song_audio_url||'')}" data-start="${Number(p.song_start_seconds)||0}" style="display:block;margin-top:8px"><i class="fas fa-music"></i> ${escHtml(p.song_title)} · ${escHtml(p.song_artist||'')}</button>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<button class="btn btn-ghost btn-sm photo-delete" style="margin-left:auto"><i class="fas fa-trash"></i></button>':''}</div><div class="photo-media-wrap"><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url||'')}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   const sharePhoto = async c => {
@@ -6025,7 +6029,9 @@ async function renderPhotoDetail(app, photoId) {
   try {
     const photo = await api('/photos/' + encodeURIComponent(photoId));
     app.innerHTML = `<div class="container page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
-    bindPhotoFeed(app.querySelector('.photo-detail-shell'));
+    const shell = app.querySelector('.photo-detail-shell');
+    bindPhotoFeed(shell);
+    setupPhotoAudio(shell);
   } catch (error) {
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-image"></i><p>${escHtml(error.message || 'Fotoğraf bulunamadı')}</p></div></div>`;
   }
@@ -6047,7 +6053,7 @@ function setupPhotoAudio(feed) {
   $('#photo-audio-toggle').onclick=()=>{enabled=!enabled;localStorage.setItem('cigcig_photo_audio_enabled',enabled?'1':'0');sync(); if (enabled) photoAudioObserver?.takeRecords?.();};
   $('#photo-audio-volume')?.addEventListener('input',e=>{volume=Number(e.target.value)/100;localStorage.setItem('cigcig_photo_audio_volume',String(volume));if(activePhotoAudio)activePhotoAudio.volume=volume;});
   const play=card=>{const b=card.querySelector('.photo-song');if(!enabled||!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.volume=isPhone?1:volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
-  photoAudioObserver=new IntersectionObserver(entries=>entries.forEach(x=>{if(x.isIntersecting&&x.intersectionRatio>.7)play(x.target);}),{threshold:[.7]});
+  photoAudioObserver=new IntersectionObserver(entries=>{const visible=[...feed.querySelectorAll('[data-photo-id]')].map(card=>({card,ratio:entries.find(e=>e.target===card)?.intersectionRatio||0})).sort((a,b)=>b.ratio-a.ratio)[0];if(visible?.ratio>.7)play(visible.card);else if(![...feed.querySelectorAll('[data-photo-id]')].some(card=>card.getBoundingClientRect().top<innerHeight&&card.getBoundingClientRect().bottom>0))stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
 }
 
