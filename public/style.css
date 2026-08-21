@@ -1026,15 +1026,19 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .dm-chat-header-right .btn i { font-size:13px; }
 }
 
-/* Discord-style group chat: avatar, name and message always share the left edge. */
-.chat-msg.own { flex-direction: row; }
-.chat-msg.own .chat-msg-body { text-align: left; }
-.chat-msg.own .chat-msg-text { border-radius: 0 10px 10px 10px; background: linear-gradient(135deg,var(--red) 0%, var(--theme-dark) 100%); color: #fff; }
+/* Group chat: own messages align to the right, other messages to the left. */
+.chat-msg.own { grid-template-columns: minmax(0,1fr) 34px !important; }
+.chat-msg.own .chat-msg-avatar { grid-column: 2; }
+.chat-msg.own .chat-msg-body { grid-column: 1; text-align: right; }
+.chat-msg.own .chat-msg-meta { justify-content: flex-end; }
+.chat-msg.own .chat-msg-text { border-radius: 10px 0 10px 10px; background: var(--bg-card2); border: 1px solid var(--border-hover); color: var(--text-primary); }
 .chat-msg.own .chat-msg-avatar { box-shadow: 0 0 0 2px rgba(255,255,255,0.02); }
 .chat-input-bar { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .chat-input-bar input { flex: 1; min-width: 0; }
 .chat-input-bar button { flex-shrink: 0; }
 .chat-input-bar label { flex-shrink: 0; cursor: pointer; }
+.chat-input-bar #send-msg-btn { width: 40px; height: 40px; padding: 0; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #f3f3f3; color: #555; border: 0; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.chat-input-bar #send-msg-btn:hover { background: #fff; color: #222; transform: scale(1.04); }
 .group-sidebar-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-bottom: 20px; }
 .member-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .member-item:last-child { border-bottom: none; }
