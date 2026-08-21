@@ -96,8 +96,8 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="/" data-link class="nav-brand">
-        <img src="/cigcig.png" alt="CigCig" class="site-logo" />
-        <span style="font-size:16px;font-weight:800;letter-spacing:0;color:var(--text-primary);white-space:nowrap;font-family:'Nunito',sans-serif">CigCig</span>
+        <span class="site-logo brand-crescent" aria-label="CigCig"><span class="brand-star">★</span></span>
+        <span class="site-name" style="font-size:16px;font-weight:800;letter-spacing:0;color:var(--text-primary);white-space:nowrap;font-family:'Nunito',sans-serif">CigCig</span>
       </a>
       <div class="nav-links">
         <a href="/" data-link class="nav-link">Ana Sayfa</a>
@@ -261,13 +261,12 @@
       if(d.primary_color) applyThemeColor(d.primary_color);
       applyBackgroundColor(d.background_color || '#121212');
       // Logo güncelle
-      const navLogo = document.querySelector('.nav-brand img');
-      if(navLogo) navLogo.src = '/cigcig.png';
+      const navLogo = document.querySelector('.nav-brand .brand-crescent');
       const favicon = document.querySelector('link[rel="icon"]');
       if(favicon) favicon.href = '/cigcig.png';
       // Site adı güncelle
       if(d.site_name && d.site_name.toLowerCase() !== 'demlik') {
-        const navSpan = document.querySelector('.nav-brand span');
+        const navSpan = document.querySelector('.nav-brand .site-name');
         if(navSpan) navSpan.textContent = d.site_name;
       }
     })
