@@ -3935,7 +3935,7 @@ async function init() {
     if (footer) {
       const createdVisible = ps.footer_created_visible !== '0';
       const copyrightText = ps.footer_copyright_text || '©&nbsp;Copyright 2026';
-      footer.innerHTML = createdVisible ? `Created By. İsmail DEMİRCAN &nbsp;${copyrightText}` : copyrightText;
+      footer.innerHTML = createdVisible ? `Created By. İsmail Demircan &nbsp;${copyrightText}` : copyrightText;
     }
   } catch {}
   loadAnnouncements();
@@ -4619,7 +4619,7 @@ function showDmOptionsMenu(username, convId) {
     hideModal();
     showModal('Konuşmayı Gizle', `
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Şifre koyarsanız açmak için şifre gerekecek.</p>
-      <div class="form-group"><label>Şifre (opsiyonel)</label><input id="dm-hide-pass" type="password" placeholder="Şifresiz bırakmak için boş bırakın" /></div>
+      <div class="form-group"><label>Şifre (opsiyonel)</label><input id="dm-hide-pass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" placeholder="Şifresiz bırakmak için boş bırakın" /></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" id="dm-hide-confirm" style="flex:1">Gizle</button>
         <button class="btn btn-outline" onclick="hideModal()" style="flex:1">İptal</button>
@@ -4634,7 +4634,7 @@ function showDmOptionsMenu(username, convId) {
   document.getElementById('dm-opt-setpass')?.addEventListener('click', () => {
     hideModal();
     showModal('Şifre Değiştir', `
-      <div class="form-group"><label>Yeni Şifre (boş = şifresiz)</label><input id="dm-newpass" type="password" /></div>
+      <div class="form-group"><label>Yeni Şifre (boş = şifresiz)</label><input id="dm-newpass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" /></div>
       <button class="btn btn-primary" style="width:100%" id="dm-setpass-confirm">Kaydet</button>
     `);
     document.getElementById('dm-setpass-confirm')?.addEventListener('click', async () => {
@@ -5920,7 +5920,11 @@ async function loadStoriesBar(container) {
       };
       render();
     };
-    container.querySelectorAll('[data-story-group]').forEach(button => button.addEventListener('click', () => openGroup(Number(button.dataset.storyGroup))));
+    container.querySelectorAll('[data-story-group]').forEach(button => button.addEventListener('click', () => {
+      const group = groups[Number(button.dataset.storyGroup)];
+      const story = group?.stories?.find(item => !item.viewed) || group?.stories?.[0];
+      if (story) navigate('/hikaye/' + encodeURIComponent(story.public_id || story.id));
+    }));
     container.querySelector('#story-add-btn')?.addEventListener('click', showStoryUploadModal);
   } catch { container.innerHTML = ''; }
 }
@@ -6082,7 +6086,7 @@ function setupPhotoAudio(feed) {
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();muted=!muted;localStorage.setItem('cigcig_photo_audio_muted',muted?'1':'0');if(activePhotoAudio){activePhotoAudio.muted=muted;activePhotoAudio.volume=volume;}syncMuteButtons();}));
   syncMuteButtons();
   const ratios = new Map();
-  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible){play(visible[0]);if(location.pathname==='/fotograflar')history.replaceState({},'', '/foto/'+visible[0].dataset.photoId);}else if(![...ratios.values()].some(ratio=>ratio>0))stop();},{threshold:[0,.7]});
+  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
 }
 
