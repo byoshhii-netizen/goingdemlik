@@ -657,12 +657,6 @@ async function renderHome(app) {
   try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
   const raw = settings.homepage_sections;
   let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
-  if (currentUser) {
-    try {
-      const preference = await api('/me/home-sections');
-      if (preference.sections?.length) sections = preference.sections;
-    } catch {}
-  }
   if (!Array.isArray(sections)) sections = [sections];
   sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
   if (!sections.length) sections = ['konular'];
@@ -2966,6 +2960,8 @@ async function renderProfile(app, username) {
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const isOwn = currentUser && currentUser.id === user.id;
+  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true };
+  try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (!isOwn && currentUser) {
     try { followState = await api('/users/' + encodeURIComponent(username) + '/follow-status'); } catch {}
@@ -2976,10 +2972,18 @@ async function renderProfile(app, username) {
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
+        if (user.is_private) {
+          await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
+          button.textContent = 'Arkadaş isteği gönderildi';
+          button.classList.remove('btn-primary');
+          button.classList.add('btn-outline');
+          button.disabled = true;
+          return;
+        }
         followState = followState.following || followState.pending
           ? await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'DELETE' })
           : await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
-        button.textContent = followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et');
+        button.textContent = user.is_private ? 'Arkadaş isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et'));
         button.classList.toggle('btn-outline', followState.following || followState.pending);
         button.classList.toggle('btn-primary', !followState.following && !followState.pending);
         button.disabled = false;
@@ -2992,7 +2996,7 @@ async function renderProfile(app, username) {
       <div class="profile-info"><div class="profile-username">${escHtml(user.username)}</div>
       <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et')}</button>` : ''}</div></div></div>`;
+      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">Arkadaş İsteği Gönder</button>` : ''}</div></div></div>`;
     bindFollowButton();
     return;
   }
@@ -3089,16 +3093,16 @@ async function renderProfile(app, username) {
         <div class="profile-stats" style="margin-top:12px">
           <button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>
           <button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>
-          <div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>
-          <div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>
-          ${profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
-          <div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>
-          <div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Fotoğraf</div></div>
+          ${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
+          ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
+          ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
+          ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
+          ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Fotoğraf</div></div>` : ''}
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
-          <button id="profile-follow-btn" class="btn ${followState.following ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.following ? 'Takip ediliyor' : 'Takip et'}</button>
-          <button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>
+          <button id="profile-follow-btn" class="btn ${followState.following ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? 'Arkadaş İsteği Gönder' : (followState.following ? 'Takip ediliyor' : 'Takip et')}</button>
+          ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-friend-btn" class="btn btn-ghost btn-sm"><i class="fas fa-user-friends"></i> Arkadaşlık</button>
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
@@ -3284,7 +3288,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
-        <div class="settings-nav-item" data-section="homepage"><i class="fas fa-layer-group"></i> Ana Sayfa Bölümleri</div>
+        <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-chart-simple"></i> Profil Sayıları</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
         <div class="settings-nav-item" data-section="spotify"><i class="fab fa-spotify" style="color:#1ED760"></i> Spotify</div>
         <div class="settings-nav-item" data-section="account" style="color:var(--accent-red2)"><i class="fas fa-exclamation-triangle"></i> Hesap</div>
@@ -3491,7 +3495,7 @@ async function renderSettingsSection(section) {
         toast('Görünüm güncellendi');
       } catch (e) { $('#appear-msg').textContent = e.message; }
     });
-  } else if (section === 'homepage') {
+  } else if (section === '__removed-homepage') {
     const options = [
       ['konular', 'Konular', 'Topluluğun son tartışmaları', 'fas fa-comments'],
       ['kitaplar', 'Kitaplar', 'Yeni ve öne çıkan kitaplar', 'fas fa-book'],
@@ -3516,6 +3520,22 @@ async function renderSettingsSection(section) {
       const sections = [...picker.querySelectorAll('input:checked')].map(input => input.value);
       if (!sections.length) { $('#homepage-msg').textContent = 'En az bir bölüm seçmelisin.'; return; }
       try { await api('/me/home-sections', { method: 'PUT', body: JSON.stringify({ sections }) }); toast('Ana sayfa seçimlerin kaydedildi'); navigate('/'); } catch (error) { $('#homepage-msg').textContent = error.message; }
+    });
+  } else if (section === 'profile-visibility') {
+    let visibility = { forums: true, books: true, comments: true, photos: true, music: true };
+    try { visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility }; } catch {}
+    const items = [
+      ['forums', 'Forum sayısı', 'Profilindeki forum/konu sayısını göster', 'fas fa-comments'],
+      ['books', 'Kitap sayısı', 'Profilindeki kitap sayısını göster', 'fas fa-book'],
+      ['comments', 'Yorum sayısı', 'Profilindeki yorum sayısını göster', 'fas fa-comment'],
+      ['photos', 'Fotoğraf sayısı', 'Profilindeki fotoğraf sayısını göster', 'fas fa-images'],
+      ['music', 'Müzik sayısı', 'Profilindeki müzik sayısını göster', 'fas fa-music']
+    ];
+    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-chart-simple" style="color:var(--accent-red2);margin-right:6px"></i>Profilde Gösterilecek Sayılar</span></div><div class="card-body"><p class="settings-help">Profilini ziyaret eden kişiler hangi içerik sayılarını görebilsin, buradan seçebilirsin.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] ? 'checked' : ''} /></label>`).join('')}</div><button class="btn btn-primary" id="save-profile-visibility"><i class="fas fa-save"></i> Kaydet</button><div id="profile-visibility-msg" class="form-error mt-4"></div></div></div>`;
+    $('#save-profile-visibility').addEventListener('click', async () => {
+      const next = {};
+      el.querySelectorAll('[data-visibility]').forEach(input => { next[input.dataset.visibility] = input.checked; });
+      try { const result = await api('/me/profile-visibility', { method: 'PUT', body: JSON.stringify({ visibility: next }) }); currentUser = result.user; updateNavUI(); toast('Profil görünürlük ayarları kaydedildi'); } catch (error) { $('#profile-visibility-msg').textContent = error.message; }
     });
   } else if (section === 'notifications') {
     el.innerHTML = `

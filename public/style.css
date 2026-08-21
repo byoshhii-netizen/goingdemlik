@@ -141,6 +141,13 @@ body[data-theme="gold"] {
 .homepage-section-copy b { color: var(--text-primary); font-size: 14px; }
 .homepage-section-copy small { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
 .homepage-section-drag { color: var(--text-muted); padding: 5px; }
+.profile-visibility-list { display: grid; gap: 8px; margin-bottom: 18px; }
+.profile-visibility-option { display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-card2); cursor: pointer; }
+.profile-visibility-option:hover { border-color: var(--border-hover); background: var(--bg-active); }
+.profile-visibility-option > span:nth-child(2) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.profile-visibility-option small { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+.profile-visibility-option input { width: 19px; height: 19px; accent-color: var(--accent-red); }
+.profile-visibility-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; background: var(--bg-active); color: var(--accent-red2); flex: 0 0 auto; }
 .profile-photo-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .profile-photo-item { position: relative; aspect-ratio: 1; overflow: hidden; border-radius: var(--radius-sm); background: var(--bg-card2); }
 .profile-photo-item img { width: 100%; height: 100%; object-fit: cover; transition: transform .2s; }

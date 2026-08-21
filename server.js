@@ -1482,18 +1482,20 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   res.json({ user: sanitizeUser(user), forums, books, groups, photos, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
-app.get('/api/me/home-sections', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT homepage_sections FROM users WHERE id=$1', [req.user.id]);
-  let sections = [];
-  try { sections = rows[0]?.homepage_sections ? JSON.parse(rows[0].homepage_sections) : []; } catch {}
-  res.json({ sections: Array.isArray(sections) ? sections : [] });
+app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT profile_visibility FROM users WHERE id=$1', [req.user.id]);
+  let visibility = {};
+  try { visibility = rows[0]?.profile_visibility ? JSON.parse(rows[0].profile_visibility) : {}; } catch {}
+  res.json({ visibility });
 });
 
-app.put('/api/me/home-sections', authMiddleware, async (req, res) => {
-  const allowed = ['konular', 'kitaplar', 'gruplar', 'muzikler', 'fotograflar', 'magaza', 'playlistler'];
-  const sections = [...new Set((Array.isArray(req.body.sections) ? req.body.sections : []).filter(section => allowed.includes(section)))];
-  await query('UPDATE users SET homepage_sections=$1 WHERE id=$2', [JSON.stringify(sections), req.user.id]);
-  res.json({ sections });
+app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
+  const allowed = ['forums', 'books', 'comments', 'photos', 'music'];
+  const visibility = {};
+  allowed.forEach(key => { visibility[key] = req.body.visibility?.[key] !== false; });
+  await query('UPDATE users SET profile_visibility=$1 WHERE id=$2', [JSON.stringify(visibility), req.user.id]);
+  const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+  res.json({ visibility, user: sanitizeUser(rows[0]) });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
@@ -3166,6 +3168,7 @@ app.post('/api/friends/request/:username', authMiddleware, async (req, res) => {
   const { rows: ex } = await query('SELECT * FROM friendships WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)', [req.user.id, targetId]);
   if (ex.length) return res.status(400).json({ error: 'Zaten istek gönderilmiş veya arkadaşsınız' });
   await query('INSERT INTO friendships (requester_id, addressee_id, status) VALUES ($1,$2,$3)', [req.user.id, targetId, 'pending']);
+  await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,'friend_request',$2,$3,'Yeni arkadaşlık isteği','@' || $2 || ' sana arkadaşlık isteği gönderdi.',$4)`, [targetId, req.user.username, req.user.avatar || '', '/arkadaslar']);
   res.json({ ok: true });
 });
 
@@ -3285,9 +3288,13 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
-  const { rows: target } = await query('SELECT id,username,avatar,name_color FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows: target } = await query('SELECT id,username,avatar,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
+  if (other.is_private && other.id !== uid) {
+    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
+    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
@@ -3350,15 +3357,17 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true });
 });
 
-app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
   // Engel kontrolü
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
-  const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
-  if (!friendship.length) return res.status(403).json({ error: 'Yalnızca arkadaşlarınıza mesaj gönderebilirsiniz' });
+  if (other.is_private && other.id !== uid) {
+    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
+    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
