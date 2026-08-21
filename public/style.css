@@ -71,8 +71,9 @@ body[data-theme="gold"] {
 .stories-scroll::-webkit-scrollbar { display: none; }
 .story-user, .story-add { flex: 0 0 68px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--text-primary); padding: 0; font: inherit; }
 .story-user small, .story-add small { max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); }
-.story-ring, .story-add > span { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 50%; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
+.story-ring, .story-add > span { width: 58px; height: 58px; flex: 0 0 58px; display: grid; place-items: center; border-radius: 50%; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
 .story-ring img, .story-ring i { width: 100%; height: 100%; display: grid; place-items: center; border-radius: 50%; object-fit: cover; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); }
+.story-user.viewed { opacity: .48; filter: saturate(.25); }
 .story-user.viewed .story-ring { background: var(--border-hover); }
 .story-add > span { background: var(--bg-card2); border: 1px solid var(--border); color: var(--accent-red); font-size: 18px; }
 .story-viewer { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; }
@@ -81,7 +82,26 @@ body[data-theme="gold"] {
 .story-progress { display: flex; gap: 4px; width: 100%; }
 .story-progress span { height: 3px; flex: 1; border-radius: 3px; background: var(--border); }
 .story-progress span.active { background: var(--accent-red); }
-.story-viewer-actions { display: flex; justify-content: center; gap: 8px; }
+.story-viewer-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.story-like.active { color: var(--accent-red2); }
+.story-song, .story-selected-song { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card2); color: var(--text-primary); text-align: left; }
+.story-song { cursor: pointer; }
+.story-song img, .story-selected-song img { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--bg-card); }
+.story-song span, .story-selected-song div { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.story-song small, .story-selected-song small, .story-song-option small { color: var(--text-muted); font-size: 11px; }
+.story-media-preview, .photo-file-preview { margin: 10px 0 14px; text-align: center; }
+.story-media-preview img, .story-media-preview video, .photo-file-preview img { max-width: 100%; max-height: 280px; border-radius: 10px; object-fit: contain; background: #000; }
+.story-song-list { max-height: 220px; overflow-y: auto; margin-top: 8px; display: grid; gap: 5px; }
+.story-song-option { display: flex; align-items: center; gap: 9px; width: 100%; border: 1px solid transparent; border-radius: 8px; padding: 7px; background: var(--bg-card2); color: var(--text-primary); text-align: left; cursor: pointer; }
+.story-song-option:hover, .story-song-option.selected { border-color: var(--accent-red); background: var(--bg-active); }
+.story-song-option img, .story-song-cover { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 5px; object-fit: cover; background: var(--bg-card); color: var(--text-muted); }
+.story-song-option span:not(.story-song-cover) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.story-song-option-play { color: var(--accent-red2); }
+.story-reply-box { width: 100%; padding-top: 4px; }
+.story-reply-preview { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; margin-bottom: 7px; }
+.story-reply-preview img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; }
+.story-reply-form { display: flex; gap: 7px; }
+.story-reply-form input { flex: 1; min-width: 0; }
 .profile-follow-list { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .profile-follow-list:hover .profile-stat-num { color: var(--accent-red); }
 .profile-followers-list { display: flex; flex-direction: column; gap: 8px; }

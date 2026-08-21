@@ -1681,11 +1681,14 @@ app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
 // ===== HIKAYELER =====
 app.get('/api/stories', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.created_at,s.expires_at,
-      u.username,u.avatar,
+  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.created_at,s.expires_at,
+      u.username,u.avatar,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
+      EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
+      (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
+      (SELECT COUNT(*) FROM story_replies src WHERE src.story_id=s.id) AS reply_count,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
-    FROM stories s JOIN users u ON u.id=s.user_id
+    FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
     WHERE s.expires_at > NOW() AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
@@ -1698,7 +1701,9 @@ app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res
   try {
     const mediaUrl = await handleUpload(req.file);
     const mediaType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
-    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption) VALUES ($1,$2,$3,$4) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim()]);
+    const songId = req.body.song_id ? Number(req.body.song_id) : null;
+    const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
+    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption,song_id,song_start_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
 });
@@ -1708,6 +1713,42 @@ app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW()', [req.params.id, req.user.id]);
   res.json({ ok: true });
+});
+
+app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
+  const { rows: stories } = await query('SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar FROM stories s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.expires_at>NOW()', [req.params.id]);
+  if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const story = stories[0];
+  const { rows: existing } = await query('SELECT id FROM story_likes WHERE story_id=$1 AND user_id=$2', [story.id, req.user.id]);
+  const liked = !existing.length;
+  if (liked) {
+    await query('INSERT INTO story_likes (story_id,user_id) VALUES ($1,$2)', [story.id, req.user.id]);
+  } else {
+    await query('DELETE FROM story_likes WHERE id=$1', [existing[0].id]);
+  }
+  if (story.user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
+      story.user_id, liked ? 'story_like' : 'story_unlike', req.user.username, req.user.avatar || '',
+      liked ? 'Hikayeniz beğenildi' : 'Hikaye beğenisi geri alındı',
+      `${req.user.username} hikayenizi ${liked ? 'beğendi' : 'beğenisini geri aldı'}.`, '/fotograflar'
+    ]);
+  }
+  const { rows: count } = await query('SELECT COUNT(*)::int AS count FROM story_likes WHERE story_id=$1', [story.id]);
+  res.json({ liked, like_count: count[0].count });
+});
+
+app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
+  const content = String(req.body.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Yanıt boş olamaz' });
+  const { rows: stories } = await query('SELECT s.id,s.user_id FROM stories s WHERE s.id=$1 AND s.expires_at>NOW()', [req.params.id]);
+  if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [stories[0].id, req.user.id, content]);
+  if (stories[0].user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
+      stories[0].user_id, 'story_reply', req.user.username, req.user.avatar || '', 'Hikayenize yanıt geldi', `${req.user.username} hikayenize yanıt verdi: ${content}`, '/fotograflar'
+    ]);
+  }
+  res.json(rows[0]);
 });
 
 // Like toggle

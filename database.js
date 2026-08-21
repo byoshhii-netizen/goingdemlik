@@ -64,9 +64,13 @@ async function initDb() {
       media_url TEXT NOT NULL,
       media_type TEXT NOT NULL DEFAULT 'image',
       caption TEXT DEFAULT '',
+      song_id BIGINT,
+      song_start_seconds INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
     );
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS song_id BIGINT;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_stories_active ON stories(expires_at, user_id);
 
     CREATE TABLE IF NOT EXISTS story_views (
@@ -75,6 +79,22 @@ async function initDb() {
       viewer_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       viewed_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(story_id, viewer_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS story_likes (
+      id BIGSERIAL PRIMARY KEY,
+      story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(story_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS story_replies (
+      id BIGSERIAL PRIMARY KEY,
+      story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
