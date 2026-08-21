@@ -247,9 +247,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .mobile-nav-link:hover { color: var(--text-primary); background: rgba(189,162,117,0.08); }
 .nav-mobile-toggle { display: none; background: none; border: none; color: var(--text-primary); font-size: 20px; }
 @media (max-width: 768px) {
+  .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
   .nav-mobile-toggle { display: block; margin-left: auto; }
-  .mobile-menu { display: flex; }
+  .mobile-menu { display: flex; width: 100%; max-width: 100%; overflow-x: hidden; }
 }
 
 /* ===== BUTTONS ===== */
@@ -1344,8 +1345,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 @media (max-width: 768px) {
   .mobile-menu-auth { display: flex; gap: 8px; padding: 8px 12px 4px; }
   .mobile-menu-auth .btn { flex: 1; justify-content: center; }
-  .mobile-menu-new { display: flex; gap: 6px; padding: 4px 12px 8px; border-bottom: 1px solid rgba(189,162,117,0.15); margin-bottom: 4px; }
-  .mobile-menu-new .btn { flex: 1; justify-content: center; font-size: 12px; padding: 7px 8px; }
+  .mobile-menu-new { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 12px 8px; border-bottom: 1px solid rgba(189,162,117,0.15); margin-bottom: 4px; }
+  .mobile-menu-new .btn { flex: 1 1 82px; min-width: 0; justify-content: center; font-size: 12px; padding: 7px 6px; }
 }
 @media (min-width: 769px) {
   .mobile-menu-auth, .mobile-menu-new { display: none; }
