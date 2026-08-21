@@ -1469,15 +1469,30 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   if (user.is_private && !isOwner && !isFollower) {
     return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: 0, following_count: 0, following: false });
   }
-  const [forums, books, groups, level, levels, bpCount] = await Promise.all([
+  const [forums, books, groups, level, levels, bpCount, photos] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
+    query('SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,s.title AS song_title,s.artist_name AS song_artist FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1 ORDER BY p.created_at DESC LIMIT 50', [user.id]).then(r => r.rows),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), forums, books, groups, photos, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+});
+
+app.get('/api/me/home-sections', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT homepage_sections FROM users WHERE id=$1', [req.user.id]);
+  let sections = [];
+  try { sections = rows[0]?.homepage_sections ? JSON.parse(rows[0].homepage_sections) : []; } catch {}
+  res.json({ sections: Array.isArray(sections) ? sections : [] });
+});
+
+app.put('/api/me/home-sections', authMiddleware, async (req, res) => {
+  const allowed = ['konular', 'kitaplar', 'gruplar', 'muzikler', 'fotograflar', 'magaza', 'playlistler'];
+  const sections = [...new Set((Array.isArray(req.body.sections) ? req.body.sections : []).filter(section => allowed.includes(section)))];
+  await query('UPDATE users SET homepage_sections=$1 WHERE id=$2', [JSON.stringify(sections), req.user.id]);
+  res.json({ sections });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {

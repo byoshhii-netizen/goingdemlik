@@ -45,6 +45,7 @@ async function initDb() {
       last_active TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS follows (
       id BIGSERIAL PRIMARY KEY,

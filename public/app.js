@@ -146,6 +146,8 @@ function renderContent(text) {
 
 function navigate(path, push = true) {
   closeMobileMenu();
+  $('#mobile-new-dropdown')?.classList.add('hidden');
+  $('#new-dropdown')?.classList.add('hidden');
   if (push) history.pushState({}, '', path);
   // path içindeki query string'i renderRoute'a geçir
   renderRoute(path);
@@ -463,8 +465,7 @@ function updateNavUI() {
     if (mbbAuth) {
       mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
-      mbbAuth.querySelector('i').style.display = 'none';
-      const mbbAvatar = $('#mbb-avatar'); if (mbbAvatar) { mbbAvatar.src = currentUser.avatar || '/cigcig.png'; mbbAvatar.style.display = 'block'; }
+      mbbAuth.querySelector('i').className = 'fas fa-user-circle';
     }
   } else {
     authEl.classList.remove('hidden');
@@ -483,8 +484,9 @@ function updateNavUI() {
     if (mbbAuth) {
       mbbAuth.setAttribute('href', '/giris');
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
-      mbbAuth.querySelector('i').style.display = '';
-      const mbbAvatar = $('#mbb-avatar'); if (mbbAvatar) mbbAvatar.style.display = 'none';
+      mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
+      $('#mobile-new-dropdown')?.classList.add('hidden');
+      $('#new-dropdown')?.classList.add('hidden');
     }
   }
 }
@@ -643,6 +645,12 @@ async function renderHome(app) {
   try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
   const raw = settings.homepage_sections;
   let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
+  if (currentUser) {
+    try {
+      const preference = await api('/me/home-sections');
+      if (preference.sections?.length) sections = preference.sections;
+    } catch {}
+  }
   if (!Array.isArray(sections)) sections = [sections];
   sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
   if (!sections.length) sections = ['konular'];
@@ -2942,7 +2950,7 @@ async function renderProfile(app, username) {
     return;
   }
 
-  const { user, forums, books, groups, videos, songs, level, levels, book_page_count } = data;
+  const { user, forums, books, groups, photos = [], videos, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const isOwn = currentUser && currentUser.id === user.id;
@@ -3073,6 +3081,7 @@ async function renderProfile(app, username) {
           <div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>
           ${profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
           <div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>
+          <div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Fotoğraf</div></div>
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
@@ -3089,6 +3098,7 @@ async function renderProfile(app, username) {
     <div class="tabs">
       <button class="tab active" data-tab="forums">Forumlar</button>
       <button class="tab" data-tab="books">Kitaplar</button>
+      <button class="tab" data-tab="photos">Fotoğraflar</button>
       <button class="tab" data-tab="groups">Gruplar</button>
       <button class="tab" data-tab="videos">Videolar</button>
       <button class="tab" data-tab="saved">Kaydedilenler</button>
@@ -3100,6 +3110,9 @@ async function renderProfile(app, username) {
     </div>
     <div id="tab-books" class="hidden">
       ${books.length ? `<div class="grid-3">${books.map(b => bookCardHTML(b)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
+    </div>
+    <div id="tab-photos" class="hidden">
+      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="${escHtml(photo.title || photo.caption || 'Fotoğraf')}" />${photo.title ? `<span>${escHtml(photo.title)}</span>` : ''}</a>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
@@ -3141,7 +3154,7 @@ async function renderProfile(app, username) {
     btn.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
-      ['forums', 'books', 'groups', 'videos', 'saved', 'songs'].forEach(name => {
+      ['forums', 'books', 'photos', 'groups', 'videos', 'saved', 'songs'].forEach(name => {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
       });
@@ -3259,6 +3272,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
+        <div class="settings-nav-item" data-section="homepage"><i class="fas fa-layer-group"></i> Ana Sayfa Bölümleri</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
         <div class="settings-nav-item" data-section="spotify"><i class="fab fa-spotify" style="color:#1ED760"></i> Spotify</div>
         <div class="settings-nav-item" data-section="account" style="color:var(--accent-red2)"><i class="fas fa-exclamation-triangle"></i> Hesap</div>
@@ -3283,7 +3297,7 @@ async function renderSettings(app) {
   });
 }
 
-function renderSettingsSection(section) {
+async function renderSettingsSection(section) {
   const el = $('#settings-content'); if (!el) return;
   if (section === 'profile') {
     const links = (() => { try { return JSON.parse(currentUser.links || '[]'); } catch { return []; } })();
@@ -3461,6 +3475,32 @@ function renderSettingsSection(section) {
         currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
       } catch (e) { $('#appear-msg').textContent = e.message; }
+    });
+  } else if (section === 'homepage') {
+    const options = [
+      ['konular', 'Konular', 'Topluluğun son tartışmaları', 'fas fa-comments'],
+      ['kitaplar', 'Kitaplar', 'Yeni ve öne çıkan kitaplar', 'fas fa-book'],
+      ['gruplar', 'Gruplar', 'Katıldığın ve keşfedebileceğin gruplar', 'fas fa-users'],
+      ['muzikler', 'Müzikler', 'Son eklenen şarkılar', 'fas fa-music'],
+      ['fotograflar', 'Fotoğraflar ve Hikayeler', 'Fotoğraf akışı ve hikaye çubuğu', 'fas fa-images'],
+      ['magaza', 'Mağaza', 'Mağazadaki ürünler', 'fas fa-store'],
+      ['playlistler', 'Playlistler', 'Kişisel müzik listelerin', 'fas fa-list-music']
+    ];
+    let selected = [];
+    try { selected = (await api('/me/home-sections')).sections || []; } catch {}
+    if (!selected.length) selected = ['konular'];
+    el.innerHTML = `<div class="card homepage-preferences"><div class="card-header"><span><i class="fas fa-layer-group" style="color:var(--accent-red2);margin-right:6px"></i>Ana Sayfa Bölümleri</span></div><div class="card-body"><p class="settings-help">Ana sayfanda görmek istediğin bölümleri seç. Kartları sürükleyerek sıralarını değiştirebilirsin.</p><div id="homepage-section-picker" class="homepage-section-picker">${options.map(([id, title, desc, icon]) => `<label class="homepage-section-option" draggable="true" data-section-id="${id}"><input type="checkbox" value="${id}" ${selected.includes(id) ? 'checked' : ''}/><span class="homepage-section-icon"><i class="${icon}"></i></span><span class="homepage-section-copy"><b>${title}</b><small>${desc}</small></span><i class="fas fa-grip-vertical homepage-section-drag"></i></label>`).join('')}</div><button class="btn btn-primary" id="save-homepage-btn"><i class="fas fa-save"></i> Seçimleri Kaydet</button><div id="homepage-msg" class="form-error mt-4"></div></div></div>`;
+    const picker = $('#homepage-section-picker');
+    let dragged = null;
+    picker.querySelectorAll('.homepage-section-option').forEach(item => {
+      item.addEventListener('dragstart', () => { dragged = item; item.classList.add('dragging'); });
+      item.addEventListener('dragend', () => { dragged = null; item.classList.remove('dragging'); });
+      item.addEventListener('dragover', event => { event.preventDefault(); if (dragged && dragged !== item) { const box = item.getBoundingClientRect(); picker.insertBefore(dragged, event.clientY < box.top + box.height / 2 ? item : item.nextSibling); } });
+    });
+    $('#save-homepage-btn').addEventListener('click', async () => {
+      const sections = [...picker.querySelectorAll('input:checked')].map(input => input.value);
+      if (!sections.length) { $('#homepage-msg').textContent = 'En az bir bölüm seçmelisin.'; return; }
+      try { await api('/me/home-sections', { method: 'PUT', body: JSON.stringify({ sections }) }); toast('Ana sayfa seçimlerin kaydedildi'); navigate('/'); } catch (error) { $('#homepage-msg').textContent = error.message; }
     });
   } else if (section === 'notifications') {
     el.innerHTML = `
