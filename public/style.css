@@ -1707,6 +1707,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
   flex-shrink: 0;
+  min-width: 0;
 }
 .dm-input-wrap {
   flex: 1; min-width: 0;
@@ -1739,6 +1740,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   box-shadow: 0 2px 8px var(--dm-own-border, rgba(189,162,117,0.3));
 }
 .dm-send-btn:hover { transform: scale(1.06); }
+.dm-input-bar > * { min-width: 0; }
 .dm-img-preview-wrap {
   display: none; position: relative; flex-shrink: 0; margin-bottom: 4px;
 }
@@ -1786,7 +1788,11 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
   .dm-msg-content { max-width: 82%; }
   .dm-msg-bubble { font-size: 12px; padding: 4px 9px; line-height: 1.35; }
-  .dm-input-bar { padding: 8px 10px; }
+  .dm-input-bar { padding: 8px; gap: 6px; }
+  .dm-input-wrap { min-height: 40px; padding: 6px 9px; border-radius: 12px; align-items: center; }
+  .dm-input-wrap textarea { min-width: 0; width: 100%; font-size: 13px; line-height: 1.35; max-height: 80px; }
+  .dm-input-img-btn { font-size: 13px; padding-right: 5px; }
+  .dm-send-btn { width: 40px; height: 40px; }
   .dm-messages { padding: 12px 10px 8px; }
   .dm-chat-header { padding: 8px 12px; }
   .dm-sel-actions-bar { gap: 4px; padding: 6px 8px; }
