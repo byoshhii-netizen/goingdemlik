@@ -61,6 +61,7 @@ function hideModal() {
   if (storyComposerAudio) { storyComposerAudio.pause(); storyComposerAudio.src = ''; storyComposerAudio = null; }
   if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
   $('#modal-overlay').classList.add('hidden');
+  $('#modal-overlay').classList.remove('story-fullscreen-overlay');
 }
 
 $('#modal-close').addEventListener('click', hideModal);
@@ -767,7 +768,7 @@ async function renderHome(app) {
     const html = `<div class="section"><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     loadStoriesBar($('#home-stories-bar'));
-    try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); } catch {}
+    try { const ps = await api('/photos'); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
   }
 
   async function renderShopSection() {
@@ -4051,7 +4052,6 @@ async function renderMessages(app, targetUsername) {
 
   let convs = [], hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
-  try { hiddenConvs = await api('/conversations/hidden'); } catch {}
 
   function convItemHTML(c, isHidden) {
     const unread = c.unread_count || 0;
@@ -4074,7 +4074,7 @@ async function renderMessages(app, targetUsername) {
       <div class="dm-sidebar-header">
         <span class="dm-sidebar-title">Mesajlar</span>
         <div class="dm-sidebar-actions">
-          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button">•</button>
+          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>
           <button class="btn btn-ghost btn-sm" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 8px"><i class="fas fa-user-friends"></i></button>
           <button class="btn btn-primary btn-sm" id="new-dm-btn" title="Yeni mesaj" style="padding:5px 9px"><i class="fas fa-edit"></i></button>
         </div>
@@ -4116,7 +4116,27 @@ async function renderMessages(app, targetUsername) {
 
   // Hidden toggle
   document.getElementById('dm-hidden-toggle-btn')?.addEventListener('click', () => {
-    document.getElementById('dm-hidden-panel')?.classList.toggle('hidden');
+    if (hiddenConvs.length) {
+      document.getElementById('dm-hidden-panel')?.classList.toggle('hidden');
+      return;
+    }
+    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için şifreni gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Şifre" autocomplete="current-password" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
+    $('#dm-global-unlock-btn')?.addEventListener('click', async () => {
+      const button = $('#dm-global-unlock-btn');
+      const password = $('#dm-global-unlock-pass')?.value || '';
+      button.disabled = true;
+      try {
+        hiddenConvs = await api('/conversations/unlock', { method: 'POST', body: JSON.stringify({ password }) });
+        hideModal();
+        const panel = $('#dm-hidden-panel');
+        const list = $('#dm-hidden-list');
+        if (list) list.innerHTML = hiddenConvs.length ? hiddenConvs.map(c => convItemHTML(c, true)).join('') : '<div class="dm-empty-small">Kilitli konuşma yok</div>';
+        panel?.classList.remove('hidden');
+      } catch (error) {
+        $('#dm-global-unlock-error').textContent = error.message || 'Şifre yanlış';
+        button.disabled = false;
+      }
+    });
   });
 
   // Friends nav
@@ -4256,7 +4276,7 @@ async function renderDMChat(username) {
         <div class="dm-sel-actions-bar" id="dm-sel-actions-bar">
           <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
           <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
-          <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i></button>
+          <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i> İptal</button>
         </div>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" style="padding:5px 8px"><i class="fas fa-ellipsis-v"></i></button>
       </div>
@@ -5869,6 +5889,7 @@ async function loadStoriesBar(container) {
         const storyKey = story.public_id || story.id;
         if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
         showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-tap-zone story-tap-left" id="story-tap-left" aria-label="Önceki hikaye"></div><div class="story-tap-zone story-tap-right" id="story-tap-right" aria-label="Sonraki hikaye"></div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><button class="btn btn-ghost" id="story-share"><i class="fas fa-share-alt"></i> Paylaş</button><button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>${story.is_owner ? `<button type="button" class="btn btn-ghost" id="story-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button type="button" class="btn btn-ghost" id="story-edit"><i class="fas fa-pen"></i> Düzenle</button><button type="button" class="btn btn-ghost text-danger" id="story-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>${story.is_owner ? '<small class="story-owner-hint">Hikayeni görenleri ve tekrar görüntüleme sayılarını inceleyebilirsin.</small>' : ''}<div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div></div>`);
+        $('#modal-overlay')?.classList.add('story-fullscreen-overlay');
         api('/stories/' + storyKey + '/view', { method: 'POST' }).catch(() => {});
         $('#story-share')?.addEventListener('click', () => shareStory(story));
         $('#story-viewers')?.addEventListener('click', () => showStoryViewers(story));
@@ -5980,6 +6001,7 @@ function bindPhotoFeed(feed) {
     if (!c) return;
     const box = c.querySelector('.photo-comment-box');
     if (!box) return;
+    if (!currentUser) { toast('Yorum yapmak için giriş yapın.', 'error'); return; }
     box.hidden = !box.hidden;
     if (!box.hidden) {
       try { await renderComments(c, box); }
@@ -5997,7 +6019,7 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-like').forEach(x => x.onclick = async e => {
     e.preventDefault();
     e.stopPropagation();
-    if (!currentUser) return toast('Giriş yapın', 'error');
+    if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error');
     const c = e.target.closest('[data-photo-id]');
     if (!c) return;
     try {
@@ -6053,7 +6075,8 @@ function setupPhotoAudio(feed) {
   $('#photo-audio-toggle').onclick=()=>{enabled=!enabled;localStorage.setItem('cigcig_photo_audio_enabled',enabled?'1':'0');sync(); if (enabled) photoAudioObserver?.takeRecords?.();};
   $('#photo-audio-volume')?.addEventListener('input',e=>{volume=Number(e.target.value)/100;localStorage.setItem('cigcig_photo_audio_volume',String(volume));if(activePhotoAudio)activePhotoAudio.volume=volume;});
   const play=card=>{const b=card.querySelector('.photo-song');if(!enabled||!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.volume=isPhone?1:volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
-  photoAudioObserver=new IntersectionObserver(entries=>{const visible=[...feed.querySelectorAll('[data-photo-id]')].map(card=>({card,ratio:entries.find(e=>e.target===card)?.intersectionRatio||0})).sort((a,b)=>b.ratio-a.ratio)[0];if(visible?.ratio>.7)play(visible.card);else if(![...feed.querySelectorAll('[data-photo-id]')].some(card=>card.getBoundingClientRect().top<innerHeight&&card.getBoundingClientRect().bottom>0))stop();},{threshold:[0,.7]});
+  const ratios = new Map();
+  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else if(![...ratios.values()].some(ratio=>ratio>0))stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
 }
 

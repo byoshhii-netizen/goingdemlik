@@ -1909,7 +1909,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
   if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, req.user.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  if (Number(rows[0].allow_comments) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
+  if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
   await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
   const { rows: photoOwner } = await query('SELECT p.user_id,p.title FROM photos p WHERE p.id=$1', [photoId]);
   if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
@@ -3294,6 +3294,26 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
     WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
     ORDER BY c.last_message_at DESC
   `, [uid]);
+  res.json(rows);
+});
+
+app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
+  const crypto = require('crypto');
+  const password = String(req.body?.password || '');
+  const inputHash = crypto.createHash('sha256').update(password).digest('hex');
+  const { rows } = await query(`
+    SELECT c.*, CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
+      CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
+      CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
+    FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
+    WHERE ((c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1))
+      AND (CASE WHEN c.user1_id=$1 THEN c.hidden_pass_user1 ELSE c.hidden_pass_user2 END) = $2
+    ORDER BY c.last_message_at DESC
+  `, [req.user.id, inputHash]);
+  if (!rows.length) return res.status(403).json({ error: 'Şifre yanlış veya kilitli sohbet bulunamadı' });
   res.json(rows);
 });
 

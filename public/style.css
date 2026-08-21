@@ -81,6 +81,13 @@ body[data-theme="gold"] {
 .story-tap-zone { position: absolute; top: 28px; bottom: 105px; width: 50%; z-index: 4; cursor: pointer; }
 .story-tap-left { left: 0; }
 .story-tap-right { right: 0; }
+.story-fullscreen-overlay { padding: 0 !important; align-items: stretch !important; }
+.story-fullscreen-overlay .modal { width: 100vw; max-width: none; height: 100vh; max-height: none; border: 0; border-radius: 0; background: #000; }
+.story-fullscreen-overlay .modal-header { position: absolute; top: 10px; left: 12px; right: 12px; z-index: 8; padding: 0; margin: 0; }
+.story-fullscreen-overlay .modal-header h3 { display: none; }
+.story-fullscreen-overlay .modal-body { height: 100%; padding: 18px 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.story-fullscreen-overlay .story-viewer { width: 100%; height: 100%; justify-content: center; gap: 10px; }
+.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: 100%; max-width: 100%; height: min(82vh, 820px); max-height: none; object-fit: contain; border-radius: 0; background: #000; }
 .story-viewer video, .story-viewer > img { width: min(100%, 420px); max-height: 68vh; object-fit: contain; border-radius: var(--radius-sm); background: #000; }
 .story-viewer p { width: 100%; color: var(--text-primary); text-align: center; }
 .story-progress { display: flex; gap: 4px; width: 100%; }
@@ -114,6 +121,8 @@ body[data-theme="gold"] {
 .story-route-song small { color: var(--text-muted); font-size: 11px; }
 .story-route-note { margin-top: 14px; }
 .story-route-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.story-route { max-width: none; min-height: calc(100svh - 90px); margin: -20px auto 0; border: 0; border-radius: 0; background: #000; display: flex; flex-direction: column; align-items: center; }
+.story-route > img, .story-route > video { width: min(100%, 760px); height: calc(100svh - 190px); max-height: none; flex: 1 1 auto; }
 .my-groups-list { display: grid; gap: 8px; }
 .my-group-item { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); }
 .my-group-item:hover { background: var(--bg-hover); border-color: var(--border-hover); }
@@ -1537,6 +1546,9 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-hidden-panel-content { padding: 8px 14px 10px; display: flex; flex-direction: column; gap: 6px; }
 .dm-hidden-panel-header { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
 .dm-hidden-list { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.dm-unlock-screen { display: grid; gap: 12px; text-align: center; }
+.dm-unlock-screen > i { font-size: 34px; color: var(--accent-red2); }
+.dm-unlock-screen input { width: 100%; }
 .dm-empty-small { padding: 8px 0; font-size: 12px; color: var(--text-muted); }
 .dm-conv-lock { margin-left: 6px; font-size: 11px; color: var(--accent-red2); }
 
@@ -1630,6 +1642,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 .dm-msg-bubble { box-shadow: 0 1px 3px rgba(0,0,0,.10); }
 .dm-msg-bubble { display: inline-block; width: fit-content; height: fit-content !important; min-height: 0 !important; align-self: flex-start; text-align: left; }
+.dm-msg-bubble img { display: block; max-width: min(200px, 100%); max-height: 180px; height: auto; object-fit: contain; }
 .dm-msg-wrap:not(.dm-own) .dm-msg-bubble { border-top-left-radius: 5px; }
 .dm-msg-wrap.dm-own .dm-msg-bubble { border-top-right-radius: 5px; }
 .dm-msg-bubble.dm-deleted {
@@ -1728,6 +1741,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 .dm-sel-actions-bar.visible { display: flex; }
+.dm-sel-actions-bar { flex-wrap: wrap; max-width: 100%; overflow: hidden; }
+.dm-sel-actions-bar .btn { min-width: 0; white-space: nowrap; }
 
 /* ---- Mobile responsive ---- */
 @media (max-width: 768px) {
@@ -1758,6 +1773,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-input-bar { padding: 8px 10px; }
   .dm-messages { padding: 12px 10px 8px; }
   .dm-chat-header { padding: 8px 12px; }
+  .dm-sel-actions-bar { gap: 4px; padding: 6px 8px; }
+  .dm-sel-actions-bar .btn { padding: 4px 7px; font-size: 11px; }
   .dm-sidebar-header { padding: 12px 14px; }
   .dm-sidebar-title { font-size: 18px; }
   .dm-conv-item { margin: 2px 6px; padding: 10px 8px; }
