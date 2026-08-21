@@ -418,7 +418,8 @@ function updateNavUI() {
   const authEl = $('#nav-auth');
   const userEl = $('#nav-user');
   const mobAuth = $('#mobile-menu-auth');
-  const mobNew = $('#mobile-menu-new');
+  const mobNew = $('#mobile-new-dropdown');
+  const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
 
   if (currentUser) {
@@ -436,6 +437,7 @@ function updateNavUI() {
 
     if (mobAuth) mobAuth.classList.add('hidden');
     if (mobNew) mobNew.classList.remove('hidden');
+    if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="/profil/${escHtml(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
@@ -467,6 +469,7 @@ function updateNavUI() {
     userEl.classList.add('hidden');
     if (mobAuth) mobAuth.classList.remove('hidden');
     if (mobNew) mobNew.classList.add('hidden');
+    if (mobNewToggle) mobNewToggle.classList.add('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = '';
 
     const mbbAuth = $('#mbb-auth');
@@ -580,9 +583,17 @@ $('#mobile-toggle').addEventListener('click', () => {
   $('#mobile-menu').classList.toggle('hidden');
 });
 
+$('#mobile-new-toggle')?.addEventListener('click', e => {
+  e.stopPropagation();
+  $('#mobile-new-dropdown')?.classList.toggle('hidden');
+});
+
 document.addEventListener('click', e => {
   if (!$('#mobile-menu')?.contains(e.target) && !$('#mobile-toggle')?.contains(e.target)) {
     $('#mobile-menu')?.classList.add('hidden');
+  }
+  if (!$('#mobile-new-dropdown')?.contains(e.target) && !$('#mobile-new-toggle')?.contains(e.target)) {
+    $('#mobile-new-dropdown')?.classList.add('hidden');
   }
 });
 
@@ -594,13 +605,13 @@ document.addEventListener('click', e => {
   const mobNewStory = e.target.closest('#mob-new-story');
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
-  if (mobNewForum) { $('#mobile-menu').classList.add('hidden'); navigate('/forum'); setTimeout(() => showNewForumModal(), 100); }
-  if (mobNewBook) { $('#mobile-menu').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
-  if (mobNewGroup) { $('#mobile-menu').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
-  if (mobNewPhoto) { $('#mobile-menu').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
-  if (mobNewStory) { $('#mobile-menu').classList.add('hidden'); if (currentUser) showStoryUploadModal(); }
-  if (mobNewVideo) { $('#mobile-menu').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
-  if (mobNewMusic) { $('#mobile-menu').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); }
+  if (mobNewForum) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => showNewForumModal(), 100); }
+  if (mobNewBook) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
+  if (mobNewGroup) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
+  if (mobNewPhoto) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
+  if (mobNewStory) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); }
+  if (mobNewVideo) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
+  if (mobNewMusic) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); }
 });
 
 async function renderHome(app) {
