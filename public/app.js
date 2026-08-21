@@ -3425,6 +3425,7 @@ async function renderSettingsSection(section) {
       $('#save-username-btn').addEventListener('click', async () => {
         const val = ($('#new-username').value || '').trim();
         if (!val) { $('#username-msg').textContent = 'Kullanıcı adı zorunlu'; return; }
+        if (/\s/.test(val)) { $('#username-msg').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
         try {
           const updated = await api('/profile/username', { method: 'PUT', body: JSON.stringify({ username: val }) });
           currentUser = updated;
@@ -3836,6 +3837,7 @@ function renderRegister(app) {
     const password = $('#reg-pw').value;
     const kvkk_accepted = $('#reg-kvkk').checked;
     if (!username || !email || !password) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
       const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password, kvkk_accepted }) });

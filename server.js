@@ -445,12 +445,13 @@ app.post('/api/auth/register', async (req, res) => {
     const { username, email, password, kvkk_accepted } = req.body;
     if (!username || !email || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
+    if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
-    const { rows: existing } = await query('SELECT id FROM users WHERE username=$1 OR email=$2', [username, email]);
+    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, email]);
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     const { rows } = await query(
       'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip) VALUES ($1,$2,$3,$4,$5) RETURNING *',
@@ -472,7 +473,7 @@ app.post('/api/auth/login', async (req, res) => {
     await purgeDeletedAccounts();
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
-    const { rows } = await query('SELECT * FROM users WHERE username=$1', [login]);
+    const { rows } = await query('SELECT * FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1', [login]);
     const user = rows[0];
     if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Hatalı bilgiler' });
     if (user.banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
@@ -1563,6 +1564,7 @@ app.put('/api/profile/username', authMiddleware, async (req, res) => {
   try {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: 'Kullanıcı adı zorunlu' });
+    if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (!/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı yalnızca harf, rakam ve alt çizgi içerebilir' });
     if (username.toLowerCase() === req.user.username.toLowerCase()) return res.status(400).json({ error: 'Bu zaten mevcut kullanıcı adınız' });
