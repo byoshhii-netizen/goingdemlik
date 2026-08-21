@@ -4265,18 +4265,20 @@ async function renderDMChat(username) {
         ${hasUsableAvatar(other)
           ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
-        <a href="/profil/${escHtml(other.username)}" data-link class="dm-chat-username" style="color:${other.name_color || 'var(--text-primary)'}">
-          ${escHtml(other.username)}
+        <a href="/profil/${escHtml(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
+          <strong>${escHtml(other.username)}</strong><small>Özel mesajlaşma</small>
         </a>
       </div>
       <div class="dm-chat-header-right">
-        <div class="dm-sel-actions-bar" id="dm-sel-actions-bar">
-          <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
-          <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
-          <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i> İptal</button>
-        </div>
-        <button class="btn btn-ghost btn-sm" id="dm-options-btn" style="padding:5px 8px"><i class="fas fa-ellipsis-v"></i></button>
+        <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
+    </div>
+
+    <div class="dm-sel-actions-bar" id="dm-sel-actions-bar">
+      <span class="dm-selection-label">Mesaj seçildi</span>
+      <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
+      <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
+      <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i> İptal</button>
     </div>
 
     <!-- Messages -->
