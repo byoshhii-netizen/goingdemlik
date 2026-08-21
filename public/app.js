@@ -5880,6 +5880,18 @@ async function loadStoriesBar(container) {
     });
     if (!groups.length) { container.innerHTML = ''; return; }
     container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${groups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
+    const ownGroupIndex = currentUser ? groups.findIndex(group => group.user_id === currentUser.id) : -1;
+    if (ownGroupIndex >= 0) {
+      const ownButton = container.querySelector(`[data-story-group="${ownGroupIndex}"]`);
+      const addButton = container.querySelector('#story-add-btn');
+      if (ownButton) {
+        ownButton.classList.add('story-add', 'story-owner-story');
+        ownButton.classList.remove('story-user');
+        ownButton.querySelector('small').textContent = 'Hikayen';
+        addButton?.remove();
+        ownButton.parentElement.prepend(ownButton);
+      }
+    }
     const openGroup = index => {
       const group = groups[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
@@ -6064,16 +6076,10 @@ function setupPhotoAudio(feed) {
   photoAudioObserver?.disconnect(); activePhotoAudio?.pause(); activePhotoAudio=null;
   const isPhone=matchMedia('(max-width: 768px)').matches;
   let enabled=localStorage.getItem('cigcig_photo_audio_enabled');
-  enabled=enabled===null ? isPhone : enabled==='1';
+  enabled=enabled===null ? true : enabled==='1';
   let volume=Math.min(1,Math.max(0,Number(localStorage.getItem('cigcig_photo_audio_volume')||'0.8')));
   document.getElementById('photo-audio-control')?.remove();
-  const control=document.createElement('div'); control.id='photo-audio-control';
-  control.innerHTML=`<button type="button" class="btn btn-primary btn-sm" id="photo-audio-toggle" title="Fotoğraf müzikleri"><i class="fas ${enabled?'fa-volume-up':'fa-volume-mute'}"></i></button>${!isPhone?`<input id="photo-audio-volume" type="range" min="0" max="100" value="${Math.round(volume*100)}" aria-label="Ses seviyesi" />`:''}`;
-  document.body.appendChild(control);
   const stop=()=>{activePhotoAudio?.pause();activePhotoAudio=null;};
-  const sync=()=>{document.querySelector('#photo-audio-toggle i').className='fas '+(enabled?'fa-volume-up':'fa-volume-mute'); if(!enabled)stop();};
-  $('#photo-audio-toggle').onclick=()=>{enabled=!enabled;localStorage.setItem('cigcig_photo_audio_enabled',enabled?'1':'0');sync(); if (enabled) photoAudioObserver?.takeRecords?.();};
-  $('#photo-audio-volume')?.addEventListener('input',e=>{volume=Number(e.target.value)/100;localStorage.setItem('cigcig_photo_audio_volume',String(volume));if(activePhotoAudio)activePhotoAudio.volume=volume;});
   const play=card=>{const b=card.querySelector('.photo-song');if(!enabled||!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.volume=isPhone?1:volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
   const ratios = new Map();
   photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else if(![...ratios.values()].some(ratio=>ratio>0))stop();},{threshold:[0,.7]});
