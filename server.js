@@ -1096,6 +1096,11 @@ app.get('/api/groups', async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/my-groups', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT g.*, gm.role FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=$1 ORDER BY g.name ASC`, [req.user.id]);
+  res.json(rows);
+});
+
 app.get('/api/group/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE g.slug=$1`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
@@ -1696,6 +1701,18 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/stories/:id', optionalAuth, async (req, res) => {
+  const viewerId = req.user?.id || 0;
+  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.created_at,s.expires_at,
+      u.username,u.avatar,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+      EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
+      (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count
+    FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
+    WHERE s.id=$1`, [req.params.id, viewerId]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  res.json(rows[0]);
+});
+
 app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Hikaye medyası seçin' });
   try {
@@ -1703,7 +1720,8 @@ app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res
     const mediaType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
-    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption,song_id,song_start_seconds) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart]);
+    const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
+    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW() + ($7 * INTERVAL '1 hour')) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
 });

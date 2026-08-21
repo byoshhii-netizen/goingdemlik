@@ -66,11 +66,13 @@ async function initDb() {
       caption TEXT DEFAULT '',
       song_id BIGINT,
       song_start_seconds INTEGER DEFAULT 0,
+      duration_hours INTEGER NOT NULL DEFAULT 24,
       created_at TIMESTAMP DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
     );
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS song_id BIGINT;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER DEFAULT 0;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS duration_hours INTEGER NOT NULL DEFAULT 24;
     CREATE INDEX IF NOT EXISTS idx_stories_active ON stories(expires_at, user_id);
 
     CREATE TABLE IF NOT EXISTS story_views (

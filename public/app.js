@@ -1,5 +1,7 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
+let activeStoryAudio = null;
+let storyComposerAudio = null;
 let realsFeedOrder = null;
 let siteName = 'CigCig';
 
@@ -56,6 +58,8 @@ function showModal(title, bodyHTML) {
 }
 
 function hideModal() {
+  if (storyComposerAudio) { storyComposerAudio.pause(); storyComposerAudio.src = ''; storyComposerAudio = null; }
+  if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
   $('#modal-overlay').classList.add('hidden');
 }
 
@@ -164,6 +168,7 @@ function renderRoute(fullPath) {
   activePhotoAudio?.pause();
   activePhotoAudio = null;
   photoAudioObserver = null;
+  if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
@@ -191,6 +196,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/kitap/') && segs.length === 4 && segs[2] === 'sayfa') return renderPageReader(app, segs[1], segs[3]);
   if (path === '/gruplar') return renderGroupList(app);
   if (path === '/fotograflar') return renderPhotos(app);
+  if (path.startsWith('/hikaye/')) return renderStoryRoute(app, segs[1]);
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
   if (path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
@@ -457,7 +463,8 @@ function updateNavUI() {
     if (mbbAuth) {
       mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
-      mbbAuth.querySelector('i').className = 'fas fa-user-circle';
+      mbbAuth.querySelector('i').style.display = 'none';
+      const mbbAvatar = $('#mbb-avatar'); if (mbbAvatar) { mbbAvatar.src = currentUser.avatar || '/cigcig.png'; mbbAvatar.style.display = 'block'; }
     }
   } else {
     authEl.classList.remove('hidden');
@@ -476,7 +483,8 @@ function updateNavUI() {
     if (mbbAuth) {
       mbbAuth.setAttribute('href', '/giris');
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Giriş';
-      mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
+      mbbAuth.querySelector('i').style.display = '';
+      const mbbAvatar = $('#mbb-avatar'); if (mbbAvatar) mbbAvatar.style.display = 'none';
     }
   }
 }
@@ -511,8 +519,9 @@ async function loadNotifCount() {
     const data = await api('/notifications/unread-count');
     const badge = $('#nav-notif-badge');
     if (!badge) return;
-    if (data.count > 0) { badge.style.display = ''; badge.textContent = data.count > 9 ? '9+' : data.count; }
-    else { badge.style.display = 'none'; }
+    const mobileBadge = $('#mobile-notif-badge');
+    if (data.count > 0) { badge.style.display = ''; badge.textContent = data.count > 9 ? '9+' : data.count; if (mobileBadge) { mobileBadge.style.display = ''; mobileBadge.textContent = data.count > 9 ? '9+' : data.count; } }
+    else { badge.style.display = 'none'; if (mobileBadge) mobileBadge.style.display = 'none'; }
   } catch {}
 }
 
@@ -587,6 +596,17 @@ $('#mobile-new-toggle')?.addEventListener('click', e => {
   e.stopPropagation();
   $('#mobile-new-dropdown')?.classList.toggle('hidden');
 });
+
+async function showMyGroupsModal() {
+  if (!currentUser) return navigate('/giris');
+  showModal('Gruplarım', '<div class="loading-center"><div class="spinner"></div></div>');
+  try {
+    const groups = await api('/my-groups');
+    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz bir gruba katılmadınız.</p></div>';
+  } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
+}
+$('#mobile-groups-btn')?.addEventListener('click', showMyGroupsModal);
+$('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler'));
 
 document.addEventListener('click', e => {
   if (!$('#mobile-menu')?.contains(e.target) && !$('#mobile-toggle')?.contains(e.target)) {
@@ -3803,6 +3823,8 @@ async function checkUnreadMessages() {
 }
 
 async function init() {
+  $('#new-dropdown')?.classList.add('hidden');
+  $('#mobile-new-dropdown')?.classList.add('hidden');
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
@@ -5744,10 +5766,11 @@ async function loadStoriesBar(container) {
       if (storyIndex < 0) storyIndex = 0;
       const render = () => {
         const story = group.stories[storyIndex];
-        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-play"></i></button>` : ''}<div class="story-viewer-actions"><button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>${storyIndex > 0 ? '<button type="button" class="btn btn-outline" id="story-prev"><i class="fas fa-chevron-left"></i></button>' : ''}${storyIndex < group.stories.length - 1 ? '<button type="button" class="btn btn-outline" id="story-next"><i class="fas fa-chevron-right"></i></button>' : ''}</div><div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div></div>`);
+        if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
+        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><a class="btn btn-ghost" href="/hikaye/${story.id}" onclick="hideModal()"><i class="fas fa-link"></i> Link</a><button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>${storyIndex > 0 ? '<button type="button" class="btn btn-outline" id="story-prev"><i class="fas fa-chevron-left"></i></button>' : ''}${storyIndex < group.stories.length - 1 ? '<button type="button" class="btn btn-outline" id="story-next"><i class="fas fa-chevron-right"></i></button>' : ''}</div><div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div></div>`);
         api('/stories/' + story.id + '/view', { method: 'POST' }).catch(() => {});
         $('#story-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + story.id + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; render(); } catch (error) { toast(error.message, 'error'); } });
-        $('#story-song-play')?.addEventListener('click', event => { const audio = new Audio(story.song_audio_url); audio.currentTime = Number(story.song_start_seconds) || 0; const icon = event.currentTarget.querySelector('i'); audio.play().then(() => { icon.className = 'fas fa-pause'; audio.onended = () => icon.className = 'fas fa-play'; }).catch(() => toast('Müzik oynatılamadı.', 'error')); event.currentTarget.onclick = () => { if (audio.paused) { audio.play(); icon.className = 'fas fa-pause'; } else { audio.pause(); icon.className = 'fas fa-play'; } }; });
+        if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); const volume = document.createElement('input'); volume.type = 'range'; volume.min = '0'; volume.max = '100'; volume.value = '80'; volume.className = 'story-volume'; volume.title = 'Hikaye sesi'; volume.setAttribute('aria-label', 'Hikaye sesi'); $('#story-song-play')?.appendChild(volume); volume.addEventListener('input', event => { if (activeStoryAudio) activeStoryAudio.volume = Number(event.target.value) / 100; }); }
         $('#story-reply-open')?.addEventListener('click', () => { $('#story-reply-box').hidden = !$('#story-reply-box').hidden; $('#story-reply-input')?.focus(); });
         $('#story-reply-send')?.addEventListener('click', async () => { const input = $('#story-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + story.id + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt hikaye sahibine gönderildi'); hideModal(); } catch (error) { toast(error.message, 'error'); } });
         $('#story-prev')?.addEventListener('click', () => { storyIndex--; render(); });
@@ -5761,21 +5784,32 @@ async function loadStoriesBar(container) {
 }
 
 function showStoryUploadModal() {
-  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="hidden" value="0" /></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
-  let songs = [], selectedSong = null, previewAudio = null;
+  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="hidden" value="0" /></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
+  let songs = [], selectedSong = null;
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   mediaInput.onchange = () => { const file = mediaInput.files[0]; if (!file) return; const url = URL.createObjectURL(file); preview.hidden = false; preview.innerHTML = file.type.startsWith('video/') ? `<video src="${url}" controls playsinline></video>` : `<img src="${url}" alt="Seçilen hikaye önizlemesi" />`; };
-  const renderSongs = list => { songList.innerHTML = list.slice(0, 30).map(song => `<button type="button" class="story-song-option ${selectedSong?.id === song.id ? 'selected' : ''}" data-song-id="${song.id}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<span class="story-song-cover"><i class="fas fa-music"></i></span>'}<span><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></span><i class="fas fa-play story-song-option-play"></i></button>`).join('') || '<small class="text-muted">Müzik bulunamadı.</small>'; songList.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => { selectedSong = songs.find(song => String(song.id) === button.dataset.songId); $('#story-song').value = selectedSong.id; renderSongs(songs); $('#story-song-player').hidden = false; $('#story-song-player').innerHTML = `<img src="${escHtml(selectedSong.cover_url || '')}" alt="" /><div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div><button type="button" id="story-song-toggle" class="btn btn-ghost"><i class="fas fa-play"></i></button>`; $('#story-song-toggle').onclick = () => { if (!previewAudio) previewAudio = new Audio(selectedSong.audio_url); previewAudio.currentTime = Number($('#story-song-start').value) || 0; if (previewAudio.paused) { previewAudio.play(); $('#story-song-toggle i').className = 'fas fa-pause'; } else { previewAudio.pause(); $('#story-song-toggle i').className = 'fas fa-play'; } }; }); };
+  const renderSongs = list => { songList.innerHTML = list.slice(0, 30).map(song => `<button type="button" class="story-song-option ${selectedSong?.id === song.id ? 'selected' : ''}" data-song-id="${song.id}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<span class="story-song-cover"><i class="fas fa-music"></i></span>'}<span><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></span><i class="fas fa-play story-song-option-play"></i></button>`).join('') || '<small class="text-muted">Müzik bulunamadı.</small>'; songList.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => { selectedSong = songs.find(song => String(song.id) === button.dataset.songId); $('#story-song').value = selectedSong.id; renderSongs(songs); $('#story-song-player').hidden = false; $('#story-song-player').innerHTML = `<img src="${escHtml(selectedSong.cover_url || '')}" alt="" /><div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div><button type="button" id="story-song-toggle" class="btn btn-ghost"><i class="fas fa-play"></i></button>`; $('#story-song-toggle').onclick = () => { if (!storyComposerAudio || storyComposerAudio.src !== selectedSong.audio_url) { if (storyComposerAudio) storyComposerAudio.pause(); storyComposerAudio = new Audio(selectedSong.audio_url); } storyComposerAudio.currentTime = Number($('#story-song-start').value) || 0; if (storyComposerAudio.paused) { storyComposerAudio.play(); $('#story-song-toggle i').className = 'fas fa-pause'; } else { storyComposerAudio.pause(); $('#story-song-toggle i').className = 'fas fa-play'; } }; }); };
   api('/songs').then(result => { songs = result; renderSongs(songs); }).catch(() => { songList.innerHTML = '<small class="text-muted">Müzikler yüklenemedi.</small>'; });
   $('#story-song-search').oninput = event => { const q = event.target.value.toLowerCase(); renderSongs(songs.filter(song => `${song.title} ${song.artist_name}`.toLowerCase().includes(q))); };
   $('#story-save').addEventListener('click', async event => {
     const file = $('#story-media').files[0];
     if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
     event.currentTarget.disabled = true;
-    const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
+    const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try { await apiForm('/stories', form); hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar); }
     catch (error) { event.currentTarget.disabled = false; $('#story-error').textContent = error.message; }
   });
+}
+
+async function renderStoryRoute(app, storyId) {
+  try {
+    const story = await api('/stories/' + encodeURIComponent(storyId));
+    document.title = '@' + story.username + ' hikayesi - ' + siteName;
+    app.innerHTML = `<div class="container page"><div class="story-route"><div class="story-route-head">${avatarImg(story)}<div><b>@${escHtml(story.username)}</b><small>${timeAgo(story.created_at)}</small></div></div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline></video>` : `<img src="${escHtml(story.media_url)}" alt="Hikaye" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<div class="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><input id="story-route-volume" type="range" min="0" max="100" value="80" aria-label="Hikaye sesi" /></div>` : ''}<div class="story-route-note">Bu hikaye artık akışta görünmüyor olabilir, ancak bağlantısından izlenebilir.</div></div></div>`;
+    if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); $('#story-route-volume')?.addEventListener('input', e => { if (activeStoryAudio) activeStoryAudio.volume = Number(e.target.value) / 100; }); }
+  } catch (error) {
+    app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-circle-exclamation"></i><p>${escHtml(error.message || 'Hikaye bulunamadı')}</p></div></div>`;
+  }
 }
 
 async function renderPhotos(app) {
