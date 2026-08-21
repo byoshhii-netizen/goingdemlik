@@ -1644,7 +1644,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   padding: 5px 10px; border-radius: 12px;
   font-size: 13px; line-height: 1.4;
   word-break: break-word; overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  white-space: normal;
   width: fit-content; max-width: 100%; height: auto; min-height: 0; flex: 0 0 auto;
 }
 .dm-msg-wrap:not(.dm-own) .dm-msg-bubble {

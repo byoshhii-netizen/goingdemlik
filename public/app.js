@@ -4481,6 +4481,7 @@ function updateDmSelActions() {
 function dmMessageHTML(m, myId, selMode) {
   const isOwn = m.sender_id == myId;
   const deleted = m.deleted_for_all;
+  const messageText = String(m.content || '').replace(/\s+/g, ' ').trim();
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe && !deleted) return '';
 
@@ -4503,7 +4504,7 @@ function dmMessageHTML(m, myId, selMode) {
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
         : `<div class="dm-msg-bubble">
-             ${m.image_url && !m.content?.trim()
+             ${m.image_url && !messageText
                ? `<button type="button" class="dm-image-link" onclick="window.open('${escHtml(m.image_url)}','_blank')"><i class="fas fa-image"></i> Fotoğrafı aç</button>`
                : ''}
              ${m.shared_forum_id
@@ -4521,7 +4522,7 @@ function dmMessageHTML(m, myId, selMode) {
                     <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title || 'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
                   </div>`
                : ''}
-             ${m.content ? `<span>${escHtml(m.content.trim())}</span>` : ''}
+             ${messageText ? `<span>${escHtml(messageText)}</span>` : ''}
            </div>`}
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
