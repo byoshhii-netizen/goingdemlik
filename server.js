@@ -1496,7 +1496,7 @@ app.put('/api/me/home-sections', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display, is_private } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
   let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
@@ -1534,19 +1534,20 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
       return res.status(500).json({ error: 'Avatar yükleme hatası: ' + e.message });
     }
   }
+  const avatarRemoved = req.file ? 0 : (avatar_removed !== undefined ? (parseBool(avatar_removed) ? 1 : 0) : (req.user.avatar_removed || 0));
   const newLinks = links ? (typeof links === 'string' ? links : JSON.stringify(links)) : req.user.links;
   const selectedBadgeDisplay = badge_display || req.user.badge_display || 'level';
   const allowedBadgeDisplay = ['level','none'].includes(selectedBadgeDisplay)
     ? selectedBadgeDisplay
     : (canSetBadge && ['vip','plus','custom'].includes(selectedBadgeDisplay) ? selectedBadgeDisplay : req.user.badge_display || 'level');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,title=$9,location=$10,allow_mentions=$11,badge_name=$12,badge_icon=$13,badge_color=$14,badge_display=$15,is_private=$16 WHERE id=$17',
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,avatar_removed=$9,title=$10,location=$11,allow_mentions=$12,badge_name=$13,badge_icon=$14,badge_color=$15,badge_display=$16,is_private=$17 WHERE id=$18',
     [bio??req.user.bio, newLinks,
      canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
      canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
      canSetCustomColor ? resolvedGradient : (req.user.name_gradient || ''),
      show_level_badge!==undefined?(parseBool(show_level_badge)?1:0):req.user.show_level_badge,
      show_level_color!==undefined?(parseBool(show_level_color)?1:0):req.user.show_level_color,
-     newAvatar, title??req.user.title??'', location??req.user.location??'',
+    newAvatar, avatarRemoved, title??req.user.title??'', location??req.user.location??'',
      allow_mentions!==undefined?(parseBool(allow_mentions)?1:0):(req.user.allow_mentions??1),
      canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,
      canSetBadge ? (badge_icon??req.user.badge_icon) : req.user.badge_icon,
@@ -1699,17 +1700,22 @@ app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
 });
 
 // ===== HIKAYELER =====
+function randomStoryPublicId() {
+  return 'h' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
+}
+
 app.get('/api/stories', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.created_at,s.expires_at,
-      u.username,u.avatar,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+      u.username,u.avatar,u.avatar_removed,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
       (SELECT COUNT(*) FROM story_replies src WHERE src.story_id=s.id) AS reply_count,
+      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
-    WHERE s.expires_at > NOW() AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
+    WHERE s.expires_at > NOW() AND (s.is_suspended=0 OR s.user_id=$1) AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
       SELECT 1 FROM follows f2 WHERE f2.follower_id=$1 AND f2.following_id=s.user_id AND f2.status='accepted') THEN 1 ELSE 2 END), s.created_at DESC`, [viewerId]);
@@ -1718,12 +1724,14 @@ app.get('/api/stories', authMiddleware, async (req, res) => {
 
 app.get('/api/stories/:id', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.created_at,s.expires_at,
-      u.username,u.avatar,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+      u.username,u.avatar,u.avatar_removed,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
-      (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count
+      (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
+      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
+      CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
-    WHERE s.id=$1`, [req.params.id, viewerId]);
+    WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   res.json(rows[0]);
 });
@@ -1736,20 +1744,82 @@ app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
-    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW() + ($7 * INTERVAL '1 hour')) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW() + ($8 * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
 });
 
 app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
-  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.expires_at>NOW() AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW()', [req.params.id, req.user.id]);
+  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW(),view_count=story_views.view_count+1', [story[0].id, req.user.id]);
+  res.json({ ok: true });
+});
+
+app.put('/api/stories/:id', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu hikayeyi düzenleme yetkiniz yok' });
+  const caption = String(req.body.caption ?? rows[0].caption).trim().slice(0, 180);
+  const songId = req.body.song_id === '' || req.body.song_id === null ? null : (req.body.song_id ?? rows[0].song_id);
+  const songStart = Math.max(0, parseInt(req.body.song_start_seconds ?? rows[0].song_start_seconds, 10) || 0);
+  const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : rows[0].duration_hours;
+  const { rows: updated } = await query('UPDATE stories SET caption=$1,song_id=$2,song_start_seconds=$3,duration_hours=$4,expires_at=created_at + ($4 * INTERVAL \'1 hour\') WHERE id=$5 RETURNING *', [caption, songId, songStart, durationHours, rows[0].id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/stories/:id', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id,user_id,public_id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu hikayeyi silme yetkiniz yok' });
+  await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/stories/:id/viewers', authMiddleware, async (req, res) => {
+  const { rows: owner } = await query('SELECT id,user_id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!owner.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  if (owner[0].user_id !== req.user.id) return res.status(403).json({ error: 'Görüntüleyenleri görme yetkiniz yok' });
+  const { rows } = await query(`SELECT sv.viewer_id,sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 ORDER BY sv.viewed_at DESC`, [owner[0].id]);
+  res.json(rows);
+});
+
+app.get('/api/admin/stories', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT s.*,u.username,u.avatar,
+    (SELECT COUNT(*) FROM story_views sv WHERE sv.story_id=s.id)::int AS unique_viewers,
+    (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id)::int AS total_views,
+    (SELECT COUNT(*) FROM story_likes sl WHERE sl.story_id=s.id)::int AS like_count
+    FROM stories s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC`);
+  res.json(rows);
+});
+
+app.get('/api/admin/stories/:id/viewers', adminMiddleware, async (req, res) => {
+  const { rows: story } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const { rows } = await query(`SELECT sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 ORDER BY sv.viewed_at DESC`, [story[0].id]);
+  res.json(rows);
+});
+
+app.put('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const old = rows[0];
+  const caption = String(req.body.caption ?? old.caption).trim().slice(0, 180);
+  const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : old.duration_hours;
+  const suspended = req.body.is_suspended === undefined ? old.is_suspended : (req.body.is_suspended ? 1 : 0);
+  const { rows: updated } = await query('UPDATE stories SET caption=$1,duration_hours=$2,is_suspended=$3,expires_at=created_at + ($2 * INTERVAL \'1 hour\') WHERE id=$4 RETURNING *', [caption, durationHours, suspended, old.id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
   res.json({ ok: true });
 });
 
 app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
-  const { rows: stories } = await query('SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar FROM stories s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.expires_at>NOW()', [req.params.id]);
+  const { rows: stories } = await query('SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0', [req.params.id]);
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = stories[0];
   const { rows: existing } = await query('SELECT id FROM story_likes WHERE story_id=$1 AND user_id=$2', [story.id, req.user.id]);
@@ -1773,7 +1843,7 @@ app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
 app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
   const content = String(req.body.content || '').trim();
   if (!content) return res.status(400).json({ error: 'Yanıt boş olamaz' });
-  const { rows: stories } = await query('SELECT s.id,s.user_id FROM stories s WHERE s.id=$1 AND s.expires_at>NOW()', [req.params.id]);
+  const { rows: stories } = await query('SELECT s.id,s.user_id FROM stories s WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0', [req.params.id]);
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [stories[0].id, req.user.id, content]);
   if (stories[0].user_id !== req.user.id) {

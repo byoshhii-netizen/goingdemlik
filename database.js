@@ -46,6 +46,7 @@ async function initDb() {
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS follows (
       id BIGSERIAL PRIMARY KEY,
@@ -62,27 +63,35 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS stories (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      public_id TEXT UNIQUE,
       media_url TEXT NOT NULL,
       media_type TEXT NOT NULL DEFAULT 'image',
       caption TEXT DEFAULT '',
       song_id BIGINT,
       song_start_seconds INTEGER DEFAULT 0,
       duration_hours INTEGER NOT NULL DEFAULT 24,
+      is_suspended INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
     );
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS song_id BIGINT;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER DEFAULT 0;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS duration_hours INTEGER NOT NULL DEFAULT 24;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS public_id TEXT;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_suspended INTEGER NOT NULL DEFAULT 0;
+    UPDATE stories SET public_id='h' || substr(md5(random()::text || id::text), 1, 10) WHERE public_id IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_stories_public_id ON stories(public_id);
     CREATE INDEX IF NOT EXISTS idx_stories_active ON stories(expires_at, user_id);
 
     CREATE TABLE IF NOT EXISTS story_views (
       id BIGSERIAL PRIMARY KEY,
       story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
       viewer_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      view_count INTEGER NOT NULL DEFAULT 1,
       viewed_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(story_id, viewer_id)
     );
+    ALTER TABLE story_views ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 1;
 
     CREATE TABLE IF NOT EXISTS story_likes (
       id BIGSERIAL PRIMARY KEY,
