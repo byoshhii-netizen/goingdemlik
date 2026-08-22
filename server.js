@@ -4312,8 +4312,9 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
 app.post('/api/videos', authMiddleware, async (req, res) => {
   const { title, description, video_url, banner_image, location, sound_name, allow_comments, show_likes, is_reals } = req.body;
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
-  const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,allow_comments,show_likes,is_reals)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0]);
+    const provisionalSlug = makeVideoSlug(title, uuidv4().slice(0, 8));
+  const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,allow_comments,show_likes,is_reals,slug)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0, provisionalSlug]);
   const slug = makeVideoSlug(title, rows[0].id);
   await query('UPDATE videos SET slug=$1 WHERE id=$2', [slug, rows[0].id]);
   res.json({ slug, id: rows[0].id });
