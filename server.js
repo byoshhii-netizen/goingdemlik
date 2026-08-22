@@ -383,6 +383,21 @@ async function handleLargeVideoUpload(file) {
   }
 }
 
+async function handleR2VideoBufferUpload(file) {
+  if (!USE_R2) return null;
+  const key = `stories/${uuidv4()}${path.extname(file.originalname) || '.mp4'}`;
+  await new Upload({
+    client: r2Client,
+    params: { Bucket: process.env.R2_BUCKET_NAME, Key: key, Body: file.buffer || fs.createReadStream(file.path), ContentType: file.mimetype || 'video/mp4' },
+    partSize: 20 * 1024 * 1024,
+    queueSize: 3,
+    leavePartsOnError: false
+  }).done();
+  const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
+  if (file.path) fs.promises.unlink(file.path).catch(() => {});
+  return `${publicBase}/${key}`;
+}
+
 // ===== ROBOTS & SITEMAP =====
 app.get('/robots.txt', (req, res) => {
   res.type('text/plain');
@@ -1892,14 +1907,14 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
 
 app.post('/api/stories', authMiddleware, (req, res, next) => {
   upload.single('media')(req, res, error => {
-    if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu 50 MB sınırını geçemez.' : error.message });
+    if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu 500 MB sınırını geçemez.' : error.message });
     next();
   });
 }, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Hikaye medyası seçin' });
   try {
-    const mediaUrl = await handleUpload(req.file);
     const mediaType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
+    const mediaUrl = mediaType === 'video' && USE_R2 ? await handleR2VideoBufferUpload(req.file) : await handleUpload(req.file);
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
@@ -1912,6 +1927,32 @@ app.post('/api/stories', authMiddleware, (req, res, next) => {
     console.error('Story upload failed:', e);
     res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message });
   }
+});
+
+app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
+  if (!USE_R2) return res.status(503).json({ error: 'Hikaye video depolaması ayarlanmamış.' });
+  const contentType = String(req.body?.content_type || 'video/mp4');
+  if (!contentType.startsWith('video/')) return res.status(400).json({ error: 'Geçersiz video türü.' });
+  const extension = path.extname(String(req.body?.filename || '')).toLowerCase() || '.mp4';
+  const key = `stories/${uuidv4()}${extension}`;
+  try {
+    const uploadUrl = await getSignedUrl(r2Client, new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ContentType: contentType }), { expiresIn: 900 });
+    const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
+    res.json({ upload_url: uploadUrl, public_url: `${publicBase}/${key}` });
+  } catch (error) { res.status(500).json({ error: 'Hikaye video bağlantısı oluşturulamadı: ' + error.message }); }
+});
+
+app.post('/api/stories/from-url', authMiddleware, async (req, res) => {
+  const { media_url, caption, song_id, song_start_seconds, duration_hours } = req.body;
+  if (!media_url) return res.status(400).json({ error: 'Hikaye videosu gerekli' });
+  const songId = song_id ? Number(song_id) : null;
+  const songStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
+  const durationHours = [5, 10, 24].includes(Number(duration_hours)) ? Number(duration_hours) : 24;
+  try {
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,'video',$4,$5,$6,$7::integer,NOW() + ($7::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), media_url, String(caption || '').trim(), songId, songStart, durationHours]);
+    res.json(rows[0]);
+    notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(() => {});
+  } catch (error) { res.status(500).json({ error: 'Hikaye kaydedilemedi: ' + error.message }); }
 });
 
 app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
@@ -2989,7 +3030,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','homepage_sections','footer_created_visible','footer_copyright_text','first_visit_auth')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','homepage_sections','profile_tabs','footer_created_visible','footer_copyright_text','first_visit_auth')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';

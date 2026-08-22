@@ -2113,6 +2113,15 @@ async function renderSettings(main) {
           <div id="s-first-visit-auth-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card adm-feature-card" style="grid-column:1 / -1">
+        <div class="card-header"><span><i class="fas fa-table-columns" style="color:var(--red2);margin-right:8px"></i>Profil Sekmeleri</span></div>
+        <div class="card-body">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Profillerdeki Forumlar, Kitaplar, Fotoğraflar gibi sekmelerin sırasını belirleyin.</p>
+          <div id="profile-tabs-order" style="display:grid;gap:8px"></div>
+          <button class="btn btn-primary" id="profile-tabs-save" style="width:100%;justify-content:center;margin-top:14px"><i class="fas fa-save"></i> Sekme Sırasını Kaydet</button>
+          <div id="profile-tabs-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><span><i class="fas fa-file-alt" style="color:var(--red2);margin-right:8px"></i>Footer</span></div>
         <div class="card-body">
@@ -2284,6 +2293,34 @@ async function renderSettings(main) {
       if (!response.ok) throw new Error(result.error || 'Ayar kaydedilemedi');
       toast('Kaydedildi');
     } catch(e) { if(msgEl) msgEl.textContent=e.message; }
+  }
+
+  const profileTabOptions = [
+    ['forums', 'Forumlar', 'fas fa-comments'], ['books', 'Kitaplar', 'fas fa-book'],
+    ['photos', 'Fotoğraflar', 'fas fa-images'], ['groups', 'Gruplar', 'fas fa-users'],
+    ['videos', 'Videolar', 'fas fa-video'], ['saved', 'Kaydedilenler', 'fas fa-bookmark'], ['songs', 'Müzikler', 'fas fa-music']
+  ];
+  const profileTabsOrder = document.getElementById('profile-tabs-order');
+  if (profileTabsOrder) {
+    let configured = [];
+    try { configured = JSON.parse(settings.profile_tabs || '[]'); } catch {}
+    const order = [...configured, ...profileTabOptions.map(([id]) => id).filter(id => !configured.includes(id))];
+    profileTabsOrder.innerHTML = order.map(id => {
+      const item = profileTabOptions.find(option => option[0] === id);
+      return item ? `<div class="profile-tab-order-row" data-id="${item[0]}"><span><i class="${item[2]}"></i>${item[1]}</span><span><button type="button" class="btn btn-ghost btn-xs profile-tab-up" title="Yukarı taşı"><i class="fas fa-chevron-up"></i></button><button type="button" class="btn btn-ghost btn-xs profile-tab-down" title="Aşağı taşı"><i class="fas fa-chevron-down"></i></button></span></div>` : '';
+    }).join('');
+    profileTabsOrder.addEventListener('click', event => {
+      const row = event.target.closest('.profile-tab-order-row');
+      if (!row) return;
+      if (event.target.closest('.profile-tab-up') && row.previousElementSibling) profileTabsOrder.insertBefore(row, row.previousElementSibling);
+      if (event.target.closest('.profile-tab-down') && row.nextElementSibling) profileTabsOrder.insertBefore(row.nextElementSibling, row);
+    });
+    document.getElementById('profile-tabs-save')?.addEventListener('click', async () => {
+      const selected = Array.from(profileTabsOrder.children).map(row => row.dataset.id);
+      await saveSetting('profile_tabs', JSON.stringify(selected), document.getElementById('profile-tabs-msg'));
+      const msg = document.getElementById('profile-tabs-msg');
+      msg.style.color = 'var(--green)'; msg.textContent = '✓ Sekme sırası kaydedildi';
+    });
   }
 
   document.getElementById('s-general-save').addEventListener('click', async () => {

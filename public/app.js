@@ -310,6 +310,7 @@ async function renderRealsFeed(app) {
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
   app.innerHTML = `
     <div class="reals-container">
+      <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında">?</button>
       <div id="reals-list" class="reals-list"></div>
     </div>`;
 
@@ -331,16 +332,9 @@ async function renderRealsFeed(app) {
   }
   const orderedReals = realsFeedOrder.map(id => reals.find(r => r.id === id)).filter(Boolean);
 
-  // show reminder once per user (server provides text)
-  try {
-    const rs = await fetch('/api/reals-settings');
-    const data = await rs.json();
-    const reminder = data.reminder || '';
-    if (reminder && !localStorage.getItem('seen_reals_reminder')) {
-      showModal('Reals', `<div style="padding:12px">${escHtml(reminder)}</div><div style="text-align:right;margin-top:10px"><button class="btn" id="reals-remind-ok">Tamam</button></div>`);
-      document.getElementById('reals-remind-ok').addEventListener('click', () => { hideModal(); localStorage.setItem('seen_reals_reminder','1'); });
-    }
-  } catch {}
+  document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
+    try { const data = await fetch('/api/reals-settings').then(response => response.json()); showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`); } catch {}
+  });
 
   let watchedIds = new Set();
   let idx = 0;
@@ -3079,6 +3073,12 @@ async function renderProfile(app, username) {
   const { user, forums, books, groups, photos = [], videos, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
+  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'saved', 'songs'];
+  try {
+    const settings = await fetch('/api/settings/public').then(response => response.json());
+    const configured = JSON.parse(settings.profile_tabs || '[]');
+    if (Array.isArray(configured)) profileTabOrder = [...configured, ...profileTabOrder.filter(tab => !configured.includes(tab))];
+  } catch {}
   const isOwn = currentUser && currentUser.id === user.id;
   let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true };
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
@@ -3230,15 +3230,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="forums">Forumlar</button>
-      <button class="tab" data-tab="books">Kitaplar</button>
-      <button class="tab" data-tab="photos">Fotoğraflar</button>
-      <button class="tab" data-tab="groups">Gruplar</button>
-      <button class="tab" data-tab="videos">Videolar</button>
-      <button class="tab" data-tab="saved">Kaydedilenler</button>
-      <button class="tab" data-tab="songs">Müzikler</button>
-    </div>
+    <div class="tabs">${profileTabOrder.map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', saved:'Kaydedilenler', songs:'Müzikler' })[tab] ? `<button class="tab ${tab === profileTabOrder[0] ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', saved:'Kaydedilenler', songs:'Müzikler' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -3262,6 +3254,9 @@ async function renderProfile(app, username) {
       ${profileSongsHTML}
     </div>
   </div>`;
+  const tabPanels = profileTabOrder.map(tab => document.getElementById('tab-' + tab)).filter(Boolean);
+  const tabsContainer = app.querySelector('.tabs');
+  tabPanels.forEach(panel => tabsContainer?.parentElement.appendChild(panel));
 
   bindFollowButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
@@ -3289,7 +3284,7 @@ async function renderProfile(app, username) {
     btn.addEventListener('click', () => {
       $$('.tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
-      ['forums', 'books', 'photos', 'groups', 'videos', 'saved', 'songs'].forEach(name => {
+      profileTabOrder.forEach(name => {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
       });
@@ -6093,12 +6088,19 @@ function showStoryUploadModal() {
     const file = $('#story-media').files[0];
     if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
     if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) { $('#story-error').textContent = 'Sadece fotoğraf veya video yükleyebilirsiniz.'; return; }
-    if (file.size > 50 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 50 MB sınırını geçemez.'; return; }
+    if (file.size > 500 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 500 MB sınırını geçemez.'; return; }
     submitButton.disabled = true;
     submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
-      await apiFormWithTimeout('/stories', form);
+      if (file.type.startsWith('video/')) {
+        const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type }) });
+        const response = await fetch(signed.upload_url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+        if (!response.ok) throw new Error('Hikaye videosu R2’ye yüklenemedi.');
+        await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption: $('#story-caption').value.trim(), duration_hours: $('#story-duration').value, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0 }) });
+      } else {
+        await apiFormWithTimeout('/stories', form);
+      }
       hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
     }
     catch (error) { submitButton.disabled = false; submitButton.innerHTML = 'Paylaş'; $('#story-error').textContent = error.message || 'Hikaye yüklenemedi.'; }
