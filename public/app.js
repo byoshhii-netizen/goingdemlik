@@ -307,7 +307,7 @@ async function renderRealsFeed(app) {
     </div>`;
 
   if (!localStorage.getItem('cigcig_reals_intro_seen')) {
-    showModal('Reals', `<div class="reals-intro"><i class="fab fa-instagram"></i><p>Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.</p><button class="btn btn-primary" id="reals-intro-ok">Reals'a geç</button></div>`);
+    showModal('Reals', `<div class="reals-intro"><i class="fas fa-circle-play"></i><p>Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.</p><button class="btn btn-primary" id="reals-intro-ok">Reals'a geç</button></div>`);
     document.getElementById('reals-intro-ok')?.addEventListener('click', () => { localStorage.setItem('cigcig_reals_intro_seen', '1'); hideModal(); });
   }
 
@@ -645,7 +645,7 @@ $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classL
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
 $('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
 $('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
-$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(null, true), 120); } else { navigate('/giris'); } });
+$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else { navigate('/giris'); } });
 $('#logout-btn').addEventListener('click', async () => {
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
   currentToken = null; currentUser = null;
@@ -700,7 +700,7 @@ document.addEventListener('click', e => {
   if (mobNewStory) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); }
   if (mobNewVideo) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
   const mobNewReals = e.target.closest('#mob-new-reals');
-  if (mobNewReals) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(null, true), 120); } else navigate('/giris'); }
+  if (mobNewReals) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else navigate('/giris'); }
   if (mobNewMusic) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); }
 });
 
