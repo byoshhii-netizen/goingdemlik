@@ -23,9 +23,9 @@ Direct browser upload icin `reals-cigcig` bucket > Settings > CORS Policy alanin
 [
 	{
 		"AllowedOrigins": ["https://cigcig.xyz", "https://www.cigcig.xyz"],
-		"AllowedMethods": ["PUT"],
-		"AllowedHeaders": ["Content-Type"],
-		"ExposeHeaders": ["ETag"],
+		"AllowedMethods": ["PUT", "GET", "HEAD"],
+		"AllowedHeaders": ["*"],
+		"ExposeHeaders": ["ETag", "Content-Length"],
 		"MaxAgeSeconds": 3600
 	}
 ]
