@@ -3113,8 +3113,8 @@ async function renderProfile(app, username) {
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
         <div class="profile-stats" style="margin-top:12px">
-          ${profileVisibility.followers ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : ''}
-          ${profileVisibility.following ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : ''}
+          ${profileVisibility.followers ? (profileVisibility.followers_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`) : ''}
+          ${profileVisibility.following ? (profileVisibility.following_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`) : ''}
           ${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
           ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
           ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
@@ -3523,7 +3523,9 @@ async function renderSettingsSection(section) {
       ['photos', 'Fotoğraf sayısı', 'Profilindeki fotoğraf sayısını göster', 'fas fa-images'],
       ['music', 'Müzik sayısı', 'Profilindeki müzik sayısını göster', 'fas fa-music']
     ];
-    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-chart-simple" style="color:var(--accent-red2);margin-right:6px"></i>Profilde Gösterilecek Sayılar</span></div><div class="card-body"><p class="settings-help">Profilini ziyaret eden kişiler hangi içerik sayılarını görebilsin, buradan seçebilirsin.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] ? 'checked' : ''} /></label>`).join('')}</div><button class="btn btn-primary" id="save-profile-visibility"><i class="fas fa-save"></i> Kaydet</button><div id="profile-visibility-msg" class="form-error mt-4"></div></div></div>`;
+    items.push(['followers_list', 'Takipçileri göster', 'Takipçi listesini profilinden aç', 'fas fa-users']);
+    items.push(['following_list', 'Takip ettiklerini göster', 'Takip edilenler listesini profilinden aç', 'fas fa-user-check']);
+    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:6px"></i>Profil Ayarları</span></div><div class="card-body"><p class="settings-help">Profilinde hangi bilgilerin ve listelerin görüneceğini seç.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} /></label>`).join('')}</div><button class="btn btn-primary" id="save-profile-visibility"><i class="fas fa-save"></i> Kaydet</button><div id="profile-visibility-msg" class="form-error mt-4"></div></div></div>`;
     $('#save-profile-visibility').addEventListener('click', async () => {
       const next = {};
       el.querySelectorAll('[data-visibility]').forEach(input => { next[input.dataset.visibility] = input.checked; });
@@ -3836,8 +3838,8 @@ function renderRegister(app) {
         <label class="radio-label"><input type="radio" name="reg-tags" value="nobody" /> Hiç kimse</label>
       </div>
       <details class="register-preferences">
-        <summary>Profil sayılarını seç</summary>
-        <p class="form-hint">Ana sayfada seçili olan bölümler varsayılan olarak açık gelir.</p>
+        <summary>Profil Ayarları</summary>
+        <p class="form-hint">Profilinde göstermek istediğin bilgileri seç.</p>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="forums" checked /> Konu sayısı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="books" /> Kitap sayısı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="comments" /> Yorum sayısı</label>
@@ -3845,6 +3847,8 @@ function renderRegister(app) {
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="music" /> Müzik sayısı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="followers" checked /> Takipçi sayımı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="following" checked /> Takip sayımı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="followers_list" checked /> Takipçilerimi göster</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="following_list" checked /> Takip ettiklerimi göster</label>
       </details>
       <div class="form-group">
         <label class="checkbox-label">
@@ -4101,6 +4105,15 @@ async function renderMessages(app, targetUsername) {
       </div>
     </div>`;
   }
+  const bindConversationItems = () => document.querySelectorAll('.dm-conv-item').forEach(item => {
+    if (item.dataset.bound) return;
+    item.dataset.bound = '1';
+    item.addEventListener('click', () => {
+      document.querySelectorAll('.dm-conv-item').forEach(other => other.classList.remove('active'));
+      item.classList.add('active');
+      navigate('/mesajlar/' + item.dataset.username);
+    });
+  });
 
   app.innerHTML = `<div class="dm-layout${targetUsername ? ' dm-mobile-chat-open' : ''}">
     <div class="dm-sidebar">
@@ -4160,6 +4173,7 @@ async function renderMessages(app, targetUsername) {
         const panel = $('#dm-hidden-panel');
         const list = $('#dm-hidden-list');
         if (list) list.innerHTML = hiddenConvs.length ? hiddenConvs.map(c => convItemHTML(c, true)).join('') : '<div class="dm-empty-small">Kilitli konuşma yok</div>';
+        bindConversationItems();
         panel?.classList.remove('hidden');
       } catch (error) {
         $('#dm-global-unlock-error').textContent = error.message || 'Şifre yanlış';
@@ -4202,13 +4216,7 @@ async function renderMessages(app, targetUsername) {
   });
 
   // Conv item clicks
-  document.querySelectorAll('.dm-conv-item').forEach(el => {
-    el.addEventListener('click', () => {
-      document.querySelectorAll('.dm-conv-item').forEach(x => x.classList.remove('active'));
-      el.classList.add('active');
-      navigate('/mesajlar/' + el.dataset.username);
-    });
-  });
+  bindConversationItems();
 
   if (targetUsername) {
     const activeEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(targetUsername)}"]`);
@@ -4553,6 +4561,12 @@ function dmMessageHTML(m, myId, selMode) {
                ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
                     ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
                     <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title || 'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
+                  </div>`
+               : ''}
+             ${m.shared_story_id
+               ? `<div class="dm-shared-story" onclick="navigate('/hikaye/${escHtml(m.shared_story_id)}')">
+                    ${m.story_media_url ? `<img src="${escHtml(m.story_media_url)}" alt="" />` : ''}
+                    <div><b>${escHtml(m.story_username || 'Hikaye')}</b><small>Hikaye yanıtı</small></div>
                   </div>`
                : ''}
              ${messageText ? `<span>${escHtml(messageText)}</span>` : ''}
@@ -5982,6 +5996,14 @@ async function renderStoryRoute(app, storyId) {
     $('#story-route-prev')?.addEventListener('click', () => previousStory && navigate('/hikaye/' + encodeURIComponent(previousStory.public_id || previousStory.id)));
     $('#story-route-next')?.addEventListener('click', () => nextStory && navigate('/hikaye/' + encodeURIComponent(nextStory.public_id || nextStory.id)));
     $('#story-route-share')?.addEventListener('click', () => shareStory(story));
+    const routeActions = document.querySelector('.story-route-actions');
+    if (routeActions) {
+      routeActions.insertAdjacentHTML('afterbegin', `<button class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-route-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button class="btn btn-ghost" id="story-route-reply-open"><i class="far fa-comment"></i> Yanıtla</button>`);
+      routeActions.insertAdjacentHTML('afterend', '<div class="story-route-reply" id="story-route-reply" hidden><input id="story-route-reply-input" maxlength="500" placeholder="Hikayeye yanıt yaz..." /><button class="btn btn-primary btn-sm" id="story-route-reply-send"><i class="fas fa-paper-plane"></i></button></div>');
+    }
+    $('#story-route-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; renderStoryRoute(app, storyId); } catch (error) { toast(error.message, 'error'); } });
+    $('#story-route-reply-open')?.addEventListener('click', () => { $('#story-route-reply').hidden = !$('#story-route-reply').hidden; $('#story-route-reply-input')?.focus(); });
+    $('#story-route-reply-send')?.addEventListener('click', async () => { const input = $('#story-route-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + (story.public_id || story.id) + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt DM olarak gönderildi'); input.value = ''; } catch (error) { toast(error.message, 'error'); } });
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
     $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });

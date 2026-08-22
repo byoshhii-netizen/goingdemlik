@@ -447,6 +447,7 @@ async function initDb() {
       image_url TEXT DEFAULT '',
       shared_forum_id BIGINT,
       shared_video_id BIGINT,
+      shared_story_id BIGINT,
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
@@ -463,6 +464,7 @@ async function initDb() {
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;

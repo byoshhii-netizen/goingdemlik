@@ -458,7 +458,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
     if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
     const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
-    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true };
+    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true, followers_list: true, following_list: true };
     if (profile_visibility && typeof profile_visibility === 'object') {
       Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = profile_visibility[key] !== false; });
     } else {
@@ -1452,9 +1452,12 @@ app.delete('/api/users/:username/follow', authMiddleware, async (req, res) => {
   res.json({ following: false, pending: false });
 });
 
-async function canViewFollowList(username, viewer) {
-  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [username]);
+async function canViewFollowList(username, viewer, listType) {
+  const { rows: target } = await query('SELECT id,is_private,profile_visibility FROM users WHERE username=$1', [username]);
   if (!target.length) return null;
+  let visibility = { followers: true, following: true };
+  try { visibility = { ...visibility, ...(target[0].profile_visibility ? JSON.parse(target[0].profile_visibility) : {}) }; } catch {}
+  if (visibility[listType] === false) return false;
   if (!target[0].is_private || (viewer && viewer.id === target[0].id)) return target[0].id;
   if (!viewer) return false;
   const { rows } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [viewer.id, target[0].id]);
@@ -1462,7 +1465,7 @@ async function canViewFollowList(username, viewer) {
 }
 
 app.get('/api/users/:username/followers', optionalAuth, async (req, res) => {
-  const userId = await canViewFollowList(req.params.username, req.user);
+  const userId = await canViewFollowList(req.params.username, req.user, 'followers');
   if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
   const { rows } = await query("SELECT u.id,u.username,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.follower_id WHERE f.following_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
@@ -1470,7 +1473,7 @@ app.get('/api/users/:username/followers', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/users/:username/following', optionalAuth, async (req, res) => {
-  const userId = await canViewFollowList(req.params.username, req.user);
+  const userId = await canViewFollowList(req.params.username, req.user, 'following');
   if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
   const { rows } = await query("SELECT u.id,u.username,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.following_id WHERE f.follower_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
@@ -1536,7 +1539,7 @@ app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
-  const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following'];
+  const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following', 'followers_list', 'following_list'];
   const visibility = {};
   allowed.forEach(key => { visibility[key] = req.body.visibility?.[key] !== false; });
   await query('UPDATE users SET profile_visibility=$1 WHERE id=$2', [JSON.stringify(visibility), req.user.id]);
@@ -1757,7 +1760,7 @@ function randomStoryPublicId() {
   return 'h' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
 }
 
-app.get('/api/stories', authMiddleware, async (req, res) => {
+app.get('/api/stories', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
       u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
@@ -1775,7 +1778,7 @@ app.get('/api/stories', authMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/stories/:id', authMiddleware, async (req, res) => {
+app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
   u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
@@ -1905,6 +1908,12 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [stories[0].id, req.user.id, content]);
   if (stories[0].user_id !== req.user.id) {
+    const user1 = Math.min(req.user.id, stories[0].user_id);
+    const user2 = Math.max(req.user.id, stories[0].user_id);
+    let { rows: conversations } = await query('SELECT id FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [user1, user2]);
+    if (!conversations.length) ({ rows: conversations } = await query('INSERT INTO dm_conversations (user1_id,user2_id) VALUES ($1,$2) RETURNING id', [user1, user2]));
+    await query('INSERT INTO dm_messages (conversation_id,sender_id,content,shared_story_id) VALUES ($1,$2,$3,$4)', [conversations[0].id, req.user.id, content, stories[0].id]);
+    await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conversations[0].id]);
     await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
       stories[0].user_id, 'story_reply', req.user.username, req.user.avatar || '', 'Hikayenize yanıt geldi', `${req.user.username} hikayenize yanıt verdi: ${content}`, '/fotograflar'
     ]);
@@ -3391,18 +3400,21 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const hiddenPass = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
   if (isHidden) return res.json({ conv, other, messages: [], isHidden: true, hasPassword: !!hiddenPass });
   const { rows: msgs } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
+      st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
     LEFT JOIN videos v ON m.shared_video_id=v.id
     LEFT JOIN photos p ON m.shared_photo_id=p.id
+    LEFT JOIN stories st ON m.shared_story_id=st.id
+    LEFT JOIN users su ON st.user_id=su.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
@@ -3465,16 +3477,16 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  let { content, shared_forum_id, shared_video_id, shared_photo_id, reply_to_id } = req.body;
+  let { content, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id } = req.body;
   let image_url = '';
   if (req.file) {
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
   if (shared_photo_id && !content) content = ' ';
-  if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_photo_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *',
-    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   // Forum paylaşım sayısını artır
@@ -3486,17 +3498,20 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
+      st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
     LEFT JOIN videos v ON m.shared_video_id=v.id
     LEFT JOIN photos p ON m.shared_photo_id=p.id
+    LEFT JOIN stories st ON m.shared_story_id=st.id
+    LEFT JOIN users su ON st.user_id=su.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
