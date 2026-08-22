@@ -91,6 +91,7 @@
       box-shadow: 0 0 30px rgba(189,162,117,0.4);
       margin-bottom: 16px;
     }
+    .login-shield img { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
     .login-title {
       font-family: var(--font2); font-size: 28px; font-weight: 700;
       letter-spacing: 4px; color: var(--text);
@@ -119,11 +120,12 @@
     }
     .adm-brand-icon {
       width: 34px; height: 34px; border-radius: 10px;
-      background: linear-gradient(135deg, var(--red), #8a6b3e);
+      background: var(--bg3); overflow: hidden;
       display: flex; align-items: center; justify-content: center;
       font-size: 14px; color: #fff;
       box-shadow: 0 0 12px rgba(189,162,117,0.4);
     }
+    .adm-brand-icon img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .adm-brand-text { font-size: 16px; letter-spacing: 2px; }
     .adm-brand-badge {
       background: linear-gradient(135deg, var(--blue), var(--blue2));
@@ -358,7 +360,7 @@
 <div id="login-screen">
   <div class="login-box">
     <div class="login-hex">
-      <div class="login-shield"><i class="fas fa-shield"></i></div>
+      <div class="login-shield"><img src="/glulu.png" alt="CigCig" /></div>
       <div class="login-title">CigCig<span>.</span></div>
       <div class="login-sub"></div>
     </div>
@@ -377,7 +379,7 @@
   <!-- TOP BAR -->
   <div class="adm-topbar">
     <div class="adm-brand">
-      <div class="adm-brand-icon"><i class="fas fa-shield"></i></div>
+      <div class="adm-brand-icon"><img src="/glulu.png" alt="CigCig" /></div>
       <span class="adm-brand-text">CigCig</span>
       <span class="adm-brand-badge">KONTROL</span>
     </div>
