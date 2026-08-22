@@ -284,9 +284,10 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (audio için)
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+    const allowedVideos = ['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'];
     const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
-    if (allowedImages.includes(file.mimetype) || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
-    else cb(new Error('Sadece resim veya ses dosyaları kabul edilir'));
+    if (allowedImages.includes(file.mimetype) || allowedVideos.includes(file.mimetype) || file.mimetype.startsWith('video/') || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
+    else cb(new Error('Sadece resim, video veya ses dosyaları kabul edilir'));
   }
 });
 
@@ -300,9 +301,10 @@ async function handleUpload(file) {
       const ext = path.extname(file.originalname).replace('.', '') || 'jpg';
       const public_id = 'teatube/' + uuidv4();
       const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
+      const isVideo = file.mimetype && file.mimetype.startsWith('video/');
       const stream = cloudinary.uploader.upload_stream(
-        isAudio
-          ? { public_id, resource_type: 'video' } // Cloudinary audio için 'video' resource type kullanır
+        isAudio || isVideo
+          ? { public_id, resource_type: 'video' }
           : { public_id, resource_type: 'image', quality: 'auto', fetch_format: 'auto' },
         (err, result) => {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
@@ -442,19 +444,41 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 // ===== AUTH =====
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { username, email, password, kvkk_accepted } = req.body;
+    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility } = req.body;
     if (!username || !email || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
+    if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
+    if (!birth_date || !/^\d{4}-\d{2}-\d{2}$/.test(birth_date)) return res.status(400).json({ error: 'Doğum tarihi zorunlu' });
+    const birth = new Date(`${birth_date}T00:00:00Z`);
+    const today = new Date();
+    let age = today.getUTCFullYear() - birth.getUTCFullYear();
+    const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
+    if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
+    const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
+    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true };
+    if (profile_visibility && typeof profile_visibility === 'object') {
+      Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = profile_visibility[key] !== false; });
+    } else {
+      const { rows: homepageSettings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+      let sections = [];
+      try { sections = JSON.parse(homepageSettings[0]?.value || '[]'); } catch {}
+      const sectionMap = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
+      (Array.isArray(sections) ? sections : []).forEach(section => {
+        const key = sectionMap[section] || section;
+        if (key in defaultVisibility) defaultVisibility[key] = true;
+      });
+    }
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
-    const { rows: existing } = await query('SELECT id FROM users WHERE username=$1 OR email=$2', [username, email]);
+    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, email]);
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip) VALUES ($1,$2,$3,$4,$5) RETURNING *',
-      [username, email, hashPassword(password), 1, ip]);
+      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(homepage_sections) ? homepage_sections : []), JSON.stringify(defaultVisibility)]);
     const user = rows[0];
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -472,7 +496,7 @@ app.post('/api/auth/login', async (req, res) => {
     await purgeDeletedAccounts();
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
-    const { rows } = await query('SELECT * FROM users WHERE username=$1', [login]);
+    const { rows } = await query('SELECT * FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1', [login]);
     const user = rows[0];
     if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Hatalı bilgiler' });
     if (user.banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
@@ -649,10 +673,14 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
   )];
   for (const username of mentions) {
     if (username.toLowerCase() === actorUser.username.toLowerCase()) continue;
-    const { rows } = await query('SELECT id, allow_mentions FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
+    const { rows } = await query('SELECT id, allow_mentions, tag_permission FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
     if (!rows.length) continue;
-    // allow_mentions NULL ise varsayılan olarak açık say (1)
-    if (rows[0].allow_mentions !== null && rows[0].allow_mentions == 0) continue;
+    const permission = rows[0].tag_permission || (rows[0].allow_mentions === 0 ? 'nobody' : 'everyone');
+    if (permission === 'nobody') continue;
+    if (permission === 'friends') {
+      const { rows: mutual } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [actorUser.id, rows[0].id]);
+      if (!mutual.length) continue;
+    }
     const body = type === 'forum_mention'
       ? `@${actorUser.username} sizi "${contextTitle}" başlıklı konuda etiketledi`
       : type === 'comment_mention'
@@ -662,6 +690,13 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
       'INSERT INTO notifications (user_id, type, actor_username, actor_avatar, title, body, link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
       [rows[0].id, type, actorUser.username, actorUser.avatar || '', contextTitle, body, link]
     );
+  }
+}
+
+async function notifyFollowersOfContent(actorUser, type, title, body, link) {
+  const { rows: followers } = await query("SELECT follower_id FROM follows WHERE following_id=$1 AND status='accepted' AND follower_id<>$1", [actorUser.id]);
+  for (const follower of followers) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [follower.follower_id, type, actorUser.username, actorUser.avatar || '', title, body, link]);
   }
 }
 
@@ -781,6 +816,7 @@ app.post('/api/forums', authMiddleware, async (req, res) => {
     await query('UPDATE users SET forum_count=forum_count+1 WHERE id=$1', [req.user.id]);
     await updateUserLevel(req.user.id);
     await logAction(req.user.username, 'create_forum', realSlug);
+      await notifyFollowersOfContent(req.user, 'new_forum', 'Yeni forum konusu', `@${req.user.username} yeni bir forum konusu paylaştı: ${title}`, '/forum/' + realSlug).catch(() => {});
     // @mention bildirimleri
     await parseMentionsAndNotify(content + ' ' + title, req.user, 'forum_mention', '/forum/' + realSlug, title).catch(() => {});
     const { rows: fRows } = await query('SELECT * FROM forums WHERE id=$1', [id]);
@@ -868,6 +904,9 @@ app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
   if (!content?.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO forum_comments (forum_id,user_id,content) VALUES ($1,$2,$3) RETURNING id', [forum.id, req.user.id, content.trim()]);
   await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
+  if (forum.user_id && forum.user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [forum.user_id, 'forum_comment', req.user.username, req.user.avatar || '', 'Konuna yorum geldi', `@${req.user.username} konuna yorum yaptı.`, '/forum/' + req.params.slug]).catch(() => {});
+  }
   await updateUserLevel(req.user.id);
   // @mention bildirimleri
   await parseMentionsAndNotify(content, req.user, 'comment_mention', '/forum/' + req.params.slug, forum.title).catch(() => {});
@@ -1096,6 +1135,11 @@ app.get('/api/groups', async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/my-groups', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT g.*, gm.role FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=$1 ORDER BY g.name ASC`, [req.user.id]);
+  res.json(rows);
+});
+
 app.get('/api/group/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE g.slug=$1`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
@@ -1105,7 +1149,7 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
     const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
     if (m.length) { isMember = true; role = m[0].role; }
     // Check if user has pending join request for private group
-    if (!isMember && group.type === 'private') {
+    if (!isMember && (group.type === 'private' || group.invite_only)) {
       const { rows: jr } = await query('SELECT status, rejection_reason FROM group_join_requests WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
       if (jr.length) joinRequestStatus = { status: jr[0].status, rejectionReason: jr[0].rejection_reason };
     }
@@ -1213,7 +1257,7 @@ app.post('/api/group/:slug/join-request', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
-  if (group.type !== 'private') return res.status(400).json({ error: 'Bu grup için istek gerekli değil' });
+  if (group.type !== 'private' && !group.invite_only) return res.status(400).json({ error: 'Bu grup için istek gerekli değil' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   const { rows: existing } = await query('SELECT id FROM group_join_requests WHERE group_id=$1 AND user_id=$2 AND status=$3', [group.id, req.user.id, 'pending']);
@@ -1259,7 +1303,7 @@ app.post('/api/group/:slug/join-request/:requestId/respond', authMiddleware, asy
 app.get('/api/group/:slug/members', async (req, res) => {
   const { rows: gRows } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.level_id FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
+  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.level_id FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
   res.json(rows);
 });
 
@@ -1276,10 +1320,10 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     params = [group.id, before_id, limit];
   } else {
-    sql = `SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
+    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
     params = [group.id, limit];
   }
   const { rows } = await query(sql, params);
@@ -1297,7 +1341,7 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
     [group.id, req.user.id, content||'', image_url||'']);
-  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
 
@@ -1462,21 +1506,46 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower) {
-    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: 0, following_count: 0, following: false });
+    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
-  const [forums, books, groups, level, levels, bpCount] = await Promise.all([
+  const [forums, books, groups, level, levels, bpCount, photos] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
+    query('SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,s.title AS song_title,s.artist_name AS song_artist FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1 ORDER BY p.created_at DESC LIMIT 50', [user.id]).then(r => r.rows),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), forums, books, groups, photos, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+});
+
+app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT profile_visibility FROM users WHERE id=$1', [req.user.id]);
+  let visibility = {};
+  try { visibility = rows[0]?.profile_visibility ? JSON.parse(rows[0].profile_visibility) : {}; } catch {}
+  if (!Object.keys(visibility).length) {
+    const { rows: settings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+    let sections = [];
+    try { sections = JSON.parse(settings[0]?.value || '[]'); } catch {}
+    const map = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
+    visibility = { forums: false, books: false, comments: false, photos: false, music: false };
+    (Array.isArray(sections) ? sections : []).forEach(section => { const key = map[section] || section; if (key in visibility) visibility[key] = true; });
+  }
+  res.json({ visibility });
+});
+
+app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
+  const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following'];
+  const visibility = {};
+  allowed.forEach(key => { visibility[key] = req.body.visibility?.[key] !== false; });
+  await query('UPDATE users SET profile_visibility=$1 WHERE id=$2', [JSON.stringify(visibility), req.user.id]);
+  const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+  res.json({ visibility, user: sanitizeUser(rows[0]) });
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, badge_name, badge_icon, badge_color, badge_display, is_private } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
   let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
@@ -1514,23 +1583,26 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
       return res.status(500).json({ error: 'Avatar yükleme hatası: ' + e.message });
     }
   }
+  const avatarRemoved = req.file ? 0 : (avatar_removed !== undefined ? (parseBool(avatar_removed) ? 1 : 0) : (req.user.avatar_removed || 0));
   const newLinks = links ? (typeof links === 'string' ? links : JSON.stringify(links)) : req.user.links;
   const selectedBadgeDisplay = badge_display || req.user.badge_display || 'level';
   const allowedBadgeDisplay = ['level','none'].includes(selectedBadgeDisplay)
     ? selectedBadgeDisplay
     : (canSetBadge && ['vip','plus','custom'].includes(selectedBadgeDisplay) ? selectedBadgeDisplay : req.user.badge_display || 'level');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,title=$9,location=$10,allow_mentions=$11,badge_name=$12,badge_icon=$13,badge_color=$14,badge_display=$15,is_private=$16 WHERE id=$17',
+  const resolvedTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : (req.user.tag_permission || 'everyone');
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,avatar_removed=$9,title=$10,location=$11,allow_mentions=$12,tag_permission=$13,badge_name=$14,badge_icon=$15,badge_color=$16,badge_display=$17,is_private=$18 WHERE id=$19',
     [bio??req.user.bio, newLinks,
      canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
      canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
      canSetCustomColor ? resolvedGradient : (req.user.name_gradient || ''),
      show_level_badge!==undefined?(parseBool(show_level_badge)?1:0):req.user.show_level_badge,
      show_level_color!==undefined?(parseBool(show_level_color)?1:0):req.user.show_level_color,
-     newAvatar, title??req.user.title??'', location??req.user.location??'',
-     allow_mentions!==undefined?(parseBool(allow_mentions)?1:0):(req.user.allow_mentions??1),
-     canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,
-     canSetBadge ? (badge_icon??req.user.badge_icon) : req.user.badge_icon,
-     canSetBadge ? (badge_color??req.user.badge_color) : req.user.badge_color,
+    newAvatar, avatarRemoved, title??req.user.title??'', location??req.user.location??'',
+    allow_mentions!==undefined?(parseBool(allow_mentions)?1:0):(req.user.allow_mentions??1),
+    resolvedTagPermission,
+    canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,
+    canSetBadge ? (badge_icon??req.user.badge_icon) : req.user.badge_icon,
+    canSetBadge ? (badge_color??req.user.badge_color) : req.user.badge_color,
     allowedBadgeDisplay,
     is_private!==undefined?(parseBool(is_private)?1:0):(req.user.is_private??0),
     req.user.id]);
@@ -1542,6 +1614,7 @@ app.put('/api/profile/username', authMiddleware, async (req, res) => {
   try {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: 'Kullanıcı adı zorunlu' });
+    if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (!/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı yalnızca harf, rakam ve alt çizgi içerebilir' });
     if (username.toLowerCase() === req.user.username.toLowerCase()) return res.status(400).json({ error: 'Bu zaten mevcut kullanıcı adınız' });
@@ -1601,7 +1674,7 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
 app.get('/api/photos', optionalAuth, async (req, res) => {
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
-  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
+  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
@@ -1619,7 +1692,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   const { rows } = await query(
     `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds,
       s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
-      p.created_at, p.user_id, u.username, u.avatar, p.show_likes, p.allow_comments, p.allow_shares,
+      p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
@@ -1642,6 +1715,7 @@ app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res)
       req.user.id, url, req.file.cloudinary_public_id || '', (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
       songStart, b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.allow_shares === 'false' ? 0 : 1
     ]);
+    await notifyFollowersOfContent(req.user, 'new_photo', 'Yeni fotoğraf', `@${req.user.username} yeni bir fotoğraf paylaştı.`, '/foto/' + rows[0].id).catch(() => {});
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1679,18 +1753,44 @@ app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
 });
 
 // ===== HIKAYELER =====
-app.get('/api/stories', optionalAuth, async (req, res) => {
+function randomStoryPublicId() {
+  return 'h' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
+}
+
+app.get('/api/stories', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.user_id,s.media_url,s.media_type,s.caption,s.created_at,s.expires_at,
-      u.username,u.avatar,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+      u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
+      EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
+      (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
+      (SELECT COUNT(*) FROM story_replies src WHERE src.story_id=s.id) AS reply_count,
+      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
-    FROM stories s JOIN users u ON u.id=s.user_id
-    WHERE s.expires_at > NOW() AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
+    FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
+    WHERE s.expires_at > NOW() AND (s.is_suspended=0 OR s.user_id=$1) AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
       SELECT 1 FROM follows f2 WHERE f2.follower_id=$1 AND f2.following_id=s.user_id AND f2.status='accepted') THEN 1 ELSE 2 END), s.created_at DESC`, [viewerId]);
   res.json(rows);
+});
+
+app.get('/api/stories/:id', authMiddleware, async (req, res) => {
+  const viewerId = req.user?.id || 0;
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+  u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+      EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
+      (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
+      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
+      CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
+    FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
+    WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const story = rows[0];
+  if (story.user_id !== viewerId && story.is_private && !(await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [viewerId, story.user_id])).rows.length) {
+    return res.status(403).json({ error: 'Bu hikaye yalnızca takipçilere açık.' });
+  }
+  res.json(story);
 });
 
 app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res) => {
@@ -1698,23 +1798,125 @@ app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res
   try {
     const mediaUrl = await handleUpload(req.file);
     const mediaType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
-    const { rows } = await query(`INSERT INTO stories (user_id,media_url,media_type,caption) VALUES ($1,$2,$3,$4) RETURNING *`, [req.user.id, mediaUrl, mediaType, (req.body.caption || '').trim()]);
+    const songId = req.body.song_id ? Number(req.body.song_id) : null;
+    const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
+    const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW() + ($8 * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
+    await notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(() => {});
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
 });
 
 app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
-  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.expires_at>NOW() AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW()', [req.params.id, req.user.id]);
+  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW(),view_count=story_views.view_count+1', [story[0].id, req.user.id]);
   res.json({ ok: true });
+});
+
+app.put('/api/stories/:id', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu hikayeyi düzenleme yetkiniz yok' });
+  const caption = String(req.body.caption ?? rows[0].caption).trim().slice(0, 180);
+  const songId = req.body.song_id === '' || req.body.song_id === null ? null : (req.body.song_id ?? rows[0].song_id);
+  const songStart = Math.max(0, parseInt(req.body.song_start_seconds ?? rows[0].song_start_seconds, 10) || 0);
+  const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : rows[0].duration_hours;
+  const { rows: updated } = await query('UPDATE stories SET caption=$1,song_id=$2,song_start_seconds=$3,duration_hours=$4,expires_at=created_at + ($4 * INTERVAL \'1 hour\') WHERE id=$5 RETURNING *', [caption, songId, songStart, durationHours, rows[0].id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/stories/:id', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id,user_id,public_id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu hikayeyi silme yetkiniz yok' });
+  await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/stories/:id/viewers', authMiddleware, async (req, res) => {
+  const { rows: owner } = await query('SELECT id,user_id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!owner.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  if (owner[0].user_id !== req.user.id) return res.status(403).json({ error: 'Görüntüleyenleri görme yetkiniz yok' });
+  const { rows } = await query(`SELECT sv.viewer_id,sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 ORDER BY sv.viewed_at DESC`, [owner[0].id]);
+  res.json(rows);
+});
+
+app.get('/api/admin/stories', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT s.*,u.username,u.avatar,
+    (SELECT COUNT(*) FROM story_views sv WHERE sv.story_id=s.id)::int AS unique_viewers,
+    (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id)::int AS total_views,
+    (SELECT COUNT(*) FROM story_likes sl WHERE sl.story_id=s.id)::int AS like_count
+    FROM stories s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC`);
+  res.json(rows);
+});
+
+app.get('/api/admin/stories/:id/viewers', adminMiddleware, async (req, res) => {
+  const { rows: story } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const { rows } = await query(`SELECT sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 ORDER BY sv.viewed_at DESC`, [story[0].id]);
+  res.json(rows);
+});
+
+app.put('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const old = rows[0];
+  const caption = String(req.body.caption ?? old.caption).trim().slice(0, 180);
+  const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : old.duration_hours;
+  const suspended = req.body.is_suspended === undefined ? old.is_suspended : (req.body.is_suspended ? 1 : 0);
+  const { rows: updated } = await query('UPDATE stories SET caption=$1,duration_hours=$2,is_suspended=$3,expires_at=created_at + ($2 * INTERVAL \'1 hour\') WHERE id=$4 RETURNING *', [caption, durationHours, suspended, old.id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
+  const { rows: stories } = await query('SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0', [req.params.id]);
+  if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const story = stories[0];
+  const { rows: existing } = await query('SELECT id FROM story_likes WHERE story_id=$1 AND user_id=$2', [story.id, req.user.id]);
+  const liked = !existing.length;
+  if (liked) {
+    await query('INSERT INTO story_likes (story_id,user_id) VALUES ($1,$2)', [story.id, req.user.id]);
+  } else {
+    await query('DELETE FROM story_likes WHERE id=$1', [existing[0].id]);
+  }
+  if (story.user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
+      story.user_id, liked ? 'story_like' : 'story_unlike', req.user.username, req.user.avatar || '',
+      liked ? 'Hikayeniz beğenildi' : 'Hikaye beğenisi geri alındı',
+      `${req.user.username} hikayenizi ${liked ? 'beğendi' : 'beğenisini geri aldı'}.`, '/fotograflar'
+    ]);
+  }
+  const { rows: count } = await query('SELECT COUNT(*)::int AS count FROM story_likes WHERE story_id=$1', [story.id]);
+  res.json({ liked, like_count: count[0].count });
+});
+
+app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
+  const content = String(req.body.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Yanıt boş olamaz' });
+  const { rows: stories } = await query('SELECT s.id,s.user_id FROM stories s WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0', [req.params.id]);
+  if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+  const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [stories[0].id, req.user.id, content]);
+  if (stories[0].user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
+      stories[0].user_id, 'story_reply', req.user.username, req.user.avatar || '', 'Hikayenize yanıt geldi', `${req.user.username} hikayenize yanıt verdi: ${content}`, '/fotograflar'
+    ]);
+  }
+  res.json(rows[0]);
 });
 
 // Like toggle
 app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user.id;
-  const { rows } = await query(`SELECT p.id, p.show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
+  const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
     WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
@@ -1724,14 +1926,19 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
     return res.json({ liked: false });
   } else {
     await query('INSERT INTO photo_likes (photo_id,user_id) VALUES ($1,$2)', [photoId, userId]);
+    const { rows: owner } = await query('SELECT user_id FROM photos WHERE id=$1', [photoId]);
+    if (owner[0] && owner[0].user_id !== userId) {
+        await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner[0].user_id, 'photo_like', req.user.username, req.user.avatar || '', 'Fotoğrafın beğenildi', `@${req.user.username} fotoğrafını beğendi.`, '/foto/' + photoId]).catch(() => {});
+    }
     return res.json({ liked: true });
   }
 });
 
 // Photo comments
-app.get('/api/photos/:id/comments', async (req, res) => {
+app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
   const photoId = req.params.id;
-  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR COALESCE(p.user_id,0)=0)`, [photoId]);
+  const userId = req.user ? req.user.id : 0;
+  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   const { rows } = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
   res.json(rows);
@@ -1743,8 +1950,12 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
   if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, req.user.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  if (Number(rows[0].allow_comments) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
+  if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
   await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
+  const { rows: photoOwner } = await query('SELECT p.user_id,p.title FROM photos p WHERE p.id=$1', [photoId]);
+  if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
+    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
+  }
   const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
   res.json(c.rows[c.rows.length-1]);
 });
@@ -2146,6 +2357,7 @@ app.post('/api/songs', authMiddleware, upload.fields([
   const slug = makeSongSlug(title, id);
   await query('UPDATE songs SET slug=$1 WHERE id=$2', [slug, id]);
   await logAction(req.user.username, 'upload_song', slug);
+  await notifyFollowersOfContent(req.user, 'new_song', 'Yeni şarkı', `@${req.user.username} yeni bir şarkı paylaştı: ${title}`, '/muzik/' + slug).catch(() => {});
   res.json({ ok: true, slug });
 });
 
@@ -2648,9 +2860,10 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','homepage_sections','footer_created_visible','footer_copyright_text')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','homepage_sections','footer_created_visible','footer_copyright_text')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
+  if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';
   res.json(obj);
 });
 
@@ -2994,16 +3207,14 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/friends', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
-    SELECT f.*, 
-      CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END as other_id,
-      CASE WHEN f.requester_id=$1 THEN u2.username ELSE u1.username END as other_username,
-      CASE WHEN f.requester_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
-      CASE WHEN f.requester_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      CASE WHEN f.requester_id=$1 THEN COALESCE(u2.is_deleted,0) ELSE COALESCE(u1.is_deleted,0) END as other_is_deleted
-    FROM friendships f
-    LEFT JOIN users u1 ON f.requester_id=u1.id
-    LEFT JOIN users u2 ON f.addressee_id=u2.id
-    WHERE (f.requester_id=$1 OR f.addressee_id=$1)
+    SELECT f.id, f.created_at, 'accepted' AS status,
+      f.following_id AS other_id, u.username AS other_username, u.avatar AS other_avatar,
+      u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted
+    FROM follows f
+    JOIN users u ON u.id=f.following_id
+    WHERE f.follower_id=$1 AND f.status='accepted'
+      AND EXISTS (SELECT 1 FROM follows mutual WHERE mutual.follower_id=f.following_id
+        AND mutual.following_id=$1 AND mutual.status='accepted')
   `, [uid]);
   res.json(rows);
 });
@@ -3019,6 +3230,7 @@ app.post('/api/friends/request/:username', authMiddleware, async (req, res) => {
   const { rows: ex } = await query('SELECT * FROM friendships WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)', [req.user.id, targetId]);
   if (ex.length) return res.status(400).json({ error: 'Zaten istek gönderilmiş veya arkadaşsınız' });
   await query('INSERT INTO friendships (requester_id, addressee_id, status) VALUES ($1,$2,$3)', [req.user.id, targetId, 'pending']);
+  await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,'friend_request',$2,$3,'Yeni arkadaşlık isteği','@' || $2 || ' sana arkadaşlık isteği gönderdi.',$4)`, [targetId, req.user.username, req.user.avatar || '', '/arkadaslar']);
   res.json({ ok: true });
 });
 
@@ -3087,6 +3299,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     SELECT c.*,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message,
@@ -3110,6 +3323,7 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
     SELECT c.*,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
@@ -3119,6 +3333,26 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
     WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
     ORDER BY c.last_message_at DESC
   `, [uid]);
+  res.json(rows);
+});
+
+app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
+  const crypto = require('crypto');
+  const password = String(req.body?.password || '');
+  const inputHash = crypto.createHash('sha256').update(password).digest('hex');
+  const { rows } = await query(`
+    SELECT c.*, CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
+      CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
+      CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
+      CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
+    FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
+    WHERE ((c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1))
+      AND (CASE WHEN c.user1_id=$1 THEN c.hidden_pass_user1 ELSE c.hidden_pass_user2 END) = $2
+    ORDER BY c.last_message_at DESC
+  `, [req.user.id, inputHash]);
+  if (!rows.length) return res.status(403).json({ error: 'Şifre yanlış veya kilitli sohbet bulunamadı' });
   res.json(rows);
 });
 
@@ -3138,9 +3372,13 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
-  const { rows: target } = await query('SELECT id,username,avatar,name_color FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
+  if (other.is_private && other.id !== uid) {
+    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
+    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
@@ -3155,7 +3393,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: msgs } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
+      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
@@ -3203,15 +3441,17 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true });
 });
 
-app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
   // Engel kontrolü
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
-  const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
-  if (!friendship.length) return res.status(403).json({ error: 'Yalnızca arkadaşlarınıza mesaj gönderebilirsiniz' });
+  if (other.is_private && other.id !== uid) {
+    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
+    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
@@ -3248,7 +3488,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   const { rows: full } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.name_color as sender_name_color,
+      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
