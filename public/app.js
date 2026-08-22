@@ -5968,18 +5968,19 @@ function showStoryUploadModal() {
   api('/songs').then(result => { songs = result; renderSongs(songs); }).catch(() => { songList.innerHTML = '<small class="text-muted">Müzikler yüklenemedi.</small>'; });
   $('#story-song-search').oninput = event => { const q = event.target.value.toLowerCase(); renderSongs(songs.filter(song => `${song.title} ${song.artist_name}`.toLowerCase().includes(q))); };
   $('#story-save').addEventListener('click', async event => {
+    const submitButton = event.currentTarget;
     const file = $('#story-media').files[0];
     if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
     if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) { $('#story-error').textContent = 'Sadece fotoğraf veya video yükleyebilirsiniz.'; return; }
     if (file.size > 50 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 50 MB sınırını geçemez.'; return; }
-    event.currentTarget.disabled = true;
-    event.currentTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
+    submitButton.disabled = true;
+    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
       await apiFormWithTimeout('/stories', form);
       hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
     }
-    catch (error) { event.currentTarget.disabled = false; event.currentTarget.innerHTML = 'Paylaş'; $('#story-error').textContent = error.message; }
+    catch (error) { submitButton.disabled = false; submitButton.innerHTML = 'Paylaş'; $('#story-error').textContent = error.message || 'Hikaye yüklenemedi.'; }
   });
 }
 

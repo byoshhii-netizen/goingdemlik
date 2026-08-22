@@ -1796,7 +1796,12 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   res.json(story);
 });
 
-app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res) => {
+app.post('/api/stories', authMiddleware, (req, res, next) => {
+  upload.single('media')(req, res, error => {
+    if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu 50 MB sınırını geçemez.' : error.message });
+    next();
+  });
+}, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Hikaye medyası seçin' });
   try {
     const mediaUrl = await handleUpload(req.file);
@@ -1809,7 +1814,10 @@ app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res
     notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(error => {
       console.warn('Story follower notifications failed:', error.message || error);
     });
-  } catch (e) { res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message }); }
+  } catch (e) {
+    console.error('Story upload failed:', e);
+    res.status(500).json({ error: 'Hikaye yüklenemedi: ' + e.message });
+  }
 });
 
 app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
