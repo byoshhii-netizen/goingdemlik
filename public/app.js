@@ -5976,7 +5976,7 @@ function showStoryUploadModal() {
     event.currentTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
-      await apiForm('/stories', form);
+      await apiFormWithTimeout('/stories', form);
       hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
     }
     catch (error) { event.currentTarget.disabled = false; event.currentTarget.innerHTML = 'Paylaş'; $('#story-error').textContent = error.message; }
