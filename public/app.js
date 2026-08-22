@@ -4,6 +4,7 @@ let activeStoryAudio = null;
 let storyComposerAudio = null;
 let realsFeedOrder = null;
 let siteName = 'CigCig';
+let firstVisitAuthEnabled = false;
 
 const SITE_URL = 'https://cigcig.xyz';
 
@@ -206,7 +207,13 @@ function renderRoute(fullPath) {
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
 
-  if (path === '/') return renderHome(app);
+  if (path === '/') {
+    if (firstVisitAuthEnabled && !currentUser && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
+      localStorage.setItem('cigcig_first_visit_auth_seen', '1');
+      return navigate('/giris', false);
+    }
+    return renderHome(app);
+  }
   if (path === '/forum' || path === '/konular') {
     // query string'i de geçir
     const qs = queryStr ? '?' + queryStr : '';
@@ -3788,9 +3795,11 @@ function renderLogin(app) {
   if (currentUser) { navigate('/'); return; }
   document.title = 'Giriş Yap - ' + siteName;
   app.innerHTML = `<div class="auth-page">
-    <div class="auth-card card card-body">
-      <div class="auth-title">Giriş Yap</div>
-      <p class="auth-subtitle">Hesabınıza erişin</p>
+    <div class="auth-card auth-card--enhanced card card-body">
+      <div class="auth-brand-mark"><i class="fas fa-feather-pointed"></i></div>
+      <div class="auth-kicker">CIGCIG TOPLULUĞU</div>
+      <div class="auth-title">Tekrar hoş geldin</div>
+      <p class="auth-subtitle">Hesabına giriş yap ve kaldığın yerden devam et.</p>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="login-id" placeholder="kullanıcı_adı" autocomplete="username" /></div>
       <div class="form-group">
         <label>Şifre</label>
@@ -3879,9 +3888,11 @@ function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
-    <div class="auth-card card card-body">
-      <div class="auth-title">Kayıt Ol</div>
-      <p class="auth-subtitle">Topluluğa katıl</p>
+    <div class="auth-card auth-card--enhanced auth-card--register card card-body">
+      <div class="auth-brand-mark"><i class="fas fa-sparkles"></i></div>
+      <div class="auth-kicker">CIGCIG TOPLULUĞU</div>
+      <div class="auth-title">Kendi alanını oluştur</div>
+      <p class="auth-subtitle">Birkaç bilgiyle CigCig dünyasına katıl.</p>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
@@ -4025,6 +4036,7 @@ async function init() {
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
+    firstVisitAuthEnabled = ps.first_visit_auth === '1';
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     // Kitap arka plan rengi CSS değişkeni olarak ayarla
     if (ps.book_bg_color) {

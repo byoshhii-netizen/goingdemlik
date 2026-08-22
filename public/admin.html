@@ -215,6 +215,20 @@
       background: rgba(189,162,117,0.12); border: 1px solid var(--border-red);
       display: flex; align-items: center; justify-content: center; font-size: 14px; color: var(--red2);
     }
+    .adm-feature-card { border-color: rgba(189,162,117,.28); background: linear-gradient(145deg, rgba(189,162,117,.08), var(--bg3) 48%); }
+    .adm-setting-status { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: .6px; color: var(--text3); background: rgba(255,255,255,.05); }
+    .adm-setting-status.is-on { color: #86efac; background: rgba(34,197,94,.12); }
+    .adm-feature-copy strong { display: block; font-size: 15px; color: var(--text); margin-bottom: 7px; }
+    .adm-feature-copy p { color: var(--text2); font-size: 12px; line-height: 1.6; margin-bottom: 18px; max-width: 620px; }
+    .adm-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; margin-bottom: 16px; color: var(--text2); font-size: 12px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+    .adm-toggle-row > span:first-child { display: flex; align-items: center; gap: 8px; }
+    .adm-toggle-row i { color: var(--red2); }
+    .adm-toggle { width: 44px; height: 24px; position: relative; flex: 0 0 auto; }
+    .adm-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .adm-toggle > span { position: absolute; inset: 0; border-radius: 999px; background: var(--bg4); border: 1px solid var(--border); transition: .2s; }
+    .adm-toggle > span::after { content: ''; position: absolute; width: 18px; height: 18px; left: 2px; top: 2px; border-radius: 50%; background: var(--text3); transition: .2s; }
+    .adm-toggle input:checked + span { background: rgba(189,162,117,.3); border-color: var(--red); }
+    .adm-toggle input:checked + span::after { transform: translateX(20px); background: var(--red2); }
 
     /* BUTTONS */
     .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 9px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.18s; white-space: nowrap; font-family: var(--font); }
