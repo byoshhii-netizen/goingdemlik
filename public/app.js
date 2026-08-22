@@ -5223,6 +5223,14 @@ let playerRepeatOne = false;
 let shuffledIndices = [];      // shuffled order of indices
 let musicAdBypass = false;
 
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) return;
+  activePhotoAudio?.pause();
+  activeStoryAudio?.pause();
+  storyComposerAudio?.pause();
+  document.querySelectorAll('video').forEach(video => video.pause());
+});
+
 function playMusicAd(ad, onComplete) {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   let player = document.getElementById('global-music-player');
@@ -6180,6 +6188,19 @@ function bindPhotoFeed(feed) {
         if (count) count.textContent = String(Number(count.textContent) + 1);
       } catch (error) { toast(error.message || 'Yorum gönderilemedi', 'error'); }
     });
+    box.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!currentUser) return toast('Yorum beğenmek için giriş yapın.', 'error');
+      try {
+        const result = await api('/photos/comments/' + button.dataset.commentId + '/like', { method: 'POST' });
+        const count = button.querySelector('span');
+        const value = Math.max(0, Number(count?.textContent || 0) + (result.liked ? 1 : -1));
+        if (count) count.textContent = value;
+        button.classList.toggle('liked', result.liked);
+        button.querySelector('i').className = (result.liked ? 'fas' : 'far') + ' fa-heart';
+      } catch (error) { toast(error.message || 'Yorum beğenilemedi', 'error'); }
+    }));
   };
 
   feed.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
@@ -6272,7 +6293,7 @@ async function renderPhotoDetail(app, photoId) {
     app.innerHTML = `<div class="container page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
     const shell = app.querySelector('.photo-detail-shell');
     bindPhotoFeed(shell);
-    setupPhotoAudio(shell, { playImmediately: true });
+    setupPhotoAudio(shell, { disableAutoplay: true });
   } catch (error) {
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-image"></i><p>${escHtml(error.message || 'Fotoğraf bulunamadı')}</p></div></div>`;
   }
@@ -6291,10 +6312,7 @@ function setupPhotoAudio(feed, options = {}) {
   const play=card=>{const b=card.querySelector('.photo-song');if(!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.muted=muted;a.volume=volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();muted=!muted;localStorage.setItem('cigcig_photo_audio_muted',muted?'1':'0');if(activePhotoAudio){activePhotoAudio.muted=muted;activePhotoAudio.volume=volume;}syncMuteButtons();}));
   syncMuteButtons();
-  if (options.playImmediately) {
-    const firstPhoto = feed.querySelector('[data-photo-id]');
-    if (firstPhoto) play(firstPhoto);
-  }
+  if (options.disableAutoplay) return;
   const ratios = new Map();
   photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));

@@ -1999,6 +1999,16 @@ app.get('/api/admin/stories', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/admin/videos', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT id,title,is_reals,status,created_at FROM videos ORDER BY created_at DESC');
+    res.json(rows);
+  } catch (error) {
+    console.error('Admin video stats failed:', error.message);
+    res.status(500).json({ error: 'Video istatistikleri alınamadı' });
+  }
+});
+
 app.get('/api/admin/stories/:id/viewers', adminMiddleware, async (req, res) => {
   const { rows: story } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
@@ -4481,7 +4491,15 @@ app.get('*', (req, res) => {
 });
 
 initDb().then(() => {
-  app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
+  return query(`CREATE TABLE IF NOT EXISTS photo_comment_likes (
+    id BIGSERIAL PRIMARY KEY,
+    comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(comment_id, user_id)
+  )`).then(() => {
+    app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
+  });
 }).catch(err => {
   console.error('DB başlatma hatası:', err);
   process.exit(1);

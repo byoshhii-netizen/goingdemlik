@@ -301,11 +301,14 @@ async function renderDashboard(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   
   // Her isteği ayrı ayrı çek, biri patlarsa diğerleri etkilenmesin
-  const [users, forums, books, groups, logs] = await Promise.all([
+  const [users, forums, books, groups, photos, videos, stories, logs] = await Promise.all([
     adminApi('/users').catch(() => []),
     adminApi('/forums').catch(() => []),
     adminApi('/books').catch(() => []),
     adminApi('/groups').catch(() => []),
+    adminApi('/photos').catch(() => []),
+    adminApi('/videos').catch(() => []),
+    adminApi('/stories').catch(() => []),
     adminApi('/logs?limit=5').catch(() => []),
   ]);
 
@@ -340,6 +343,24 @@ async function renderDashboard(main) {
         <div class="adm-stat-icon" style="color:#fb923c"><i class="fas fa-users-cog"></i></div>
         <div class="adm-stat-num">${Array.isArray(groups) ? groups.length : 0}</div>
         <div class="adm-stat-label">Toplam Grup</div>
+      </div>
+      <div class="adm-stat-card">
+        <div class="adm-stat-glow" style="background:#ec4899"></div>
+        <div class="adm-stat-icon" style="color:#f472b6"><i class="fas fa-images"></i></div>
+        <div class="adm-stat-num">${Array.isArray(photos) ? photos.length : 0}</div>
+        <div class="adm-stat-label">Toplam Fotoğraf</div>
+      </div>
+      <div class="adm-stat-card">
+        <div class="adm-stat-glow" style="background:#06b6d4"></div>
+        <div class="adm-stat-icon" style="color:#22d3ee"><i class="fas fa-circle-play"></i></div>
+        <div class="adm-stat-num">${Array.isArray(videos) ? videos.filter(video => video.is_reals).length : 0}</div>
+        <div class="adm-stat-label">Toplam Reals</div>
+      </div>
+      <div class="adm-stat-card">
+        <div class="adm-stat-glow" style="background:#eab308"></div>
+        <div class="adm-stat-icon" style="color:#facc15"><i class="fas fa-clapperboard"></i></div>
+        <div class="adm-stat-num">${Array.isArray(stories) ? stories.length : 0}</div>
+        <div class="adm-stat-label">Aktif Hikaye</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
