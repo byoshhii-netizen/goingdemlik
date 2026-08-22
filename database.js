@@ -433,10 +433,46 @@ async function initDb() {
       description TEXT DEFAULT '',
       video_url TEXT NOT NULL,
       thumbnail_url TEXT DEFAULT '',
+      location TEXT DEFAULT '',
+      sound_name TEXT DEFAULT '',
+      allow_comments INTEGER DEFAULT 1,
+      show_likes INTEGER DEFAULT 1,
+      is_reals INTEGER DEFAULT 0,
+      like_count INTEGER DEFAULT 0,
+      comment_count INTEGER DEFAULT 0,
       slug TEXT UNIQUE,
       views INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS sound_name TEXT DEFAULT '';
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_reals INTEGER DEFAULT 0;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS like_count INTEGER DEFAULT 0;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS comment_count INTEGER DEFAULT 0;
+
+    CREATE TABLE IF NOT EXISTS video_likes (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(video_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS video_saves (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(video_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS video_comments (
+      id BIGSERIAL PRIMARY KEY,
+      video_id BIGINT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS dm_messages (

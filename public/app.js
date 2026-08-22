@@ -306,6 +306,11 @@ async function renderRealsFeed(app) {
       <div id="reals-list" class="reals-list"></div>
     </div>`;
 
+  if (!localStorage.getItem('cigcig_reals_intro_seen')) {
+    showModal('Reals', `<div class="reals-intro"><i class="fas fa-clapperboard"></i><p>Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.</p><button class="btn btn-primary" id="reals-intro-ok">Reals'a geç</button></div>`);
+    document.getElementById('reals-intro-ok')?.addEventListener('click', () => { localStorage.setItem('cigcig_reals_intro_seen', '1'); hideModal(); });
+  }
+
   // fetch reals
   let reals = [];
   try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
@@ -350,10 +355,13 @@ async function renderRealsFeed(app) {
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
         <div class="reals-meta">
           <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
+          ${r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : ''}
+          ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
           <div class="reals-desc">${escHtml(r.description||'')}</div>
           <div class="reals-actions">
-            <button class="btn btn-ghost like-btn"> <i class="fas fa-heart"></i> <span class="count">${r.like_count||0}</span></button>
-            <button class="btn btn-ghost comment-btn"> <i class="fas fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
+            ${r.show_likes !== 0 ? `<button class="btn btn-ghost like-btn"> <i class="far fa-heart"></i> <span class="count">${r.like_count||0}</span></button>` : ''}
+            <button class="btn btn-ghost comment-btn"> <i class="far fa-comment"></i> <span class="count">${r.comment_count||0}</span></button>
+            <button class="btn btn-ghost save-btn" title="Kaydet"><i class="far fa-bookmark"></i></button>
             <button class="btn btn-ghost resend-btn"> <i class="fas fa-retweet"></i></button>
             <button class="btn btn-ghost share-btn"> <i class="fas fa-share-alt"></i></button>
             <a href="/reals/${escHtml(r.slug)}" data-link class="btn btn-outline btn-sm view-detail-btn"><i class="fas fa-external-link-alt"></i> Detay</a>
@@ -366,10 +374,25 @@ async function renderRealsFeed(app) {
     items.forEach(it => {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
-      it.addEventListener('click', () => { if (vid.paused) vid.play(); else vid.pause(); });
+      let clickTimer = null;
+      it.addEventListener('click', event => {
+        if (event.target.closest('button,a')) return;
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
+      });
+      it.addEventListener('dblclick', event => {
+        if (event.target.closest('button,a')) return;
+        clearTimeout(clickTimer);
+        it.querySelector('.like-btn')?.click();
+      });
     });
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = Number(span.textContent||0)+1; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; const result = await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked); btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart'; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+    }));
+    listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/reals/' + btn.closest('.reals-item').dataset.slug); }));
+    listEl.querySelectorAll('.save-btn').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation(); const slug = btn.closest('.reals-item').dataset.slug;
+      try { const result = await api(`/video/${slug}/save`, { method: 'POST' }); btn.classList.toggle('active', result.saved); btn.querySelector('i').className = result.saved ? 'fas fa-bookmark' : 'far fa-bookmark'; } catch (error) { toast(error.message, 'error'); }
     }));
     listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
@@ -423,15 +446,21 @@ async function renderRealsFeed(app) {
 
   // wheel
   let wheelDeb = false;
-  window.addEventListener('wheel', e => {
+  const realsWheelHandler = e => {
     if (wheelDeb) return; wheelDeb = true; setTimeout(() => wheelDeb=false, 300);
     if (e.deltaY > 0) showIndex(idx+1); else showIndex(idx-1);
-  }, { passive: true });
+  };
+  listEl.addEventListener('wheel', realsWheelHandler, { passive: true });
 
   // touch
   let startY = null;
-  window.addEventListener('touchstart', e => { startY = e.touches[0].clientY; });
-  window.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (diff > 30) showIndex(idx+1); else if (diff < -30) showIndex(idx-1); startY = null; });
+  listEl.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+  listEl.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (Math.abs(diff) > 30) { e.preventDefault(); if (diff > 0) showIndex(idx+1); else showIndex(idx-1); } startY = null; }, { passive: false });
+  window.addEventListener('keydown', e => {
+    if (location.pathname !== '/reals') return;
+    if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); showIndex(idx+1); }
+    if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); showIndex(idx-1); }
+  });
 }
 
 
@@ -2627,20 +2656,27 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   try { videoSettings = await api('/video-settings'); } catch {}
   const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
-  showModal(existing ? 'Videoyu Düzenle' : 'Video Yükle', `
+  showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals Yükle' : 'Video Yükle'), `
     <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" /></div>
     <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="5">${escHtml(defaultDescription)}</textarea></div>
     <div class="form-group">
       <label>Video Dosyası</label>
       <input type="file" id="video-file" accept="video/*" />
+      <video id="video-upload-preview" controls muted playsinline style="display:none;width:100%;max-height:260px;object-fit:contain;border-radius:8px;margin-top:10px;background:#000"></video>
       ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
     </div>
     <div class="form-group">
       <label>Banner / Kapak</label>
       <input type="file" id="video-banner-file" accept="image/*" />
+      <img id="video-banner-preview" alt="Kapak önizleme" style="display:none;width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />
       ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
     </div>
+    <div class="form-row">
+      <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
+      <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
+    </div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
+    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label></div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
     <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
     <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
@@ -2653,13 +2689,21 @@ async function showNewVideoModal(existing = null, forceReals = false) {
 
   videoInput?.addEventListener('change', async () => {
     const file = videoInput.files[0];
-    if (!file || bannerInput?.files?.length) return;
+    if (!file) return;
+    const uploadPreview = $('#video-upload-preview');
+    if (uploadPreview) { uploadPreview.src = URL.createObjectURL(file); uploadPreview.style.display = 'block'; }
+    if (bannerInput?.files?.length) return;
     try {
       const generated = await generateVideoPoster(file);
       autoBannerFile = generated;
     } catch {
       autoBannerFile = null;
     }
+  });
+  bannerInput?.addEventListener('change', () => {
+    const file = bannerInput.files[0];
+    const preview = $('#video-banner-preview');
+    if (file && preview) { preview.src = URL.createObjectURL(file); preview.style.display = 'block'; }
   });
 
   $('#video-submit').addEventListener('click', async () => {
@@ -2711,7 +2755,10 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         description: description || '',
         video_url: videoUrl,
         banner_image: bannerImage,
+        location: $('#video-location').value.trim(),
+        sound_name: $('#video-sound').value.trim(),
         allow_comments: $('#video-comments').checked,
+        show_likes: $('#video-likes').checked,
         is_reals: $('#video-is-reals').checked
       };
       if (existing) {

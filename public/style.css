@@ -515,13 +515,20 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .video-ad-overlay { min-width: 140px; max-width: calc(100% - 24px); font-size: 12px; padding: 10px 12px; }
   /* Reals styles */
   .reals-container { position: relative; height: 100vh; }
-  .reals-list { position: relative; height: 100vh; }
-  .reals-item { width: 100%; height: 100vh; display:flex; align-items:flex-end; justify-content:flex-start; padding:16px; box-sizing:border-box; }
-  .reals-video { width:100%; height:100%; object-fit:cover; border-radius:0; }
-  .reals-meta { position:absolute; bottom:20px; left:16px; right:16px; color:#fff; }
+  .reals-list { position: relative; height: 100svh; touch-action: none; }
+  .reals-item { width: 100%; height: 100svh; display:flex; align-items:flex-end; justify-content:flex-start; padding:16px; box-sizing:border-box; background:#000; }
+  .reals-video { width:100%; height:100%; object-fit:contain; border-radius:0; background:#000; }
+  .reals-meta { position:absolute; bottom:24px; left:16px; right:16px; color:#fff; text-shadow:0 1px 3px #000; pointer-events:none; }
   .reals-user { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-  .reals-actions { display:flex; gap:8px; margin-top:8px; }
+  .reals-sound, .reals-location { font-size:12px; margin:4px 0; }
+  .reals-actions { display:flex; gap:8px; margin-top:8px; pointer-events:auto; }
+  .reals-actions .btn { color:#fff; text-shadow:none; }
+  .reals-actions .active { color:var(--accent-red2); }
 }
+
+.reals-intro { text-align:center; padding:18px 8px; }
+.reals-intro > i { font-size:42px; color:var(--accent-red2); margin-bottom:14px; }
+.reals-intro p { color:var(--text-secondary); line-height:1.6; margin:0 0 18px; }
 
 .book-info { padding: 16px; display: grid; gap: 8px; }
 .book-title { font-size: 18px; font-weight: 800; color: var(--text-primary); }
