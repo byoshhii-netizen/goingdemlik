@@ -15,6 +15,22 @@ R2_PUBLIC_URL=https://<public R2 domain>
 
 `R2_PUBLIC_URL` Reals videolarinin tarayicida oynatilabilmesi icin onerilir. R2 bucket veya custom domain uzerinden herkese acik bir public URL olmalidir.
 
+## R2 CORS
+
+Direct browser upload icin `reals-cigcig` bucket > Settings > CORS Policy alanina su kurali ekleyin. Production domaininiz farkliysa origin degerini ona gore degistirin.
+
+```json
+[
+	{
+		"AllowedOrigins": ["https://cigcig.xyz", "https://www.cigcig.xyz"],
+		"AllowedMethods": ["PUT"],
+		"AllowedHeaders": ["Content-Type"],
+		"ExposeHeaders": ["ETag"],
+		"MaxAgeSeconds": 3600
+	}
+]
+```
+
 ## Fotograflar ve diger medya
 
 Cloudinary kullaniyorsaniz asagidakilerden birini tanimlayin:

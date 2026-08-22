@@ -2756,7 +2756,13 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       let videoUrl = existing?.video_url || '';
       let bannerImage = existing?.banner_image || '';
       if (videoFile) {
-        const fd = new FormData(); fd.append('file', videoFile);
+        let uploadTarget = '/api/upload';
+        let uploadUrl = '';
+        if (isReals) {
+          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: videoFile.type || 'video/mp4' }) });
+          uploadTarget = signed.public_url;
+          uploadUrl = signed.upload_url;
+        }
         const xhr = new XMLHttpRequest();
         xhr.upload.addEventListener('progress', e => {
           if (e.lengthComputable) {
@@ -2767,16 +2773,21 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         });
         const uploadResult = await new Promise((resolve, reject) => {
           xhr.addEventListener('load', () => {
-            try { const data = JSON.parse(xhr.responseText); if (xhr.status >= 400) reject(new Error(data.error || 'Yükleme hatası')); else resolve(data); } catch (e) { reject(new Error('Yanıt geçersiz')); }
+            if (xhr.status >= 200 && xhr.status < 300) {
+              if (isReals) return resolve({});
+              try { return resolve(JSON.parse(xhr.responseText)); } catch { return reject(new Error('Yanıt geçersiz')); }
+            }
+            try { const data = JSON.parse(xhr.responseText); reject(new Error(data.error || 'Yükleme hatası')); } catch { reject(new Error('Yükleme hatası')); }
           });
           xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
           xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
-          xhr.open('POST', isReals ? '/api/upload-video' : '/api/upload');
+          xhr.open(isReals ? 'PUT' : 'POST', isReals ? uploadUrl : uploadTarget);
           xhr.timeout = 15 * 60 * 1000;
-          xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
-          xhr.send(fd);
+          if (isReals) xhr.setRequestHeader('Content-Type', videoFile.type || 'video/mp4');
+          else xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
+          xhr.send(isReals ? videoFile : (() => { const fd = new FormData(); fd.append('file', videoFile); return fd; })());
         });
-        videoUrl = uploadResult.url;
+        videoUrl = isReals ? uploadTarget : uploadResult.url;
       }
       if (bannerFile) {
         const fd = new FormData(); fd.append('file', bannerFile);

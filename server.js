@@ -10,6 +10,7 @@ const rateLimit = require('express-rate-limit');
 const cloudinary = require('cloudinary').v2;
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { query, initDb } = require('./database');
 
 const app = express();
@@ -1741,6 +1742,22 @@ app.post('/api/upload-video', authMiddleware, (req, res, next) => {
     res.json({ url });
   } catch (error) {
     res.status(500).json({ error: 'Video yüklenemedi: ' + error.message });
+  }
+});
+
+app.post('/api/reals/upload-url', authMiddleware, async (req, res) => {
+  if (!USE_R2) return res.status(503).json({ error: 'Reals R2 depolama ayarlanmamış.' });
+  const contentType = String(req.body?.content_type || 'video/mp4');
+  if (!contentType.startsWith('video/')) return res.status(400).json({ error: 'Geçersiz video türü.' });
+  const extension = path.extname(String(req.body?.filename || '')).toLowerCase() || '.mp4';
+  const key = `reals/${uuidv4()}${extension}`;
+  try {
+    const command = new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ContentType: contentType });
+    const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 900 });
+    const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
+    res.json({ upload_url: uploadUrl, public_url: `${publicBase}/${key}` });
+  } catch (error) {
+    res.status(500).json({ error: 'Reals yükleme bağlantısı oluşturulamadı: ' + error.message });
   }
 });
 
