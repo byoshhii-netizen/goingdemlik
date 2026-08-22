@@ -314,6 +314,8 @@ async function renderDashboard(main) {
 
   const banned = Array.isArray(users) ? users.filter(u => u.banned).length : 0;
   const admins = Array.isArray(users) ? users.filter(u => u.is_admin).length : 0;
+  const activeStories = Array.isArray(stories) ? stories.filter(story => !story.is_suspended && new Date(story.expires_at) > new Date()).length : 0;
+  const inactiveStories = Array.isArray(stories) ? stories.length - activeStories : 0;
 
   main.innerHTML = `
     <div class="adm-section-header">
@@ -359,8 +361,14 @@ async function renderDashboard(main) {
       <div class="adm-stat-card">
         <div class="adm-stat-glow" style="background:#eab308"></div>
         <div class="adm-stat-icon" style="color:#facc15"><i class="fas fa-clapperboard"></i></div>
-        <div class="adm-stat-num">${Array.isArray(stories) ? stories.length : 0}</div>
+        <div class="adm-stat-num">${activeStories}</div>
         <div class="adm-stat-label">Aktif Hikaye</div>
+      </div>
+      <div class="adm-stat-card">
+        <div class="adm-stat-glow" style="background:#ef4444"></div>
+        <div class="adm-stat-icon" style="color:#f87171"><i class="fas fa-eye-slash"></i></div>
+        <div class="adm-stat-num">${inactiveStories}</div>
+        <div class="adm-stat-label">Pasif Hikaye</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">

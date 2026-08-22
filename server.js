@@ -1601,6 +1601,16 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   res.json({ user: sanitizeUser(user), forums, books, groups, photos, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
+app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
+  if (req.user.username.toLowerCase() !== String(req.params.username).toLowerCase()) return res.status(403).json({ error: 'Kaydedilenler yalnızca size görünür.' });
+  const { rows } = await query(`SELECT v.*, u.username, u.avatar, u.avatar_removed,
+    (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
+    (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
+    FROM video_saves s JOIN videos v ON v.id=s.video_id LEFT JOIN users u ON u.id=v.user_id
+    WHERE s.user_id=$1 ORDER BY s.created_at DESC`, [req.user.id]);
+  res.json(rows);
+});
+
 app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT profile_visibility FROM users WHERE id=$1', [req.user.id]);
   let visibility = {};
@@ -4491,7 +4501,19 @@ app.get('*', (req, res) => {
 });
 
 initDb().then(() => {
-  return query(`CREATE TABLE IF NOT EXISTS photo_comment_likes (
+  return query(`CREATE TABLE IF NOT EXISTS photo_likes (
+    id BIGSERIAL PRIMARY KEY,
+    photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(photo_id, user_id)
+  ); CREATE TABLE IF NOT EXISTS photo_comments (
+    id BIGSERIAL PRIMARY KEY,
+    photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+  ); CREATE TABLE IF NOT EXISTS photo_comment_likes (
     id BIGSERIAL PRIMARY KEY,
     comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
