@@ -70,7 +70,7 @@ body[data-theme="gold"] {
 .stories-strip { width: 100%; margin-bottom: 16px; padding: 10px 0 14px; border-bottom: 1px solid var(--border); overflow: hidden; }
 .stories-scroll { display: flex; gap: 14px; overflow-x: auto; padding: 2px 2px 5px; scrollbar-width: none; }
 .stories-scroll::-webkit-scrollbar { display: none; }
-.story-user, .story-add { flex: 0 0 68px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--text-primary); padding: 0; font: inherit; }
+.story-user, .story-add { flex: 0 0 68px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--text-primary); padding: 0; font: inherit; -webkit-tap-highlight-color: transparent; }
 .story-own-wrap { position: relative; flex: 0 0 68px; width: 68px; }
 .story-own-wrap .story-own { width: 68px; }
 .story-own-wrap.no-story .story-ring { background: transparent; padding: 0; }
@@ -86,9 +86,10 @@ body[data-theme="gold"] {
 .story-user.viewed .story-ring { background: var(--border-hover); }
 .story-add > span { background: var(--bg-card2); border: 1px solid var(--border); color: var(--accent-red); font-size: 18px; }
 .story-viewer { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.story-tap-zone { position: absolute; top: 28px; bottom: 105px; width: 50%; z-index: 4; cursor: pointer; }
+.story-tap-zone { position: absolute; top: 28px; bottom: 105px; width: 50%; z-index: 4; cursor: pointer; border: 0; outline: 0; padding: 0; background: transparent; -webkit-appearance: none; appearance: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .story-tap-left { left: 0; }
 .story-tap-right { right: 0; }
+.story-tap-zone:focus, .story-tap-zone:active { outline: 0; background: transparent; box-shadow: none; }
 .story-fullscreen-overlay { padding: 0 !important; align-items: stretch !important; }
 .story-fullscreen-overlay .modal { width: 100vw; max-width: none; height: 100vh; max-height: none; border: 0; border-radius: 0; background: #000; }
 .story-fullscreen-overlay .modal-header { position: absolute; top: 10px; left: 12px; right: 12px; z-index: 8; padding: 0; margin: 0; }
