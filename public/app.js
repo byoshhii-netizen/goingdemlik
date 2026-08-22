@@ -6063,7 +6063,7 @@ async function loadStoriesBar(container) {
         $('#story-edit')?.addEventListener('click', () => showStoryEditModal(story, render));
         $('#story-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; try { await api('/stories/' + storyKey, { method: 'DELETE' }); hideModal(); toast('Hikaye silindi'); loadStoriesBar(container); } catch (error) { toast(error.message, 'error'); } });
         $('#story-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + storyKey + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; render(); } catch (error) { toast(error.message, 'error'); } });
-        if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); const volume = document.createElement('input'); volume.type = 'range'; volume.min = '0'; volume.max = '100'; volume.value = '80'; volume.className = 'story-volume'; volume.title = 'Hikaye sesi'; volume.setAttribute('aria-label', 'Hikaye sesi'); $('#story-song-play')?.appendChild(volume); volume.addEventListener('input', event => { if (activeStoryAudio) activeStoryAudio.volume = Number(event.target.value) / 100; }); }
+        if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); }
         $('#story-reply-open')?.addEventListener('click', () => { $('#story-reply-box').hidden = !$('#story-reply-box').hidden; $('#story-reply-input')?.focus(); });
         $('#story-reply-send')?.addEventListener('click', async () => { const input = $('#story-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + storyKey + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt hikaye sahibine gönderildi'); hideModal(); } catch (error) { toast(error.message, 'error'); } });
         $('#story-tap-left')?.addEventListener('click', event => { event.stopPropagation(); if (storyIndex > 0) { storyIndex--; render(); } });
@@ -6138,7 +6138,7 @@ async function renderStoryRoute(app, storyId) {
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
     $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
-    if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); $('#story-route-volume')?.addEventListener('input', e => { if (activeStoryAudio) activeStoryAudio.volume = Number(e.target.value) / 100; }); }
+    if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); }
     api('/stories/' + (story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
   } catch (error) {
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-circle-exclamation"></i><p>${escHtml(error.message || 'Hikaye bulunamadı')}</p></div></div>`;
@@ -6167,7 +6167,7 @@ function bindPhotoFeed(feed) {
 
   const renderComments = async (c, box) => {
     const cs = await api('/photos/' + c.dataset.photoId + '/comments');
-    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<div class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz"/><button class="btn btn-primary btn-sm photo-comment-send">Gönder</button></div>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
+    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<div class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz"/><button class="btn btn-primary btn-sm photo-comment-send">Gönder</button></div>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
     box.querySelector('.photo-comment-send')?.addEventListener('click', async () => {
       const input = box.querySelector('input');
       if (!input?.value.trim()) return;
@@ -6179,6 +6179,20 @@ function bindPhotoFeed(feed) {
       } catch (error) { toast(error.message || 'Yorum gönderilemedi', 'error'); }
     });
   };
+
+  feed.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!currentUser) return toast('Yorum beğenmek için giriş yapın.', 'error');
+    try {
+      const result = await api('/photos/comments/' + button.dataset.commentId + '/like', { method: 'POST' });
+      const count = button.querySelector('span');
+      const value = Math.max(0, Number(count?.textContent || 0) + (result.liked ? 1 : -1));
+      if (count) count.textContent = value;
+      button.classList.toggle('liked', result.liked);
+      button.querySelector('i').className = (result.liked ? 'fas' : 'far') + ' fa-heart';
+    } catch (error) { toast(error.message || 'Yorum beğenilemedi', 'error'); }
+  }));
 
   feed.querySelectorAll('.photo-ad-card').forEach(x => x.onclick = () => {
     const id = x.dataset.adId;
@@ -6256,17 +6270,18 @@ async function renderPhotoDetail(app, photoId) {
     app.innerHTML = `<div class="container page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
     const shell = app.querySelector('.photo-detail-shell');
     bindPhotoFeed(shell);
-    setupPhotoAudio(shell);
+    setupPhotoAudio(shell, { playImmediately: true });
   } catch (error) {
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-image"></i><p>${escHtml(error.message || 'Fotoğraf bulunamadı')}</p></div></div>`;
   }
 }
 
 let activePhotoAudio=null, photoAudioObserver=null;
-function setupPhotoAudio(feed) {
+function setupPhotoAudio(feed, options = {}) {
   photoAudioObserver?.disconnect(); activePhotoAudio?.pause(); activePhotoAudio=null;
   let muted=localStorage.getItem('cigcig_photo_audio_muted');
   muted=muted===null ? true : muted==='1';
+  if (options.playImmediately) muted = false;
   let volume=Math.min(1,Math.max(0,Number(localStorage.getItem('cigcig_photo_audio_volume')||'0.8')));
   document.getElementById('photo-audio-control')?.remove();
   const stop=()=>{activePhotoAudio?.pause();activePhotoAudio=null;};
@@ -6274,6 +6289,10 @@ function setupPhotoAudio(feed) {
   const play=card=>{const b=card.querySelector('.photo-song');if(!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.muted=muted;a.volume=volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();muted=!muted;localStorage.setItem('cigcig_photo_audio_muted',muted?'1':'0');if(activePhotoAudio){activePhotoAudio.muted=muted;activePhotoAudio.volume=volume;}syncMuteButtons();}));
   syncMuteButtons();
+  if (options.playImmediately) {
+    const firstPhoto = feed.querySelector('[data-photo-id]');
+    if (firstPhoto) play(firstPhoto);
+  }
   const ratios = new Map();
   photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));

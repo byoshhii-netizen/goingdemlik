@@ -2053,7 +2053,10 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
   const userId = req.user ? req.user.id : 0;
   const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  const { rows } = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
+  const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
+    (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
+    EXISTS(SELECT 1 FROM photo_comment_likes pcl2 WHERE pcl2.comment_id=pc.id AND pcl2.user_id=$2) AS liked
+    FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
   res.json(rows);
 });
 
@@ -2083,6 +2086,19 @@ app.delete('/api/photos/comments/:id', authMiddleware, async (req, res) => {
   if (comment.user_id !== req.user.id && photoOwner !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yorum silme yetkiniz yok' });
   await query('DELETE FROM photo_comments WHERE id=$1', [commentId]);
   res.json({ ok: true });
+});
+
+app.post('/api/photos/comments/:id/like', authMiddleware, async (req, res) => {
+  const commentId = req.params.id;
+  const { rows: existing } = await query('SELECT id FROM photo_comment_likes WHERE comment_id=$1 AND user_id=$2', [commentId, req.user.id]);
+  if (existing.length) {
+    await query('DELETE FROM photo_comment_likes WHERE id=$1', [existing[0].id]);
+    return res.json({ liked: false });
+  }
+  const { rows: comment } = await query('SELECT id FROM photo_comments WHERE id=$1', [commentId]);
+  if (!comment.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  await query('INSERT INTO photo_comment_likes (comment_id,user_id) VALUES ($1,$2)', [commentId, req.user.id]);
+  res.json({ liked: true });
 });
 
 // Admin: manage photos

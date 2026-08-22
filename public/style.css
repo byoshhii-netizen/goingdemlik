@@ -103,12 +103,24 @@ body[data-theme="gold"] {
 .story-progress span { height: 3px; flex: 1; border-radius: 3px; background: var(--border); }
 .story-progress span.active { background: var(--accent-red); }
 .story-viewer-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.story-fullscreen-overlay .story-viewer-actions { order: 2; }
+.story-fullscreen-overlay .story-song { order: 3; }
+.story-fullscreen-overlay .story-owner-hint { order: 4; }
+.story-fullscreen-overlay .story-reply-box { order: 5; }
 .story-like.active { color: var(--accent-red2); }
 .story-song, .story-selected-song { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card2); color: var(--text-primary); text-align: left; }
+.story-fullscreen-overlay .story-song { width: min(100%, 280px); padding: 5px 8px; gap: 7px; border-radius: 7px; opacity: .85; }
+.story-fullscreen-overlay .story-song img { width: 24px; height: 24px; border-radius: 4px; }
+.story-fullscreen-overlay .story-song b { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.story-fullscreen-overlay .story-song small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .story-song { cursor: pointer; }
 .story-song img, .story-selected-song img { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; background: var(--bg-card); }
 .story-song span, .story-selected-song div { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .story-song small, .story-selected-song small, .story-song-option small { color: var(--text-muted); font-size: 11px; }
+.story-song-compact { width: min(100%, 280px); padding: 5px 8px; margin: 0 auto; gap: 7px; border-radius: 7px; opacity: .85; }
+.story-song-compact img { width: 24px; height: 24px; border-radius: 4px; }
+.story-song-compact b { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.story-song-compact small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .story-media-preview, .photo-file-preview { margin: 10px 0 14px; text-align: center; }
 .story-media-preview img, .story-media-preview video, .photo-file-preview img { max-width: 100%; max-height: 280px; border-radius: 10px; object-fit: contain; background: #000; }
 .story-song-list { max-height: 220px; overflow-y: auto; margin-top: 8px; display: grid; gap: 5px; }
@@ -117,7 +129,7 @@ body[data-theme="gold"] {
 .story-song-option img, .story-song-cover { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 5px; object-fit: cover; background: var(--bg-card); color: var(--text-muted); }
 .story-song-option span:not(.story-song-cover) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .story-song-option-play { color: var(--accent-red2); }
-.story-volume, .story-route-song input { width: 90px; min-height: 0; padding: 0; accent-color: var(--accent-red); }
+.story-volume, .story-route-song input { display: none; }
 .story-route { position: relative; max-width: 620px; margin: 0 auto; padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 .story-route > img, .story-route > video { width: 100%; max-height: 72vh; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
 .story-route-media { position: relative; width: min(100%, 760px); height: calc(100svh - 190px); display: flex; align-items: center; justify-content: center; }
@@ -131,11 +143,19 @@ body[data-theme="gold"] {
 .story-route-head small, .story-route-note { color: var(--text-muted); font-size: 12px; }
 .story-route > p { margin: 12px 0; }
 .story-route-song { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.story-route-song { width: min(100%, 300px); margin: 10px auto 0; padding: 6px 9px; gap: 7px; }
+.story-route-song img { width: 26px; height: 26px; border-radius: 4px; }
+.story-route-song b { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.story-route-song small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .story-route-song img { width: 42px; height: 42px; border-radius: 6px; object-fit: cover; background: var(--bg-card2); }
 .story-route-song span { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .story-route-song small { color: var(--text-muted); font-size: 11px; }
 .story-route-note { margin-top: 14px; }
 .story-route-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.story-route-actions { order: 2; }
+.story-route-song { order: 3; }
+.story-route-reply { order: 4; }
+.story-route-note { order: 5; }
 .story-route-reply { display: flex; width: min(100%, 520px); gap: 7px; margin-top: 8px; }
 .story-route-reply input { flex: 1; min-width: 0; }
 .story-route { max-width: none; min-height: calc(100svh - 90px); margin: -20px auto 0; border: 0; border-radius: 0; background: #000; display: flex; flex-direction: column; align-items: center; }
@@ -736,6 +756,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .photo-comment-box { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
 .photo-comments { display:grid; gap:7px; margin-bottom:10px; }
 .photo-comments p { padding:8px 10px; margin:0; background:var(--bg-card2); border-radius:8px; overflow-wrap:anywhere; }
+.photo-comment-row { display:flex; align-items:center; gap:4px; }
+.photo-comment-row p { flex:1; min-width:0; }
+.photo-comment-like { flex:0 0 auto; padding:5px 7px; color:var(--text-muted); }
+.photo-comment-like.liked { color:#ef4444; }
 .photo-comment-form { display:flex; gap:8px; }.photo-comment-form input { flex:1; min-width:0; }
 #photo-audio-control { position:fixed; right:20px; bottom:82px; z-index:90; display:flex; align-items:center; gap:8px; padding:7px; border:1px solid var(--border); border-radius:22px; background:var(--bg-card); box-shadow:0 8px 24px rgba(0,0,0,.28); }
 #photo-audio-control input { width:96px; accent-color:var(--accent-red); }

@@ -474,6 +474,13 @@ async function initDb() {
       content TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS photo_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(comment_id, user_id)
+    );
 
     CREATE TABLE IF NOT EXISTS dm_messages (
       id BIGSERIAL PRIMARY KEY,
