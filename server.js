@@ -37,6 +37,13 @@ const r2Client = USE_R2 ? new S3Client({
   endpoint: R2_ENDPOINT,
   credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY }
 }) : null;
+const R2_CSP_ORIGINS = [R2_ENDPOINT, process.env.R2_PUBLIC_URL]
+  .map(value => { try { return new URL(value).origin; } catch { return ''; } })
+  .filter(Boolean);
+try {
+  const endpointUrl = new URL(R2_ENDPOINT);
+  if (process.env.R2_BUCKET_NAME) R2_CSP_ORIGINS.push(`${endpointUrl.protocol}//${process.env.R2_BUCKET_NAME}.${endpointUrl.host}`);
+} catch {}
 
 // Fallback: local disk (Railway volume veya geliştirme)
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
@@ -68,7 +75,7 @@ app.use((req, res, next) => {
     "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; " +
     "img-src 'self' data: https: blob:; " +
     "media-src 'self' https: blob:; " +
-    "connect-src 'self' https://api.spotify.com https://pagead2.googlesyndication.com; " +
+    "connect-src 'self' https://api.spotify.com https://pagead2.googlesyndication.com " + R2_CSP_ORIGINS.join(' ') + "; " +
     "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;"
   );
   // Statik dosyalarda source map'leri engelle
