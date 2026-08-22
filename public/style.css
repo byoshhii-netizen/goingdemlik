@@ -528,6 +528,16 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 
 .reals-intro { text-align:center; padding:18px 8px; }
 .reals-intro > i { font-size:42px; color:var(--accent-red2); margin-bottom:14px; }
+.video-upload-notice { position:fixed; right:16px; bottom:18px; z-index:10000; width:min(300px,calc(100vw - 32px)); padding:12px 14px; border:1px solid var(--border-hover); border-radius:12px; background:rgba(12,12,12,.96); color:var(--text-primary); box-shadow:0 8px 28px rgba(0,0,0,.45); animation:fadeDown .2s ease; }
+.video-upload-notice-head { display:flex; align-items:center; gap:8px; font-size:12px; }
+.video-upload-notice-head i { color:var(--accent-red2); }
+.video-upload-notice-head span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.video-upload-notice-head b { font-size:12px; color:var(--accent-red2); }
+.video-upload-notice-bar { height:5px; margin-top:9px; overflow:hidden; border-radius:5px; background:var(--bg-card2); }
+.video-upload-notice-bar i { display:block; width:0; height:100%; border-radius:inherit; background:var(--grad-red); transition:width .2s ease; }
+.video-upload-notice.done .video-upload-notice-bar i { background:#36c275; }
+.video-upload-notice.error { border-color:#b94a48; }
+.video-upload-notice.error .video-upload-notice-bar i { background:#b94a48; }
 .reals-intro p { color:var(--text-secondary); line-height:1.6; margin:0 0 18px; }
 
 .book-info { padding: 16px; display: grid; gap: 8px; }

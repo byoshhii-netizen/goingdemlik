@@ -281,7 +281,7 @@ const storage = USE_CLOUDINARY
     });
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB (audio için)
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB (Reals video için)
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
     const allowedVideos = ['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'];

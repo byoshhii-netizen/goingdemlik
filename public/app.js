@@ -307,7 +307,7 @@ async function renderRealsFeed(app) {
     </div>`;
 
   if (!localStorage.getItem('cigcig_reals_intro_seen')) {
-    showModal('Reals', `<div class="reals-intro"><i class="fas fa-clapperboard"></i><p>Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.</p><button class="btn btn-primary" id="reals-intro-ok">Reals'a geç</button></div>`);
+    showModal('Reals', `<div class="reals-intro"><i class="fab fa-instagram"></i><p>Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.</p><button class="btn btn-primary" id="reals-intro-ok">Reals'a geç</button></div>`);
     document.getElementById('reals-intro-ok')?.addEventListener('click', () => { localStorage.setItem('cigcig_reals_intro_seen', '1'); hideModal(); });
   }
 
@@ -2654,6 +2654,22 @@ function videoCardHTML(v) {
   </div>`;
 }
 
+function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyor') {
+  let notice = document.getElementById('video-upload-notice');
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.id = 'video-upload-notice';
+    notice.className = 'video-upload-notice';
+    notice.innerHTML = '<div class="video-upload-notice-head"><i class="fas fa-cloud-arrow-up"></i><span></span><b></b></div><div class="video-upload-notice-bar"><i></i></div>';
+    document.body.appendChild(notice);
+  }
+  notice.className = `video-upload-notice ${state}`;
+  notice.querySelector('span').textContent = message;
+  notice.querySelector('b').textContent = state === 'error' ? '!' : `${percent}%`;
+  notice.querySelector('.video-upload-notice-bar i').style.width = `${state === 'error' ? 100 : percent}%`;
+  if (state === 'done') setTimeout(() => notice.remove(), 5000);
+}
+
 async function showNewVideoModal(existing = null, forceReals = false) {
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   try { videoSettings = await api('/video-settings'); } catch {}
@@ -2664,7 +2680,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     <div class="form-group">
       <label>Video Dosyası</label>
       <input type="file" id="video-file" accept="video/*" />
-      <video id="video-upload-preview" controls muted playsinline style="display:none;width:100%;max-height:260px;object-fit:contain;border-radius:8px;margin-top:10px;background:#000"></video>
+      <video id="video-upload-preview" controls muted playsinline style="display:none;width:100%;max-height:420px;aspect-ratio:9/16;object-fit:contain;border-radius:8px;margin-top:10px;background:#000"></video>
       ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
     </div>
     <div class="form-group">
@@ -2715,10 +2731,17 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     const bannerFile = $('#video-banner-file').files[0];
     if (!title) { $('#video-error').textContent = 'Başlık zorunlu'; return; }
     if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
+    if (!existing && videoFile.size > 100 * 1024 * 1024) { $('#video-error').textContent = 'Reals video sınırı 100 MB.'; return; }
 
     const submitBtn = $('#video-submit');
+    const uploadFields = {
+      title, description, location: $('#video-location').value.trim(), sound_name: $('#video-sound').value.trim(),
+      allow_comments: $('#video-comments').checked, show_likes: $('#video-likes').checked, is_reals: $('#video-is-reals').checked
+    };
     submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
     const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
+    updateVideoUploadNotice('uploading', 0, forceReals ? 'Reals yükleniyor' : 'Video yükleniyor');
+    hideModal();
 
     try {
       let videoUrl = existing?.video_url || '';
@@ -2730,6 +2753,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           if (e.lengthComputable) {
             const pct = Math.round((e.loaded / e.total) * 100);
             progress.innerHTML = `<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor... ${pct}%</div><div style="margin-top:6px;background:var(--bg-card2);height:8px;border-radius:999px;overflow:hidden"><div style="height:100%;background:var(--grad-red);width:${pct}%"></div></div>`;
+            updateVideoUploadNotice('uploading', pct, forceReals ? 'Reals yükleniyor' : 'Video yükleniyor');
           }
         });
         const uploadResult = await new Promise((resolve, reject) => {
@@ -2737,7 +2761,9 @@ async function showNewVideoModal(existing = null, forceReals = false) {
             try { const data = JSON.parse(xhr.responseText); if (xhr.status >= 400) reject(new Error(data.error || 'Yükleme hatası')); else resolve(data); } catch (e) { reject(new Error('Yanıt geçersiz')); }
           });
           xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
+          xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
           xhr.open('POST', '/api/upload');
+          xhr.timeout = 15 * 60 * 1000;
           xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
           xhr.send(fd);
         });
@@ -2753,15 +2779,15 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         bannerImage = bannerResult.url;
       }
       const payload = {
-        title,
-        description: description || '',
+        title: uploadFields.title,
+        description: uploadFields.description || '',
         video_url: videoUrl,
         banner_image: bannerImage,
-        location: $('#video-location').value.trim(),
-        sound_name: $('#video-sound').value.trim(),
-        allow_comments: $('#video-comments').checked,
-        show_likes: $('#video-likes').checked,
-        is_reals: $('#video-is-reals').checked
+        location: uploadFields.location,
+        sound_name: uploadFields.sound_name,
+        allow_comments: uploadFields.allow_comments,
+        show_likes: uploadFields.show_likes,
+        is_reals: uploadFields.is_reals
       };
       if (existing) {
         await api('/video/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
@@ -2770,11 +2796,14 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         const created = await api('/videos', { method: 'POST', body: JSON.stringify(payload) });
         const successMs = Math.max(1000, parseInt(videoSettings.uploadSuccessDuration || 3) * 1000);
         toast(videoSettings.uploadSuccessText || 'YÜKLENDİ', 'success', successMs);
-        hideModal(); navigate('/video/' + created.slug); return;
+        updateVideoUploadNotice('done', 100, forceReals ? 'Reals hazır' : 'Video hazır');
+        return;
       }
-      hideModal(); renderRoute(location.pathname);
+      updateVideoUploadNotice('done', 100, 'Video güncellendi');
+      renderRoute(location.pathname);
     } catch (e) {
-      $('#video-error').textContent = e.message;
+      updateVideoUploadNotice('error', 100, e.message || 'Yükleme başarısız');
+      toast(e.message || 'Yükleme başarısız', 'error');
     } finally {
       submitBtn.disabled = false; submitBtn.innerHTML = existing ? 'Güncelle' : 'Yükle';
     }
