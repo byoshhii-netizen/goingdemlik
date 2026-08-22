@@ -76,11 +76,12 @@ body[data-theme="gold"] {
 .story-own-wrap.no-story .story-ring { background: transparent; padding: 0; }
 .story-own-wrap.no-story .story-ring img, .story-own-wrap.no-story .story-ring i { border: 1px solid var(--border); }
 .story-own-wrap.has-story .story-ring { background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
+.story-own-wrap.viewed .story-ring, .story-user.viewed .story-ring { background: var(--border-hover) !important; }
 .story-add-corner { position: absolute; right: 3px; bottom: 17px; width: 22px; height: 22px; padding: 0; border: 2px solid var(--bg-primary); border-radius: 50%; display: grid; place-items: center; background: var(--accent-red); color: #fff; font-size: 11px; z-index: 2; }
 .story-own-wrap.no-story .story-add-corner { background: var(--grad-red) !important; color: var(--accent-contrast) !important; }
 .story-user small, .story-add small { max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); }
-.story-ring, .story-add > span { width: 58px !important; height: 58px !important; min-width: 58px; max-width: 58px; flex: 0 0 58px; aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden; border-radius: 50%; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
-.story-ring img, .story-ring i { width: 100% !important; height: 100% !important; min-width: 0; max-width: none; display: grid; place-items: center; border-radius: 50%; object-fit: cover !important; object-position: center; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); }
+.story-ring, .story-add > span { width: 58px !important; height: 58px !important; min-width: 58px !important; max-width: 58px !important; min-height: 58px !important; max-height: 58px !important; flex: 0 0 58px !important; aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden; border-radius: 50% !important; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
+.story-ring img, .story-ring i { width: 100% !important; height: 100% !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; display: grid; place-items: center; border-radius: 50% !important; object-fit: cover !important; object-position: center; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); }
 .story-user.viewed { opacity: .48; filter: saturate(.25); }
 .story-user.viewed .story-ring { background: var(--border-hover); }
 .story-add > span { background: var(--bg-card2); border: 1px solid var(--border); color: var(--accent-red); font-size: 18px; }
@@ -94,8 +95,8 @@ body[data-theme="gold"] {
 .story-fullscreen-overlay .modal-header h3 { display: none; }
 .story-fullscreen-overlay .modal-body { height: 100%; padding: 18px 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .story-fullscreen-overlay .story-viewer { width: 100%; height: 100%; justify-content: center; gap: 10px; }
-.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: 100%; max-width: 100%; height: min(82vh, 820px); max-height: none; object-fit: contain; border-radius: 0; background: #000; }
-.story-viewer video, .story-viewer > img { width: min(100%, 420px); max-height: 68vh; object-fit: contain; border-radius: var(--radius-sm); background: #000; }
+.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: min(100%, 760px); max-width: 100%; height: min(72vh, 680px); min-height: 240px; max-height: 680px; object-fit: contain; border-radius: 0; background: #000; }
+.story-viewer video, .story-viewer > img { width: min(100%, 420px) !important; height: min(68vh, 560px) !important; min-height: 240px; max-height: 560px; aspect-ratio: 9 / 16; object-fit: contain !important; border-radius: var(--radius-sm); background: #000; }
 .story-viewer p { width: 100%; color: var(--text-primary); text-align: center; }
 .story-progress { display: flex; gap: 4px; width: 100%; }
 .story-progress span { height: 3px; flex: 1; border-radius: 3px; background: var(--border); }
