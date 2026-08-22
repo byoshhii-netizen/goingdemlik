@@ -5887,18 +5887,9 @@ async function loadStoriesBar(container) {
       return Number(aViewed) - Number(bViewed);
     });
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? '<button type="button" class="story-add" id="story-add-btn"><span><i class="fas fa-plus"></i></span><small>Hikayen</small></button>' : ''}${visibleGroups.map((group, index) => `<button type="button" class="story-user" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
-    const ownGroupIndex = currentUser ? visibleGroups.findIndex(group => group.user_id === currentUser.id) : -1;
-    if (ownGroupIndex >= 0) {
-      const ownButton = container.querySelector(`[data-story-group="${ownGroupIndex}"]`);
-      const addButton = container.querySelector('#story-add-btn');
-      if (ownButton) {
-        ownButton.classList.add('story-add', 'story-owner-story');
-        ownButton.classList.remove('story-user');
-        ownButton.querySelector('small').textContent = 'Hikayen';
-        ownButton.parentElement.prepend(ownButton);
-      }
-    }
+    const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
+    const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
       const group = groups[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
@@ -5924,7 +5915,7 @@ async function loadStoriesBar(container) {
       render();
     };
     container.querySelectorAll('[data-story-group]').forEach(button => button.addEventListener('click', () => {
-      const group = visibleGroups[Number(button.dataset.storyGroup)];
+      const group = button.dataset.storyGroup === '-1' ? ownGroup : otherGroups[Number(button.dataset.storyGroup)];
       const story = group?.stories?.find(item => !item.viewed);
       if (story) navigate('/hikaye/' + encodeURIComponent(story.public_id || story.id));
     }));
@@ -5943,6 +5934,8 @@ function showStoryUploadModal() {
   $('#story-save').addEventListener('click', async event => {
     const file = $('#story-media').files[0];
     if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) { $('#story-error').textContent = 'Sadece fotoğraf veya video yükleyebilirsiniz.'; return; }
+    if (file.size > 50 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 50 MB sınırını geçemez.'; return; }
     event.currentTarget.disabled = true;
     event.currentTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }

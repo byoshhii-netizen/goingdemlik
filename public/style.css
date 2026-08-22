@@ -71,6 +71,9 @@ body[data-theme="gold"] {
 .stories-scroll { display: flex; gap: 14px; overflow-x: auto; padding: 2px 2px 5px; scrollbar-width: none; }
 .stories-scroll::-webkit-scrollbar { display: none; }
 .story-user, .story-add { flex: 0 0 68px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--text-primary); padding: 0; font: inherit; }
+.story-own-wrap { position: relative; flex: 0 0 68px; width: 68px; }
+.story-own-wrap .story-own { width: 68px; }
+.story-add-corner { position: absolute; right: 3px; bottom: 17px; width: 22px; height: 22px; padding: 0; border: 2px solid var(--bg-primary); border-radius: 50%; display: grid; place-items: center; background: var(--accent-red); color: #fff; font-size: 11px; z-index: 2; }
 .story-user small, .story-add small { max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); }
 .story-ring, .story-add > span { width: 58px !important; height: 58px !important; min-width: 58px; max-width: 58px; flex: 0 0 58px; aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden; border-radius: 50%; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
 .story-ring img, .story-ring i { width: 100% !important; height: 100% !important; min-width: 0; max-width: none; display: grid; place-items: center; border-radius: 50%; object-fit: cover !important; object-position: center; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); }
