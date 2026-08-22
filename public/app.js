@@ -3892,8 +3892,8 @@ function renderRegister(app) {
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
       <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
       <div class="auth-site-wordmark">CigCig</div>
-      <div class="auth-title">Kendi alanını oluştur</div>
-      <p class="auth-subtitle">Birkaç bilgiyle CigCig dünyasına katıl.</p>
+      <div class="auth-title">Kayıt Ol</div>
+      <p class="auth-subtitle">CigCig'e kayıt ol.</p>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
