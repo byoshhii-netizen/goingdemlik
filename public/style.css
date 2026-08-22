@@ -280,6 +280,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   overflow: visible;
 }
 .site-logo { width: 32px !important; height: 32px !important; min-width: 32px; max-width: 32px; flex: 0 0 32px; object-fit: contain !important; object-position: center; aspect-ratio: 1 / 1; border-radius: 6px; }
+.site-wordmark { font-family: 'Elsie', Georgia, serif; font-size: 22px; font-weight: 900; letter-spacing: 0; color: var(--text-primary); white-space: nowrap; }
 .brand-icon {
   width: 32px; height: 32px;
   background: var(--grad-red);

@@ -77,7 +77,7 @@
   <link rel="icon" href="/cigcig.png" type="image/png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Nunito:wght@700;800&family=Literata:ital,opsz,wght@0,7..72,300;0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,300;1,7..72,400;1,7..72,500;1,7..72,600;1,7..72,700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Elsie:wght@400;900&family=Inter:wght@300;400;500;600;700;800;900&family=Nunito:wght@700;800&family=Literata:ital,opsz,wght@0,7..72,300;0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,300;1,7..72,400;1,7..72,500;1,7..72,600;1,7..72,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link rel="stylesheet" href="/style.css" />
   <style>
@@ -96,8 +96,7 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="/" data-link class="nav-brand">
-        <img src="/cigcig2.png" alt="CigCig" class="site-logo" />
-        <span style="font-size:16px;font-weight:800;letter-spacing:0;color:var(--text-primary);white-space:nowrap;font-family:'Nunito',sans-serif">CigCig</span>
+        <span class="site-wordmark">CigCig</span>
       </a>
       <div class="nav-links">
         <a href="/" data-link class="nav-link">Ana Sayfa</a>
@@ -273,9 +272,6 @@
     .then(d=>{
       if(d.primary_color) applyThemeColor(d.primary_color);
       applyBackgroundColor(d.background_color || '#121212');
-      // Logo güncelle
-      const navLogo = document.querySelector('.nav-brand img');
-      if(navLogo) navLogo.src = '/cigcig2.png';
       const favicon = document.querySelector('link[rel="icon"]');
       if(favicon) favicon.href = '/cigcig.png';
       // Site adı güncelle
