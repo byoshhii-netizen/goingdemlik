@@ -3618,6 +3618,12 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
 app.post('/api/messages/delete-bulk', authMiddleware, async (req, res) => {
   const { ids, mode } = req.body; // ids: array, mode: 'me'|'all'
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ID listesi gerekli' });
+  if (mode === 'all') {
+    for (const id of ids) {
+      const { rows } = await query('SELECT sender_id FROM dm_messages WHERE id=$1', [id]);
+      if (rows.length && rows[0].sender_id != req.user.id) return res.status(403).json({ error: 'Sadece kendi mesajınızı herkesten silebilirsiniz' });
+    }
+  }
   for (const id of ids) {
     const { rows } = await query('SELECT * FROM dm_messages WHERE id=$1', [id]);
     if (!rows.length) continue;

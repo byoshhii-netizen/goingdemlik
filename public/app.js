@@ -4516,7 +4516,10 @@ function exitDmSelection() {
 
 function updateDmSelActions() {
   const bar = document.getElementById('dm-sel-actions-bar');
+  const deleteAllButton = document.getElementById('dm-sel-delete-all');
+  const onlyOwnMessages = [...dmSelectedIds].every(id => document.querySelector(`.dm-msg-wrap[data-id="${id}"]`)?.classList.contains('dm-own'));
   if (bar) { if (dmSelectedIds.size > 0) bar.classList.add('visible'); else bar.classList.remove('visible'); }
+  if (deleteAllButton) deleteAllButton.hidden = !dmSelectedIds.size || !onlyOwnMessages;
 }
 
 function dmMessageHTML(m, myId, selMode) {
