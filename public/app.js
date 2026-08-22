@@ -699,6 +699,8 @@ document.addEventListener('click', e => {
   if (mobNewPhoto) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
   if (mobNewStory) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); }
   if (mobNewVideo) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
+  const mobNewReals = e.target.closest('#mob-new-reals');
+  if (mobNewReals) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(null, true), 120); } else navigate('/giris'); }
   if (mobNewMusic) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); }
 });
 
