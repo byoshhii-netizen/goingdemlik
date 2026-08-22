@@ -3797,8 +3797,8 @@ function renderLogin(app) {
   document.title = 'Giriş Yap - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced card card-body">
-      <div class="auth-brand-mark"><i class="fas fa-feather-pointed"></i></div>
-      <div class="auth-kicker">CIGCIG TOPLULUĞU</div>
+      <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
+      <div class="auth-site-wordmark">CigCig</div>
       <div class="auth-title">Tekrar hoş geldin</div>
       <p class="auth-subtitle">Hesabına giriş yap ve kaldığın yerden devam et.</p>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="login-id" placeholder="kullanıcı_adı" autocomplete="username" /></div>
@@ -3890,15 +3890,15 @@ function renderRegister(app) {
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
-      <div class="auth-brand-mark"><i class="fas fa-sparkles"></i></div>
-      <div class="auth-kicker">CIGCIG TOPLULUĞU</div>
+      <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
+      <div class="auth-site-wordmark">CigCig</div>
       <div class="auth-title">Kendi alanını oluştur</div>
       <p class="auth-subtitle">Birkaç bilgiyle CigCig dünyasına katıl.</p>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
           E-posta
-          <span style="font-size:11px;color:var(--text-muted);font-weight:400;font-style:italic">Sallayabilirsiniz. Zaten umursamıyoruz&nbsp;: )</span>
+          <span style="font-size:11px;color:var(--text-muted);font-weight:400">İletişim için kullanılır.</span>
         </label>
         <input type="email" id="reg-email" placeholder="..." autocomplete="email" />
       </div>
@@ -3955,8 +3955,20 @@ function renderRegister(app) {
   fetch('/api/settings/public').then(response => response.json()).then(settings => {
     let sections = [];
     try { sections = JSON.parse(settings.homepage_sections || '[]'); } catch { sections = []; }
-    const defaults = new Set((Array.isArray(sections) ? sections : []).map(section => ({ konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' }[section] || section)));
-    if (defaults.size) document.querySelectorAll('[data-reg-stat]').forEach(input => { input.checked = defaults.has(input.dataset.regStat); });
+    const sectionMap = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
+    const selectedSections = Array.isArray(sections) ? sections : [];
+    const defaults = new Set(selectedSections.map(section => sectionMap[section] || section));
+    const details = document.querySelector('.register-preferences');
+    const orderedStats = selectedSections.map(section => sectionMap[section] || section).filter(stat => ['forums', 'books', 'comments', 'photos', 'music'].includes(stat));
+    if (details && defaults.size) {
+      details.querySelectorAll('[data-reg-stat]').forEach(input => { input.checked = defaults.has(input.dataset.regStat); });
+      const order = new Map(orderedStats.map((stat, index) => [stat, index]));
+      const profileStatNames = new Set(['forums', 'books', 'comments', 'photos', 'music']);
+      const statLabels = Array.from(details.querySelectorAll('.checkbox-label')).filter(label => profileStatNames.has(label.querySelector('[data-reg-stat]')?.dataset.regStat));
+      const firstOtherLabel = Array.from(details.querySelectorAll('.checkbox-label')).find(label => !statLabels.includes(label));
+      statLabels.sort((a, b) => (order.get(a.querySelector('[data-reg-stat]').dataset.regStat) ?? 999) - (order.get(b.querySelector('[data-reg-stat]').dataset.regStat) ?? 999));
+      statLabels.forEach(label => details.insertBefore(label, firstOtherLabel || null));
+    }
   }).catch(() => {});
 
   $('#reg-pw-toggle').addEventListener('click', () => {

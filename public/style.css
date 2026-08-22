@@ -901,8 +901,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .auth-card { width: 100%; max-width: 460px; }
 .auth-card--enhanced { position: relative; overflow: hidden; padding: 38px 40px 32px; border-color: rgba(189,162,117,.3); box-shadow: 0 22px 70px rgba(0,0,0,.35), 0 0 36px rgba(189,162,117,.08); }
 .auth-card--enhanced::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg, transparent, var(--accent-red), transparent); }
-.auth-brand-mark { width: 48px; height: 48px; margin: 0 auto 16px; display: grid; place-items: center; border-radius: 15px; background: var(--grad-red); color: #fff; font-size: 20px; box-shadow: 0 8px 24px rgba(189,162,117,.2); }
-.auth-kicker { color: var(--accent-red2); font-size: 10px; font-weight: 800; letter-spacing: 2px; text-align: center; margin-bottom: 8px; }
+.auth-site-logo { display: block; width: 50px; height: 50px; margin: 0 auto 12px; object-fit: contain; border-radius: 14px; box-shadow: 0 8px 24px rgba(189,162,117,.2); }
+.auth-site-wordmark { font-family: 'Elsie', Georgia, serif; color: var(--text-primary); font-size: 22px; font-weight: 900; text-align: center; margin-bottom: 10px; }
 .auth-title { font-size: 29px; font-weight: 800; line-height: 1.15; margin-bottom: 9px; text-align: center; letter-spacing: 0; }
 .auth-subtitle { color: var(--text-secondary); text-align: center; margin: 0 auto 30px; font-size: 14px; line-height: 1.55; max-width: 310px; }
 .auth-card--enhanced .form-group { margin-bottom: 18px; }
