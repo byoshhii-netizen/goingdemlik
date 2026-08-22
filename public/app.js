@@ -1159,7 +1159,7 @@ function showNewForumModal(existing = null) {
             }
           });
           xhr.addEventListener('error', () => reject(new Error('Ağ hatası, tekrar deneyin')));
-          xhr.open('POST', '/api/upload');
+          xhr.open('POST', '/api/upload-video');
           const token = localStorage.getItem('token');
           if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
           xhr.send(fd);

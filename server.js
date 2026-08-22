@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const crypto = require('crypto');
 const path = require('path');
@@ -7,6 +8,8 @@ const multer = require('multer');
 const slugify = require('slugify');
 const rateLimit = require('express-rate-limit');
 const cloudinary = require('cloudinary').v2;
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { Upload } = require('@aws-sdk/lib-storage');
 const { query, initDb } = require('./database');
 
 const app = express();
@@ -26,6 +29,13 @@ if (process.env.CLOUDINARY_URL) {
 }
 
 const USE_CLOUDINARY = !!(process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME);
+const USE_R2 = !!(process.env.R2_ACCOUNT_ID && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME);
+const R2_ENDPOINT = process.env.R2_ENDPOINT || `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+const r2Client = USE_R2 ? new S3Client({
+  region: 'auto',
+  endpoint: R2_ENDPOINT,
+  credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY }
+}) : null;
 
 // Fallback: local disk (Railway volume veya geliştirme)
 const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
@@ -281,7 +291,7 @@ const storage = USE_CLOUDINARY
     });
 const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB (Reals video için)
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB (buyuk Reals videolari icin)
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
     const allowedVideos = ['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'];
@@ -289,6 +299,20 @@ const upload = multer({
     if (allowedImages.includes(file.mimetype) || allowedVideos.includes(file.mimetype) || file.mimetype.startsWith('video/') || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
     else cb(new Error('Sadece resim, video veya ses dosyaları kabul edilir'));
   }
+});
+
+const largeVideoStorage = USE_CLOUDINARY
+  ? multer.diskStorage({
+      destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+      filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname))
+    })
+  : storage;
+const largeVideoUpload = multer({
+  storage: largeVideoStorage,
+  limits: { fileSize: 500 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => file.mimetype?.startsWith('video/')
+    ? cb(null, true)
+    : cb(new Error('Sadece video dosyasi yukleyebilirsiniz'))
 });
 
 // Yükleme helper'ı — Cloudinary ya da disk
@@ -317,6 +341,37 @@ async function handleUpload(file) {
     });
   } else {
     return '/uploads/' + file.filename;
+  }
+}
+
+async function handleLargeVideoUpload(file) {
+  if (USE_R2) {
+    const key = `reals/${uuidv4()}${path.extname(file.originalname) || '.mp4'}`;
+    try {
+      await new Upload({
+        client: r2Client,
+        params: { Bucket: process.env.R2_BUCKET_NAME, Key: key, Body: fs.createReadStream(file.path), ContentType: file.mimetype || 'video/mp4' },
+        partSize: 20 * 1024 * 1024,
+        queueSize: 3,
+        leavePartsOnError: false
+      }).done();
+      const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
+      return `${publicBase}/${key}`;
+    } finally {
+      fs.promises.unlink(file.path).catch(() => {});
+    }
+  }
+  if (!USE_CLOUDINARY) return '/uploads/' + file.filename;
+  try {
+    const result = await cloudinary.uploader.upload_large(file.path, {
+      public_id: 'teatube/' + uuidv4(),
+      resource_type: 'video',
+      chunk_size: 20 * 1024 * 1024
+    });
+    if (!result?.secure_url) throw new Error('Cloudinary URL alinamadi');
+    return result.secure_url;
+  } finally {
+    fs.promises.unlink(file.path).catch(() => {});
   }
 }
 
@@ -1671,6 +1726,21 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
     res.json({ url });
   } catch (e) {
     res.status(500).json({ error: 'Yükleme hatası: ' + e.message });
+  }
+});
+
+app.post('/api/upload-video', authMiddleware, (req, res, next) => {
+  largeVideoUpload.single('file')(req, res, error => {
+    if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Video boyutu 500 MB sınırını geçemez.' : error.message });
+    next();
+  });
+}, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Video dosyası gerekli' });
+  try {
+    const url = await handleLargeVideoUpload(req.file);
+    res.json({ url });
+  } catch (error) {
+    res.status(500).json({ error: 'Video yüklenemedi: ' + error.message });
   }
 });
 
