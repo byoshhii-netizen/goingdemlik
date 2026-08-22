@@ -1809,7 +1809,7 @@ app.post('/api/stories', authMiddleware, (req, res, next) => {
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
-    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW() + ($8 * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::integer,NOW() + ($8::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
     res.json(rows[0]);
     notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(error => {
       console.warn('Story follower notifications failed:', error.message || error);
