@@ -3472,14 +3472,13 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
 app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
-    SELECT COUNT(*) as c FROM dm_conversations c
+    SELECT COUNT(*) as c FROM dm_messages m
+    JOIN dm_conversations c ON c.id=m.conversation_id
     WHERE ((c.user1_id=$1 AND c.hidden_by_user1=0) OR (c.user2_id=$1 AND c.hidden_by_user2=0))
-    AND EXISTS (
-      SELECT 1 FROM dm_messages m WHERE m.conversation_id=c.id AND m.sender_id!=$1
-      AND CASE WHEN c.user1_id=$1 THEN m.deleted_by_receiver=0 ELSE m.deleted_by_sender=0 END
-      AND m.deleted_for_all=0
-      AND m.id > CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user1,0) ELSE COALESCE(c.read_until_user2,0) END
-    )
+    AND m.sender_id!=$1
+    AND CASE WHEN c.user1_id=$1 THEN m.deleted_by_receiver=0 ELSE m.deleted_by_sender=0 END
+    AND m.deleted_for_all=0
+    AND m.id > CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user1,0) ELSE COALESCE(c.read_until_user2,0) END
   `, [uid]);
   res.json({ count: parseInt(rows[0].c) });
 });

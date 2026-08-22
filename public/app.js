@@ -4049,8 +4049,10 @@ async function checkUnreadMessages() {
     const count = data.count || 0;
     const badge = $('#nav-msg-badge');
     const mobBadge = $('#mob-msg-badge');
+    const bottomBadge = $('#mbb-msg-badge');
     if (badge) { badge.textContent = count > 9 ? '9+' : count; badge.style.display = count > 0 ? 'inline' : 'none'; }
     if (mobBadge) { mobBadge.textContent = count > 9 ? '9+' : count; mobBadge.style.display = count > 0 ? 'inline' : 'none'; }
+    if (bottomBadge) { bottomBadge.textContent = count > 99 ? '99+' : count; bottomBadge.style.display = count > 0 ? 'block' : 'none'; }
   } catch {}
 }
 
