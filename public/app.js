@@ -2738,7 +2738,8 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     const bannerFile = $('#video-banner-file').files[0];
     if (!title) { $('#video-error').textContent = 'Başlık zorunlu'; return; }
     if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
-    if (!existing && videoFile.size > 100 * 1024 * 1024) { $('#video-error').textContent = 'Reals video sınırı 100 MB.'; return; }
+    const maxVideoSize = forceReals ? 500 * 1024 * 1024 : 100 * 1024 * 1024;
+    if (!existing && videoFile.size > maxVideoSize) { $('#video-error').textContent = `${forceReals ? 'Reals' : 'Video'} dosyası ${forceReals ? 500 : 100} MB sınırını geçemez.`; return; }
 
     const submitBtn = $('#video-submit');
     const uploadFields = {
@@ -2769,7 +2770,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           });
           xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
           xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
-          xhr.open('POST', '/api/upload');
+          xhr.open('POST', forceReals ? '/api/upload-video' : '/api/upload');
           xhr.timeout = 15 * 60 * 1000;
           xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
           xhr.send(fd);
