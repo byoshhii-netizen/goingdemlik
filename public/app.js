@@ -85,6 +85,24 @@ async function apiForm(path, formData, method = 'POST') {
   return data;
 }
 
+function apiFormWithTimeout(path, formData, timeout = 120000) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api' + path);
+    if (currentToken) xhr.setRequestHeader('Authorization', 'Bearer ' + currentToken);
+    xhr.timeout = timeout;
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch { reject(new Error('Sunucudan geçersiz yanıt geldi.')); return; }
+      if (xhr.status < 200 || xhr.status >= 300) { reject(new Error(data.error || 'Hikaye yüklenemedi.')); return; }
+      resolve(data);
+    };
+    xhr.onerror = () => reject(new Error('Yükleme sırasında bağlantı hatası oluştu.'));
+    xhr.ontimeout = () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.'));
+    xhr.send(formData);
+  });
+}
+
 function timeAgo(dt) {
   const now = new Date();
   const d = new Date(dt);
@@ -2964,7 +2982,7 @@ async function renderProfile(app, username) {
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const isOwn = currentUser && currentUser.id === user.id;
-  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true };
+  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true };
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (!isOwn && currentUser) {
@@ -2997,8 +3015,8 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-      <div class="profile-info"><div class="profile-username">${escHtml(user.username)}</div>
-      <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
+      <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}</div>
+      <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
     bindFollowButton();
@@ -3082,7 +3100,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
+          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -3095,8 +3113,8 @@ async function renderProfile(app, username) {
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
         <div class="profile-stats" style="margin-top:12px">
-          <button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>
-          <button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>
+          ${profileVisibility.followers ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : ''}
+          ${profileVisibility.following ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : ''}
           ${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
           ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
           ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
@@ -3497,6 +3515,8 @@ async function renderSettingsSection(section) {
     let visibility = { forums: true, books: true, comments: true, photos: true, music: true };
     try { visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility }; } catch {}
     const items = [
+      ['followers', 'Takipçi sayımı', 'Profilindeki takipçi sayısını göster', 'fas fa-user-plus'],
+      ['following', 'Takip sayımı', 'Profilindeki takip edilen sayısını göster', 'fas fa-user-check'],
       ['forums', 'Forum sayısı', 'Profilindeki forum/konu sayısını göster', 'fas fa-comments'],
       ['books', 'Kitap sayısı', 'Profilindeki kitap sayısını göster', 'fas fa-book'],
       ['comments', 'Yorum sayısı', 'Profilindeki yorum sayısını göster', 'fas fa-comment'],
@@ -3823,6 +3843,8 @@ function renderRegister(app) {
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="comments" /> Yorum sayısı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="photos" /> Fotoğraf sayısı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="music" /> Müzik sayısı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="followers" checked /> Takipçi sayımı</label>
+        <label class="checkbox-label"><input type="checkbox" data-reg-stat="following" checked /> Takip sayımı</label>
       </details>
       <div class="form-group">
         <label class="checkbox-label">
@@ -3870,7 +3892,7 @@ function renderRegister(app) {
     const homepage_sections = [];
     document.querySelectorAll('[data-reg-stat]').forEach(input => {
       profile_visibility[input.dataset.regStat] = input.checked;
-      if (input.checked) homepage_sections.push(sectionNames[input.dataset.regStat]);
+      if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
     });
     if (!username || !email || !password || !birth_date) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
@@ -5889,7 +5911,7 @@ async function loadStoriesBar(container) {
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
     const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
     const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
       const group = groups[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
@@ -5941,8 +5963,7 @@ function showStoryUploadModal() {
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
       await Promise.race([
-        apiForm('/stories', form),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')), 120000))
+        apiFormWithTimeout('/stories', form)
       ]);
       hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
     }

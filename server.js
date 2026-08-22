@@ -458,7 +458,7 @@ app.post('/api/auth/register', async (req, res) => {
     if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
     if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
     const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
-    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false };
+    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true };
     if (profile_visibility && typeof profile_visibility === 'object') {
       Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = profile_visibility[key] !== false; });
     } else {
@@ -1506,7 +1506,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower) {
-    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: 0, following_count: 0, following: false });
+    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
   const [forums, books, groups, level, levels, bpCount, photos] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
@@ -1536,7 +1536,7 @@ app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
-  const allowed = ['forums', 'books', 'comments', 'photos', 'music'];
+  const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following'];
   const visibility = {};
   allowed.forEach(key => { visibility[key] = req.body.visibility?.[key] !== false; });
   await query('UPDATE users SET profile_visibility=$1 WHERE id=$2', [JSON.stringify(visibility), req.user.id]);
@@ -1760,7 +1760,7 @@ function randomStoryPublicId() {
 app.get('/api/stories', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
-      u.username,u.avatar,u.avatar_removed,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+      u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
@@ -1778,7 +1778,7 @@ app.get('/api/stories', authMiddleware, async (req, res) => {
 app.get('/api/stories/:id', authMiddleware, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
-      u.username,u.avatar,u.avatar_removed,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+  u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
       (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
@@ -1786,7 +1786,11 @@ app.get('/api/stories/:id', authMiddleware, async (req, res) => {
     FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
     WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  res.json(rows[0]);
+  const story = rows[0];
+  if (story.user_id !== viewerId && story.is_private && !(await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [viewerId, story.user_id])).rows.length) {
+    return res.status(403).json({ error: 'Bu hikaye yalnızca takipçilere açık.' });
+  }
+  res.json(story);
 });
 
 app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res) => {

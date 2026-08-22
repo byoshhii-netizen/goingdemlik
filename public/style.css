@@ -73,6 +73,9 @@ body[data-theme="gold"] {
 .story-user, .story-add { flex: 0 0 68px; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: transparent; color: var(--text-primary); padding: 0; font: inherit; }
 .story-own-wrap { position: relative; flex: 0 0 68px; width: 68px; }
 .story-own-wrap .story-own { width: 68px; }
+.story-own-wrap.no-story .story-ring { background: transparent; padding: 0; }
+.story-own-wrap.no-story .story-ring img, .story-own-wrap.no-story .story-ring i { border: 1px solid var(--border); }
+.story-own-wrap.has-story .story-ring { background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
 .story-add-corner { position: absolute; right: 3px; bottom: 17px; width: 22px; height: 22px; padding: 0; border: 2px solid var(--bg-primary); border-radius: 50%; display: grid; place-items: center; background: var(--accent-red); color: #fff; font-size: 11px; z-index: 2; }
 .story-user small, .story-add small { max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); }
 .story-ring, .story-add > span { width: 58px !important; height: 58px !important; min-width: 58px; max-width: 58px; flex: 0 0 58px; aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden; border-radius: 50%; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
@@ -891,6 +894,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .profile-info { flex: 1; min-width: 0; text-align: center; }
 .profile-info > * { max-width: 100%; }
 .profile-username { font-size: 26px; font-weight: 800; margin-bottom: 2px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.profile-private-lock { color: rgba(255,255,255,.72); font-size: .72em; }
 .profile-title { font-size: 13px; font-weight: 600; color: var(--accent-red2); margin-top: 4px; margin-bottom: 4px; }
 .profile-bio { color: var(--text-secondary); font-size: 14px; margin-bottom: 12px; }
 
