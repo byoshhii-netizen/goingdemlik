@@ -124,7 +124,7 @@ body[data-theme="gold"] {
 .story-route-tap-left { left: 0; }
 .story-route-tap-right { right: 0; }
 .story-route-tap:disabled { cursor: default; }
-.story-route-head { position: absolute; top: 14px; left: 14px; z-index: 3; display: flex; align-items: flex-start; gap: 10px; margin: 0; text-align: left; }
+.story-route-head { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 3; display: flex; align-items: flex-start; gap: 10px; margin: 0; text-align: left; pointer-events: none; }
 .story-route-head > div { display: flex; flex-direction: column; }
 .story-route-head small, .story-route-note { color: var(--text-muted); font-size: 12px; }
 .story-route > p { margin: 12px 0; }
@@ -137,7 +137,7 @@ body[data-theme="gold"] {
 .story-route-reply { display: flex; width: min(100%, 520px); gap: 7px; margin-top: 8px; }
 .story-route-reply input { flex: 1; min-width: 0; }
 .story-route { max-width: none; min-height: calc(100svh - 90px); margin: -20px auto 0; border: 0; border-radius: 0; background: #000; display: flex; flex-direction: column; align-items: center; }
-.story-route-head { top: 12px; left: 12px; }
+.story-route-head { top: 12px; left: 12px; right: 12px; }
 .story-route > img, .story-route > video { width: min(100%, 760px); height: calc(100svh - 190px); max-height: none; flex: 1 1 auto; }
 .my-groups-list { display: grid; gap: 8px; }
 .my-group-item { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); }
@@ -1692,7 +1692,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   color: var(--text-primary);
 }
 .dm-msg-bubble { box-shadow: 0 1px 3px rgba(0,0,0,.10); }
-.dm-msg-bubble { display: inline-block; width: fit-content; height: fit-content !important; min-height: 0 !important; align-self: flex-start; text-align: left; }
+.dm-msg-bubble { display: block; width: fit-content; height: fit-content !important; min-height: 0 !important; align-self: flex-start; text-align: left; }
+.dm-msg-wrap.dm-own .dm-msg-bubble { align-self: flex-end; }
 .dm-msg-bubble img { display: block; max-width: min(200px, 100%); max-height: 180px; height: auto; object-fit: contain; }
 .dm-message-image { width: auto !important; max-width: min(200px, 100%) !important; max-height: 180px !important; }
 .dm-image-link { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--border); border-radius:7px; background:var(--bg-tertiary); color:var(--text-secondary); font:inherit; font-size:11px; cursor:pointer; }
