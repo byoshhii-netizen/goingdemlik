@@ -116,7 +116,7 @@ body[data-theme="gold"] {
 .story-song-option span:not(.story-song-cover) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .story-song-option-play { color: var(--accent-red2); }
 .story-volume, .story-route-song input { width: 90px; min-height: 0; padding: 0; accent-color: var(--accent-red); }
-.story-route { max-width: 620px; margin: 0 auto; padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+.story-route { position: relative; max-width: 620px; margin: 0 auto; padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 .story-route > img, .story-route > video { width: 100%; max-height: 72vh; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
 .story-route-media { position: relative; width: min(100%, 760px); height: calc(100svh - 190px); display: flex; align-items: center; justify-content: center; }
 .story-route-media > img, .story-route-media > video { width: 100%; height: 100%; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
@@ -124,7 +124,7 @@ body[data-theme="gold"] {
 .story-route-tap-left { left: 0; }
 .story-route-tap-right { right: 0; }
 .story-route-tap:disabled { cursor: default; }
-.story-route-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.story-route-head { position: absolute; top: 14px; left: 14px; z-index: 3; display: flex; align-items: flex-start; gap: 10px; margin: 0; text-align: left; }
 .story-route-head > div { display: flex; flex-direction: column; }
 .story-route-head small, .story-route-note { color: var(--text-muted); font-size: 12px; }
 .story-route > p { margin: 12px 0; }
@@ -137,6 +137,7 @@ body[data-theme="gold"] {
 .story-route-reply { display: flex; width: min(100%, 520px); gap: 7px; margin-top: 8px; }
 .story-route-reply input { flex: 1; min-width: 0; }
 .story-route { max-width: none; min-height: calc(100svh - 90px); margin: -20px auto 0; border: 0; border-radius: 0; background: #000; display: flex; flex-direction: column; align-items: center; }
+.story-route-head { top: 12px; left: 12px; }
 .story-route > img, .story-route > video { width: min(100%, 760px); height: calc(100svh - 190px); max-height: none; flex: 1 1 auto; }
 .my-groups-list { display: grid; gap: 8px; }
 .my-group-item { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-primary); }
