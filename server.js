@@ -290,6 +290,16 @@ const upload = multer({
     else cb(new Error('Sadece resim, video veya ses dosyaları kabul edilir'));
   }
 });
+const storyUpload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || '').toLowerCase();
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const allowed = mime.startsWith('image/') || mime.startsWith('video/') || ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.heif', '.mp4', '.mov', '.webm', '.m4v'].includes(ext);
+    cb(allowed ? null : new Error('Hikaye için sadece fotoğraf veya video yükleyebilirsiniz.'));
+  }
+});
 
 // Yükleme helper'ı — Cloudinary ya da disk
 async function handleUpload(file) {
@@ -1793,7 +1803,7 @@ app.get('/api/stories/:id', authMiddleware, async (req, res) => {
   res.json(story);
 });
 
-app.post('/api/stories', authMiddleware, upload.single('media'), async (req, res) => {
+app.post('/api/stories', authMiddleware, storyUpload.single('media'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Hikaye medyası seçin' });
   try {
     const mediaUrl = await handleUpload(req.file);

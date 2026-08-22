@@ -85,7 +85,7 @@ async function apiForm(path, formData, method = 'POST') {
   return data;
 }
 
-function apiFormWithTimeout(path, formData, timeout = 120000) {
+function apiFormWithTimeout(path, formData, timeout = 180000, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api' + path);
@@ -99,6 +99,7 @@ function apiFormWithTimeout(path, formData, timeout = 120000) {
     };
     xhr.onerror = () => reject(new Error('Yükleme sırasında bağlantı hatası oluştu.'));
     xhr.ontimeout = () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.'));
+    xhr.upload.onprogress = event => { if (event.lengthComputable) onProgress?.(Math.round(event.loaded / event.total * 100)); };
     xhr.send(formData);
   });
 }
@@ -5957,17 +5958,19 @@ function showStoryUploadModal() {
     const file = $('#story-media').files[0];
     if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
     if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) { $('#story-error').textContent = 'Sadece fotoğraf veya video yükleyebilirsiniz.'; return; }
-    if (file.size > 50 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 50 MB sınırını geçemez.'; return; }
+    if (file.size > 100 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 100 MB sınırını geçemez.'; return; }
     event.currentTarget.disabled = true;
     event.currentTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
+    const uploadStatus = document.createElement('div');
+    uploadStatus.className = 'story-upload-status';
+    uploadStatus.textContent = 'Yükleniyor...';
+    event.currentTarget.parentElement.insertBefore(uploadStatus, event.currentTarget);
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
-      await Promise.race([
-        apiFormWithTimeout('/stories', form)
-      ]);
+      await apiFormWithTimeout('/stories', form, 180000, percent => { uploadStatus.textContent = `Yükleniyor... %${percent}`; });
       hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
     }
-    catch (error) { event.currentTarget.disabled = false; event.currentTarget.innerHTML = 'Paylaş'; $('#story-error').textContent = error.message; }
+    catch (error) { event.currentTarget.disabled = false; event.currentTarget.innerHTML = 'Paylaş'; uploadStatus.remove(); $('#story-error').textContent = error.message; }
   });
 }
 
