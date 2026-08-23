@@ -1304,8 +1304,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  position: sticky;
-  top: 60px;
+  position: relative;
+  top: auto;
   z-index: 10;
   min-width: 0;
   overflow: hidden;
@@ -1330,6 +1330,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+  max-width: 100%;
 }
 @media (max-width: 600px) {
   .ebook-page-content { padding: 20px 16px; font-size: 15px; }
