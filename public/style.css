@@ -1928,18 +1928,18 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 /* ---- Mobile responsive ---- */
 @media (max-width: 768px) {
   .dm-layout {
-    height: calc(100svh - 60px - 56px);
+    height: calc(100dvh - 60px);
     flex-direction: row;
     position: relative;
   }
   /* On mobile: sidebar is absolute full-width by default, chat hidden */
   .dm-sidebar {
-    position: absolute; inset: 0;
+    position: absolute; inset: 0 0 60px;
     width: 100%; z-index: 2;
     border-right: none;
   }
   .dm-main {
-    position: absolute; inset: 0;
+    position: absolute; inset: 0 0 60px;
     z-index: 3;
     display: none;
   }
