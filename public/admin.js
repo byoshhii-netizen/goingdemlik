@@ -494,8 +494,9 @@ function renderUsersTable(users) {
     <td>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-outline btn-xs edit-user-btn" data-id="${u.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
-        <button class="btn btn-blue btn-xs perm-user-btn" data-id="${u.id}" title="Yetkiler"><i class="fas fa-shield"></i></button>
+        <button class="btn btn-blue btn-xs perm-user-btn" data-id="${u.id}" title="Yetkili rolü ve yetkiler"><i class="fas fa-shield"></i></button>
         <button class="btn btn-outline btn-xs restrict-user-btn" data-id="${u.id}" title="Kısıtlama"><i class="fas fa-user-lock"></i></button>
+        ${!u.is_admin ? `<button class="btn btn-xs direct-authority-btn" style="background:rgba(189,162,117,.16);color:var(--red2);border:1px solid var(--border-red)" data-id="${u.id}" title="Direkt Yetkili Ata"><i class="fas fa-user-shield"></i></button>` : ''}
         ${u.banned
           ? `<button class="btn btn-green btn-xs unban-user-btn" data-id="${u.id}" title="Ban Kaldır"><i class="fas fa-unlock"></i></button>`
           : `<button class="btn btn-danger btn-xs ban-user-btn" data-id="${u.id}" title="Banla"><i class="fas fa-ban"></i></button>`}
@@ -511,12 +512,17 @@ function renderUsersTable(users) {
     const del = e.target.closest('.del-user-btn');
     const perm = e.target.closest('.perm-user-btn');
     const restrict = e.target.closest('.restrict-user-btn');
+    const directAuthority = e.target.closest('.direct-authority-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
     if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (del) { if (!confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (perm) { const u = users.find(x => x.id == perm.dataset.id); if (u) showPermModal(u); }
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
+    if (directAuthority) {
+      const defaults = { admin_role:'authority', can_view_users:1, can_view_logs:1, can_suspend_content:1, can_restrict_users:1, can_review_artists:1, can_assign_badges:1, can_view_store:1, can_view_groups:1, can_view_stories:1, can_view_levels:1 };
+      try { await adminApi('/permissions/' + directAuthority.dataset.id, { method:'POST', body:JSON.stringify(defaults) }); toast('Yetkili rolü atandı'); loadSection('users'); } catch (error) { toast(error.message, 'error'); }
+    }
   });
 }
 
@@ -632,6 +638,7 @@ async function showPermModal(user) {
       Kaydet'e basınca kullanıcıya <strong>is_admin=1</strong> atanır ve sadece işaretli yetkiler verilir.
       Tüm yetkiler verirsen süperadmin gibi çalışır.
     </div>`}
+    <div class="form-group" style="margin-bottom:16px"><label>Yetkili rolü</label><select id="perm-role"><option value="none" ${!user.is_admin ? 'selected' : ''}>Yetkili değil</option><option value="authority" ${user.admin_role === 'authority' || (user.is_admin && !perms) ? 'selected' : ''}>Yetkili</option><option value="custom" ${user.is_admin && user.admin_role !== 'authority' && perms ? 'selected' : ''}>Özel yetki profili</option></select><div style="font-size:11px;color:var(--text3);margin-top:6px">“Yetkili” seçimi, moderasyon için güvenli varsayılan yetkileri otomatik verir. Sonra aşağıdaki izinleri değiştirebilirsin.</div></div>
     <div class="perm-grid" id="perm-grid">
       ${permDefs.map(d => `
         <div class="perm-item">
@@ -649,10 +656,15 @@ async function showPermModal(user) {
     <button class="btn btn-blue" id="perm-save-btn" style="width:100%;justify-content:center;margin-top:8px"><i class="fas fa-save"></i> Kaydet &amp; Adminliği Etkinleştir</button>
     <div id="perm-error" class="form-error mt-4"></div>
   `);
+  $('#perm-role').addEventListener('change', () => {
+    if ($('#perm-role').value !== 'authority') return;
+    const defaults = ['can_view_users','can_view_logs','can_suspend_content','can_restrict_users','can_review_artists','can_assign_badges','can_view_store','can_view_groups','can_view_stories','can_view_levels'];
+    permDefs.forEach(d => { const checkbox = $('#perm-'+d.key); if (checkbox) checkbox.checked = defaults.includes(d.key); });
+  });
   $('#perm-all-btn').addEventListener('click', () => permDefs.forEach(d => { const el=$('#perm-'+d.key); if(el) el.checked=true; }));
   $('#perm-none-btn').addEventListener('click', () => permDefs.forEach(d => { const el=$('#perm-'+d.key); if(el) el.checked=false; }));
   $('#perm-save-btn').addEventListener('click', async () => {
-    const body = {}; permDefs.forEach(d => { body[d.key] = $('#perm-'+d.key)?.checked ? 1 : 0; });
+    const body = { admin_role: $('#perm-role').value }; permDefs.forEach(d => { body[d.key] = $('#perm-'+d.key)?.checked ? 1 : 0; });
     try { await adminApi('/permissions/'+user.id, {method:'POST', body:JSON.stringify(body)}); toast('Yetkiler kaydedildi'); hideModal(); }
     catch (e) { $('#perm-error').textContent = e.message; }
   });

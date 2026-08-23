@@ -3158,6 +3158,7 @@ app.get('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => {
 
 app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => {
   const uid = req.params.userId;
+  const role = String(req.body.admin_role || '').trim();
   const {
     can_ban_users, can_delete_content, can_edit_content,
     can_manage_levels, can_manage_tags, can_manage_announcements,
@@ -3165,8 +3166,15 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
     can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges,
     can_view_store, can_view_groups, can_view_stories, can_view_levels
   } = req.body;
+  const isAuthority = role === 'authority';
+  if (role === 'none') {
+    await query("UPDATE users SET is_admin=0, admin_role='' WHERE id=$1", [uid]);
+    await query('DELETE FROM admin_permissions WHERE user_id=$1', [uid]);
+    await logAction(req.adminUser.username, 'revoke_authority_role', uid, 'Yetkili rolü kaldırıldı', getIp(req));
+    return res.json({ ok: true });
+  }
   // Kullanıcıyı admin yap (is_admin=1 yoksa set et)
-  await query('UPDATE users SET is_admin=1 WHERE id=$1', [uid]);
+  await query('UPDATE users SET is_admin=1, admin_role=$1 WHERE id=$2', [isAuthority ? 'authority' : role, uid]);
   const { rows: existing } = await query('SELECT id FROM admin_permissions WHERE user_id=$1', [uid]);
   if (existing.length) {
     await query(`UPDATE admin_permissions SET
@@ -3193,7 +3201,7 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
       can_suspend_content?1:0, can_restrict_users?1:0, can_review_artists?1:0, can_assign_badges?1:0,
       can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_levels?1:0]);
   }
-  await logAction('admin', 'set_permissions', uid);
+  await logAction(req.adminUser.username, isAuthority ? 'assign_authority_role' : 'set_permissions', uid, JSON.stringify({ role, permissions: req.body }), getIp(req));
   res.json({ ok: true });
 });
 
