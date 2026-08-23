@@ -98,15 +98,16 @@ body[data-theme="gold"] {
 .story-fullscreen-overlay .modal { width: 100vw; max-width: none; height: 100vh; max-height: none; border: 0; border-radius: 0; background: #000; }
 .story-fullscreen-overlay .modal-header { position: absolute; top: 10px; left: 12px; right: 12px; z-index: 8; padding: 0; margin: 0; }
 .story-fullscreen-overlay .modal-header h3 { display: none; }
-.story-fullscreen-overlay .modal-body { height: 100%; padding: 18px 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-.story-fullscreen-overlay .story-viewer { width: 100%; height: 100%; justify-content: center; gap: 10px; }
-.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: min(100%, 760px); max-width: 100%; height: min(72vh, 680px); min-height: 240px; max-height: 680px; object-fit: contain; border-radius: 0; background: #000; }
+.story-fullscreen-overlay .modal-body { box-sizing: border-box; height: 100%; min-height: 0; padding: 52px 12px 12px; display: flex; align-items: center; justify-content: center; overflow-y: auto; overflow-x: hidden; }
+.story-fullscreen-overlay .story-viewer { width: min(100%, 760px); height: auto; max-height: 100%; justify-content: center; gap: 8px; min-width: 0; }
+.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: min(100%, 760px); max-width: 100%; height: min(62vh, 600px); min-height: 0; max-height: 600px; flex: 0 1 auto; object-fit: contain; border-radius: 0; background: #000; }
 .story-viewer video, .story-viewer > img { width: min(100%, 420px) !important; height: min(68vh, 560px) !important; min-height: 240px; max-height: 560px; aspect-ratio: 9 / 16; object-fit: contain !important; border-radius: var(--radius-sm); background: #000; }
 .story-viewer p { width: 100%; color: var(--text-primary); text-align: center; }
 .story-progress { display: flex; gap: 4px; width: 100%; }
 .story-progress span { height: 3px; flex: 1; border-radius: 3px; background: var(--border); }
 .story-progress span.active { background: var(--accent-red); }
 .story-viewer-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.story-fullscreen-overlay .story-viewer-actions { width: 100%; max-width: 760px; }
 .story-fullscreen-overlay .story-viewer-actions { order: 2; }
 .story-fullscreen-overlay .story-owner-hint { order: 3; }
 .story-fullscreen-overlay .story-reply-box { order: 4; }
@@ -114,6 +115,7 @@ body[data-theme="gold"] {
 .story-like.active { color: var(--accent-red2); }
 .story-song, .story-selected-song { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card2); color: var(--text-primary); text-align: left; }
 .story-fullscreen-overlay .story-song { width: min(100%, 280px); padding: 5px 8px; gap: 7px; border-radius: 7px; opacity: .85; }
+.story-fullscreen-overlay .story-song { flex: 0 1 auto; background: rgba(20,20,20,.96); border-color: rgba(255,255,255,.28); color: #fff; }
 .story-fullscreen-overlay .story-song img { width: 24px; height: 24px; border-radius: 4px; }
 .story-fullscreen-overlay .story-song b { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .story-fullscreen-overlay .story-song small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -133,6 +135,8 @@ body[data-theme="gold"] {
 .story-song-option img, .story-song-cover { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 5px; object-fit: cover; background: var(--bg-card); color: var(--text-muted); }
 .story-song-option span:not(.story-song-cover) { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .story-song-option-play { color: var(--accent-red2); }
+.music-play-mini { z-index: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; background: rgba(0,0,0,.78) !important; color: #fff !important; border: 1px solid rgba(255,255,255,.3); }
+.music-play-mini:hover, .music-play-mini:focus-visible { background: var(--accent-red) !important; color: #fff !important; outline: 2px solid rgba(255,255,255,.8); outline-offset: -3px; }
 .story-volume, .story-route-song input { display: none; }
 .story-route { position: relative; max-width: 620px; margin: 0 auto; padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 .story-route > img, .story-route > video { width: 100%; max-height: 72vh; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
@@ -909,6 +913,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   display: none;
 }
 
+.toggle-slider {
   min-width: 0;
   overflow: hidden;
   position: relative;
@@ -945,11 +950,12 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .nav-user-btn { padding: 5px 7px; font-size: 12px; }
 }
 .toggle-switch input:checked + .toggle-slider {
-.story-song { max-width: min(100%, 340px); margin: 0 auto; }
   background: var(--accent-red);
-  .story-viewer-actions .btn { min-width: 0; }
   border-color: var(--accent-red);
 }
+
+.story-song { max-width: min(100%, 340px); margin: 0 auto; }
+.story-viewer-actions .btn { min-width: 0; }
 
 .toggle-switch input:checked + .toggle-slider::after {
   transform: translateX(20px);
