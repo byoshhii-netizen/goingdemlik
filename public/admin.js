@@ -143,7 +143,6 @@ $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-
 // ===== AUTH =====
 if (adminToken) showPanel();
 $('#admin-login-btn').addEventListener('click', tryLogin);
-$('#admin-username-input').value = 'Tarator';
 $('#admin-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 

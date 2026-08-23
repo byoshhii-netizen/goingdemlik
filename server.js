@@ -541,7 +541,9 @@ app.post('/api/admin/auth/login', async (req, res) => {
   if (!username || !password) return res.status(400).json({ error: 'Kullanıcı adı ve şifre gerekli' });
   const { rows: settings } = await query("SELECT key, value FROM settings WHERE key IN ('admin_username','admin_password')");
   const config = Object.fromEntries(settings.map(row => [row.key, row.value]));
-  if (username === (config.admin_username || 'Tarator') && hashPassword(password) === config.admin_password) {
+  const storedMasterPassword = String(config.admin_password || '').trim();
+  const masterPasswordMatches = hashPassword(password) === storedMasterPassword || password === storedMasterPassword;
+  if (username.toLowerCase() === (config.admin_username || 'Tarator').trim().toLowerCase() && masterPasswordMatches) {
     return res.json({ token: config.admin_password, is_super_admin: true, username });
   }
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
