@@ -180,7 +180,9 @@ function applyAuthorityNav() {
   const visible = new Set(['dashboard']);
   if (p.can_view_users) visible.add('users');
   if (p.can_view_logs) visible.add('logs');
-  if (p.can_suspend_content || p.can_view_stories) { visible.add('stories'); visible.add('videos'); visible.add('photos'); visible.add('forums'); visible.add('books'); }
+  if (p.can_suspend_content || p.can_view_stories) visible.add('stories');
+  if (p.can_suspend_content || p.can_view_reals) visible.add('videos');
+  if (p.can_suspend_content) { visible.add('photos'); visible.add('forums'); visible.add('books'); }
   if (p.can_view_groups) visible.add('groups');
   if (p.can_view_levels) visible.add('levels');
   if (p.can_view_store) visible.add('shop');
@@ -597,7 +599,8 @@ async function showPermModal(user) {
     { key:'can_assign_badges', label:'Rozet Ver', desc:'Mevcut rozetleri kullanıcılara verebilir', icon:'fas fa-award' },
     { key:'can_view_store', label:'Mağazayı Görüntüle', desc:'Mağaza ürünlerini sadece görebilir', icon:'fas fa-store' },
     { key:'can_view_groups', label:'Grupları Görüntüle', desc:'Grupları sadece görebilir', icon:'fas fa-users' },
-    { key:'can_view_stories', label:'Hikayeleri Görüntüle', desc:'Hikayeleri görebilir ve moderasyon yapabilir', icon:'fas fa-circle-play' },
+    { key:'can_view_stories', label:'Hikayeleri Görüntüle', desc:'Hikayeleri sadece görebilir', icon:'fas fa-circle-play' },
+    { key:'can_view_reals', label:'Reals Görüntüle', desc:'Reals videolarını sadece görebilir', icon:'fas fa-video' },
     { key:'can_view_levels', label:'Seviyeleri Görüntüle', desc:'Seviyeleri sadece görebilir', icon:'fas fa-layer-group' },
     { key:'can_manage_settings', label:'Site Ayarları', desc:'Site ayarlarını değiştirebilir', icon:'fas fa-cog' },
     { key:'can_manage_admins', label:'Admin Yönet', desc:'Admin atayabilir/alabilir', icon:'fas fa-shield' },
@@ -899,7 +902,7 @@ async function renderGroups(main) {
       <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(g.name)}">${escHtml(g.name)}</td>
       <td><span style="color:var(--blue2)">${escHtml(g.owner_name||'—')}</span></td>
       <td style="color:var(--text3);font-size:12px">${timeAgo(g.created_at)}</td>
-      <td><button class="btn btn-danger btn-xs del-group-btn" data-id="${g.id}"><i class="fas fa-trash"></i> Sil</button></td>
+      <td><span style="color:var(--text3);font-size:12px"><i class="fas fa-eye"></i> Sadece görüntüleme</span></td>
     </tr>`).join('');
     tbody.querySelectorAll('.del-group-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -1449,6 +1452,7 @@ async function renderLevels(main) {
   try { levels = await adminApi('/levels'); } catch (e) {
     main.innerHTML = `<p style="color:var(--red2);padding:20px">${e.message}</p>`; return;
   }
+  const canManageLevels = adminProfile?.is_super_admin || adminProfile?.permissions?.can_manage_levels;
   const renderTable = () => {
     const tbody = $('#levels-tbody'); if (!tbody) return;
     if (!levels.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:32px">Seviye yok</td></tr>'; return; }
@@ -1463,8 +1467,7 @@ async function renderLevels(main) {
       <td style="font-size:12px;color:var(--text2)">${l.order_num}</td>
       <td>
         <div style="display:flex;gap:4px">
-          <button class="btn btn-outline btn-xs edit-level-btn" data-id="${l.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
-          <button class="btn btn-danger btn-xs del-level-btn" data-id="${l.id}"><i class="fas fa-trash"></i></button>
+          ${canManageLevels ? `<button class="btn btn-outline btn-xs edit-level-btn" data-id="${l.id}" title="Düzenle"><i class="fas fa-edit"></i></button><button class="btn btn-danger btn-xs del-level-btn" data-id="${l.id}"><i class="fas fa-trash"></i></button>` : '<span style="color:var(--text3);font-size:12px"><i class="fas fa-eye"></i> Sadece görüntüleme</span>'}
         </div>
       </td>
     </tr>`).join('');
@@ -1525,7 +1528,7 @@ async function renderLevels(main) {
   main.innerHTML = `
     <div class="adm-section-header">
       <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-layer-group"></i></div> Seviyeler</div>
-      <button class="btn btn-primary btn-sm" id="new-level-btn"><i class="fas fa-plus"></i> Yeni Seviye</button>
+          ${canManageLevels ? '<button class="btn btn-primary btn-sm" id="new-level-btn"><i class="fas fa-plus"></i> Yeni Seviye</button>' : '<span style="color:var(--text3);font-size:12px"><i class="fas fa-eye"></i> Sadece görüntüleme</span>'}
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -1536,7 +1539,7 @@ async function renderLevels(main) {
       </div>
     </div>`;
   renderTable();
-  $('#new-level-btn').addEventListener('click', () => {
+  $('#new-level-btn')?.addEventListener('click', () => {
     showModal('Yeni Seviye Ekle', `
       <div class="form-group"><label>İsim</label><input id="lv-name" /></div>
       <div class="form-row">

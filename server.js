@@ -230,13 +230,13 @@ async function adminMiddleware(req, res, next) {
   const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
   if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
   const user = users[0];
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges && !user.can_view_groups && !user.can_view_stories && !user.can_view_reals && !user.can_view_levels) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
   req.adminUser = { id: user.id, username: user.username, isSuperAdmin: false, permissions: user };
   const permissions = user;
   if (req.method === 'GET') {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
-      [/\/users/, !!permissions.can_view_users], [/\/stories/, !!permissions.can_view_stories], [/\/groups/, !!permissions.can_view_groups],
+      [/\/users/, !!permissions.can_view_users], [/\/stories/, !!permissions.can_view_stories], [/\/videos/, !!permissions.can_view_reals], [/\/groups/, !!permissions.can_view_groups],
       [/\/levels/, !!permissions.can_view_levels], [/\/shop(\/|$)/, !!permissions.can_view_store], [/\/logs/, !!permissions.can_view_logs]
     ];
     const rule = readRules.find(([pattern]) => pattern.test(req.path));
@@ -246,13 +246,15 @@ async function adminMiddleware(req, res, next) {
     const allowed = [
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
-      /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/
+      /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/,
+      /^\/api\/admin\/levels?(?:\/\d+)?$/
     ];
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
     if (/\/badge$/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
+    if (/\/levels?(?:\/\d+)?$/.test(req.path) && !permissions.can_manage_levels) return res.status(403).json({ error: 'Seviye yönetme yetkisi yok' });
   }
   next();
 }
@@ -549,7 +551,7 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
   if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges && !user.can_view_groups && !user.can_view_stories && !user.can_view_reals && !user.can_view_levels) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
   const token = generateToken(user.id);
   await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
   await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));
@@ -3163,7 +3165,7 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
     can_manage_levels, can_manage_tags, can_manage_announcements,
     can_view_logs, can_manage_settings, can_manage_admins, can_view_users,
     can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges,
-    can_view_store, can_view_groups, can_view_stories, can_view_levels
+    can_view_store, can_view_groups, can_view_stories, can_view_reals, can_view_levels
   } = req.body;
   // Kullanıcıyı admin yap (is_admin=1 yoksa set et)
   await query('UPDATE users SET is_admin=1 WHERE id=$1', [uid]);
@@ -3174,24 +3176,24 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
       can_manage_levels=$4, can_manage_tags=$5, can_manage_announcements=$6,
       can_view_logs=$7, can_manage_settings=$8, can_manage_admins=$9, can_view_users=$10
       , can_suspend_content=$11, can_restrict_users=$12, can_review_artists=$13, can_assign_badges=$14,
-      can_view_store=$15, can_view_groups=$16, can_view_stories=$17, can_view_levels=$18
-      WHERE user_id=$19`,
+      can_view_store=$15, can_view_groups=$16, can_view_stories=$17, can_view_reals=$18, can_view_levels=$19
+      WHERE user_id=$20`,
       [can_ban_users?1:0, can_delete_content?1:0, can_edit_content?1:0,
       can_manage_levels?1:0, can_manage_tags?1:0, can_manage_announcements?1:0,
       can_view_logs?1:0, can_manage_settings?1:0, can_manage_admins?1:0, can_view_users?1:0,
       can_suspend_content?1:0, can_restrict_users?1:0, can_review_artists?1:0, can_assign_badges?1:0,
-      can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_levels?1:0, uid]);
+      can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_reals?1:0, can_view_levels?1:0, uid]);
   } else {
     await query(`INSERT INTO admin_permissions
       (user_id, can_ban_users, can_delete_content, can_edit_content, can_manage_levels,
       can_manage_tags, can_manage_announcements, can_view_logs, can_manage_settings, can_manage_admins, can_view_users,
-      can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges, can_view_store, can_view_groups, can_view_stories, can_view_levels)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+        can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges, can_view_store, can_view_groups, can_view_stories, can_view_reals, can_view_levels)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [uid, can_ban_users?1:0, can_delete_content?1:0, can_edit_content?1:0,
       can_manage_levels?1:0, can_manage_tags?1:0, can_manage_announcements?1:0,
       can_view_logs?1:0, can_manage_settings?1:0, can_manage_admins?1:0, can_view_users?1:0,
       can_suspend_content?1:0, can_restrict_users?1:0, can_review_artists?1:0, can_assign_badges?1:0,
-      can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_levels?1:0]);
+      can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_reals?1:0, can_view_levels?1:0]);
   }
   await logAction('admin', 'set_permissions', uid);
   res.json({ ok: true });
@@ -3261,7 +3263,9 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
     permissions: rows[0] || {
       can_ban_users:1, can_delete_content:1, can_edit_content:1,
       can_manage_levels:1, can_manage_tags:1, can_manage_announcements:1,
-      can_view_logs:1, can_manage_settings:1, can_manage_admins:1, can_view_users:1
+      can_view_logs:1, can_manage_settings:1, can_manage_admins:1, can_view_users:1,
+      can_suspend_content:1, can_restrict_users:1, can_review_artists:1, can_assign_badges:1,
+      can_view_store:1, can_view_groups:1, can_view_stories:1, can_view_reals:1, can_view_levels:1
     }
   });
 });

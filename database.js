@@ -574,6 +574,7 @@ async function initDb() {
     ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_store INTEGER DEFAULT 0;
     ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_groups INTEGER DEFAULT 0;
     ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_stories INTEGER DEFAULT 0;
+    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_reals INTEGER DEFAULT 0;
     ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_levels INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role TEXT DEFAULT '';
     CREATE TABLE IF NOT EXISTS user_restrictions (
