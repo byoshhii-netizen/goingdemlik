@@ -157,6 +157,11 @@ function hashPassword(pw) {
   return crypto.createHash('sha256').update(pw).digest('hex');
 }
 
+function hasAdminPermission(permissions, name) {
+  const value = permissions?.[name];
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 function generateToken(userId) {
   return Buffer.from(JSON.stringify({ id: userId, ts: Date.now(), rand: Math.random() })).toString('base64');
 }
@@ -230,14 +235,14 @@ async function adminMiddleware(req, res, next) {
   const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
   if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
   const user = users[0];
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges && !user.can_view_groups && !user.can_view_stories && !user.can_view_reals && !user.can_view_levels) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
+  if (!hasAdminPermission(user, 'can_view_users') && !hasAdminPermission(user, 'can_suspend_content') && !hasAdminPermission(user, 'can_restrict_users') && !hasAdminPermission(user, 'can_review_artists') && !hasAdminPermission(user, 'can_assign_badges') && !hasAdminPermission(user, 'can_view_store') && !hasAdminPermission(user, 'can_view_groups') && !hasAdminPermission(user, 'can_view_stories') && !hasAdminPermission(user, 'can_view_reals') && !hasAdminPermission(user, 'can_view_levels')) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
   req.adminUser = { id: user.id, username: user.username, isSuperAdmin: false, permissions: user };
   const permissions = user;
   if (req.method === 'GET') {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
-      [/\/users/, !!permissions.can_view_users], [/\/stories/, !!permissions.can_view_stories], [/\/videos/, !!permissions.can_view_reals], [/\/groups/, !!permissions.can_view_groups],
-      [/\/levels/, !!permissions.can_view_levels], [/\/shop(\/|$)/, !!permissions.can_view_store], [/\/logs/, !!permissions.can_view_logs]
+      [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
+      [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
     ];
     const rule = readRules.find(([pattern]) => pattern.test(req.path));
     if (rule && !rule[1]) return res.status(403).json({ error: 'Bu bölümü görüntüleme yetkiniz yok' });
@@ -551,7 +556,7 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
   if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges && !user.can_view_groups && !user.can_view_stories && !user.can_view_reals && !user.can_view_levels) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  if (!hasAdminPermission(user, 'can_view_users') && !hasAdminPermission(user, 'can_suspend_content') && !hasAdminPermission(user, 'can_restrict_users') && !hasAdminPermission(user, 'can_review_artists') && !hasAdminPermission(user, 'can_assign_badges') && !hasAdminPermission(user, 'can_view_store') && !hasAdminPermission(user, 'can_view_groups') && !hasAdminPermission(user, 'can_view_stories') && !hasAdminPermission(user, 'can_view_reals') && !hasAdminPermission(user, 'can_view_levels')) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
   const token = generateToken(user.id);
   await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
   await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));

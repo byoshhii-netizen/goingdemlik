@@ -107,6 +107,11 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function hasPermission(name) {
+  const value = adminProfile?.permissions?.[name];
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
 function timeAgo(dt) {
   if (!dt) return '-';
   const now = new Date(), d = new Date(dt);
@@ -178,16 +183,16 @@ function applyAuthorityNav() {
   if (!adminProfile || adminProfile.is_super_admin) return;
   const p = adminProfile.permissions || {};
   const visible = new Set(['dashboard']);
-  if (p.can_view_users) visible.add('users');
-  if (p.can_view_logs) visible.add('logs');
-  if (p.can_suspend_content || p.can_view_stories) visible.add('stories');
-  if (p.can_suspend_content || p.can_view_reals) visible.add('videos');
-  if (p.can_suspend_content) { visible.add('photos'); visible.add('forums'); visible.add('books'); }
-  if (p.can_view_groups) visible.add('groups');
-  if (p.can_view_levels) visible.add('levels');
-  if (p.can_view_store) visible.add('shop');
-  if (p.can_review_artists) visible.add('artist-apps');
-  if (p.can_assign_badges) visible.add('badges');
+  if (hasPermission('can_view_users')) visible.add('users');
+  if (hasPermission('can_view_logs')) visible.add('logs');
+  if (hasPermission('can_suspend_content') || hasPermission('can_view_stories')) visible.add('stories');
+  if (hasPermission('can_suspend_content') || hasPermission('can_view_reals')) visible.add('videos');
+  if (hasPermission('can_suspend_content')) { visible.add('photos'); visible.add('forums'); visible.add('books'); }
+  if (hasPermission('can_view_groups')) visible.add('groups');
+  if (hasPermission('can_view_levels')) visible.add('levels');
+  if (hasPermission('can_view_store')) visible.add('shop');
+  if (hasPermission('can_review_artists')) visible.add('artist-apps');
+  if (hasPermission('can_assign_badges')) visible.add('badges');
   $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
 }
 
@@ -1452,7 +1457,7 @@ async function renderLevels(main) {
   try { levels = await adminApi('/levels'); } catch (e) {
     main.innerHTML = `<p style="color:var(--red2);padding:20px">${e.message}</p>`; return;
   }
-  const canManageLevels = adminProfile?.is_super_admin || adminProfile?.permissions?.can_manage_levels;
+  const canManageLevels = adminProfile?.is_super_admin || hasPermission('can_manage_levels');
   const renderTable = () => {
     const tbody = $('#levels-tbody'); if (!tbody) return;
     if (!levels.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:32px">Seviye yok</td></tr>'; return; }
