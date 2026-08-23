@@ -1421,7 +1421,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
   /* Mobile menu geliştirilmiş */
   .mobile-menu {
-    background: var(--bg-secondary);
+    background: var(--bg-card2);
     border-bottom: 1px solid var(--border);
     padding: 6px 12px 10px;
   }
