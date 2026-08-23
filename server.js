@@ -161,6 +161,16 @@ function generateToken(userId) {
   return Buffer.from(JSON.stringify({ id: userId, ts: Date.now(), rand: Math.random() })).toString('base64');
 }
 
+function setSessionCookie(res, token) {
+  res.setHeader('Set-Cookie', `cigcig_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`);
+}
+
+function getSessionCookie(req) {
+  const cookies = String(req.headers.cookie || '').split(';').map(value => value.trim());
+  const session = cookies.find(value => value.startsWith('cigcig_session='));
+  return session ? decodeURIComponent(session.slice('cigcig_session='.length)) : '';
+}
+
 function sanitizeUser(u) {
   if (!u) return null;
   const { password_hash, spotify_token, spotify_refresh, ...rest } = u;
@@ -526,7 +536,7 @@ app.use(async (req, res, next) => {
     } catch {}
     let actor = 'anonymous';
     try {
-      const token = req.headers['authorization']?.replace('Bearer ', '');
+      const token = req.headers['authorization']?.replace('Bearer ', '') || getSessionCookie(req);
       if (token) {
         const { rows: users } = await query('SELECT u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1', [token]);
         if (users[0]?.username) actor = users[0].username;
@@ -616,6 +626,7 @@ app.post('/api/auth/register', async (req, res) => {
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(username, 'register', '', '', ip);
+    setSessionCookie(res, token);
     res.json({ token, user: sanitizeUser(user) });
   } catch (e) { res.status(400).json({ error: 'Kayıt başarısız: ' + e.message }); }
 });
@@ -649,6 +660,7 @@ app.post('/api/auth/login', async (req, res) => {
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(user.username, 'login', '', '', ip);
+    setSessionCookie(res, token);
     res.json({ token, user: sanitizeUser(user) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -661,6 +673,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 app.post('/api/auth/logout', authMiddleware, async (req, res) => {
   const token = req.headers['authorization']?.replace('Bearer ', '');
   await query('DELETE FROM sessions WHERE token=$1', [token]);
+  res.setHeader('Set-Cookie', 'cigcig_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
   res.json({ ok: true });
 });
 
