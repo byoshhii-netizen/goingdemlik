@@ -227,7 +227,7 @@ async function adminMiddleware(req, res, next) {
     req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
     return next();
   }
-  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
+  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, u.admin_role, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
   if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
   const user = users[0];
   if (user.admin_role === 'authority') {
