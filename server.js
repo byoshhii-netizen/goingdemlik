@@ -221,9 +221,52 @@ async function adminMiddleware(req, res, next) {
   }
   const token = req.headers['x-admin-token'];
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
-  const { rows } = await query("SELECT value FROM settings WHERE key='admin_password'");
-  if (!rows.length || token !== rows[0].value) return res.status(403).json({ error: 'Geçersiz admin token' });
+  const { rows: masterRows } = await query("SELECT value FROM settings WHERE key IN ('admin_password','admin_username')");
+  const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
+  if (master.admin_password && token === master.admin_password) {
+    req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
+    return next();
+  }
+  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
+  if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
+  const user = users[0];
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
+  req.adminUser = { id: user.id, username: user.username, isSuperAdmin: false, permissions: user };
+  const permissions = user;
+  if (req.method === 'GET') {
+    const readRules = [
+      [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
+      [/\/users/, !!permissions.can_view_users], [/\/stories/, !!permissions.can_view_stories], [/\/groups/, !!permissions.can_view_groups],
+      [/\/levels/, !!permissions.can_view_levels], [/\/shop(\/|$)/, !!permissions.can_view_store], [/\/logs/, !!permissions.can_view_logs]
+    ];
+    const rule = readRules.find(([pattern]) => pattern.test(req.path));
+    if (rule && !rule[1]) return res.status(403).json({ error: 'Bu bölümü görüntüleme yetkiniz yok' });
+  }
+  if (req.method !== 'GET') {
+    const allowed = [
+      /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
+      /^\/api\/admin\/artist-applications\/\d+\/review$/,
+      /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/
+    ];
+    if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
+    if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
+    if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
+    if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
+    if (/\/badge$/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
+  }
   next();
+}
+
+async function getActiveRestriction(userId, restrictionType) {
+  const { rows } = await query(`SELECT * FROM user_restrictions WHERE user_id=$1 AND restriction_type=$2 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) ORDER BY created_at DESC LIMIT 1`, [userId, restrictionType]);
+  return rows[0] || null;
+}
+
+async function denyIfRestricted(req, res, restrictionType) {
+  const restriction = await getActiveRestriction(req.user.id, restrictionType);
+  if (!restriction) return false;
+  const duration = restriction.expires_at ? new Date(restriction.expires_at).toLocaleString('tr-TR') : 'süresiz';
+  return res.status(403).json({ error: `Bu işlem ${duration} tarihine kadar kısıtlandı. Neden: ${restriction.reason}`, restriction });
 }
 
 async function updateUserLevel(userId) {
@@ -492,23 +535,23 @@ app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); }
 // New admin entry path
 app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 
-app.get('/uyarı', async (req, res, next) => {
-  try {
-    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('warning_text','warning_link','warning_link_label','warning_logo')");
-    const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
-    const text = settings.warning_text || 'BÖYLE ŞEYLER DENERSEN BAŞINA BÜYÜK İŞ ALACAKSIN. POLİS AMCALARA SELAM VERMEK İSTER MİSİN ?';
-    const link = settings.warning_link || 'https://egm.gov.tr';
-    const label = settings.warning_link_label || 'egm.gov.tr';
-    const logo = settings.warning_logo || '/uyarı.png';
-    res.send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Uyarı</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#07080d;color:#f7f5ef;font-family:Inter,system-ui,sans-serif}main{width:min(680px,100%);padding:clamp(28px,7vw,72px) clamp(22px,7vw,64px);text-align:center;border:1px solid rgba(220,190,130,.3);border-radius:24px;background:linear-gradient(145deg,#171820,#0d0e14);box-shadow:0 24px 80px #0008,0 0 50px rgba(220,170,80,.1)}img{width:min(150px,42vw);height:min(150px,42vw);object-fit:contain;margin-bottom:26px}h1{margin:0 auto 30px;font-size:clamp(25px,5vw,48px);line-height:1.18;letter-spacing:0;color:#f5e7c7}a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 24px;border-radius:12px;background:#d6b36a;color:#17120a;font-weight:800;text-decoration:none;transition:transform .2s,background .2s}a:hover{background:#f0cf86;transform:translateY(-2px)}@media(max-width:480px){body{padding:14px}main{border-radius:18px}h1{font-size:27px;margin-bottom:24px}a{width:100%}}</style></head><body><main><img src="${escapeHtml(logo)}" alt="Uyarı"><h1>${escapeHtml(text)}</h1><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a></main></body></html>`);
-  } catch (error) { next(error); }
-});
-
-app.get('/uyarı.png', (req, res) => {
-  const warningLogo = path.join(__dirname, 'uyarı.png');
-  res.sendFile(warningLogo, error => {
-    if (error && !res.headersSent) res.sendFile(path.join(__dirname, 'cigcig.png'));
-  });
+app.post('/api/admin/auth/login', async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+  if (!username || !password) return res.status(400).json({ error: 'Kullanıcı adı ve şifre gerekli' });
+  const { rows: settings } = await query("SELECT key, value FROM settings WHERE key IN ('admin_username','admin_password')");
+  const config = Object.fromEntries(settings.map(row => [row.key, row.value]));
+  if (username === (config.admin_username || 'Tarator') && hashPassword(password) === config.admin_password) {
+    return res.json({ token: config.admin_password, is_super_admin: true, username });
+  }
+  const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
+  const user = rows[0];
+  if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  const token = generateToken(user.id);
+  await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
+  await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));
+  res.json({ token, is_super_admin: false, username: user.username, permissions: user });
 });
 
 // VMB tarzı route koruması: admin panelinden tanımlanan hassas yolları gizler.
@@ -548,6 +591,10 @@ app.use(async (req, res, next) => {
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/api/admin/me', adminMiddleware, (req, res) => {
+  res.json({ username: req.adminUser.username, is_super_admin: req.adminUser.isSuperAdmin, permissions: req.adminUser.permissions || null });
+});
 
 // ===== ADMIN BADGES API =====
 app.get('/api/admin/badges', adminMiddleware, async (req, res) => {
@@ -885,11 +932,11 @@ app.get('/api/forums', async (req, res) => {
         SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
         FROM tags t INNER JOIN forum_tags ft ON ft.tag_id=t.id WHERE ft.forum_id=f.id
       ), '[]'::json) as system_tags
-    FROM forums f LEFT JOIN users u ON f.user_id=u.id`;
+    FROM forums f LEFT JOIN users u ON f.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`;
 
   if (tag) {
     // Sistem etiketi, custom tag veya içerik içindeki #tag ile filtrele — hepsi case-insensitive
-    baseQuery += ` WHERE (
+    baseQuery += ` AND (
       EXISTS (SELECT 1 FROM forum_tags ft INNER JOIN tags t ON t.id=ft.tag_id WHERE ft.forum_id=f.id AND LOWER(t.name)=LOWER($1))
       OR f.custom_tags ILIKE $2
       OR f.content ILIKE $3
@@ -915,7 +962,7 @@ app.get('/api/forum/:slug', optionalAuth, async (req, res) => {
         SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
         FROM tags t INNER JOIN forum_tags ft ON ft.tag_id=t.id WHERE ft.forum_id=f.id
       ), '[]'::json) as system_tags
-    FROM forums f LEFT JOIN users u ON f.user_id=u.id WHERE f.slug=$1`, [req.params.slug]);
+    FROM forums f LEFT JOIN users u ON f.user_id=u.id WHERE f.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   res.json(rows[0]);
 });
@@ -937,6 +984,7 @@ app.post('/api/forum/:slug/view', async (req, res) => {
 });
 
 app.post('/api/forums', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'forum')) return;
   try {
     const { title, content, banner_image, allow_comments, tagIds, customTags, banner_fit, images, thumbnail } = req.body;
     if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
@@ -1042,6 +1090,7 @@ app.get('/api/forum/:slug/comments', async (req, res) => {
 });
 
 app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'comment')) return;
   const { rows: fRows } = await query('SELECT * FROM forums WHERE slug=$1', [req.params.slug]);
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const forum = fRows[0];
@@ -1102,7 +1151,7 @@ app.get('/api/forum/:slug/tags', async (req, res) => {
 
 // ===== BOOKS =====
 app.get('/api/books', optionalAuth, async (req, res) => {
-  const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id ORDER BY b.created_at DESC`);
+  const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) ORDER BY b.created_at DESC`);
   const filtered = rows.filter(book => {
     if (!book.is_hidden) return true;
     if (req.user && (req.user.id === book.user_id || req.user.is_admin)) return true;
@@ -1112,7 +1161,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
-  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE b.slug=$1`, [req.params.slug]);
+  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.is_hidden && (!req.user || (req.user.id !== book.user_id && !req.user.is_admin))) {
@@ -1304,6 +1353,7 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/groups', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'group')) return;
   try {
     const { name, description, cover_image, type, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
@@ -1351,6 +1401,7 @@ app.delete('/api/group/:slug', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/group/:slug/join', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'group')) return;
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
@@ -1386,6 +1437,7 @@ app.post('/api/group/:slug/invite', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'group')) return;
   const { invite_code } = req.body;
   if (!invite_code) return res.status(400).json({ error: 'Kod zorunlu' });
   const { rows } = await query('SELECT * FROM group_invites WHERE invite_code=$1', [invite_code.toUpperCase()]);
@@ -1846,6 +1898,7 @@ app.post('/api/upload-video', authMiddleware, (req, res, next) => {
 });
 
 app.post('/api/reals/upload-url', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'reals')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Reals R2 depolama ayarlanmamış.' });
   const contentType = String(req.body?.content_type || 'video/mp4');
   if (!contentType.startsWith('video/')) return res.status(400).json({ error: 'Geçersiz video türü.' });
@@ -1868,11 +1921,11 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
-    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id`;
+    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
   const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted'))`;
   const queryText = username
-    ? `${base} WHERE u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
-    : `${base} WHERE ${visibility} ORDER BY p.created_at DESC LIMIT 100`;
+    ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
+    : `${base} AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`;
   const { rows } = username ? await query(queryText, [userId, username]) : await query(queryText, [userId]);
   res.json(rows);
 });
@@ -1887,7 +1940,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
-    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`,
+    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`,
     [req.params.id, userId]
   );
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -1895,6 +1948,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res) => {
+  if (await denyIfRestricted(req, res, 'photo')) return;
   if (!req.file) return res.status(400).json({ error: 'Fotoğraf seçin' });
   try {
     const url = await handleUpload(req.file);
@@ -1983,7 +2037,10 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   res.json(story);
 });
 
-app.post('/api/stories', authMiddleware, (req, res, next) => {
+app.post('/api/stories', authMiddleware, async (req, res, next) => {
+  if (await denyIfRestricted(req, res, 'story')) return;
+  next();
+}, (req, res, next) => {
   upload.single('media')(req, res, error => {
     if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu 500 MB sınırını geçemez.' : error.message });
     next();
@@ -2008,6 +2065,7 @@ app.post('/api/stories', authMiddleware, (req, res, next) => {
 });
 
 app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'story')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Hikaye video depolaması ayarlanmamış.' });
   const contentType = String(req.body?.content_type || 'video/mp4');
   if (!contentType.startsWith('video/')) return res.status(400).json({ error: 'Geçersiz video türü.' });
@@ -2021,6 +2079,7 @@ app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/stories/from-url', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'story')) return;
   const { media_url, caption, song_id, song_start_seconds, duration_hours } = req.body;
   if (!media_url) return res.status(400).json({ error: 'Hikaye videosu gerekli' });
   const songId = song_id ? Number(song_id) : null;
@@ -2190,6 +2249,7 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'comment')) return;
   const photoId = req.params.id;
   const { content } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
@@ -2524,6 +2584,13 @@ app.get('/api/admin/route-logs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/admin/authority-logs', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu loglar yalnızca ana admin içindir' });
+  const limit = Math.min(parseInt(req.query.limit) || 500, 1000);
+  const { rows } = await query("SELECT id, actor, action, target, detail, ip, created_at FROM system_logs WHERE action IN ('authority_login','apply_restriction','revoke_restriction','suspend_content') OR actor IN (SELECT username FROM users WHERE is_admin=1) ORDER BY created_at DESC LIMIT $1", [limit]);
+  res.json(rows);
+});
+
 app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM settings');
   res.json(Object.fromEntries(rows.map(s => [s.key, s.value])));
@@ -2568,6 +2635,71 @@ app.post('/api/admin/user/:id/set-admin', adminMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+function parseRestrictionDuration(value) {
+  const input = String(value || '').trim().toLowerCase();
+  if (!input || /süresiz|sure[s]?iz|kalıcı|kalici/.test(input)) return null;
+  const units = { dakika: 60000, dk: 60000, saat: 3600000, sa: 3600000, gün: 86400000, gun: 86400000, hafta: 604800000 };
+  let total = 0;
+  const matches = input.matchAll(/(\d+(?:[.,]\d+)?)\s*(dakika|dk|saat|sa|gün|gun|hafta)/g);
+  for (const match of matches) total += Number(match[1].replace(',', '.')) * units[match[2]];
+  if (!total) return undefined;
+  return new Date(Date.now() + total);
+}
+
+app.get('/api/admin/user/:id/restrictions', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions.can_restrict_users) return res.status(403).json({ error: 'Kısıtlama yetkisi yok' });
+  const { rows } = await query('SELECT * FROM user_restrictions WHERE user_id=$1 ORDER BY created_at DESC', [req.params.id]);
+  res.json(rows);
+});
+
+app.post('/api/admin/user/:id/restrictions', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions.can_restrict_users) return res.status(403).json({ error: 'Kısıtlama yetkisi yok' });
+  const types = ['photo','story','reals','music','comment','forum','message','group'];
+  const type = String(req.body.restriction_type || '');
+  const reason = String(req.body.reason || '').trim();
+  if (!types.includes(type)) return res.status(400).json({ error: 'Geçerli bir kısıtlama türü seçin' });
+  if (!reason) return res.status(400).json({ error: 'Kısıtlama nedeni zorunludur' });
+  const expiresAt = parseRestrictionDuration(req.body.duration);
+  if (expiresAt === undefined) return res.status(400).json({ error: 'Süreyi örneğin 2 gün 4 saat veya süresiz yazın' });
+  const { rows: target } = await query('SELECT id, username FROM users WHERE id=$1', [req.params.id]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  await query("UPDATE user_restrictions SET revoked_at=NOW(), revoked_by=$1 WHERE user_id=$2 AND restriction_type=$3 AND revoked_at IS NULL", [req.adminUser.id, req.params.id, type]);
+  const { rows } = await query('INSERT INTO user_restrictions (user_id,restriction_type,reason,expires_at,created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *', [req.params.id, type, reason, expiresAt, req.adminUser.id]);
+  const labels = { photo:'fotoğraf', story:'hikaye', reals:'Reals', music:'müzik', comment:'yorum', forum:'forum', message:'mesaj', group:'grup' };
+  const durationLabel = expiresAt ? expiresAt.toLocaleString('tr-TR') + ' tarihine kadar' : 'süresiz';
+  await query('INSERT INTO notifications (user_id,type,actor_username,title,body,link) VALUES ($1,$2,$3,$4,$5,$6)', [req.params.id, 'restriction', 'CigCig Yetkilileri', 'Hesabınıza kısıtlama uygulandı', `CigCig Yetkilileri tarafından ${durationLabel} ${labels[type]} gönderme/oluşturma kısıtlaması aldınız. Neden: ${reason}`, '/bildirimler']);
+  await logAction(req.adminUser.username, 'apply_restriction', target[0].username, JSON.stringify({ type, reason, expiresAt }), getIp(req));
+  res.json(rows[0]);
+});
+
+app.delete('/api/admin/user/:id/restrictions/:restrictionId', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions.can_restrict_users) return res.status(403).json({ error: 'Kısıtlama yetkisi yok' });
+  await query('UPDATE user_restrictions SET revoked_at=NOW(), revoked_by=$1 WHERE id=$2 AND user_id=$3', [req.adminUser.id, req.params.restrictionId, req.params.id]);
+  await logAction(req.adminUser.username, 'revoke_restriction', req.params.id, req.params.restrictionId, getIp(req));
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/content/:type/:id/suspend', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
+  const tables = { forum:'forums', book:'books', photo:'photos', video:'videos', reals:'videos', story:'stories', song:'songs', group:'groups' };
+  const ownerColumns = { song:'uploader_id' };
+  const type = String(req.params.type || '');
+  const table = tables[type];
+  const reason = String(req.body.reason || '').trim();
+  if (!table || !/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz içerik' });
+  if (!reason) return res.status(400).json({ error: 'Askıya alma nedeni zorunludur' });
+  const ownerColumn = ownerColumns[type] || 'user_id';
+  const { rows: content } = await query(`SELECT id, ${ownerColumn} AS user_id FROM ${table} WHERE id=$1`, [req.params.id]);
+  if (!content.length) return res.status(404).json({ error: 'İçerik bulunamadı' });
+  await query(`INSERT INTO content_suspensions (content_type,content_id,reason,suspended_by) VALUES ($1,$2,$3,$4) ON CONFLICT (content_type,content_id) DO UPDATE SET reason=EXCLUDED.reason,suspended_by=EXCLUDED.suspended_by,created_at=NOW()`, [type, req.params.id, reason, req.adminUser.id]);
+  if (type === 'story') await query('UPDATE stories SET is_suspended=1 WHERE id=$1', [req.params.id]);
+  if (type === 'song') await query("UPDATE songs SET status='suspended', ban_reason=$1, ban_until=NULL WHERE id=$2", [reason, req.params.id]);
+  const owner = content[0].user_id ? (await query('SELECT username FROM users WHERE id=$1', [content[0].user_id])).rows[0] : null;
+  if (owner) await query('INSERT INTO notifications (user_id,type,actor_username,title,body,link) VALUES ($1,$2,$3,$4,$5,$6)', [content[0].user_id, 'content_suspended', 'CigCig Yetkilileri', 'İçeriğiniz askıya alındı', `CigCig Yetkilileri içeriğinizi şu nedenle askıya aldı: ${reason}`, '/bildirimler']);
+  await logAction(req.adminUser.username, 'suspend_content', owner?.username || String(req.params.id), JSON.stringify({ type, contentId: req.params.id, reason }), getIp(req));
+  res.json({ ok: true });
+});
+
 // ===== MÜZİK SİSTEMİ =====
 function makeSongSlug(title, id) {
   const base = slugify(title, { lower: true, strict: false, locale: 'tr', replacement: '-' })
@@ -2601,6 +2733,7 @@ app.post('/api/songs', authMiddleware, upload.fields([
   { name: 'audio', maxCount: 1 },
   { name: 'cover', maxCount: 1 }
 ]), async (req, res) => {
+  if (await denyIfRestricted(req, res, 'music')) return;
   const { song_type, title, artist_name, distributor, genre, lyrics, share_reason, rules_accepted } = req.body;
   // Kendi şarkısı için artist rozeti zorunlu, başkasının şarkısı için değil
   if ((song_type === 'own' || !song_type) && !req.user.is_artist) {
@@ -3026,7 +3159,9 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
   const {
     can_ban_users, can_delete_content, can_edit_content,
     can_manage_levels, can_manage_tags, can_manage_announcements,
-    can_view_logs, can_manage_settings, can_manage_admins, can_view_users
+    can_view_logs, can_manage_settings, can_manage_admins, can_view_users,
+    can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges,
+    can_view_store, can_view_groups, can_view_stories, can_view_levels
   } = req.body;
   // Kullanıcıyı admin yap (is_admin=1 yoksa set et)
   await query('UPDATE users SET is_admin=1 WHERE id=$1', [uid]);
@@ -3036,18 +3171,25 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
       can_ban_users=$1, can_delete_content=$2, can_edit_content=$3,
       can_manage_levels=$4, can_manage_tags=$5, can_manage_announcements=$6,
       can_view_logs=$7, can_manage_settings=$8, can_manage_admins=$9, can_view_users=$10
-      WHERE user_id=$11`,
+      , can_suspend_content=$11, can_restrict_users=$12, can_review_artists=$13, can_assign_badges=$14,
+      can_view_store=$15, can_view_groups=$16, can_view_stories=$17, can_view_levels=$18
+      WHERE user_id=$19`,
       [can_ban_users?1:0, can_delete_content?1:0, can_edit_content?1:0,
-       can_manage_levels?1:0, can_manage_tags?1:0, can_manage_announcements?1:0,
-       can_view_logs?1:0, can_manage_settings?1:0, can_manage_admins?1:0, can_view_users?1:0, uid]);
+      can_manage_levels?1:0, can_manage_tags?1:0, can_manage_announcements?1:0,
+      can_view_logs?1:0, can_manage_settings?1:0, can_manage_admins?1:0, can_view_users?1:0,
+      can_suspend_content?1:0, can_restrict_users?1:0, can_review_artists?1:0, can_assign_badges?1:0,
+      can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_levels?1:0, uid]);
   } else {
     await query(`INSERT INTO admin_permissions
       (user_id, can_ban_users, can_delete_content, can_edit_content, can_manage_levels,
-       can_manage_tags, can_manage_announcements, can_view_logs, can_manage_settings, can_manage_admins, can_view_users)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      can_manage_tags, can_manage_announcements, can_view_logs, can_manage_settings, can_manage_admins, can_view_users,
+      can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges, can_view_store, can_view_groups, can_view_stories, can_view_levels)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [uid, can_ban_users?1:0, can_delete_content?1:0, can_edit_content?1:0,
-       can_manage_levels?1:0, can_manage_tags?1:0, can_manage_announcements?1:0,
-       can_view_logs?1:0, can_manage_settings?1:0, can_manage_admins?1:0, can_view_users?1:0]);
+      can_manage_levels?1:0, can_manage_tags?1:0, can_manage_announcements?1:0,
+      can_view_logs?1:0, can_manage_settings?1:0, can_manage_admins?1:0, can_view_users?1:0,
+      can_suspend_content?1:0, can_restrict_users?1:0, can_review_artists?1:0, can_assign_badges?1:0,
+      can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_levels?1:0]);
   }
   await logAction('admin', 'set_permissions', uid);
   res.json({ ok: true });
@@ -3708,6 +3850,7 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
 });
 
 app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
+  if (await denyIfRestricted(req, res, 'message')) return;
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
@@ -4433,7 +4576,7 @@ function makeVideoSlug(title, id) {
 const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
-  FROM videos v LEFT JOIN users u ON u.id=v.user_id`;
+  FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
 
 app.get('/api/videos', optionalAuth, async (req, res) => {
   const { rows } = await query(`${videoSelect} ORDER BY v.created_at DESC LIMIT 100`);
@@ -4441,7 +4584,7 @@ app.get('/api/videos', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} WHERE v.is_reals=1 ORDER BY v.created_at DESC LIMIT 100`);
+  const { rows } = await query(`${videoSelect} AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 100`);
   res.json(rows);
 });
 
@@ -4518,6 +4661,7 @@ app.get('/api/video/:slug/comments', async (req, res) => {
 });
 
 app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'comment')) return;
   const content = String(req.body.content || '').trim();
   const { rows: video } = await query('SELECT id,allow_comments FROM videos WHERE slug=$1', [req.params.slug]);
   if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
