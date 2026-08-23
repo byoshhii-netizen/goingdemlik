@@ -230,6 +230,11 @@ async function adminMiddleware(req, res, next) {
   const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
   if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
   const user = users[0];
+  if (user.admin_role === 'authority') {
+    user.can_view_groups = 1;
+    user.can_view_stories = 1;
+    user.can_view_levels = 1;
+  }
   if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges &&
       !user.can_view_groups && !user.can_view_stories && !user.can_view_levels && !user.can_manage_levels) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
   req.adminUser = { id: user.id, username: user.username, isSuperAdmin: false, permissions: user };
@@ -552,6 +557,11 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
   if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
+  if (user.admin_role === 'authority') {
+    user.can_view_groups = 1;
+    user.can_view_stories = 1;
+    user.can_view_levels = 1;
+  }
   if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges &&
       !user.can_view_groups && !user.can_view_stories && !user.can_view_levels && !user.can_manage_levels) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
   const token = generateToken(user.id);
