@@ -1607,7 +1607,7 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
     (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
     (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
     FROM video_saves s JOIN videos v ON v.id=s.video_id LEFT JOIN users u ON u.id=v.user_id
-    WHERE s.user_id=$1 ORDER BY s.created_at DESC`, [req.user.id]);
+    WHERE s.user_id=$1 ORDER BY v.created_at DESC`, [req.user.id]);
   res.json(rows);
 });
 
