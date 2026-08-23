@@ -2267,9 +2267,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .music-plays { display: none !important; }
   .music-date { display: none !important; }
 
-  /* DM layout düzeltme */
-  .dm-layout { height: calc(100vh - 60px - 60px); }
-  .dm-sidebar { max-height: 350px; }
+  /* DM layout uses the same bottom navigation reservation as the chat panel. */
   .dm-chat { height: 100%; min-height: 260px; }
 
   /* Modal tam genişlik + bottom sheet */
