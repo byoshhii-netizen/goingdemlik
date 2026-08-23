@@ -226,7 +226,7 @@ async function adminMiddleware(req, res, next) {
   }
   const token = String(req.headers['x-admin-token'] || '').trim();
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
-  const { rows: masterRows } = await query("SELECT value FROM settings WHERE key IN ('admin_password','admin_username')");
+  const { rows: masterRows } = await query("SELECT key, value FROM settings WHERE key IN ('admin_password','admin_username')");
   const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
   if (master.admin_password && token === master.admin_password) {
     req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
