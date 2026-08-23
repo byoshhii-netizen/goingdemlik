@@ -482,6 +482,26 @@ app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); }
 // New admin entry path
 app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 
+// VMB tarzı route koruması: admin panelinden tanımlanan hassas yolları gizler.
+app.use(async (req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path === '/gubukgak' || req.method !== 'GET') return next();
+  try {
+    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect')");
+    const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
+    if (settings.route_protection_enabled !== '1') return next();
+    let routes = [];
+    try { routes = JSON.parse(settings.protected_routes || '[]'); } catch {}
+    const matched = routes.find(route => {
+      const normalized = String(route || '').trim().replace(/\/$/, '') || '/';
+      return req.path === normalized || req.path.startsWith(`${normalized}/`);
+    });
+    if (!matched) return next();
+    await logAction('security', 'restricted_route_attempt', req.path, `Korunan route: ${matched}`, getIp(req));
+    const target = String(settings.route_redirect || '/').trim();
+    return res.redirect(/^https?:\/\//i.test(target) ? target : (target.startsWith('/') ? target : '/'));
+  } catch { return next(); }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ===== ADMIN BADGES API =====

@@ -2127,6 +2127,17 @@ async function renderSettings(main) {
           <div id="s-pw-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card adm-feature-card" style="grid-column:1 / -1">
+        <div class="card-header"><span><i class="fas fa-route" style="color:var(--red2);margin-right:8px"></i>Route Koruması</span><span class="adm-setting-status ${settings['route_protection_enabled']==='1'?'is-on':''}">${settings['route_protection_enabled']==='1'?'AKTİF':'KAPALI'}</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy"><strong>Hassas sayfaları görünmez yap</strong><p>Tanımlanan route'lara gelen ziyaretçiler seçtiğiniz adrese yönlendirilir ve denemeler sistem loglarına kaydedilir.</p></div>
+          <label class="adm-toggle-row" for="s-route-protection"><span><i class="fas fa-shield-halved"></i> Route korumasını etkinleştir</span><span class="adm-toggle"><input type="checkbox" id="s-route-protection" ${settings['route_protection_enabled']==='1'?'checked':''}><span></span></span></label>
+          <div class="form-group"><label>Korunacak route'lar</label><textarea id="s-protected-routes" rows="3" placeholder="Her satıra bir route: /admin\n/yonetim">${escHtml((() => { try { return JSON.parse(settings['protected_routes'] || '[]').join('\n'); } catch { return settings['protected_routes'] || ''; } })())}</textarea></div>
+          <div class="form-group"><label>Yönlendirme adresi</label><input id="s-route-redirect" value="${escHtml(settings['route_redirect'] || '/')}" placeholder="/" /></div>
+          <button class="btn btn-primary" id="s-route-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Koruma Ayarlarını Kaydet</button>
+          <div id="s-route-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card adm-feature-card">
         <div class="card-header"><span><i class="fas fa-user-shield" style="color:var(--red2);margin-right:8px"></i>Sosyal Medya Uygulaması</span><span class="adm-setting-status ${settings['first_visit_auth']==='1'?'is-on':''}">${settings['first_visit_auth']==='1'?'AÇIK':'KAPALI'}</span></div>
         <div class="card-body">
@@ -2323,6 +2334,16 @@ async function renderSettings(main) {
       toast('Kaydedildi');
     } catch(e) { if(msgEl) msgEl.textContent=e.message; }
   }
+
+  document.getElementById('s-route-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-route-msg');
+    const routes = document.getElementById('s-protected-routes').value.split('\n').map(route => route.trim()).filter(route => route.startsWith('/')).filter((route, index, all) => all.indexOf(route) === index);
+    const redirect = document.getElementById('s-route-redirect').value.trim() || '/';
+    await saveSetting('route_protection_enabled', document.getElementById('s-route-protection').checked ? '1' : '0', msg);
+    await saveSetting('protected_routes', JSON.stringify(routes), msg);
+    await saveSetting('route_redirect', redirect, msg);
+    msg.style.color = 'var(--green)'; msg.textContent = 'Route koruma ayarları kaydedildi';
+  });
 
   const profileTabOptions = [
     ['forums', 'Forumlar', 'fas fa-comments'], ['books', 'Kitaplar', 'fas fa-book'],
