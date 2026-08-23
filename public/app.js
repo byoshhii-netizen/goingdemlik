@@ -69,7 +69,7 @@ $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
 async function api(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  const headers = { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
   const res = await fetch('/api' + path, { ...options, headers });
   const data = await res.json();
@@ -3916,7 +3916,17 @@ function renderRegister(app) {
       <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
       <div class="auth-site-wordmark">CigCig</div>
       <div class="auth-title">Kayıt Ol</div>
-      <p class="auth-subtitle">CigCig'e kayıt ol.</p>
+      <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
+      <div class="register-profile-photo">
+        <div class="register-avatar-preview" id="reg-avatar-preview"><i class="fas fa-user"></i></div>
+        <div class="register-profile-copy">
+          <strong>Profil fotoğrafın</strong>
+          <span>İstersen şimdi ekle, daha sonra da değiştirebilirsin.</span>
+          <label class="btn btn-outline btn-sm register-photo-button" for="reg-avatar">Fotoğraf seç</label>
+          <input type="file" id="reg-avatar" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden />
+          <small id="reg-avatar-name">JPG, PNG, WEBP veya GIF · en fazla 5 MB</small>
+        </div>
+      </div>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
@@ -4001,6 +4011,26 @@ function renderRegister(app) {
     else { pw.type = 'password'; icon.className = 'fas fa-eye'; }
   });
 
+  $('#reg-avatar').addEventListener('change', e => {
+    const file = e.target.files[0];
+    const preview = $('#reg-avatar-preview');
+    const name = $('#reg-avatar-name');
+    if (!file) {
+      preview.innerHTML = '<i class="fas fa-user"></i>';
+      name.textContent = 'JPG, PNG, WEBP veya GIF · en fazla 5 MB';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      e.target.value = '';
+      name.textContent = 'Fotoğraf 5 MB\'dan küçük olmalı';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => { preview.innerHTML = `<img src="${reader.result}" alt="Profil fotoğrafı önizleme" />`; };
+    reader.readAsDataURL(file);
+    name.textContent = file.name;
+  });
+
   $('#kvkk-btn').addEventListener('click', async () => {
     try {
       const r = await api('/kvkk');
@@ -4017,6 +4047,7 @@ function renderRegister(app) {
     const is_private = $('#reg-private').checked;
     const tag_permission = document.querySelector('input[name="reg-tags"]:checked')?.value || 'everyone';
     const profile_visibility = {};
+    const avatar = $('#reg-avatar').files[0];
     const sectionNames = { forums: 'konular', books: 'kitaplar', comments: 'yorumlar', photos: 'fotograflar', music: 'muzikler' };
     const homepage_sections = [];
     document.querySelectorAll('[data-reg-stat]').forEach(input => {
@@ -4032,7 +4063,10 @@ function renderRegister(app) {
     if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
-      const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility }) });
+      const formData = new FormData();
+      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      if (avatar) formData.append('avatar', avatar);
+      const data = await api('/auth/register', { method: 'POST', body: formData });
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');

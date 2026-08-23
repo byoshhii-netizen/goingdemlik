@@ -146,7 +146,11 @@ $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
 // ===== AUTH =====
-if (adminToken) showPanel();
+if (adminToken) {
+  fetch('/api/admin/me', { headers: { 'X-Admin-Token': adminToken } })
+    .then(response => { if (!response.ok) throw new Error('Geçersiz oturum'); showPanel(); })
+    .catch(() => { adminToken = ''; adminProfile = null; sessionStorage.removeItem('admin_token'); sessionStorage.removeItem('admin_profile'); });
+}
 $('#admin-login-btn').addEventListener('click', tryLogin);
 $('#admin-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });

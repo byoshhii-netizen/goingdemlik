@@ -224,7 +224,7 @@ async function adminMiddleware(req, res, next) {
     const clientIP = (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || '').split(',')[0].trim();
     if (!allowed.includes(clientIP)) return res.status(404).json({ error: 'Not found' });
   }
-  const token = req.headers['x-admin-token'];
+  const token = String(req.headers['x-admin-token'] || '').trim();
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
   const { rows: masterRows } = await query("SELECT value FROM settings WHERE key IN ('admin_password','admin_username')");
   const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
@@ -366,6 +366,16 @@ const upload = multer({
     const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
     if (allowedImages.includes(file.mimetype) || allowedVideos.includes(file.mimetype) || file.mimetype.startsWith('video/') || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
     else cb(new Error('Sadece resim, video veya ses dosyaları kabul edilir'));
+  }
+});
+
+const avatarUpload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+    if (allowedImages.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Profil fotoğrafı JPEG, PNG, GIF, WEBP veya AVIF olmalı'));
   }
 });
 
@@ -551,7 +561,7 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const storedMasterPassword = String(config.admin_password || '').trim();
   const masterPasswordMatches = hashPassword(password) === storedMasterPassword || password === storedMasterPassword;
   if (username.toLowerCase() === (config.admin_username || 'Tarator').trim().toLowerCase() && masterPasswordMatches) {
-    return res.json({ token: config.admin_password, is_super_admin: true, username });
+    return res.json({ token: storedMasterPassword, is_super_admin: true, username });
   }
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
@@ -641,9 +651,13 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 });
 
 // ===== AUTH =====
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
     const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility } = req.body;
+    let parsedHomepageSections = homepage_sections;
+    let parsedProfileVisibility = profile_visibility;
+    try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
+    try { if (typeof parsedProfileVisibility === 'string') parsedProfileVisibility = JSON.parse(parsedProfileVisibility); } catch { parsedProfileVisibility = null; }
     if (!username || !email || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
@@ -658,8 +672,8 @@ app.post('/api/auth/register', async (req, res) => {
     if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
     const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
     let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true, followers_list: true, following_list: true };
-    if (profile_visibility && typeof profile_visibility === 'object') {
-      Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = profile_visibility[key] !== false; });
+    if (parsedProfileVisibility && typeof parsedProfileVisibility === 'object') {
+      Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = parsedProfileVisibility[key] !== false; });
     } else {
       const { rows: homepageSettings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
       let sections = [];
@@ -675,9 +689,11 @@ app.post('/api/auth/register', async (req, res) => {
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
     const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, email]);
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
+    let avatar = '';
+    if (req.file) avatar = await handleUpload(req.file);
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(homepage_sections) ? homepage_sections : []), JSON.stringify(defaultVisibility)]);
+      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), avatar]);
     const user = rows[0];
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
