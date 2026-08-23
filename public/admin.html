@@ -232,6 +232,16 @@
     .profile-tab-order-row > span:last-child { display:flex; gap:5px; }
     .profile-tab-order-row .btn { width:30px; height:30px; padding:0; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--border); border-radius:8px; }
     .profile-tab-order-row .btn:hover { border-color:var(--red2); color:var(--red2); }
+    .route-log-row { padding:14px 18px; border-bottom:1px solid var(--border); }
+    .route-log-row:last-child { border-bottom:0; }
+    .route-log-main, .route-log-meta { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .route-log-main { font-size:13px; }
+    .route-log-user { min-width:150px; color:var(--red2); font-weight:700; }
+    .route-log-user i, .route-log-meta i { margin-right:6px; color:var(--red2); }
+    .route-log-route { color:var(--text); font-family:var(--font2); font-weight:600; }
+    .route-log-arrow { color:var(--text3); }
+    .route-log-redirect { color:#86efac; word-break:break-all; }
+    .route-log-meta { margin-top:8px; color:var(--text3); font-size:11px; }
     .adm-toggle { width: 44px; height: 24px; position: relative; flex: 0 0 auto; }
     .adm-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
     .adm-toggle > span { position: absolute; inset: 0; border-radius: 999px; background: var(--bg4); border: 1px solid var(--border); transition: .2s; }
@@ -428,6 +438,7 @@
       <div class="adm-nav-item" data-section="shop-orders"><div class="adm-nav-icon"><i class="fas fa-receipt"></i></div> Siparişler</div>
       <div class="adm-nav-item" data-section="shop-settings"><div class="adm-nav-icon"><i class="fas fa-credit-card"></i></div> Ödeme Sistemi</div>
       <div class="adm-nav-item" data-section="logs"><div class="adm-nav-icon"><i class="fas fa-history"></i></div> Loglar</div>
+      <div class="adm-nav-item" data-section="route-logs"><div class="adm-nav-icon"><i class="fas fa-route"></i></div> Route Log</div>
       <div class="adm-nav-item" data-section="settings"><div class="adm-nav-icon"><i class="fas fa-cog"></i></div> Site Ayarları</div>
     </div>
 

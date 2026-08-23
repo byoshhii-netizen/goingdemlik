@@ -482,6 +482,25 @@ app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); }
 // New admin entry path
 app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 
+app.get('/uyarı', async (req, res, next) => {
+  try {
+    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('warning_text','warning_link','warning_link_label','warning_logo')");
+    const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
+    const text = settings.warning_text || 'BÖYLE ŞEYLER DENERSEN BAŞINA BÜYÜK İŞ ALACAKSIN. POLİS AMCALARA SELAM VERMEK İSTER MİSİN ?';
+    const link = settings.warning_link || 'https://egm.gov.tr';
+    const label = settings.warning_link_label || 'egm.gov.tr';
+    const logo = settings.warning_logo || '/uyarı.png';
+    res.send(`<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Uyarı</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#07080d;color:#f7f5ef;font-family:Inter,system-ui,sans-serif}main{width:min(680px,100%);padding:clamp(28px,7vw,72px) clamp(22px,7vw,64px);text-align:center;border:1px solid rgba(220,190,130,.3);border-radius:24px;background:linear-gradient(145deg,#171820,#0d0e14);box-shadow:0 24px 80px #0008,0 0 50px rgba(220,170,80,.1)}img{width:min(150px,42vw);height:min(150px,42vw);object-fit:contain;margin-bottom:26px}h1{margin:0 auto 30px;font-size:clamp(25px,5vw,48px);line-height:1.18;letter-spacing:0;color:#f5e7c7}a{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 24px;border-radius:12px;background:#d6b36a;color:#17120a;font-weight:800;text-decoration:none;transition:transform .2s,background .2s}a:hover{background:#f0cf86;transform:translateY(-2px)}@media(max-width:480px){body{padding:14px}main{border-radius:18px}h1{font-size:27px;margin-bottom:24px}a{width:100%}}</style></head><body><main><img src="${escapeHtml(logo)}" alt="Uyarı"><h1>${escapeHtml(text)}</h1><a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a></main></body></html>`);
+  } catch (error) { next(error); }
+});
+
+app.get('/uyarı.png', (req, res) => {
+  const warningLogo = path.join(__dirname, 'uyarı.png');
+  res.sendFile(warningLogo, error => {
+    if (error && !res.headersSent) res.sendFile(path.join(__dirname, 'cigcig.png'));
+  });
+});
+
 // VMB tarzı route koruması: admin panelinden tanımlanan hassas yolları gizler.
 app.use(async (req, res, next) => {
   if (req.path.startsWith('/api/') || req.path === '/gubukgak' || req.method !== 'GET') return next();
@@ -496,15 +515,25 @@ app.use(async (req, res, next) => {
       return req.path === normalized || req.path.startsWith(`${normalized}/`);
     });
     if (!matched) return next();
-    await logAction('security', 'restricted_route_attempt', req.path, `Korunan route: ${matched}`, getIp(req));
     const target = String(settings.route_redirect || '/').trim();
-    if (target.startsWith('/')) return res.redirect(target);
-    const externalTarget = /^https?:\/\//i.test(target) ? target : `https://${target}`;
+    const externalTarget = target.startsWith('/') ? target : (/^https?:\/\//i.test(target) ? target : `https://${target}`);
+    let redirectTarget = target.startsWith('/') ? target : '/';
     try {
-      const parsedTarget = new URL(externalTarget);
-      if (parsedTarget.protocol !== 'http:' && parsedTarget.protocol !== 'https:') return res.redirect('/');
-      return res.redirect(parsedTarget.toString());
-    } catch { return res.redirect('/'); }
+      if (!target.startsWith('/')) {
+        const parsedTarget = new URL(externalTarget);
+        if (parsedTarget.protocol === 'http:' || parsedTarget.protocol === 'https:') redirectTarget = parsedTarget.toString();
+      }
+    } catch {}
+    let actor = 'anonymous';
+    try {
+      const token = req.headers['authorization']?.replace('Bearer ', '');
+      if (token) {
+        const { rows: users } = await query('SELECT u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1', [token]);
+        if (users[0]?.username) actor = users[0].username;
+      }
+    } catch {}
+    await logAction(actor, 'restricted_route_attempt', req.path, JSON.stringify({ matchedRoute: matched, redirectTarget }), getIp(req));
+    return res.redirect(redirectTarget);
   } catch { return next(); }
 });
 
@@ -2473,6 +2502,12 @@ app.delete('/api/admin/tag/:id', adminMiddleware, async (req, res) => {
 app.get('/api/admin/logs', adminMiddleware, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 200, 500);
   const { rows } = await query('SELECT * FROM system_logs ORDER BY created_at DESC LIMIT $1', [limit]);
+  res.json(rows);
+});
+
+app.get('/api/admin/route-logs', adminMiddleware, async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 500, 1000);
+  const { rows } = await query("SELECT id, actor, target, detail, ip, created_at FROM system_logs WHERE action='restricted_route_attempt' ORDER BY created_at DESC LIMIT $1", [limit]);
   res.json(rows);
 });
 

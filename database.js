@@ -148,7 +148,11 @@ async function initDb() {
     INSERT INTO settings (key, value) VALUES
       ('route_protection_enabled', '0'),
       ('protected_routes', '["/admin","/yonetim","/yonetici","/yonet"]'),
-      ('route_redirect', '/')
+      ('route_redirect', '/'),
+      ('warning_text', 'BÖYLE ŞEYLER DENERSEN BAŞINA BÜYÜK İŞ ALACAKSIN. POLİS AMCALARA SELAM VERMEK İSTER MİSİN ?'),
+      ('warning_link', 'https://egm.gov.tr'),
+      ('warning_link_label', 'egm.gov.tr'),
+      ('warning_logo', '/uyarı.png')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 

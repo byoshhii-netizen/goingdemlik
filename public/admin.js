@@ -202,7 +202,7 @@ function loadSection(section) {
   const map = {
     dashboard: renderDashboard, users: renderUsers,
     forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
-    levels: renderLevels, tags: renderTags, logs: renderLogs,
+    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
@@ -1703,6 +1703,15 @@ async function renderLogs(main) {
   });
 }
 
+async function renderRouteLogs(main) {
+  let logs = [];
+  try { logs = await adminApi('/route-logs'); } catch (e) { main.innerHTML = `<p style="color:var(--red2);padding:20px">${escHtml(e.message)}</p>`; return; }
+  const getRedirect = log => { try { return JSON.parse(log.detail || '{}').redirectTarget || '—'; } catch { return log.detail || '—'; } };
+  const render = rows => rows.length ? rows.map(log => { let detail = {}; try { detail = JSON.parse(log.detail || '{}'); } catch {} return `<div class="route-log-row"><div class="route-log-main"><span class="route-log-user"><i class="fas fa-user"></i>${escHtml(log.actor || 'anonymous')}</span><span class="route-log-route">${escHtml(log.target || '—')}</span><span class="route-log-arrow"><i class="fas fa-arrow-right"></i></span><span class="route-log-redirect">${escHtml(detail.redirectTarget || '—')}</span></div><div class="route-log-meta"><span><i class="fas fa-network-wired"></i>${escHtml(log.ip || '—')}</span><span><i class="fas fa-clock"></i>${formatDate(log.created_at)}</span><span><i class="fas fa-shield-halved"></i>${escHtml(detail.matchedRoute || '—')}</span></div></div>`; }).join('') : '<div style="padding:36px;text-align:center;color:var(--text3)">Route denemesi bulunamadı</div>';
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-route"></i></div> Route Log <span style="font-size:13px;font-weight:400;color:var(--text2)">(${logs.length})</span></div><div class="adm-search"><i class="fas fa-search"></i><input id="route-log-search" type="text" placeholder="Kullanıcı, IP, route, tarih veya hedef ara..." style="min-width:300px"></div></div><div class="card"><div id="route-logs-list">${render(logs)}</div></div>`;
+  $('#route-log-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); $('#route-logs-list').innerHTML = render(logs.filter(log => JSON.stringify(log).toLowerCase().includes(q) || getRedirect(log).toLowerCase().includes(q))); });
+}
+
 // ===== MESSAGES =====
 async function renderAdminMessages(main) {
   let convs = [];
@@ -2138,6 +2147,16 @@ async function renderSettings(main) {
           <div id="s-route-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card adm-feature-card" style="grid-column:1 / -1">
+        <div class="card-header"><span><i class="fas fa-triangle-exclamation" style="color:#f59e0b;margin-right:8px"></i>Uyarı Sayfası</span><span class="adm-setting-status is-on">/uyarı</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy"><strong>Yönlendirme ekranını özelleştir</strong><p>Korunan route denemelerinde gösterilecek uyarı metnini, bağlantıyı ve logo yolunu buradan değiştirebilirsiniz.</p></div>
+          <div class="form-group"><label>Logo yolu</label><input id="s-warning-logo" value="${escHtml(settings['warning_logo'] || '/uyarı.png')}" placeholder="/uyarı.png" /></div>
+          <div class="form-group"><label>Uyarı metni</label><textarea id="s-warning-text" rows="4">${escHtml(settings['warning_text'] || 'BÖYLE ŞEYLER DENERSEN BAŞINA BÜYÜK İŞ ALACAKSIN. POLİS AMCALARA SELAM VERMEK İSTER MİSİN ?')}</textarea></div>
+          <div class="form-row"><div class="form-group"><label>Link adresi</label><input id="s-warning-link" value="${escHtml(settings['warning_link'] || 'https://egm.gov.tr')}" /></div><div class="form-group"><label>Link yazısı</label><input id="s-warning-link-label" value="${escHtml(settings['warning_link_label'] || 'egm.gov.tr')}" /></div></div>
+          <button class="btn btn-primary" id="s-warning-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Uyarı Sayfasını Kaydet</button><div id="s-warning-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card adm-feature-card">
         <div class="card-header"><span><i class="fas fa-user-shield" style="color:var(--red2);margin-right:8px"></i>Sosyal Medya Uygulaması</span><span class="adm-setting-status ${settings['first_visit_auth']==='1'?'is-on':''}">${settings['first_visit_auth']==='1'?'AÇIK':'KAPALI'}</span></div>
         <div class="card-body">
@@ -2343,6 +2362,14 @@ async function renderSettings(main) {
     await saveSetting('protected_routes', JSON.stringify(routes), msg);
     await saveSetting('route_redirect', redirect, msg);
     msg.style.color = 'var(--green)'; msg.textContent = 'Route koruma ayarları kaydedildi';
+  });
+  document.getElementById('s-warning-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-warning-msg');
+    await saveSetting('warning_logo', document.getElementById('s-warning-logo').value.trim() || '/uyarı.png', msg);
+    await saveSetting('warning_text', document.getElementById('s-warning-text').value.trim(), msg);
+    await saveSetting('warning_link', document.getElementById('s-warning-link').value.trim(), msg);
+    await saveSetting('warning_link_label', document.getElementById('s-warning-link-label').value.trim(), msg);
+    msg.style.color = 'var(--green)'; msg.textContent = 'Uyarı sayfası ayarları kaydedildi';
   });
 
   const profileTabOptions = [
