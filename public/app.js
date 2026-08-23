@@ -615,7 +615,7 @@ async function loadNotifCount() {
     else { badge.style.display = 'none'; if (mobileBadge) mobileBadge.style.display = 'none'; }
     const friends = await api('/friends').catch(() => []);
     const pendingCount = friends.filter(friend => friend.status === 'pending' && String(friend.addressee_id) === String(currentUser.id)).length;
-    ['#nav-friends-badge', '#mob-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) dot.style.display = pendingCount ? 'inline-block' : 'none'; });
+    ['#nav-friends-badge', '#mobile-friends-badge', '#mob-friends-badge', '#dm-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) dot.style.display = pendingCount ? 'inline-block' : 'none'; });
   } catch {}
 }
 
@@ -4299,7 +4299,7 @@ async function renderMessages(app, targetUsername) {
         <span class="dm-sidebar-title">Mesajlar</span>
         <div class="dm-sidebar-actions">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>
-          <button class="btn btn-ghost btn-sm" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 8px"><i class="fas fa-user-friends"></i></button>
+          <button class="btn btn-ghost btn-sm dm-friends-button" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 8px;position:relative"><i class="fas fa-user-friends"></i><span id="dm-friends-badge" class="friend-request-dot"></span></button>
           <button class="btn btn-primary btn-sm" id="new-dm-btn" title="Yeni mesaj" style="padding:5px 9px"><i class="fas fa-edit"></i></button>
         </div>
       </div>

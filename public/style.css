@@ -2396,6 +2396,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 /* ===== ARKADAŞLAR GRID ===== */
 .friends-page-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
 .friend-request-dot, .notification-dot, .tab-dot { display: none; width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--accent-red); box-shadow: 0 0 0 2px var(--bg-card); vertical-align: middle; }
+.nav-friends-link, .mobile-friends-btn, .dm-friends-button { position: relative; }
+.nav-friends-link .friend-request-dot, .mobile-friends-btn .friend-request-dot, .dm-friends-button .friend-request-dot { position: absolute; top: 3px; right: 3px; margin: 0; }
 .notification-dot { display: inline-block; margin: 5px 2px 0 0; box-shadow: none; }
 .tab-has-notice { color: var(--accent-red2) !important; }
 .tab-has-notice .tab-dot { display: inline-block; margin-left: 4px; box-shadow: none; }
