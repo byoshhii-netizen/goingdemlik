@@ -141,7 +141,7 @@ $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
 // ===== AUTH =====
-if (adminToken) showPanel();
+if (adminToken) restoreAdminSession();
 $('#admin-login-btn').addEventListener('click', tryLogin);
 $('#admin-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
@@ -162,6 +162,24 @@ async function tryLogin() {
   } catch (error) {
     adminToken = ''; sessionStorage.removeItem('admin_token');
     $('#admin-login-err').textContent = error.message;
+  }
+}
+
+async function restoreAdminSession() {
+  try {
+    const response = await fetch('/api/admin/me', { headers: { 'X-Admin-Token': adminToken } });
+    if (!response.ok) throw new Error('Oturum süresi doldu');
+    adminProfile = await response.json();
+    sessionStorage.setItem('admin_profile', JSON.stringify(adminProfile));
+    showPanel();
+  } catch {
+    adminToken = '';
+    adminProfile = null;
+    sessionStorage.removeItem('admin_token');
+    sessionStorage.removeItem('admin_profile');
+    $('#login-screen').style.display = '';
+    $('#admin-panel').classList.remove('visible');
+    $('#admin-login-err').textContent = 'Oturum geçersiz, tekrar giriş yapın';
   }
 }
 

@@ -223,7 +223,7 @@ async function adminMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
   const { rows: masterRows } = await query("SELECT value FROM settings WHERE key IN ('admin_password','admin_username')");
   const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
-  if (master.admin_password && token === master.admin_password) {
+  if (master.admin_password && token.trim() === String(master.admin_password).trim()) {
     req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
     return next();
   }
@@ -544,7 +544,7 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const storedMasterPassword = String(config.admin_password || '').trim();
   const masterPasswordMatches = hashPassword(password) === storedMasterPassword || password === storedMasterPassword;
   if (username.toLowerCase() === (config.admin_username || 'Tarator').trim().toLowerCase() && masterPasswordMatches) {
-    return res.json({ token: config.admin_password, is_super_admin: true, username });
+    return res.json({ token: String(config.admin_password).trim(), is_super_admin: true, username });
   }
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
