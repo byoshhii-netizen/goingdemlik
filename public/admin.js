@@ -165,31 +165,9 @@ async function tryLogin() {
   }
 }
 
-async function refreshAdminProfile() {
-  if (!adminToken) return;
-  try {
-    const response = await fetch('/api/admin/me', { headers: { 'X-Admin-Token': adminToken } });
-    if (!response.ok) throw new Error('Yetkili oturumu geçersiz');
-    adminProfile = await response.json();
-    sessionStorage.setItem('admin_profile', JSON.stringify(adminProfile));
-  } catch (error) {
-    adminToken = '';
-    adminProfile = null;
-    sessionStorage.removeItem('admin_token');
-    sessionStorage.removeItem('admin_profile');
-    throw error;
-  }
-}
-
-async function showPanel() {
+function showPanel() {
   $('#login-screen').style.display = 'none';
   $('#admin-panel').classList.add('visible');
-  try { await refreshAdminProfile(); } catch (error) {
-    $('#login-screen').style.display = '';
-    $('#admin-panel').classList.remove('visible');
-    $('#admin-login-err').textContent = error.message;
-    return;
-  }
   loadTopbarStats();
   setupNav();
   applyAuthorityNav();
@@ -231,9 +209,11 @@ function setupNav() {
 async function loadTopbarStats() {
   try {
     const users = await adminApi('/users');
+    const forums = await adminApi('/forums');
     const el = $('#adm-topbar-stats');
     if (el) el.innerHTML = `
-      <span><i class="fas fa-users" style="color:#5865F2;margin-right:4px"></i>${users.length} üye</span>`;
+      <span><i class="fas fa-users" style="color:#5865F2;margin-right:4px"></i>${users.length} üye</span>
+      <span><i class="fas fa-comments" style="color:#dc2626;margin-right:4px"></i>${forums.length} konu</span>`;
   } catch {}
 }
 
