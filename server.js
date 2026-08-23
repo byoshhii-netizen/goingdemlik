@@ -498,7 +498,13 @@ app.use(async (req, res, next) => {
     if (!matched) return next();
     await logAction('security', 'restricted_route_attempt', req.path, `Korunan route: ${matched}`, getIp(req));
     const target = String(settings.route_redirect || '/').trim();
-    return res.redirect(/^https?:\/\//i.test(target) ? target : (target.startsWith('/') ? target : '/'));
+    if (target.startsWith('/')) return res.redirect(target);
+    const externalTarget = /^https?:\/\//i.test(target) ? target : `https://${target}`;
+    try {
+      const parsedTarget = new URL(externalTarget);
+      if (parsedTarget.protocol !== 'http:' && parsedTarget.protocol !== 'https:') return res.redirect('/');
+      return res.redirect(parsedTarget.toString());
+    } catch { return res.redirect('/'); }
   } catch { return next(); }
 });
 
