@@ -87,6 +87,7 @@ async function renderBadges(main) {
 
 // ===== CIGCIG ADMIN PANEL =====
 let adminToken = sessionStorage.getItem('admin_token') || '';
+let adminProfile = JSON.parse(sessionStorage.getItem('admin_profile') || 'null');
 let currentSection = 'dashboard';
 
 function $(s) { return document.querySelector(s); }
@@ -140,24 +141,45 @@ $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
 // ===== AUTH =====
-if (adminToken) showPanel();
+if (adminToken) restoreAdminSession();
 $('#admin-login-btn').addEventListener('click', tryLogin);
+$('#admin-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
 async function tryLogin() {
+  const username = $('#admin-username-input').value.trim();
   const pw = $('#admin-pw-input').value;
-  if (!pw) return;
-  const msgBuf = new TextEncoder().encode(pw);
-  const hashBuf = await crypto.subtle.digest('SHA-256', msgBuf);
-  const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
-  adminToken = hashHex;
-  sessionStorage.setItem('admin_token', adminToken);
+  if (!username || !pw) return;
   try {
-    await adminApi('/settings');
+    const response = await fetch('/api/admin/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username, password:pw }) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Giriş başarısız');
+    adminToken = result.token;
+    adminProfile = result;
+    sessionStorage.setItem('admin_token', adminToken);
+    sessionStorage.setItem('admin_profile', JSON.stringify(result));
+    showPanel();
+  } catch (error) {
+    adminToken = ''; sessionStorage.removeItem('admin_token');
+    $('#admin-login-err').textContent = error.message;
+  }
+}
+
+async function restoreAdminSession() {
+  try {
+    const response = await fetch('/api/admin/me', { headers: { 'X-Admin-Token': adminToken } });
+    if (!response.ok) throw new Error('Oturum süresi doldu');
+    adminProfile = await response.json();
+    sessionStorage.setItem('admin_profile', JSON.stringify(adminProfile));
     showPanel();
   } catch {
-    adminToken = ''; sessionStorage.removeItem('admin_token');
-    $('#admin-login-err').textContent = 'Hatalı şifre';
+    adminToken = '';
+    adminProfile = null;
+    sessionStorage.removeItem('admin_token');
+    sessionStorage.removeItem('admin_profile');
+    $('#login-screen').style.display = '';
+    $('#admin-panel').classList.remove('visible');
+    $('#admin-login-err').textContent = 'Oturum geçersiz, tekrar giriş yapın';
   }
 }
 
@@ -166,7 +188,23 @@ function showPanel() {
   $('#admin-panel').classList.add('visible');
   loadTopbarStats();
   setupNav();
+  applyAuthorityNav();
   loadSection('dashboard');
+}
+
+function applyAuthorityNav() {
+  if (!adminProfile || adminProfile.is_super_admin) return;
+  const p = adminProfile.permissions || {};
+  const visible = new Set(['dashboard']);
+  if (p.can_view_users) visible.add('users');
+  if (p.can_view_logs) visible.add('logs');
+  if (p.can_suspend_content || p.can_view_stories) { visible.add('stories'); visible.add('videos'); visible.add('photos'); visible.add('forums'); visible.add('books'); }
+  if (p.can_view_groups) visible.add('groups');
+  if (p.can_view_levels) visible.add('levels');
+  if (p.can_view_store) visible.add('shop');
+  if (p.can_review_artists) visible.add('artist-apps');
+  if (p.can_assign_badges) visible.add('badges');
+  $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
 }
 
 $('#admin-logout-btn').addEventListener('click', () => {
@@ -202,7 +240,7 @@ function loadSection(section) {
   const map = {
     dashboard: renderDashboard, users: renderUsers,
     forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
-    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs,
+    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
@@ -458,6 +496,7 @@ function renderUsersTable(users) {
         <button class="btn btn-outline btn-xs edit-user-btn" data-id="${u.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
         <button class="btn btn-blue btn-xs perm-user-btn" data-id="${u.id}" title="Yetkili rolü ve yetkiler"><i class="fas fa-shield"></i></button>
         <button class="btn btn-outline btn-xs restrict-user-btn" data-id="${u.id}" title="Kısıtlama"><i class="fas fa-user-lock"></i></button>
+        ${!u.is_admin ? `<button class="btn btn-xs direct-authority-btn" style="background:rgba(189,162,117,.16);color:var(--red2);border:1px solid var(--border-red)" data-id="${u.id}" title="Direkt Yetkili Ata"><i class="fas fa-user-shield"></i></button>` : ''}
         ${u.banned
           ? `<button class="btn btn-green btn-xs unban-user-btn" data-id="${u.id}" title="Ban Kaldır"><i class="fas fa-unlock"></i></button>`
           : `<button class="btn btn-danger btn-xs ban-user-btn" data-id="${u.id}" title="Banla"><i class="fas fa-ban"></i></button>`}
@@ -472,11 +511,30 @@ function renderUsersTable(users) {
     const unban = e.target.closest('.unban-user-btn');
     const del = e.target.closest('.del-user-btn');
     const perm = e.target.closest('.perm-user-btn');
+    const restrict = e.target.closest('.restrict-user-btn');
+    const directAuthority = e.target.closest('.direct-authority-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
     if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (del) { if (!confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (perm) { const u = users.find(x => x.id == perm.dataset.id); if (u) showPermModal(u); }
+    if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
+    if (directAuthority) {
+      const defaults = { admin_role:'authority', can_view_users:1, can_view_logs:1, can_suspend_content:1, can_restrict_users:1, can_review_artists:1, can_assign_badges:1, can_view_store:1, can_view_groups:1, can_view_stories:1, can_view_levels:1 };
+      try { await adminApi('/permissions/' + directAuthority.dataset.id, { method:'POST', body:JSON.stringify(defaults) }); toast('Yetkili rolü atandı'); loadSection('users'); } catch (error) { toast(error.message, 'error'); }
+    }
+  });
+}
+
+async function showRestrictionModal(user) {
+  showModal('Kısıtlama Uygula — ' + user.username, `<div class="form-group"><label>Kısıtlama türü</label><select id="restriction-type"><option value="photo">Fotoğraf</option><option value="story">Hikaye</option><option value="reals">Reals</option><option value="music">Müzik</option><option value="comment">Yorum</option><option value="forum">Forum</option><option value="message">Mesaj</option><option value="group">Grup</option></select></div><div class="form-group"><label>Süre</label><input id="restriction-duration" placeholder="Örn: 2 gün 4 saat veya süresiz" /></div><div class="form-group"><label>Neden <b style="color:var(--red2)">*</b></label><textarea id="restriction-reason" rows="4" placeholder="Kısıtlama nedenini yazın"></textarea></div><button class="btn btn-primary" id="restriction-save" style="width:100%;justify-content:center"><i class="fas fa-shield-halved"></i> Kısıtlamayı Uygula</button><div id="restriction-error" class="form-error mt-4"></div><div id="restriction-history" style="margin-top:18px"></div>`);
+  try {
+    const history = await adminApi('/user/' + user.id + '/restrictions');
+    $('#restriction-history').innerHTML = history.length ? '<div style="font-size:11px;color:var(--text3);margin-bottom:7px">Kısıtlama geçmişi</div>' + history.slice(0,5).map(item => `<div style="padding:8px 0;border-top:1px solid var(--border);font-size:11px"><b>${escHtml(item.restriction_type)}</b> · ${escHtml(item.reason)}<br><span style="color:var(--text3)">${item.expires_at ? formatDate(item.expires_at) : 'Süresiz'} · ${item.revoked_at ? 'Kaldırıldı' : 'Aktif'}</span></div>`).join('') : '';
+  } catch {}
+  $('#restriction-save').addEventListener('click', async () => {
+    const error = $('#restriction-error');
+    try { await adminApi('/user/' + user.id + '/restrictions', { method:'POST', body:JSON.stringify({ restriction_type:$('#restriction-type').value, duration:$('#restriction-duration').value, reason:$('#restriction-reason').value.trim() }) }); toast('Kısıtlama uygulandı'); hideModal(); loadSection('users'); } catch (e) { error.textContent = e.message; }
   });
 }
 
@@ -557,6 +615,14 @@ async function showPermModal(user) {
     { key:'can_manage_tags', label:'Etiketleri Yönet', desc:'Etiket ekle/düzenle/sil', icon:'fas fa-tags' },
     { key:'can_manage_announcements', label:'Duyuru Yönet', desc:'Duyuru oluştur/düzenle/sil', icon:'fas fa-bullhorn' },
     { key:'can_view_logs', label:'Log Görüntüle', desc:'Sistem loglarını okuyabilir', icon:'fas fa-history' },
+    { key:'can_suspend_content', label:'İçerik Askıya Al', desc:'İçerikleri geçici olarak görünmez yapabilir', icon:'fas fa-pause-circle' },
+    { key:'can_restrict_users', label:'Kullanıcı Kısıtla', desc:'Gerekçeli ve süreli kısıtlama verebilir', icon:'fas fa-user-lock' },
+    { key:'can_review_artists', label:'Artist Başvuruları', desc:'Başvuruları kabul veya reddedebilir', icon:'fas fa-microphone' },
+    { key:'can_assign_badges', label:'Rozet Ver', desc:'Mevcut rozetleri kullanıcılara verebilir', icon:'fas fa-award' },
+    { key:'can_view_store', label:'Mağazayı Görüntüle', desc:'Mağaza ürünlerini sadece görebilir', icon:'fas fa-store' },
+    { key:'can_view_groups', label:'Grupları Görüntüle', desc:'Grupları sadece görebilir', icon:'fas fa-users' },
+    { key:'can_view_stories', label:'Hikayeleri Görüntüle', desc:'Hikayeleri görebilir ve moderasyon yapabilir', icon:'fas fa-circle-play' },
+    { key:'can_view_levels', label:'Seviyeleri Görüntüle', desc:'Seviyeleri sadece görebilir', icon:'fas fa-layer-group' },
     { key:'can_manage_settings', label:'Site Ayarları', desc:'Site ayarlarını değiştirebilir', icon:'fas fa-cog' },
     { key:'can_manage_admins', label:'Admin Yönet', desc:'Admin atayabilir/alabilir', icon:'fas fa-shield' },
   ];
@@ -572,6 +638,7 @@ async function showPermModal(user) {
       Kaydet'e basınca kullanıcıya <strong>is_admin=1</strong> atanır ve sadece işaretli yetkiler verilir.
       Tüm yetkiler verirsen süperadmin gibi çalışır.
     </div>`}
+    <div class="form-group" style="margin-bottom:16px"><label>Yetkili rolü</label><select id="perm-role"><option value="none" ${!user.is_admin ? 'selected' : ''}>Yetkili değil</option><option value="authority" ${user.admin_role === 'authority' || (user.is_admin && !perms) ? 'selected' : ''}>Yetkili</option><option value="custom" ${user.is_admin && user.admin_role !== 'authority' && perms ? 'selected' : ''}>Özel yetki profili</option></select><div style="font-size:11px;color:var(--text3);margin-top:6px">“Yetkili” seçimi, moderasyon için güvenli varsayılan yetkileri otomatik verir. Sonra aşağıdaki izinleri değiştirebilirsin.</div></div>
     <div class="perm-grid" id="perm-grid">
       ${permDefs.map(d => `
         <div class="perm-item">
@@ -589,10 +656,15 @@ async function showPermModal(user) {
     <button class="btn btn-blue" id="perm-save-btn" style="width:100%;justify-content:center;margin-top:8px"><i class="fas fa-save"></i> Kaydet &amp; Adminliği Etkinleştir</button>
     <div id="perm-error" class="form-error mt-4"></div>
   `);
+  $('#perm-role').addEventListener('change', () => {
+    if ($('#perm-role').value !== 'authority') return;
+    const defaults = ['can_view_users','can_view_logs','can_suspend_content','can_restrict_users','can_review_artists','can_assign_badges','can_view_store','can_view_groups','can_view_stories','can_view_levels'];
+    permDefs.forEach(d => { const checkbox = $('#perm-'+d.key); if (checkbox) checkbox.checked = defaults.includes(d.key); });
+  });
   $('#perm-all-btn').addEventListener('click', () => permDefs.forEach(d => { const el=$('#perm-'+d.key); if(el) el.checked=true; }));
   $('#perm-none-btn').addEventListener('click', () => permDefs.forEach(d => { const el=$('#perm-'+d.key); if(el) el.checked=false; }));
   $('#perm-save-btn').addEventListener('click', async () => {
-    const body = {}; permDefs.forEach(d => { body[d.key] = $('#perm-'+d.key)?.checked ? 1 : 0; });
+    const body = { admin_role: $('#perm-role').value }; permDefs.forEach(d => { body[d.key] = $('#perm-'+d.key)?.checked ? 1 : 0; });
     try { await adminApi('/permissions/'+user.id, {method:'POST', body:JSON.stringify(body)}); toast('Yetkiler kaydedildi'); hideModal(); }
     catch (e) { $('#perm-error').textContent = e.message; }
   });
@@ -1713,6 +1785,13 @@ async function renderRouteLogs(main) {
   $('#route-log-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); $('#route-logs-list').innerHTML = render(logs.filter(log => JSON.stringify(log).toLowerCase().includes(q) || getRedirect(log).toLowerCase().includes(q))); });
 }
 
+async function renderAuthorityLogs(main) {
+  let logs = [];
+  try { logs = await adminApi('/authority-logs'); } catch (e) { main.innerHTML = `<p style="color:var(--red2);padding:20px">${escHtml(e.message)}</p>`; return; }
+  const render = rows => rows.length ? rows.map(log => `<div class="route-log-row"><div class="route-log-main"><span class="route-log-user"><i class="fas fa-user-shield"></i>${escHtml(log.actor || '—')}</span><span class="route-log-route">${escHtml(log.action || '—')}</span><span class="route-log-arrow"><i class="fas fa-arrow-right"></i></span><span class="route-log-redirect">${escHtml(log.target || '—')}</span></div><div class="route-log-meta"><span><i class="fas fa-network-wired"></i>${escHtml(log.ip || '—')}</span><span><i class="fas fa-clock"></i>${formatDate(log.created_at)}</span><span><i class="fas fa-file-lines"></i>${escHtml(log.detail || '—')}</span></div></div>`).join('') : '<div style="padding:36px;text-align:center;color:var(--text3)">Yetkili müdahalesi bulunamadı</div>';
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-user-shield"></i></div> Yetkili Logları <span style="font-size:13px;font-weight:400;color:var(--text2)">(${logs.length})</span></div><div class="adm-search"><i class="fas fa-search"></i><input id="authority-log-search" type="text" placeholder="Yetkili, işlem, kullanıcı, IP veya tarih ara..." style="min-width:300px"></div></div><div class="card"><div id="authority-logs-list">${render(logs)}</div></div>`;
+  $('#authority-log-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); $('#authority-logs-list').innerHTML = render(logs.filter(log => JSON.stringify(log).toLowerCase().includes(q))); });
+}
 
 // ===== MESSAGES =====
 async function renderAdminMessages(main) {
@@ -2132,6 +2211,7 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Güvenlik</span></div>
         <div class="card-body">
+          <div class="form-group"><label>Ana Admin Kullanıcı Adı</label><input id="s-admin-username" value="${escHtml(settings['admin_username'] || 'Tarator')}" /></div>
           <div class="form-group"><label>Yeni Admin Şifresi</label><input id="s-newpw" type="password" placeholder="Boş bırakırsan değişmez" /></div>
           <div class="form-group"><label>Şifreyi Onayla</label><input id="s-newpw2" type="password" placeholder="••••••" /></div>
           <button class="btn btn-primary" id="s-pw-save" style="width:100%;justify-content:center"><i class="fas fa-key"></i> Şifreyi Güncelle</button>
@@ -2391,11 +2471,14 @@ async function renderSettings(main) {
   });
   document.getElementById('s-pw-save').addEventListener('click', async () => {
     const msg = document.getElementById('s-pw-msg');
+    const adminUsername = document.getElementById('s-admin-username').value.trim();
+    if (!adminUsername) { msg.textContent='Ana admin kullanıcı adı boş olamaz'; return; }
     const pw = document.getElementById('s-newpw').value, pw2 = document.getElementById('s-newpw2').value;
     if (!pw) { msg.textContent='Şifre boş olamaz'; return; }
     if (pw !== pw2) { msg.textContent='Şifreler eşleşmiyor'; return; }
     const hashHex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pw)))).map(b=>b.toString(16).padStart(2,'0')).join('');
     await saveSetting('admin_password', hashHex, msg);
+    await saveSetting('admin_username', adminUsername, msg);
     adminToken = hashHex; sessionStorage.setItem('admin_token', adminToken);
     msg.style.color='var(--green)'; msg.textContent='Şifre güncellendi';
   });
