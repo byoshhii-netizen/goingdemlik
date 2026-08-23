@@ -90,18 +90,18 @@ body[data-theme="gold"] {
 .story-user.viewed .story-ring { background: var(--border-hover); }
 .story-add > span { background: var(--bg-card2); border: 1px solid var(--border); color: var(--accent-red); font-size: 18px; }
 .story-viewer { position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.story-tap-zone { position: absolute; top: 28px; bottom: 105px; width: 50%; z-index: 4; cursor: pointer; border: 0; outline: 0; padding: 0; background: transparent; -webkit-appearance: none; appearance: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+.story-tap-zone { position: absolute; top: 0; bottom: 115px; width: 50%; z-index: 4; cursor: pointer; border: 0; outline: 0; padding: 0; background: transparent !important; -webkit-appearance: none; appearance: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .story-tap-left { left: 0; }
 .story-tap-right { right: 0; }
-.story-tap-zone:focus, .story-tap-zone:active { outline: 0; background: transparent; box-shadow: none; }
+.story-tap-zone:focus, .story-tap-zone:focus-visible, .story-tap-zone:active { outline: 0; background: transparent !important; box-shadow: none; }
 .story-fullscreen-overlay { padding: 0 !important; align-items: stretch !important; }
 .story-fullscreen-overlay .modal { width: 100vw; max-width: none; height: 100vh; max-height: none; border: 0; border-radius: 0; background: #000; }
 .story-fullscreen-overlay .modal-header { position: absolute; top: 10px; left: 12px; right: 12px; z-index: 8; padding: 0; margin: 0; }
 .story-fullscreen-overlay .modal-header h3 { display: none; }
 .story-fullscreen-overlay .modal-body { box-sizing: border-box; height: 100%; min-height: 0; padding: 52px 12px 12px; display: flex; align-items: center; justify-content: center; overflow-y: auto; overflow-x: hidden; }
-.story-fullscreen-overlay .story-viewer { width: min(100%, 760px); height: auto; max-height: 100%; justify-content: center; gap: 8px; min-width: 0; }
-.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: min(100%, 760px); max-width: 100%; height: min(62vh, 600px); min-height: 0; max-height: 600px; flex: 0 1 auto; object-fit: contain; border-radius: 0; background: #000; }
-.story-viewer video, .story-viewer > img { width: min(100%, 420px) !important; height: min(68vh, 560px) !important; min-height: 240px; max-height: 560px; aspect-ratio: 9 / 16; object-fit: contain !important; border-radius: var(--radius-sm); background: #000; }
+.story-fullscreen-overlay .story-viewer { width: min(100%, 760px); height: auto; max-height: 100%; justify-content: flex-start; gap: 7px; min-width: 0; }
+.story-fullscreen-overlay .story-viewer video, .story-fullscreen-overlay .story-viewer > img { width: min(100%, 360px); max-width: 100%; height: min(62vh, 480px); min-height: 0; max-height: 480px; aspect-ratio: 3 / 4; flex: 0 1 auto; object-fit: contain; object-position: center; border-radius: 0; background: #000; }
+.story-viewer video, .story-viewer > img { width: min(100%, 420px); height: min(68vh, 560px); min-height: 240px; max-height: 560px; aspect-ratio: 9 / 16; object-fit: contain; border-radius: var(--radius-sm); background: #000; }
 .story-viewer p { width: 100%; color: var(--text-primary); text-align: center; }
 .story-progress { display: flex; gap: 4px; width: 100%; }
 .story-progress span { height: 3px; flex: 1; border-radius: 3px; background: var(--border); }
@@ -185,6 +185,14 @@ body[data-theme="gold"] {
 .story-viewer-row { display: flex; align-items: center; gap: 10px; padding: 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .story-viewer-row > span { display: flex; flex-direction: column; min-width: 0; }
 .story-viewer-row small { color: var(--text-muted); font-size: 11px; }
+@media (max-width: 480px) {
+  .stories-scroll { gap: 10px; padding-left: 10px; padding-right: 10px; }
+  .story-user, .story-add, .story-own-wrap { flex-basis: 64px; width: 64px; }
+  .story-own-wrap .story-own { width: 64px; }
+  .story-user small, .story-add small { max-width: 64px; }
+  .story-ring, .story-add > span { width: 54px !important; height: 54px !important; min-width: 54px !important; max-width: 54px !important; min-height: 54px !important; max-height: 54px !important; flex-basis: 54px !important; }
+  .story-ring img { object-fit: contain !important; background: var(--bg-card); }
+}
 .profile-follow-list { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .profile-follow-list:hover .profile-stat-num { color: var(--accent-red); }
 .profile-followers-list { display: flex; flex-direction: column; gap: 8px; }
