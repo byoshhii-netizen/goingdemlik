@@ -85,7 +85,8 @@ body[data-theme="gold"] {
 .story-own-wrap.no-story .story-add-corner { background: #4a4a4a !important; color: #fff !important; }
 .story-user small, .story-add small { max-width: 68px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-secondary); }
 .story-ring, .story-add > span { width: 58px !important; height: 58px !important; min-width: 58px !important; max-width: 58px !important; min-height: 58px !important; max-height: 58px !important; flex: 0 0 58px !important; aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden; border-radius: 50% !important; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
-.story-ring img, .story-ring i { width: 100% !important; height: 100% !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; display: grid; place-items: center; border-radius: 50% !important; object-fit: cover !important; object-position: center; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); }
+.story-ring { position: relative; flex-shrink: 0; }
+.story-ring img, .story-ring i { position: absolute; inset: 3px; width: calc(100% - 6px) !important; height: calc(100% - 6px) !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; display: grid; place-items: center; border-radius: 50% !important; object-fit: cover !important; object-position: 50% 50% !important; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); }
 .story-user.viewed { opacity: .48; filter: saturate(.25); }
 .story-user.viewed .story-ring { background: var(--border-hover); }
 .story-add > span { background: var(--bg-card2); border: 1px solid var(--border); color: var(--accent-red); font-size: 18px; }
@@ -193,7 +194,7 @@ body[data-theme="gold"] {
   .story-own-wrap .story-own { width: 64px; }
   .story-user small, .story-add small { max-width: 64px; }
   .story-ring, .story-add > span { width: 54px !important; height: 54px !important; min-width: 54px !important; max-width: 54px !important; min-height: 54px !important; max-height: 54px !important; flex-basis: 54px !important; }
-  .story-ring img { object-fit: cover !important; object-position: center center !important; background: var(--bg-card); }
+  .story-ring img { object-fit: cover !important; object-position: 50% 50% !important; background: var(--bg-card); }
 }
 .profile-follow-list { border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit; }
 .profile-follow-list:hover .profile-stat-num { color: var(--accent-red); }
