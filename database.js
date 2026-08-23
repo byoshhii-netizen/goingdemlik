@@ -567,37 +567,6 @@ async function initDb() {
 
     ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_permissions_id BIGINT;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_suspend_content INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_restrict_users INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_review_artists INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_assign_badges INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_store INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_groups INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_stories INTEGER DEFAULT 0;
-    ALTER TABLE admin_permissions ADD COLUMN IF NOT EXISTS can_view_levels INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_role TEXT DEFAULT '';
-    CREATE TABLE IF NOT EXISTS user_restrictions (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      restriction_type TEXT NOT NULL CHECK (restriction_type IN ('photo','story','reals','music','comment','forum','message','group')),
-      reason TEXT NOT NULL,
-      starts_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      expires_at TIMESTAMP,
-      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      revoked_at TIMESTAMP,
-      revoked_by BIGINT REFERENCES users(id) ON DELETE SET NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_user_restrictions_active ON user_restrictions(user_id, restriction_type, expires_at);
-    CREATE TABLE IF NOT EXISTS content_suspensions (
-      id BIGSERIAL PRIMARY KEY,
-      content_type TEXT NOT NULL CHECK (content_type IN ('forum','book','photo','video','reals','story','song','group')),
-      content_id BIGINT NOT NULL,
-      reason TEXT NOT NULL,
-      suspended_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(content_type, content_id)
-    );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_artist INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_display_name TEXT DEFAULT '';
@@ -881,7 +850,6 @@ async function initDb() {
   }
 
   // Seed admin password
-  await query("INSERT INTO settings (key,value) VALUES ('admin_username','Tarator') ON CONFLICT (key) DO NOTHING");
   const { rows: pwRows } = await query("SELECT value FROM settings WHERE key='admin_password'");
   if (pwRows.length === 0) {
     const hash = crypto.createHash('sha256').update('admin123').digest('hex');
