@@ -106,9 +106,13 @@ body[data-theme="gold"] {
 .story-ring, .story-add > span { width: 58px !important; height: 58px !important; min-width: 58px !important; max-width: 58px !important; min-height: 58px !important; max-height: 58px !important; flex: 0 0 58px !important; aspect-ratio: 1 / 1; display: grid; place-items: center; overflow: hidden; border-radius: 50% !important; padding: 3px; background: conic-gradient(#feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5, #feda75); }
 .story-ring { position: relative; flex-shrink: 0; }
 .story-ring img, .story-ring i { position: absolute; inset: 3px; width: calc(100% - 6px) !important; height: calc(100% - 6px) !important; min-width: 0 !important; max-width: none !important; min-height: 0 !important; max-height: none !important; display: grid; place-items: center; border-radius: 50% !important; object-fit: cover !important; object-position: 50% 50% !important; background: var(--bg-card); color: var(--text-muted); border: 2px solid var(--bg-primary); opacity: 1 !important; filter: none !important; }
+.story-avatar-media { aspect-ratio: 1 / 1; }
 .story-user.viewed, .story-user.viewed .story-ring, .story-user.viewed .story-ring img { opacity: 1 !important; filter: none !important; }
 .story-user.viewed .story-ring { background: var(--border-hover); }
 .story-add > span { background: var(--bg-card2); border: 1px solid var(--border); color: var(--accent-red); font-size: 18px; }
+.settings-avatar, .settings-avatar-placeholder { width: 64px !important; height: 64px !important; min-width: 64px !important; max-width: 64px !important; min-height: 64px !important; max-height: 64px !important; flex: 0 0 64px; aspect-ratio: 1 / 1; border-radius: 50%; overflow: hidden; }
+.settings-avatar { display: block; object-fit: cover !important; object-position: 50% 50%; background: var(--bg-card2); }
+.settings-avatar-placeholder { display: flex; align-items: center; justify-content: center; background: var(--bg-card2); color: var(--text-muted); font-size: 24px; }
 .story-viewer { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .story-tap-zone { position: absolute; top: 0; bottom: 115px; width: 50%; z-index: 4; cursor: pointer; border: 0; outline: 0; padding: 0; background: transparent !important; -webkit-appearance: none; appearance: none; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 .story-tap-left { left: 0; }
