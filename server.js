@@ -2120,7 +2120,7 @@ app.post('/api/stories/from-url', authMiddleware, async (req, res) => {
 app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
   const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO UPDATE SET viewed_at=NOW(),view_count=story_views.view_count+1', [story[0].id, req.user.id]);
+  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO NOTHING', [story[0].id, req.user.id]);
   res.json({ ok: true });
 });
 

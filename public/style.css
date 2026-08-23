@@ -179,6 +179,7 @@ body[data-theme="gold"] {
 .my-group-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: var(--bg-active); color: var(--accent-red); }
 .story-reply-box { width: 100%; padding-top: 4px; }
 .story-reply-box[hidden] { display: none !important; }
+#story-route-reply[hidden] { display: none !important; }
 .story-reply-preview { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; margin-bottom: 7px; }
 .story-reply-preview img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; }
 .story-reply-form { display: flex; gap: 7px; }

@@ -6393,7 +6393,7 @@ let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed, options = {}) {
   photoAudioObserver?.disconnect(); activePhotoAudio?.pause(); activePhotoAudio=null;
   let muted=localStorage.getItem('cigcig_photo_audio_muted');
-  muted=muted===null ? true : muted==='1';
+  muted=muted===null ? false : muted==='1';
   if (options.playImmediately) muted = false;
   let volume=Math.min(1,Math.max(0,Number(localStorage.getItem('cigcig_photo_audio_volume')||'0.8')));
   document.getElementById('photo-audio-control')?.remove();
@@ -6406,6 +6406,13 @@ function setupPhotoAudio(feed, options = {}) {
   const ratios = new Map();
   photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
+  requestAnimationFrame(() => {
+    const firstVisible = [...feed.querySelectorAll('[data-photo-id]')].find(card => {
+      const rect = card.getBoundingClientRect();
+      return rect.top < window.innerHeight * .7 && rect.bottom > window.innerHeight * .3;
+    });
+    if (firstVisible) play(firstVisible);
+  });
 }
 
 document.addEventListener('click', e => {
