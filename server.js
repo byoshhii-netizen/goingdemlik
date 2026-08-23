@@ -407,7 +407,7 @@ async function handleUpload(file) {
       const stream = cloudinary.uploader.upload_stream(
         isAudio || isVideo
           ? { public_id, resource_type: 'video' }
-          : { public_id, resource_type: 'image', quality: 'auto', fetch_format: 'auto' },
+          : { public_id, resource_type: 'image' },
         (err, result) => {
           if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
           if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));

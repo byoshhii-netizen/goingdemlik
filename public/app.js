@@ -388,7 +388,7 @@ async function renderRealsFeed(app) {
       </div>`).join('');
     items = Array.from(document.querySelectorAll('.reals-item'));
     items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
-    listEl.style.position='relative'; listEl.style.height='100vh'; listEl.style.overflow='hidden';
+    listEl.style.position='relative'; listEl.style.overflow='hidden';
     items.forEach(it => {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
@@ -6309,7 +6309,6 @@ function bindPhotoFeed(feed) {
     if (!c) return;
     const box = c.querySelector('.photo-comment-box');
     if (!box) return;
-    if (!currentUser) { toast('Yorum yapmak için giriş yapın.', 'error'); return; }
     box.hidden = !box.hidden;
     if (!box.hidden) {
       try { await renderComments(c, box); }
