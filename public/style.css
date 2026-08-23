@@ -1113,6 +1113,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .chat-msg-name { font-size: 13px; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
 .chat-msg-time { font-size: 11px; color: var(--text-muted); }
 .chat-msg-text { font-size: 14px; line-height: 1.45; color: var(--text-primary); background: var(--bg-card2); padding: 8px 12px; border-radius: 0 10px 10px 10px; display: inline-block; max-width:100%; word-break: break-word; overflow-wrap:anywhere; white-space:pre-wrap; }
+.chat-msg-text a, .dm-msg-bubble a { color: var(--accent-red2); text-decoration: underline; text-underline-offset: 2px; }
+.chat-msg-text a:hover, .dm-msg-bubble a:hover { color: var(--accent-red); }
 .chat-msg-img { max-width: 200px; border-radius: 8px; margin-top: 4px; cursor: pointer; }
 
 /* Mesajların avatarı, başlığı ve balonu tek satır düzeninde kalır. */

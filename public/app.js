@@ -157,15 +157,27 @@ function hasUsableAvatar(u) {
 function renderContent(text) {
   if (!text) return '';
   // XSS güvenli: önce escape, sonra pattern'lere dönüştür
-  const safe = String(text)
+  let safe = String(text)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  return safe
+  const links = [];
+  safe = safe.replace(/(?:https?:\/\/|www\.)[^\s<]+/gi, match => {
+    const trailing = match.match(/[.,!?;:)]+$/)?.[0] || '';
+    const url = trailing ? match.slice(0, -trailing.length) : match;
+    const placeholder = `__CIGCIG_LINK_${links.length}__`;
+    links.push({ placeholder, url, href: normalizeExternalUrl(url) });
+    return placeholder + trailing;
+  });
+  safe = safe
     // #hashtag → mavi tıklanabilir link
     .replace(/#([a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]+)/g, (_, tag) =>
       `<a href="/forum?tag=${encodeURIComponent(tag)}" data-link class="inline-hashtag">#${tag}</a>`)
     // @mention → profil link
     .replace(/@([a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]+)/g, (_, user) =>
       `<a href="/profil/${encodeURIComponent(user)}" data-link class="inline-mention">@${user}</a>`);
+  links.forEach(({ placeholder, url, href }) => {
+    safe = safe.replaceAll(placeholder, `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-link">${url}</a>`);
+  });
+  return safe;
 }
 
 function navigate(path, push = true) {
@@ -2626,7 +2638,7 @@ function chatMsgHTML(m, canModDelete = false) {
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
         ${canDel ? `<button class="btn btn-ghost del-msg" data-id="${m.id}" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-trash"></i></button>` : ''}
       </div>
-      ${m.content ? `<div class="chat-msg-text">${escHtml(m.content)}</div>` : ''}
+      ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}
       ${m.image_url ? `<img src="${escHtml(m.image_url)}" class="chat-msg-img" alt="" onclick="window.open(this.src)" />` : ''}
     </div>
   </div>`;
@@ -4734,7 +4746,7 @@ function dmMessageHTML(m, myId, selMode) {
                     <div><b>${escHtml(m.story_username || 'Hikaye')}</b><small>Hikaye yanıtı</small></div>
                   </div>`
                : ''}
-             ${messageText ? `<span>${escHtml(messageText)}</span>` : ''}
+             ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
            </div>`}
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
