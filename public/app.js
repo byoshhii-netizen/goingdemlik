@@ -529,7 +529,7 @@ function updateNavUI() {
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="/profil/${escHtml(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
-      <a href="/arkadaslar" data-link class="mobile-nav-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar</a>
+      <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
@@ -613,6 +613,9 @@ async function loadNotifCount() {
     const mobileBadge = $('#mobile-notif-badge');
     if (data.count > 0) { badge.style.display = ''; badge.textContent = data.count > 9 ? '9+' : data.count; if (mobileBadge) { mobileBadge.style.display = ''; mobileBadge.textContent = data.count > 9 ? '9+' : data.count; } }
     else { badge.style.display = 'none'; if (mobileBadge) mobileBadge.style.display = 'none'; }
+    const friends = await api('/friends').catch(() => []);
+    const pendingCount = friends.filter(friend => friend.status === 'pending' && String(friend.addressee_id) === String(currentUser.id)).length;
+    ['#nav-friends-badge', '#mob-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) dot.style.display = pendingCount ? 'inline-block' : 'none'; });
   } catch {}
 }
 
@@ -624,7 +627,7 @@ async function openNotifDropdown() {
   dd.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)"><div class="spinner" style="margin:0 auto"></div></div>';
   try {
     const notifs = await api('/notifications');
-    const followRequests = await api('/follow-requests').catch(() => []);
+    const friends = await api('/friends').catch(() => []);
     await api('/notifications/read-all', { method: 'POST' });
     const badge = $('#nav-notif-badge'); if (badge) badge.style.display = 'none';
     if (!notifs.length) {
@@ -643,6 +646,7 @@ async function openNotifDropdown() {
               <div style="font-size:13px;line-height:1.4">${escHtml(n.body)}</div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${timeAgo(n.created_at)}</div>
             </div>
+            ${!n.is_read ? '<span class="notification-dot" aria-label="Okunmamış bildirim"></span>' : ''}
           </div>
         </div>`).join('')}`;
     dd.querySelectorAll('.notif-item').forEach(item => {
@@ -4875,6 +4879,8 @@ async function renderNotifications(app) {
   </div>`;
   try {
     const notifs = await api('/notifications');
+    const friends = await api('/friends').catch(() => []);
+    const followRequests = await api('/follow-requests').catch(() => []);
     await api('/notifications/read-all', { method: 'POST' });
     const badge = $('#nav-notif-badge'); if (badge) badge.style.display = 'none';
     const list = $('#notif-page-list');
@@ -4889,12 +4895,17 @@ async function renderNotifications(app) {
           <div style="font-size:14px;line-height:1.5;color:var(--text-primary)">${escHtml(n.body)}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${timeAgo(n.created_at)}</div>
         </div>
-        ${n.type === 'follow_request' ? (() => { const request = followRequests.find(item => item.username === n.actor_username); return request ? `<div class="notification-actions"><button type="button" class="btn btn-primary btn-sm follow-request-action" data-request-id="${request.id}" data-action="accept">Kabul</button><button type="button" class="btn btn-outline btn-sm follow-request-action" data-request-id="${request.id}" data-action="reject">Reddet</button></div>` : ''; })() : n.link ? `<button type="button" class="btn btn-ghost btn-sm notification-open" data-link="${escHtml(n.link)}" title="Aç"><i class="fas fa-arrow-right"></i></button>` : ''}
+        ${n.type === 'friend_request' ? (() => { const request = friends.find(item => item.status === 'pending' && String(item.requester_id) !== String(currentUser.id) && item.other_username === n.actor_username); return request ? `<div class="notification-actions"><button type="button" class="btn btn-primary btn-sm friend-request-action" data-request-id="${request.id}" data-action="accept">Kabul</button><button type="button" class="btn btn-outline btn-sm friend-request-action" data-request-id="${request.id}" data-action="reject">Reddet</button></div>` : ''; })() : n.type === 'follow_request' ? (() => { const request = followRequests.find(item => item.username === n.actor_username); return request ? `<div class="notification-actions"><button type="button" class="btn btn-primary btn-sm follow-request-action" data-request-id="${request.id}" data-action="accept">Kabul</button><button type="button" class="btn btn-outline btn-sm follow-request-action" data-request-id="${request.id}" data-action="reject">Reddet</button></div>` : ''; })() : n.link ? `<button type="button" class="btn btn-ghost btn-sm notification-open" data-link="${escHtml(n.link)}" title="Aç"><i class="fas fa-arrow-right"></i></button>` : ''}
         ${!n.is_read ? `<span style="width:8px;height:8px;border-radius:50%;background:var(--accent-red);flex-shrink:0;margin-top:6px"></span>` : ''}
       </div>`).join('')}</div>`;
     list.querySelectorAll('.follow-request-action').forEach(button => button.addEventListener('click', async () => {
       button.disabled = true;
       try { await api('/follow-requests/' + button.dataset.requestId + '/respond', { method: 'POST', body: JSON.stringify({ action: button.dataset.action }) }); toast(button.dataset.action === 'accept' ? 'Takip isteği kabul edildi' : 'Takip isteği reddedildi'); renderNotifications(app); }
+      catch (e) { button.disabled = false; toast(e.message, 'error'); }
+    }));
+    list.querySelectorAll('.friend-request-action').forEach(button => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await api('/friends/respond/' + button.dataset.requestId, { method: 'POST', body: JSON.stringify({ action: button.dataset.action }) }); toast(button.dataset.action === 'accept' ? 'Arkadaşlık isteği kabul edildi' : 'Arkadaşlık isteği reddedildi'); renderNotifications(app); }
       catch (e) { button.disabled = false; toast(e.message, 'error'); }
     }));
     list.querySelectorAll('.notification-open').forEach(button => button.addEventListener('click', () => navigate(button.dataset.link)));
@@ -4922,12 +4933,19 @@ async function renderFriends(app) {
       <div>
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Takipleştiklerin (${accepted.length})</button>
+          <button class="tab${pending_in.length ? ' tab-has-notice' : ''}" id="tab-requests" onclick="showFriendsTab('requests')">Bekleyen İstekler${pending_in.length ? ` <span class="tab-dot"></span>` : ''} (${pending_in.length})</button>
           <button class="tab" id="tab-blocked" onclick="showFriendsTab('blocked')">Engellenenler (${blocks.length})</button>
         </div>
         <div id="friends-content">
           <div id="tab-content-friends">
             ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
               : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
+          </div>
+          <div id="tab-content-requests" style="display:none">
+            <div class="pending-requests-panel">
+              <div class="pending-requests-heading"><span class="pending-requests-icon"><i class="fas fa-user-plus"></i></span><span><b>Gelen arkadaşlık istekleri</b><small>Yeni istekleri buradan yönetebilirsin.</small></span></div>
+              ${pending_in.length === 0 ? '<div class="empty-state"><i class="fas fa-inbox"></i><p>Bekleyen arkadaşlık isteği yok</p></div>' : pending_in.map(f => friendItemHTML(f, 'incoming', currentUser.id)).join('')}
+            </div>
           </div>
           <div id="tab-content-blocked" style="display:none">
             ${blocks.length === 0 ? '<div class="empty-state"><i class="fas fa-ban"></i><p>Engellenen yok</p></div>'

@@ -3640,14 +3640,14 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/friends', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
-    SELECT f.id, f.created_at, 'accepted' AS status,
-      f.following_id AS other_id, u.username AS other_username, u.avatar AS other_avatar,
+    SELECT f.id, f.created_at, f.status, f.requester_id, f.addressee_id,
+      CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END AS other_id,
+      u.username AS other_username, u.avatar AS other_avatar,
       u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted
-    FROM follows f
-    JOIN users u ON u.id=f.following_id
-    WHERE f.follower_id=$1 AND f.status='accepted'
-      AND EXISTS (SELECT 1 FROM follows mutual WHERE mutual.follower_id=f.following_id
-        AND mutual.following_id=$1 AND mutual.status='accepted')
+    FROM friendships f
+    JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
+    WHERE (f.requester_id=$1 OR f.addressee_id=$1)
+      AND (f.status='pending' OR f.status='accepted')
   `, [uid]);
   res.json(rows);
 });
