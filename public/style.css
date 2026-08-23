@@ -1927,6 +1927,23 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 /* ---- Mobile responsive ---- */
 @media (max-width: 768px) {
+  /* Conversation list should grow with the page instead of scrolling inside a short panel. */
+  .dm-layout:not(.dm-mobile-chat-open) {
+    height: auto;
+    min-height: calc(100dvh - 60px);
+    overflow: visible;
+  }
+  .dm-layout:not(.dm-mobile-chat-open) .dm-sidebar {
+    position: relative;
+    inset: auto;
+    min-height: calc(100dvh - 60px);
+    overflow: visible;
+  }
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-list {
+    flex: none;
+    overflow: visible;
+  }
+
   .dm-layout {
     height: calc(100dvh - 60px);
     flex-direction: row;
