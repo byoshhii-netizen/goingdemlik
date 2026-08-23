@@ -4934,6 +4934,7 @@ async function renderFriends(app) {
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Takipleştiklerin (${accepted.length})</button>
           <button class="tab${pending_in.length ? ' tab-has-notice' : ''}" id="tab-requests" onclick="showFriendsTab('requests')">Bekleyen İstekler${pending_in.length ? ` <span class="tab-dot"></span>` : ''} (${pending_in.length})</button>
+          <button class="tab" id="tab-sent" onclick="showFriendsTab('sent')">Gönderilen İstekler (${pending_out.length})</button>
           <button class="tab" id="tab-blocked" onclick="showFriendsTab('blocked')">Engellenenler (${blocks.length})</button>
         </div>
         <div id="friends-content">
@@ -4945,6 +4946,12 @@ async function renderFriends(app) {
             <div class="pending-requests-panel">
               <div class="pending-requests-heading"><span class="pending-requests-icon"><i class="fas fa-user-plus"></i></span><span><b>Gelen arkadaşlık istekleri</b><small>Yeni istekleri buradan yönetebilirsin.</small></span></div>
               ${pending_in.length === 0 ? '<div class="empty-state"><i class="fas fa-inbox"></i><p>Bekleyen arkadaşlık isteği yok</p></div>' : pending_in.map(f => friendItemHTML(f, 'incoming', currentUser.id)).join('')}
+            </div>
+          </div>
+          <div id="tab-content-sent" style="display:none">
+            <div class="pending-requests-panel sent-requests-panel">
+              <div class="pending-requests-heading"><span class="pending-requests-icon"><i class="fas fa-paper-plane"></i></span><span><b>Gönderilen arkadaşlık istekleri</b><small>Yanıt bekleyen isteklerini buradan takip edebilirsin.</small></span></div>
+              ${pending_out.length === 0 ? '<div class="empty-state"><i class="fas fa-paper-plane"></i><p>Gönderilmiş bekleyen istek yok</p></div>' : pending_out.map(f => friendItemHTML(f, 'outgoing', currentUser.id)).join('')}
             </div>
           </div>
           <div id="tab-content-blocked" style="display:none">
@@ -4986,18 +4993,19 @@ async function renderFriends(app) {
     try {
       const users = await api(`/search/users?q=${encodeURIComponent(q)}`);
       if (!users.length) { res.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center">Sonuç bulunamadı</p>'; return; }
-      res.innerHTML = users.map(u => `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      res.innerHTML = users.map(u => { const relation = friends.find(friend => friend.other_username === u.username); const requestPending = relation?.status === 'pending' && String(relation.requester_id) === String(currentUser.id); const accepted = relation?.status === 'accepted'; return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
         <a href="/profil/${escHtml(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
-            <button class="btn btn-primary btn-sm send-follow-btn" data-username="${escHtml(u.username)}"><i class="fas fa-user-plus"></i> Takip et</button>
-      </div>`).join('');
-      $$('.send-follow-btn').forEach(btn => {
+        <button class="btn ${requestPending || accepted ? 'btn-outline' : 'btn-primary'} btn-sm send-friend-btn" data-username="${escHtml(u.username)}" ${requestPending || accepted ? 'disabled' : ''}><i class="fas fa-user-plus"></i> ${accepted ? 'Arkadaşsınız' : requestPending ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>
+      </div>`; }).join('');
+      $$('.send-friend-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           try {
-            const result = await api(`/users/${encodeURIComponent(btn.dataset.username)}/follow`, { method: 'POST' });
-            btn.textContent = result.pending ? 'İstek gönderildi' : 'Takip ediliyor';
+        await api(`/friends/request/${encodeURIComponent(btn.dataset.username)}`, { method: 'POST' });
+        btn.innerHTML = '<i class="fas fa-clock"></i> İstek gönderildi';
             btn.disabled = true;
             btn.classList.remove('btn-primary');
+        btn.classList.add('btn-outline');
           } catch (e) { toast(e.message, 'error'); }
         });
       });
