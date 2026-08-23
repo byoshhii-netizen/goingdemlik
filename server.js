@@ -552,7 +552,8 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
   if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges &&
+      !user.can_view_groups && !user.can_view_stories && !user.can_view_levels && !user.can_manage_levels) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
   const token = generateToken(user.id);
   await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
   await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));
