@@ -6131,8 +6131,8 @@ async function loadStoriesBar(container) {
         if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); }
         $('#story-reply-open')?.addEventListener('click', () => { $('#story-reply-box').hidden = !$('#story-reply-box').hidden; $('#story-reply-input')?.focus(); });
         $('#story-reply-send')?.addEventListener('click', async () => { const input = $('#story-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + storyKey + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt hikaye sahibine gönderildi'); hideModal(); } catch (error) { toast(error.message, 'error'); } });
-        $('#story-tap-left')?.addEventListener('click', event => { event.stopPropagation(); if (storyIndex > 0) { storyIndex--; render(); } });
-        $('#story-tap-right')?.addEventListener('click', event => { event.stopPropagation(); if (storyIndex < group.stories.length - 1) { storyIndex++; render(); } });
+        $('#story-tap-left')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (storyIndex > 0) { storyIndex--; render(); } });
+        $('#story-tap-right')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (storyIndex < group.stories.length - 1) { storyIndex++; render(); } });
       };
       render();
     };
