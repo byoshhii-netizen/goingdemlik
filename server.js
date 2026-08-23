@@ -221,29 +221,23 @@ async function adminMiddleware(req, res, next) {
   }
   const token = req.headers['x-admin-token'];
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
-  const { rows: masterRows } = await query("SELECT key, value FROM settings WHERE key IN ('admin_password','admin_username')");
+  const { rows: masterRows } = await query("SELECT value FROM settings WHERE key IN ('admin_password','admin_username')");
   const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
-  if (master.admin_password && token.trim() === String(master.admin_password).trim()) {
+  if (master.admin_password && token === master.admin_password) {
     req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
     return next();
   }
-  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, u.admin_role, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
+  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
   if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
   const user = users[0];
-  if (user.admin_role === 'authority') {
-    user.can_view_groups = 1;
-    user.can_view_stories = 1;
-    user.can_view_levels = 1;
-  }
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges &&
-      !user.can_view_groups && !user.can_view_stories && !user.can_view_levels && !user.can_manage_levels) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
   req.adminUser = { id: user.id, username: user.username, isSuperAdmin: false, permissions: user };
   const permissions = user;
   if (req.method === 'GET') {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
-      [/\/users/, !!permissions.can_view_users], [/\/stories|\/videos/, !!(permissions.can_view_stories || permissions.can_suspend_content)], [/\/groups/, !!permissions.can_view_groups],
-      [/\/levels/, !!(permissions.can_view_levels || permissions.can_manage_levels)], [/\/shop(\/|$)/, !!permissions.can_view_store], [/\/logs/, !!permissions.can_view_logs]
+      [/\/users/, !!permissions.can_view_users], [/\/stories/, !!permissions.can_view_stories], [/\/groups/, !!permissions.can_view_groups],
+      [/\/levels/, !!permissions.can_view_levels], [/\/shop(\/|$)/, !!permissions.can_view_store], [/\/logs/, !!permissions.can_view_logs]
     ];
     const rule = readRules.find(([pattern]) => pattern.test(req.path));
     if (rule && !rule[1]) return res.status(403).json({ error: 'Bu bölümü görüntüleme yetkiniz yok' });
@@ -254,8 +248,6 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/
     ];
-    if (/^\/api\/admin\/(stories|story|videos|video)/.test(req.path) && permissions.can_suspend_content) return next();
-    if (/^\/api\/admin\/level/.test(req.path) && permissions.can_manage_levels) return next();
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
@@ -552,18 +544,12 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const storedMasterPassword = String(config.admin_password || '').trim();
   const masterPasswordMatches = hashPassword(password) === storedMasterPassword || password === storedMasterPassword;
   if (username.toLowerCase() === (config.admin_username || 'Tarator').trim().toLowerCase() && masterPasswordMatches) {
-    return res.json({ token: String(config.admin_password).trim(), is_super_admin: true, username });
+    return res.json({ token: config.admin_password, is_super_admin: true, username });
   }
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
   if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
-  if (user.admin_role === 'authority') {
-    user.can_view_groups = 1;
-    user.can_view_stories = 1;
-    user.can_view_levels = 1;
-  }
-  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges &&
-      !user.can_view_groups && !user.can_view_stories && !user.can_view_levels && !user.can_manage_levels) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  if (!user.can_view_users && !user.can_suspend_content && !user.can_restrict_users && !user.can_review_artists && !user.can_assign_badges) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
   const token = generateToken(user.id);
   await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
   await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));
@@ -2154,34 +2140,12 @@ app.get('/api/admin/stories', adminMiddleware, async (req, res) => {
 
 app.get('/api/admin/videos', adminMiddleware, async (req, res) => {
   try {
-    const { rows } = await query(`SELECT v.*, u.username
-      FROM videos v LEFT JOIN users u ON u.id=v.user_id ORDER BY v.created_at DESC`);
+    const { rows } = await query('SELECT id,title,is_reals,status,created_at FROM videos ORDER BY created_at DESC');
     res.json(rows);
   } catch (error) {
     console.error('Admin video stats failed:', error.message);
     res.status(500).json({ error: 'Video istatistikleri alınamadı' });
   }
-});
-
-app.put('/api/admin/video/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM videos WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
-  const video = rows[0];
-  const { title, description, video_url, banner_image, thumbnail_url, location, sound_name, allow_comments, show_likes, is_reals } = req.body;
-  const { rows: updated } = await query(`UPDATE videos SET title=$1,description=$2,video_url=$3,thumbnail_url=$4,
-    location=$5,sound_name=$6,allow_comments=$7,show_likes=$8,is_reals=$9 WHERE id=$10 RETURNING *`,
-    [title?.trim() || video.title, description ?? video.description, video_url?.trim() || video.video_url,
-     thumbnail_url ?? banner_image ?? video.thumbnail_url, location ?? video.location, sound_name ?? video.sound_name,
-     allow_comments === undefined ? video.allow_comments : (allow_comments ? 1 : 0),
-     show_likes === undefined ? video.show_likes : (show_likes ? 1 : 0),
-     is_reals === undefined ? video.is_reals : (is_reals ? 1 : 0), video.id]);
-  res.json(updated[0]);
-});
-
-app.delete('/api/admin/video/:id', adminMiddleware, async (req, res) => {
-  const result = await query('DELETE FROM videos WHERE id=$1', [req.params.id]);
-  if (!result.rowCount) return res.status(404).json({ error: 'Video bulunamadı' });
-  res.json({ ok: true });
 });
 
 app.get('/api/admin/stories/:id/viewers', adminMiddleware, async (req, res) => {
@@ -3194,7 +3158,6 @@ app.get('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => {
 
 app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => {
   const uid = req.params.userId;
-  const role = String(req.body.admin_role || '').trim();
   const {
     can_ban_users, can_delete_content, can_edit_content,
     can_manage_levels, can_manage_tags, can_manage_announcements,
@@ -3202,15 +3165,8 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
     can_suspend_content, can_restrict_users, can_review_artists, can_assign_badges,
     can_view_store, can_view_groups, can_view_stories, can_view_levels
   } = req.body;
-  const isAuthority = role === 'authority';
-  if (role === 'none') {
-    await query("UPDATE users SET is_admin=0, admin_role='' WHERE id=$1", [uid]);
-    await query('DELETE FROM admin_permissions WHERE user_id=$1', [uid]);
-    await logAction(req.adminUser.username, 'revoke_authority_role', uid, 'Yetkili rolü kaldırıldı', getIp(req));
-    return res.json({ ok: true });
-  }
   // Kullanıcıyı admin yap (is_admin=1 yoksa set et)
-  await query('UPDATE users SET is_admin=1, admin_role=$1 WHERE id=$2', [isAuthority ? 'authority' : role, uid]);
+  await query('UPDATE users SET is_admin=1 WHERE id=$1', [uid]);
   const { rows: existing } = await query('SELECT id FROM admin_permissions WHERE user_id=$1', [uid]);
   if (existing.length) {
     await query(`UPDATE admin_permissions SET
@@ -3237,7 +3193,7 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
       can_suspend_content?1:0, can_restrict_users?1:0, can_review_artists?1:0, can_assign_badges?1:0,
       can_view_store?1:0, can_view_groups?1:0, can_view_stories?1:0, can_view_levels?1:0]);
   }
-  await logAction(req.adminUser.username, isAuthority ? 'assign_authority_role' : 'set_permissions', uid, JSON.stringify({ role, permissions: req.body }), getIp(req));
+  await logAction('admin', 'set_permissions', uid);
   res.json({ ok: true });
 });
 
