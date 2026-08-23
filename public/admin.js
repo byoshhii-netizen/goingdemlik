@@ -195,12 +195,14 @@ function showPanel() {
 function applyAuthorityNav() {
   if (!adminProfile || adminProfile.is_super_admin) return;
   const p = adminProfile.permissions || {};
+  const canViewLevels = p.can_view_levels || p.can_manage_levels;
+  const canViewStories = p.can_view_stories || p.can_suspend_content;
   const visible = new Set(['dashboard']);
   if (p.can_view_users) visible.add('users');
   if (p.can_view_logs) visible.add('logs');
-  if (p.can_suspend_content || p.can_view_stories) { visible.add('stories'); visible.add('videos'); visible.add('photos'); visible.add('forums'); visible.add('books'); }
+  if (canViewStories) { visible.add('stories'); visible.add('videos'); visible.add('photos'); visible.add('forums'); visible.add('books'); }
   if (p.can_view_groups) visible.add('groups');
-  if (p.can_view_levels) visible.add('levels');
+  if (canViewLevels) visible.add('levels');
   if (p.can_view_store) visible.add('shop');
   if (p.can_review_artists) visible.add('artist-apps');
   if (p.can_assign_badges) visible.add('badges');
@@ -255,8 +257,10 @@ function loadSection(section) {
 
 async function renderAdminStories(main) {
   let stories = [];
+  const canModerateContent = adminProfile?.is_super_admin || adminProfile?.permissions?.can_suspend_content;
   try { stories = await adminApi('/stories'); } catch (error) { main.innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; return; }
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-circle-play"></i></div> Hikayeler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${stories.length})</span></div></div><div class="card"><div style="overflow:auto"><table class="adm-table"><thead><tr><th>Medya</th><th>Sahip</th><th>Durum</th><th>Süre</th><th>Görüntülenme</th><th>Beğeni</th><th>Tarih</th><th>İşlemler</th></tr></thead><tbody>${stories.map(story => `<tr><td><a href="/hikaye/${escHtml(story.public_id || story.id)}" target="_blank"><img src="${escHtml(story.media_url)}" style="width:64px;height:82px;object-fit:contain;background:#000;border-radius:6px" /></a></td><td>${story.avatar ? `<img src="${escHtml(story.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:5px" />` : ''}${escHtml(story.username)}</td><td>${story.is_suspended ? '<span class="badge badge-red">Askıda</span>' : (new Date(story.expires_at) < new Date() ? '<span class="badge">Süresi doldu</span>' : '<span class="badge badge-green">Aktif</span>')}</td><td>${story.duration_hours} saat</td><td>${story.total_views || 0} toplam / ${story.unique_viewers || 0} kişi</td><td>${story.like_count || 0}</td><td>${formatDate(story.created_at)}</td><td><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn btn-outline btn-xs story-admin-viewers" data-id="${escHtml(story.public_id || story.id)}">Görenler</button><button class="btn btn-outline btn-xs story-admin-edit" data-id="${escHtml(story.public_id || story.id)}">Düzenle</button><button class="btn ${story.is_suspended ? 'btn-primary' : 'btn-outline'} btn-xs story-admin-suspend" data-id="${escHtml(story.public_id || story.id)}" data-suspended="${story.is_suspended ? '1' : '0'}">${story.is_suspended ? 'Aktifleştir' : 'Askıya al'}</button><button class="btn btn-danger btn-xs story-admin-delete" data-id="${escHtml(story.public_id || story.id)}">Sil</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
+  if (!canModerateContent) main.querySelectorAll('.story-admin-edit,.story-admin-suspend,.story-admin-delete').forEach(button => button.remove());
   main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => { try { const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers'); showModal('Hikaye görüntüleyenleri', viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${escHtml(viewer.username)}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)}</small></span></div>`).join('')}</div>` : '<div class="empty-state">Henüz görüntüleyen yok.</div>'); } catch (error) { toast(error.message, 'error'); } });
   main.querySelectorAll('.story-admin-edit').forEach(button => button.onclick = async () => { const story = stories.find(item => String(item.public_id || item.id) === button.dataset.id); if (!story) return; showModal('Hikayeyi düzenle', `<div class="form-group"><label>Açıklama</label><textarea id="adm-story-caption">${escHtml(story.caption || '')}</textarea></div><div class="form-group"><label>Süre</label><select id="adm-story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24">24 saat</option></select></div><button class="btn btn-primary" id="adm-story-save">Kaydet</button>`); $('#adm-story-duration').value = String(story.duration_hours); $('#adm-story-save').onclick = async () => { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ caption: $('#adm-story-caption').value, duration_hours: $('#adm-story-duration').value }) }); hideModal(); toast('Hikaye güncellendi'); renderAdminStories(main); }; });
   main.querySelectorAll('.story-admin-suspend').forEach(button => button.onclick = async () => { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_suspended: button.dataset.suspended !== '1' }) }); toast(button.dataset.suspended === '1' ? 'Hikaye aktifleştirildi' : 'Hikaye askıya alındı'); renderAdminStories(main); });
@@ -929,15 +933,8 @@ async function renderGroups(main) {
       <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(g.name)}">${escHtml(g.name)}</td>
       <td><span style="color:var(--blue2)">${escHtml(g.owner_name||'—')}</span></td>
       <td style="color:var(--text3);font-size:12px">${timeAgo(g.created_at)}</td>
-      <td><button class="btn btn-danger btn-xs del-group-btn" data-id="${g.id}"><i class="fas fa-trash"></i> Sil</button></td>
+      <td><span class="badge badge-gray"><i class="fas fa-eye"></i> Salt görüntüleme</span></td>
     </tr>`).join('');
-    tbody.querySelectorAll('.del-group-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Bu grubu silmek istediğine emin misin?')) return;
-        try { await adminApi('/group/'+btn.dataset.id, {method:'DELETE'}); toast('Grup silindi'); groups = groups.filter(g=>g.id!=btn.dataset.id); renderTable(groups); }
-        catch (e) { toast(e.message, 'error'); }
-      });
-    });
   };
   renderTable(groups);
   $('#group-search').addEventListener('input', e => {
@@ -949,6 +946,7 @@ async function renderGroups(main) {
 // ===== VIDEOS =====
 async function renderVideos(main) {
   let videos = [];
+  const canModerateContent = adminProfile?.is_super_admin || adminProfile?.permissions?.can_suspend_content;
   try { videos = await adminApi('/videos'); } catch (e) {
     main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-video"></i></div> Videolar</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
     return;
@@ -984,6 +982,7 @@ async function renderVideos(main) {
         </div>
       </td>
     </tr>`).join('');
+    if (!canModerateContent) tbody.querySelectorAll('.edit-video-btn,.delete-video-btn').forEach(button => button.remove());
 
     tbody.querySelectorAll('.edit-video-btn').forEach(btn => btn.addEventListener('click', async () => {
       const video = videos.find(x => x.id == btn.dataset.id);
@@ -1476,6 +1475,7 @@ function showEditArtistModal(artist, list, renderTable) {
 // ===== LEVELS =====
 async function renderLevels(main) {
   let levels = [];
+  const canManageLevels = adminProfile?.is_super_admin || adminProfile?.permissions?.can_manage_levels;
   try { levels = await adminApi('/levels'); } catch (e) {
     main.innerHTML = `<p style="color:var(--red2);padding:20px">${e.message}</p>`; return;
   }
@@ -1493,8 +1493,8 @@ async function renderLevels(main) {
       <td style="font-size:12px;color:var(--text2)">${l.order_num}</td>
       <td>
         <div style="display:flex;gap:4px">
-          <button class="btn btn-outline btn-xs edit-level-btn" data-id="${l.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
-          <button class="btn btn-danger btn-xs del-level-btn" data-id="${l.id}"><i class="fas fa-trash"></i></button>
+          ${canManageLevels ? `<button class="btn btn-outline btn-xs edit-level-btn" data-id="${l.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-danger btn-xs del-level-btn" data-id="${l.id}"><i class="fas fa-trash"></i></button>` : '<span class="badge badge-gray"><i class="fas fa-eye"></i> Salt görüntüleme</span>'}
         </div>
       </td>
     </tr>`).join('');
@@ -1555,7 +1555,7 @@ async function renderLevels(main) {
   main.innerHTML = `
     <div class="adm-section-header">
       <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-layer-group"></i></div> Seviyeler</div>
-      <button class="btn btn-primary btn-sm" id="new-level-btn"><i class="fas fa-plus"></i> Yeni Seviye</button>
+      ${canManageLevels ? '<button class="btn btn-primary btn-sm" id="new-level-btn"><i class="fas fa-plus"></i> Yeni Seviye</button>' : ''}
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -1566,7 +1566,7 @@ async function renderLevels(main) {
       </div>
     </div>`;
   renderTable();
-  $('#new-level-btn').addEventListener('click', () => {
+  $('#new-level-btn')?.addEventListener('click', () => {
     showModal('Yeni Seviye Ekle', `
       <div class="form-group"><label>İsim</label><input id="lv-name" /></div>
       <div class="form-row">
