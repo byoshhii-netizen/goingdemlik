@@ -208,7 +208,7 @@ function applyAuthorityNav() {
 }
 
 $('#admin-logout-btn').addEventListener('click', () => {
-  adminToken = ''; sessionStorage.removeItem('admin_token');
+  adminToken = ''; adminProfile = null; sessionStorage.removeItem('admin_token'); sessionStorage.removeItem('admin_profile');
   location.reload();
 });
 

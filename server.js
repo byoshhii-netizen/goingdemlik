@@ -248,7 +248,7 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/
     ];
-    if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
+    if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem için yetkiniz yok' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
@@ -2587,7 +2587,7 @@ app.get('/api/admin/route-logs', adminMiddleware, async (req, res) => {
 });
 
 app.get('/api/admin/authority-logs', adminMiddleware, async (req, res) => {
-  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu loglar yalnızca ana admin içindir' });
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu bölümü görüntüleme yetkiniz yok' });
   const limit = Math.min(parseInt(req.query.limit) || 500, 1000);
   const { rows } = await query("SELECT id, actor, action, target, detail, ip, created_at FROM system_logs WHERE action IN ('authority_login','apply_restriction','revoke_restriction','suspend_content') OR actor IN (SELECT username FROM users WHERE is_admin=1) ORDER BY created_at DESC LIMIT $1", [limit]);
   res.json(rows);
@@ -3168,13 +3168,13 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
   } = req.body;
   const isAuthority = role === 'authority';
   if (role === 'none') {
-    await query("UPDATE users SET is_admin=0, admin_role='' WHERE id=$1", [uid]);
+    await query("UPDATE users SET is_admin=0, admin_role='', admin_since=NULL WHERE id=$1", [uid]);
     await query('DELETE FROM admin_permissions WHERE user_id=$1', [uid]);
     await logAction(req.adminUser.username, 'revoke_authority_role', uid, 'Yetkili rolü kaldırıldı', getIp(req));
     return res.json({ ok: true });
   }
   // Kullanıcıyı admin yap (is_admin=1 yoksa set et)
-  await query('UPDATE users SET is_admin=1, admin_role=$1 WHERE id=$2', [isAuthority ? 'authority' : role, uid]);
+  await query("UPDATE users SET is_admin=1, admin_role=$1, admin_since=COALESCE(admin_since, NOW()) WHERE id=$2", [isAuthority ? 'authority' : role, uid]);
   const { rows: existing } = await query('SELECT id FROM admin_permissions WHERE user_id=$1', [uid]);
   if (existing.length) {
     await query(`UPDATE admin_permissions SET
