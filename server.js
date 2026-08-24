@@ -2357,7 +2357,7 @@ function normalizedExternalUrl(value) {
 function newAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 async function uniqueAdPortalCode(table) { let code = newAdPortalCode(); while ((await query(`SELECT id FROM ${table} WHERE portal_code=$1`, [code])).rows.length) code = newAdPortalCode(); return code; }
 
-app.get('/api/photo-ads/random', async (req,res) => res.json((await query('SELECT * FROM photo_ads WHERE active=1 ORDER BY priority DESC,created_at ASC LIMIT 1')).rows[0] || null));
+app.get('/api/photo-ads/random', async (req,res) => res.json((await query('SELECT * FROM photo_ads WHERE active=1 ORDER BY RANDOM() LIMIT 1')).rows[0] || null));
 app.post('/api/photo-ads/:id/click', async (req,res) => { await query('UPDATE photo_ads SET click_count=click_count+1 WHERE id=$1 AND active=1',[req.params.id]); res.json({ok:true}); });
 app.get('/api/admin/photo-ads', adminMiddleware, async (req,res) => res.json((await query('SELECT * FROM photo_ads ORDER BY priority DESC,created_at DESC')).rows));
 app.put('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => {
