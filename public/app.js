@@ -6405,12 +6405,12 @@ function setupPhotoAudio(feed, options = {}) {
   document.getElementById('photo-audio-control')?.remove();
   const stop=()=>{activePhotoAudio?.pause();activePhotoAudio=null;};
   const syncMuteButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{button.classList.toggle('muted',muted);button.querySelector('i').className='fas '+(muted?'fa-volume-mute':'fa-volume-up');});
-  const play=card=>{const b=card.querySelector('.photo-song');if(!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.muted=muted;a.volume=volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{});activePhotoAudio=a;};
+  const play=card=>{const b=card.querySelector('.photo-song');if(!b?.dataset.audio||activePhotoAudio?._photoId===card.dataset.photoId)return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.muted=muted;a.volume=volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };a.play().catch(()=>{ if (activePhotoAudio===a) activePhotoAudio=null; });activePhotoAudio=a;};
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();muted=!muted;localStorage.setItem('cigcig_photo_audio_muted',muted?'1':'0');if(activePhotoAudio){activePhotoAudio.muted=muted;activePhotoAudio.volume=volume;}syncMuteButtons();}));
   syncMuteButtons();
   if (options.disableAutoplay) return;
   const ratios = new Map();
-  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.7).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.7]});
+  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.1).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.1,.7]});
   feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
   requestAnimationFrame(() => {
     const firstVisible = [...feed.querySelectorAll('[data-photo-id]')].find(card => {
@@ -6419,6 +6419,11 @@ function setupPhotoAudio(feed, options = {}) {
     });
     if (firstVisible) play(firstVisible);
   });
+  const resumePhotoAudio = () => {
+    const current = [...ratios.entries()].filter(([, ratio]) => ratio > .1).sort((a, b) => b[1] - a[1])[0];
+    if (current && !activePhotoAudio) play(current[0]);
+  };
+  document.addEventListener('pointerdown', resumePhotoAudio, { once: true, capture: true });
 }
 
 document.addEventListener('click', e => {
