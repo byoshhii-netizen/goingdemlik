@@ -2183,7 +2183,8 @@ app.put('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const old = rows[0];
   const caption = String(req.body.caption ?? old.caption).trim().slice(0, 180);
-  const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : old.duration_hours;
+  const requestedDuration = Number(req.body.duration_hours);
+  const durationHours = Number.isInteger(requestedDuration) && requestedDuration >= 1 && requestedDuration <= 720 ? requestedDuration : old.duration_hours;
   const suspended = req.body.is_suspended === undefined ? old.is_suspended : (req.body.is_suspended ? 1 : 0);
   const { rows: updated } = await query('UPDATE stories SET caption=$1,duration_hours=$2,is_suspended=$3,expires_at=created_at + ($2 * INTERVAL \'1 hour\') WHERE id=$4 RETURNING *', [caption, durationHours, suspended, old.id]);
   res.json(updated[0]);

@@ -2402,6 +2402,37 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 .gplayer-play { background:#707070 !important; color:#fff !important; }
 
+/* Reels viewer */
+.reals-container { background: #08090b !important; overflow: hidden; }
+.reals-list { isolation: isolate; }
+.reals-item { will-change: transform; }
+.reals-video-box { box-shadow: 0 18px 60px rgba(0,0,0,.65) !important; }
+.reals-video { display: block; }
+.reals-meta { z-index: 1; padding: 24px 18px 18px !important; background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,.1) 30%, rgba(0,0,0,.88) 100%) !important; }
+.reals-user { font-size: 14px; font-weight: 700; }
+.reals-sound { display: inline-flex; align-items: center; gap: 6px; max-width: calc(100% - 8px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reals-desc { max-width: 280px; margin-top: 7px; font-size: 13px; line-height: 1.45; }
+.reals-right-actions { z-index: 3; }
+.reals-action-btn { min-width: 44px; padding: 7px 4px; border-radius: 12px; text-shadow: 0 2px 8px rgba(0,0,0,.8); transition: color .15s, transform .15s, background .15s; }
+.reals-action-btn:hover { transform: translateY(-2px); background: rgba(255,255,255,.12); }
+.reals-action-btn .count, .reals-action-btn span { line-height: 1.2; }
+.reals-icon-btn { backdrop-filter: blur(10px); box-shadow: 0 5px 18px rgba(0,0,0,.35); }
+.reals-info-btn { backdrop-filter: blur(10px); }
+@media (min-width:769px) {
+  .reals-list { width: min(100%, 520px); }
+  .reals-video-box { width: 400px; height: min(720px, calc(100vh - 88px)); border-radius: 18px; }
+  .reals-video { object-fit: cover; }
+  .reals-right-actions { right: -76px; }
+}
+@media (max-width:768px) {
+  .reals-container { min-height: calc(100dvh - 56px - env(safe-area-inset-bottom)) !important; }
+  .reals-list { height: calc(100dvh - 56px - env(safe-area-inset-bottom)); }
+  .reals-video-box { box-shadow: none !important; }
+  .reals-meta { padding: 24px 78px 18px 16px !important; }
+  .reals-right-actions { right: 10px; bottom: max(28px, env(safe-area-inset-bottom)); }
+  .reals-action-btn { min-width: 42px; }
+}
+
 .song-detail-actions-row { display:flex; gap:8px; flex-wrap:wrap; }
 .song-detail-uploader { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); }
 .song-detail-uploader-link { display:flex; align-items:center; gap:5px; color:var(--text-secondary); text-decoration:none; font-weight:500; }

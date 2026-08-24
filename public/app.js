@@ -453,10 +453,10 @@ async function renderRealsFeed(app) {
       it.style.transition = 'transform .35s';
       const vid = it.querySelector('video');
       const videoUrl = it.dataset.videoUrl;
-      if (j === idx) {
+      if (Math.abs(j - idx) <= 1) {
         setRealsVideoSource(vid, videoUrl);
-        vid.muted = false;
-        vid.play().catch(() => {});
+        vid.muted = j !== idx;
+        if (j === idx) vid.play().catch(() => {});
       } else {
         setRealsVideoSource(vid, '');
         vid.pause();
@@ -3446,7 +3446,7 @@ async function renderSettingsSection(section) {
           <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-remove-avatar" ${currentUser.avatar_removed ? 'checked' : ''} /> Profil fotoğrafını kaldır, fotoğrafsız görün</label>
           <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="3">${escHtml(currentUser.bio || '')}</textarea></div>
           <div class="form-row">
-            <div class="form-group"><label>Ünvan <span style="color:var(--accent-red2)">*</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
+            <div class="form-group"><label>Ünvan <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
             <div class="form-group"><label>Konum <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-location" value="${escHtml(currentUser.location || '')}" placeholder="Örn: İstanbul, Türkiye" /></div>
           </div>
           <div class="form-group">
@@ -3495,7 +3495,6 @@ async function renderSettingsSection(section) {
 
     $('#save-profile-btn').addEventListener('click', async () => {
       const titleVal = ($('#s-title').value || '').trim();
-      if (!titleVal) { $('#profile-msg').textContent = 'Ünvan zorunlu'; return; }
       const fd = new FormData();
       fd.append('bio', $('#s-bio').value);
       fd.append('title', titleVal);
