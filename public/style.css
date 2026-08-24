@@ -2425,11 +2425,12 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .reals-right-actions { right: -76px; }
 }
 @media (max-width:768px) {
-  .reals-container { min-height: calc(100dvh - 56px - env(safe-area-inset-bottom)) !important; }
+  .reals-container { width: 100%; max-width: 100%; min-width: 0; min-height: calc(100dvh - 56px - env(safe-area-inset-bottom)) !important; overflow-x: hidden !important; }
+  .reals-list, .reals-item, .reals-video-box { width: 100%; max-width: 100%; min-width: 0; }
   .reals-list { height: calc(100dvh - 56px - env(safe-area-inset-bottom)); }
   .reals-video-box { box-shadow: none !important; }
   .reals-meta { padding: 24px 78px 18px 16px !important; }
-  .reals-right-actions { right: 10px; bottom: max(28px, env(safe-area-inset-bottom)); }
+  .reals-right-actions { right: 10px; bottom: max(28px, env(safe-area-inset-bottom)); max-width: calc(100% - 20px); }
   .reals-action-btn { min-width: 42px; }
 }
 
