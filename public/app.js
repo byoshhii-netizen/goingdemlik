@@ -5,6 +5,22 @@ let storyComposerAudio = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
 
+const themeSystemPreference = window.matchMedia('(prefers-color-scheme: light)');
+function getThemeChoice() { return localStorage.getItem('cigcig_theme') || 'auto'; }
+function applyDisplayTheme(choice = getThemeChoice()) {
+  const selected = ['light', 'dark', 'auto'].includes(choice) ? choice : 'auto';
+  const resolved = selected === 'auto' ? (themeSystemPreference.matches ? 'light' : 'dark') : selected;
+  document.body.dataset.theme = resolved;
+  document.documentElement.style.colorScheme = resolved;
+  document.querySelectorAll('[data-theme-choice]').forEach(button => button.classList.toggle('active', button.dataset.themeChoice === selected));
+}
+function setThemeChoice(choice) {
+  localStorage.setItem('cigcig_theme', choice);
+  applyDisplayTheme(choice);
+}
+applyDisplayTheme();
+themeSystemPreference.addEventListener?.('change', () => { if (getThemeChoice() === 'auto') applyDisplayTheme('auto'); });
+
 const SITE_URL = 'https://cigcig.xyz';
 
 function $(sel) { return document.querySelector(sel); }
@@ -567,6 +583,12 @@ function updateMobileBottomBar(path) {
 
 $('#nav-user-btn').addEventListener('click', () => {
   $('#dropdown-menu').classList.toggle('hidden');
+});
+document.querySelectorAll('[data-theme-choice]').forEach(button => {
+  button.addEventListener('click', event => {
+    event.stopPropagation();
+    setThemeChoice(button.dataset.themeChoice);
+  });
 });
 document.addEventListener('click', e => {
   if (!$('#nav-dropdown')?.contains(e.target)) $('#dropdown-menu')?.classList.add('hidden');
