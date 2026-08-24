@@ -3495,7 +3495,7 @@ app.get('/forum/:slug', async (req, res) => {
   const imgTag = forum.banner_image
     ? `<meta property="og:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:card" content="summary_large_image" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const forumKw = `${escapeHtml(forum.title)}, cig forum, cigcig, cigcig forum, cig, forum konusu`;
+  const forumKw = `${escapeHtml(forum.title)}, Cig Forum, CigCig, CigCig Forum, cig, forum konusu`;
   const forumLd = JSON.stringify({
     '@context':'https://schema.org','@type':'DiscussionForumPosting',
     'headline': forum.title,
@@ -3530,7 +3530,7 @@ app.get('/kitap/:slug', async (req, res) => {
   const imgTag = book.cover_image
     ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, cigcig kitap, cig forum kitap, ücretsiz kitap oku`;
+  const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, CigCig kitap, Cig Forum kitap, ücretsiz kitap oku`;
   const bookLd = JSON.stringify({
     '@context':'https://schema.org','@type':'Book',
     'name': book.title,
