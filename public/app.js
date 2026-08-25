@@ -37,7 +37,7 @@ function updatePageMeta(title, description, imageUrl) {
 
   let canonical = document.querySelector('link[rel="canonical"]');
   if (!canonical) { canonical = document.createElement('link'); canonical.setAttribute('rel','canonical'); document.head.appendChild(canonical); }
-  canonical.setAttribute('href', location.href);
+  canonical.setAttribute('href', new URL(location.pathname, SITE_URL).href);
 
   let ld = document.getElementById('page-jsonld');
   if (!ld) { ld = document.createElement('script'); ld.type = 'application/ld+json'; ld.id = 'page-jsonld'; document.head.appendChild(ld); }
@@ -155,6 +155,13 @@ function avatarImg(u, cls = 'avatar-sm') {
 
 function hasUsableAvatar(u) {
   return Boolean(u && u.avatar && !u.avatar_removed && u.avatar !== '?' && u.avatar !== 'null' && u.avatar !== 'undefined');
+}
+
+function updateAppIcon(user) {
+  const favicon = document.querySelector('link[rel="icon"]');
+  if (favicon) favicon.href = hasUsableAvatar(user) ? user.avatar : '/cigcig.png';
+  const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+  if (appleIcon) appleIcon.href = hasUsableAvatar(user) ? user.avatar : '/cigcig.png';
 }
 
 // ===== IÇERIK RENDER (hashtag + mention) =====
@@ -486,6 +493,7 @@ async function initAuth() {
 }
 
 function updateNavUI() {
+  updateAppIcon(currentUser);
   const authEl = $('#nav-auth');
   const userEl = $('#nav-user');
   const mobAuth = $('#mobile-menu-auth');

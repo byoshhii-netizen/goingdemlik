@@ -96,6 +96,15 @@ if (!process.env.SITE_URL) {
   console.warn('[SEO] ⚠️  SITE_URL env ayarlanmamış! Railway panelinde: SITE_URL=https://cigcig.xyz');
 }
 
+app.use((req, res, next) => {
+  const host = String(req.get('host') || '').toLowerCase().split(':')[0];
+  const canonicalHost = new URL(SITE_URL).host.toLowerCase();
+  if (host.endsWith('.railway.app') && host !== canonicalHost) {
+    return res.redirect(301, `${SITE_URL}${req.originalUrl}`);
+  }
+  next();
+});
+
 // ===== RATE LIMITERS =====
 
 // Genel API: dakikada 80 istek (daha sıkı)
