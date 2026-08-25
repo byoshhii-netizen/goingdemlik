@@ -4185,13 +4185,33 @@ app.get('/api/admin/conversations', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, res) => {
+app.get('/api/admin/users/:id/conversations', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
-    SELECT m.*, u.username as sender_username
+    SELECT c.id, u1.username AS user1, u2.username AS user2, c.last_message_at,
+      (SELECT COUNT(*) FROM dm_messages WHERE conversation_id=c.id) AS message_count
+    FROM dm_conversations c JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
+    WHERE c.user1_id=$1 OR c.user2_id=$1 ORDER BY c.last_message_at DESC
+  `, [req.params.id]);
+  res.json(rows);
+});
+
+app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, res) => {
+  const { rows: messages } = await query(`
+    SELECT m.*, u.username AS sender_username,
+      CASE WHEN m.deleted_for_all=1 THEN 'deleted_for_all'
+        WHEN m.deleted_by_sender=1 OR m.deleted_by_receiver=1 THEN 'deleted_for_user'
+        ELSE 'visible' END AS audit_status
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     WHERE m.conversation_id=$1 ORDER BY m.created_at ASC
   `, [req.params.id]);
-  res.json(rows);
+  const { rows: calls } = await query(`
+    SELECT c.id, c.caller_id, c.callee_id, c.status, c.created_at, c.updated_at, c.ended_at,
+      cu.username AS caller_username, tu.username AS callee_username
+    FROM voice_calls c JOIN dm_conversations d ON d.user1_id=LEAST(c.caller_id,c.callee_id) AND d.user2_id=GREATEST(c.caller_id,c.callee_id)
+      JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
+    WHERE d.id=$1 ORDER BY c.created_at ASC
+  `, [req.params.id]);
+  res.json({ messages, calls });
 });
 
 app.use((err, req, res, next) => {

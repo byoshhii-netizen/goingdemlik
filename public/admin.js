@@ -1777,48 +1777,39 @@ async function renderAuthorityLogs(main) {
 
 // ===== MESSAGES =====
 async function renderAdminMessages(main) {
-  let convs = [];
-  try { convs = await adminApi('/conversations'); } catch (e) {
+  let users = [];
+  try { users = await adminApi('/users'); } catch (e) {
     main.innerHTML = `<p style="color:var(--red2);padding:20px">${e.message}</p>`; return;
   }
   main.innerHTML = `
     <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-envelope"></i></div> Mesajlar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${convs.length})</span></div>
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-envelope"></i></div> Mesajlar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${users.length} kullanıcı)</span></div>
+      <div class="adm-search"><i class="fas fa-search"></i><input id="admin-message-user-search" type="text" placeholder="İsim veya kullanıcı ara..." style="min-width:260px"></div>
     </div>
-    <div class="card">
+    <div class="card admin-message-users-card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Kullanıcı 1</th><th>Kullanıcı 2</th><th>Son Mesaj</th><th>İşlem</th></tr></thead>
-          <tbody>
-            ${convs.length ? convs.map(c => `<tr>
-              <td style="color:var(--text3);font-size:12px">#${c.id}</td>
-              <td style="color:var(--blue2)">${escHtml(c.user1||'—')}</td>
-              <td style="color:var(--blue2)">${escHtml(c.user2||'—')}</td>
-              <td style="color:var(--text3);font-size:12px">${timeAgo(c.last_message_at)}</td>
-              <td><button class="btn btn-outline btn-xs view-conv-btn" data-id="${c.id}" data-u1="${escHtml(c.user1||'')}" data-u2="${escHtml(c.user2||'')}"><i class="fas fa-eye"></i> Gör</button></td>
-            </tr>`).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:32px">Konuşma bulunamadı</td></tr>'}
-          </tbody>
+          <thead><tr><th>Kullanıcı</th><th>E-posta</th><th>İşlem</th></tr></thead><tbody id="admin-message-users-body"></tbody>
         </table>
       </div>
     </div>`;
-  main.querySelectorAll('.view-conv-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
+  const renderUsers = list => {
+    const body = $('#admin-message-users-body'); if (!body) return;
+    body.innerHTML = list.length ? list.map(user => `<tr><td><strong>${escHtml(user.username)}</strong></td><td style="color:var(--text3)">${escHtml(user.email || '—')}</td><td><button class="btn btn-outline btn-xs admin-user-messages" data-id="${user.id}" data-username="${escHtml(user.username)}"><i class="fas fa-comments"></i> Mesajlarını gör</button></td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>';
+    body.querySelectorAll('.admin-user-messages').forEach(btn => btn.addEventListener('click', async () => {
       try {
-        const msgs = await adminApi('/conversations/'+btn.dataset.id+'/messages');
-        const u1 = btn.dataset.u1, u2 = btn.dataset.u2;
-        showModal(`${u1} ↔ ${u2}`, `
-          <div style="max-height:400px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 0">
-            ${msgs.length ? msgs.map(m => `
-              <div style="padding:8px 12px;border-radius:8px;background:var(--bg4);font-size:13px">
-                <span style="color:var(--blue2);font-weight:600">${escHtml(m.sender_username)}</span>
-                <span style="color:var(--text3);font-size:11px;margin-left:8px">${timeAgo(m.created_at)}</span>
-                <div style="margin-top:4px;color:var(--text)">${escHtml(m.content)}</div>
-              </div>`).join('') : '<div style="color:var(--text3);text-align:center;padding:20px">Mesaj yok</div>'}
-          </div>
-        `);
+        const convs = await adminApi('/users/' + btn.dataset.id + '/conversations');
+        showModal(`${btn.dataset.username} - DM listesi`, `<div class="admin-conversation-list">${convs.length ? convs.map(c => `<button class="admin-conversation-choice" data-id="${c.id}" data-u1="${escHtml(c.user1)}" data-u2="${escHtml(c.user2)}"><span><strong>${escHtml(c.user1)}</strong> <i class="fas fa-arrow-right"></i> <strong>${escHtml(c.user2)}</strong></span><small>${c.message_count} mesaj · ${formatDate(c.last_message_at)}</small></button>`).join('') : '<div class="admin-audit-empty">Bu kullanıcının konuşması yok.</div>'}</div>`);
+        document.querySelectorAll('.admin-conversation-choice').forEach(choice => choice.addEventListener('click', async () => {
+          const audit = await adminApi('/conversations/' + choice.dataset.id + '/messages');
+          const events = [...audit.messages.map(message => ({ ...message, event_type: 'message', event_time: message.created_at })), ...audit.calls.map(call => ({ ...call, event_type: 'call', event_time: call.created_at }))].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+          showModal(`${choice.dataset.u1} ↔ ${choice.dataset.u2}`, `<div class="admin-audit-list">${events.length ? events.map(event => event.event_type === 'call' ? `<div class="admin-call-event"><i class="fas fa-phone"></i><span><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong> ${event.status === 'connected' ? 'arama başlattı, cevaplandı ve sonlandı' : event.status === 'ended' ? 'arama sonlandı' : 'arama başlattı, cevap bekleniyor'}</span></div>` : `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div>${escHtml(event.content || '[Medya]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj veya arama kaydı yok.</div>'}</div>`);
+        }));
       } catch(e) { toast(e.message, 'error'); }
-    });
-  });
+    }));
+  };
+  renderUsers(users);
+  $('#admin-message-user-search')?.addEventListener('input', event => { const q = event.target.value.toLocaleLowerCase('tr-TR'); renderUsers(users.filter(user => `${user.username} ${user.email || ''}`.toLocaleLowerCase('tr-TR').includes(q))); });
 }
 
 // ===== DUYURULAR =====
