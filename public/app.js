@@ -7,6 +7,7 @@ let firstVisitAuthEnabled = false;
 
 const themeSystemPreference = window.matchMedia('(prefers-color-scheme: light)');
 window.deviceThemeEnabled = true;
+window.themePickerEnabled = true;
 function getThemeChoice() { return localStorage.getItem('cigcig_theme') || 'auto'; }
 function applyDisplayTheme(choice = getThemeChoice()) {
   const selected = ['light', 'dark', 'auto'].includes(choice) ? choice : 'auto';
@@ -18,6 +19,7 @@ function applyDisplayTheme(choice = getThemeChoice()) {
     button.classList.toggle('active', button.dataset.themeChoice === allowedChoice || button.dataset.settingsTheme === allowedChoice);
     if (button.dataset.themeChoice === 'auto' || button.dataset.settingsTheme === 'auto') button.hidden = !window.deviceThemeEnabled;
   });
+  document.querySelectorAll('.theme-picker, .theme-settings-group').forEach(element => { element.hidden = !window.themePickerEnabled; });
 }
 function setThemeChoice(choice) {
   localStorage.setItem('cigcig_theme', choice);
@@ -3589,7 +3591,7 @@ async function renderSettingsSection(section) {
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
-          <div class="form-group"><label>Tema</label><div class="theme-picker-options settings-theme-options">
+          <div class="form-group theme-settings-group"><label>Tema</label><div class="theme-picker-options settings-theme-options">
             ${[['auto','Otomatik','fas fa-circle-half-stroke'],['light','Açık','fas fa-sun'],['dark','Koyu','fas fa-moon']].map(([choice, label, icon]) => `<button type="button" class="theme-option${getThemeChoice() === choice ? ' active' : ''}" data-settings-theme="${choice}"><i class="${icon}"></i>${label}</button>`).join('')}
           </div></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
@@ -4137,6 +4139,7 @@ async function init() {
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
     window.deviceThemeEnabled = ps.device_theme_enabled !== '0';
+    window.themePickerEnabled = ps.theme_picker_enabled !== '0';
     if (ps.light_primary_color) document.documentElement.style.setProperty('--light-accent', ps.light_primary_color);
     if (ps.light_background_color) document.documentElement.style.setProperty('--light-bg', ps.light_background_color);
     applyDisplayTheme();

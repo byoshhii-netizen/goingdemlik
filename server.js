@@ -2642,7 +2642,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_created_visible', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'book_bg_color', 'first_visit_auth'];
+  const keys = ['site_name', 'footer_created_visible', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -3295,7 +3295,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','light_primary_color','light_background_color','device_theme_enabled','homepage_sections','profile_tabs','footer_created_visible','footer_copyright_text','first_visit_auth')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','light_primary_color','light_background_color','device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_created_visible','footer_copyright_text','first_visit_auth')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';
