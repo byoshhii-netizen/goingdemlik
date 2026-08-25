@@ -623,8 +623,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .reals-icon-btn { width:42px; height:42px; border:1px solid var(--reals-control-border); border-radius:50%; background:var(--reals-control-bg); color:var(--reals-fg); cursor:pointer; }
   .reals-top-controls { position:absolute; top:14px; left:14px; z-index:2; }
   .reals-close-btn { position:absolute; top:14px; right:14px; z-index:2; }
-  .reals-play-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
-  .reals-play-overlay span { width:72px; height:72px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); color:#fff; font-size:30px; opacity:0; }
+  .reals-play-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:auto; border:0; background:transparent; cursor:pointer; }
+  .reals-play-overlay span { width:72px; height:72px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.58); color:#fff; font-size:30px; opacity:0; transform:scale(.9); transition:opacity .18s, transform .18s; }
+  .reals-item.reals-is-paused .reals-play-overlay span { opacity:1; transform:scale(1); }
 }
 
 @media (max-width:768px) {
@@ -649,8 +650,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .reals-icon-btn { width:42px; height:42px; border:1px solid var(--reals-control-border); border-radius:50%; background:var(--reals-control-bg); color:var(--reals-fg); cursor:pointer; }
   .reals-top-controls { position:absolute; top:14px; left:14px; z-index:2; }
   .reals-close-btn { position:absolute; top:14px; right:14px; z-index:2; }
-  .reals-play-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
-  .reals-play-overlay span { width:72px; height:72px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); color:#fff; font-size:30px; opacity:0; }
+  .reals-play-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:auto; border:0; background:transparent; cursor:pointer; }
+  .reals-play-overlay span { width:72px; height:72px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.58); color:#fff; font-size:30px; opacity:0; transform:scale(.9); transition:opacity .18s, transform .18s; }
+  .reals-item.reals-is-paused .reals-play-overlay span { opacity:1; transform:scale(1); }
 }
 
 .reals-intro { text-align:center; padding:18px 8px; }

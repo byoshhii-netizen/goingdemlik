@@ -563,7 +563,7 @@ async function renderRealsFeed(app) {
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}">
         <div class="reals-video-box">
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
-        <div class="reals-play-overlay"><span><i class="fas fa-pause"></i></span></div>
+        <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-mute"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -577,7 +577,7 @@ async function renderRealsFeed(app) {
             <button class="reals-action-btn save-btn" title="Kaydet"><i class="far fa-bookmark"></i><span>Kaydet</span></button>
             <button class="reals-action-btn resend-btn"><i class="fas fa-retweet"></i><span>Paylaş</span></button>
             <button class="reals-action-btn share-btn"><i class="fas fa-paper-plane"></i><span>Gönder</span></button>
-            <a href="/reals/${escHtml(r.slug)}" data-link class="reals-action-btn"><i class="fas fa-link"></i><span>Detay</span></a>
+            <a href="/reals/${encodeURIComponent(r.id)}" data-link class="reals-action-btn"><i class="fas fa-link"></i><span>Detay</span></a>
           </div>
         </div>
         </div>
@@ -594,13 +594,17 @@ async function renderRealsFeed(app) {
         clearTimeout(clickTimer);
         clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
       });
+      it.querySelector('.reals-play-overlay')?.addEventListener('click', event => {
+        event.stopPropagation();
+        if (vid.paused) vid.play().catch(() => {}); else vid.pause();
+      });
       it.addEventListener('dblclick', event => {
         if (event.target.closest('button,a')) return;
         clearTimeout(clickTimer);
         it.querySelector('.like-btn')?.click();
       });
-      vid.addEventListener('play', () => it.querySelector('.reals-play-overlay i').className = 'fas fa-pause');
-      vid.addEventListener('pause', () => it.querySelector('.reals-play-overlay i').className = 'fas fa-play');
+      vid.addEventListener('play', () => { it.querySelector('.reals-play-overlay i').className = 'fas fa-pause'; it.classList.remove('reals-is-paused'); });
+      vid.addEventListener('pause', () => { it.querySelector('.reals-play-overlay i').className = 'fas fa-play'; it.classList.add('reals-is-paused'); });
     });
     listEl.querySelectorAll('.mute-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation(); const vid = btn.closest('.reals-video-box').querySelector('video');
@@ -610,16 +614,20 @@ async function renderRealsFeed(app) {
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; const result = await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked); btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart'; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
     }));
-    listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/reals/' + btn.closest('.reals-item').dataset.slug); }));
+    listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/reals/' + encodeURIComponent(btn.closest('.reals-item').dataset.id)); }));
     listEl.querySelectorAll('.save-btn').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation(); const slug = btn.closest('.reals-item').dataset.slug;
       try { const result = await api(`/video/${slug}/save`, { method: 'POST' }); btn.classList.toggle('active', result.saved); btn.querySelector('i').className = result.saved ? 'fas fa-bookmark' : 'far fa-bookmark'; } catch (error) { toast(error.message, 'error'); }
     }));
     listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; try { btn.disabled=true; await api(`/video/${slug}/resend`, { method:'POST' }); toast('Yeniden paylaşıldı'); } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); if (!video) return;
+      const shareUrl = `${location.origin}/reals/${encodeURIComponent(video.id)}`;
+      try { await navigator.clipboard.writeText(shareUrl); toast('Reals bağlantısı kopyalandı'); } catch { toast(shareUrl); }
     }));
     listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const slug = it.dataset.slug; const video = orderedReals.find(r => r.slug === slug); if (video) showForwardVideoModal(video);
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); if (!video) return;
+      const shareUrl = `${location.origin}/reals/${encodeURIComponent(video.id)}`;
+      try { await navigator.clipboard.writeText(shareUrl); toast('Reals bağlantısı kopyalandı'); } catch { showForwardVideoModal(video); }
     }));
   }
 

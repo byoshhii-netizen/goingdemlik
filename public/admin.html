@@ -370,6 +370,14 @@
       input, textarea, select { font-size: 16px; }
     }
     .admin-message-users-card { margin-top: 14px; }
+    .admin-message-search-results { margin-top: 14px; }
+    .admin-message-search-list { display: grid; gap: 6px; padding: 10px; }
+    .admin-message-search-result { display: grid; gap: 4px; width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg4); color: var(--text); text-align: left; cursor: pointer; }
+    .admin-message-search-result:hover { border-color: var(--red); background: var(--surface); }
+    .admin-search-result-meta { color: var(--blue2); font-size: 12px; }
+    .admin-search-result-users { color: var(--text3); font-size: 11px; }
+    .admin-search-result-content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+    .admin-search-result-content.is-deleted { color: #fed7aa; }
     .admin-conversation-list { display: grid; gap: 8px; max-height: 520px; overflow-y: auto; }
     .admin-conversation-choice { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg4); color: var(--text); text-align: left; cursor: pointer; }
     .admin-conversation-choice:hover { border-color: var(--red); background: var(--surface); }

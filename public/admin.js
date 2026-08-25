@@ -1784,7 +1784,7 @@ async function renderAdminMessages(main) {
   main.innerHTML = `
     <div class="adm-section-header">
       <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-envelope"></i></div> Mesajlar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${users.length} kullanıcı)</span></div>
-      <div class="adm-search"><i class="fas fa-search"></i><input id="admin-message-user-search" type="text" placeholder="İsim veya kullanıcı ara..." style="min-width:260px"></div>
+      <div class="adm-search"><i class="fas fa-search"></i><input id="admin-message-user-search" type="text" placeholder="Kullanıcı veya mesaj ara..." style="min-width:260px"></div>
     </div>
     <div class="card admin-message-users-card">
       <div class="table-wrap">
@@ -1793,6 +1793,16 @@ async function renderAdminMessages(main) {
         </table>
       </div>
     </div>`;
+  const searchResults = document.createElement('div');
+  searchResults.id = 'admin-message-search-results';
+  searchResults.className = 'card admin-message-search-results';
+  searchResults.style.display = 'none';
+  main.appendChild(searchResults);
+  const showAudit = async (conversationId, title) => {
+    const audit = await adminApi('/conversations/' + conversationId + '/messages');
+    const events = [...audit.messages.map(message => ({ ...message, event_type: 'message', event_time: message.created_at })), ...audit.calls.map(call => ({ ...call, event_type: 'call', event_time: call.created_at }))].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
+    showModal(title, `<div class="admin-audit-list">${events.length ? events.map(event => event.event_type === 'call' ? `<div class="admin-call-event"><i class="fas fa-phone"></i><span><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong> ${event.status === 'connected' ? 'arama başlattı, cevaplandı ve sonlandı' : event.status === 'ended' ? 'arama sonlandı' : 'arama başlattı, cevap bekleniyor'}</span></div>` : `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div>${escHtml(event.content || '[Medya]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj veya arama kaydı yok.</div>'}</div>`);
+  };
   const renderUsers = list => {
     const body = $('#admin-message-users-body'); if (!body) return;
     body.innerHTML = list.length ? list.map(user => `<tr><td><strong>${escHtml(user.username)}</strong></td><td style="color:var(--text3)">${escHtml(user.email || '—')}</td><td><button class="btn btn-outline btn-xs admin-user-messages" data-id="${user.id}" data-username="${escHtml(user.username)}"><i class="fas fa-comments"></i> Mesajlarını gör</button></td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>';
@@ -1801,15 +1811,28 @@ async function renderAdminMessages(main) {
         const convs = await adminApi('/users/' + btn.dataset.id + '/conversations');
         showModal(`${btn.dataset.username} - DM listesi`, `<div class="admin-conversation-list">${convs.length ? convs.map(c => `<button class="admin-conversation-choice" data-id="${c.id}" data-u1="${escHtml(c.user1)}" data-u2="${escHtml(c.user2)}"><span><strong>${escHtml(c.user1)}</strong> <i class="fas fa-arrow-right"></i> <strong>${escHtml(c.user2)}</strong></span><small>${c.message_count} mesaj · ${formatDate(c.last_message_at)}</small></button>`).join('') : '<div class="admin-audit-empty">Bu kullanıcının konuşması yok.</div>'}</div>`);
         document.querySelectorAll('.admin-conversation-choice').forEach(choice => choice.addEventListener('click', async () => {
-          const audit = await adminApi('/conversations/' + choice.dataset.id + '/messages');
-          const events = [...audit.messages.map(message => ({ ...message, event_type: 'message', event_time: message.created_at })), ...audit.calls.map(call => ({ ...call, event_type: 'call', event_time: call.created_at }))].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
-          showModal(`${choice.dataset.u1} ↔ ${choice.dataset.u2}`, `<div class="admin-audit-list">${events.length ? events.map(event => event.event_type === 'call' ? `<div class="admin-call-event"><i class="fas fa-phone"></i><span><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong> ${event.status === 'connected' ? 'arama başlattı, cevaplandı ve sonlandı' : event.status === 'ended' ? 'arama sonlandı' : 'arama başlattı, cevap bekleniyor'}</span></div>` : `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div>${escHtml(event.content || '[Medya]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj veya arama kaydı yok.</div>'}</div>`);
+          await showAudit(choice.dataset.id, `${choice.dataset.u1} ↔ ${choice.dataset.u2}`);
         }));
       } catch(e) { toast(e.message, 'error'); }
     }));
   };
   renderUsers(users);
-  $('#admin-message-user-search')?.addEventListener('input', event => { const q = event.target.value.toLocaleLowerCase('tr-TR'); renderUsers(users.filter(user => `${user.username} ${user.email || ''}`.toLocaleLowerCase('tr-TR').includes(q))); });
+  let searchTimer;
+  $('#admin-message-user-search')?.addEventListener('input', event => {
+    const q = event.target.value.trim();
+    const lowered = q.toLocaleLowerCase('tr-TR');
+    renderUsers(users.filter(user => `${user.username} ${user.email || ''}`.toLocaleLowerCase('tr-TR').includes(lowered)));
+    clearTimeout(searchTimer);
+    if (q.length < 2) { searchResults.style.display = 'none'; searchResults.innerHTML = ''; return; }
+    searchTimer = setTimeout(async () => {
+      try {
+        const results = await adminApi('/messages/search?q=' + encodeURIComponent(q));
+        searchResults.style.display = '';
+        searchResults.innerHTML = `<div class="card-header"><span><i class="fas fa-message" style="color:var(--red2);margin-right:8px"></i>Mesaj sonuçları (${results.length})</span></div><div class="admin-message-search-list">${results.length ? results.map(result => `<button class="admin-message-search-result" data-conversation-id="${result.conversation_id}" data-title="${escHtml(result.user1)} ↔ ${escHtml(result.user2)}"><span class="admin-search-result-meta"><strong>${escHtml(result.sender_username)}</strong> · ${formatDate(result.created_at)}</span><span class="admin-search-result-users">${escHtml(result.user1)} ↔ ${escHtml(result.user2)}</span><span class="admin-search-result-content ${result.audit_status !== 'visible' ? 'is-deleted' : ''}">${escHtml(result.content || '[Medya]')}</span>${result.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : result.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</button>`).join('') : '<div class="admin-audit-empty">Bu metni içeren mesaj bulunamadı.</div>'}</div>`;
+        searchResults.querySelectorAll('.admin-message-search-result').forEach(result => result.addEventListener('click', () => showAudit(result.dataset.conversationId, result.dataset.title)));
+      } catch (error) { searchResults.style.display = ''; searchResults.innerHTML = `<div class="admin-audit-empty">${escHtml(error.message)}</div>`; }
+    }, 250);
+  });
 }
 
 // ===== DUYURULAR =====

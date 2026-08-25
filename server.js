@@ -4195,6 +4195,23 @@ app.get('/api/admin/users/:id/conversations', adminMiddleware, async (req, res) 
   res.json(rows);
 });
 
+app.get('/api/admin/messages/search', adminMiddleware, async (req, res) => {
+  const search = String(req.query.q || '').trim();
+  if (search.length < 2) return res.json([]);
+  const { rows } = await query(`
+    SELECT m.id, m.conversation_id, m.content, m.created_at, m.deleted_for_all,
+      m.deleted_by_sender, m.deleted_by_receiver, sender.username AS sender_username,
+      u1.username AS user1, u2.username AS user2
+    FROM dm_messages m
+    JOIN users sender ON sender.id=m.sender_id
+    JOIN dm_conversations c ON c.id=m.conversation_id
+    JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
+    WHERE m.content ILIKE $1
+    ORDER BY m.created_at DESC LIMIT 100
+  `, [`%${search}%`]);
+  res.json(rows.map(row => ({ ...row, audit_status: row.deleted_for_all ? 'deleted_for_all' : (row.deleted_by_sender || row.deleted_by_receiver ? 'deleted_for_user' : 'visible') })));
+});
+
 app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, res) => {
   const { rows: messages } = await query(`
     SELECT m.*, u.username AS sender_username,
@@ -4751,7 +4768,7 @@ app.get('/api/video-settings', async (req, res) => {
 });
 
 app.get('/api/video/:slug', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} WHERE v.slug=$1`, [req.params.slug]);
+  const { rows } = await query(`${videoSelect} WHERE v.slug=$1 OR v.id::text=$1`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   res.json(rows[0]);
 });
