@@ -2496,6 +2496,20 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .reals-action-btn { min-width: 42px; }
 }
 
+/* Reals mobile viewport alignment */
+@media (max-width: 768px) {
+  #app:has(.reals-container) { width: 100%; max-width: none; padding: 0; overflow: hidden; }
+  .reals-container { position: relative; width: 100vw !important; max-width: 100vw !important; min-width: 100vw !important; height: calc(100dvh - 56px); min-height: 0 !important; margin-left: calc(50% - 50vw); padding: 0 !important; overflow: hidden !important; }
+  .reals-list { position: relative; width: 100% !important; max-width: none !important; height: 100% !important; margin: 0; overflow: hidden !important; }
+  .reals-item { position: absolute !important; inset: 0 !important; width: 100% !important; max-width: none !important; height: 100% !important; margin: 0; padding: 0 !important; overflow: hidden; }
+  .reals-video-box { width: 100% !important; max-width: none !important; height: 100% !important; max-height: none !important; margin: 0; border-radius: 0 !important; }
+  .reals-video { width: 100% !important; max-width: none !important; height: 100% !important; object-fit: cover !important; border-radius: 0 !important; }
+  .reals-meta { left: 0; right: 72px !important; bottom: 0; max-width: none; box-sizing: border-box; }
+  .reals-right-actions { right: 10px !important; bottom: max(28px, env(safe-area-inset-bottom)) !important; width: 50px; max-width: 50px; gap: 10px !important; }
+  .reals-action-btn { width: 50px; min-width: 50px; padding: 6px 2px; }
+  .reals-play-overlay { z-index: 4; }
+}
+
 .song-detail-actions-row { display:flex; gap:8px; flex-wrap:wrap; }
 .song-detail-uploader { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); }
 .song-detail-uploader-link { display:flex; align-items:center; gap:5px; color:var(--text-secondary); text-decoration:none; font-weight:500; }
