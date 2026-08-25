@@ -148,7 +148,10 @@ function showVoicePermissionRetry(call, other) {
 }
 
 async function requestMicrophoneThenCall(username, other) {
-  if (!navigator.mediaDevices?.getUserMedia) return toast('Bu tarayıcı mikrofon erişimini desteklemiyor', 'error');
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    showModal('Mikrofon erişimi kullanılamıyor', `<div class="call-permission-guide"><div class="call-permission-guide-icon"><i class="fas fa-lock"></i></div><p>Mikrofon izni yalnızca güvenli bağlantıda çalışır.</p><ol><li>CigCig’i <strong>HTTPS</strong> veya <strong>localhost</strong> üzerinden açın.</li><li>Adres çubuğundaki kilitten Mikrofon için <strong>İzin ver</strong> seçin.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol></div>`);
+    return;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     await startVoiceCall(username, other, stream);
