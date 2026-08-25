@@ -2302,6 +2302,18 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card" style="grid-column: 1 / -1">
+        <div class="card-header"><span><i class="fas fa-mobile-screen-button" style="color:var(--red2);margin-right:8px"></i>Kullanıcı Tema Davranışı</span></div>
+        <div class="card-body">
+          <label class="adm-toggle-row" for="s-device-theme"><span><i class="fas fa-sun"></i> Telefon temasına otomatik uyum</span><span class="adm-toggle"><input type="checkbox" id="s-device-theme" ${settings['device_theme_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
+          <p style="font-size:12px;color:var(--text3);margin:8px 0 16px">Kapalıysa kullanıcılar yalnızca açık veya koyu temayı seçebilir.</p>
+          <div style="display:flex;gap:24px;flex-wrap:wrap">
+            <div><label>Açık tema hat rengi</label><input type="color" id="s-light-primary" value="${settings['light_primary_color'] || '#dc2626'}" style="width:64px;height:42px;padding:3px" /></div>
+            <div><label>Açık tema arka plan rengi</label><input type="color" id="s-light-background" value="${settings['light_background_color'] || '#f8f9fa'}" style="width:64px;height:42px;padding:3px" /></div>
+          </div>
+          <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="s-light-theme-save"><i class="fas fa-save"></i> Kaydet</button><div id="s-light-theme-msg" class="form-error"></div></div>
+        </div>
+      </div>
+      <div class="card" style="grid-column: 1 / -1">
         <div class="card-header"><span><i class="fas fa-book-open" style="color:#a16207;margin-right:8px"></i>Kitap Sayfası Arka Plan Rengi</span></div>
         <div class="card-body">
           <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Okuyucu ekranındaki sayfa arka plan rengini ayarlayın. Varsayılan: <code>#F4ECD8</code> (eski kitap sayfası)</p>
@@ -2407,6 +2419,14 @@ async function renderSettings(main) {
       toast('Kaydedildi');
     } catch(e) { if(msgEl) msgEl.textContent=e.message; }
   }
+
+  document.getElementById('s-light-theme-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-light-theme-msg');
+    await saveSetting('device_theme_enabled', document.getElementById('s-device-theme').checked ? '1' : '0', msg);
+    await saveSetting('light_primary_color', document.getElementById('s-light-primary').value, msg);
+    await saveSetting('light_background_color', document.getElementById('s-light-background').value, msg);
+    msg.style.color = 'var(--green)'; msg.textContent = 'Tema ayarları kaydedildi';
+  });
 
   document.getElementById('s-route-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-route-msg');

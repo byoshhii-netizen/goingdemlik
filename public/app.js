@@ -6,13 +6,18 @@ let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
 
 const themeSystemPreference = window.matchMedia('(prefers-color-scheme: light)');
+window.deviceThemeEnabled = true;
 function getThemeChoice() { return localStorage.getItem('cigcig_theme') || 'auto'; }
 function applyDisplayTheme(choice = getThemeChoice()) {
   const selected = ['light', 'dark', 'auto'].includes(choice) ? choice : 'auto';
-  const resolved = selected === 'auto' ? (themeSystemPreference.matches ? 'light' : 'dark') : selected;
+  const allowedChoice = window.deviceThemeEnabled || selected !== 'auto' ? selected : 'dark';
+  const resolved = allowedChoice === 'auto' ? (themeSystemPreference.matches ? 'light' : 'dark') : allowedChoice;
   document.body.dataset.theme = resolved;
   document.documentElement.style.colorScheme = resolved;
-  document.querySelectorAll('[data-theme-choice]').forEach(button => button.classList.toggle('active', button.dataset.themeChoice === selected));
+  document.querySelectorAll('[data-theme-choice], [data-settings-theme]').forEach(button => {
+    button.classList.toggle('active', button.dataset.themeChoice === allowedChoice || button.dataset.settingsTheme === allowedChoice);
+    if (button.dataset.themeChoice === 'auto' || button.dataset.settingsTheme === 'auto') button.hidden = !window.deviceThemeEnabled;
+  });
 }
 function setThemeChoice(choice) {
   localStorage.setItem('cigcig_theme', choice);
@@ -4131,6 +4136,10 @@ async function init() {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
+    window.deviceThemeEnabled = ps.device_theme_enabled !== '0';
+    if (ps.light_primary_color) document.documentElement.style.setProperty('--light-accent', ps.light_primary_color);
+    if (ps.light_background_color) document.documentElement.style.setProperty('--light-bg', ps.light_background_color);
+    applyDisplayTheme();
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     // Kitap arka plan rengi CSS değişkeni olarak ayarla
     if (ps.book_bg_color) {

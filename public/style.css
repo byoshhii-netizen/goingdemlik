@@ -29,12 +29,26 @@
 
 /* TeaTube'den uyarlanan tema sistemi: CigCig'in mevcut değişkenlerini kullanır. */
 :where(body[data-theme="light"], html[data-theme="light"] body) {
-  --bg-primary: #f8f9fa; --bg-secondary: #ffffff; --bg-card: #ffffff; --bg-card2: #eef1f4; --bg-tertiary: #e9ecef;
-  --bg-active: rgba(220,38,38,0.08); --bg-hover: rgba(0,0,0,0.04); --accent-red: #dc2626; --accent-red2: #b91c1c; --accent-red-dark: #991b1b;
-  --grad-red: linear-gradient(135deg,#dc2626,#991b1b); --text-primary: #212529; --text-secondary: #5f6872; --text-muted: #7b8490;
+  --bg-primary: var(--light-bg, #f8f9fa); --bg-secondary: color-mix(in srgb, var(--light-bg, #f8f9fa) 88%, #ffffff); --bg-card: color-mix(in srgb, var(--light-bg, #f8f9fa) 94%, #ffffff); --bg-card2: color-mix(in srgb, var(--light-bg, #f8f9fa) 82%, #ffffff); --bg-tertiary: color-mix(in srgb, var(--light-bg, #f8f9fa) 76%, #ffffff);
+  --bg-active: color-mix(in srgb, var(--light-accent, #dc2626) 10%, transparent); --bg-hover: rgba(0,0,0,0.04); --accent-red: var(--light-accent, #dc2626); --accent-red2: color-mix(in srgb, var(--light-accent, #dc2626) 82%, #000000); --accent-red-dark: color-mix(in srgb, var(--light-accent, #dc2626) 65%, #000000);
+  --grad-red: linear-gradient(135deg,var(--light-accent, #dc2626),var(--accent-red-dark)); --text-primary: #000000; --text-secondary: #202020; --text-muted: #4a4a4a;
   --border: rgba(90,100,110,0.22); --border-hover: rgba(185,28,28,0.5); --glow: 0 0 20px rgba(220,38,38,0.12);
   --reals-fg: #ffffff; --reals-control-bg: rgba(24,24,27,.86); --reals-control-border: rgba(255,255,255,.34);
 }
+
+:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar,
+:where(body[data-theme="light"], html[data-theme="light"] body) .dm-layout,
+:where(body[data-theme="light"], html[data-theme="light"] body) .dm-sidebar,
+:where(body[data-theme="light"], html[data-theme="light"] body) .dm-main { color: #000; }
+:where(body[data-theme="light"], html[data-theme="light"] body) .chat-msg-text,
+:where(body[data-theme="light"], html[data-theme="light"] body) .dm-conv-name,
+:where(body[data-theme="light"], html[data-theme="light"] body) .dm-chat-header,
+:where(body[data-theme="light"], html[data-theme="light"] body) .profile-stat-num,
+:where(body[data-theme="light"], html[data-theme="light"] body) .settings-nav-item,
+:where(body[data-theme="light"], html[data-theme="light"] body) .settings-nav-item.active,
+:where(body[data-theme="light"], html[data-theme="light"] body) .settings-help { color: #000 !important; }
+:where(body[data-theme="light"], html[data-theme="light"] body) .dm-chat-header,
+:where(body[data-theme="light"], html[data-theme="light"] body) .chat-msg-text { background: var(--bg-card2); }
 body[data-theme="ocean-blue"] {
   --bg-primary: #001a2c; --bg-secondary: #002d4a; --bg-card: #063957; --bg-card2: #0b4668; --bg-tertiary: #004d7a;
   --bg-active: rgba(0,180,216,0.1); --bg-hover: rgba(255,255,255,0.05); --accent-red: #00b4d8; --accent-red2: #48cae4; --accent-red-dark: #0077a3;
@@ -253,9 +267,9 @@ body[data-theme="gold"] {
 :where(body[data-theme="light"], html[data-theme="light"] body) select,
 :where(body[data-theme="light"], html[data-theme="light"] body) .nav-user-btn { background: var(--bg-card2); color: var(--text-primary); border-color: var(--border); }
 :where(body[data-theme="light"], html[data-theme="light"] body) { --accent-contrast: #ffffff; }
-:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar { background: #000; border-top-color: #222; }
-:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar a { color: #999; }
-:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar a.active { color: #fff !important; }
+:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar { background: var(--bg-card); border-top-color: var(--border); }
+:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar a { color: var(--text-secondary); }
+:where(body[data-theme="light"], html[data-theme="light"] body) .mobile-bottom-bar a.active { color: var(--accent-red) !important; }
 .theme-picker { padding: 10px 16px 12px; color: var(--text-secondary); }
 .theme-picker-label { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; font-weight: 700; }
 .theme-picker-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
@@ -1688,7 +1702,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
     padding: 4px 0;
     transition: color 0.15s;
   }
-  .mobile-bottom-bar a.active { color: #fff !important; background: transparent; }
+  .mobile-bottom-bar a.active { color: var(--accent-red) !important; background: transparent; }
   .mobile-bottom-bar a:hover { color: var(--text-muted); background: transparent; }
   .mobile-bottom-bar i { font-size: 18px; }
   body { padding-bottom: 60px; }
@@ -1771,7 +1785,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-conv-item {
   display: flex; align-items: center; gap: 10px;
   padding: 11px 14px; cursor: pointer;
-  border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border);
   transition: background 0.15s;
 }
 .dm-conv-item:hover, .dm-conv-item.active { background: var(--bg-active); }
