@@ -2238,11 +2238,7 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-file-alt" style="color:var(--red2);margin-right:8px"></i>Footer</span></div>
         <div class="card-body">
-          <div class="form-group"><label>Footer Yazısı</label><input id="s-footer" value="${escHtml(settings['footer_copyright_text']||'')}" placeholder="© Copyright 2026" /></div>
-          <label class="checkbox-label" style="margin-bottom:12px">
-            <input type="checkbox" id="s-footer-created" ${settings['footer_created_visible']!=='0'?'checked':''} />
-            "Created By" yazısını göster
-          </label>
+          <div class="form-group"><label>Footer metni</label><input id="s-footer" value="${escHtml(settings['footer_copyright_text'] || '© 2026 İsmail D. Tüm hakları saklıdır.')}" placeholder="© 2026 İsmail D. Tüm hakları saklıdır." /></div>
           <button class="btn btn-primary" id="s-footer-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-footer-msg" class="form-error mt-4"></div>
         </div>
@@ -2494,8 +2490,7 @@ async function renderSettings(main) {
   });
   document.getElementById('s-footer-save').addEventListener('click', async () => {
     const msg = document.getElementById('s-footer-msg');
-    await saveSetting('footer_copyright_text', document.getElementById('s-footer').value.trim(), msg);
-    await saveSetting('footer_created_visible', document.getElementById('s-footer-created').checked?'1':'0', msg);
+    await saveSetting('footer_copyright_text', document.getElementById('s-footer').value.trim() || '© 2026 İsmail D. Tüm hakları saklıdır.', msg);
   });
   document.getElementById('s-kvkk-save').addEventListener('click', async () => {
     await saveSetting('kvkk_text', document.getElementById('s-kvkk').value.trim(), document.getElementById('s-kvkk-msg'));

@@ -4131,9 +4131,7 @@ async function init() {
     if (brandSpan) brandSpan.textContent = siteName;
     const footer = document.getElementById('site-footer');
     if (footer) {
-      const createdVisible = ps.footer_created_visible !== '0';
-      const copyrightText = ps.footer_copyright_text || '©&nbsp;Copyright 2026';
-      footer.innerHTML = createdVisible ? `Created By. İsmail Demircan &nbsp;${copyrightText}` : copyrightText;
+      footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
     }
   } catch {}
   loadAnnouncements();
