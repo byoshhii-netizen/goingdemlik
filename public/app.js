@@ -152,19 +152,26 @@ async function requestMicrophoneThenCall(username, other) {
     showModal('Mikrofon erişimi kullanılamıyor', `<div class="call-permission-guide"><div class="call-permission-guide-icon"><i class="fas fa-lock"></i></div><p>Mikrofon izni yalnızca güvenli bağlantıda çalışır.</p><ol><li>CigCig’i <strong>HTTPS</strong> veya <strong>localhost</strong> üzerinden açın.</li><li>Adres çubuğundaki kilitten Mikrofon için <strong>İzin ver</strong> seçin.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol></div>`);
     return;
   }
+  let permissionState = 'unknown';
+  try { permissionState = (await navigator.permissions.query({ name: 'microphone' })).state; } catch {}
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     await startVoiceCall(username, other, stream);
   } catch (error) {
-    showMicrophonePermissionGuide(username, other);
-    toast(error.name === 'NotAllowedError' ? 'Arama yapabilmek için mikrofon izni vermelisiniz' : 'Mikrofon kullanılamıyor', 'error');
+    const reason = error.name === 'NotAllowedError' || permissionState === 'denied'
+      ? 'Tarayıcı mikrofon iznini engelliyor. Kilit simgesinden Mikrofon ayarını İzin ver yapın.'
+      : error.name === 'NotReadableError'
+        ? 'Mikrofon başka bir uygulama tarafından kullanılıyor. Diğer uygulamayı kapatıp tekrar deneyin.'
+        : `Mikrofon başlatılamadı (${error.name || 'bilinmeyen hata'}).`;
+    if (error.name === 'NotAllowedError' || permissionState === 'denied') showMicrophonePermissionGuide(username, other, reason);
+    toast(reason, 'error');
   }
 }
 
-function showMicrophonePermissionGuide(username, other) {
+function showMicrophonePermissionGuide(username, other, message = 'Arama yapabilmek için mikrofon izni gerekiyor.') {
   showModal('Mikrofon izni gerekli', `<div class="call-permission-guide">
     <div class="call-permission-guide-icon"><i class="fas fa-microphone-slash"></i></div>
-    <p>Arama yapabilmek için mikrofon izni gerekiyor.</p>
+    <p>${escHtml(message)}</p>
     <ol><li>Adres çubuğunun solundaki kilit simgesine basın.</li><li><strong>Mikrofon</strong> ayarını <strong>İzin ver</strong> yapın.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol>
     <button class="btn btn-primary" id="call-permission-retry" style="width:100%"><i class="fas fa-microphone"></i> İzni tekrar dene</button>
   </div>`);
