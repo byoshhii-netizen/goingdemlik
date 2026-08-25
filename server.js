@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const { randomUUID } = require('crypto');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -2640,6 +2641,12 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/admin/upload-call-ringtone', adminMiddleware, upload.single('ringtone'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Ses dosyası gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Ses dosyası yüklenemedi' }); }
+});
+
 // Logo dosya yükleme (cihazdan)
 app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async (req, res) => {
   res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
@@ -3304,7 +3311,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','light_primary_color','light_background_color','device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text','first_visit_auth')");
+  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','light_primary_color','light_background_color','device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text','first_visit_auth','call_ringtone_url')");
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';
@@ -3737,6 +3744,76 @@ app.get('/api/blocks', authMiddleware, async (req, res) => {
 });
 
 // ===== MESAJLAR (DM) =====
+async function getCallForUser(callId, userId) {
+  const { rows } = await query(`
+    SELECT c.*, cu.username AS caller_username, cu.avatar AS caller_avatar,
+      cu.avatar_removed AS caller_avatar_removed, cu.name_color AS caller_name_color,
+      tu.username AS callee_username, tu.avatar AS callee_avatar,
+      tu.avatar_removed AS callee_avatar_removed, tu.name_color AS callee_name_color
+    FROM voice_calls c
+    JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
+    WHERE c.id=$1 AND (c.caller_id=$2 OR c.callee_id=$2)
+  `, [callId, userId]);
+  return rows[0];
+}
+
+app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT c.id, c.status, c.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    FROM voice_calls c JOIN users u ON u.id=c.caller_id
+    WHERE c.callee_id=$1 AND c.status='ringing' AND c.created_at > NOW() - INTERVAL '2 minutes'
+    ORDER BY c.created_at DESC LIMIT 1
+  `, [req.user.id]);
+  res.json(rows[0] || null);
+});
+
+app.post('/api/voice-calls', authMiddleware, async (req, res) => {
+  const username = String(req.body?.username || '').trim();
+  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color FROM users WHERE username=$1', [username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (target[0].id === req.user.id) return res.status(400).json({ error: 'Kendinizi arayamazsınız' });
+  const { rows: mutual } = await query(`
+    SELECT 1 FROM follows a JOIN follows b ON b.follower_id=a.following_id AND b.following_id=a.follower_id
+    WHERE a.follower_id=$1 AND a.following_id=$2 AND a.status='accepted' AND b.status='accepted'
+  `, [req.user.id, target[0].id]);
+  if (!mutual.length) return res.status(403).json({ error: 'Arama için birbirinizi takip etmelisiniz' });
+  const { rows: active } = await query("SELECT id FROM voice_calls WHERE status IN ('ringing','connected') AND (caller_id=$1 OR callee_id=$1) LIMIT 1", [req.user.id]);
+  if (active.length) return res.status(409).json({ error: 'Zaten aktif bir aramanız var' });
+  const id = randomUUID();
+  await query('INSERT INTO voice_calls (id,caller_id,callee_id) VALUES ($1,$2,$3)', [id, req.user.id, target[0].id]);
+  res.json({ id, status: 'ringing', other: target[0] });
+});
+
+app.get('/api/voice-calls/:id', authMiddleware, async (req, res) => {
+  const call = await getCallForUser(req.params.id, req.user.id);
+  if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
+  res.json(call);
+});
+
+app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
+  const call = await getCallForUser(req.params.id, req.user.id);
+  if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
+  const action = String(req.body?.action || '');
+  const isCaller = call.caller_id === req.user.id;
+  if (['reject', 'end'].includes(action)) {
+    await query("UPDATE voice_calls SET status='ended', ended_at=NOW(), updated_at=NOW() WHERE id=$1", [call.id]);
+  } else if (action === 'accept' && !isCaller && call.status === 'ringing') {
+    await query("UPDATE voice_calls SET status='accepted', updated_at=NOW() WHERE id=$1", [call.id]);
+  } else if (action === 'connect') {
+    await query("UPDATE voice_calls SET status='connected', updated_at=NOW() WHERE id=$1", [call.id]);
+  } else if (action === 'offer' || action === 'answer') {
+    const value = req.body?.value;
+    if (!value || typeof value !== 'object') return res.status(400).json({ error: 'Geçersiz sinyal' });
+    await query(`UPDATE voice_calls SET ${action}=$1, updated_at=NOW() WHERE id=$2`, [JSON.stringify(value), call.id]);
+  } else if (action === 'ice') {
+    const value = req.body?.value;
+    if (!value || typeof value !== 'object') return res.status(400).json({ error: 'Geçersiz ICE paketi' });
+    const column = isCaller ? 'caller_ice' : 'callee_ice';
+    await query(`UPDATE voice_calls SET ${column}=COALESCE(${column},'[]'::jsonb) || $1::jsonb, updated_at=NOW() WHERE id=$2`, [JSON.stringify([value]), call.id]);
+  } else return res.status(400).json({ error: 'Geçersiz arama işlemi' });
+  res.json({ ok: true });
+});
+
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`

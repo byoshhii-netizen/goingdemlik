@@ -4,6 +4,9 @@ let activeStoryAudio = null;
 let storyComposerAudio = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
+let activeVoiceCall = null;
+let voiceCallPoll = null;
+let incomingCallPoll = null;
 
 localStorage.removeItem('cigcig_theme');
 document.documentElement.style.colorScheme = 'dark';
@@ -79,6 +82,114 @@ async function api(path, options = {}) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Hata');
   return data;
+}
+
+function callAvatar(user, size = 'call-avatar') {
+  return hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" class="${size}" alt="" />` : `<div class="${size} call-avatar-placeholder"><i class="fas fa-user"></i></div>`;
+}
+
+function stopVoiceCallAudio() {
+  if (activeVoiceCall?.ringtone) { activeVoiceCall.ringtone.pause(); activeVoiceCall.ringtone.currentTime = 0; }
+}
+function isVoiceCallMuted() { return Number(localStorage.getItem('cigcig_call_mute_until') || 0) > Date.now(); }
+function setVoiceCallMute(hours) { localStorage.setItem('cigcig_call_mute_until', hours ? String(Date.now() + hours * 3600000) : '0'); }
+
+function closeVoiceCallPanel() {
+  stopVoiceCallAudio();
+  document.getElementById('voice-call-layer')?.remove();
+}
+
+function renderVoiceCallPanel(call, mode, other) {
+  closeVoiceCallPanel();
+  const layer = document.createElement('div');
+  layer.id = 'voice-call-layer';
+  layer.innerHTML = `<section class="voice-call-card ${mode === 'mini' ? 'voice-call-mini' : ''}">
+    <button class="voice-call-close" id="voice-call-close" title="Küçült"><i class="fas fa-times"></i></button>
+    <div class="voice-call-kicker"><span class="voice-call-live-dot"></span> CIGCIG SESLİ ARAMA</div>
+    <div class="voice-call-avatars">${callAvatar(mode === 'incoming' ? other : currentUser)}<span class="voice-call-wave"><i></i><i></i><i></i><i></i></span>${callAvatar(mode === 'incoming' ? currentUser : other)}</div>
+    <div class="voice-call-names"><strong>${escHtml(mode === 'incoming' ? other.username : currentUser.username)}</strong><span>${mode === 'incoming' ? 'seni arıyor' : 'aranıyor'}</span><strong>${escHtml(mode === 'incoming' ? currentUser.username : other.username)}</strong></div>
+    <div class="voice-call-dots"><i></i><i></i><i></i></div>
+    <div class="voice-call-status" id="voice-call-status">${mode === 'incoming' ? 'Gelen arama' : 'Bağlantı kuruluyor'}</div>
+    <div class="voice-call-quality" id="voice-call-quality"><span></span><span></span><span></span><em>Bekleniyor</em></div>
+    ${mode === 'incoming' ? '<div class="voice-call-actions"><button class="call-action call-decline" id="voice-call-decline"><i class="fas fa-phone-slash"></i></button><button class="call-action call-accept" id="voice-call-accept"><i class="fas fa-phone"></i></button></div>' : '<button class="call-action call-decline" id="voice-call-end"><i class="fas fa-phone-slash"></i></button>'}
+    ${mode === 'connected' ? '<button class="call-mic" id="voice-call-mic"><i class="fas fa-microphone"></i> Mikrofon açık</button>' : ''}
+  </section>`;
+  document.body.appendChild(layer);
+  layer.querySelector('#voice-call-close').onclick = event => { event.stopPropagation(); layer.querySelector('.voice-call-card').classList.add('voice-call-mini'); stopVoiceCallAudio(); };
+  layer.querySelector('.voice-call-card').addEventListener('click', event => {
+    if (!event.target.closest('#voice-call-close') && layer.querySelector('.voice-call-card').classList.contains('voice-call-mini')) {
+      layer.querySelector('.voice-call-card').classList.remove('voice-call-mini');
+      activeVoiceCall?.ringtone?.play().catch(() => {});
+    }
+  });
+  layer.querySelector('#voice-call-end, #voice-call-decline')?.addEventListener('click', () => endVoiceCall());
+  layer.querySelector('#voice-call-accept')?.addEventListener('click', () => acceptVoiceCall(call, other));
+  layer.querySelector('#voice-call-mic')?.addEventListener('click', () => {
+    const track = activeVoiceCall?.stream?.getAudioTracks()[0]; if (!track) return;
+    track.enabled = !track.enabled; layer.querySelector('#voice-call-mic').innerHTML = `<i class="fas fa-microphone${track.enabled ? '' : '-slash'}"></i> Mikrofon ${track.enabled ? 'açık' : 'kapalı'}`;
+  });
+}
+
+async function startVoiceCall(username, other) {
+  try {
+    const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
+    activeVoiceCall = { id: call.id, role: 'caller', other, seenIce: 0, stream: await navigator.mediaDevices.getUserMedia({ audio: true }) };
+    renderVoiceCallPanel(call, 'outgoing', other);
+    activeVoiceCall.ringtone = new Audio();
+    await loadCallRingtone(activeVoiceCall.ringtone);
+    activeVoiceCall.ringtone.loop = true; activeVoiceCall.ringtone.play().catch(() => {});
+    activeVoiceCall.peer = new RTCPeerConnection();
+    activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
+    activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
+    activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
+    activeVoiceCall.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(activeVoiceCall.peer.connectionState)) { document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; } };
+    const offer = await activeVoiceCall.peer.createOffer(); await activeVoiceCall.peer.setLocalDescription(offer);
+    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'offer', value: offer }) });
+    voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1200);
+  } catch (error) { toast(error.message || 'Arama başlatılamadı', 'error'); endVoiceCall(true); }
+}
+
+async function pollVoiceCall(id) {
+  if (!activeVoiceCall) return;
+  try {
+    const call = await api('/voice-calls/' + id);
+    if (call.status === 'ended') return endVoiceCall(true);
+    if (activeVoiceCall.role === 'caller' && call.answer && activeVoiceCall.peer.signalingState === 'have-local-offer') await activeVoiceCall.peer.setRemoteDescription(call.answer);
+    const ice = activeVoiceCall.role === 'caller' ? (call.callee_ice || []) : (call.caller_ice || []);
+    while (activeVoiceCall.seenIce < ice.length) await activeVoiceCall.peer.addIceCandidate(ice[activeVoiceCall.seenIce++]);
+    if (call.status === 'connected') { stopVoiceCallAudio(); document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; document.querySelector('#voice-call-quality em').textContent = 'İyi'; document.querySelector('#voice-call-quality').classList.add('good'); }
+    if (activeVoiceCall.role === 'caller' && call.status === 'accepted') await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'connect' }) });
+  } catch {}
+}
+
+async function acceptVoiceCall(call, other) {
+  stopVoiceCallAudio();
+  try {
+    activeVoiceCall = { id: call.id, role: 'callee', other, seenIce: 0, stream: await navigator.mediaDevices.getUserMedia({ audio: true }) };
+    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
+    renderVoiceCallPanel(call, 'connected', other);
+    activeVoiceCall.peer = new RTCPeerConnection(); activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
+    activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
+    activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
+    activeVoiceCall.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(activeVoiceCall.peer.connectionState)) document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; };
+    const fresh = await api('/voice-calls/' + call.id); await activeVoiceCall.peer.setRemoteDescription(fresh.offer);
+    const answer = await activeVoiceCall.peer.createAnswer(); await activeVoiceCall.peer.setLocalDescription(answer);
+    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'answer', value: answer }) });
+    voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1200);
+  } catch (error) { toast(error.message || 'Arama açılamadı', 'error'); endVoiceCall(); }
+}
+
+async function endVoiceCall(silent = false) {
+  if (voiceCallPoll) { clearInterval(voiceCallPoll); voiceCallPoll = null; }
+  if (activeVoiceCall) { try { await api(`/voice-calls/${activeVoiceCall.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'end' }) }); } catch {} activeVoiceCall.stream?.getTracks().forEach(track => track.stop()); activeVoiceCall.peer?.close(); activeVoiceCall.remoteAudio?.remove(); }
+  activeVoiceCall = null; closeVoiceCallPanel(); if (!silent) toast('Arama sonlandırıldı');
+}
+
+async function loadCallRingtone(audio) { try { const s = await fetch('/api/settings/public').then(r => r.json()); if (s.call_ringtone_url) audio.src = s.call_ringtone_url; } catch {} }
+
+async function pollIncomingVoiceCall() {
+  if (!currentUser || isVoiceCallMuted() || activeVoiceCall || document.getElementById('voice-call-layer')) return;
+  try { const call = await api('/voice-calls/incoming'); if (!call) return; const other = { username: call.username, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color }; renderVoiceCallPanel(call, 'incoming', other); const ringtone = new Audio(); await loadCallRingtone(ringtone); ringtone.loop = true; ringtone.play().catch(() => {}); activeVoiceCall = { id: call.id, role: 'callee', other, ringtone }; } catch {}
 }
 
 async function apiForm(path, formData, method = 'POST') {
@@ -609,6 +720,7 @@ async function loadNotifCount() {
     ['#nav-friends-badge', '#mobile-friends-badge', '#mob-friends-badge', '#dm-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) dot.style.display = pendingCount ? 'inline-block' : 'none'; });
   } catch {}
 }
+setInterval(pollIncomingVoiceCall, 2500);
 
 async function openNotifDropdown() {
   const dd = $('#notif-dropdown');
@@ -4485,6 +4597,7 @@ async function renderDMChat(username) {
         </a>
       </div>
       <div class="dm-chat-header-right">
+        <button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Sesli ara"><i class="fas fa-phone"></i><span>Sesli ara</span></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -4527,6 +4640,10 @@ async function renderDMChat(username) {
 
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
+  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
+    if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) return toast('Tarayıcınız sesli aramayı desteklemiyor', 'error');
+    startVoiceCall(username, other);
+  });
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
 
@@ -4825,11 +4942,14 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
 function showDmOptionsMenu(username, convId) {
   showModal('Konuşma Seçenekleri', `
     <div style="display:flex;flex-direction:column;gap:8px">
+      <div class="call-mute-title"><i class="fas fa-bell-slash"></i> Aramaları sessize al</div>
+      <div class="call-mute-grid"><button class="btn btn-outline call-mute-option" data-hours="5">5 saat</button><button class="btn btn-outline call-mute-option" data-hours="10">10 saat</button><button class="btn btn-outline call-mute-option" data-hours="24">24 saat</button><button class="btn btn-outline call-mute-option" data-hours="0">Aç</button></div>
       <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Gizle / Kilitle</button>
       <button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>
       <button class="btn btn-danger" id="dm-opt-delete"><i class="fas fa-trash"></i> Konuşmayı Sil</button>
     </div>
   `);
+  document.querySelectorAll('.call-mute-option').forEach(button => button.addEventListener('click', () => { setVoiceCallMute(Number(button.dataset.hours)); hideModal(); toast(Number(button.dataset.hours) ? `Aramalar ${button.dataset.hours} saat sessizde` : 'Arama bildirimleri açıldı'); }));
   document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
     showModal('Konuşmayı Gizle', `

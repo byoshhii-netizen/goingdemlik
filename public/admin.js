@@ -2191,6 +2191,15 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-phone-volume" style="color:var(--red2);margin-right:8px"></i>Sesli Arama Sesi</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Zil sesi URL'si</label><input id="s-call-ringtone-url" type="url" value="${escHtml(settings['call_ringtone_url']||'')}" placeholder="https://site.com/ring.mp3" /></div>
+          <div class="form-group"><label>MP3 dosyası</label><input id="s-call-ringtone-file" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" /></div>
+          <button class="btn btn-primary" id="s-call-ringtone-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Zil sesini kaydet</button>
+          <div id="s-call-ringtone-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Güvenlik</span></div>
         <div class="card-body">
           <div class="form-group"><label>Ana Admin Kullanıcı Adı</label><input id="s-admin-username" value="${escHtml(settings['admin_username'] || 'Tarator')}" /></div>
@@ -2468,6 +2477,19 @@ async function renderSettings(main) {
     const msg = document.getElementById('s-general-msg');
     await saveSetting('site_name', document.getElementById('s-sitename').value.trim(), msg);
     await saveSetting('site_description', document.getElementById('s-desc').value.trim(), msg);
+  });
+  document.getElementById('s-call-ringtone-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-call-ringtone-msg');
+    try {
+      const file = document.getElementById('s-call-ringtone-file').files[0];
+      let url = document.getElementById('s-call-ringtone-url').value.trim();
+      if (file) {
+        const form = new FormData(); form.append('ringtone', file);
+        const response = await fetch('/api/admin/upload-call-ringtone', { method:'POST', headers:{'X-Admin-Token':adminToken}, body:form });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Dosya yüklenemedi'); url = result.url;
+      }
+      await saveSetting('call_ringtone_url', url, msg); msg.style.color = 'var(--green)'; msg.textContent = 'Arama zil sesi kaydedildi';
+    } catch (error) { msg.textContent = error.message; }
   });
   document.getElementById('s-pw-save').addEventListener('click', async () => {
     const msg = document.getElementById('s-pw-msg');

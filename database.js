@@ -524,6 +524,21 @@ async function initDb() {
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS public_id TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS voice_calls (
+      id UUID PRIMARY KEY,
+      caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      callee_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'ringing',
+      offer JSONB,
+      answer JSONB,
+      caller_ice JSONB NOT NULL DEFAULT '[]'::jsonb,
+      callee_ice JSONB NOT NULL DEFAULT '[]'::jsonb,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      ended_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_voice_calls_callee ON voice_calls(callee_id, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_voice_calls_caller ON voice_calls(caller_id, status, created_at DESC);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
