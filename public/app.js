@@ -295,9 +295,9 @@ function hasUsableAvatar(u) {
 
 function updateAppIcon(user) {
   const favicon = document.querySelector('link[rel="icon"]');
-  if (favicon) favicon.href = hasUsableAvatar(user) ? user.avatar : '/cigcig.png';
+  if (favicon) favicon.href = '/cigcig.png';
   const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-  if (appleIcon) appleIcon.href = hasUsableAvatar(user) ? user.avatar : '/cigcig.png';
+  if (appleIcon) appleIcon.href = '/cigcig.png';
 }
 
 // ===== IÇERIK RENDER (hashtag + mention) =====
