@@ -726,7 +726,7 @@ document.addEventListener('click', e => {
 
 async function renderHome(app) {
   document.title = siteName + ' – Topluluk Platformu';
-  updatePageMeta(siteName + ' – Topluluk Platformu', 'Çay kadar sıcak topluluk platformu.', '');
+  updatePageMeta(siteName + ' – Topluluk Platformu', 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.', '');
   app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
 
   let settings = {};
