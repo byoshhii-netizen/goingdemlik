@@ -128,9 +128,36 @@ function renderVoiceCallPanel(call, mode, other) {
     const track = activeVoiceCall?.stream?.getAudioTracks()[0]; if (!track) return;
     track.enabled = !track.enabled; layer.querySelector('#voice-call-mic').innerHTML = `<i class="fas fa-microphone${track.enabled ? '' : '-slash'}"></i> Mikrofon ${track.enabled ? 'açık' : 'kapalı'}`;
   });
+  layer.querySelector('#voice-call-permission-retry')?.addEventListener('click', () => acceptVoiceCall(call, other));
 }
 
-async function startVoiceCall(username, other) {
+function showVoicePermissionRetry(call, other) {
+  const status = document.querySelector('#voice-call-status');
+  if (status) status.textContent = 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.';
+  document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
+  const card = document.querySelector('.voice-call-card');
+  if (card && !document.querySelector('#voice-call-permission-retry')) {
+    const button = document.createElement('button');
+    button.id = 'voice-call-permission-retry'; button.className = 'call-mic';
+    button.innerHTML = '<i class="fas fa-microphone"></i> Mikrofon iznini yeniden dene';
+    button.addEventListener('click', () => activeVoiceCall?.role === 'callee'
+      ? acceptVoiceCall(call, other)
+      : endVoiceCall(true).then(() => requestMicrophoneThenCall(other.username, other)));
+    card.appendChild(button);
+  }
+}
+
+async function requestMicrophoneThenCall(username, other) {
+  if (!navigator.mediaDevices?.getUserMedia) return toast('Bu tarayıcı mikrofon erişimini desteklemiyor', 'error');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    await startVoiceCall(username, other, stream);
+  } catch (error) {
+    toast(error.name === 'NotAllowedError' ? 'Arama yapabilmek için mikrofon izni vermelisiniz' : 'Mikrofon kullanılamıyor', 'error');
+  }
+}
+
+async function startVoiceCall(username, other, microphoneStream = null) {
   try {
     const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
     activeVoiceCall = { id: call.id, role: 'caller', other, seenIce: 0 };
@@ -139,11 +166,9 @@ async function startVoiceCall(username, other) {
     await loadCallRingtone(activeVoiceCall.ringtone);
     activeVoiceCall.ringtone.loop = true; activeVoiceCall.ringtone.play().catch(() => {});
     try {
-      activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      activeVoiceCall.stream = microphoneStream || await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
-      const status = document.querySelector('#voice-call-status');
-      if (status) status.textContent = error.name === 'NotAllowedError' ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.' : 'Mikrofon kullanılamıyor.';
-      document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
+      showVoicePermissionRetry(call, other);
       toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
       return;
     }
@@ -155,7 +180,7 @@ async function startVoiceCall(username, other) {
     const offer = await activeVoiceCall.peer.createOffer(); await activeVoiceCall.peer.setLocalDescription(offer);
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'offer', value: offer }) });
     voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1200);
-  } catch (error) { toast(error.message || 'Arama başlatılamadı', 'error'); endVoiceCall(true); }
+  } catch (error) { microphoneStream?.getTracks().forEach(track => track.stop()); toast(error.message || 'Arama başlatılamadı', 'error'); endVoiceCall(true); }
 }
 
 async function pollVoiceCall(id) {
@@ -179,9 +204,7 @@ async function acceptVoiceCall(call, other) {
     try {
       activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
-      const status = document.querySelector('#voice-call-status');
-      if (status) status.textContent = error.name === 'NotAllowedError' ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.' : 'Mikrofon kullanılamıyor.';
-      document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
+      showVoicePermissionRetry(call, other);
       toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
       return;
     }
@@ -4667,7 +4690,7 @@ async function renderDMChat(username) {
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
   document.getElementById('dm-call-btn')?.addEventListener('click', () => {
     if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) return toast('Tarayıcınız sesli aramayı desteklemiyor', 'error');
-    startVoiceCall(username, other);
+    requestMicrophoneThenCall(username, other);
   });
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
