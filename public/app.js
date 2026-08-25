@@ -5,28 +5,10 @@ let storyComposerAudio = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
 
-const themeSystemPreference = window.matchMedia('(prefers-color-scheme: light)');
-window.deviceThemeEnabled = true;
-window.themePickerEnabled = true;
-function getThemeChoice() { return localStorage.getItem('cigcig_theme') || 'auto'; }
-function applyDisplayTheme(choice = getThemeChoice()) {
-  const selected = ['light', 'dark', 'auto'].includes(choice) ? choice : 'auto';
-  const allowedChoice = window.deviceThemeEnabled || selected !== 'auto' ? selected : 'dark';
-  const resolved = allowedChoice === 'auto' ? (themeSystemPreference.matches ? 'light' : 'dark') : allowedChoice;
-  document.body.dataset.theme = resolved;
-  document.documentElement.style.colorScheme = resolved;
-  document.querySelectorAll('[data-theme-choice], [data-settings-theme]').forEach(button => {
-    button.classList.toggle('active', button.dataset.themeChoice === allowedChoice || button.dataset.settingsTheme === allowedChoice);
-    if (button.dataset.themeChoice === 'auto' || button.dataset.settingsTheme === 'auto') button.hidden = !window.deviceThemeEnabled;
-  });
-  document.querySelectorAll('.theme-picker, .theme-settings-group').forEach(element => { element.hidden = !window.themePickerEnabled; });
-}
-function setThemeChoice(choice) {
-  localStorage.setItem('cigcig_theme', choice);
-  applyDisplayTheme(choice);
-}
+localStorage.removeItem('cigcig_theme');
+document.documentElement.style.colorScheme = 'dark';
+function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
 applyDisplayTheme();
-themeSystemPreference.addEventListener?.('change', () => { if (getThemeChoice() === 'auto') applyDisplayTheme('auto'); });
 
 const SITE_URL = 'https://cigcig.xyz';
 
@@ -590,12 +572,6 @@ function updateMobileBottomBar(path) {
 
 $('#nav-user-btn').addEventListener('click', () => {
   $('#dropdown-menu').classList.toggle('hidden');
-});
-document.querySelectorAll('[data-theme-choice]').forEach(button => {
-  button.addEventListener('click', event => {
-    event.stopPropagation();
-    setThemeChoice(button.dataset.themeChoice);
-  });
 });
 document.addEventListener('click', e => {
   if (!$('#nav-dropdown')?.contains(e.target)) $('#dropdown-menu')?.classList.add('hidden');
@@ -3591,18 +3567,11 @@ async function renderSettingsSection(section) {
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
-          <div class="form-group theme-settings-group"><label>Tema</label><div class="theme-picker-options settings-theme-options">
-            ${[['auto','Otomatik','fas fa-circle-half-stroke'],['light','Açık','fas fa-sun'],['dark','Koyu','fas fa-moon']].map(([choice, label, icon]) => `<button type="button" class="theme-option${getThemeChoice() === choice ? ' active' : ''}" data-settings-theme="${choice}"><i class="${icon}"></i>${label}</button>`).join('')}
-          </div></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
           <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
-    el.querySelectorAll('[data-settings-theme]').forEach(button => button.addEventListener('click', () => {
-      setThemeChoice(button.dataset.settingsTheme);
-      el.querySelectorAll('[data-settings-theme]').forEach(item => item.classList.toggle('active', item === button));
-    }));
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_badge: $('#s-show-badge').checked,
@@ -4138,11 +4107,8 @@ async function init() {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
-    window.deviceThemeEnabled = ps.device_theme_enabled !== '0';
-    window.themePickerEnabled = ps.theme_picker_enabled !== '0';
     if (ps.light_primary_color) document.documentElement.style.setProperty('--light-accent', ps.light_primary_color);
     if (ps.light_background_color) document.documentElement.style.setProperty('--light-bg', ps.light_background_color);
-    applyDisplayTheme();
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
     // Kitap arka plan rengi CSS değişkeni olarak ayarla
     if (ps.book_bg_color) {
