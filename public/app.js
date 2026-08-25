@@ -153,8 +153,29 @@ async function requestMicrophoneThenCall(username, other) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     await startVoiceCall(username, other, stream);
   } catch (error) {
+    showMicrophonePermissionGuide(username, other);
     toast(error.name === 'NotAllowedError' ? 'Arama yapabilmek için mikrofon izni vermelisiniz' : 'Mikrofon kullanılamıyor', 'error');
   }
+}
+
+function showMicrophonePermissionGuide(username, other) {
+  showModal('Mikrofon izni gerekli', `<div class="call-permission-guide">
+    <div class="call-permission-guide-icon"><i class="fas fa-microphone-slash"></i></div>
+    <p>Arama yapabilmek için mikrofon izni gerekiyor.</p>
+    <ol><li>Adres çubuğunun solundaki kilit simgesine basın.</li><li><strong>Mikrofon</strong> ayarını <strong>İzin ver</strong> yapın.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol>
+    <button class="btn btn-primary" id="call-permission-retry" style="width:100%"><i class="fas fa-microphone"></i> İzni tekrar dene</button>
+  </div>`);
+  document.getElementById('call-permission-retry')?.addEventListener('click', async () => {
+    const button = document.getElementById('call-permission-retry');
+    if (button) { button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Kontrol ediliyor'; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      hideModal(); await startVoiceCall(username, other, stream);
+    } catch (error) {
+      if (button) { button.disabled = false; button.innerHTML = '<i class="fas fa-microphone"></i> İzni tekrar dene'; }
+      toast('Tarayıcı ayarlarından mikrofon iznini İzin ver yapın', 'error');
+    }
+  });
 }
 
 async function startVoiceCall(username, other, microphoneStream = null) {

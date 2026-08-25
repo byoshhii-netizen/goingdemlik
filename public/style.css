@@ -1,4 +1,5 @@
 .voice-call-quality.call-permission-error span { background:#e34d5f; }.voice-call-quality.call-permission-error em { color:#e34d5f; }
+.call-permission-guide { text-align:center; color:var(--text-secondary); font-size:13px; line-height:1.6; }.call-permission-guide-icon { width:58px; height:58px; margin:0 auto 12px; display:grid; place-items:center; border-radius:50%; color:#e34d5f; background:rgba(227,77,95,.12); font-size:24px; }.call-permission-guide p { margin:0 0 12px; color:var(--text-primary); }.call-permission-guide ol { margin:0 0 16px; padding-left:22px; text-align:left; }.call-permission-guide li { margin:7px 0; }
 :root {
   --bg-primary: #121212;
   --bg-secondary: #050505;
