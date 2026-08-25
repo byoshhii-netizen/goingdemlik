@@ -14,6 +14,14 @@ const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { query, initDb } = require('./database');
 
+function profileRouteKey(username) {
+  return String(username || '').toLocaleLowerCase('tr-TR')
+    .replace(/[çğıöşüÇĞİÖŞÜ]/g, char => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', Ç: 'c', Ğ: 'g', İ: 'i', Ö: 'o', Ş: 's', Ü: 'u' }[char] || char))
+    .replace(/[^a-z0-9]/g, '');
+}
+
+const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü', 'cgiosu'), '[^a-z0-9]', '', 'g')";
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -526,7 +534,7 @@ app.get('/sitemap.xml', async (req, res) => {
   ).join('\n');
 
   const profileUrls = users.map(u =>
-    `  <url><loc>${SITE_URL}/profil/${escapeHtml(u.username)}</loc><changefreq>weekly</changefreq><priority>0.5</priority></url>`
+    `  <url><loc>${SITE_URL}/profil/${profileRouteKey(u.username)}</loc><changefreq>weekly</changefreq><priority>0.5</priority></url>`
   ).join('\n');
 
   const songUrls = songs.map(s => {
@@ -1663,7 +1671,8 @@ app.get('/api/users/:username/follow-status', optionalAuth, async (req, res) => 
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private });
   const { rows } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
-  res.json({ following: rows[0]?.status === 'accepted', pending: rows[0]?.status === 'pending', is_private: !!target[0].is_private });
+  const { rows: friendship } = await query("SELECT 1 FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [req.user.id, target[0].id]);
+  res.json({ following: rows[0]?.status === 'accepted' || friendship.length > 0, pending: rows[0]?.status === 'pending', is_private: !!target[0].is_private });
 });
 
 app.post('/api/users/:username/follow', authMiddleware, async (req, res) => {
@@ -1733,7 +1742,7 @@ app.post('/api/follow-requests/:id/respond', authMiddleware, async (req, res) =>
 
 // ===== PROFILE =====
 app.get('/api/profile/:username', optionalAuth, async (req, res) => {
-  const { rows: users } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
+  const { rows: users } = await query(`SELECT * FROM users WHERE username=$1 OR ${profileRouteSql}=$2 LIMIT 1`, [req.params.username, profileRouteKey(req.params.username)]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = users[0];
   const isOwner = req.user && req.user.id === user.id;
@@ -3596,7 +3605,7 @@ app.get('/grup/:slug', async (req, res) => {
 });
 
 app.get('/profil/:username', async (req, res) => {
-  const { rows } = await query('SELECT * FROM users WHERE username=$1', [req.params.username]);
+  const { rows } = await query(`SELECT * FROM users WHERE username=$1 OR ${profileRouteSql}=$2 LIMIT 1`, [req.params.username, profileRouteKey(req.params.username)]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const user = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -3606,10 +3615,10 @@ app.get('/profil/:username', async (req, res) => {
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const meta = `<title>${escapeHtml(user.username)} – CigCig</title>
     <meta name="description" content="${desc}" />
-    <link rel="canonical" href="${SITE_URL}/profil/${escapeHtml(user.username)}" />
+    <link rel="canonical" href="${SITE_URL}/profil/${profileRouteKey(user.username)}" />
     <meta property="og:title" content="${escapeHtml(user.username)} – CigCig" />
     <meta property="og:description" content="${desc}" />
-    <meta property="og:url" content="${SITE_URL}/profil/${escapeHtml(user.username)}" />
+    <meta property="og:url" content="${SITE_URL}/profil/${profileRouteKey(user.username)}" />
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
   const r4 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
@@ -3691,6 +3700,9 @@ app.post('/api/friends/respond/:id', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'İstek bulunamadı' });
   if (action === 'accept') {
     await query("UPDATE friendships SET status='accepted', updated_at=NOW() WHERE id=$1", [rows[0].id]);
+    await query(`INSERT INTO follows (follower_id, following_id, status) VALUES
+      ($1,$2,'accepted'), ($2,$1,'accepted')
+      ON CONFLICT (follower_id, following_id) DO UPDATE SET status='accepted'`, [rows[0].requester_id, rows[0].addressee_id]);
   } else {
     await query('DELETE FROM friendships WHERE id=$1', [rows[0].id]);
   }
@@ -3775,6 +3787,8 @@ app.post('/api/voice-calls', authMiddleware, async (req, res) => {
   const { rows: mutual } = await query(`
     SELECT 1 FROM follows a JOIN follows b ON b.follower_id=a.following_id AND b.following_id=a.follower_id
     WHERE a.follower_id=$1 AND a.following_id=$2 AND a.status='accepted' AND b.status='accepted'
+    UNION ALL
+    SELECT 1 FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'
   `, [req.user.id, target[0].id]);
   if (!mutual.length) return res.status(403).json({ error: 'Arama için birbirinizi takip etmelisiniz' });
   const { rows: active } = await query("SELECT id FROM voice_calls WHERE status IN ('ringing','connected') AND (caller_id=$1 OR callee_id=$1) LIMIT 1", [req.user.id]);

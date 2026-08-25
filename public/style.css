@@ -1,3 +1,4 @@
+.voice-call-quality.call-permission-error span { background:#e34d5f; }.voice-call-quality.call-permission-error em { color:#e34d5f; }
 :root {
   --bg-primary: #121212;
   --bg-secondary: #050505;

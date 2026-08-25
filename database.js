@@ -407,6 +407,12 @@ async function initDb() {
       FOREIGN KEY(requester_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(addressee_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    INSERT INTO follows (follower_id, following_id, status)
+    SELECT requester_id, addressee_id, 'accepted' FROM friendships WHERE status='accepted'
+    ON CONFLICT (follower_id, following_id) DO UPDATE SET status='accepted';
+    INSERT INTO follows (follower_id, following_id, status)
+    SELECT addressee_id, requester_id, 'accepted' FROM friendships WHERE status='accepted'
+    ON CONFLICT (follower_id, following_id) DO UPDATE SET status='accepted';
 
     CREATE TABLE IF NOT EXISTS blocks (
       id BIGSERIAL PRIMARY KEY,

@@ -133,11 +133,20 @@ function renderVoiceCallPanel(call, mode, other) {
 async function startVoiceCall(username, other) {
   try {
     const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
-    activeVoiceCall = { id: call.id, role: 'caller', other, seenIce: 0, stream: await navigator.mediaDevices.getUserMedia({ audio: true }) };
+    activeVoiceCall = { id: call.id, role: 'caller', other, seenIce: 0 };
     renderVoiceCallPanel(call, 'outgoing', other);
     activeVoiceCall.ringtone = new Audio();
     await loadCallRingtone(activeVoiceCall.ringtone);
     activeVoiceCall.ringtone.loop = true; activeVoiceCall.ringtone.play().catch(() => {});
+    try {
+      activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      const status = document.querySelector('#voice-call-status');
+      if (status) status.textContent = error.name === 'NotAllowedError' ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.' : 'Mikrofon kullanılamıyor.';
+      document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
+      toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
+      return;
+    }
     activeVoiceCall.peer = new RTCPeerConnection();
     activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
     activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
@@ -165,9 +174,18 @@ async function pollVoiceCall(id) {
 async function acceptVoiceCall(call, other) {
   stopVoiceCallAudio();
   try {
-    activeVoiceCall = { id: call.id, role: 'callee', other, seenIce: 0, stream: await navigator.mediaDevices.getUserMedia({ audio: true }) };
-    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
+    activeVoiceCall = { id: call.id, role: 'callee', other, seenIce: 0 };
     renderVoiceCallPanel(call, 'connected', other);
+    try {
+      activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      const status = document.querySelector('#voice-call-status');
+      if (status) status.textContent = error.name === 'NotAllowedError' ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.' : 'Mikrofon kullanılamıyor.';
+      document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
+      toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
+      return;
+    }
+    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
     activeVoiceCall.peer = new RTCPeerConnection(); activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
     activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
     activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
@@ -247,6 +265,13 @@ function normalizeExternalUrl(value) {
   return 'https://' + url;
 }
 
+function profileRoute(username) {
+  const routeKey = String(username || '').toLocaleLowerCase('tr-TR')
+    .replace(/[çğıöşüÇĞİÖŞÜ]/g, char => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', Ç: 'c', Ğ: 'g', İ: 'i', Ö: 'o', Ş: 's', Ü: 'u' }[char] || char))
+    .replace(/[^a-z0-9]/g, '');
+  return '/profil/' + encodeURIComponent(routeKey);
+}
+
 function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
 }
@@ -295,7 +320,7 @@ function renderContent(text) {
       `<a href="/forum?tag=${encodeURIComponent(tag)}" data-link class="inline-hashtag">#${tag}</a>`)
     // @mention → profil link
     .replace(/@([a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]+)/g, (_, user) =>
-      `<a href="/profil/${encodeURIComponent(user)}" data-link class="inline-mention">@${user}</a>`);
+      `<a href="${profileRoute(user)}" data-link class="inline-mention">@${user}</a>`);
   links.forEach(({ placeholder, url, href }) => {
     safe = safe.replaceAll(placeholder, `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-link">${url}</a>`);
   });
@@ -617,8 +642,8 @@ function updateNavUI() {
     userEl.classList.remove('hidden');
     const nav = currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="nav-avatar" />` : `<div class="nav-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:12px"></i></div>`;
     const btn = $('#nav-user-btn');
-    btn.innerHTML = `<a href="/profil/${escHtml(currentUser.username)}" data-link class="nav-avatar-link" onclick="event.stopPropagation()">${nav}</a><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
-    $('#dropdown-profile').setAttribute('href', '/profil/' + currentUser.username);
+    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link" onclick="event.stopPropagation()">${nav}</a><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
+    $('#dropdown-profile').setAttribute('href', profileRoute(currentUser.username));
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
       navBrand.setAttribute('href', '/');
@@ -629,7 +654,7 @@ function updateNavUI() {
     if (mobNew) mobNew.classList.add('hidden');
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = `
-      <a href="/profil/${escHtml(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
+      <a href="${profileRoute(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
@@ -645,7 +670,7 @@ function updateNavUI() {
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
-      mbbAuth.setAttribute('href', '/profil/' + currentUser.username);
+      mbbAuth.setAttribute('href', profileRoute(currentUser.username));
       const lbl = $('#mbb-auth-label'); if (lbl) lbl.textContent = 'Profil';
       mbbAuth.querySelector('i').style.display = 'none';
       const avatar = $('#mbb-avatar');
@@ -1059,7 +1084,7 @@ function forumCardHTML(f) {
   const preview = f.content.substring(0, 140).replace(/</g,'&lt;');
   const authorName = f.username || 'Silinmiş Kullanıcı';
   const authorClick = f.username
-    ? `onclick="event.stopPropagation();navigate('/profil/${escHtml(f.username)}')" style="cursor:pointer"`
+    ? `onclick="event.stopPropagation();navigate('${profileRoute(f.username)}')" style="cursor:pointer"`
     : `style="cursor:default;opacity:0.6"`;
   const d = new Date(f.created_at);
   const dateStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -1389,7 +1414,7 @@ async function renderForumDetail(app, slug) {
         <div class="forum-detail-meta">
           <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${avatarImg(forum, 'avatar-sm')}
-            <a href="/profil/${escHtml(forum.username)}" data-link style="color:inherit">${userDisplayName(forum)}</a>
+            <a href="${profileRoute(forum.username)}" data-link style="color:inherit">${userDisplayName(forum)}</a>
             ${forum.user_location ? `<span style="font-size:11px;color:var(--text-muted)"><i class="fas fa-map-marker-alt" style="font-size:10px"></i> ${escHtml(forum.user_location)}</span>` : ''}
           </span>
           <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDate(forum.created_at)}</span>
@@ -1544,7 +1569,7 @@ function commentHTML(c) {
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
       <div class="comment-header">
-        <span class="comment-author">${c.username ? `<a href="/profil/${escHtml(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
+        <span class="comment-author">${c.username ? `<a href="${profileRoute(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
         <span class="comment-time">${timeAgo(c.created_at)}</span>
       </div>
       <div class="comment-content">${renderContent(c.content)}</div>
@@ -3020,8 +3045,8 @@ async function renderVideoDetail(app, slug) {
         <div class="video-meta-block">
           <div class="video-title">${escHtml(video.title)}</div>
           <div class="video-author-row">
-            <a href="/profil/${escHtml(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip ediliyor' : 'Takip et'}</button>` : ''}
+            <a href="${profileRoute(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
+            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takiptesin' : 'Takip et'}</button>` : ''}
           </div>
           <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
           <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
@@ -3064,7 +3089,7 @@ async function renderVideoDetail(app, slug) {
     try {
       const r = await api('/user/' + encodeURIComponent(video.username) + '/follow', { method: 'POST' });
       followState = r.following;
-      $('#follow-btn').textContent = followState ? 'Takip ediliyor' : 'Takip et';
+      $('#follow-btn').textContent = followState ? 'Takiptesin' : 'Takip et';
     } catch {}
   });
 
@@ -3160,7 +3185,7 @@ function renderVideoComment(c, isOwner) {
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
       <div class="comment-header">
-        <span class="comment-author">${c.username ? `<a href="/profil/${escHtml(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
+        <span class="comment-author">${c.username ? `<a href="${profileRoute(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
         <span class="comment-time">${timeAgo(c.created_at)}${c.is_pinned ? ' • Üstte sabitlendi' : ''}${c.updated_at && c.updated_at !== c.created_at ? ' • düzenlendi' : ''}</span>
       </div>
       <div class="comment-content">${renderContent(c.content)}</div>
@@ -3228,7 +3253,7 @@ async function renderProfile(app, username) {
         followState = followState.following || followState.pending
           ? await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'DELETE' })
           : await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
-        button.textContent = user.is_private ? 'Takip isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip ediliyor' : 'Takip et'));
+        button.textContent = user.is_private ? 'Takip isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takiptesin' : 'Takip et'));
         button.classList.toggle('btn-outline', followState.following || followState.pending);
         button.classList.toggle('btn-primary', !followState.following && !followState.pending);
         button.disabled = false;
@@ -3348,7 +3373,7 @@ async function renderProfile(app, username) {
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
-          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takip ediliyor' : 'Takip et')}</button>
+          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
@@ -3391,7 +3416,7 @@ async function renderProfile(app, username) {
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
       const list = await api('/users/' + encodeURIComponent(username) + '/' + button.dataset.followList);
-      showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="/profil/${escHtml(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
+      showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
     } catch (e) { toast(e.message, 'error'); }
   }));
 
@@ -4592,7 +4617,7 @@ async function renderDMChat(username) {
         ${hasUsableAvatar(other)
           ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
-        <a href="/profil/${escHtml(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
+        <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
           <strong>${escHtml(other.username)}</strong>
         </a>
       </div>
@@ -5111,7 +5136,7 @@ async function renderFriends(app) {
       if (!users.length) { res.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center">Sonuç bulunamadı</p>'; return; }
       res.innerHTML = users.map(u => { const relation = friends.find(friend => friend.other_username === u.username); const requestPending = relation?.status === 'pending' && String(relation.requester_id) === String(currentUser.id); const accepted = relation?.status === 'accepted'; return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <a href="/profil/${escHtml(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
+        <a href="${profileRoute(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
         <button class="btn ${requestPending || accepted ? 'btn-outline' : 'btn-primary'} btn-sm send-friend-btn" data-username="${escHtml(u.username)}" ${requestPending || accepted ? 'disabled' : ''}><i class="fas fa-user-plus"></i> ${accepted ? 'Arkadaşsınız' : requestPending ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>
       </div>`; }).join('');
       $$('.send-friend-btn').forEach(btn => {
@@ -5179,7 +5204,7 @@ function friendItemHTML(f, type, myId) {
   return `<div class="card card-body friend-card" data-type="${type}" data-username="${escHtml(other_username)}" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
-      <a href="/profil/${escHtml(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
+      <a href="${profileRoute(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
@@ -5754,7 +5779,7 @@ async function renderMusicDetail(app, slug) {
           ${song.uploader_username ? `
             <div class="song-detail-uploader">
               <span style="font-size:12px;color:var(--text-muted)">Yükleyen: </span>
-              <a href="/profil/${escHtml(song.uploader_username)}" data-link class="song-detail-uploader-link">
+              <a href="${profileRoute(song.uploader_username)}" data-link class="song-detail-uploader-link">
                 ${song.uploader_avatar ? `<img src="${escHtml(song.uploader_avatar)}" class="avatar-xs" />` : `<div class="avatar-xs avatar-placeholder"><i class="fas fa-user" style="font-size:9px"></i></div>`}
                 ${escHtml(song.uploader_username)}
               </a>
