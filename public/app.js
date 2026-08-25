@@ -3160,7 +3160,7 @@ async function renderProfile(app, username) {
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
   let progressHTML = '';
-  if (nextLevel) {
+  if (nextLevel && user.show_level_progress !== 0) {
     const reqAny = nextLevel.require_any === 1;
     const INF = 9999999;
     const nf = nextLevel.min_forums >= INF ? null : nextLevel.min_forums;
@@ -3582,15 +3582,24 @@ async function renderSettingsSection(section) {
         <div class="card-body">
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
+          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
+          <div class="form-group"><label>Tema</label><div class="theme-picker-options settings-theme-options">
+            ${[['auto','Otomatik','fas fa-circle-half-stroke'],['light','Açık','fas fa-sun'],['dark','Koyu','fas fa-moon']].map(([choice, label, icon]) => `<button type="button" class="theme-option${getThemeChoice() === choice ? ' active' : ''}" data-settings-theme="${choice}"><i class="${icon}"></i>${label}</button>`).join('')}
+          </div></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
           <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    el.querySelectorAll('[data-settings-theme]').forEach(button => button.addEventListener('click', () => {
+      setThemeChoice(button.dataset.settingsTheme);
+      el.querySelectorAll('[data-settings-theme]').forEach(item => item.classList.toggle('active', item === button));
+    }));
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_badge: $('#s-show-badge').checked,
+        show_level_progress: $('#s-show-progress').checked,
         show_level_color: $('#s-show-color').checked,
       };
       if (currentUser.is_vip || currentUser.is_plus) body.name_color = $('#s-name-color')?.value || '';
@@ -3630,7 +3639,7 @@ async function renderSettingsSection(section) {
       try { toast('Bu eski ayar artık kullanılmıyor'); } catch (error) { $('#homepage-msg').textContent = error.message; }
     });
   } else if (section === 'profile-visibility') {
-    let visibility = { forums: true, books: true, comments: true, photos: true, music: true };
+    let visibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true, followers_list: true, following_list: true };
     try { visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility }; } catch {}
     const items = [
       ['followers', 'Takipçi sayımı', 'Profilindeki takipçi sayısını göster', 'fas fa-user-plus'],
@@ -3981,6 +3990,8 @@ function renderRegister(app) {
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="following" checked /> Takip sayımı</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="followers_list" checked /> Takipçilerimi göster</label>
         <label class="checkbox-label"><input type="checkbox" data-reg-stat="following_list" checked /> Takip ettiklerimi göster</label>
+        <label class="checkbox-label"><input type="checkbox" id="reg-show-level" checked /> Seviye rozetini göster</label>
+        <label class="checkbox-label"><input type="checkbox" id="reg-show-progress" checked /> Seviye ilerleme barını göster</label>
       </details>
       <div class="form-group">
         <label class="checkbox-label">
@@ -4073,7 +4084,9 @@ function renderRegister(app) {
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
       const formData = new FormData();
-      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      const show_level_badge = $('#reg-show-level').checked;
+      const show_level_progress = $('#reg-show-progress').checked;
+      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       currentToken = data.token; currentUser = data.user;

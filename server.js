@@ -653,7 +653,7 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 // ===== AUTH =====
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
-    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility } = req.body;
+    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress } = req.body;
     let parsedHomepageSections = homepage_sections;
     let parsedProfileVisibility = profile_visibility;
     try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
@@ -692,8 +692,8 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     let avatar = '';
     if (req.file) avatar = await handleUpload(req.file);
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), avatar]);
+      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
+      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -1781,7 +1781,7 @@ app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_progress, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
   let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
@@ -1826,14 +1826,15 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
     ? selectedBadgeDisplay
     : (canSetBadge && ['vip','plus','custom'].includes(selectedBadgeDisplay) ? selectedBadgeDisplay : req.user.badge_display || 'level');
   const resolvedTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : (req.user.tag_permission || 'everyone');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_color=$7,avatar=$8,avatar_removed=$9,title=$10,location=$11,allow_mentions=$12,tag_permission=$13,badge_name=$14,badge_icon=$15,badge_color=$16,badge_display=$17,is_private=$18 WHERE id=$19',
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_progress=$7,show_level_color=$8,avatar=$9,avatar_removed=$10,title=$11,location=$12,allow_mentions=$13,tag_permission=$14,badge_name=$15,badge_icon=$16,badge_color=$17,badge_display=$18,is_private=$19 WHERE id=$20',
     [bio??req.user.bio, newLinks,
      canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
      canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
      canSetCustomColor ? resolvedGradient : (req.user.name_gradient || ''),
      show_level_badge!==undefined?(parseBool(show_level_badge)?1:0):req.user.show_level_badge,
-     show_level_color!==undefined?(parseBool(show_level_color)?1:0):req.user.show_level_color,
-    newAvatar, avatarRemoved, title??req.user.title??'', location??req.user.location??'',
+    show_level_progress!==undefined?(parseBool(show_level_progress)?1:0):req.user.show_level_progress,
+    show_level_color!==undefined?(parseBool(show_level_color)?1:0):req.user.show_level_color,
+      newAvatar, avatarRemoved, title??req.user.title??'', location??req.user.location??'',
     allow_mentions!==undefined?(parseBool(allow_mentions)?1:0):(req.user.allow_mentions??1),
     resolvedTagPermission,
     canSetBadge ? (badge_name??req.user.badge_name) : req.user.badge_name,

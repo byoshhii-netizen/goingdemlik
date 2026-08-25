@@ -29,6 +29,7 @@ async function initDb() {
       links TEXT DEFAULT '[]',
       level_id INTEGER DEFAULT 1,
       show_level_badge INTEGER DEFAULT 1,
+      show_level_progress INTEGER DEFAULT 1,
       show_level_color INTEGER DEFAULT 1,
       is_vip INTEGER DEFAULT 0,
       is_plus INTEGER DEFAULT 0,
@@ -45,6 +46,7 @@ async function initDb() {
       last_active TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tag_permission TEXT DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
