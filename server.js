@@ -3040,7 +3040,7 @@ app.get('/muzik/:slug', async (req, res) => {
   const { rows } = await query('SELECT * FROM songs WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const s = rows[0];
-  const musicKw = `${s.title}, ${s.artist_name}, müzik, cigcig müzik, cig forum müzik, teatube müzik, türkçe müzik`;
+  const musicKw = `${s.title}, ${s.artist_name}, müzik, CigCig müzik, topluluk platformu, türkçe müzik`;
   const musicLd = JSON.stringify({
     '@context':'https://schema.org','@type':'MusicRecording',
     'name': s.title,
@@ -3486,8 +3486,8 @@ app.get('/giris', (req, res) => res.send(injectMeta('Giriş – CigCig', 'CigCig
 app.get('/kayit', (req, res) => res.send(injectMeta('Kayıt Ol – CigCig', 'CigCig\'e ücretsiz kaydol.', `${SITE_URL}/kayit`, '')));
 app.get('/forum', (req, res) => {
   const tag = req.query.tag || '';
-  res.send(injectMeta(tag ? `${tag} Konuları – CigCig Forum` : 'Konular – CigCig Forum',
-    tag ? `CigCig Forum'da ${tag} etiketli konular.` : 'CigCig Forum – konular, tartışmalar ve haberler.',
+  res.send(injectMeta(tag ? `${tag} Konuları – CigCig` : 'Konular – CigCig',
+    tag ? `CigCig topluluk platformunda ${tag} etiketli konular.` : 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.',
     `${SITE_URL}/forum${tag ? '?tag='+encodeURIComponent(tag) : ''}`, ''));
 });
 app.get('/kitaplar', (req, res) => res.send(injectMeta('E-Kitaplar – CigCig', 'CigCig e-kitaplarını ücretsiz oku. Kitap adını aratarak bul.', `${SITE_URL}/kitaplar`, '')));
@@ -3506,7 +3506,7 @@ app.get('/forum/:slug', async (req, res) => {
   const imgTag = forum.banner_image
     ? `<meta property="og:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:card" content="summary_large_image" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const forumKw = `${escapeHtml(forum.title)}, Cig Forum, CigCig, CigCig Forum, cig, forum konusu`;
+  const forumKw = `${escapeHtml(forum.title)}, CigCig, topluluk platformu, konu`;
   const forumLd = JSON.stringify({
     '@context':'https://schema.org','@type':'DiscussionForumPosting',
     'headline': forum.title,
@@ -3517,11 +3517,11 @@ app.get('/forum/:slug', async (req, res) => {
     'author':{'@type':'Person','name':forum.username||'Anonim'},
     'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL,'logo':{'@type':'ImageObject','url':`${SITE_URL}/cigcig.png`}}
   });
-  const meta = `<title>${escapeHtml(forum.title)} – CigCig Forum</title>
+  const meta = `<title>${escapeHtml(forum.title)} – CigCig</title>
     <meta name="description" content="${desc}" />
     <meta name="keywords" content="${forumKw}" />
     <link rel="canonical" href="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
-    <meta property="og:title" content="${escapeHtml(forum.title)} – CigCig Forum" />
+    <meta property="og:title" content="${escapeHtml(forum.title)} – CigCig" />
     <meta property="og:description" content="${desc}" />
     <meta property="og:type" content="article" />
     <meta property="og:url" content="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
@@ -3541,7 +3541,7 @@ app.get('/kitap/:slug', async (req, res) => {
   const imgTag = book.cover_image
     ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, CigCig kitap, Cig Forum kitap, ücretsiz kitap oku`;
+  const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, CigCig kitap, topluluk platformu, ücretsiz kitap oku`;
   const bookLd = JSON.stringify({
     '@context':'https://schema.org','@type':'Book',
     'name': book.title,
@@ -4556,6 +4556,11 @@ async function pickMusicAd() {
     FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT 1`);
   return rows[0] || null;
 }
+
+app.get('/api/music-ads/guest', async (req, res) => {
+  try { res.json({ ad: await pickMusicAd() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('/api/music-ads/pending', authMiddleware, async (req, res) => {
   try {

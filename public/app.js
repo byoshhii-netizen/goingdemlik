@@ -5306,6 +5306,17 @@ let playerShuffle = false;
 let playerRepeatOne = false;
 let shuffledIndices = [];      // shuffled order of indices
 let musicAdBypass = false;
+let guestMusicSongCount = 0;
+
+async function playGuestMusicAdIfDue(onComplete) {
+  guestMusicSongCount += 1;
+  if (guestMusicSongCount < 2) return false;
+  const result = await api('/music-ads/guest').catch(() => null);
+  if (!result?.ad) return false;
+  guestMusicSongCount = 0;
+  playMusicAd(result.ad, onComplete);
+  return true;
+}
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
@@ -5455,9 +5466,11 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
       if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
       else { const pb=document.getElementById('gp-play'); if(pb) pb.innerHTML='<i class="fas fa-play"></i>'; }
     };
-    if (currentUser && !song?.is_music_ad) {
-      const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
-      if (result?.ad) return playMusicAd(result.ad, continueQueue);
+    if (!song?.is_music_ad) {
+      if (currentUser) {
+        const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
+        if (result?.ad) return playMusicAd(result.ad, continueQueue);
+      } else if (await playGuestMusicAdIfDue(continueQueue)) return;
     }
     continueQueue();
     /*
@@ -5667,7 +5680,7 @@ async function renderMusicDetail(app, slug) {
     if (currentUser) {
       const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
       if (result?.ad) playMusicAd(result.ad);
-    }
+    } else if (await playGuestMusicAdIfDue(() => {})) return;
   });
 
   let halfCounted = false;
