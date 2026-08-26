@@ -116,14 +116,24 @@ app.use((req, res, next) => {
 
 // ===== RATE LIMITERS =====
 
-// Genel API: dakikada 80 istek (daha sıkı)
+function isContentCreationPath(requestPath) {
+  return requestPath === '/forums' ||
+    requestPath === '/books' ||
+    requestPath === '/messages' ||
+    /^\/forum\/[^/]+\/comments$/.test(requestPath) ||
+    /^\/book\/[^/]+\/pages$/.test(requestPath) ||
+    /^\/group\/[^/]+\/messages$/.test(requestPath) ||
+    /^\/conversation\/[^/]+\/messages$/.test(requestPath);
+}
+
+// Genel API: dakikada 80 istek. İçerik üretim endpoint'leri bu sınıra dahil değildir.
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 80,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla istek. Lütfen bekleyin.' },
-  skip: (req) => req.path.startsWith('/uploads/'), // statik dosyaları atla
+  skip: (req) => req.path.startsWith('/uploads/') || isContentCreationPath(req.path),
 });
 
 // Auth (login/register): 15 dakikada 5 deneme (bruteforce önlemi)
@@ -152,19 +162,9 @@ const adminAuthLimiter = rateLimit({
   message: { error: 'Çok fazla admin giriş denemesi. 15 dakika bekleyin.' },
 });
 
-// İçerik oluşturma (forum/kitap/mesaj): dakikada 10
-const createLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Çok hızlı içerik oluşturuyorsunuz. Yavaşlayın.' },
-});
-
 app.use('/api', generalLimiter);
 app.use('/api/auth', authLimiter);
 app.use(['/api/photos', '/api/stories', '/api/upload-video'], uploadLimiter);
-app.use(['/api/conversation', '/api/messages'], createLimiter);
 app.use(['/api/admin/auth', '/api/reklampanel'], adminAuthLimiter);
 
 
@@ -1074,8 +1074,6 @@ app.post('/api/forums', authMiddleware, async (req, res) => {
   try {
     const { title, content, banner_image, allow_comments, tagIds, customTags, banner_fit, images, thumbnail } = req.body;
     if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
-    const limitErr = await checkDailyLimit(req.user.id, req.user, 'forums');
-    if (limitErr) return res.status(429).json({ error: limitErr });
     const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     // İçerik içindeki #tag'ları da custom_tags'e merge et
     const contentHashtags = (content.match(/#([a-zA-Z0-9_\u00c7\u00e7\u011e\u011f\u0130\u0131\u00d6\u00f6\u015e\u015f\u00dc\u00fc]+)/g) || []).map(t => t.slice(1).toLowerCase());
@@ -1264,8 +1262,6 @@ app.post('/api/books', authMiddleware, async (req, res) => {
     // İsimsiz seçildiyse başlık zorunlu değil, placeholder atanır
     const finalTitle = is_unnamed ? ('İsimsiz Kitap #' + Date.now().toString().slice(-6)) : title;
     if (!is_unnamed && !title) return res.status(400).json({ error: 'Başlık zorunlu' });
-    const limitErr = await checkDailyLimit(req.user.id, req.user, 'books');
-    if (limitErr) return res.status(429).json({ error: limitErr });
     // İsimsiz kitap her zaman gizli olur
     const finalHidden = is_unnamed ? 1 : (is_hidden ? 1 : 0);
     const tempSlug = slugify(finalTitle, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
@@ -1317,8 +1313,6 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { title, content, chapter_id, image_url } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
-  const limitErr = await checkDailyLimit(req.user.id, req.user, 'book_pages');
-  if (limitErr) return res.status(429).json({ error: limitErr });
   const { rows: cnt } = await query('SELECT COUNT(*) as c FROM book_pages WHERE book_id=$1', [book.id]);
   const pageNum = parseInt(cnt[0].c) + 1;
   const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 40) + '-' + Date.now();
