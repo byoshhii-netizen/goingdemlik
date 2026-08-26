@@ -635,7 +635,6 @@ app.use(async (req, res, next) => {
   try {
     const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect')");
     const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
-    if (settings.route_protection_enabled !== '1') return next();
     let routes = [];
     try { routes = JSON.parse(settings.protected_routes || '[]'); } catch {}
     const matched = routes.find(route => {
@@ -643,6 +642,7 @@ app.use(async (req, res, next) => {
       return req.path === normalized || req.path.startsWith(`${normalized}/`);
     });
     if (!matched) return next();
+    const protectionEnabled = settings.route_protection_enabled === '1';
     const target = String(settings.route_redirect || '/').trim();
     const externalTarget = target.startsWith('/') ? target : (/^https?:\/\//i.test(target) ? target : `https://${target}`);
     let redirectTarget = target.startsWith('/') ? target : '/';
@@ -660,7 +660,9 @@ app.use(async (req, res, next) => {
         if (users[0]?.username) actor = users[0].username;
       }
     } catch {}
-    await logAction(actor, 'restricted_route_attempt', req.path, JSON.stringify({ matchedRoute: matched, redirectTarget }), getIp(req), getClientInfo(req));
+    const loggedTarget = protectionEnabled ? redirectTarget : 'koruma kapalıydı';
+    await logAction(actor, 'restricted_route_attempt', req.path, JSON.stringify({ matchedRoute: matched, redirectTarget: loggedTarget }), getIp(req), getClientInfo(req));
+    if (!protectionEnabled) return next();
     return res.redirect(redirectTarget);
   } catch { return next(); }
 });
