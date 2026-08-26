@@ -3,6 +3,9 @@ const crypto = require('crypto');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: Number(process.env.PGPOOL_MAX || 10),
+  connectionTimeoutMillis: 5000,
+  idleTimeoutMillis: 30000,
   ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('railway')
     ? { rejectUnauthorized: false }
     : false,
@@ -118,7 +121,15 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id BIGINT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
+    );
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+    UPDATE sessions SET expires_at=created_at + INTERVAL '30 days' WHERE expires_at IS NULL;
+    ALTER TABLE sessions ALTER COLUMN expires_at SET DEFAULT (NOW() + INTERVAL '30 days');
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      token TEXT PRIMARY KEY,
+      expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '8 hours')
     );
 
     CREATE TABLE IF NOT EXISTS levels (
@@ -393,8 +404,18 @@ async function initDb() {
       target TEXT DEFAULT '',
       detail TEXT DEFAULT '',
       ip TEXT DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      device TEXT DEFAULT '',
+      operating_system TEXT DEFAULT '',
+      country TEXT DEFAULT '',
+      city TEXT DEFAULT '',
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS user_agent TEXT DEFAULT '';
+    ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS device TEXT DEFAULT '';
+    ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS operating_system TEXT DEFAULT '';
+    ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';
+    ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS city TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS friendships (
       id BIGSERIAL PRIMARY KEY,
@@ -555,6 +576,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP;
+    CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation_created ON dm_messages(conversation_id, created_at, id);
 
     CREATE TABLE IF NOT EXISTS announcements (
       id BIGSERIAL PRIMARY KEY,

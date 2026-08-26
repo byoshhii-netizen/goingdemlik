@@ -4,7 +4,6 @@ const { randomUUID } = require('crypto');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
-const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
 const slugify = require('slugify');
 const rateLimit = require('express-rate-limit');
@@ -60,7 +59,8 @@ if (!USE_CLOUDINARY) {
   try { if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) {}
 }
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 if (!USE_CLOUDINARY) app.use('/uploads', express.static(UPLOAD_DIR));
 
 // Cloudflare proxy arkasındaysa gerçek IP'yi al
@@ -144,6 +144,14 @@ const uploadLimiter = rateLimit({
   message: { error: 'Çok fazla yükleme. Lütfen bekleyin.' },
 });
 
+const adminAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Çok fazla admin giriş denemesi. 15 dakika bekleyin.' },
+});
+
 // İçerik oluşturma (forum/kitap/mesaj): dakikada 10
 const createLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -152,6 +160,12 @@ const createLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Çok hızlı içerik oluşturuyorsunuz. Yavaşlayın.' },
 });
+
+app.use('/api', generalLimiter);
+app.use('/api/auth', authLimiter);
+app.use(['/api/photos', '/api/stories', '/api/upload-video'], uploadLimiter);
+app.use(['/api/conversation', '/api/messages'], createLimiter);
+app.use(['/api/admin/auth', '/api/reklampanel'], adminAuthLimiter);
 
 
 function escapeHtml(str) {
@@ -163,8 +177,36 @@ function getIp(req) {
   return (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || '').split(',')[0].trim();
 }
 
+function getClientInfo(req) {
+  const userAgent = String(req.get('user-agent') || '').slice(0, 512);
+  let operatingSystem = 'Bilinmiyor';
+  if (/Windows/i.test(userAgent)) operatingSystem = 'Windows';
+  else if (/Android/i.test(userAgent)) operatingSystem = 'Android';
+  else if (/iPhone|iPad|iPod/i.test(userAgent)) operatingSystem = 'iOS';
+  else if (/Mac OS X|Macintosh/i.test(userAgent)) operatingSystem = 'macOS';
+  else if (/Linux/i.test(userAgent)) operatingSystem = 'Linux';
+  let device = /Mobile|Android|iPhone|iPad|iPod/i.test(userAgent) ? 'Mobil' : 'Masaüstü';
+  if (/Tablet|iPad/i.test(userAgent)) device = 'Tablet';
+  const country = String(req.get('cf-ipcountry') || '').slice(0, 64);
+  const city = String(req.get('cf-ipcity') || '').slice(0, 128);
+  return { userAgent, device, operatingSystem, country, city };
+}
+
 function hashPassword(pw) {
-  return crypto.createHash('sha256').update(pw).digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(String(pw), salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+function verifyPassword(pw, stored) {
+  const value = String(stored || '');
+  if (value.startsWith('scrypt$')) {
+    const [, salt, expected] = value.split('$');
+    if (!salt || !expected) return false;
+    const actual = crypto.scryptSync(String(pw), salt, 64).toString('hex');
+    return actual.length === expected.length && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
+  }
+  return crypto.createHash('sha256').update(String(pw)).digest('hex') === value;
 }
 
 function hasAdminPermission(permissions, name) {
@@ -173,11 +215,11 @@ function hasAdminPermission(permissions, name) {
 }
 
 function generateToken(userId) {
-  return Buffer.from(JSON.stringify({ id: userId, ts: Date.now(), rand: Math.random() })).toString('base64');
+  return crypto.randomBytes(32).toString('hex');
 }
 
 function setSessionCookie(res, token) {
-  res.setHeader('Set-Cookie', `cigcig_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/`);
+  res.setHeader('Set-Cookie', `cigcig_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/`);
 }
 
 function getSessionCookie(req) {
@@ -198,15 +240,15 @@ function makeSlug(title, id) {
   return base + '-' + id;
 }
 
-async function logAction(actor, action, target = '', detail = '', ip = '') {
-  await query('INSERT INTO system_logs (actor,action,target,detail,ip) VALUES ($1,$2,$3,$4,$5)',
-    [actor, action, target, detail, ip]);
+async function logAction(actor, action, target = '', detail = '', ip = '', clientInfo = {}) {
+  await query('INSERT INTO system_logs (actor,action,target,detail,ip,user_agent,device,operating_system,country,city) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [actor, action, target, detail, ip, clientInfo.userAgent || '', clientInfo.device || '', clientInfo.operatingSystem || '', clientInfo.country || '', clientInfo.city || '']);
 }
 
 async function authMiddleware(req, res, next) {
   const token = req.headers['authorization']?.replace('Bearer ', '');
   if (!token) return res.status(401).json({ error: 'Giriş gerekli' });
-  const { rows } = await query('SELECT user_id FROM sessions WHERE token=$1', [token]);
+  const { rows } = await query('SELECT user_id FROM sessions WHERE token=$1 AND expires_at > NOW()', [token]);
   if (!rows.length) return res.status(401).json({ error: 'Giriş gerekli' });
   const { rows: users } = await query('SELECT * FROM users WHERE id=$1', [rows[0].user_id]);
   if (!users.length) return res.status(401).json({ error: 'Kullanıcı bulunamadı' });
@@ -218,7 +260,7 @@ async function authMiddleware(req, res, next) {
 async function optionalAuth(req, res, next) {
   const token = req.headers['authorization']?.replace('Bearer ', '');
   if (token) {
-    const { rows } = await query('SELECT user_id FROM sessions WHERE token=$1', [token]);
+    const { rows } = await query('SELECT user_id FROM sessions WHERE token=$1 AND expires_at > NOW()', [token]);
     if (rows.length) {
       const { rows: users } = await query('SELECT * FROM users WHERE id=$1', [rows[0].user_id]);
       if (users.length && !users[0].banned) req.user = users[0];
@@ -236,13 +278,15 @@ async function adminMiddleware(req, res, next) {
   }
   const token = String(req.headers['x-admin-token'] || '').trim();
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
-  const { rows: masterRows } = await query("SELECT key, value FROM settings WHERE key IN ('admin_password','admin_username')");
-  const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
-  if (master.admin_password && token === master.admin_password) {
+  const { rows: masterRows } = await query(`SELECT s.key, s.value, a.token
+    FROM settings s CROSS JOIN admin_sessions a
+    WHERE s.key IN ('admin_username') AND a.token=$1 AND a.expires_at > NOW()`, [token]);
+  if (masterRows.length) {
+    const master = Object.fromEntries(masterRows.map(row => [row.key, row.value]));
     req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
     return next();
   }
-  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND u.is_admin=1', [token]);
+  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND s.expires_at > NOW() AND u.is_admin=1', [token]);
   if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
   const user = users[0];
   if (!hasAdminPermission(user, 'can_view_users') && !hasAdminPermission(user, 'can_suspend_content') && !hasAdminPermission(user, 'can_restrict_users') && !hasAdminPermission(user, 'can_review_artists') && !hasAdminPermission(user, 'can_assign_badges') && !hasAdminPermission(user, 'can_view_store') && !hasAdminPermission(user, 'can_view_groups') && !hasAdminPermission(user, 'can_view_stories') && !hasAdminPermission(user, 'can_view_reals') && !hasAdminPermission(user, 'can_view_levels')) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
@@ -364,12 +408,12 @@ const storage = USE_CLOUDINARY
       destination: (req, file, cb) => cb(null, UPLOAD_DIR),
       filename: (req, file, cb) => {
         const ext = path.extname(file.originalname);
-        cb(null, uuidv4() + ext);
+        cb(null, randomUUID() + ext);
       }
     });
 const upload = multer({
   storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB (buyuk Reals videolari icin)
+  limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
     const allowedVideos = ['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'];
@@ -392,7 +436,7 @@ const avatarUpload = multer({
 const largeVideoStorage = USE_CLOUDINARY
   ? multer.diskStorage({
       destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-      filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname))
+      filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname))
     })
   : storage;
 const largeVideoUpload = multer({
@@ -411,7 +455,7 @@ async function handleUpload(file) {
         return reject(new Error('Dosya buffer boş'));
       }
       const ext = path.extname(file.originalname).replace('.', '') || 'jpg';
-      const public_id = 'teatube/' + uuidv4();
+      const public_id = 'teatube/' + randomUUID();
       const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
       const isVideo = file.mimetype && file.mimetype.startsWith('video/');
       const stream = cloudinary.uploader.upload_stream(
@@ -434,7 +478,7 @@ async function handleUpload(file) {
 
 async function handleLargeVideoUpload(file) {
   if (USE_R2) {
-    const key = `reals/${uuidv4()}${path.extname(file.originalname) || '.mp4'}`;
+    const key = `reals/${randomUUID()}${path.extname(file.originalname) || '.mp4'}`;
     try {
       await new Upload({
         client: r2Client,
@@ -452,7 +496,7 @@ async function handleLargeVideoUpload(file) {
   if (!USE_CLOUDINARY) return '/uploads/' + file.filename;
   try {
     const result = await cloudinary.uploader.upload_large(file.path, {
-      public_id: 'teatube/' + uuidv4(),
+      public_id: 'teatube/' + randomUUID(),
       resource_type: 'video',
       chunk_size: 20 * 1024 * 1024
     });
@@ -465,7 +509,7 @@ async function handleLargeVideoUpload(file) {
 
 async function handleR2VideoBufferUpload(file) {
   if (!USE_R2) return null;
-  const key = `stories/${uuidv4()}${path.extname(file.originalname) || '.mp4'}`;
+  const key = `stories/${randomUUID()}${path.extname(file.originalname) || '.mp4'}`;
   await new Upload({
     client: r2Client,
     params: { Bucket: process.env.R2_BUCKET_NAME, Key: key, Body: file.buffer || fs.createReadStream(file.path), ContentType: file.mimetype || 'video/mp4' },
@@ -569,13 +613,15 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const { rows: settings } = await query("SELECT key, value FROM settings WHERE key IN ('admin_username','admin_password')");
   const config = Object.fromEntries(settings.map(row => [row.key, row.value]));
   const storedMasterPassword = String(config.admin_password || '').trim();
-  const masterPasswordMatches = hashPassword(password) === storedMasterPassword || password === storedMasterPassword;
+  const masterPasswordMatches = verifyPassword(password, storedMasterPassword);
   if (username.toLowerCase() === (config.admin_username || 'Tarator').trim().toLowerCase() && masterPasswordMatches) {
-    return res.json({ token: storedMasterPassword, is_super_admin: true, username });
+    const token = generateToken('admin');
+    await query('INSERT INTO admin_sessions (token) VALUES ($1)', [token]);
+    return res.json({ token, is_super_admin: true, username });
   }
   const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
   const user = rows[0];
-  if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
+  if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
   if (!hasAdminPermission(user, 'can_view_users') && !hasAdminPermission(user, 'can_suspend_content') && !hasAdminPermission(user, 'can_restrict_users') && !hasAdminPermission(user, 'can_review_artists') && !hasAdminPermission(user, 'can_assign_badges') && !hasAdminPermission(user, 'can_view_store') && !hasAdminPermission(user, 'can_view_groups') && !hasAdminPermission(user, 'can_view_stories') && !hasAdminPermission(user, 'can_view_reals') && !hasAdminPermission(user, 'can_view_levels')) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
   const token = generateToken(user.id);
   await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -614,7 +660,7 @@ app.use(async (req, res, next) => {
         if (users[0]?.username) actor = users[0].username;
       }
     } catch {}
-    await logAction(actor, 'restricted_route_attempt', req.path, JSON.stringify({ matchedRoute: matched, redirectTarget }), getIp(req));
+    await logAction(actor, 'restricted_route_attempt', req.path, JSON.stringify({ matchedRoute: matched, redirectTarget }), getIp(req), getClientInfo(req));
     return res.redirect(redirectTarget);
   } catch { return next(); }
 });
@@ -724,7 +770,10 @@ app.post('/api/auth/login', async (req, res) => {
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
     const { rows } = await query('SELECT * FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1', [login]);
     const user = rows[0];
-    if (!user || user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Hatalı bilgiler' });
+    if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Hatalı bilgiler' });
+    if (!String(user.password_hash).startsWith('scrypt$')) {
+      await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(password), user.id]);
+    }
     if (user.banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
     // Silinme talebi verilmiş hesap — kullanıcıya bildir
     if (user.is_deleted) {
@@ -755,7 +804,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
 app.post('/api/auth/logout', authMiddleware, async (req, res) => {
   const token = req.headers['authorization']?.replace('Bearer ', '');
   await query('DELETE FROM sessions WHERE token=$1', [token]);
-  res.setHeader('Set-Cookie', 'cigcig_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+  res.setHeader('Set-Cookie', 'cigcig_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0');
   res.json({ ok: true });
 });
 
@@ -864,7 +913,7 @@ app.get('/api/gifts', authMiddleware, async (req, res) => {
 app.post('/api/auth/request-delete', authMiddleware, async (req, res) => {
   const { password } = req.body;
   if (!password) return res.status(400).json({ error: 'Şifre gerekli' });
-  if (req.user.password_hash !== hashPassword(password)) return res.status(401).json({ error: 'Şifre hatalı' });
+  if (!verifyPassword(password, req.user.password_hash)) return res.status(401).json({ error: 'Şifre hatalı' });
   // İçerikleri hemen gizle (is_deleted=1), kalıcı silme 10 gün sonra
   await query('UPDATE users SET is_deleted=1, delete_requested_at=NOW() WHERE id=$1', [req.user.id]);
   // Tüm sessionları sil
@@ -1025,7 +1074,7 @@ app.post('/api/forums', authMiddleware, async (req, res) => {
     if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
     const limitErr = await checkDailyLimit(req.user.id, req.user, 'forums');
     if (limitErr) return res.status(429).json({ error: limitErr });
-    const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
+    const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     // İçerik içindeki #tag'ları da custom_tags'e merge et
     const contentHashtags = (content.match(/#([a-zA-Z0-9_\u00c7\u00e7\u011e\u011f\u0130\u0131\u00d6\u00f6\u015e\u015f\u00dc\u00fc]+)/g) || []).map(t => t.slice(1).toLowerCase());
     const manualTags = Array.isArray(customTags) ? customTags : (customTags ? customTags.split(',').map(t => t.trim()).filter(Boolean) : []);
@@ -1217,7 +1266,7 @@ app.post('/api/books', authMiddleware, async (req, res) => {
     if (limitErr) return res.status(429).json({ error: limitErr });
     // İsimsiz kitap her zaman gizli olur
     const finalHidden = is_unnamed ? 1 : (is_hidden ? 1 : 0);
-    const tempSlug = slugify(finalTitle, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
+    const tempSlug = slugify(finalTitle, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
       [req.user.id, finalTitle, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0]);
     const id = rows[0].id;
@@ -1392,7 +1441,7 @@ app.post('/api/groups', authMiddleware, async (req, res) => {
   try {
     const { name, description, cover_image, type, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
-    const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + uuidv4().substring(0, 8);
+    const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query(
       'INSERT INTO groups (name,slug,description,cover_image,owner_id,type,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1) RETURNING id',
       [name, tempSlug, description||'', cover_image||'', req.user.id, type||'public', allow_chat!==false?1:0, allow_photos!==false?1:0, invite_only?1:0]);
@@ -1466,7 +1515,7 @@ app.post('/api/group/:slug/invite', authMiddleware, async (req, res) => {
   const group = rows[0];
   const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!m.length || (m[0].role !== 'owner' && m[0].role !== 'moderator')) return res.status(403).json({ error: 'Yetki yok' });
-  const code = uuidv4().substring(0, 8).toUpperCase();
+  const code = randomUUID().substring(0, 8).toUpperCase();
   await query('INSERT INTO group_invites (group_id,invite_code,created_by) VALUES ($1,$2,$3)', [group.id, code, req.user.id]);
   res.json({ invite_code: code });
 });
@@ -1911,7 +1960,7 @@ app.put('/api/profile/username', authMiddleware, async (req, res) => {
 app.put('/api/profile/password', authMiddleware, async (req, res) => {
   const { old_password, new_password } = req.body;
   if (!old_password || !new_password) return res.status(400).json({ error: 'Eski ve yeni şifre zorunlu' });
-  if (req.user.password_hash !== hashPassword(old_password)) return res.status(401).json({ error: 'Eski şifre yanlış' });
+  if (!verifyPassword(old_password, req.user.password_hash)) return res.status(401).json({ error: 'Eski şifre yanlış' });
   if (new_password.length < 6) return res.status(400).json({ error: 'Yeni şifre en az 6 karakter' });
   await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(new_password), req.user.id]);
   res.json({ ok: true });
@@ -1946,11 +1995,13 @@ app.post('/api/reals/upload-url', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'reals')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Reals R2 depolama ayarlanmamış.' });
   const contentType = String(req.body?.content_type || 'video/mp4');
+  const contentLength = Number(req.body?.content_length);
   if (!contentType.startsWith('video/')) return res.status(400).json({ error: 'Geçersiz video türü.' });
+  if (!Number.isSafeInteger(contentLength) || contentLength < 1 || contentLength > 500 * 1024 * 1024) return res.status(400).json({ error: 'Video boyutu 1 byte ile 500 MB arasında olmalı.' });
   const extension = path.extname(String(req.body?.filename || '')).toLowerCase() || '.mp4';
-  const key = `reals/${uuidv4()}${extension}`;
+  const key = `reals/${randomUUID()}${extension}`;
   try {
-    const command = new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ContentType: contentType });
+    const command = new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ContentType: contentType, ContentLength: contentLength });
     const uploadUrl = await getSignedUrl(r2Client, command, { expiresIn: 900 });
     const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
     res.json({ upload_url: uploadUrl, public_url: `${publicBase}/${key}` });
@@ -2113,11 +2164,13 @@ app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'story')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Hikaye video depolaması ayarlanmamış.' });
   const contentType = String(req.body?.content_type || 'video/mp4');
+  const contentLength = Number(req.body?.content_length);
   if (!contentType.startsWith('video/')) return res.status(400).json({ error: 'Geçersiz video türü.' });
+  if (!Number.isSafeInteger(contentLength) || contentLength < 1 || contentLength > 500 * 1024 * 1024) return res.status(400).json({ error: 'Video boyutu 1 byte ile 500 MB arasında olmalı.' });
   const extension = path.extname(String(req.body?.filename || '')).toLowerCase() || '.mp4';
-  const key = `stories/${uuidv4()}${extension}`;
+  const key = `stories/${randomUUID()}${extension}`;
   try {
-    const uploadUrl = await getSignedUrl(r2Client, new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ContentType: contentType }), { expiresIn: 900 });
+    const uploadUrl = await getSignedUrl(r2Client, new PutObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ContentType: contentType, ContentLength: contentLength }), { expiresIn: 900 });
     const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
     res.json({ upload_url: uploadUrl, public_url: `${publicBase}/${key}` });
   } catch (error) { res.status(500).json({ error: 'Hikaye video bağlantısı oluşturulamadı: ' + error.message }); }
@@ -2628,7 +2681,7 @@ app.get('/api/admin/logs', adminMiddleware, async (req, res) => {
 
 app.get('/api/admin/route-logs', adminMiddleware, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 500, 1000);
-  const { rows } = await query("SELECT id, actor, target, detail, ip, created_at FROM system_logs WHERE action='restricted_route_attempt' ORDER BY created_at DESC LIMIT $1", [limit]);
+  const { rows } = await query("SELECT id, actor, target, detail, ip, user_agent, device, operating_system, country, city, created_at FROM system_logs WHERE action='restricted_route_attempt' ORDER BY created_at DESC LIMIT $1", [limit]);
   res.json(rows);
 });
 
@@ -3926,6 +3979,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const isHidden = isUser1 ? conv.hidden_by_user1 : conv.hidden_by_user2;
   const hiddenPass = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
   if (isHidden) return res.json({ conv, other, messages: [], isHidden: true, hasPassword: !!hiddenPass });
+  const requestedLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 100);
+  const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const { rows: msgs } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
@@ -3948,7 +4003,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       AND ($2=1 OR m.deleted_by_sender=0 OR m.sender_id!=$3)
       AND ($2=1 OR m.deleted_by_receiver=0 OR m.sender_id=$3)
     ORDER BY m.created_at ASC
-  `, [conv.id, 0, uid]);
+    LIMIT $4 OFFSET $5
+  `, [conv.id, 0, uid, requestedLimit, offset]);
 
   // Konuşma açılınca read_until güncelle (son mesaj ID'si)
   if (msgs.length) {
@@ -4779,7 +4835,7 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
 app.post('/api/videos', authMiddleware, async (req, res) => {
   const { title, description, video_url, banner_image, location, sound_name, allow_comments, show_likes, is_reals } = req.body;
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
-    const provisionalSlug = makeVideoSlug(title, uuidv4().slice(0, 8));
+    const provisionalSlug = makeVideoSlug(title, randomUUID().slice(0, 8));
   const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,allow_comments,show_likes,is_reals,slug)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0, provisionalSlug]);
   const slug = makeVideoSlug(title, rows[0].id);
@@ -4878,7 +4934,7 @@ app.delete('/api/admin/music-ads/:id', adminMiddleware, async (req,res) => { awa
 
 // 6 haneli kod reklamverenin gizli panel anahtarıdır.
 app.get('/api/reklampanel/:code', async (req,res) => { const {rows}=await query('SELECT * FROM music_ads WHERE portal_code=$1',[req.params.code]); if(!rows.length)return res.status(404).json({error:'Reklam kodu bulunamadı.'}); res.json(rows[0]); });
-app.put('/api/reklampanel/:code', upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
+app.put('/api/reklampanel/:code', adminMiddleware, upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
   try { const old=(await query('SELECT * FROM music_ads WHERE portal_code=$1',[req.params.code])).rows[0]; if(!old)return res.status(404).json({error:'Reklam kodu bulunamadı.'}); const b=req.body;
     const audio=req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : old.audio_url, cover=req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : old.cover_url;
     const {rows}=await query('UPDATE music_ads SET title=$1,site_url=$2,audio_url=$3,cover_url=$4,updated_at=NOW() WHERE id=$5 RETURNING *',[b.title?.trim()||old.title,b.site_url??old.site_url,audio,cover,old.id]); res.json(rows[0]);
