@@ -2510,6 +2510,22 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .reals-play-overlay { z-index: 4; }
 }
 
+/* Reals controls and metadata must stay in one stable coordinate system. */
+.reals-video-box { overflow: hidden !important; }
+.reals-meta { right: 0 !important; z-index: 2 !important; padding-right: 78px !important; box-sizing: border-box; }
+.reals-right-actions { right: 10px !important; z-index: 6 !important; width: 52px; max-width: 52px; pointer-events: auto !important; }
+.reals-action-btn, .reals-icon-btn, .reals-close-btn { position: relative; z-index: 7; pointer-events: auto !important; }
+.reals-play-overlay { z-index: 1 !important; }
+.reals-play-overlay span { position: relative; z-index: 1; }
+@media (min-width: 769px) {
+  .reals-right-actions { right: 10px !important; bottom: 12px !important; gap: 14px !important; }
+  .reals-meta { padding: 22px 78px 18px 18px !important; }
+}
+@media (max-width: 768px) {
+  .reals-right-actions { right: 10px !important; bottom: max(28px, env(safe-area-inset-bottom)) !important; }
+  .reals-meta { padding: 24px 78px 18px 16px !important; }
+}
+
 .song-detail-actions-row { display:flex; gap:8px; flex-wrap:wrap; }
 .song-detail-uploader { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); }
 .song-detail-uploader-link { display:flex; align-items:center; gap:5px; color:var(--text-secondary); text-decoration:none; font-weight:500; }
