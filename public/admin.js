@@ -429,6 +429,7 @@ async function renderDashboard(main) {
             </div>`).join('') : '<div style="padding:20px;text-align:center;color:var(--text3)">Henüz log yok</div>'}
         </div>
       </div>
+      </div>
     </div>`;
 }
 
@@ -2193,8 +2194,14 @@ async function renderSettings(main) {
   try { const rows = await adminApi('/settings'); settings = rows; } catch {}
 
   main.innerHTML = `
-    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-cog"></i></div> Site Ayarları</div></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div class="settings-page">
+      <div class="settings-hero">
+        <div class="settings-hero-icon"><i class="fas fa-sliders"></i></div>
+        <div><div class="settings-kicker">YÖNETİM MERKEZİ</div><h1>Site Ayarları</h1><p>CigCig deneyiminin görünümünü, güvenliğini ve içerik akışını tek yerden yönetin.</p></div>
+        <div class="settings-hero-mark"><i class="fas fa-layer-group"></i><span>${Object.keys(settings).length} ayar</span></div>
+      </div>
+      <div class="settings-section-label"><span>Temel yapı</span><i class="fas fa-minus"></i></div>
+      <div class="settings-grid">
       <div class="card">
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Genel</span></div>
         <div class="card-body">
@@ -2223,7 +2230,7 @@ async function renderSettings(main) {
           <div id="s-pw-msg" class="form-error mt-4"></div>
         </div>
       </div>
-      <div class="card adm-feature-card" style="grid-column:1 / -1">
+      <div class="card adm-feature-card settings-wide">
         <div class="card-header"><span><i class="fas fa-route" style="color:var(--red2);margin-right:8px"></i>Route Koruması</span><span class="adm-setting-status ${settings['route_protection_enabled']==='1'?'is-on':''}">${settings['route_protection_enabled']==='1'?'AKTİF':'KAPALI'}</span></div>
         <div class="card-body">
           <div class="adm-feature-copy"><strong>Hassas sayfaları görünmez yap</strong><p>Tanımlanan route'lara gelen ziyaretçiler seçtiğiniz adrese yönlendirilir ve denemeler sistem loglarına kaydedilir.</p></div>
@@ -2249,7 +2256,7 @@ async function renderSettings(main) {
           <div id="s-first-visit-auth-msg" class="form-error mt-4"></div>
         </div>
       </div>
-      <div class="card adm-feature-card" style="grid-column:1 / -1">
+      <div class="card adm-feature-card settings-wide">
         <div class="card-header"><span><i class="fas fa-table-columns" style="color:var(--red2);margin-right:8px"></i>Profil Sekmeleri</span></div>
         <div class="card-body">
           <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Profillerdeki Forumlar, Kitaplar, Fotoğraflar gibi sekmelerin sırasını belirleyin.</p>
@@ -2320,7 +2327,7 @@ async function renderSettings(main) {
           <div id="s-music-msg" class="form-error mt-4"></div>
         </div>
       </div>
-      <div class="card" style="grid-column: 1 / -1">
+      <div class="card settings-wide">
         <div class="card-header"><span><i class="fas fa-mobile-screen-button" style="color:var(--red2);margin-right:8px"></i>Kullanıcı Tema Davranışı</span></div>
         <div class="card-body">
           <label class="adm-toggle-row" for="s-device-theme"><span><i class="fas fa-sun"></i> Telefon temasına otomatik uyum</span><span class="adm-toggle"><input type="checkbox" id="s-device-theme" ${settings['device_theme_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
@@ -2333,7 +2340,7 @@ async function renderSettings(main) {
           <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="s-light-theme-save"><i class="fas fa-save"></i> Kaydet</button><div id="s-light-theme-msg" class="form-error"></div></div>
         </div>
       </div>
-      <div class="card" style="grid-column: 1 / -1">
+      <div class="card settings-wide">
         <div class="card-header"><span><i class="fas fa-book-open" style="color:#a16207;margin-right:8px"></i>Kitap Sayfası Arka Plan Rengi</span></div>
         <div class="card-body">
           <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Okuyucu ekranındaki sayfa arka plan rengini ayarlayın. Varsayılan: <code>#F4ECD8</code> (eski kitap sayfası)</p>
@@ -2462,7 +2469,7 @@ async function renderSettings(main) {
   const profileTabOptions = [
     ['forums', 'Forumlar', 'fas fa-comments'], ['books', 'Kitaplar', 'fas fa-book'],
     ['photos', 'Fotoğraflar', 'fas fa-images'], ['groups', 'Gruplar', 'fas fa-users'],
-    ['videos', 'Videolar', 'fas fa-video'], ['saved', 'Kaydedilenler', 'fas fa-bookmark'], ['songs', 'Müzikler', 'fas fa-music']
+    ['reals', 'Reals', 'fas fa-circle-play'], ['saved', 'Kaydedilenler', 'fas fa-bookmark'], ['songs', 'Müzikler', 'fas fa-music']
   ];
   const profileTabsOrder = document.getElementById('profile-tabs-order');
   if (profileTabsOrder) {
