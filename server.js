@@ -153,14 +153,6 @@ const createLimiter = rateLimit({
   message: { error: 'Çok hızlı içerik oluşturuyorsunuz. Yavaşlayın.' },
 });
 
-app.use('/api/', generalLimiter);
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/upload', uploadLimiter);
-app.use('/api/group/:slug/upload', uploadLimiter);
-app.use('/api/forums', createLimiter);
-app.use('/api/books', createLimiter);
-app.use('/api/group/:slug/messages', createLimiter);
 
 function escapeHtml(str) {
   if (!str) return '';
