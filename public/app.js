@@ -6584,7 +6584,7 @@ function bindPhotoFeed(feed) {
     try {
       const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
       const n = x.querySelector('span');
-      if (n) n.textContent = String(Number(n.textContent) + (r.liked ? 1 : -1));
+      if (n) n.textContent = String(r.like_count ?? Math.max(0, Number(n.textContent) + (r.liked ? 1 : -1)));
       const icon = x.querySelector('i');
       if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
       if (r.liked) {
@@ -6596,6 +6596,15 @@ function bindPhotoFeed(feed) {
       }
     } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
   });
+
+  feed.querySelectorAll('.photo-song').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault(); event.stopPropagation();
+    try {
+      const photo = await api('/photos/' + encodeURIComponent(button.closest('[data-photo-id]').dataset.photoId));
+      if (photo.song_slug) navigate('/muzik/' + encodeURIComponent(photo.song_slug));
+      else toast('Bu müziğin sayfası bulunamadı', 'error');
+    } catch (error) { toast(error.message || 'Müzik sayfası açılamadı', 'error'); }
+  }));
 
 }
 

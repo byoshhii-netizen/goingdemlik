@@ -1962,7 +1962,7 @@ app.post('/api/reals/upload-url', authMiddleware, async (req, res) => {
 app.get('/api/photos', optionalAuth, async (req, res) => {
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
-  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
+  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
@@ -1979,7 +1979,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   const userId = req.user ? req.user.id : 0;
   const { rows } = await query(
     `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds,
-      s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
+    s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
       p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
@@ -2270,14 +2270,16 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
   if (exists.length) {
     await query('DELETE FROM photo_likes WHERE id=$1', [exists[0].id]);
-    return res.json({ liked: false });
+    const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM photo_likes WHERE photo_id=$1', [photoId]);
+    return res.json({ liked: false, like_count: counts[0].like_count });
   } else {
     await query('INSERT INTO photo_likes (photo_id,user_id) VALUES ($1,$2)', [photoId, userId]);
     const { rows: owner } = await query('SELECT user_id FROM photos WHERE id=$1', [photoId]);
     if (owner[0] && owner[0].user_id !== userId) {
         await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner[0].user_id, 'photo_like', req.user.username, req.user.avatar || '', 'Fotoğrafın beğenildi', `@${req.user.username} fotoğrafını beğendi.`, '/foto/' + photoId]).catch(() => {});
     }
-    return res.json({ liked: true });
+    const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM photo_likes WHERE photo_id=$1', [photoId]);
+    return res.json({ liked: true, like_count: counts[0].like_count });
   }
 });
 

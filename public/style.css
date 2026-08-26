@@ -862,6 +862,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .photo-audio-toggle { appearance:none; -webkit-appearance:none; position:absolute; right:10px; bottom:10px; z-index:3; width:34px; height:34px; min-width:34px; min-height:34px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.28); border-radius:50%; background:rgba(0,0,0,.78) !important; color:#fff !important; cursor:pointer; backdrop-filter:blur(6px); padding:0; line-height:1; }
 .photo-audio-toggle:not(.muted) { background:rgba(0,0,0,.78) !important; }
 .photo-audio-toggle:hover { background:var(--accent-red) !important; }
+.photo-audio-toggle { box-sizing:border-box !important; overflow:hidden !important; font-size:14px !important; line-height:1 !important; }
+.photo-audio-toggle i { display:block !important; width:14px !important; height:14px !important; line-height:14px !important; font-size:14px !important; color:#fff !important; opacity:1 !important; }
 .photo-native-link { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:1; }
 .photo-native { display:block; width:100%; height:100%; border-radius:10px; object-fit:contain; object-position:center; background:transparent; }
 .photo-card h3 { margin:10px 0 4px; font-size:15px; }.photo-card p { margin:0 0 7px; color:var(--text-secondary); font-size:13px; line-height:1.45; }.photo-card small { color:var(--text-muted); }
