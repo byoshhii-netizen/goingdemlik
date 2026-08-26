@@ -1695,7 +1695,7 @@ function bookCardHTML(b) {
   return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
-      ${b.is_hidden ? '<div style="position:absolute;top:8px;right:8px;background:var(--accent-red2);color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px"><i class="fas fa-lock"></i></div>' : ''}
+      ${b.is_hidden ? '<div style="position:absolute;top:8px;right:8px;background:#6b6b6b;color:var(--accent-red2);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px"><i class="fas fa-lock"></i></div>' : ''}
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
@@ -2885,7 +2885,7 @@ function videoCardHTML(v) {
 
 function realsProfileCardHTML(v) {
   const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
-  return `<div class="video-card reals-profile-card" onclick="navigate('/reals/${encodeURIComponent(v.id)}')"><div class="video-thumb">${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}</div><div class="video-card-body"><div class="video-card-title">${escHtml(v.title)}</div><div class="video-card-meta"><span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span><span>•</span><span>${v.views || 0} izlenme</span></div>${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}</div></div>`;
+  return `<div class="video-card reals-profile-card" onclick="navigate('/reals')"><div class="video-thumb">${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}</div><div class="video-card-body"><div class="video-card-title">${escHtml(v.title)}</div><div class="video-card-meta"><span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span><span>•</span><span>${v.views || 0} izlenme</span></div>${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}</div></div>`;
 }
 
 function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyor') {
@@ -3305,15 +3305,17 @@ async function renderProfile(app, username) {
     return;
   }
 
-  const { user, forums, books, groups, photos = [], videos, reals, songs, level, levels, book_page_count } = data;
+  const { user, forums, books, groups, photos = [], reals, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
-  const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
-  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs'];
+  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'reals', 'saved', 'songs'];
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
     const configured = JSON.parse(settings.profile_tabs || '[]');
-    if (Array.isArray(configured)) profileTabOrder = [...configured, ...profileTabOrder.filter(tab => !configured.includes(tab))];
+    if (Array.isArray(configured)) {
+      const configuredWithoutVideos = configured.filter(tab => tab !== 'videos');
+      profileTabOrder = [...configuredWithoutVideos, ...profileTabOrder.filter(tab => !configuredWithoutVideos.includes(tab))];
+    }
   } catch {}
   const isOwn = currentUser && currentUser.id === user.id;
   let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true };
@@ -3482,9 +3484,6 @@ async function renderProfile(app, username) {
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
-    </div>
-    <div id="tab-videos" class="hidden">
-      ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
     </div>
     <div id="tab-reals" class="hidden">
       ${profileReals.length ? `<div class="grid-3">${profileReals.map(v => realsProfileCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
