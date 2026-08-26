@@ -585,6 +585,14 @@ async function renderRealsFeed(app) {
         </div>
       </div>`).join('');
     items = Array.from(document.querySelectorAll('.reals-item'));
+    items.forEach(it => {
+      const video = orderedReals.find(item => String(item.id) === it.dataset.id);
+      const likeButton = it.querySelector('.like-btn');
+      if (likeButton && video?.liked) {
+        likeButton.classList.add('active');
+        likeButton.querySelector('i').className = 'fas fa-heart';
+      }
+    });
     items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
     listEl.style.position='relative'; listEl.style.overflow='hidden';
     items.forEach(it => {
@@ -2874,6 +2882,11 @@ function videoCardHTML(v) {
   </div>`;
 }
 
+function realsProfileCardHTML(v) {
+  const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
+  return `<div class="video-card reals-profile-card" onclick="navigate('/reals/${encodeURIComponent(v.id)}')"><div class="video-thumb">${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}</div><div class="video-card-body"><div class="video-card-title">${escHtml(v.title)}</div><div class="video-card-meta"><span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span><span>•</span><span>${v.views || 0} izlenme</span></div>${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}</div></div>`;
+}
+
 function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyor') {
   let notice = document.getElementById('video-upload-notice');
   if (!notice) {
@@ -2924,6 +2937,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const videoInput = $('#video-file');
   const bannerInput = $('#video-banner-file');
   let autoBannerFile = null;
+  const getVideoDuration = file => new Promise((resolve, reject) => { const probe = document.createElement('video'); probe.preload = 'metadata'; probe.onloadedmetadata = () => { URL.revokeObjectURL(probe.src); resolve(probe.duration); }; probe.onerror = () => reject(new Error('Video süresi okunamadı')); probe.src = URL.createObjectURL(file); });
 
   videoInput?.addEventListener('change', async () => {
     const file = videoInput.files[0];
@@ -2954,6 +2968,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
     const maxVideoSize = isReals ? 500 * 1024 * 1024 : 100 * 1024 * 1024;
     if (!existing && videoFile.size > maxVideoSize) { $('#video-error').textContent = `${isReals ? 'Reals' : 'Video'} dosyası ${isReals ? 500 : 100} MB sınırını geçemez.`; return; }
+    if (!existing && isReals) { try { const duration = await getVideoDuration(videoFile); if (!Number.isFinite(duration) || duration > 180) { $('#video-error').textContent = 'Reals videoları en fazla 3 dakika olabilir. Uzun videoyu Video olarak yükleyin.'; return; } } catch { $('#video-error').textContent = 'Reals video süresi okunamadı.'; return; } }
 
     const submitBtn = $('#video-submit');
     const uploadFields = {
@@ -3289,10 +3304,11 @@ async function renderProfile(app, username) {
     return;
   }
 
-  const { user, forums, books, groups, photos = [], videos, songs, level, levels, book_page_count } = data;
+  const { user, forums, books, groups, photos = [], videos, reals, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
-  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'saved', 'songs'];
+  const profileReals = Array.isArray(reals) ? reals : [];
+  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs'];
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
     const configured = JSON.parse(settings.profile_tabs || '[]');
@@ -3451,7 +3467,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">${profileTabOrder.filter(tab => isOwn || tab !== 'saved').map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', saved:'Kaydedilenler', songs:'Müzikler' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || item !== 'saved') ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', saved:'Kaydedilenler', songs:'Müzikler' })[tab]}</button>` : '').join('')}</div>
+    <div class="tabs">${profileTabOrder.filter(tab => isOwn || tab !== 'saved').map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || item !== 'saved') ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -3467,6 +3483,9 @@ async function renderProfile(app, username) {
     </div>
     <div id="tab-videos" class="hidden">
       ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
+    </div>
+    <div id="tab-reals" class="hidden">
+      ${profileReals.length ? `<div class="grid-3">${profileReals.map(v => realsProfileCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
     </div>
     <div id="tab-saved" class="hidden">
       ${profileSavedVideos.length ? `<div class="grid-3">${profileSavedVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>'}

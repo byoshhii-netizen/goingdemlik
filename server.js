@@ -1753,7 +1753,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   if (user.is_private && !isOwner && !isFollower) {
     return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
-  const [forums, books, groups, level, levels, bpCount, photos] = await Promise.all([
+  const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
@@ -1761,8 +1761,16 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
     query('SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,s.title AS song_title,s.artist_name AS song_artist FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1 ORDER BY p.created_at DESC LIMIT 50', [user.id]).then(r => r.rows),
+    query(`SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
+      (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
+      (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
+      FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=0 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+    query(`SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
+      (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
+      (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
+      FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, photos, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), forums, books, groups, photos, videos, reals, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -1967,7 +1975,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
-  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted'))`;
+  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))`;
   const queryText = username
     ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
     : `${base} AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`;
@@ -1985,7 +1993,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
-    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`,
+    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
     [req.params.id, userId]
   );
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -2264,7 +2272,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user.id;
   const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
-    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
+    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
   const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
@@ -2287,7 +2295,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
 app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user ? req.user.id : 0;
-  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
+  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
   if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
     (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
@@ -2301,7 +2309,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
   const photoId = req.params.id;
   const { content } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-  const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, req.user.id]);
+  const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
   await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
@@ -4748,16 +4756,17 @@ function makeVideoSlug(title, id) {
 
 const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
-  (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
+  (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
+  (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
   FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
 
 app.get('/api/videos', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} ORDER BY v.created_at DESC LIMIT 100`);
+  const { rows } = await query(`${videoSelect} ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
   res.json(rows);
 });
 
 app.get('/api/reals', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 100`);
+  const { rows } = await query(`${videoSelect} AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
   res.json(rows);
 });
 
@@ -4770,7 +4779,7 @@ app.get('/api/video-settings', async (req, res) => {
 });
 
 app.get('/api/video/:slug', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} AND (v.slug=$1 OR v.id::text=$1)`, [req.params.slug]);
+  const { rows } = await query(`${videoSelect} AND (v.slug=$2 OR v.id::text=$2)`, [req.user?.id || 0, req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   res.json(rows[0]);
 });
@@ -4810,12 +4819,12 @@ app.post('/api/video/:id/like', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/video/:slug/liked', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT 1 FROM video_likes vl JOIN videos v ON v.id=vl.video_id WHERE v.slug=$1 AND vl.user_id=$2', [req.params.slug, req.user.id]);
+  const { rows } = await query('SELECT 1 FROM video_likes vl JOIN videos v ON v.id=vl.video_id WHERE (v.slug=$1 OR v.id::text=$1) AND vl.user_id=$2', [req.params.slug, req.user.id]);
   res.json({ liked: !!rows.length });
 });
 
 app.post('/api/video/:slug/save', authMiddleware, async (req, res) => {
-  const { rows: video } = await query('SELECT id FROM videos WHERE slug=$1', [req.params.slug]);
+  const { rows: video } = await query('SELECT id FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
   if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
   const { rows: existing } = await query('SELECT id FROM video_saves WHERE video_id=$1 AND user_id=$2', [video[0].id, req.user.id]);
   if (existing.length) await query('DELETE FROM video_saves WHERE id=$1', [existing[0].id]);
@@ -4824,19 +4833,19 @@ app.post('/api/video/:slug/save', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/video/:slug/saved', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT 1 FROM video_saves s JOIN videos v ON v.id=s.video_id WHERE v.slug=$1 AND s.user_id=$2', [req.params.slug, req.user.id]);
+  const { rows } = await query('SELECT 1 FROM video_saves s JOIN videos v ON v.id=s.video_id WHERE (v.slug=$1 OR v.id::text=$1) AND s.user_id=$2', [req.params.slug, req.user.id]);
   res.json({ saved: !!rows.length });
 });
 
 app.get('/api/video/:slug/comments', async (req, res) => {
-  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id WHERE v.slug=$1 ORDER BY c.created_at ASC`, [req.params.slug]);
+  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id WHERE v.slug=$1 OR v.id::text=$1 ORDER BY c.created_at ASC`, [req.params.slug]);
   res.json(rows);
 });
 
 app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'comment')) return;
   const content = String(req.body.content || '').trim();
-  const { rows: video } = await query('SELECT id,allow_comments FROM videos WHERE slug=$1', [req.params.slug]);
+  const { rows: video } = await query('SELECT id,allow_comments FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
   if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (video[0].allow_comments !== 1) return res.status(403).json({ error: 'Yorumlar kapalı' });
   if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
