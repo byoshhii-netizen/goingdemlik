@@ -2510,6 +2510,21 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .reals-play-overlay { z-index: 4; }
 }
 
+.reals-desc { max-width: calc(100% - 70px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; cursor: pointer; }
+.reals-action-btn, .reals-icon-btn, .reals-play-overlay { pointer-events: auto !important; }
+.reals-description-modal { color: var(--text-secondary); line-height: 1.7; }
+.reals-description-modal p { max-height: 55vh; margin: 0 0 18px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (min-width: 769px) {
+  .reals-video-box { overflow: visible !important; }
+  .reals-video { overflow: hidden; border-radius: 12px; }
+  .reals-meta { overflow: visible; }
+  .reals-right-actions { right: -84px !important; width: 60px; max-width: 60px; }
+  .reals-desc { max-width: 260px; }
+}
+@media (max-width: 768px) {
+  .reals-desc { max-width: calc(100% - 4px); }
+}
+
 /* Reals controls and metadata must stay in one stable coordinate system. */
 .reals-video-box { overflow: hidden !important; }
 .reals-meta { right: 0 !important; z-index: 2 !important; padding-right: 78px !important; box-sizing: border-box; }

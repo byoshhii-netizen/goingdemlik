@@ -4768,7 +4768,7 @@ app.get('/api/video-settings', async (req, res) => {
 });
 
 app.get('/api/video/:slug', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} WHERE v.slug=$1 OR v.id::text=$1`, [req.params.slug]);
+  const { rows } = await query(`${videoSelect} AND (v.slug=$1 OR v.id::text=$1)`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   res.json(rows[0]);
 });

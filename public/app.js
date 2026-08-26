@@ -68,6 +68,8 @@ function showModal(title, bodyHTML) {
 function hideModal() {
   if (storyComposerAudio) { storyComposerAudio.pause(); storyComposerAudio.src = ''; storyComposerAudio = null; }
   if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
+  window.__realsResumeVideo?.();
+  window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
 }
@@ -539,6 +541,7 @@ async function renderRealsFeed(app) {
   if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
 
   const orderedReals = shuffleArray(reals);
+  let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
 
   document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
     try { const data = await fetch('/api/reals-settings').then(response => response.json()); showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`); } catch {}
@@ -564,7 +567,7 @@ async function renderRealsFeed(app) {
         <div class="reals-video-box">
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
-        <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-mute"></i></button></div>
+        <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
           <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
@@ -575,9 +578,8 @@ async function renderRealsFeed(app) {
             ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
             <button class="reals-action-btn comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>
             <button class="reals-action-btn save-btn" title="Kaydet"><i class="far fa-bookmark"></i><span>Kaydet</span></button>
-            <button class="reals-action-btn resend-btn"><i class="fas fa-retweet"></i><span>Paylaş</span></button>
-            <button class="reals-action-btn share-btn"><i class="fas fa-paper-plane"></i><span>Gönder</span></button>
-            <a href="/reals/${encodeURIComponent(r.id)}" data-link class="reals-action-btn"><i class="fas fa-link"></i><span>Detay</span></a>
+            <button class="reals-action-btn resend-btn" title="Bağlantıyı paylaş"><i class="fas fa-share-alt"></i><span>Paylaş</span></button>
+            <button class="reals-action-btn share-btn" title="Mesaj olarak ilet"><i class="fas fa-paper-plane"></i><span>İlet</span></button>
           </div>
         </div>
         </div>
@@ -608,7 +610,7 @@ async function renderRealsFeed(app) {
     });
     listEl.querySelectorAll('.mute-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation(); const vid = btn.closest('.reals-video-box').querySelector('video');
-      vid.muted = !vid.muted; btn.innerHTML = '<i class="fas fa-volume-' + (vid.muted ? 'mute' : 'up') + '"></i>';
+      vid.muted = !vid.muted; realsMuted = vid.muted; localStorage.setItem('cigcig_reals_muted', vid.muted ? '1' : '0'); btn.innerHTML = '<i class="fas fa-volume-' + (vid.muted ? 'mute' : 'up') + '"></i>';
     }));
     listEl.querySelectorAll('.reals-close-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/'); }));
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
@@ -625,9 +627,14 @@ async function renderRealsFeed(app) {
       try { await navigator.clipboard.writeText(shareUrl); toast('Reals bağlantısı kopyalandı'); } catch { toast(shareUrl); }
     }));
     listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); if (!video) return;
-      const shareUrl = `${location.origin}/reals/${encodeURIComponent(video.id)}`;
-      try { await navigator.clipboard.writeText(shareUrl); toast('Reals bağlantısı kopyalandı'); } catch { showForwardVideoModal(video); }
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); if (video) showForwardVideoModal(video);
+    }));
+    listEl.querySelectorAll('.reals-desc').forEach(desc => desc.addEventListener('click', e => {
+      e.stopPropagation(); const it = desc.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); const vid = it.querySelector('video');
+      if (!video) return; const wasPlaying = !vid.paused; if (wasPlaying) vid.pause();
+      window.__realsResumeVideo = () => { if (wasPlaying && location.pathname === '/reals') vid.play().catch(() => {}); };
+      showModal('Reals açıklaması', `<div class="reals-description-modal"><p>${escHtml(video.description || '')}</p><button class="btn btn-primary" id="reals-description-close">Kapat</button></div>`);
+      document.getElementById('reals-description-close')?.addEventListener('click', hideModal);
     }));
   }
 
@@ -643,7 +650,7 @@ async function renderRealsFeed(app) {
       const videoUrl = it.dataset.videoUrl;
       if (Math.abs(j - idx) <= 1) {
         setRealsVideoSource(vid, videoUrl);
-        vid.muted = j !== idx;
+        vid.muted = realsMuted || j !== idx;
         if (j === idx) vid.play().catch(() => {});
       } else {
         setRealsVideoSource(vid, '');
