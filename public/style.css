@@ -456,8 +456,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .mobile-header-action { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; font-size: 17px; }
   .mobile-new-wrap { order: 1; }
   .mobile-groups-btn { order: 2; }
-  .mobile-notif-btn { order: 3; margin-left: auto; }
-  .nav-mobile-toggle { order: 4; }
+  .mobile-books-btn { order: 3; }
+  .mobile-notif-btn { order: 4; margin-left: auto; }
+  .nav-mobile-toggle { order: 5; }
   .mobile-new-wrap { display: block; position: relative; }
   .nav-mobile-new-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-card); color: var(--text-primary); font-size: 16px; }
   .mobile-new-dropdown:not(.hidden) { display: grid; }
