@@ -907,7 +907,6 @@ async function showMyGroupsModal() {
     $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
-$('#mobile-groups-btn')?.addEventListener('click', showMyGroupsModal);
 $('#mobile-books-btn')?.addEventListener('click', () => navigate('/kitaplar'));
 $('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler'));
 
@@ -1960,7 +1959,7 @@ async function renderBookDetail(app, slug) {
         ${book.cover_image ? `<img src="${escHtml(book.cover_image)}" alt="" />` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-card2)"><i class="fas fa-book" style="font-size:40px;color:var(--text-muted)"></i></div>`}
       </div>
       <div class="book-detail-info">
-        <div class="book-detail-title">${book.is_unnamed ? '<span style="color:rgba(255,255,255,0.3);font-style:italic">İsimsiz Kitap</span>' : escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:var(--accent-red2);color:white;border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
+        <div class="book-detail-title">${book.is_unnamed ? '<span style="color:rgba(255,255,255,0.3);font-style:italic">İsimsiz Kitap</span>' : escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:#6b6b6b;color:var(--accent-red2);border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
         ${(book.author || book.username) ? `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> <span style="font-weight:600">${escHtml(book.author || book.username)}</span></div>` : ''}
         <div class="book-detail-meta">
           <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
@@ -5120,7 +5119,7 @@ async function renderNotifications(app) {
     }
     list.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px">${notifs.map(n => `
       <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}" style="display:flex;align-items:flex-start;gap:14px;cursor:default">
-        ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" style="width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0" />` : `<div style="width:40px;height:40px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-bell" style="color:var(--accent-red2)"></i></div>`}
+        ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" class="notification-avatar" alt="" />` : `<div class="notification-avatar notification-avatar-placeholder"><i class="fas fa-bell"></i></div>`}
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;line-height:1.5;color:var(--text-primary)">${escHtml(n.body)}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${timeAgo(n.created_at)}</div>
