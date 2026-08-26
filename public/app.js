@@ -3360,6 +3360,7 @@ async function renderProfile(app, username) {
     try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
+  const savedContentHTML = profileSavedVideos.length ? `<div class="grid-3">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
   const profileSongsHTML = profileSongs.length ? `<div class="grid-3" style="gap:16px">${profileSongs.map(s => `
       <div class="song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -3488,7 +3489,7 @@ async function renderProfile(app, username) {
       ${profileReals.length ? `<div class="grid-3">${profileReals.map(v => realsProfileCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
     </div>
     <div id="tab-saved" class="hidden">
-      ${profileSavedVideos.length ? `<div class="grid-3">${profileSavedVideos.map(v => videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>'}
+      ${savedContentHTML}
     </div>
     <div id="tab-songs" class="hidden">
       ${profileSongsHTML}
