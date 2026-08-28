@@ -941,7 +941,7 @@ async function showMyGroupsModal() {
   showModal('Gruplarım', '<div class="loading-center"><div class="spinner"></div></div>');
   try {
     const groups = await api('/my-groups');
-    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
+    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><span class="my-group-status"><i class="fas fa-check"></i> Üyesiniz</span><i class="fas fa-chevron-right"></i></a>`).join('')}</div><button type="button" class="btn btn-primary my-groups-explore-btn" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
     $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
@@ -2466,7 +2466,7 @@ async function renderGroupList(app) {
     const el = $('#groups-grid');
     if (!el) return;
     if (!list.length) { el.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-users"></i><p>Grup bulunamadı.</p></div>'; return; }
-    el.innerHTML = list.map(g => groupCardHTML(g)).join('');
+    el.innerHTML = list.map(g => groupCardHTML(g)).filter(Boolean).join('') || '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-users"></i><p>Grup bulunamadı.</p></div>';
   }
 
   renderGroups(groups);
@@ -2490,6 +2490,7 @@ function groupCardHTML(g) {
       <div class="group-desc">${escHtml(g.description || '')}</div>
       <div class="group-meta">
         ${typeBadge}
+        ${g.is_member ? '<span class="group-member-status"><i class="fas fa-check"></i> Üyesiniz</span>' : ''}
         <span class="forum-meta-item"><i class="fas fa-users" style="color:var(--accent-red)"></i> ${g.member_count}</span>
       </div>
     </div>
@@ -2650,7 +2651,7 @@ async function renderGroupDetail(app, slug) {
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
-            ${visibility !== 'public' ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}` : ''}
+            ${(visibility !== 'public' && (isOwner || isMod)) ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}` : ''}
         </div>
       </div>
     </div>
@@ -2777,12 +2778,13 @@ async function renderGroupDetail(app, slug) {
       try {
         const newMsgs = await api('/group/' + slug + '/messages');
         const newest = newMsgs.filter(m => Number(m.id) > lastId);
-        if (newest.length) {
-          newest.forEach(m => { $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(m, window._chatCanMod)); });
-          enhanceLinkPreviews($('#chat-messages'));
-          lastId = Math.max(lastId, ...newest.map(m => Number(m.id)));
-          const chatEl2 = $('#chat-messages');
-          if (chatEl2) chatEl2.scrollTop = chatEl2.scrollHeight;
+        const chatEl2 = $('#chat-messages');
+        if (chatEl2 && newMsgs.length) {
+          const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
+          chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod)).join('');
+          enhanceLinkPreviews(chatEl2);
+          lastId = Math.max(lastId, ...newMsgs.map(m => Number(m.id)));
+          if (wasBottom || newest.length) chatEl2.scrollTop = chatEl2.scrollHeight;
         }
       } catch {}
     }, 5000);
@@ -2790,8 +2792,17 @@ async function renderGroupDetail(app, slug) {
 
   $('#chat-messages')?.addEventListener('click', async e => {
     const del = e.target.closest('.del-msg');
+    const edit = e.target.closest('.edit-msg');
+    if (edit) {
+      const message = edit.closest('.chat-msg');
+      showModal('Mesajı düzenle', `<div class="form-group"><label>Mesaj</label><textarea id="edit-group-message" rows="5">${escHtml(edit.dataset.content || '')}</textarea></div><button class="btn btn-primary" id="save-group-message-edit" style="width:100%">Kaydet</button><div id="edit-group-message-error" class="form-error mt-4"></div>`);
+      $('#save-group-message-edit').addEventListener('click', async () => {
+        try { const updated = await api('/group/' + slug + '/messages/' + edit.dataset.id, { method: 'PUT', body: JSON.stringify({ content: $('#edit-group-message').value }) }); message.outerHTML = chatMsgHTML(updated, isOwner || isMod); hideModal(); toast('Mesaj düzenlendi'); } catch (error) { $('#edit-group-message-error').textContent = error.message; }
+      });
+      return;
+    }
     if (!del) return;
-    try { await api('/group/' + slug + '/messages/' + del.dataset.id, { method: 'DELETE' }); del.closest('.chat-msg').remove(); } catch (e) { toast(e.message, 'error'); }
+    try { await api('/group/' + slug + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.chat-msg'); if (row?.classList.contains('own') || isOwner || isMod) row?.remove(); else if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#join-requests-btn')?.addEventListener('click', async () => {
@@ -2823,13 +2834,15 @@ async function renderGroupDetail(app, slug) {
   });
 
   $('#gen-invite-btn')?.addEventListener('click', async () => {
-    try {
-      const r = await api('/group/' + slug + '/invite', { method: 'POST' });
+    showModal('Davet Kodu Oluştur', `<div class="form-group"><label>Kaç kişi kullanabilsin?</label><input id="invite-max-uses" type="number" min="0" max="100000" value="0" /><div class="form-hint">0 sınırsız demektir.</div></div><div class="form-group"><label>Kod kaç saat geçerli olsun?</label><input id="invite-expires-hours" type="number" min="0" max="8760" value="0" /><div class="form-hint">0 süresiz demektir.</div></div><button class="btn btn-primary" id="create-invite-btn" style="width:100%"><i class="fas fa-key"></i> Kodu oluştur</button><div id="invite-create-error" class="form-error mt-4"></div>`);
+    $('#create-invite-btn').addEventListener('click', async () => { try {
+      const r = await api('/group/' + slug + '/invite', { method: 'POST', body: JSON.stringify({ max_uses: $('#invite-max-uses').value, expires_hours: $('#invite-expires-hours').value }) });
       showModal('Davet Kodu', `<div style="text-align:center;padding:20px">
         <div style="font-size:32px;font-weight:900;letter-spacing:6px;color:var(--accent-red2);background:var(--bg-card2);padding:16px;border-radius:8px;margin-bottom:16px">${r.invite_code}</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:16px">${r.max_uses ? `${r.max_uses} kişi kullanabilir` : 'Sınırsız kullanım'} · ${r.expires_at ? formatDate(r.expires_at) + ' tarihinde sona erer' : 'Süresiz'}</div>
         <button class="btn btn-primary" onclick="navigator.clipboard && navigator.clipboard.writeText('${r.invite_code}'); toast('Kopyalandı!')">Kopyala</button>
       </div>`);
-    } catch (e) { toast(e.message, 'error'); }
+    } catch (e) { $('#invite-create-error').textContent = e.message; } });
   });
 
   $('#group-settings-btn')?.addEventListener('click', () => {
@@ -2927,12 +2940,15 @@ async function renderGroupDetail(app, slug) {
 function chatMsgHTML(m, canModerate = false) {
   const isOwn = currentUser && currentUser.id === m.user_id;
   const deleteLabel = isOwn || canModerate ? 'Herkesten sil' : 'Benden sil';
+  if (m.deleted_for_me) return `<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
   return `<div class="chat-msg ${isOwn ? 'own' : ''}">
     ${isOwn ? '' : (hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`)}
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
         ${isOwn ? '' : `<span class="chat-msg-name">${escHtml(m.username || 'Silindi')}${m.badge_name ? ` <span class="badge" style="background:${escHtml(m.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${m.badge_icon ? `<i class="${escHtml(m.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(m.badge_name)}</span>` : ''}</span>`}
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
+        ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i> düzenlendi</span>' : ''}
+        ${currentUser && (isOwn || canModerate) && m.content ? `<button class="btn btn-ghost edit-msg" data-id="${m.id}" data-content="${escHtml(m.content)}" title="Mesajı düzenle" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-pen"></i></button>` : ''}
         ${currentUser ? `<button class="btn btn-ghost del-msg" data-id="${m.id}" title="${deleteLabel}" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-trash"></i></button>` : ''}
       </div>
       ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}

@@ -361,6 +361,7 @@ async function initDb() {
       user_id BIGINT,
       content TEXT,
       image_url TEXT DEFAULT '',
+      edited_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -381,8 +382,15 @@ async function initDb() {
       group_id BIGINT,
       invite_code TEXT UNIQUE,
       created_by BIGINT,
+      max_uses INTEGER DEFAULT 0,
+      use_count INTEGER DEFAULT 0,
+      expires_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 0;
+    ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS use_count INTEGER DEFAULT 0;
+    ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS photos (
       id BIGSERIAL PRIMARY KEY,

@@ -1587,8 +1587,9 @@ app.delete('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
 });
 
 // ===== GROUPS =====
-app.get('/api/groups', async (req, res) => {
-  const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' ORDER BY g.created_at DESC`);
+app.get('/api/groups', optionalAuth, async (req, res) => {
+  const userId = Number(req.user?.id || 0);
+  const { rows } = await query(`SELECT g.*, u.username as owner_name, EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=${userId}) AS is_member FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' ORDER BY g.created_at DESC`);
   res.json(rows);
 });
 
@@ -1698,9 +1699,12 @@ app.post('/api/group/:slug/invite', authMiddleware, async (req, res) => {
   const group = rows[0];
   const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!m.length || (m[0].role !== 'owner' && m[0].role !== 'moderator')) return res.status(403).json({ error: 'Yetki yok' });
+  const maxUses = Math.max(0, Math.min(Number.parseInt(req.body.max_uses, 10) || 0, 100000));
+  const hours = Math.max(0, Math.min(Number.parseInt(req.body.expires_hours, 10) || 0, 8760));
   const code = randomUUID().substring(0, 8).toUpperCase();
-  await query('INSERT INTO group_invites (group_id,invite_code,created_by) VALUES ($1,$2,$3)', [group.id, code, req.user.id]);
-  res.json({ invite_code: code });
+  const expiresAt = hours ? new Date(Date.now() + hours * 3600000) : null;
+  await query('INSERT INTO group_invites (group_id,invite_code,created_by,max_uses,use_count,expires_at) VALUES ($1,$2,$3,$4,0,$5)', [group.id, code, req.user.id, maxUses, expiresAt]);
+  res.json({ invite_code: code, max_uses: maxUses, expires_at: expiresAt });
 });
 
 app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
@@ -1710,12 +1714,15 @@ app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM group_invites WHERE invite_code=$1', [invite_code.toUpperCase()]);
   if (!rows.length) return res.status(404).json({ error: 'Geçersiz davet kodu' });
   const invite = rows[0];
+  if (invite.expires_at && new Date(invite.expires_at) <= new Date()) return res.status(410).json({ error: 'Davet kodunun süresi dolmuş' });
+  if (invite.max_uses > 0 && invite.use_count >= invite.max_uses) return res.status(410).json({ error: 'Davet kodunun kullanım hakkı dolmuş' });
   const { rows: groupRows } = await query('SELECT id FROM groups WHERE id=$1', [invite.group_id]);
   if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [invite.group_id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [invite.group_id, req.user.id, 'member']);
   await query('UPDATE groups SET member_count=member_count+1 WHERE id=$1', [invite.group_id]);
+  await query('UPDATE group_invites SET use_count=use_count+1 WHERE id=$1', [invite.id]);
   res.json({ ok: true });
 });
 
@@ -1788,16 +1795,12 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     sql = sql.replace(' ORDER BY gm.created_at DESC LIMIT $3', '');
     params = [group.id, before_id];
   } else {
-    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1`;
     params = [group.id];
-  }
-  if (req.user) {
-    sql += ` AND NOT EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=$${params.length + 1})`;
-    params.push(req.user.id);
   }
   sql += ` ORDER BY gm.created_at DESC LIMIT $${params.length + 1}`;
   params.push(limit);
@@ -1819,6 +1822,24 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     [group.id, req.user.id, content||'', image_url||'']);
   const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
+});
+
+app.put('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  const { rows: msgRows } = await query('SELECT * FROM group_messages WHERE id=$1 AND group_id=$2', [req.params.id, group.id]);
+  if (!msgRows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
+  const msg = msgRows[0];
+  const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
+  const canEdit = msg.user_id == req.user.id || member[0].role === 'owner' || member[0].role === 'moderator';
+  if (!canEdit) return res.status(403).json({ error: 'Bu mesajı düzenleme yetkiniz yok' });
+  const content = String(req.body.content || '').trim();
+  if (!content && !msg.image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  const { rows } = await query('UPDATE group_messages SET content=$1,edited_at=NOW() WHERE id=$2 RETURNING *', [content, msg.id]);
+  const { rows: full } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [msg.id]);
+  res.json(full[0] || rows[0]);
 });
 
 app.delete('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => {
