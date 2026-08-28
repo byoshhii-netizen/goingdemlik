@@ -492,7 +492,7 @@ function renderRoute(fullPath) {
   // Mesajlar sayfasında footer gizle
   const siteFooter = document.getElementById('site-footer');
   if (siteFooter) {
-    siteFooter.style.display = (path === '/mesajlar' || path.startsWith('/mesajlar/')) ? 'none' : '';
+    siteFooter.style.display = (path === '/mesajlar' || path.startsWith('/mesajlar/') || path === '/reals') ? 'none' : '';
   }
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
@@ -615,6 +615,7 @@ async function renderRealsFeed(app) {
   if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
 
   const orderedReals = shuffleArray(reals);
+  listEl.addEventListener('selectstart', event => event.preventDefault());
   let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
   const followStates = new Map();
   if (currentUser) await Promise.all(orderedReals.map(async real => {

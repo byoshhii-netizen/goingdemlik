@@ -2660,8 +2660,10 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
 
 // Like toggle
 app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
-  const photoId = req.params.id;
-  const userId = req.user.id;
+  const photoId = Number.parseInt(req.params.id, 10);
+  const userId = Number(req.user.id);
+  if (!Number.isSafeInteger(photoId) || photoId < 1) return res.status(400).json({ error: 'Geçersiz fotoğraf.' });
+  try {
   const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
     WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -2679,6 +2681,10 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
     }
     const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM photo_likes WHERE photo_id=$1', [photoId]);
     return res.json({ liked: true, like_count: counts[0].like_count });
+  }
+  } catch (error) {
+    console.error('Photo like failed:', error);
+    return res.status(500).json({ error: 'Fotoğraf beğenilemedi. Lütfen tekrar deneyin.' });
   }
 });
 
