@@ -3245,7 +3245,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         let uploadTarget = '/api/upload';
         let uploadUrl = '';
         if (isReals) {
-          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: videoFile.type || 'video/mp4' }) });
+          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: videoFile.type || 'video/mp4', content_length: videoFile.size }) });
           uploadTarget = signed.public_url;
           uploadUrl = signed.upload_url;
         }
@@ -6803,7 +6803,7 @@ function showStoryUploadModal() {
     const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
       if (file.type.startsWith('video/')) {
-        const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type }) });
+        const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type, content_length: file.size }) });
         const response = await fetch(signed.upload_url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
         if (!response.ok) throw new Error('Hikaye videosu R2’ye yüklenemedi.');
         await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption: $('#story-caption').value.trim(), duration_hours: $('#story-duration').value, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0 }) });
