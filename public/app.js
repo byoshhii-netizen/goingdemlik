@@ -7025,7 +7025,9 @@ function bindPhotoFeed(feed) {
     } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
   });
   feed.querySelectorAll('.photo-media-wrap').forEach(media => media.addEventListener('dblclick', event => {
-    if (!currentUser || event.target.closest('button,a')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!currentUser || event.target.closest('button')) return;
     media.closest('[data-photo-id]')?.querySelector('.photo-like')?.click();
   }));
 
