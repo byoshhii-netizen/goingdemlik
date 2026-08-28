@@ -1198,7 +1198,7 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .group-detail-layout > :last-child .group-sidebar-card:last-child { flex:1; min-height:0; overflow:auto; }
 @media (max-width: 900px) { .group-detail-layout { grid-template-columns: 1fr; } }
 .chat-container { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; height: min(760px, calc(100vh - 230px)); min-height: 560px; width: 100%; }
-.chat-messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-height: 0; align-content: flex-start; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; justify-content: flex-start; gap: 14px; min-height: 0; align-content: flex-start; }
 .chat-msg { display: grid; grid-template-columns: 34px minmax(0, min(100%, 520px)); align-items: flex-start; gap: 10px; min-height: 0; width:100%; }
 .chat-msg-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-card2); flex-shrink: 0; object-fit: cover; }
 .chat-msg-body { min-width: 0; width: auto; max-width: 100%; }
