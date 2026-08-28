@@ -74,6 +74,42 @@ function hideModal() {
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
 }
 
+function openAvatarCrop(file, onApply) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  showModal('Profil Fotoğrafını Kırp', `<div class="avatar-cropper">
+    <div class="avatar-crop-stage"><canvas id="avatar-crop-canvas" width="420" height="420"></canvas><div class="avatar-crop-mask"></div></div>
+    <div class="avatar-crop-tools"><i class="fas fa-camera"></i><input id="avatar-crop-zoom" type="range" min="1" max="3" step="0.01" value="1" /></div>
+    <div class="avatar-crop-actions"><button class="btn btn-outline" id="avatar-crop-cancel">Vazgeç</button><button class="btn btn-primary" id="avatar-crop-apply"><i class="fas fa-check"></i> Uygula</button></div>
+  </div>`);
+  const canvas = $('#avatar-crop-canvas');
+  const context = canvas.getContext('2d');
+  const image = new Image();
+  let scale = 1, offsetX = 0, offsetY = 0, dragging = false, startX = 0, startY = 0;
+  const draw = () => {
+    if (!image.naturalWidth) return;
+    const base = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+    const width = image.naturalWidth * base * scale;
+    const height = image.naturalHeight * base * scale;
+    const x = (canvas.width - width) / 2 + offsetX;
+    const y = (canvas.height - height) / 2 + offsetY;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, x, y, width, height);
+  };
+  image.onload = draw;
+  image.src = url;
+  $('#avatar-crop-zoom').addEventListener('input', e => { scale = Number(e.target.value); draw(); });
+  canvas.addEventListener('pointerdown', e => { dragging = true; startX = e.clientX - offsetX; startY = e.clientY - offsetY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => { if (!dragging) return; offsetX = e.clientX - startX; offsetY = e.clientY - startY; draw(); });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
+  $('#avatar-crop-cancel').addEventListener('click', () => { URL.revokeObjectURL(url); hideModal(); });
+  $('#avatar-crop-apply').addEventListener('click', () => canvas.toBlob(blob => {
+    URL.revokeObjectURL(url);
+    hideModal();
+    onApply(new File([blob], 'profil-fotografi.jpg', { type: 'image/jpeg' }));
+  }, 'image/jpeg', 0.92));
+}
+
 $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
@@ -3795,6 +3831,7 @@ async function renderSettings(app) {
 async function renderSettingsSection(section) {
   const el = $('#settings-content'); if (!el) return;
   if (section === 'profile') {
+    let selectedAvatarFile = null;
     const links = (() => { try { return JSON.parse(currentUser.links || '[]'); } catch { return []; } })();
     el.innerHTML = `
       <div class="card">
@@ -3865,8 +3902,7 @@ async function renderSettingsSection(section) {
       fd.append('location', $('#s-location').value || '');
       const validLinks = currentLinks.filter(l => l.url && l.url.trim());
       fd.append('links', JSON.stringify(validLinks));
-      const avatarFile = $('#avatar-file').files[0];
-      if (avatarFile) fd.append('avatar', avatarFile);
+      if (selectedAvatarFile) fd.append('avatar', selectedAvatarFile);
       fd.append('avatar_removed', $('#s-remove-avatar').checked ? '1' : '0');
       try {
         const updated = await apiForm('/profile', fd, 'PUT');
@@ -3877,6 +3913,7 @@ async function renderSettingsSection(section) {
         $('#profile-msg').textContent = '';
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
+    $('#avatar-file').addEventListener('change', e => openAvatarCrop(e.target.files[0], file => { selectedAvatarFile = file; $('#s-remove-avatar').checked = false; toast('Profil fotoğrafı hazır'); }));
 
   } else if (section === 'username') {
     const changes = currentUser.username_changes || 0;
@@ -4390,6 +4427,7 @@ function renderLogin(app) {
 
 function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
+  let selectedRegisterAvatar = null;
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
@@ -4531,10 +4569,11 @@ function renderRegister(app) {
       name.textContent = 'Fotoğraf 5 MB\'dan küçük olmalı';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => { preview.innerHTML = `<img src="${reader.result}" alt="Profil fotoğrafı önizleme" />`; };
-    reader.readAsDataURL(file);
-    name.textContent = file.name;
+    openAvatarCrop(file, croppedFile => {
+      selectedRegisterAvatar = croppedFile;
+      preview.innerHTML = `<img src="${URL.createObjectURL(croppedFile)}" alt="Profil fotoğrafı önizleme" />`;
+      name.textContent = 'Kırpılmış fotoğraf hazır';
+    });
   });
 
   $('#kvkk-btn').addEventListener('click', async () => {
@@ -4553,7 +4592,7 @@ function renderRegister(app) {
     const is_private = $('#reg-private').checked;
     const tag_permission = document.querySelector('input[name="reg-tags"]:checked')?.value || 'everyone';
     const profile_visibility = {};
-    const avatar = $('#reg-avatar').files[0];
+    const avatar = selectedRegisterAvatar;
     const sectionNames = { forums: 'konular', books: 'kitaplar', comments: 'yorumlar', photos: 'fotograflar', music: 'muzikler' };
     const homepage_sections = [];
     document.querySelectorAll('[data-reg-stat]').forEach(input => {
