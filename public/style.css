@@ -2673,6 +2673,11 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .reals-action-btn, .reals-icon-btn, .reals-close-btn { position: relative; z-index: 7; pointer-events: auto !important; }
 .reals-play-overlay { z-index: 1 !important; }
 .reals-play-overlay span { position: relative; z-index: 1; }
+.reals-video-box, .reals-video { background:#000 !important; }
+@media (max-width:768px) {
+  .reals-list { overflow-y:scroll !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch; touch-action:pan-y !important; }
+  .reals-video-box, .reals-video { background:#000 !important; }
+}
 @media (min-width: 769px) {
   .reals-right-actions { right: 10px !important; bottom: 12px !important; gap: 14px !important; }
   .reals-meta { padding: 22px 78px 18px 18px !important; }
@@ -2682,6 +2687,12 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .reals-meta { padding: 24px 78px 18px 16px !important; }
 }
 
+.reals-user-row { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+.reals-title { margin-top:7px; color:var(--reals-fg); font-size:16px; font-weight:800; line-height:1.3; text-shadow:0 1px 4px rgba(0,0,0,.8); }
+.reals-follow-btn { min-height:30px; padding:5px 11px; border:1px solid rgba(255,255,255,.55); border-radius:7px; background:rgba(255,255,255,.12); color:#fff; font-size:12px; font-weight:700; cursor:pointer; backdrop-filter:blur(8px); }
+.reals-follow-btn:hover { background:rgba(255,255,255,.24); }
+.reals-action-btn.active { color:#f72585 !important; text-shadow:0 0 12px rgba(247,37,133,.6); }
+.reals-action-btn.like-btn:active { transform:scale(1.18); }
 .song-detail-actions-row { display:flex; gap:8px; flex-wrap:wrap; }
 .song-detail-uploader { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-muted); }
 .song-detail-uploader-link { display:flex; align-items:center; gap:5px; color:var(--text-secondary); text-decoration:none; font-weight:500; }

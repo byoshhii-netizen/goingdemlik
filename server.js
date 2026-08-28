@@ -5196,7 +5196,7 @@ function makeVideoSlug(title, id) {
   return `${base}-${id}`;
 }
 
-const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
+const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed, u.is_private,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
   (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
@@ -5208,7 +5208,7 @@ app.get('/api/videos', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
+  const { rows } = await query(`${videoSelect} AND v.is_reals=1 AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
   res.json(rows);
 });
 
@@ -5221,7 +5221,7 @@ app.get('/api/video-settings', async (req, res) => {
 });
 
 app.get('/api/video/:slug', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} AND (v.slug=$2 OR v.id::text=$2)`, [req.user?.id || 0, req.params.slug]);
+  const { rows } = await query(`${videoSelect} AND (v.slug=$2 OR v.id::text=$2) AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted'))`, [req.user?.id || 0, req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   res.json(rows[0]);
 });
@@ -5279,20 +5279,33 @@ app.get('/api/video/:slug/saved', authMiddleware, async (req, res) => {
   res.json({ saved: !!rows.length });
 });
 
-app.get('/api/video/:slug/comments', async (req, res) => {
-  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id WHERE v.slug=$1 OR v.id::text=$1 ORDER BY c.created_at ASC`, [req.params.slug]);
+app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
+  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id
+    WHERE (v.slug=$1 OR v.id::text=$1) AND (COALESCE((SELECT is_private FROM users WHERE id=v.user_id),0)=0 OR v.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY c.created_at ASC`, [req.params.slug, req.user?.id || 0]);
   res.json(rows);
 });
 
 app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'comment')) return;
   const content = String(req.body.content || '').trim();
-  const { rows: video } = await query('SELECT id,allow_comments FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
+  const { rows: video } = await query(`SELECT v.id,v.user_id,v.allow_comments,u.is_private FROM videos v JOIN users u ON u.id=v.user_id WHERE v.slug=$1 OR v.id::text=$1`, [req.params.slug]);
   if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  if (video[0].is_private && video[0].user_id != req.user.id && !(await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, video[0].user_id])).rows.length) return res.status(403).json({ error: 'Bu hesap gizli.' });
   if (video[0].allow_comments !== 1) return res.status(403).json({ error: 'Yorumlar kapalı' });
   if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO video_comments (video_id,user_id,content) VALUES ($1,$2,$3) RETURNING *', [video[0].id, req.user.id, content.slice(0, 1000)]);
   res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar });
+});
+
+app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT c.id, c.user_id, v.user_id AS video_owner_id
+    FROM video_comments c JOIN videos v ON v.id=c.video_id
+    WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const comment = rows[0];
+  if (comment.user_id != req.user.id && comment.video_owner_id != req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok' });
+  await query('DELETE FROM video_comments WHERE id=$1', [comment.id]);
+  res.json({ ok: true });
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {

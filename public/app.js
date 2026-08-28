@@ -616,6 +616,11 @@ async function renderRealsFeed(app) {
 
   const orderedReals = shuffleArray(reals);
   let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
+  const followStates = new Map();
+  if (currentUser) await Promise.all(orderedReals.map(async real => {
+    if (!real.username || real.username === currentUser.username) return;
+    try { followStates.set(real.username, await api('/users/' + encodeURIComponent(real.username) + '/follow-status')); } catch {}
+  }));
 
   document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
     try { const data = await fetch('/api/reals-settings').then(response => response.json()); showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`); } catch {}
@@ -649,6 +654,12 @@ async function renderRealsFeed(app) {
       list.innerHTML = comments.length ? comments.map(comment => renderVideoComment(comment, currentUser?.id === video.user_id)).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
       list.addEventListener('click', async event => {
         const likeButton = event.target.closest('.video-comment-like');
+        const deleteButton = event.target.closest('.video-comment-delete');
+        if (deleteButton) {
+          if (!confirm('Bu yorum silinsin mi?')) return;
+          try { await api('/video/' + encodeURIComponent(video.id) + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' }); deleteButton.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
+          return;
+        }
         if (!likeButton) return;
         try {
           likeButton.disabled = true;
@@ -699,7 +710,8 @@ async function renderRealsFeed(app) {
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
-          <a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>
+          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private ? `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>
+          <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : ''}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
           <div class="reals-desc">${escHtml(r.description||'')}</div>
@@ -750,6 +762,16 @@ async function renderRealsFeed(app) {
     listEl.querySelectorAll('.reals-close-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/'); }));
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; const result = await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked); btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart'; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+    }));
+    listEl.querySelectorAll('.reals-follow-btn').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      try {
+        const username = btn.dataset.username;
+        const state = followStates.get(username) || {};
+        const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: state.following ? 'DELETE' : 'POST' });
+        followStates.set(username, { ...state, ...result });
+        btn.textContent = result.following ? 'Takiptesin' : result.pending ? 'İstek gönderildi' : 'Takip et';
+      } catch (error) { toast(error.message, 'error'); }
     }));
     listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -3303,6 +3325,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         const successMs = Math.max(1000, parseInt(videoSettings.uploadSuccessDuration || 3) * 1000);
         toast(videoSettings.uploadSuccessText || 'YÜKLENDİ', 'success', successMs);
         updateVideoUploadNotice('done', 100, isReals ? 'Reals hazır' : 'Video hazır');
+        navigate(isReals ? '/reals' : '/videolar');
         return;
       }
       updateVideoUploadNotice('done', 100, 'Video güncellendi');
@@ -3517,12 +3540,18 @@ async function renderVideoDetail(app, slug) {
     if (pinBtn) {
       try { await api('/video/' + slug + '/comments/' + pinBtn.dataset.id + '/pin', { method: 'POST' }); toast('İşlem tamam'); renderRoute(location.pathname); } catch(e){ toast(e.message,'error'); }
     }
+    const deleteBtn = e.target.closest('.video-comment-delete');
+    if (deleteBtn) {
+      if (!confirm('Bu yorum silinsin mi?')) return;
+      try { await api('/video/' + slug + '/comments/' + deleteBtn.dataset.id, { method: 'DELETE' }); deleteBtn.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
+    }
   });
 }
 
 function renderVideoComment(c, isOwner) {
   const canEdit = currentUser && (currentUser.id === c.user_id || isOwner);
   const canPin = currentUser && isOwner;
+  const canDelete = currentUser && (currentUser.id === c.user_id || isOwner || currentUser.is_admin);
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
@@ -3535,6 +3564,7 @@ function renderVideoComment(c, isOwner) {
         <div style="display:flex;align-items:center;gap:8px">
           ${canPin ? `<button class="btn btn-ghost btn-sm video-comment-pin" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-thumbtack"></i></button>` : ''}
           ${canEdit ? `<button class="btn btn-ghost btn-sm video-comment-edit" data-id="${c.id}" data-content="${escHtml(c.content)}" style="padding:2px 6px"><i class="fas fa-edit"></i></button>` : ''}
+          ${canDelete ? `<button class="btn btn-ghost btn-sm video-comment-delete" data-id="${c.id}" title="Yorumu sil" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
         </div>
         <button class="btn btn-ghost btn-sm video-comment-like" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-heart"></i> <span class="video-comment-count">${c.like_count || 0}</span></button>
       </div>
