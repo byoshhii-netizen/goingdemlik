@@ -2752,10 +2752,22 @@ async function renderGroupDetail(app, slug) {
     attachmentPreview.className = 'chat-attachment-preview hidden';
     attachmentPreview.innerHTML = '<img alt="Fotoğraf önizlemesi" /><div><strong>Fotoğraf hazır</strong><small>Mesajını yazıp gönder tuşuna bas</small></div><button type="button" class="btn btn-ghost btn-sm" id="chat-attachment-remove" title="Fotoğrafı kaldır"><i class="fas fa-times"></i></button>';
     $('#chat-input')?.parentElement?.insertAdjacentElement('beforebegin', attachmentPreview);
+    const prepareChatImage = file => {
+      if (!file || !file.type.startsWith('image/')) return;
+      pendingChatImage = file;
+      const preview = attachmentPreview.querySelector('img');
+      if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+      preview.src = URL.createObjectURL(file);
+      attachmentPreview.classList.remove('hidden');
+      const input = $('#chat-input');
+      if (input) { input.placeholder = 'Fotoğrafın altına bir şey yaz...'; input.focus(); }
+    };
     const resetAttachment = () => {
       pendingChatImage = null;
       attachmentPreview.classList.add('hidden');
-      attachmentPreview.querySelector('img').removeAttribute('src');
+      const preview = attachmentPreview.querySelector('img');
+      if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+      preview.removeAttribute('src');
       const fileInput = $('#chat-img-input');
       if (fileInput) fileInput.value = '';
       const input = $('#chat-input');
@@ -2788,13 +2800,14 @@ async function renderGroupDetail(app, slug) {
     $('#chat-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
 
     $('#chat-img-input')?.addEventListener('change', async e => {
-      const file = e.target.files[0]; if (!file) return;
-      pendingChatImage = file;
-      const preview = attachmentPreview.querySelector('img');
-      preview.src = URL.createObjectURL(file);
-      attachmentPreview.classList.remove('hidden');
-      const input = $('#chat-input');
-      if (input) { input.placeholder = 'Fotoğrafın altına bir şey yaz...'; input.focus(); }
+      prepareChatImage(e.target.files[0]);
+    });
+    $('#chat-input')?.addEventListener('paste', e => {
+      const imageItem = [...(e.clipboardData?.items || [])].find(item => item.type.startsWith('image/'));
+      const file = imageItem?.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      prepareChatImage(file);
     });
 
     let lastId = messages.length ? Number(messages[messages.length - 1].id) : 0;
