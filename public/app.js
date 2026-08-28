@@ -2913,8 +2913,8 @@ async function renderGroupDetail(app, slug) {
     showModal('Davet Kodları', `<div id="invite-manager"><div class="loading-center"><div class="spinner"></div></div></div>`);
     const manager = $('#invite-manager');
     const renderInvites = invites => {
-      const statusText = { active: 'Aktif', expired: 'Süresi doldu', exhausted: 'Kullanım bitti' };
-      const statusColor = { active: 'var(--success, #4ade80)', expired: 'var(--text-muted)', exhausted: 'var(--accent-red2)' };
+      const statusText = { active: 'Aktif', revoked: 'Devre dışı', expired: 'Süresi doldu', exhausted: 'Kullanım bitti' };
+      const statusColor = { active: 'var(--success, #4ade80)', revoked: 'var(--accent-red2)', expired: 'var(--text-muted)', exhausted: 'var(--accent-red2)' };
       manager.innerHTML = `<div class="invite-create-panel">
         <div class="form-group"><label>Kaç kişi kullanabilsin?</label><input id="invite-max-uses" type="number" min="0" max="100000" value="0" /><div class="form-hint">0 sınırsız demektir.</div></div>
         <div class="form-group"><label>Kod kaç saat geçerli olsun?</label><input id="invite-expires-hours" type="number" min="0" max="8760" value="0" /><div class="form-hint">0 süresiz demektir.</div></div>
@@ -2923,7 +2923,7 @@ async function renderGroupDetail(app, slug) {
       <div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><strong>Kod geçmişi</strong><span style="font-size:12px;color:var(--text-muted)">${invites.length} kod</span></div>
       <div class="invite-history">${invites.length ? invites.map(invite => `<div class="invite-history-row">
         <div style="min-width:0;flex:1"><code style="font-size:16px;letter-spacing:2px">${escHtml(invite.invite_code)}</code><div style="font-size:11px;color:var(--text-muted);margin-top:5px">${formatDate(invite.created_at)} · ${invite.max_uses ? `${invite.use_count}/${invite.max_uses} kullanım` : `${invite.use_count} kullanım · sınırsız`} ${invite.expires_at ? `· bitiş: ${formatDate(invite.expires_at)}` : '· süresiz'}</div></div>
-        <div style="text-align:right;flex-shrink:0"><div style="color:${statusColor[invite.status]};font-size:12px;font-weight:700">${statusText[invite.status]}</div><button class="btn btn-ghost btn-sm copy-invite-btn" data-code="${escHtml(invite.invite_code)}" title="Kodu kopyala"><i class="fas fa-copy"></i></button></div>
+        <div style="text-align:right;flex-shrink:0"><div style="color:${statusColor[invite.status]};font-size:12px;font-weight:700">${statusText[invite.status]}</div><button class="btn btn-ghost btn-sm copy-invite-btn" data-code="${escHtml(invite.invite_code)}" title="Kodu kopyala"><i class="fas fa-copy"></i></button>${invite.status === 'active' || invite.status === 'revoked' ? `<button class="btn btn-ghost btn-sm toggle-invite-btn" data-id="${invite.id}" data-active="${invite.status === 'active' ? '0' : '1'}" title="${invite.status === 'active' ? 'Devre dışı bırak' : 'Yeniden aktifleştir'}"><i class="fas fa-${invite.status === 'active' ? 'ban' : 'rotate-left'}"></i></button>` : ''}</div>
       </div>`).join('') : '<div class="empty-state"><i class="fas fa-key"></i><p>Henüz davet kodu oluşturulmamış.</p></div>'}</div>`;
       $('#create-invite-btn').addEventListener('click', async () => { try {
         const r = await api('/group/' + slug + '/invite', { method: 'POST', body: JSON.stringify({ max_uses: $('#invite-max-uses').value, expires_hours: $('#invite-expires-hours').value }) });
@@ -2934,6 +2934,9 @@ async function renderGroupDetail(app, slug) {
         if (created) toast('Yeni kod: ' + created.invite_code);
       } catch (e) { $('#invite-create-error').textContent = e.message; } });
       manager.querySelectorAll('.copy-invite-btn').forEach(button => button.addEventListener('click', () => { navigator.clipboard?.writeText(button.dataset.code); toast('Kopyalandı!'); }));
+      manager.querySelectorAll('.toggle-invite-btn').forEach(button => button.addEventListener('click', async () => {
+        try { await api(`/group/${slug}/invites/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ active: button.dataset.active === '1' }) }); renderInvites(await api('/group/' + slug + '/invites')); toast(button.dataset.active === '1' ? 'Kod yeniden aktifleştirildi' : 'Kod devre dışı bırakıldı'); } catch (e) { toast(e.message, 'error'); }
+      }));
     };
     try { renderInvites(await api('/group/' + slug + '/invites')); } catch (e) { manager.innerHTML = `<div class="form-error">${escHtml(e.message)}</div>`; }
   });
@@ -2997,14 +3000,18 @@ async function renderGroupDetail(app, slug) {
       showModal('Üye bilgileri', `<div class="group-member-detail">
         <div class="group-member-detail-head">${avatarImg(member, 'group-member-detail-avatar')}<div><strong>${escHtml(member.username)}</strong><small>${member.role === 'moderator' ? 'Moderatör' : 'Grup üyesi'}</small></div></div>
         <div class="group-member-joined"><i class="fas fa-calendar-check"></i><span>Katılım tarihi</span><b>${formatDate(member.joined_at)}</b></div>
-        ${canManage ? `<div class="group-member-actions"><button class="btn btn-outline member-mute-btn" data-id="${member.user_id}"><i class="fas fa-volume-xmark"></i> 1 saat sustur</button><button class="btn btn-outline member-kick-btn" data-id="${member.user_id}"><i class="fas fa-user-minus"></i> Gruptan at</button><button class="btn btn-danger member-ban-btn" data-id="${member.user_id}"><i class="fas fa-ban"></i> IP ile yasakla</button></div>` : ''}
+        ${canManage ? `<div class="group-member-actions"><button class="btn btn-outline member-mute-btn" data-id="${member.user_id}"><i class="fas fa-volume-xmark"></i> Susturma süresini ayarla</button><button class="btn btn-outline member-kick-btn" data-id="${member.user_id}"><i class="fas fa-user-minus"></i> Gruptan at</button><button class="btn btn-danger member-ban-btn" data-id="${member.user_id}"><i class="fas fa-ban"></i> IP ile yasakla</button></div>` : ''}
         <div id="member-action-error" class="form-error mt-4"></div>
       </div>`);
       const actionError = $('#member-action-error');
       const targetId = member.user_id;
       document.querySelector('.member-mute-btn')?.addEventListener('click', async () => {
-        try { await api(`/group/${slug}/mute/${targetId}`, { method: 'POST', body: JSON.stringify({ minutes: 60 }) }); hideModal(); toast(`${member.username} 1 saat susturuldu`); }
-        catch (error) { if (actionError) actionError.textContent = error.message; }
+        showModal(`${escHtml(member.username)} susturma süresi`, `<div class="form-group"><label>Ne kadar süre susturulsun?</label><select id="member-mute-duration"><option value="10">10 dakika</option><option value="30">30 dakika</option><option value="60" selected>1 saat</option><option value="180">3 saat</option><option value="1440">1 gün</option><option value="10080">7 gün</option></select></div><button class="btn btn-primary" id="member-mute-confirm" style="width:100%"><i class="fas fa-volume-xmark"></i> Sustur</button><div id="member-mute-error" class="form-error mt-4"></div>`);
+        $('#member-mute-confirm').addEventListener('click', async () => {
+          const minutes = Number($('#member-mute-duration').value);
+          try { await api(`/group/${slug}/mute/${targetId}`, { method: 'POST', body: JSON.stringify({ minutes }) }); hideModal(); toast(`${member.username} susturuldu`); }
+          catch (error) { $('#member-mute-error').textContent = error.message; }
+        });
       });
       document.querySelector('.member-kick-btn')?.addEventListener('click', async () => {
         if (!confirm(`${member.username} gruptan atılsın mı?`)) return;

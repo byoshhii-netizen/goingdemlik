@@ -235,7 +235,8 @@ async function createTwoFactorChallenge(user, purpose = 'login') {
   const method = user.two_factor_method || 'none';
   const code = method === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
   await query('DELETE FROM auth_challenges WHERE user_id=$1 OR expires_at <= NOW()', [user.id]);
-  await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, purpose, method, code ? hashChallengeValue(code) : '']);
+  const verificationHash = method === 'question' ? user.two_factor_answer_hash : (code ? hashChallengeValue(code) : '');
+  await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, purpose, method, verificationHash]);
   if (code) await sendEmailCode(user.email, user.username, code);
   return { challenge, method, question: method === 'question' ? user.two_factor_question : '', maskedEmail: method === 'email' ? maskEmail(user.email) : '' };
 }
@@ -1742,9 +1743,10 @@ app.get('/api/group/:slug/invites', authMiddleware, async (req, res) => {
   if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   if (groupRows[0].owner_id != req.user.id) return res.status(403).json({ error: 'Yalnızca kurucu davet geçmişini görebilir' });
   const { rows } = await query(`
-    SELECT gi.id, gi.invite_code, gi.max_uses, gi.use_count, gi.expires_at, gi.created_at,
+    SELECT gi.id, gi.invite_code, gi.max_uses, gi.use_count, gi.expires_at, gi.revoked_at, gi.created_at,
            u.username AS created_by_name,
            CASE
+             WHEN gi.revoked_at IS NOT NULL THEN 'revoked'
              WHEN gi.expires_at IS NOT NULL AND gi.expires_at <= NOW() THEN 'expired'
              WHEN gi.max_uses > 0 AND gi.use_count >= gi.max_uses THEN 'exhausted'
              ELSE 'active'
@@ -1757,6 +1759,16 @@ app.get('/api/group/:slug/invites', authMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.patch('/api/group/:slug/invites/:inviteId', authMiddleware, async (req, res) => {
+  const { rows: groupRows } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  if (groupRows[0].owner_id != req.user.id) return res.status(403).json({ error: 'Yalnızca kurucu davet kodlarını yönetebilir' });
+  const active = req.body.active === true || req.body.active === 'true';
+  const { rows } = await query('UPDATE group_invites SET revoked_at=$1 WHERE id=$2 AND group_id=$3 RETURNING id, revoked_at', [active ? null : new Date(), req.params.inviteId, groupRows[0].id]);
+  if (!rows.length) return res.status(404).json({ error: 'Davet kodu bulunamadı' });
+  res.json({ ok: true, active: !rows[0].revoked_at });
+});
+
 app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   const { invite_code } = req.body;
@@ -1764,6 +1776,7 @@ app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM group_invites WHERE invite_code=$1', [invite_code.toUpperCase()]);
   if (!rows.length) return res.status(404).json({ error: 'Geçersiz davet kodu' });
   const invite = rows[0];
+  if (invite.revoked_at) return res.status(410).json({ error: 'Davet kodu devre dışı bırakılmış' });
   if (invite.expires_at && new Date(invite.expires_at) <= new Date()) return res.status(410).json({ error: 'Davet kodunun süresi dolmuş' });
   if (invite.max_uses > 0 && invite.use_count >= invite.max_uses) return res.status(410).json({ error: 'Davet kodunun kullanım hakkı dolmuş' });
   const { rows: groupRows } = await query('SELECT id FROM groups WHERE id=$1', [invite.group_id]);

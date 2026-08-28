@@ -394,11 +394,13 @@ async function initDb() {
       max_uses INTEGER DEFAULT 0,
       use_count INTEGER DEFAULT 0,
       expires_at TIMESTAMP,
+      revoked_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 0;
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS use_count INTEGER DEFAULT 0;
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+    ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS photos (
