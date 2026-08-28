@@ -4974,7 +4974,8 @@ async function renderDMChat(username) {
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
     try {
-      const newMsgs = await api(`/conversation/${encodeURIComponent(username)}/messages?after_id=${lastPollMsgId}`);
+      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?after_id=${lastPollMsgId}`);
+      const newMsgs = conversationUpdate?.messages || [];
       if (!newMsgs || !newMsgs.length) return;
       const el = document.getElementById('dm-messages');
       if (!el) return;

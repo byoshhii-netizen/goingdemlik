@@ -2008,27 +2008,28 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 .dm-input-wrap {
   flex: 1; min-width: 0;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--accent-red);
-  border-radius: 22px;
-  display: flex; align-items: flex-end;
-  padding: 6px 12px;
-  transition: border-color 0.2s;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: flex; align-items: flex-end; gap: 8px;
+  padding: 0;
+  transition: none;
 }
-.dm-input-wrap:focus-within { border-color: var(--accent-red2); box-shadow: 0 0 0 1px var(--accent-red); }
+.dm-input-wrap:focus-within { border-color: transparent; box-shadow: none; }
 .dm-input-wrap textarea {
   flex: 1; background: transparent; border: none; resize: none;
   color: var(--text-primary); font-size: 14px; outline: none;
-  padding: 2px 0; line-height: 1.5; min-height: 0; height: 22px; max-height: 120px;
+  padding: 9px 13px; line-height: 1.35; min-height: 0; height: 40px; max-height: 120px;
+  border: 1px solid var(--border); border-radius: 20px; background: var(--bg-tertiary);
   overflow-y: auto; font-family: inherit;
 }
+.dm-input-wrap textarea:focus { border-color: var(--accent-red2); box-shadow: 0 0 0 1px var(--accent-red); }
 .dm-input-img-btn {
-  background: none; border: none; color: var(--text-muted);
-  font-size: 15px; padding: 0 6px 0 0; cursor: pointer;
-  align-self: flex-end; margin-bottom: 2px; transition: color 0.15s;
-  flex-shrink: 0;
+  width:40px; height:40px; display:flex; align-items:center; justify-content:center;
+  background:var(--bg-tertiary); border:1px solid var(--border); border-radius:50%; color:var(--text-muted);
+  font-size:15px; padding:0; cursor:pointer; align-self:flex-end; transition:color 0.15s,border-color .15s; flex-shrink:0;
 }
-.dm-input-img-btn:hover { color: var(--accent-red2); }
+.dm-input-img-btn:hover { color: var(--accent-red2); border-color:var(--accent-red2); }
 .dm-send-btn {
   width: 38px; height: 38px; border-radius: 50%;
   background: #b8b8b8; border: none; color: #262626;
@@ -2109,9 +2110,9 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-msg-content { max-width: 82%; }
   .dm-msg-bubble { font-size: 12px; padding: 4px 9px; line-height: 1.35; }
   .dm-input-bar { padding: 8px; gap: 6px; }
-  .dm-input-wrap { min-height: 40px; padding: 6px 9px; border-radius: 12px; align-items: center; }
-  .dm-input-wrap textarea { min-width: 0; width: 100%; min-height: 0; height: 20px; font-size: 13px; line-height: 1.35; max-height: 80px; }
-  .dm-input-img-btn { font-size: 13px; padding-right: 5px; }
+  .dm-input-wrap { min-height: 40px; padding: 0; border-radius: 0; align-items: flex-end; gap:6px; }
+  .dm-input-wrap textarea { min-width: 0; width: 100%; min-height: 0; height: 40px; padding:9px 11px; font-size: 13px; line-height: 1.35; max-height: 80px; }
+  .dm-input-img-btn { width:40px; height:40px; font-size:13px; padding:0; }
   .dm-send-btn { width: 40px; height: 40px; }
   .dm-messages { padding: 12px 10px 8px; }
   .dm-chat-header { padding: 9px 12px; min-height:52px; }
