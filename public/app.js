@@ -2752,7 +2752,7 @@ async function renderGroupDetail(app, slug) {
         input.value = '';
         resetAttachment();
         chatEl.scrollTop = chatEl.scrollHeight;
-        lastId = msg.id; // Çift mesaj önleme: poll bu mesajı tekrar eklemesin
+        lastId = Number(msg.id); // Çift mesaj önleme: poll bu mesajı tekrar eklemesin
       } catch (e) { toast(e.message, 'error'); }
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
@@ -2768,16 +2768,16 @@ async function renderGroupDetail(app, slug) {
       if (input) { input.placeholder = 'Fotoğrafın altına bir şey yaz...'; input.focus(); }
     });
 
-    let lastId = messages.length ? messages[messages.length - 1].id : 0;
+    let lastId = messages.length ? Number(messages[messages.length - 1].id) : 0;
     chatPollInterval = setInterval(async () => {
       if (!$('#chat-messages')) { clearInterval(chatPollInterval); return; }
       try {
         const newMsgs = await api('/group/' + slug + '/messages');
-        const newest = newMsgs.filter(m => m.id > lastId);
+        const newest = newMsgs.filter(m => Number(m.id) > lastId);
         if (newest.length) {
           newest.forEach(m => { $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(m, window._chatCanMod)); });
           enhanceLinkPreviews($('#chat-messages'));
-          lastId = newest[newest.length - 1].id;
+          lastId = Math.max(lastId, ...newest.map(m => Number(m.id)));
           const chatEl2 = $('#chat-messages');
           if (chatEl2) chatEl2.scrollTop = chatEl2.scrollHeight;
         }
@@ -4918,7 +4918,7 @@ async function renderDMChat(username) {
         enhanceLinkPreviews(el);
         el.scrollTop = el.scrollHeight;
       }
-      lastPollMsgId = msg.id;
+      lastPollMsgId = Number(msg.id);
     } catch (e) { toast(e.message, 'error'); }
     finally { if (sendBtn) sendBtn.disabled = false; }
   };
@@ -4929,7 +4929,7 @@ async function renderDMChat(username) {
   });
 
   // Msg menu button clicks
-  let lastPollMsgId = messages.length > 0 ? messages[messages.length - 1].id : 0;
+  let lastPollMsgId = messages.length > 0 ? Number(messages[messages.length - 1].id) : 0;
   document.getElementById('dm-messages')?.addEventListener('click', e => {
     const menuBtn = e.target.closest('.dm-msg-menu-btn');
     if (menuBtn) {
