@@ -5297,6 +5297,19 @@ app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar });
 });
 
+app.post('/api/video/:slug/comments/:commentId/like', authMiddleware, async (req, res) => {
+  const { rows: comments } = await query(`SELECT c.id FROM video_comments c JOIN videos v ON v.id=c.video_id
+    WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
+  if (!comments.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const { rows: existing } = await query('SELECT id FROM video_comment_likes WHERE comment_id=$1 AND user_id=$2', [comments[0].id, req.user.id]);
+  if (existing.length) {
+    await query('DELETE FROM video_comment_likes WHERE id=$1', [existing[0].id]);
+    return res.json({ liked: false });
+  }
+  await query('INSERT INTO video_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [comments[0].id, req.user.id]);
+  res.json({ liked: true });
+});
+
 app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
   const { rows } = await query(`SELECT c.id, c.user_id, v.user_id AS video_owner_id
     FROM video_comments c JOIN videos v ON v.id=c.video_id
@@ -5375,6 +5388,14 @@ initDb().then(() => {
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(comment_id, user_id)
   )`).then(() => {
+    return query(`CREATE TABLE IF NOT EXISTS video_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT NOT NULL REFERENCES video_comments(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(comment_id, user_id)
+    )`);
+  }).then(() => {
     app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
   });
 }).catch(err => {

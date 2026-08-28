@@ -632,6 +632,7 @@ async function renderRealsFeed(app) {
   async function openRealsComments(video) {
     const activeVideo = items[idx]?.querySelector('video');
     const wasPlaying = activeVideo && !activeVideo.paused;
+    const previousScrollTop = listEl.scrollTop;
     if (activeVideo) activeVideo.pause();
     const oldSheet = document.getElementById('reals-comments-sheet');
     oldSheet?.remove();
@@ -644,7 +645,12 @@ async function renderRealsFeed(app) {
       ${currentUser ? '<form class="reals-comment-form"><input type="text" maxlength="2000" placeholder="Yorum yaz..." autocomplete="off" /><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için giriş yapın.</div>'}
     </section>`;
     document.body.appendChild(sheet);
-    const close = () => { sheet.remove(); if (wasPlaying && location.pathname === '/reals') activeVideo?.play().catch(() => {}); };
+    const close = () => {
+      sheet.remove();
+      listEl.scrollTop = previousScrollTop;
+      requestAnimationFrame(() => { listEl.scrollTop = previousScrollTop; });
+      if (wasPlaying && location.pathname === '/reals') activeVideo?.play().catch(() => {});
+    };
     sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
     sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
     try {
@@ -688,7 +694,6 @@ async function renderRealsFeed(app) {
         list.scrollTop = list.scrollHeight;
       } catch (error) { toast(error.message, 'error'); } finally { button.disabled = false; }
     });
-    sheet.querySelector('input')?.focus();
   }
   function setRealsVideoSource(videoEl, src) {
     if (!src) {
@@ -6908,7 +6913,7 @@ function bindPhotoFeed(feed) {
 
   const renderComments = async (c, box) => {
     const cs = await api('/photos/' + c.dataset.photoId + '/comments');
-    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<div class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz"/><button class="btn btn-primary btn-sm photo-comment-send">Gönder</button></div>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
+    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p><div class="photo-comment-actions"><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button>${currentUser && (currentUser.id === v.user_id || currentUser.id === c.dataset.ownerId) ? `<button type="button" class="btn btn-ghost btn-sm photo-comment-delete" data-comment-id="${v.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<div class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz"/><button class="btn btn-primary btn-sm photo-comment-send">Gönder</button></div>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
     box.querySelector('.photo-comment-send')?.addEventListener('click', async () => {
       const input = box.querySelector('input');
       if (!input?.value.trim()) return;
@@ -6931,6 +6936,11 @@ function bindPhotoFeed(feed) {
         button.classList.toggle('liked', result.liked);
         button.querySelector('i').className = (result.liked ? 'fas' : 'far') + ' fa-heart';
       } catch (error) { toast(error.message || 'Yorum beğenilemedi', 'error'); }
+    }));
+    box.querySelectorAll('.photo-comment-delete').forEach(button => button.addEventListener('click', async event => {
+      event.preventDefault(); event.stopPropagation();
+      if (!confirm('Bu yorum silinsin mi?')) return;
+      try { await api('/photos/comments/' + button.dataset.commentId, { method: 'DELETE' }); await renderComments(c, box); } catch (error) { toast(error.message || 'Yorum silinemedi', 'error'); }
     }));
   };
 
@@ -7004,6 +7014,7 @@ function bindPhotoFeed(feed) {
       if (n) n.textContent = String(r.like_count ?? Math.max(0, Number(n.textContent) + (r.liked ? 1 : -1)));
       const icon = x.querySelector('i');
       if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
+      x.classList.toggle('liked', !!r.liked);
       if (r.liked) {
         const burst = document.createElement('span');
         burst.className = 'photo-like-burst';
@@ -7013,6 +7024,10 @@ function bindPhotoFeed(feed) {
       }
     } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
   });
+  feed.querySelectorAll('.photo-media-wrap').forEach(media => media.addEventListener('dblclick', event => {
+    if (!currentUser || event.target.closest('button,a')) return;
+    media.closest('[data-photo-id]')?.querySelector('.photo-like')?.click();
+  }));
 
   feed.querySelectorAll('.photo-song').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault(); event.stopPropagation();
