@@ -264,6 +264,7 @@ async function initDb() {
       slug TEXT UNIQUE,
       page_count INTEGER DEFAULT 0,
       is_hidden INTEGER DEFAULT 0,
+      password_hash TEXT DEFAULT '',
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -275,6 +276,14 @@ async function initDb() {
     ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_download INTEGER DEFAULT 1;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_pdf INTEGER DEFAULT 1;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS is_unnamed INTEGER DEFAULT 0;
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '';
+
+    CREATE TABLE IF NOT EXISTS book_access (
+      book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      granted_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY(book_id, user_id)
+    );
 
     CREATE TABLE IF NOT EXISTS book_chapters (
       id BIGSERIAL PRIMARY KEY,

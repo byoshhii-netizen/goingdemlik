@@ -1416,39 +1416,64 @@ app.get('/api/forum/:slug/tags', async (req, res) => {
 });
 
 // ===== BOOKS =====
+function sanitizeBook(book) {
+  if (!book) return null;
+  const { password_hash, ...safeBook } = book;
+  safeBook.has_password = Boolean(password_hash);
+  return safeBook;
+}
+
+async function canAccessBook(book, userId) {
+  if (!userId) return false;
+  if (book.user_id == userId) return true;
+  const { rows } = await query('SELECT 1 FROM book_access WHERE book_id=$1 AND user_id=$2', [book.id, userId]);
+  return rows.length > 0;
+}
+
 app.get('/api/books', optionalAuth, async (req, res) => {
-  const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) ORDER BY b.created_at DESC`);
-  const filtered = rows.filter(book => {
-    if (!book.is_hidden) return true;
-    if (req.user && (req.user.id === book.user_id || req.user.is_admin)) return true;
-    return false;
-  });
-  res.json(filtered);
+  const userId = Number(req.user?.id || 0);
+  const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color,
+    (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
+    FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) ORDER BY b.created_at DESC`);
+  res.json(rows.filter(book => !book.is_hidden || book.user_id == userId || book.has_book_access || req.user?.is_admin).map(sanitizeBook));
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  if (book.is_hidden && (!req.user || (req.user.id !== book.user_id && !req.user.is_admin))) {
+  const hasAccess = await canAccessBook(book, req.user?.id) || req.user?.is_admin;
+  if (book.password_hash && !hasAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true, book: sanitizeBook({ ...book, password_hash: undefined }) });
+  if (book.is_hidden && !hasAccess) {
     return res.status(403).json({ error: 'Bu kitap gizli' });
   }
   const { rows: chapters } = await query('SELECT * FROM book_chapters WHERE book_id=$1 ORDER BY order_num ASC', [book.id]);
   const { rows: pages } = await query('SELECT id,title,page_num,slug,chapter_id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
-  res.json({ book, chapters, pages });
+  res.json({ book: sanitizeBook(book), chapters, pages });
+});
+
+app.post('/api/book/:slug/unlock', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = rows[0];
+  if (!book.password_hash) return res.status(400).json({ error: 'Bu kitap şifreli değil' });
+  if (!verifyPassword(String(req.body.password || ''), book.password_hash)) return res.status(401).json({ error: 'Kitap şifresi yanlış' });
+  await query('INSERT INTO book_access (book_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [book.id, req.user.id]);
+  res.json({ ok: true });
 });
 
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
-    const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed } = req.body;
+    const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
     // İsimsiz seçildiyse başlık zorunlu değil, placeholder atanır
     const finalTitle = is_unnamed ? ('İsimsiz Kitap #' + Date.now().toString().slice(-6)) : title;
     if (!is_unnamed && !title) return res.status(400).json({ error: 'Başlık zorunlu' });
     // İsimsiz kitap her zaman gizli olur
     const finalHidden = is_unnamed ? 1 : (is_hidden ? 1 : 0);
     const tempSlug = slugify(finalTitle, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id',
-      [req.user.id, finalTitle, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0]);
+    if (book_password && String(book_password).length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
+    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
+      [req.user.id, finalTitle, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0, book_password ? hashPassword(book_password) : '']);
     const id = rows[0].id;
     const realSlug = makeSlug(title, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -1456,7 +1481,7 @@ app.post('/api/books', authMiddleware, async (req, res) => {
     await updateUserLevel(req.user.id);
     await logAction(req.user.username, 'create_book', realSlug);
     const { rows: bRows } = await query('SELECT * FROM books WHERE id=$1', [id]);
-    res.json(bRows[0]);
+    res.json(sanitizeBook(bRows[0]));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1465,13 +1490,16 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed } = req.body;
+  const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
   // Başlık güncellendiyse ve is_unnamed sıfırlanmadıysa, is_unnamed'i sıfırla
   const newIsUnnamed = is_unnamed !== undefined ? (is_unnamed ? 1 : 0) : book.is_unnamed;
-  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,updated_at=NOW() WHERE id=$8',
-    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, book.id]);
+  if (book_password && String(book_password).length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
+  const passwordHash = book_password ? hashPassword(book_password) : (book.password_hash || '');
+  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,password_hash=$8,updated_at=NOW() WHERE id=$9',
+    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, passwordHash, book.id]);
+  if (book_password) await query('DELETE FROM book_access WHERE book_id=$1 AND user_id<>$2', [book.id, req.user.id]);
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
-  res.json(rows[0]);
+  res.json(sanitizeBook(rows[0]));
 });
 
 app.delete('/api/book/:slug', authMiddleware, async (req, res) => {
@@ -1512,7 +1540,9 @@ app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  if (book.is_hidden && (!req.user || (req.user.id !== book.user_id && !req.user.is_admin))) {
+  const hasAccess = await canAccessBook(book, req.user?.id) || req.user?.is_admin;
+  if (book.password_hash && !hasAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true });
+  if (book.is_hidden && !hasAccess) {
     return res.status(403).json({ error: 'Bu kitap gizli' });
   }
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
@@ -1520,7 +1550,7 @@ app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   const page = pRows[0];
   const { rows: prev } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2', [book.id, page.page_num-1]);
   const { rows: next } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2', [book.id, page.page_num+1]);
-  res.json({ page, book, prev: prev[0]||null, next: next[0]||null });
+  res.json({ page, book: sanitizeBook(book), prev: prev[0]||null, next: next[0]||null });
 });
 
 app.put('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {
@@ -2044,7 +2074,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   }
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
-    query('SELECT * FROM books WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
+    query(`SELECT b.* FROM books b WHERE b.user_id=$1 AND (b.is_hidden=0 OR b.user_id=$2 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$2) OR $3=1) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0, req.user?.is_admin ? 1 : 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),

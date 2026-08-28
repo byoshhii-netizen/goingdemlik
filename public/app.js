@@ -82,7 +82,7 @@ async function api(path, options = {}) {
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
   const res = await fetch('/api' + path, { ...options, headers });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Hata');
+  if (!res.ok) { const error = new Error(data.error || 'Hata'); error.data = data; throw error; }
   return data;
 }
 
@@ -1732,7 +1732,7 @@ function bookCardHTML(b) {
   return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
-      ${b.is_hidden ? '<div style="position:absolute;top:8px;right:8px;background:#6b6b6b;color:var(--accent-red2);width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px"><i class="fas fa-lock"></i></div>' : ''}
+      ${(b.is_hidden || b.has_password) ? `<div style="position:absolute;top:8px;right:8px;background:${b.is_hidden ? '#7c3aed' : 'rgba(168,85,247,.18)'};color:${b.is_hidden ? '#fff' : '#c084fc'};width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;border:1px solid rgba(192,132,252,.45)" title="${b.is_hidden ? 'Gizli kitap' : 'Şifreli kitap'}"><i class="fas fa-${b.has_password ? 'key' : 'lock'}"></i></div>` : ''}
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
@@ -1771,7 +1771,7 @@ function showNewBookModal(existing = null) {
       <input type="file" id="bk-cover-file" accept="image/*" style="margin-bottom:8px" />
       ${existing && existing.cover_image ? `<img id="bk-cover-preview" src="${escHtml(existing.cover_image)}" style="width:100px;height:133px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="bk-cover-preview" style="display:none"></div>`}
     </div>
-    <div id="bk-hidden-wrap" class="book-privacy-toggle" style="margin-bottom:12px">
+    <div id="bk-hidden-wrap" class="book-privacy-toggle" style="margin-bottom:12px;background:rgba(124,58,237,.12);border-color:rgba(168,85,247,.42)">
       <div class="toggle-header">
         <i class="fas fa-lock" style="color:var(--accent-red2);font-size:16px"></i>
         <div class="toggle-label">
@@ -1783,6 +1783,11 @@ function showNewBookModal(existing = null) {
         <input type="checkbox" id="bk-is-hidden" ${existing && existing.is_hidden ? 'checked' : ''} />
         <span class="toggle-slider"></span>
       </label>
+    </div>
+    <div class="form-group book-password-field">
+      <label><i class="fas fa-key" style="color:#a855f7"></i> Kitap şifresi</label>
+      <input id="bk-password" type="password" autocomplete="new-password" placeholder="${existing ? 'Değiştirmek istemiyorsan boş bırak' : 'İsteğe bağlı kitap şifresi'}" />
+      <div class="form-hint">Şifreli kitaplar yalnızca sahibi ve şifreyi giren kişilere görünür.</div>
     </div>
     <div class="book-privacy-toggle">
       <div class="toggle-header">
@@ -1868,6 +1873,8 @@ function showNewBookModal(existing = null) {
         allow_download: $('#bk-allow-download').checked,
         is_unnamed: noName ? true : false
       };
+      const bookPassword = $('#bk-password').value;
+      if (bookPassword) payload.book_password = bookPassword;
       if (existing) {
         // İsimsiz bir kitaba isim ekliyorsa is_unnamed=false, is_hidden'i kullanıcı seçimine bırak
         if (existing.is_unnamed && title) {
@@ -1914,7 +1921,15 @@ function _showUnnamedPulse() {
 async function renderBookDetail(app, slug) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
-  try { data = await api('/book/' + slug); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Kitap bulunamadı.</p></div></div>'; return; }
+  try { data = await api('/book/' + slug); } catch (error) {
+    if (error.data?.password_required && currentUser) {
+      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><h2>Bu kitap şifreli</h2><p>Kitaba erişmek için sahibinin belirlediği şifreyi girin.</p><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-key"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+      $('#book-unlock-btn').addEventListener('click', async () => { try { await api('/book/' + slug + '/unlock', { method: 'POST', body: JSON.stringify({ password: $('#book-unlock-password').value }) }); renderBookDetail(app, slug); } catch (unlockError) { $('#book-unlock-error').textContent = unlockError.message; } });
+      $('#book-unlock-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('#book-unlock-btn').click(); });
+      return;
+    }
+    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Kitap bulunamadı veya gizli.</p></div></div>'; return;
+  }
 
   const { book, chapters, pages } = data;
   document.title = book.title + ' – ' + siteName;
@@ -2295,7 +2310,15 @@ function showAddChapterModal(bookSlug) {
 async function renderPageReader(app, bookSlug, pageSlug) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
-  try { data = await api(`/book/${bookSlug}/page/${pageSlug}`); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Sayfa bulunamadı.</p></div></div>'; return; }
+  try { data = await api(`/book/${bookSlug}/page/${pageSlug}`); } catch (error) {
+    if (error.data?.password_required && currentUser) {
+      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><h2>Bu kitap şifreli</h2><p>Sayfaya erişmek için kitap şifresini girin.</p><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-key"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+      $('#book-unlock-btn').addEventListener('click', async () => { try { await api('/book/' + bookSlug + '/unlock', { method: 'POST', body: JSON.stringify({ password: $('#book-unlock-password').value }) }); renderPageReader(app, bookSlug, pageSlug); } catch (unlockError) { $('#book-unlock-error').textContent = unlockError.message; } });
+      $('#book-unlock-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('#book-unlock-btn').click(); });
+      return;
+    }
+    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Sayfa bulunamadı veya gizli.</p></div></div>'; return;
+  }
 
   const { page, book, prev, next } = data;
   document.title = page.title + ' - ' + book.title;
