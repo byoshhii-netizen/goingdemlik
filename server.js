@@ -1900,6 +1900,24 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   res.json(rows.reverse()); // en eskiden yeniye
 });
 
+app.get('/api/groups/unread-count', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT COALESCE(SUM(unread_count),0)::int AS count FROM (
+    SELECT COUNT(gm.id) FILTER (WHERE gm.user_id <> $1)::int AS unread_count
+    FROM group_members member JOIN group_messages gm ON gm.group_id=member.group_id
+    WHERE member.user_id=$1 AND gm.id > COALESCE(member.last_read_message_id,0)
+    GROUP BY member.group_id
+  ) unread`, [req.user.id]);
+  res.json({ count: rows[0]?.count || 0 });
+});
+
+app.post('/api/group/:slug/mark-read', authMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const { rows: latest } = await query('SELECT COALESCE(MAX(id),0) AS id FROM group_messages WHERE group_id=$1', [groups[0].id]);
+  await query('UPDATE group_members SET last_read_message_id=$1 WHERE group_id=$2 AND user_id=$3', [latest[0].id, groups[0].id, req.user.id]);
+  res.json({ ok: true, last_read_message_id: latest[0].id });
+});
+
 app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });

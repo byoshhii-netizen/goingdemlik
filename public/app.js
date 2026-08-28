@@ -975,7 +975,13 @@ async function loadNotifCount() {
     else { badge.style.display = 'none'; if (mobileBadge) mobileBadge.style.display = 'none'; }
     const friends = await api('/friends').catch(() => []);
     const pendingCount = friends.filter(friend => friend.status === 'pending' && String(friend.addressee_id) === String(currentUser.id)).length;
-    ['#nav-friends-badge', '#mobile-friends-badge', '#mob-friends-badge', '#dm-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) dot.style.display = pendingCount ? 'inline-block' : 'none'; });
+    ['#nav-friends-badge', '#mobile-friends-badge', '#mob-friends-badge', '#dm-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) { dot.style.display = pendingCount ? 'inline-flex' : 'none'; dot.textContent = pendingCount > 99 ? '99+' : pendingCount; } });
+    const groupBadge = $('#dm-groups-badge');
+    if (groupBadge) {
+      const groupUnread = await api('/groups/unread-count').catch(() => ({ count: 0 }));
+      groupBadge.style.display = groupUnread.count ? 'inline-flex' : 'none';
+      groupBadge.textContent = groupUnread.count > 99 ? '99+' : groupUnread.count;
+    }
   } catch {}
 }
 setInterval(pollIncomingVoiceCall, 2500);
@@ -2826,6 +2832,7 @@ async function renderGroupDetail(app, slug) {
   enhanceLinkPreviews(app);
 
   const chatEl = $('#chat-messages');
+  api('/group/' + slug + '/mark-read', { method: 'POST' }).then(() => loadNotifCount()).catch(() => {});
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
   const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', message.edited_at || '', message.deleted_for_me ? 1 : 0].join(':')).join('|');
 
@@ -4953,7 +4960,7 @@ async function renderMessages(app, targetUsername) {
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
         <div class="dm-header-links">
-          <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button"><i class="fas fa-users"></i> Gruplar</button>
+          <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button"><i class="fas fa-users"></i> Gruplar<span id="dm-groups-badge" class="group-unread-badge"></span></button>
           <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button"><i class="fas fa-user-friends"></i> Arkadaşlar<span id="dm-friends-badge" class="friend-request-dot"></span></button>
         </div>
         <div class="dm-sidebar-actions">

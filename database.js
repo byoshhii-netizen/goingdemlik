@@ -335,6 +335,7 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     ALTER TABLE group_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
+    ALTER TABLE group_members ADD COLUMN IF NOT EXISTS last_read_message_id BIGINT DEFAULT 0;
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
     UPDATE groups SET visibility=CASE WHEN type='private' THEN 'private' WHEN invite_only=1 THEN 'invite' ELSE 'public' END WHERE visibility IS NULL OR visibility='';
 
