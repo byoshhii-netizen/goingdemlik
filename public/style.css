@@ -677,6 +677,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .reals-comments-empty i { display:block; margin-bottom:8px; font-size:28px; color:var(--text-secondary); }
 .reals-comments-empty p { margin:0 0 4px; color:var(--text-primary); }
 .reals-comments-empty span { font-size:12px; }
+.photo-sheet-comment { display:block !important; }
+.photo-sheet-comment-actions { display:flex; align-items:center; gap:4px; margin-top:7px; }
+.photo-sheet-like { color:var(--text-muted); }
+.photo-sheet-like.liked { color:#f72585 !important; text-shadow:0 0 10px rgba(247,37,133,.45); }
 @keyframes realsCommentsFade { from { opacity:0; } to { opacity:1; } }
 @keyframes realsCommentsUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
 @media (max-width:560px) { .reals-comments-panel { max-height:82vh; border-radius:18px 18px 0 0; } .reals-comments-list { padding:12px; } }
