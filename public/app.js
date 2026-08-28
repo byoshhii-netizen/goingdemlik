@@ -624,6 +624,61 @@ async function renderRealsFeed(app) {
   let watchedIds = new Set();
   let idx = 0;
   let items = [];
+  async function openRealsComments(video) {
+    const activeVideo = items[idx]?.querySelector('video');
+    const wasPlaying = activeVideo && !activeVideo.paused;
+    if (activeVideo) activeVideo.pause();
+    const oldSheet = document.getElementById('reals-comments-sheet');
+    oldSheet?.remove();
+    const sheet = document.createElement('div');
+    sheet.id = 'reals-comments-sheet';
+    sheet.className = 'reals-comments-sheet';
+    sheet.innerHTML = `<div class="reals-comments-backdrop"></div><section class="reals-comments-panel" role="dialog" aria-modal="true" aria-label="Yorumlar">
+      <header class="reals-comments-header"><strong>Yorumlar</strong><button type="button" class="reals-comments-close" aria-label="Yorumları kapat"><i class="fas fa-times"></i></button></header>
+      <div class="reals-comments-list"><div class="loading-center"><div class="spinner"></div></div></div>
+      ${currentUser ? '<form class="reals-comment-form"><input type="text" maxlength="2000" placeholder="Yorum yaz..." autocomplete="off" /><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için giriş yapın.</div>'}
+    </section>`;
+    document.body.appendChild(sheet);
+    const close = () => { sheet.remove(); if (wasPlaying && location.pathname === '/reals') activeVideo?.play().catch(() => {}); };
+    sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
+    sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
+    try {
+      const comments = await api('/video/' + encodeURIComponent(video.id) + '/comments');
+      const list = sheet.querySelector('.reals-comments-list');
+      if (!list || !document.body.contains(sheet)) return;
+      list.innerHTML = comments.length ? comments.map(comment => renderVideoComment(comment, currentUser?.id === video.user_id)).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
+      list.addEventListener('click', async event => {
+        const likeButton = event.target.closest('.video-comment-like');
+        if (!likeButton) return;
+        try {
+          likeButton.disabled = true;
+          const result = await api('/video/' + encodeURIComponent(video.id) + '/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
+          const count = likeButton.querySelector('.video-comment-count');
+          count.textContent = Math.max(0, (parseInt(count.textContent) || 0) + (result.liked ? 1 : -1));
+          likeButton.classList.toggle('liked', result.liked);
+        } catch (error) { toast(error.message, 'error'); } finally { likeButton.disabled = false; }
+      });
+    } catch (error) {
+      sheet.querySelector('.reals-comments-list').innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message)}</p></div>`;
+    }
+    sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = event.currentTarget.querySelector('input');
+      const content = input.value.trim();
+      if (!content) return;
+      const button = event.currentTarget.querySelector('button');
+      button.disabled = true;
+      try {
+        const comment = await api('/video/' + encodeURIComponent(video.id) + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        const list = sheet.querySelector('.reals-comments-list');
+        list.querySelector('.reals-comments-empty')?.remove();
+        list.insertAdjacentHTML('beforeend', renderVideoComment(comment, currentUser?.id === video.user_id));
+        input.value = '';
+        list.scrollTop = list.scrollHeight;
+      } catch (error) { toast(error.message, 'error'); } finally { button.disabled = false; }
+    });
+    sheet.querySelector('input')?.focus();
+  }
   function setRealsVideoSource(videoEl, src) {
     if (!src) {
       videoEl.removeAttribute('src');
@@ -696,7 +751,11 @@ async function renderRealsFeed(app) {
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; const result = await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked); btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart'; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
     }));
-    listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/reals/' + encodeURIComponent(btn.closest('.reals-item').dataset.id)); }));
+    listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const video = orderedReals.find(item => String(item.id) === btn.closest('.reals-item').dataset.id);
+      if (video) openRealsComments(video);
+    }));
     listEl.querySelectorAll('.save-btn').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation(); const slug = btn.closest('.reals-item').dataset.slug;
       try { const result = await api(`/video/${slug}/save`, { method: 'POST' }); btn.classList.toggle('active', result.saved); btn.querySelector('i').className = result.saved ? 'fas fa-bookmark' : 'far fa-bookmark'; } catch (error) { toast(error.message, 'error'); }
