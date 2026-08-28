@@ -1599,11 +1599,18 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   let sql, params;
   if (before_id) {
     sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
-    params = [group.id, before_id, limit];
+    sql = sql.replace(' ORDER BY gm.created_at DESC LIMIT $3', '');
+    params = [group.id, before_id];
   } else {
-    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.created_at DESC LIMIT $2`;
-    params = [group.id, limit];
+    sql = `SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1`;
+    params = [group.id];
   }
+  if (req.user) {
+    sql += ` AND NOT EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=$${params.length + 1})`;
+    params.push(req.user.id);
+  }
+  sql += ` ORDER BY gm.created_at DESC LIMIT $${params.length + 1}`;
+  params.push(limit);
   const { rows } = await query(sql, params);
   res.json(rows.reverse()); // en eskiden yeniye
 });
@@ -1613,8 +1620,9 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
   if (!group.allow_chat) return res.status(403).json({ error: 'Sohbet kapalı' });
-  const { rows: m } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const { rows: m } = await query('SELECT id, muted_until FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!m.length) return res.status(403).json({ error: 'Üye değilsiniz' });
+  if (m[0].muted_until && new Date(m[0].muted_until) > new Date()) return res.status(403).json({ error: 'Bu grupta geçici olarak susturuldunuz' });
   const { content, image_url } = req.body;
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
@@ -1631,15 +1639,13 @@ app.delete('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => 
   if (!msgRows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
   const msg = msgRows[0];
   const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
-  const { rows: perm } = await query('SELECT * FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
-  const isMod = member[0]?.role === 'moderator' || member[0]?.role === 'owner';
-  // Kendi mesajı, grup sahibi veya moderatör (yetki kaydı yoksa da moderatöre izin ver)
-  const canDelete = msg.user_id == req.user.id
-    || group.owner_id == req.user.id
-    || isMod;
-  if (!canDelete) return res.status(403).json({ error: 'Yetki yok' });
-  await query('DELETE FROM group_messages WHERE id=$1', [msg.id]);
-  res.json({ ok: true });
+  if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
+  if (msg.user_id == req.user.id) {
+    await query('DELETE FROM group_messages WHERE id=$1', [msg.id]);
+    return res.json({ ok: true, scope: 'everyone' });
+  }
+  await query('INSERT INTO group_message_deletions (message_id,user_id) VALUES ($1,$2) ON CONFLICT (message_id,user_id) DO NOTHING', [msg.id, req.user.id]);
+  res.json({ ok: true, scope: 'me' });
 });
 
 app.post('/api/group/:slug/moderator/:userId', authMiddleware, async (req, res) => {
@@ -1685,9 +1691,43 @@ app.post('/api/group/:slug/ban/:userId', authMiddleware, async (req, res) => {
   const canBan = group.owner_id==req.user.id || (member[0]?.role==='moderator' && perm[0]?.can_ban_members);
   if (!canBan) return res.status(403).json({ error: 'Yetki yok' });
   const userId = parseInt(req.params.userId);
+  if (userId === req.user.id) return res.status(400).json({ error: 'Kendinizi yasaklayamazsınız' });
+  const { rows: target } = await query('SELECT ip FROM users WHERE id=$1', [userId]);
+  if (!target.length || !target[0].ip) return res.status(400).json({ error: 'Bu kullanıcının kayıtlı IP adresi bulunamadı' });
   await query('DELETE FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, userId]);
   await query('UPDATE groups SET member_count=GREATEST(0,member_count-1) WHERE id=$1', [group.id]);
+  await query("UPDATE users SET banned=1, ban_type='ip', banned_ip=$1 WHERE id=$2", [target[0].ip, userId]);
   res.json({ ok: true });
+});
+
+app.post('/api/group/:slug/kick/:userId', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const { rows: perm } = await query('SELECT * FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const canKick = group.owner_id == req.user.id || (member[0]?.role === 'moderator' && perm[0]?.can_ban_members);
+  if (!canKick) return res.status(403).json({ error: 'Yetki yok' });
+  const userId = parseInt(req.params.userId);
+  if (userId === req.user.id || userId === group.owner_id) return res.status(400).json({ error: 'Bu üyeyi gruptan atamazsınız' });
+  const result = await query('DELETE FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, userId]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Üye bulunamadı' });
+  await query('UPDATE groups SET member_count=GREATEST(0,member_count-1) WHERE id=$1', [group.id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/group/:slug/mute/:userId', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  const { rows: owner } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  if (group.owner_id != req.user.id && owner[0]?.role !== 'moderator') return res.status(403).json({ error: 'Yetki yok' });
+  const userId = parseInt(req.params.userId);
+  const minutes = Math.min(10080, Math.max(1, parseInt(req.body.minutes) || 60));
+  const { rows: target } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, userId]);
+  if (!target.length) return res.status(404).json({ error: 'Üye bulunamadı' });
+  await query("UPDATE group_members SET muted_until=NOW() + ($1 * INTERVAL '1 minute') WHERE group_id=$2 AND user_id=$3", [minutes, group.id, userId]);
+  res.json({ ok: true, minutes });
 });
 
 app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), async (req, res) => {

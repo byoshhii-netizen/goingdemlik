@@ -295,11 +295,13 @@ async function initDb() {
       group_id BIGINT,
       user_id BIGINT,
       role TEXT DEFAULT 'member',
+      muted_until TIMESTAMP,
       joined_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(group_id, user_id),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    ALTER TABLE group_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS group_join_requests (
       id BIGSERIAL PRIMARY KEY,
@@ -336,6 +338,16 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS group_message_deletions (
+      id BIGSERIAL PRIMARY KEY,
+      message_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      deleted_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(message_id, user_id),
+      FOREIGN KEY(message_id) REFERENCES group_messages(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS group_invites (
