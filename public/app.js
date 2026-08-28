@@ -2714,6 +2714,7 @@ async function renderGroupDetail(app, slug) {
 
   const chatEl = $('#chat-messages');
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
+  const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', message.edited_at || '', message.deleted_for_me ? 1 : 0].join(':')).join('|');
 
   // Önceki mesajları yükle
   let oldestMsgId = messages.length > 0 ? messages[0].id : null;
@@ -2775,6 +2776,8 @@ async function renderGroupDetail(app, slug) {
         const msg = await api('/group/' + slug + '/messages', { method: 'POST', body: JSON.stringify({ content, image_url }) });
         $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod));
         enhanceLinkPreviews(chatEl);
+        messages.push(msg);
+        lastChatSignature = chatSignature(messages);
         input.value = '';
         resetAttachment();
         chatEl.scrollTop = chatEl.scrollHeight;
@@ -2795,16 +2798,18 @@ async function renderGroupDetail(app, slug) {
     });
 
     let lastId = messages.length ? Number(messages[messages.length - 1].id) : 0;
+    let lastChatSignature = chatSignature(messages);
     chatPollInterval = setInterval(async () => {
       if (!$('#chat-messages')) { clearInterval(chatPollInterval); return; }
       try {
         const newMsgs = await api('/group/' + slug + '/messages');
         const newest = newMsgs.filter(m => Number(m.id) > lastId);
         const chatEl2 = $('#chat-messages');
-        if (chatEl2 && newMsgs.length) {
+        if (chatEl2 && newMsgs.length && chatSignature(newMsgs) !== lastChatSignature) {
           const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
           chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod)).join('');
           enhanceLinkPreviews(chatEl2);
+          lastChatSignature = chatSignature(newMsgs);
           lastId = Math.max(lastId, ...newMsgs.map(m => Number(m.id)));
           if (wasBottom || newest.length) chatEl2.scrollTop = chatEl2.scrollHeight;
         }
