@@ -4044,6 +4044,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   if (isHidden) return res.json({ conv, other, messages: [], isHidden: true, hasPassword: !!hiddenPass });
   const requestedLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 100);
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
+  const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const { rows: msgs } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
@@ -4063,11 +4064,14 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
+      AND m.id>$6
       AND ($2=1 OR m.deleted_by_sender=0 OR m.sender_id!=$3)
       AND ($2=1 OR m.deleted_by_receiver=0 OR m.sender_id=$3)
     ORDER BY m.created_at ASC
     LIMIT $4 OFFSET $5
-  `, [conv.id, 0, uid, requestedLimit, offset]);
+  `, [conv.id, 0, uid, requestedLimit, offset, afterId]);
+
+  if (afterId) return res.json(msgs);
 
   // Konuşma açılınca read_until güncelle (son mesaj ID'si)
   if (msgs.length) {
