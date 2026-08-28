@@ -1737,6 +1737,26 @@ app.post('/api/group/:slug/invite', authMiddleware, async (req, res) => {
   res.json({ invite_code: code, max_uses: maxUses, expires_at: expiresAt });
 });
 
+app.get('/api/group/:slug/invites', authMiddleware, async (req, res) => {
+  const { rows: groupRows } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  if (groupRows[0].owner_id != req.user.id) return res.status(403).json({ error: 'Yalnızca kurucu davet geçmişini görebilir' });
+  const { rows } = await query(`
+    SELECT gi.id, gi.invite_code, gi.max_uses, gi.use_count, gi.expires_at, gi.created_at,
+           u.username AS created_by_name,
+           CASE
+             WHEN gi.expires_at IS NOT NULL AND gi.expires_at <= NOW() THEN 'expired'
+             WHEN gi.max_uses > 0 AND gi.use_count >= gi.max_uses THEN 'exhausted'
+             ELSE 'active'
+           END AS status
+    FROM group_invites gi
+    LEFT JOIN users u ON u.id=gi.created_by
+    WHERE gi.group_id=$1
+    ORDER BY gi.created_at DESC
+  `, [groupRows[0].id]);
+  res.json(rows);
+});
+
 app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   const { invite_code } = req.body;

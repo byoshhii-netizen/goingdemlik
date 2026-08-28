@@ -2673,7 +2673,7 @@ async function renderGroupDetail(app, slug) {
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
-            ${(visibility !== 'public' && (isOwner || isMod)) ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}` : ''}
+            ${(visibility !== 'public') ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-history"></i> Davet Kodları</button>` : ''}` : ''}
         </div>
       </div>
     </div>
@@ -2856,15 +2856,32 @@ async function renderGroupDetail(app, slug) {
   });
 
   $('#gen-invite-btn')?.addEventListener('click', async () => {
-    showModal('Davet Kodu Oluştur', `<div class="form-group"><label>Kaç kişi kullanabilsin?</label><input id="invite-max-uses" type="number" min="0" max="100000" value="0" /><div class="form-hint">0 sınırsız demektir.</div></div><div class="form-group"><label>Kod kaç saat geçerli olsun?</label><input id="invite-expires-hours" type="number" min="0" max="8760" value="0" /><div class="form-hint">0 süresiz demektir.</div></div><button class="btn btn-primary" id="create-invite-btn" style="width:100%"><i class="fas fa-key"></i> Kodu oluştur</button><div id="invite-create-error" class="form-error mt-4"></div>`);
-    $('#create-invite-btn').addEventListener('click', async () => { try {
-      const r = await api('/group/' + slug + '/invite', { method: 'POST', body: JSON.stringify({ max_uses: $('#invite-max-uses').value, expires_hours: $('#invite-expires-hours').value }) });
-      showModal('Davet Kodu', `<div style="text-align:center;padding:20px">
-        <div style="font-size:32px;font-weight:900;letter-spacing:6px;color:var(--accent-red2);background:var(--bg-card2);padding:16px;border-radius:8px;margin-bottom:16px">${r.invite_code}</div>
-        <div style="color:var(--text-muted);font-size:12px;margin-bottom:16px">${r.max_uses ? `${r.max_uses} kişi kullanabilir` : 'Sınırsız kullanım'} · ${r.expires_at ? formatDate(r.expires_at) + ' tarihinde sona erer' : 'Süresiz'}</div>
-        <button class="btn btn-primary" onclick="navigator.clipboard && navigator.clipboard.writeText('${r.invite_code}'); toast('Kopyalandı!')">Kopyala</button>
-      </div>`);
-    } catch (e) { $('#invite-create-error').textContent = e.message; } });
+    showModal('Davet Kodları', `<div id="invite-manager"><div class="loading-center"><div class="spinner"></div></div></div>`);
+    const manager = $('#invite-manager');
+    const renderInvites = invites => {
+      const statusText = { active: 'Aktif', expired: 'Süresi doldu', exhausted: 'Kullanım bitti' };
+      const statusColor = { active: 'var(--success, #4ade80)', expired: 'var(--text-muted)', exhausted: 'var(--accent-red2)' };
+      manager.innerHTML = `<div class="invite-create-panel">
+        <div class="form-group"><label>Kaç kişi kullanabilsin?</label><input id="invite-max-uses" type="number" min="0" max="100000" value="0" /><div class="form-hint">0 sınırsız demektir.</div></div>
+        <div class="form-group"><label>Kod kaç saat geçerli olsun?</label><input id="invite-expires-hours" type="number" min="0" max="8760" value="0" /><div class="form-hint">0 süresiz demektir.</div></div>
+        <button class="btn btn-primary" id="create-invite-btn" style="width:100%"><i class="fas fa-plus"></i> Yeni kod oluştur</button><div id="invite-create-error" class="form-error mt-4"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px"><strong>Kod geçmişi</strong><span style="font-size:12px;color:var(--text-muted)">${invites.length} kod</span></div>
+      <div class="invite-history">${invites.length ? invites.map(invite => `<div class="invite-history-row">
+        <div style="min-width:0;flex:1"><code style="font-size:16px;letter-spacing:2px">${escHtml(invite.invite_code)}</code><div style="font-size:11px;color:var(--text-muted);margin-top:5px">${formatDate(invite.created_at)} · ${invite.max_uses ? `${invite.use_count}/${invite.max_uses} kullanım` : `${invite.use_count} kullanım · sınırsız`} ${invite.expires_at ? `· bitiş: ${formatDate(invite.expires_at)}` : '· süresiz'}</div></div>
+        <div style="text-align:right;flex-shrink:0"><div style="color:${statusColor[invite.status]};font-size:12px;font-weight:700">${statusText[invite.status]}</div><button class="btn btn-ghost btn-sm copy-invite-btn" data-code="${escHtml(invite.invite_code)}" title="Kodu kopyala"><i class="fas fa-copy"></i></button></div>
+      </div>`).join('') : '<div class="empty-state"><i class="fas fa-key"></i><p>Henüz davet kodu oluşturulmamış.</p></div>'}</div>`;
+      $('#create-invite-btn').addEventListener('click', async () => { try {
+        const r = await api('/group/' + slug + '/invite', { method: 'POST', body: JSON.stringify({ max_uses: $('#invite-max-uses').value, expires_hours: $('#invite-expires-hours').value }) });
+        toast('Davet kodu oluşturuldu');
+        const updated = await api('/group/' + slug + '/invites');
+        renderInvites(updated);
+        const created = updated.find(item => item.invite_code === r.invite_code);
+        if (created) toast('Yeni kod: ' + created.invite_code);
+      } catch (e) { $('#invite-create-error').textContent = e.message; } });
+      manager.querySelectorAll('.copy-invite-btn').forEach(button => button.addEventListener('click', () => { navigator.clipboard?.writeText(button.dataset.code); toast('Kopyalandı!'); }));
+    };
+    try { renderInvites(await api('/group/' + slug + '/invites')); } catch (e) { manager.innerHTML = `<div class="form-error">${escHtml(e.message)}</div>`; }
   });
 
   $('#group-settings-btn')?.addEventListener('click', () => {
