@@ -154,20 +154,34 @@ async function requestMicrophoneThenCall(username, other) {
     showModal('Mikrofon erişimi kullanılamıyor', `<div class="call-permission-guide"><div class="call-permission-guide-icon"><i class="fas fa-lock"></i></div><p>Mikrofon izni yalnızca güvenli bağlantıda çalışır.</p><ol><li>CigCig’i <strong>HTTPS</strong> veya <strong>localhost</strong> üzerinden açın.</li><li>Adres çubuğundaki kilitten Mikrofon için <strong>İzin ver</strong> seçin.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol></div>`);
     return;
   }
-  let permissionState = 'unknown';
-  try { permissionState = (await navigator.permissions.query({ name: 'microphone' })).state; } catch {}
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    await startVoiceCall(username, other, stream);
-  } catch (error) {
-    const reason = error.name === 'NotAllowedError' || permissionState === 'denied'
-      ? 'Tarayıcı mikrofon iznini engelliyor. Kilit simgesinden Mikrofon ayarını İzin ver yapın.'
-      : error.name === 'NotReadableError'
-        ? 'Mikrofon başka bir uygulama tarafından kullanılıyor. Diğer uygulamayı kapatıp tekrar deneyin.'
-        : `Mikrofon başlatılamadı (${error.name || 'bilinmeyen hata'}).`;
-    if (error.name === 'NotAllowedError' || permissionState === 'denied') showMicrophonePermissionGuide(username, other, reason);
-    toast(reason, 'error');
+  const startAfterPermission = async () => {
+    let permissionState = 'unknown';
+    try { permissionState = (await navigator.permissions.query({ name: 'microphone' })).state; } catch {}
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      await startVoiceCall(username, other, stream);
+    } catch (error) {
+      const reason = error.name === 'NotAllowedError' || permissionState === 'denied'
+        ? 'Tarayıcı mikrofon iznini engelliyor. Kilit simgesinden Mikrofon ayarını İzin ver yapın.'
+        : error.name === 'NotReadableError'
+          ? 'Mikrofon başka bir uygulama tarafından kullanılıyor. Diğer uygulamayı kapatıp tekrar deneyin.'
+          : `Mikrofon başlatılamadı (${error.name || 'bilinmeyen hata'}).`;
+      if (error.name === 'NotAllowedError' || permissionState === 'denied') showMicrophonePermissionGuide(username, other, reason);
+      toast(reason, 'error');
+    }
+  };
+  if (localStorage.getItem('cigcig_microphone_consent') !== '1') {
+    showModal('Mikrofon izni', `<div class="call-permission-guide"><div class="call-permission-guide-icon"><i class="fas fa-microphone"></i></div><p>Sesli arama için mikrofon izni verilsin mi?</p><div style="display:flex;gap:8px"><button class="btn btn-outline" id="microphone-consent-no" style="flex:1">Hayır</button><button class="btn btn-primary" id="microphone-consent-yes" style="flex:1"><i class="fas fa-check"></i> Evet, izin ver</button></div></div>`);
+    document.getElementById('microphone-consent-no')?.addEventListener('click', hideModal);
+    document.getElementById('microphone-consent-yes')?.addEventListener('click', async event => {
+      event.currentTarget.disabled = true;
+      localStorage.setItem('cigcig_microphone_consent', '1');
+      hideModal();
+      await startAfterPermission();
+    });
+    return;
   }
+  await startAfterPermission();
 }
 
 function showMicrophonePermissionGuide(username, other, message = 'Arama yapabilmek için mikrofon izni gerekiyor.') {
@@ -367,7 +381,8 @@ function renderContent(text) {
     const trailing = match.match(/[.,!?;:)]+$/)?.[0] || '';
     const url = trailing ? match.slice(0, -trailing.length) : match;
     const placeholder = `__CIGCIG_LINK_${links.length}__`;
-    links.push({ placeholder, url, href: normalizeExternalUrl(url) });
+    const href = normalizeExternalUrl(url);
+    links.push({ placeholder, url, href, isImage: /\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$/i.test(url) });
     return placeholder + trailing;
   });
   safe = safe
@@ -377,10 +392,27 @@ function renderContent(text) {
     // @mention → profil link
     .replace(/@([a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]+)/g, (_, user) =>
       `<a href="${profileRoute(user)}" data-link class="inline-mention">@${user}</a>`);
-  links.forEach(({ placeholder, url, href }) => {
-    safe = safe.replaceAll(placeholder, `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-link">${url}</a>`);
+  links.forEach(({ placeholder, url, href, isImage }) => {
+    safe = safe.replaceAll(placeholder, isImage
+      ? `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-image-link"><img src="${href}" alt="Paylaşılan görsel" loading="lazy" /></a>`
+      : `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-link" data-preview-url="${href}">${url}</a>`);
   });
   return safe;
+}
+
+async function enhanceLinkPreviews(root = document) {
+  const links = [...root.querySelectorAll?.('[data-preview-url]:not([data-preview-bound])') || []];
+  links.forEach(link => link.dataset.previewBound = '1');
+  await Promise.all(links.map(async link => {
+    try {
+      const preview = await api('/link-preview?url=' + encodeURIComponent(link.dataset.previewUrl));
+      if (!preview.title && !preview.image) return;
+      const card = document.createElement('a');
+      card.className = 'link-preview-card'; card.href = preview.url || link.href; card.target = '_blank'; card.rel = 'noopener noreferrer';
+      card.innerHTML = `${preview.image ? `<img src="${escHtml(preview.image)}" alt="" loading="lazy" />` : '<span class="link-preview-icon"><i class="fas fa-globe"></i></span>'}<span class="link-preview-copy"><strong>${escHtml(preview.title || preview.site || 'Bağlantı')}</strong>${preview.description ? `<small>${escHtml(preview.description)}</small>` : ''}<em>${escHtml(preview.site || '')}</em></span>`;
+      link.replaceWith(card);
+    } catch {}
+  }));
 }
 
 function navigate(path, push = true) {
@@ -2645,6 +2677,7 @@ async function renderGroupDetail(app, slug) {
       </div>
     </div>
   </div>`;
+  enhanceLinkPreviews(app);
 
   const chatEl = $('#chat-messages');
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
@@ -2661,6 +2694,7 @@ async function renderGroupDetail(app, slug) {
       const chatEl2 = $('#chat-messages');
       const prevHeight = chatEl2.scrollHeight;
       chatEl2.insertAdjacentHTML('afterbegin', older.map(m => chatMsgHTML(m, isOwner || isMod)).join(''));
+      enhanceLinkPreviews(chatEl2);
       // Scroll pozisyonunu koru
       chatEl2.scrollTop = chatEl2.scrollHeight - prevHeight;
       oldestMsgId = older[0].id;
@@ -2707,6 +2741,7 @@ async function renderGroupDetail(app, slug) {
         }
         const msg = await api('/group/' + slug + '/messages', { method: 'POST', body: JSON.stringify({ content, image_url }) });
         $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod));
+        enhanceLinkPreviews(chatEl);
         input.value = '';
         resetAttachment();
         chatEl.scrollTop = chatEl.scrollHeight;
@@ -2734,6 +2769,7 @@ async function renderGroupDetail(app, slug) {
         const newest = newMsgs.filter(m => m.id > lastId);
         if (newest.length) {
           newest.forEach(m => { $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(m, window._chatCanMod)); });
+          enhanceLinkPreviews($('#chat-messages'));
           lastId = newest[newest.length - 1].id;
           const chatEl2 = $('#chat-messages');
           if (chatEl2) chatEl2.scrollTop = chatEl2.scrollHeight;
@@ -4731,6 +4767,7 @@ async function renderDMChat(username) {
   dmSelectionMode = false;
   let replyToId = null;
   let pendingImg = null;
+  const isSelfConversation = currentUser && (String(other.id) === String(currentUser.id) || String(other.username).toLowerCase() === String(currentUser.username).toLowerCase());
 
   mainEl.innerHTML = `<div class="dm-chat">
     <!-- Header -->
@@ -4745,7 +4782,7 @@ async function renderDMChat(username) {
         </a>
       </div>
       <div class="dm-chat-header-right">
-        <button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Sesli ara"><i class="fas fa-phone"></i><span>Sesli ara</span></button>
+        ${isSelfConversation ? '' : '<button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Sesli ara"><i class="fas fa-phone"></i><span>Sesli ara</span></button>'}
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -4798,6 +4835,7 @@ async function renderDMChat(username) {
   // Scroll to bottom
   const msgsEl = document.getElementById('dm-messages');
   if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  enhanceLinkPreviews(msgsEl);
 
   // Reply management
   const setReply = (id) => { replyToId = id; };
@@ -4870,6 +4908,7 @@ async function renderDMChat(username) {
       const el = document.getElementById('dm-messages');
       if (el) {
         el.insertAdjacentHTML('beforeend', dmMessageHTML(msg, currentUser.id, false));
+        enhanceLinkPreviews(el);
         el.scrollTop = el.scrollHeight;
       }
       lastPollMsgId = msg.id;
@@ -4939,6 +4978,7 @@ async function renderDMChat(username) {
           lastPollMsgId = Math.max(lastPollMsgId, m.id);
         }
       });
+      enhanceLinkPreviews(el);
       if (wasBottom) el.scrollTop = el.scrollHeight;
     } catch {}
   }, 2500);

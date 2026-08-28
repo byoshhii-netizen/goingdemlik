@@ -234,6 +234,32 @@ function sanitizeUser(u) {
   return rest;
 }
 
+app.get('/api/link-preview', async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || '').trim();
+    const parsed = new URL(rawUrl);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return res.status(400).json({ error: 'Geçersiz bağlantı' });
+    if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(parsed.hostname)) {
+      return res.status(400).json({ error: 'Bu bağlantı önizlenemez' });
+    }
+    const response = await fetch(parsed.href, { headers: { 'user-agent': 'CigCig Link Preview/1.0' }, redirect: 'follow', signal: AbortSignal.timeout(5000) });
+    const type = response.headers.get('content-type') || '';
+    if (!type.includes('text/html')) return res.json({ url: parsed.href, title: parsed.hostname, description: '', image: '', site: parsed.hostname });
+    const html = (await response.text()).slice(0, 500000);
+    const getMeta = (property, name) => {
+      const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["'](?:${property}|${name})["'][^>]+content=["']([^"']*)["']`, 'i'))
+        || html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+(?:property|name)=["'](?:${property}|${name})["']`, 'i'));
+      return match ? match[1].replace(/&amp;/g, '&').trim() : '';
+    };
+    const title = getMeta('og:title', 'twitter:title') || (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, '').trim();
+    const description = getMeta('og:description', 'twitter:description') || getMeta('description', 'description');
+    const image = getMeta('og:image', 'twitter:image');
+    const icon = getMeta('og:site_name', 'application-name') || parsed.hostname.replace(/^www\./, '');
+    const absolute = value => { try { return value ? new URL(value, parsed.href).href : ''; } catch { return ''; } };
+    res.json({ url: parsed.href, title: title.slice(0, 180), description: description.slice(0, 300), image: absolute(image), site: icon.slice(0, 80) });
+  } catch (error) { res.json({ url: String(req.query.url || ''), title: '', description: '', image: '', site: '' }); }
+});
+
 function makeSlug(title, id) {
   const base = slugify(title, { lower: true, strict: false, locale: 'tr', replacement: '-' })
     .replace(/[^a-z0-9\-]/g, '').replace(/-+/g, '-').substring(0, 60);
