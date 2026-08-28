@@ -4501,6 +4501,27 @@ function renderRegister(app) {
       Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
+      if (data.email_verification_required) {
+        app.innerHTML = `<div class="auth-page"><div class="auth-card auth-card--enhanced card card-body">
+          <div style="text-align:center"><div class="auth-site-wordmark"><i class="fas fa-envelope" style="color:var(--accent-red2)"></i> E-postanı doğrula</div>
+          <p class="auth-subtitle">${escHtml(data.maskedEmail)} adresine 6 haneli bir kod gönderdik.</p></div>
+          <div class="form-group"><label>Doğrulama kodu</label><input type="text" id="reg-email-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" /></div>
+          <button class="btn btn-primary" style="width:100%" id="reg-email-verify-btn"><i class="fas fa-check"></i> E-postayı doğrula</button>
+          <div id="reg-email-verify-error" class="form-error mt-4" style="text-align:center"></div>
+        </div></div>`;
+        const verifyRegistrationEmail = async () => {
+          const code = $('#reg-email-code').value.trim();
+          try {
+            await api('/auth/verify-registration-email', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, code }) });
+            navigate('/giris');
+            toast('E-posta doğrulandı. Şimdi giriş yapabilirsin.');
+          } catch (e) { $('#reg-email-verify-error').textContent = e.message; }
+        };
+        $('#reg-email-verify-btn').addEventListener('click', verifyRegistrationEmail);
+        $('#reg-email-code').addEventListener('keydown', e => { if (e.key === 'Enter') verifyRegistrationEmail(); });
+        $('#reg-email-code').focus();
+        return;
+      }
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
@@ -5100,19 +5121,18 @@ async function renderDMChat(username) {
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
     try {
-      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?after_id=${lastPollMsgId}`);
-      const newMsgs = conversationUpdate?.messages || [];
-      if (!newMsgs || !newMsgs.length) return;
+      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100`);
+      const refreshedMsgs = conversationUpdate?.messages || [];
       const el = document.getElementById('dm-messages');
       if (!el) return;
       const wasBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-      newMsgs.forEach(m => {
-        if (!document.querySelector(`.dm-msg-wrap[data-id="${m.id}"]`)) {
-          el.insertAdjacentHTML('beforeend', dmMessageHTML(m, currentUser.id, dmSelectionMode));
-          lastPollMsgId = Math.max(lastPollMsgId, m.id);
-        }
-      });
+      el.innerHTML = refreshedMsgs.map(m => dmMessageHTML(m, currentUser.id, dmSelectionMode)).join('');
+      if (refreshedMsgs.length) lastPollMsgId = Number(refreshedMsgs[refreshedMsgs.length - 1].id);
       enhanceLinkPreviews(el);
+      const conversationList = await api('/conversations').catch(() => []);
+      const activeConversation = conversationList.find(item => String(item.other_username).toLowerCase() === String(username).toLowerCase());
+      const activeConversationEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(username)}"] .dm-conv-last`);
+      if (activeConversationEl) activeConversationEl.textContent = (activeConversation?.last_message || '').substring(0, 40);
       if (wasBottom) el.scrollTop = el.scrollHeight;
     } catch {}
   }, 2500);

@@ -140,10 +140,10 @@ const generalLimiter = rateLimit({
   skip: (req) => req.path.startsWith('/uploads/') || isContentCreationPath(req.path),
 });
 
-// Auth (login/register): 15 dakikada 5 deneme (bruteforce önlemi)
+// Auth: kullanıcıları gereksiz kilitlemeden brute-force denemelerini sınırla.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
@@ -215,7 +215,7 @@ function maskEmail(email) {
   return `${visible}@${domain}`;
 }
 
-async function sendEmailCode(email, username, code) {
+async function sendEmailCode(email, username, code, purpose = 'Giriş doğrulama kodun') {
   if (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET) throw new Error('E-posta servisi yapılandırılmamış');
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -223,8 +223,8 @@ async function sendEmailCode(email, username, code) {
     body: JSON.stringify({
       from: EMAIL_FROM,
       to: [email],
-      subject: 'CigCig doğrulama kodun',
-      html: `<p>Merhaba ${escapeHtml(username)},</p><p>Giriş doğrulama kodun:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${code}</p><p>Bu kod 10 dakika geçerlidir. Kodu kimseyle paylaşma.</p>`
+      subject: `CigCig ${purpose.toLocaleLowerCase('tr-TR')}`,
+      html: `<p>Merhaba ${escapeHtml(username)},</p><p>${escapeHtml(purpose)}:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${code}</p><p>Bu kod 10 dakika geçerlidir. Kodu kimseyle paylaşma.</p>`
     })
   });
   if (!response.ok) throw new Error('Doğrulama e-postası gönderilemedi');
@@ -833,10 +833,24 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     let avatar = '';
     if (req.file) avatar = await handleUpload(req.file);
+    const registrationCode = twoFactorMethod === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
+    const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *',
-      [username, email, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *',
+      [username, email, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
+    if (registrationCode) {
+      const challenge = createChallengeToken();
+      try {
+        await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, 'registration', 'email', hashChallengeValue(registrationCode)]);
+        await sendEmailCode(email, username, registrationCode, 'E-posta doğrulama kodun');
+      } catch (error) {
+        await query('DELETE FROM auth_challenges WHERE user_id=$1 AND purpose=$2', [user.id, 'registration']);
+        await query('DELETE FROM users WHERE id=$1', [user.id]);
+        throw error;
+      }
+      return res.json({ email_verification_required: true, challenge, maskedEmail: maskEmail(email) });
+    }
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(username, 'register', '', '', ip);
@@ -861,6 +875,7 @@ app.post('/api/auth/login', async (req, res) => {
       await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(password), user.id]);
     }
     if (user.banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
+    if (user.two_factor_method === 'email' && user.email_verified === 0) return res.status(403).json({ error: 'Önce kayıt sırasında e-posta adresini doğrulamalısın' });
     // Silinme talebi verilmiş hesap — kullanıcıya bildir
     if (user.is_deleted) {
       const deleteAt = new Date(user.delete_requested_at);
@@ -899,6 +914,22 @@ app.post('/api/auth/2fa/verify', async (req, res) => {
     setSessionCookie(res, token);
     res.json({ token, user: sanitizeUser(rows[0]) });
   } catch (e) { res.status(500).json({ error: 'Doğrulama işlemi başarısız' }); }
+});
+
+app.post('/api/auth/verify-registration-email', async (req, res) => {
+  try {
+    const challenge = String(req.body.challenge || '');
+    const code = String(req.body.code || '').trim();
+    if (!/^[a-f0-9]{64}$/i.test(challenge) || !/^\d{6}$/.test(code)) return res.status(400).json({ error: 'Geçerli bir doğrulama kodu girin' });
+    const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND purpose=$2 AND method=$3 AND expires_at > NOW() LIMIT 1', [hashChallengeValue(challenge), 'registration', 'email']);
+    const record = rows[0];
+    if (!record || record.attempts >= 5) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+    await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
+    if (hashChallengeValue(code) !== record.code_hash) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+    await query('UPDATE users SET email_verified=1 WHERE id=$1', [record.user_id]);
+    await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: 'E-posta doğrulama işlemi başarısız' }); }
 });
 
 app.get('/api/profile/2fa', authMiddleware, async (req, res) => {
@@ -4099,7 +4130,9 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message,
+      (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
+        AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
+        ORDER BY m.created_at DESC LIMIT 1) as last_message,
       (SELECT COUNT(*) FROM dm_messages WHERE conversation_id=c.id AND sender_id!=$1 AND 
         CASE WHEN c.user1_id=$1 THEN deleted_by_receiver=0 ELSE deleted_by_sender=0 END
         AND deleted_for_all=0
@@ -4123,7 +4156,9 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
+      (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
+        AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
+        ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
     JOIN users u2 ON c.user2_id=u2.id
