@@ -1270,11 +1270,11 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
   .dm-chat-header-right .btn i { font-size:13px; }
 }
 
-/* Group chat: own messages align to the right, other messages to the left. */
-.chat-msg.own { grid-template-columns: minmax(0,1fr) !important; justify-items:end; }
-.chat-msg.own .chat-msg-body { grid-column: 1; text-align: right; width:auto !important; max-width:100%; }
-.chat-msg.own .chat-msg-meta { justify-content: flex-end; }
-.chat-msg.own .chat-msg-text { border-radius: 10px 0 10px 10px; background: var(--bg-card2); border: 1px solid var(--border-hover); color: var(--text-primary); }
+/* Group chat messages stay pinned to the left, including the current user's messages. */
+.chat-msg.own { grid-template-columns: minmax(0,1fr) !important; justify-items:start; }
+.chat-msg.own .chat-msg-body { grid-column: 1; text-align: left; width:auto !important; max-width:100%; }
+.chat-msg.own .chat-msg-meta { justify-content: flex-start; }
+.chat-msg.own .chat-msg-text { border-radius: 0 10px 10px 10px; background: var(--bg-card2); border: 1px solid var(--border-hover); color: var(--text-primary); }
 .chat-msg.own .chat-msg-avatar { box-shadow: 0 0 0 2px rgba(255,255,255,0.02); }
 .chat-input-bar { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .chat-input-bar input { flex: 1; min-width: 0; }
