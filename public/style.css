@@ -2677,6 +2677,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .photo-comment-like.liked, .photo-like.liked { color:#f72585 !important; text-shadow:0 0 10px rgba(247,37,133,.45); }
 .reals-video-box, .reals-video { background:#000 !important; }
 .reals-container, .reals-list, .reals-item, .reals-video, .reals-meta, .reals-right-actions { user-select:none; -webkit-user-select:none; }
+.reals-container ::selection { background:transparent; color:inherit; }
+.reals-container ::-moz-selection { background:transparent; color:inherit; }
 @media (max-width:768px) {
   .reals-list { overflow-y:scroll !important; overflow-x:hidden !important; -webkit-overflow-scrolling:touch; touch-action:pan-y !important; }
   .reals-video-box, .reals-video { background:#000 !important; }
