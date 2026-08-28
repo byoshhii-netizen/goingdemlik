@@ -943,7 +943,7 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/forum'); setTimeout(() => { if (currentUser) showNewForumModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
-$('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
+$('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); showMyGroupsModal(); });
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
 $('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
@@ -1820,19 +1820,6 @@ function showNewBookModal(existing = null) {
       <input id="bk-password" type="password" autocomplete="new-password" placeholder="${existing ? 'Değiştirmek istemiyorsan boş bırak' : 'İsteğe bağlı kitap şifresi'}" />
       <div class="form-hint">Şifreli kitaplar yalnızca sahibi ve şifreyi giren kişilere görünür.</div>
     </div>
-    <div class="book-privacy-toggle">
-      <div class="toggle-header">
-        <i class="fas fa-file-pdf" style="color:#ef4444;font-size:16px"></i>
-        <div class="toggle-label">
-          <div class="toggle-title">PDF İndir / Yazdır</div>
-          <div class="toggle-desc">Okuyucular kitabı indirebilir veya yazdırabilir</div>
-        </div>
-      </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="bk-allow-download" ${!existing || existing.allow_download !== 0 ? 'checked' : ''} />
-        <span class="toggle-slider"></span>
-      </label>
-    </div>
     <button class="btn btn-primary" id="bk-submit" style="width:100%;margin-top:16px">${existing ? (isUnnamedBook ? '<i class="fas fa-tag"></i> İsim Ekle ve Yayınla' : 'Güncelle') : 'Oluştur'}</button>
     <div id="bk-error" class="form-error mt-4"></div>
   `);
@@ -1901,7 +1888,6 @@ function showNewBookModal(existing = null) {
         kadro: $('#bk-kadro').value.trim(),
         cover_image,
         is_hidden: noName ? true : $('#bk-is-hidden').checked,
-        allow_download: $('#bk-allow-download').checked,
         is_unnamed: noName ? true : false
       };
       const bookPassword = $('#bk-password').value;
