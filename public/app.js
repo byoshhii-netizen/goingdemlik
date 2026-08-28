@@ -6908,40 +6908,6 @@ async function renderPhotos(app) {
 }
 function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Fotoğraf müziğini aç/kapat" aria-label="Fotoğraf müziğini aç/kapat"><i class="fas fa-volume-mute"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
-async function openPhotoComments(photo) {
-  const sheet = document.createElement('div');
-  sheet.className = 'reals-comments-sheet photo-comments-sheet';
-  sheet.innerHTML = `<div class="reals-comments-backdrop"></div><section class="reals-comments-panel" role="dialog" aria-modal="true" aria-label="Fotoğraf yorumları">
-    <header class="reals-comments-header"><strong>Yorumlar</strong><button type="button" class="reals-comments-close" aria-label="Yorumları kapat"><i class="fas fa-times"></i></button></header>
-    <div class="reals-comments-list"><div class="loading-center"><div class="spinner"></div></div></div>
-    ${currentUser ? '<form class="reals-comment-form"><input type="text" maxlength="1000" placeholder="Yorum yaz..." autocomplete="off" /><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için giriş yapın.</div>'}
-  </section>`;
-  document.body.appendChild(sheet);
-  const close = () => sheet.remove();
-  sheet.querySelector('.reals-comments-close').addEventListener('click', close);
-  sheet.querySelector('.reals-comments-backdrop').addEventListener('click', close);
-  const list = sheet.querySelector('.reals-comments-list');
-  const render = async () => {
-    const comments = await api('/photos/' + photo.id + '/comments');
-    list.innerHTML = comments.length ? comments.map(comment => `<div class="comment photo-sheet-comment"><div class="comment-body"><div class="comment-header"><span class="comment-author">${escHtml(comment.username || 'Silindi')}</span><span class="comment-time">${timeAgo(comment.created_at)}</span></div><div class="comment-content">${renderContent(comment.content)}</div><div class="photo-sheet-comment-actions"><button class="btn btn-ghost btn-sm photo-sheet-like ${comment.liked ? 'liked' : ''}" data-id="${comment.id}"><i class="${comment.liked ? 'fas' : 'far'} fa-heart"></i> <span>${comment.like_count || 0}</span></button>${currentUser && (currentUser.id == comment.user_id || currentUser.id == photo.user_id || currentUser.is_admin) ? `<button class="btn btn-ghost btn-sm photo-sheet-delete" data-id="${comment.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div></div>`).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
-  };
-  try { await render(); } catch (error) { list.innerHTML = `<div class="reals-comments-empty"><p>${escHtml(error.message)}</p></div>`; }
-  list.addEventListener('click', async event => {
-    const like = event.target.closest('.photo-sheet-like');
-    const remove = event.target.closest('.photo-sheet-delete');
-    if (like) {
-      try { const result = await api('/photos/comments/' + like.dataset.id + '/like', { method: 'POST' }); like.classList.toggle('liked', result.liked); like.querySelector('i').className = (result.liked ? 'fas' : 'far') + ' fa-heart'; const count = like.querySelector('span'); count.textContent = Math.max(0, Number(count.textContent || 0) + (result.liked ? 1 : -1)); } catch (error) { toast(error.message, 'error'); }
-    }
-    if (remove) {
-      if (!confirm('Bu yorum silinsin mi?')) return;
-      try { await api('/photos/comments/' + remove.dataset.id, { method: 'DELETE' }); await render(); } catch (error) { toast(error.message, 'error'); }
-    }
-  });
-  sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
-    event.preventDefault(); const input = event.currentTarget.querySelector('input'); const content = input.value.trim(); if (!content) return;
-    try { await api('/photos/' + photo.id + '/comments', { method: 'POST', body: JSON.stringify({ content }) }); input.value = ''; await render(); list.scrollTop = list.scrollHeight; } catch (error) { toast(error.message, 'error'); }
-  });
-}
 function bindPhotoFeed(feed) {
   const sharePhoto = async c => {
     const url = location.origin + '/fotograflar#foto-' + c.dataset.photoId;
@@ -7028,8 +6994,13 @@ function bindPhotoFeed(feed) {
     e.stopPropagation();
     const c = e.target.closest('[data-photo-id]');
     if (!c) return;
-    const photo = await api('/photos/' + c.dataset.photoId).catch(() => null);
-    if (photo) openPhotoComments(photo);
+    const box = c.querySelector('.photo-comment-box');
+    if (!box) return;
+    box.hidden = !box.hidden;
+    if (!box.hidden) {
+      try { await renderComments(c, box); }
+      catch (error) { box.innerHTML = `<small class="form-error">${escHtml(error.message || 'Yorumlar yüklenemedi')}</small>`; }
+    }
   });
 
   feed.querySelectorAll('.photo-share').forEach(x => x.onclick = async e => {

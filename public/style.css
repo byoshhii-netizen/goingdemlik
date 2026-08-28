@@ -677,10 +677,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .reals-comments-empty i { display:block; margin-bottom:8px; font-size:28px; color:var(--text-secondary); }
 .reals-comments-empty p { margin:0 0 4px; color:var(--text-primary); }
 .reals-comments-empty span { font-size:12px; }
-.photo-sheet-comment { display:block !important; }
-.photo-sheet-comment-actions { display:flex; align-items:center; gap:4px; margin-top:7px; }
-.photo-sheet-like { color:var(--text-muted); }
-.photo-sheet-like.liked { color:#f72585 !important; text-shadow:0 0 10px rgba(247,37,133,.45); }
 @keyframes realsCommentsFade { from { opacity:0; } to { opacity:1; } }
 @keyframes realsCommentsUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
 @media (max-width:560px) { .reals-comments-panel { max-height:82vh; border-radius:18px 18px 0 0; } .reals-comments-list { padding:12px; } }
@@ -1878,12 +1874,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-header-links { display:flex; align-items:center; gap:6px; min-width:0; }
 .dm-groups-button, .dm-friends-header-button { display:inline-flex; align-items:center; gap:7px; min-height:38px; border:1px solid var(--border); border-radius:9px; padding:7px 11px; background:var(--bg-card); color:var(--text-primary); cursor:pointer; transition:background .18s,border-color .18s,transform .18s; white-space:nowrap; }
 .dm-groups-button:hover, .dm-friends-header-button:hover { border-color:var(--border-hover); background:var(--bg-card2); transform:translateY(-1px); }
-.dm-groups-button { background:var(--accent-red); border-color:var(--accent-red); color:#fff; }
-.dm-groups-button:hover { background:var(--accent-red2); border-color:var(--accent-red2); }
-.dm-friends-header-button { background:#4b5563; border-color:#6b7280; color:#fff; }
-.dm-friends-header-button:hover { background:#6b7280; border-color:#9ca3af; }
 .dm-groups-button i, .dm-friends-header-button i { color:var(--text-secondary); }
-.dm-groups-button i, .dm-friends-header-button i { color:#fff; }
 .dm-friends-header-button { position:relative; }
 .dm-friends-header-button .friend-request-dot { position:absolute; top:3px; right:3px; margin:0; }
 .group-unread-badge, .dm-friends-header-button .friend-request-dot { display:none; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--accent-red); color:#fff; font-size:10px; font-weight:800; line-height:1; }
@@ -2687,9 +2678,6 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .photo-comment-like.liked, .photo-like.liked { color:#f72585 !important; text-shadow:0 0 10px rgba(247,37,133,.45); }
 .reals-video-box, .reals-video { background:#000 !important; }
 .reals-container, .reals-list, .reals-item, .reals-video, .reals-meta, .reals-right-actions { user-select:none; -webkit-user-select:none; }
-.reals-play-overlay { background:transparent !important; opacity:1 !important; }
-.reals-play-overlay::before, .reals-play-overlay::after { display:none !important; content:none !important; }
-.reals-item.reals-is-paused .reals-play-overlay { background:transparent !important; }
 .reals-container ::selection { background:transparent; color:inherit; }
 .reals-container ::-moz-selection { background:transparent; color:inherit; }
 @media (max-width:768px) {

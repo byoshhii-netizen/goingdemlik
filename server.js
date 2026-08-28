@@ -2710,8 +2710,6 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
 app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
   const photoId = req.params.id;
   const userId = req.user ? req.user.id : 0;
-  if (!/^\d+$/.test(photoId)) return res.status(400).json({ error: 'Geçersiz fotoğraf.' });
-  try {
   const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
   if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
@@ -2719,16 +2717,11 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
     EXISTS(SELECT 1 FROM photo_comment_likes pcl2 WHERE pcl2.comment_id=pc.id AND pcl2.user_id=$2) AS liked
     FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
   res.json(rows);
-  } catch (error) {
-    console.error('Photo comments read failed:', error);
-    res.status(500).json({ error: 'Fotoğraf yorumları yüklenemedi.' });
-  }
 });
 
 app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'comment')) return;
   const photoId = req.params.id;
-  if (!/^\d+$/.test(photoId)) return res.status(400).json({ error: 'Geçersiz fotoğraf.' });
   const { content } = req.body;
   if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
@@ -2757,7 +2750,6 @@ app.delete('/api/photos/comments/:id', authMiddleware, async (req, res) => {
 
 app.post('/api/photos/comments/:id/like', authMiddleware, async (req, res) => {
   const commentId = req.params.id;
-  if (!/^\d+$/.test(commentId)) return res.status(400).json({ error: 'Geçersiz yorum.' });
   const { rows: existing } = await query('SELECT id FROM photo_comment_likes WHERE comment_id=$1 AND user_id=$2', [commentId, req.user.id]);
   if (existing.length) {
     await query('DELETE FROM photo_comment_likes WHERE id=$1', [existing[0].id]);
