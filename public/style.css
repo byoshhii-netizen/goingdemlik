@@ -1786,6 +1786,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   flex-shrink: 0;
 }
 .dm-sidebar-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+.dm-groups-button { border:1px solid rgba(189,162,117,.4); border-radius:9px; padding:7px 11px; background:linear-gradient(135deg,rgba(189,162,117,.18),rgba(189,162,117,.05)); cursor:pointer; transition:background .18s,border-color .18s,transform .18s; }
+.dm-groups-button:hover { border-color:var(--accent-red2); background:rgba(189,162,117,.28); transform:translateY(-1px); }
 .dm-sidebar-actions { display: flex; align-items: center; gap: 4px; }
 .dm-hidden-toggle-btn {
   width: 28px; height: 28px; border: none; border-radius: 50%;

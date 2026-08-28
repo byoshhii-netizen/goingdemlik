@@ -4551,7 +4551,7 @@ async function renderMessages(app, targetUsername) {
   app.innerHTML = `<div class="dm-layout${targetUsername ? ' dm-mobile-chat-open' : ''}">
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
-        <span class="dm-sidebar-title">Mesajlar</span>
+        <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button"><i class="fas fa-users"></i> Gruplar</button>
         <div class="dm-sidebar-actions">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>
           <button class="btn btn-ghost btn-sm dm-friends-button" id="dm-friends-btn" title="Arkadaşlar" style="padding:5px 8px;position:relative"><i class="fas fa-user-friends"></i><span id="dm-friends-badge" class="friend-request-dot"></span></button>
@@ -4617,6 +4617,7 @@ async function renderMessages(app, targetUsername) {
 
   // Friends nav
   document.getElementById('dm-friends-btn')?.addEventListener('click', () => navigate('/arkadaslar'));
+  document.getElementById('dm-groups-btn')?.addEventListener('click', () => showMyGroupsModal());
 
   // New DM
   document.getElementById('new-dm-btn')?.addEventListener('click', async () => {
