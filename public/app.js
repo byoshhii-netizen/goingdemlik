@@ -407,6 +407,13 @@ async function enhanceLinkPreviews(root = document) {
     try {
       const preview = await api('/link-preview?url=' + encodeURIComponent(link.dataset.previewUrl));
       if (!preview.title && !preview.image) return;
+      if (preview.is_image) {
+        const imageLink = document.createElement('a');
+        imageLink.className = 'inline-image-link'; imageLink.href = preview.url || link.href; imageLink.target = '_blank'; imageLink.rel = 'noopener noreferrer';
+        imageLink.innerHTML = `<img src="${escHtml(preview.image)}" alt="Paylaşılan görsel" loading="lazy" />`;
+        link.replaceWith(imageLink);
+        return;
+      }
       const card = document.createElement('a');
       card.className = 'link-preview-card'; card.href = preview.url || link.href; card.target = '_blank'; card.rel = 'noopener noreferrer';
       card.innerHTML = `${preview.image ? `<img src="${escHtml(preview.image)}" alt="" loading="lazy" />` : '<span class="link-preview-icon"><i class="fas fa-globe"></i></span>'}<span class="link-preview-copy"><strong>${escHtml(preview.title || preview.site || 'Bağlantı')}</strong>${preview.description ? `<small>${escHtml(preview.description)}</small>` : ''}<em>${escHtml(preview.site || '')}</em></span>`;

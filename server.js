@@ -244,7 +244,8 @@ app.get('/api/link-preview', async (req, res) => {
     }
     const response = await fetch(parsed.href, { headers: { 'user-agent': 'CigCig Link Preview/1.0' }, redirect: 'follow', signal: AbortSignal.timeout(5000) });
     const type = response.headers.get('content-type') || '';
-    if (!type.includes('text/html')) return res.json({ url: parsed.href, title: parsed.hostname, description: '', image: '', site: parsed.hostname });
+    if (type.startsWith('image/')) return res.json({ url: parsed.href, title: '', description: '', image: parsed.href, site: parsed.hostname, is_image: true });
+    if (!type.includes('text/html')) return res.json({ url: parsed.href, title: parsed.hostname, description: '', image: '', site: parsed.hostname, is_image: false });
     const html = (await response.text()).slice(0, 500000);
     const getMeta = (property, name) => {
       const match = html.match(new RegExp(`<meta[^>]+(?:property|name)=["'](?:${property}|${name})["'][^>]+content=["']([^"']*)["']`, 'i'))
