@@ -2019,7 +2019,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-input-wrap textarea {
   flex: 1; background: transparent; border: none; resize: none;
   color: var(--text-primary); font-size: 14px; outline: none;
-  padding: 2px 0; line-height: 1.5; max-height: 120px;
+  padding: 2px 0; line-height: 1.5; min-height: 0; height: 22px; max-height: 120px;
   overflow-y: auto; font-family: inherit;
 }
 .dm-input-img-btn {
@@ -2102,6 +2102,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   /* When chat open: show main, hide sidebar */
   .dm-layout.dm-mobile-chat-open .dm-sidebar { display: none; }
   .dm-layout.dm-mobile-chat-open .dm-main { display: flex; }
+  body:has(.dm-layout) { padding-bottom: 0; }
 
   .dm-mobile-back-btn { display: inline-flex !important; }
 
@@ -2109,7 +2110,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-msg-bubble { font-size: 12px; padding: 4px 9px; line-height: 1.35; }
   .dm-input-bar { padding: 8px; gap: 6px; }
   .dm-input-wrap { min-height: 40px; padding: 6px 9px; border-radius: 12px; align-items: center; }
-  .dm-input-wrap textarea { min-width: 0; width: 100%; font-size: 13px; line-height: 1.35; max-height: 80px; }
+  .dm-input-wrap textarea { min-width: 0; width: 100%; min-height: 0; height: 20px; font-size: 13px; line-height: 1.35; max-height: 80px; }
   .dm-input-img-btn { font-size: 13px; padding-right: 5px; }
   .dm-send-btn { width: 40px; height: 40px; }
   .dm-messages { padding: 12px 10px 8px; }
