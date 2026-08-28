@@ -413,12 +413,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   transition: border-color 0.2s;
 }
 .nav-user-btn:hover { border-color: var(--border-hover); }
-.nav-quick-links { display:flex; align-items:center; gap:6px; }
-.nav-quick-link { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:7px; min-height:38px; padding:7px 13px; border:1px solid var(--border); border-radius:10px; background:var(--bg-card); color:var(--text-primary); font-size:14px; font-weight:700; text-decoration:none; transition:border-color .2s, background .2s, transform .2s; }
-.nav-quick-link:hover, .nav-quick-link.active { border-color:var(--border-hover); background:var(--bg-card2); transform:translateY(-1px); }
-.nav-quick-link i { color:var(--text-secondary); font-size:15px; }
-.nav-quick-link .friend-request-dot { position:absolute; top:3px; right:3px; margin:0; }
-.nav-new-btn { min-height:40px; padding:8px 16px !important; border-radius:10px; font-size:14px; font-weight:700; }
 .nav-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; background: var(--bg-card2); }
 .dropdown-menu {
   position: absolute;
@@ -452,7 +446,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .mobile-new-dropdown { position: fixed; right: 12px; top: 62px; width: 240px; max-width: calc(100vw - 24px); padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; z-index: 110; }
 .mobile-new-dropdown .btn { width: 100%; min-width: 0; justify-content: center; padding: 7px 5px; font-size: 12px; white-space: nowrap; }
 @media (max-width: 768px) {
-  .nav-quick-links { display:none; }
   .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
   .nav-mobile-toggle { display: block; margin-left: 4px; }
@@ -1858,8 +1851,13 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   flex-shrink: 0;
 }
 .dm-sidebar-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
-.dm-groups-button { border:1px solid rgba(189,162,117,.4); border-radius:9px; padding:7px 11px; background:linear-gradient(135deg,rgba(189,162,117,.18),rgba(189,162,117,.05)); cursor:pointer; transition:background .18s,border-color .18s,transform .18s; }
-.dm-groups-button:hover { border-color:var(--accent-red2); background:rgba(189,162,117,.28); transform:translateY(-1px); }
+.dm-header-links { display:flex; align-items:center; gap:6px; min-width:0; }
+.dm-groups-button, .dm-friends-header-button { display:inline-flex; align-items:center; gap:7px; min-height:38px; border:1px solid var(--border); border-radius:9px; padding:7px 11px; background:var(--bg-card); color:var(--text-primary); cursor:pointer; transition:background .18s,border-color .18s,transform .18s; white-space:nowrap; }
+.dm-groups-button:hover, .dm-friends-header-button:hover { border-color:var(--border-hover); background:var(--bg-card2); transform:translateY(-1px); }
+.dm-groups-button i, .dm-friends-header-button i { color:var(--text-secondary); }
+.dm-friends-header-button { position:relative; }
+.dm-friends-header-button .friend-request-dot { position:absolute; top:3px; right:3px; margin:0; }
+.dm-new-message-btn { width:38px; height:38px; padding:0 !important; display:inline-flex; align-items:center; justify-content:center; border-radius:9px; }
 .dm-sidebar-actions { display: flex; align-items: center; gap: 4px; }
 .dm-hidden-toggle-btn {
   width: 28px; height: 28px; border: none; border-radius: 50%;
@@ -2193,6 +2191,12 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   }
   .voice-call-card { padding:24px 17px 20px; }
   .voice-call-card.voice-call-mini { right:10px; bottom:70px; width:205px; }
+}
+@media (max-width:480px) {
+  .dm-sidebar-header { padding:10px 8px; gap:5px; }
+  .dm-header-links { gap:4px; }
+  .dm-groups-button, .dm-friends-header-button { min-height:36px; padding:6px 8px; gap:5px; font-size:13px; }
+  .dm-new-message-btn { width:36px; height:36px; }
 }
 
 /* ---- Touch: always show menu btn ---- */
