@@ -1953,8 +1953,8 @@ async function renderBookDetail(app, slug) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
   try { data = await api('/book/' + slug); } catch (error) {
-    if (error.data?.password_required && currentUser) {
-      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><h2>Bu kitap şifreli</h2><p>Kitaba erişmek için sahibinin belirlediği şifreyi girin.</p><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-key"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+    if (error.data?.password_required) {
+      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><div class="book-unlock-kicker">ÖZEL KİTAP</div><h2>Bu kitap şifreli</h2><p>Kitaba erişmek için sahibinin belirlediği şifreyi girin.</p><div class="book-unlock-field"><i class="fas fa-key"></i><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /></div><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-unlock"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
       $('#book-unlock-btn').addEventListener('click', async () => { try { await api('/book/' + slug + '/unlock', { method: 'POST', body: JSON.stringify({ password: $('#book-unlock-password').value }) }); renderBookDetail(app, slug); } catch (unlockError) { $('#book-unlock-error').textContent = unlockError.message; } });
       $('#book-unlock-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('#book-unlock-btn').click(); });
       return;
@@ -2342,8 +2342,8 @@ async function renderPageReader(app, bookSlug, pageSlug) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
   try { data = await api(`/book/${bookSlug}/page/${pageSlug}`); } catch (error) {
-    if (error.data?.password_required && currentUser) {
-      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><h2>Bu kitap şifreli</h2><p>Sayfaya erişmek için kitap şifresini girin.</p><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-key"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+    if (error.data?.password_required) {
+      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><div class="book-unlock-kicker">ÖZEL KİTAP</div><h2>Bu kitap şifreli</h2><p>Bu sayfaya devam etmek için kitap şifresini girin.</p><div class="book-unlock-field"><i class="fas fa-key"></i><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /></div><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-unlock"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
       $('#book-unlock-btn').addEventListener('click', async () => { try { await api('/book/' + bookSlug + '/unlock', { method: 'POST', body: JSON.stringify({ password: $('#book-unlock-password').value }) }); renderPageReader(app, bookSlug, pageSlug); } catch (unlockError) { $('#book-unlock-error').textContent = unlockError.message; } });
       $('#book-unlock-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('#book-unlock-btn').click(); });
       return;

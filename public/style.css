@@ -1335,6 +1335,17 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .group-member-joined i { color:var(--accent-red2); }
 .group-member-joined b { margin-left:auto; color:var(--text-primary); }
 .group-member-actions { display:grid; gap:8px; margin-top:16px; }
+.book-unlock-panel { width:min(100%,560px); margin:clamp(28px,9vh,96px) auto; padding:clamp(28px,5vw,48px); text-align:center; border:1px solid rgba(189,162,117,.28); border-radius:20px; background:linear-gradient(145deg,rgba(31,31,31,.98),rgba(14,14,14,.98)); box-shadow:0 24px 70px rgba(0,0,0,.35); }
+.book-unlock-icon { width:68px; height:68px; margin:0 auto 18px; display:grid; place-items:center; border:1px solid rgba(189,162,117,.45); border-radius:50%; color:#f3d49d; background:rgba(189,162,117,.12); font-size:25px; }
+.book-unlock-kicker { margin-bottom:8px; color:#c8a874; font-size:11px; font-weight:800; letter-spacing:2px; }
+.book-unlock-panel h2 { margin:0 0 10px; color:var(--text-primary); font-size:clamp(22px,4vw,30px); }
+.book-unlock-panel p { margin:0 auto 24px; color:var(--text-secondary); line-height:1.6; }
+.book-unlock-field { display:flex; align-items:center; gap:10px; margin-bottom:12px; padding:0 14px; border:1px solid var(--border-hover); border-radius:10px; background:rgba(255,255,255,.04); }
+.book-unlock-field:focus-within { border-color:#c8a874; box-shadow:0 0 0 3px rgba(189,162,117,.12); }
+.book-unlock-field i { color:#c8a874; }
+.book-unlock-field input { flex:1; min-width:0; padding:13px 0; border:0; outline:0; background:transparent; color:var(--text-primary); }
+.book-unlock-panel .btn { width:100%; justify-content:center; min-height:44px; }
+@media (max-width:600px) { .book-unlock-panel { margin:28px 12px; padding:30px 20px; border-radius:16px; } }
 .group-moderation-notice { max-width:620px; margin:48px auto; padding:48px 24px; border:1px solid var(--border); border-radius:16px; background:var(--bg-card); }
 .group-moderation-notice > i { display:block; margin-bottom:18px; color:var(--accent-red2); font-size:42px; }
 .group-moderation-notice h2 { margin:0 0 10px; color:var(--text-primary); }

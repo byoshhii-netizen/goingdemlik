@@ -1456,7 +1456,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color,
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
     FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) ORDER BY b.created_at DESC`);
-  res.json(rows.filter(book => !book.is_hidden || book.user_id == userId || req.user?.is_admin).map(sanitizeBook));
+  res.json(rows.filter(book => !book.is_hidden || book.user_id == userId).map(sanitizeBook));
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
@@ -1464,12 +1464,9 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const isOwner = req.user?.id == book.user_id;
-  const isAdmin = !!req.user?.is_admin;
-  if (book.is_hidden && !isOwner && !isAdmin) {
-    return res.status(403).json({ error: 'Bu kitap gizli' });
-  }
-  const hasPasswordAccess = await canAccessBook(book, req.user?.id) || isAdmin;
+  const hasPasswordAccess = await canAccessBook(book, req.user?.id);
   if (book.password_hash && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true, book: sanitizeBook({ ...book, password_hash: undefined }) });
+  if (book.is_hidden && !isOwner && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap gizli' });
   const { rows: chapters } = await query('SELECT * FROM book_chapters WHERE book_id=$1 ORDER BY order_num ASC', [book.id]);
   const { rows: pages } = await query('SELECT id,title,page_num,slug,chapter_id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
   res.json({ book: sanitizeBook(book), chapters, pages });
@@ -1479,7 +1476,6 @@ app.post('/api/book/:slug/unlock', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = rows[0];
-  if (book.is_hidden && book.user_id != req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu kitap gizli' });
   if (!book.password_hash) return res.status(400).json({ error: 'Bu kitap şifreli değil' });
   if (!verifyPassword(String(req.body.password || ''), book.password_hash)) return res.status(401).json({ error: 'Kitap şifresi yanlış' });
   await query('INSERT INTO book_access (book_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [book.id, req.user.id]);
@@ -1565,12 +1561,9 @@ app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const isOwner = req.user?.id == book.user_id;
-  const isAdmin = !!req.user?.is_admin;
-  if (book.is_hidden && !isOwner && !isAdmin) {
-    return res.status(403).json({ error: 'Bu kitap gizli' });
-  }
-  const hasPasswordAccess = await canAccessBook(book, req.user?.id) || isAdmin;
+  const hasPasswordAccess = await canAccessBook(book, req.user?.id);
   if (book.password_hash && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true });
+  if (book.is_hidden && !isOwner && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap gizli' });
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
   if (!pRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const page = pRows[0];
@@ -2144,7 +2137,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   }
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
-    query(`SELECT b.* FROM books b WHERE b.user_id=$1 AND (b.is_hidden=0 OR b.user_id=$2 OR $3=1) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0, req.user?.is_admin ? 1 : 0]).then(r => r.rows.map(sanitizeBook)),
+    query(`SELECT b.* FROM books b WHERE b.user_id=$1 AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
