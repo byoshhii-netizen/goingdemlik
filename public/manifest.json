@@ -1,0 +1,24 @@
+{
+  "name": "CigCig",
+  "short_name": "CigCig",
+  "description": "CigCig topluluk platformu",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#121212",
+  "icons": [
+    {
+      "src": "/cigcig.png",
+      "sizes": "1044x910",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/cigcig2.png",
+      "sizes": "1201x1218",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -644,7 +644,7 @@ async function renderRealsFeed(app) {
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
-          <div class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</div>
+          <a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>
           ${r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : ''}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
           <div class="reals-desc">${escHtml(r.description||'')}</div>
@@ -667,8 +667,6 @@ async function renderRealsFeed(app) {
         likeButton.querySelector('i').className = 'fas fa-heart';
       }
     });
-    items.forEach(it => { it.style.position='absolute'; it.style.top='0'; it.style.left='0'; it.style.width='100%'; it.style.height='100%'; });
-    listEl.style.position='relative'; listEl.style.overflow='hidden';
     items.forEach(it => {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
@@ -720,14 +718,14 @@ async function renderRealsFeed(app) {
     }));
   }
 
-  function showIndex(i) {
+  function showIndex(i, shouldScroll = true) {
     if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
     const previousId = items[idx]?.dataset.id;
     if (previousId && i !== idx) watchedIds.add(Number(previousId));
     idx = i;
+    if (shouldScroll) listEl.scrollTo({ top: i * listEl.clientHeight, behavior: 'smooth' });
     items.forEach((it, j) => {
-      it.style.transform = `translateY(${(j-idx)*100}%)`;
-      it.style.transition = 'transform .35s';
+      it.classList.toggle('is-active', j === idx);
       const vid = it.querySelector('video');
       const videoUrl = it.dataset.videoUrl;
       if (Math.abs(j - idx) <= 1) {
@@ -746,18 +744,15 @@ async function renderRealsFeed(app) {
   renderItems();
   showIndex(0);
 
-  // wheel
-  let wheelDeb = false;
-  const realsWheelHandler = e => {
-    if (wheelDeb) return; wheelDeb = true; setTimeout(() => wheelDeb=false, 300);
-    if (e.deltaY > 0) showIndex(idx+1); else showIndex(idx-1);
-  };
-  listEl.addEventListener('wheel', realsWheelHandler, { passive: true });
-
-  // touch
-  let startY = null;
-  listEl.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
-  listEl.addEventListener('touchend', e => { if (startY===null) return; const endY = e.changedTouches[0].clientY; const diff = startY - endY; if (Math.abs(diff) > 30) { e.preventDefault(); if (diff > 0) showIndex(idx+1); else showIndex(idx-1); } startY = null; }, { passive: false });
+  let scrollFrame = null;
+  listEl.addEventListener('scroll', () => {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = null;
+      const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(listEl.scrollTop / Math.max(1, listEl.clientHeight))));
+      if (nextIndex !== idx) showIndex(nextIndex, false);
+    });
+  }, { passive: true });
   window.addEventListener('keydown', e => {
     if (location.pathname !== '/reals') return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); showIndex(idx+1); }
@@ -3041,11 +3036,13 @@ function chatMsgHTML(m, canModerate = false) {
   const isOwn = currentUser && currentUser.id === m.user_id;
   const deleteLabel = isOwn || canModerate ? 'Herkesten sil' : 'Benden sil';
   if (m.deleted_for_me) return `<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
+  const profileLink = m.username ? profileRoute(m.username) : '#';
+  const avatar = hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`;
   return `<div class="chat-msg ${isOwn ? 'own' : ''}">
-    ${isOwn ? '' : (hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`)}
+    <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
-        ${isOwn ? '' : `<span class="chat-msg-name">${escHtml(m.username || 'Silindi')}${m.badge_name ? ` <span class="badge" style="background:${escHtml(m.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${m.badge_icon ? `<i class="${escHtml(m.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(m.badge_name)}</span>` : ''}</span>`}
+        <a href="${profileLink}" data-link class="chat-msg-name">${isOwn ? 'Sen' : escHtml(m.username || 'Silindi')}${m.badge_name ? ` <span class="badge" style="background:${escHtml(m.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${m.badge_icon ? `<i class="${escHtml(m.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(m.badge_name)}</span>` : ''}</a>
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
         ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
         ${currentUser && (isOwn || canModerate) && m.content ? `<button class="btn btn-ghost edit-msg" data-id="${m.id}" data-content="${escHtml(m.content)}" title="Mesajı düzenle" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-pen"></i></button>` : ''}
