@@ -133,7 +133,7 @@ function isContentCreationPath(requestPath) {
 // Genel API: dakikada 80 istek. İçerik üretim endpoint'leri bu sınıra dahil değildir.
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 80,
+  max: Number(process.env.API_RATE_LIMIT_MAX || 100000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla istek. Lütfen bekleyin.' },
@@ -143,7 +143,7 @@ const generalLimiter = rateLimit({
 // Auth: kullanıcıları gereksiz kilitlemeden brute-force denemelerini sınırla.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 30),
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 100000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
@@ -152,7 +152,7 @@ const authLimiter = rateLimit({
 // Upload: dakikada 5 yükleme
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 5,
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 100000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla yükleme. Lütfen bekleyin.' },
@@ -160,7 +160,7 @@ const uploadLimiter = rateLimit({
 
 const adminAuthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX || 100000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla admin giriş denemesi. 15 dakika bekleyin.' },
