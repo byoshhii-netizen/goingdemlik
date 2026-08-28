@@ -310,12 +310,12 @@ function apiFormWithTimeout(path, formData, timeout = 120000) {
 function timeAgo(dt) {
   const now = new Date();
   const d = new Date(dt);
-  const sec = Math.floor((now - d) / 1000);
-  if (sec < 60) return 'az önce';
-  if (sec < 3600) return Math.floor(sec / 60) + ' dk önce';
-  if (sec < 86400) return Math.floor(sec / 3600) + ' sa önce';
-  if (sec < 604800) return Math.floor(sec / 86400) + ' gün önce';
-  return d.toLocaleDateString('tr-TR');
+  if (Number.isNaN(d.getTime())) return '';
+  const isToday = now.getFullYear() === d.getFullYear()
+    && now.getMonth() === d.getMonth()
+    && now.getDate() === d.getDate();
+  if (isToday) return d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 function formatDate(dt) {
