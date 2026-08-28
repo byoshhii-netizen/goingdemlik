@@ -935,9 +935,31 @@ async function renderGroups(main) {
       <td style="color:var(--text3);font-size:12px">#${g.id}</td>
       <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(g.name)}">${escHtml(g.name)}</td>
       <td><span style="color:var(--blue2)">${escHtml(g.owner_name||'—')}</span></td>
-      <td style="color:var(--text3);font-size:12px">${timeAgo(g.created_at)}</td>
-      <td><span style="color:var(--text3);font-size:12px"><i class="fas fa-eye"></i> Sadece görüntüleme</span></td>
+      <td style="color:var(--text3);font-size:12px">${timeAgo(g.created_at)}<br><span style="color:${g.moderation_status === 'active' ? 'var(--green2)' : 'var(--red2)'}">${g.moderation_status === 'banned' ? 'Yasaklı' : g.moderation_status === 'suspended' ? 'Askıda' : 'Aktif'}</span></td>
+      <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm view-group-messages" data-id="${g.id}" data-name="${escHtml(g.name)}"><i class="fas fa-comments"></i> Mesajlar</button>
+        <button class="btn btn-outline btn-sm group-status-btn" data-id="${g.id}" data-status="${g.moderation_status === 'active' ? 'suspended' : 'active'}">${g.moderation_status === 'active' ? '<i class="fas fa-pause"></i> Askıya al' : '<i class="fas fa-play"></i> Aktifleştir'}</button>
+        ${g.moderation_status !== 'banned' ? `<button class="btn btn-danger btn-sm group-ban-btn" data-id="${g.id}"><i class="fas fa-ban"></i> Yasakla</button>` : ''}
+        <button class="btn btn-danger btn-sm del-group-btn" data-id="${g.id}"><i class="fas fa-trash"></i></button>
+      </div></td>
     </tr>`).join('');
+    tbody.querySelectorAll('.view-group-messages').forEach(btn => btn.addEventListener('click', async () => {
+      try {
+        const data = await adminApi('/group/' + btn.dataset.id + '/messages');
+        showModal('Grup mesajları: ' + btn.dataset.name, `<div style="max-height:60vh;overflow:auto;display:grid;gap:10px">${data.messages.length ? data.messages.map(m => `<div style="padding:10px 12px;border:1px solid var(--border);border-radius:8px"><div style="display:flex;justify-content:space-between;gap:10px;font-size:12px"><strong>${escHtml(m.username || 'Silindi')}</strong><span style="color:var(--text3)">${formatDate(m.created_at)}</span></div>${m.content ? `<div style="margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere">${escHtml(m.content)}</div>` : ''}${m.image_url ? `<a href="${escHtml(m.image_url)}" target="_blank" rel="noopener">Fotoğrafı aç</a>` : ''}</div>`).join('') : '<div class="empty-state"><i class="fas fa-comments"></i><p>Henüz mesaj yok.</p></div>'}</div>`);
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+    tbody.querySelectorAll('.group-status-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (btn.dataset.status === 'active') { await updateGroupStatus(btn.dataset.id, 'active', ''); return; }
+      const reason = prompt('Askıya alma nedeni:');
+      if (reason === null) return;
+      await updateGroupStatus(btn.dataset.id, 'suspended', reason);
+    }));
+    tbody.querySelectorAll('.group-ban-btn').forEach(btn => btn.addEventListener('click', async () => {
+      const reason = prompt('Grubu yasaklama nedeni:');
+      if (reason === null) return;
+      await updateGroupStatus(btn.dataset.id, 'banned', reason);
+    }));
     tbody.querySelectorAll('.del-group-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('Bu grubu silmek istediğine emin misin?')) return;
@@ -945,6 +967,10 @@ async function renderGroups(main) {
         catch (e) { toast(e.message, 'error'); }
       });
     });
+  };
+  const updateGroupStatus = async (id, status, reason) => {
+    try { await adminApi('/group/' + id + '/status', { method: 'PATCH', body: JSON.stringify({ status, reason }) }); toast(status === 'active' ? 'Grup aktifleştirildi' : status === 'banned' ? 'Grup yasaklandı' : 'Grup askıya alındı'); groups = await adminApi('/groups'); renderTable(groups); }
+    catch (e) { toast(e.message, 'error'); }
   };
   renderTable(groups);
   $('#group-search').addEventListener('input', e => {

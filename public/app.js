@@ -2608,7 +2608,16 @@ async function renderGroupDetail(app, slug) {
     groupData = await api('/group/' + slug);
     members = await api('/group/' + slug + '/members');
     try { messages = await api('/group/' + slug + '/messages'); } catch {}
-  } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>'; return; }
+  } catch (error) {
+    const status = error.data?.group_status;
+    if (status === 'suspended' || status === 'banned' || status === 'member_banned') {
+      const title = status === 'banned' ? 'Bu grup yasaklandı' : status === 'member_banned' ? 'Bu gruba erişiminiz yasaklandı' : 'Bu grup askıya alındı';
+      app.innerHTML = `<div class="container page"><div class="empty-state group-moderation-notice"><i class="fas fa-${status === 'suspended' ? 'pause-circle' : 'ban'}"></i><h2>${title}</h2><p>${escHtml(error.data.reason || error.message)}</p><a href="/gruplar" data-link class="btn btn-outline">Gruplara dön</a></div></div>`;
+    } else {
+      app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Grup bulunamadı.</p></div></div>';
+    }
+    return;
+  }
 
   if (currentUser && members.length) {
     try {
@@ -3014,8 +3023,10 @@ async function renderGroupDetail(app, slug) {
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
       document.querySelector('.member-ban-btn')?.addEventListener('click', async () => {
-        if (!confirm(`${member.username} IP adresiyle yasaklansın mı? Bu IP ile tekrar giriş yapılamaz.`)) return;
-        try { await api(`/group/${slug}/ban/${targetId}`, { method: 'POST' }); hideModal(); toast('Üye IP adresiyle yasaklandı'); renderRoute(location.pathname); }
+        const reason = prompt(`${member.username} için grup yasaklama nedeni:`);
+        if (reason === null || !reason.trim()) return;
+        if (!confirm(`${member.username} bu gruptan yasaklansın mı?`)) return;
+        try { await api(`/group/${slug}/ban/${targetId}`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) }); hideModal(); toast('Üye bu gruptan yasaklandı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
       return;
@@ -3042,7 +3053,6 @@ function chatMsgHTML(m, canModerate = false) {
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
-        <a href="${profileLink}" data-link class="chat-msg-name">${isOwn ? 'Sen' : escHtml(m.username || 'Silindi')}${m.badge_name ? ` <span class="badge" style="background:${escHtml(m.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${m.badge_icon ? `<i class="${escHtml(m.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(m.badge_name)}</span>` : ''}</a>
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
         ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
         ${currentUser && (isOwn || canModerate) && m.content ? `<button class="btn btn-ghost edit-msg" data-id="${m.id}" data-content="${escHtml(m.content)}" title="Mesajı düzenle" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-pen"></i></button>` : ''}

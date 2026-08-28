@@ -701,6 +701,23 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(content_type, content_id)
     );
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'active';
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_reason TEXT DEFAULT '';
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMP;
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_groups_moderation_status ON groups(moderation_status);
+    CREATE TABLE IF NOT EXISTS group_member_restrictions (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      restriction_type TEXT NOT NULL CHECK (restriction_type IN ('ban')),
+      reason TEXT NOT NULL,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      revoked_at TIMESTAMP,
+      UNIQUE(group_id, user_id, restriction_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_member_restrictions_active ON group_member_restrictions(group_id, user_id, revoked_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_artist INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_display_name TEXT DEFAULT '';

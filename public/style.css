@@ -1335,6 +1335,10 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .group-member-joined i { color:var(--accent-red2); }
 .group-member-joined b { margin-left:auto; color:var(--text-primary); }
 .group-member-actions { display:grid; gap:8px; margin-top:16px; }
+.group-moderation-notice { max-width:620px; margin:48px auto; padding:48px 24px; border:1px solid var(--border); border-radius:16px; background:var(--bg-card); }
+.group-moderation-notice > i { display:block; margin-bottom:18px; color:var(--accent-red2); font-size:42px; }
+.group-moderation-notice h2 { margin:0 0 10px; color:var(--text-primary); }
+.group-moderation-notice p { max-width:520px; margin:0 auto 24px; color:var(--text-secondary); line-height:1.7; white-space:pre-wrap; overflow-wrap:anywhere; }
 
 /* ===== SETTINGS ===== */
 .settings-layout { display: grid; grid-template-columns: 220px 1fr; gap: 32px; }
