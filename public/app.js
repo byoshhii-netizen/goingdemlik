@@ -2478,7 +2478,9 @@ async function renderGroupList(app) {
 }
 
 function groupCardHTML(g) {
-  const typeBadge = g.type === 'private' ? `<span class="badge badge-red"><i class="fas fa-lock"></i> Özel</span>` : g.invite_only ? `<span class="badge badge-orange"><i class="fas fa-user-check"></i> İzinli katılım</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Açık</span>`;
+  const visibility = g.visibility || (g.type === 'private' ? 'private' : g.invite_only ? 'invite' : 'public');
+  if (visibility === 'private') return '';
+  const typeBadge = visibility === 'invite' ? `<span class="badge badge-orange"><i class="fas fa-key"></i> Kod ile katılım</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Herkese açık</span>`;
   return `<div class="group-card" onclick="navigate('/grup/${escHtml(g.slug)}')">
     <div class="group-cover">
       ${g.cover_image ? `<img src="${escHtml(g.cover_image)}" alt="" />` : `<div class="group-cover-placeholder"><i class="fas fa-users"></i></div>`}
@@ -2503,7 +2505,7 @@ function showNewGroupModal() {
       <input type="file" id="gr-cover-file" accept="image/*" style="margin-bottom:8px" />
       <div id="gr-cover-preview" style="display:none"></div>
     </div>
-    <div class="form-group"><label>Tür</label><select id="gr-type"><option value="public">Açık</option><option value="private">Özel</option></select></div>
+    <div class="form-group"><label>Bu tür</label><select id="gr-visibility"><option value="public">Herkese açık · Herkes direkt katılabilir</option><option value="invite">Davetli · Listede görünür, kod ile girilir</option><option value="private">Gizli · Listelerde görünmez, kod ile girilir</option></select></div>
     <div class="form-group">
       <label class="checkbox-label"><input type="checkbox" id="gr-chat" checked /> Sohbete izin ver</label>
       <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gr-photos" checked /> Fotoğrafa izin ver</label>
@@ -2534,7 +2536,8 @@ function showNewGroupModal() {
         const r = await apiForm('/upload', fd);
         cover_image = r.url;
       }
-      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, type: $('#gr-type').value, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked, invite_only: $('#gr-invite').checked }) });
+      const visibility = $('#gr-visibility').value;
+      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
       toast('Grup oluşturuldu'); hideModal(); navigate('/grup/' + g.slug);
     } catch (e) { $('#gr-error').textContent = e.message; }
   });
@@ -2565,7 +2568,8 @@ async function renderGroupDetail(app, slug) {
   document.title = group.name + ' - ' + siteName;
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
-  const isOpenGroup = group.type !== 'private' && !group.invite_only;
+  const visibility = group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public');
+  const isOpenGroup = visibility === 'public';
   const canSend = currentUser && isMember && group.allow_chat;
 
   // Üye olmayan kullanıcılar için önizleme sayfası göster
@@ -2646,8 +2650,7 @@ async function renderGroupDetail(app, slug) {
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
-            ${(group.type === 'private' || group.invite_only) ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}
-            ${(group.type === 'private' || group.invite_only) ? `<button class="btn btn-outline btn-sm" id="join-requests-btn"><i class="fas fa-user-plus"></i> Katılım İstekleri</button>` : ''}` : ''}
+            ${visibility !== 'public' ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-link"></i> Davet Kodu</button>` : ''}` : ''}
         </div>
       </div>
     </div>
@@ -2672,13 +2675,13 @@ async function renderGroupDetail(app, slug) {
           <div class="card-header"><span><i class="fas fa-info-circle" style="color:var(--accent-red)"></i> Bilgi</span></div>
           <div class="card-body" style="font-size:13px;color:var(--text-secondary)">
             <div style="margin-bottom:6px"><i class="fas fa-users"></i> ${group.member_count} üye</div>
-            <div style="margin-bottom:6px">${group.type === 'private' ? '<span class="badge badge-red"><i class="fas fa-lock"></i> Özel</span>' : '<span class="badge badge-green"><i class="fas fa-globe"></i> Açık</span>'}</div>
+            <div style="margin-bottom:6px">${visibility === 'private' ? '<span class="badge badge-red"><i class="fas fa-lock"></i> Gizli</span>' : visibility === 'invite' ? '<span class="badge badge-orange"><i class="fas fa-key"></i> Davetli</span>' : '<span class="badge badge-green"><i class="fas fa-globe"></i> Açık</span>'}</div>
             <div style="margin-bottom:6px"><i class="fas fa-user-shield"></i> Sahip: ${escHtml(group.owner_name || '')}</div>
             <div><i class="fas fa-calendar"></i> ${formatDate(group.created_at)}</div>
           </div>
         </div>
         <div class="group-sidebar-card">
-          <div class="card-header"><span><i class="fas fa-users" style="color:var(--accent-red)"></i> Üyeler</span></div>
+          <div class="card-header"><span><i class="fas fa-users" style="color:var(--accent-red)"></i> Üyeler (${members.length})</span></div>
           <div id="members-list">${members.map(m => memberItemHTML(m, isOwner, slug)).join('')}</div>
         </div>
       </div>
@@ -2838,7 +2841,7 @@ async function renderGroupDetail(app, slug) {
         <input type="file" id="gs-cover-file" accept="image/*" style="margin-bottom:8px" />
         ${group.cover_image ? `<img id="gs-cover-preview" src="${escHtml(group.cover_image)}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />` : `<div id="gs-cover-preview" style="display:none"></div>`}
       </div>
-      <div class="form-group"><label>Tür</label><select id="gs-type"><option value="public" ${group.type === 'public' ? 'selected' : ''}>Açık</option><option value="private" ${group.type === 'private' ? 'selected' : ''}>Özel</option></select></div>
+      <div class="form-group"><label>Bu tür</label><select id="gs-visibility"><option value="public" ${visibility === 'public' ? 'selected' : ''}>Herkese açık</option><option value="invite" ${visibility === 'invite' ? 'selected' : ''}>Davetli · Kod ile</option><option value="private" ${visibility === 'private' ? 'selected' : ''}>Gizli · Kod ile</option></select></div>
       <div class="form-group">
         <label class="checkbox-label"><input type="checkbox" id="gs-chat" ${group.allow_chat ? 'checked' : ''} /> Sohbet</label>
         <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gs-photos" ${group.allow_photos ? 'checked' : ''} /> Fotoğraf</label>
@@ -2867,7 +2870,7 @@ async function renderGroupDetail(app, slug) {
           const r = await apiForm('/upload', fd);
           cover_image = r.url;
         }
-        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, type: $('#gs-type').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
+        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, visibility: $('#gs-visibility').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
         toast('Grup güncellendi'); hideModal(); renderRoute(location.pathname);
       } catch (e) { $('#gs-error').textContent = e.message; }
     });
@@ -2921,9 +2924,9 @@ async function renderGroupDetail(app, slug) {
   });
 }
 
-function chatMsgHTML(m) {
+function chatMsgHTML(m, canModerate = false) {
   const isOwn = currentUser && currentUser.id === m.user_id;
-  const deleteLabel = isOwn ? 'Herkesten sil' : 'Benden sil';
+  const deleteLabel = isOwn || canModerate ? 'Herkesten sil' : 'Benden sil';
   return `<div class="chat-msg ${isOwn ? 'own' : ''}">
     ${isOwn ? '' : (hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`)}
     <div class="chat-msg-body">
@@ -4300,6 +4303,7 @@ function renderLogin(app) {
         });
         return;
       }
+      if (!data?.user?.username || !data.token) throw new Error('Kayıt tamamlandı ancak oturum bilgisi alınamadı. Lütfen giriş ekranından deneyin.');
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');

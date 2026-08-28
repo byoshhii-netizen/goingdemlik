@@ -1588,7 +1588,7 @@ app.delete('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
 
 // ===== GROUPS =====
 app.get('/api/groups', async (req, res) => {
-  const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id ORDER BY g.created_at DESC`);
+  const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' ORDER BY g.created_at DESC`);
   res.json(rows);
 });
 
@@ -1617,16 +1617,20 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
 app.post('/api/groups', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   try {
-    const { name, description, cover_image, type, allow_chat, allow_photos, invite_only } = req.body;
+    const { name, description, cover_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
+    const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
     const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query(
-      'INSERT INTO groups (name,slug,description,cover_image,owner_id,type,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1) RETURNING id',
-      [name, tempSlug, description||'', cover_image||'', req.user.id, type||'public', allow_chat!==false?1:0, allow_photos!==false?1:0, invite_only?1:0]);
+      'INSERT INTO groups (name,slug,description,cover_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1) RETURNING id',
+      [name, tempSlug, description||'', cover_image||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
     const id = rows[0].id;
     const realSlug = makeSlug(name, id);
     await query('UPDATE groups SET slug=$1 WHERE id=$2', [realSlug, id]);
     await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [id, req.user.id, 'owner']);
+    if (groupVisibility !== 'public') {
+      await query('INSERT INTO group_invites (group_id,invite_code,created_by) VALUES ($1,$2,$3)', [id, randomUUID().substring(0, 8).toUpperCase(), req.user.id]);
+    }
     await logAction(req.user.username, 'create_group', realSlug);
     const { rows: gRows } = await query('SELECT * FROM groups WHERE id=$1', [id]);
     res.json(gRows[0]);
@@ -1638,12 +1642,13 @@ app.put('/api/group/:slug', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
   if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { name, description, cover_image, type, allow_chat, allow_photos, invite_only } = req.body;
-  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,type=$4,allow_chat=$5,allow_photos=$6,invite_only=$7 WHERE id=$8',
+  const { name, description, cover_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+  const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
+  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,type=$4,visibility=$5,allow_chat=$6,allow_photos=$7,invite_only=$8 WHERE id=$9',
     [name||group.name, description??group.description, cover_image??group.cover_image,
-     type||group.type, allow_chat!==undefined?(allow_chat?1:0):group.allow_chat,
+     groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==undefined?(allow_chat?1:0):group.allow_chat,
      allow_photos!==undefined?(allow_photos?1:0):group.allow_photos,
-     invite_only!==undefined?(invite_only?1:0):group.invite_only, group.id]);
+     groupVisibility === 'public' ? 0 : 1, group.id]);
   const { rows: gRows } = await query('SELECT * FROM groups WHERE id=$1', [group.id]);
   res.json(gRows[0]);
 });
@@ -1667,7 +1672,7 @@ app.post('/api/group/:slug/join', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
-  if (group.type === 'private' || group.invite_only) return res.status(403).json({ error: 'Bu grup sadece davet ile katılabilir' });
+  if ((group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public')) !== 'public') return res.status(403).json({ error: 'Bu grup sadece davet kodu ile katılabilir' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [group.id, req.user.id, 'member']);
@@ -1705,6 +1710,8 @@ app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM group_invites WHERE invite_code=$1', [invite_code.toUpperCase()]);
   if (!rows.length) return res.status(404).json({ error: 'Geçersiz davet kodu' });
   const invite = rows[0];
+  const { rows: groupRows } = await query('SELECT id FROM groups WHERE id=$1', [invite.group_id]);
+  if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [invite.group_id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [invite.group_id, req.user.id, 'member']);
@@ -1771,7 +1778,8 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
-  if (group.type === 'private') {
+  const groupVisibility = group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public');
+  if (groupVisibility !== 'public') {
     if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
     const { rows: m } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
     if (!m.length) return res.status(403).json({ error: 'Üye değilsiniz' });
@@ -1822,9 +1830,10 @@ app.delete('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => 
   const msg = msgRows[0];
   const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
-  if (msg.user_id == req.user.id) {
+  const canModerate = member[0].role === 'owner' || member[0].role === 'moderator';
+  if (msg.user_id == req.user.id || canModerate) {
     await query('DELETE FROM group_messages WHERE id=$1', [msg.id]);
-    return res.json({ ok: true, scope: 'everyone' });
+    return res.json({ ok: true, scope: canModerate && msg.user_id != req.user.id ? 'moderated' : 'everyone' });
   }
   await query('INSERT INTO group_message_deletions (message_id,user_id) VALUES ($1,$2) ON CONFLICT (message_id,user_id) DO NOTHING', [msg.id, req.user.id]);
   res.json({ ok: true, scope: 'me' });

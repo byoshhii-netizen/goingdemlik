@@ -1192,11 +1192,11 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .page-nav-title { font-size: 14px; font-weight: 600; }
 
 /* ===== GROUP CHAT ===== */
-.group-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 24px; align-items: stretch; }
+.group-detail-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: stretch; }
 .group-detail-layout > :last-child { display:flex; flex-direction:column; min-height:560px; }
 .group-detail-layout > :last-child .group-sidebar-card:last-child { flex:1; min-height:0; overflow:auto; }
 @media (max-width: 900px) { .group-detail-layout { grid-template-columns: 1fr; } }
-.chat-container { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; height: min(700px, calc(100vh - 260px)); min-height: 560px; width: 100%; }
+.chat-container { background: var(--bg-card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; height: min(760px, calc(100vh - 230px)); min-height: 560px; width: 100%; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-height: 0; align-content: flex-start; }
 .chat-msg { display: grid; grid-template-columns: 34px minmax(0, min(100%, 520px)); align-items: flex-start; gap: 10px; min-height: 0; width:100%; }
 .chat-msg-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-card2); flex-shrink: 0; object-fit: cover; }
@@ -2180,7 +2180,9 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
   /* Grup detay */
   .group-detail-layout { grid-template-columns: 1fr !important; gap: 12px !important; }
-  .chat-container { height: 380px !important; }
+  .chat-container { height: min(68svh, 620px) !important; min-height: 430px !important; }
+  .group-detail-layout > :last-child { min-height: 0 !important; }
+  .group-detail-layout > :last-child .group-sidebar-card:last-child { max-height: 280px; }
 
   /* Forum meta kayma */
   .forum-detail-meta { gap: 8px !important; font-size: 12px !important; }
