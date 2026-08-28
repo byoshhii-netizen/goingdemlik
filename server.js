@@ -1513,11 +1513,16 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
   // Başlık güncellendiyse ve is_unnamed sıfırlanmadıysa, is_unnamed'i sıfırla
   const newIsUnnamed = is_unnamed !== undefined ? (is_unnamed ? 1 : 0) : book.is_unnamed;
-  if (book_password && String(book_password).length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
-  const passwordHash = book_password ? hashPassword(book_password) : (book.password_hash || '');
-  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,password_hash=$8,updated_at=NOW() WHERE id=$9',
-    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, passwordHash, book.id]);
-  if (book_password) await query('DELETE FROM book_access WHERE book_id=$1 AND user_id<>$2', [book.id, req.user.id]);
+  const newPassword = typeof book_password === 'string' ? book_password.trim() : '';
+  if (newPassword && newPassword.length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
+  const updateValues = [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, book.id];
+  if (newPassword) {
+    await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,password_hash=$8,updated_at=NOW() WHERE id=$9',
+      [...updateValues.slice(0, 7), hashPassword(newPassword), updateValues[7]]);
+    await query('DELETE FROM book_access WHERE book_id=$1 AND user_id<>$2', [book.id, req.user.id]);
+  } else {
+    await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,updated_at=NOW() WHERE id=$8', updateValues);
+  }
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(sanitizeBook(rows[0]));
 });
