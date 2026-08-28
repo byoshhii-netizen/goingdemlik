@@ -12,6 +12,7 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { query, initDb } = require('./database');
+const { hashPassword, verifyPassword, needsRehash } = require('./password');
 
 function profileRouteKey(username) {
   return String(username || '').toLocaleLowerCase('tr-TR')
@@ -101,6 +102,9 @@ app.get('/ads.txt', (req, res) => {
 });
 
 const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
+const APP_SECRET = process.env.APP_SECRET || '';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const EMAIL_FROM = process.env.EMAIL_FROM || '';
 if (!process.env.SITE_URL) {
   console.warn('[SEO] ⚠️  SITE_URL env ayarlanmamış! Railway panelinde: SITE_URL=https://cigcig.xyz');
 }
@@ -192,21 +196,67 @@ function getClientInfo(req) {
   return { userAgent, device, operatingSystem, country, city };
 }
 
-function hashPassword(pw) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(String(pw), salt, 64).toString('hex');
-  return `scrypt$${salt}$${hash}`;
+function normalizeSecurityAnswer(value) {
+  return String(value || '').trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
 }
 
-function verifyPassword(pw, stored) {
-  const value = String(stored || '');
-  if (value.startsWith('scrypt$')) {
-    const [, salt, expected] = value.split('$');
-    if (!salt || !expected) return false;
-    const actual = crypto.scryptSync(String(pw), salt, 64).toString('hex');
-    return actual.length === expected.length && crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected));
-  }
-  return crypto.createHash('sha256').update(String(pw)).digest('hex') === value;
+function hashChallengeValue(value) {
+  return crypto.createHmac('sha256', APP_SECRET || 'cigcig-challenge-secret-change-me').update(String(value)).digest('hex');
+}
+
+function createChallengeToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function maskEmail(email) {
+  const [local, domain] = String(email || '').split('@');
+  if (!local || !domain) return 'gizli e-posta adresinize';
+  const visible = local.length > 2 ? `${local[0]}${'*'.repeat(Math.max(1, local.length - 2))}${local.at(-1)}` : `${local[0]}*`;
+  return `${visible}@${domain}`;
+}
+
+async function sendEmailCode(email, username, code) {
+  if (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET) throw new Error('E-posta servisi yapılandırılmamış');
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: EMAIL_FROM,
+      to: [email],
+      subject: 'CigCig doğrulama kodun',
+      html: `<p>Merhaba ${escapeHtml(username)},</p><p>Giriş doğrulama kodun:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${code}</p><p>Bu kod 10 dakika geçerlidir. Kodu kimseyle paylaşma.</p>`
+    })
+  });
+  if (!response.ok) throw new Error('Doğrulama e-postası gönderilemedi');
+}
+
+async function createTwoFactorChallenge(user, purpose = 'login') {
+  const challenge = createChallengeToken();
+  const method = user.two_factor_method || 'none';
+  const code = method === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
+  await query('DELETE FROM auth_challenges WHERE user_id=$1 OR expires_at <= NOW()', [user.id]);
+  await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, purpose, method, code ? hashChallengeValue(code) : '']);
+  if (code) await sendEmailCode(user.email, user.username, code);
+  return { challenge, method, question: method === 'question' ? user.two_factor_question : '', maskedEmail: method === 'email' ? maskEmail(user.email) : '' };
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+}
+
+async function completeTwoFactorChallenge(challenge, value) {
+  const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND expires_at > NOW() LIMIT 1', [hashChallengeValue(challenge)]);
+  const record = rows[0];
+  if (!record || record.attempts >= 5) return null;
+  await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
+  const valid = record.method === 'email'
+    ? hashChallengeValue(String(value || '').trim()) === record.code_hash
+    : verifyPassword(normalizeSecurityAnswer(value), record.code_hash);
+  if (!valid) return null;
+  await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
+  const token = generateToken(record.user_id);
+  await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, record.user_id]);
+  return token;
 }
 
 function hasAdminPermission(permissions, name) {
@@ -230,7 +280,7 @@ function getSessionCookie(req) {
 
 function sanitizeUser(u) {
   if (!u) return null;
-  const { password_hash, spotify_token, spotify_refresh, ...rest } = u;
+  const { password_hash, spotify_token, spotify_refresh, two_factor_answer_hash, email_verification_token_hash, email_verification_expires_at, ...rest } = u;
   return rest;
 }
 
@@ -330,6 +380,7 @@ async function adminMiddleware(req, res, next) {
   }
   if (req.method !== 'GET') {
     const allowed = [
+      /^\/api\/admin\/user\/\d+\/2fa$/,
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/,
@@ -642,6 +693,9 @@ app.post('/api/admin/auth/login', async (req, res) => {
   const storedMasterPassword = String(config.admin_password || '').trim();
   const masterPasswordMatches = verifyPassword(password, storedMasterPassword);
   if (username.toLowerCase() === (config.admin_username || 'Tarator').trim().toLowerCase() && masterPasswordMatches) {
+    if (needsRehash(storedMasterPassword)) {
+      await query('UPDATE settings SET value=$1 WHERE key=$2', [hashPassword(password), 'admin_password']);
+    }
     const token = generateToken('admin');
     await query('INSERT INTO admin_sessions (token) VALUES ($1)', [token]);
     return res.json({ token, is_super_admin: true, username });
@@ -738,7 +792,7 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 // ===== AUTH =====
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
-    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress } = req.body;
+    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
     let parsedHomepageSections = homepage_sections;
     let parsedProfileVisibility = profile_visibility;
     try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
@@ -748,6 +802,9 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
+    const twoFactorMethod = ['none', 'email', 'question'].includes(two_factor_method) ? two_factor_method : 'none';
+    if (twoFactorMethod === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta doğrulama servisi yapılandırılmamış' });
+    if (twoFactorMethod === 'question' && (!two_factor_question || normalizeSecurityAnswer(two_factor_answer).length < 2)) return res.status(400).json({ error: 'Güvenlik sorusu ve cevabı zorunlu' });
     if (!birth_date || !/^\d{4}-\d{2}-\d{2}$/.test(birth_date)) return res.status(400).json({ error: 'Doğum tarihi zorunlu' });
     const birth = new Date(`${birth_date}T00:00:00Z`);
     const today = new Date();
@@ -777,8 +834,8 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     let avatar = '';
     if (req.file) avatar = await handleUpload(req.file);
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
-      [username, email, hashPassword(password), 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *',
+      [username, email, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -800,7 +857,7 @@ app.post('/api/auth/login', async (req, res) => {
     const { rows } = await query('SELECT * FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1) LIMIT 1', [login]);
     const user = rows[0];
     if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Hatalı bilgiler' });
-    if (!String(user.password_hash).startsWith('scrypt$')) {
+    if (needsRehash(user.password_hash)) {
       await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(password), user.id]);
     }
     if (user.banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
@@ -816,6 +873,10 @@ app.post('/api/auth/login', async (req, res) => {
         temp_token: (() => { const t = generateToken(user.id); query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [t, user.id]); return t; })()
       });
     }
+    if (user.two_factor_method && user.two_factor_method !== 'none') {
+      const challenge = await createTwoFactorChallenge(user);
+      return res.json({ two_factor_required: true, ...challenge });
+    }
     await query('UPDATE users SET last_active=NOW(), ip=$1 WHERE id=$2', [ip, user.id]);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
@@ -823,6 +884,69 @@ app.post('/api/auth/login', async (req, res) => {
     setSessionCookie(res, token);
     res.json({ token, user: sanitizeUser(user) });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/auth/2fa/verify', async (req, res) => {
+  try {
+    const challenge = String(req.body.challenge || '');
+    const value = String(req.body.value || '');
+    if (!/^[a-f0-9]{64}$/i.test(challenge) || !value) return res.status(400).json({ error: 'Doğrulama bilgisi eksik' });
+    const token = await completeTwoFactorChallenge(challenge, value);
+    if (!token) return res.status(401).json({ error: 'Doğrulama başarısız veya kod geçersiz' });
+    const { rows } = await query('SELECT * FROM users WHERE id=(SELECT user_id FROM sessions WHERE token=$1) LIMIT 1', [token]);
+    if (!rows.length) return res.status(401).json({ error: 'Oturum oluşturulamadı' });
+    await query('UPDATE users SET last_active=NOW() WHERE id=$1', [rows[0].id]);
+    setSessionCookie(res, token);
+    res.json({ token, user: sanitizeUser(rows[0]) });
+  } catch (e) { res.status(500).json({ error: 'Doğrulama işlemi başarısız' }); }
+});
+
+app.get('/api/profile/2fa', authMiddleware, async (req, res) => {
+  res.json({ method: req.user.two_factor_method || 'none', question: req.user.two_factor_question || '', email: maskEmail(req.user.email) });
+});
+
+app.put('/api/profile/2fa', authMiddleware, async (req, res) => {
+  const { method, question, answer, password } = req.body || {};
+  if (!password || !verifyPassword(password, req.user.password_hash)) return res.status(401).json({ error: 'Hesap şifresi yanlış' });
+  if (!['none', 'email', 'question'].includes(method)) return res.status(400).json({ error: 'Geçersiz doğrulama yöntemi' });
+  if (method === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta servisi yapılandırılmamış' });
+  if (method === 'question' && (!question || normalizeSecurityAnswer(answer).length < 2)) return res.status(400).json({ error: 'Soru ve cevap zorunlu' });
+  await query('UPDATE users SET two_factor_method=$1,two_factor_question=$2,two_factor_answer_hash=$3 WHERE id=$4', [method, method === 'question' ? String(question).trim() : '', method === 'question' ? hashPassword(normalizeSecurityAnswer(answer)) : '', req.user.id]);
+  res.json({ ok: true, method, question: method === 'question' ? String(question).trim() : '', email: maskEmail(req.user.email) });
+});
+
+app.post('/api/profile/email/request', authMiddleware, async (req, res) => {
+  try {
+    const { new_email, password } = req.body || {};
+    const email = String(new_email || '').trim().toLowerCase();
+    if (!password || !verifyPassword(password, req.user.password_hash)) return res.status(401).json({ error: 'Hesap şifresi yanlış' });
+    if (!isValidEmail(email)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
+    if (email === String(req.user.email).toLowerCase()) return res.status(400).json({ error: 'Yeni e-posta mevcut e-posta ile aynı' });
+    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(email)=LOWER($1)', [email]);
+    if (existing.length) return res.status(400).json({ error: 'Bu e-posta zaten kullanılıyor' });
+    if (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET) return res.status(503).json({ error: 'E-posta servisi yapılandırılmamış' });
+    const challenge = createChallengeToken();
+    const code = String(crypto.randomInt(100000, 1000000));
+    await query('DELETE FROM auth_challenges WHERE user_id=$1 AND purpose=$2', [req.user.id, 'email_change']);
+    await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,target_value,expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), req.user.id, 'email_change', 'email', hashChallengeValue(code), email]);
+    await sendEmailCode(email, req.user.username, code);
+    res.json({ challenge, maskedEmail: maskEmail(email) });
+  } catch (e) { res.status(500).json({ error: 'Doğrulama kodu gönderilemedi' }); }
+});
+
+app.post('/api/profile/email/confirm', authMiddleware, async (req, res) => {
+  const { challenge, code } = req.body || {};
+  if (!/^[a-f0-9]{64}$/i.test(String(challenge || '')) || !/^\d{6}$/.test(String(code || ''))) return res.status(400).json({ error: 'Geçersiz doğrulama bilgisi' });
+  const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND user_id=$2 AND purpose=$3 AND expires_at > NOW() LIMIT 1', [hashChallengeValue(challenge), req.user.id, 'email_change']);
+  const record = rows[0];
+  if (!record || record.attempts >= 5) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+  await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
+  if (hashChallengeValue(code) !== record.code_hash) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+  const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(email)=LOWER($1) AND id<>$2', [record.target_value, req.user.id]);
+  if (existing.length) return res.status(409).json({ error: 'Bu e-posta artık kullanılıyor' });
+  await query('UPDATE users SET email=$1 WHERE id=$2', [record.target_value, req.user.id]);
+  await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
+  res.json({ ok: true, email: record.target_value });
 });
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
@@ -2512,6 +2636,23 @@ app.post('/api/admin/ad-submissions/:id/approve', adminMiddleware, async (req,re
 app.post('/api/admin/ad-submissions/:id/reject', adminMiddleware, async (req,res) => {await query("UPDATE ad_submissions SET status='rejected' WHERE id=$1",[req.params.id]);res.json({ok:true});});
 
 // ===== ADMIN =====
+app.get('/api/admin/user/:id/2fa', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu işlem yalnızca ana admine açıktır' });
+  const { rows } = await query('SELECT id,username,email,two_factor_method,two_factor_question FROM users WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.put('/api/admin/user/:id/2fa', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu işlem yalnızca ana admine açıktır' });
+  const { method, question, answer } = req.body || {};
+  if (!['none', 'email', 'question'].includes(method)) return res.status(400).json({ error: 'Geçersiz doğrulama yöntemi' });
+  if (method === 'question' && (!question || normalizeSecurityAnswer(answer).length < 2)) return res.status(400).json({ error: 'Soru ve cevap zorunlu' });
+  const { rows } = await query('UPDATE users SET two_factor_method=$1,two_factor_question=$2,two_factor_answer_hash=$3 WHERE id=$4 RETURNING id,username,email,two_factor_method,two_factor_question', [method, method === 'question' ? String(question).trim() : '', method === 'question' ? hashPassword(normalizeSecurityAnswer(answer)) : '', req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  res.json(rows[0]);
+});
+
 app.get('/api/admin/users', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM users ORDER BY created_at DESC');
   res.json(rows.map(u => sanitizeUser(u)));
@@ -2763,8 +2904,11 @@ app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
 app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key, value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  // admin_password için hash işlemi client tarafında yapılıyor, server direkt kaydeder
-  await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, value]);
+  if (key === 'admin_password' && String(value || '').length < 12) {
+    return res.status(400).json({ error: 'Admin şifresi en az 12 karakter olmalı' });
+  }
+  const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
+  await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
   res.json({ ok: true });
 });
 

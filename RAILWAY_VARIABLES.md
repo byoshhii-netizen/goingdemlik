@@ -52,6 +52,15 @@ CLOUDINARY_API_SECRET=<api secret>
 ```text
 DATABASE_URL=<Railway PostgreSQL connection string>
 PORT=8080
+APP_SECRET=<en az 32 karakterlik rastgele uygulama sirri>
+RESEND_API_KEY=re_<Resend API anahtari>
+EMAIL_FROM=CigCig <noreply@alanadiniz.com>
 ```
 
 Not: R2 ve Cloudinary anahtarlarini bu dosyaya veya git reposuna gercek degerleriyle yazmayin. Railway Variables uzerinden girin.
+
+## E-posta ve 2 asamali dogrulama
+
+E-posta kodlari Resend API ile gonderilir. Resend'de alan adini dogrulayip bir API key olusturun, sonra yukaridaki `RESEND_API_KEY` ve `EMAIL_FROM` degiskenlerini Railway > Service > Variables alanina ekleyin. `EMAIL_FROM` icindeki alan adi Resend'de dogrulanmis olmalidir.
+
+Kullanicilarin kayit veya ayarlardan e-posta kodlu 2AD kullanabilmesi icin `APP_SECRET` de zorunludur. Bu degeri sonradan degistirmek mevcut bekleyen kodlari gecersizlestirir; eski degeri kaybetmeyin.

@@ -2,10 +2,10 @@
 
 ## 🔐 Güvenlik
 
-### bcrypt Şifre Hashing
-- SHA-256 yerine **bcrypt (cost factor 12)** kullanılmaktadır
-- Mevcut SHA-256 hashli hesaplar ilk girişte otomatik bcrypt'e yükseltilir
-- Tüm şifre işlemleri: kayıt, giriş, şifre değiştirme, hesap silme
+### scrypt Şifre Hashing
+- Kullanıcı ve admin şifreleri sunucuda rastgele salt ve güçlü parametrelerle **scrypt** kullanılarak hashlenir
+- Mevcut SHA-256 hashli hesaplar ilk başarılı girişte otomatik olarak scrypt'e yükseltilir
+- Şifre işlemleri tarayıcıda hashlenmez; admin şifresi de sunucuda hashlenir
 
 ### Brute Force Koruması
 - `express-rate-limit` ile 15 dakikada maksimum **5 giriş denemesi**

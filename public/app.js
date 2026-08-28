@@ -3695,6 +3695,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item active" data-section="profile"><i class="fas fa-user"></i> Profil</div>
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
+        <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
         <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-sliders"></i> Profil Seçenekleri</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
@@ -3866,6 +3867,77 @@ async function renderSettingsSection(section) {
         await api('/profile/password', { method: 'PUT', body: JSON.stringify({ old_password, new_password }) });
         toast('Şifre değiştirildi'); $('#old-pw').value = ''; $('#new-pw').value = ''; $('#new-pw2').value = '';
       } catch (e) { $('#pw-msg').textContent = e.message; }
+    });
+
+  } else if (section === 'two-factor') {
+    let config = { method: 'none', question: '', email: '' };
+    try { config = await api('/profile/2fa'); } catch (e) { el.innerHTML = `<div class="card card-body"><div class="form-error">${escHtml(e.message)}</div></div>`; return; }
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span><i class="fas fa-shield-halved" style="color:var(--accent-red2);margin-right:7px"></i>2 Aşamalı Doğrulama</span></div>
+        <div class="card-body">
+          <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2);margin-bottom:16px">
+            <strong>Hesabına ekstra koruma ekle</strong>
+            <div class="form-hint">Şifren bilinse bile seçtiğin ikinci adım olmadan giriş yapılamaz.</div>
+          </div>
+          <div class="form-group"><label>Doğrulama yöntemi</label><select id="s-2fa-method">
+            <option value="none" ${config.method === 'none' ? 'selected' : ''}>Kapalı</option>
+            <option value="email" ${config.method === 'email' ? 'selected' : ''}>E-posta kodu</option>
+            <option value="question" ${config.method === 'question' ? 'selected' : ''}>Güvenlik sorusu</option>
+          </select></div>
+          <div id="s-2fa-question-fields" style="display:${config.method === 'question' ? 'block' : 'none'};padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
+            <div class="form-group"><label>Soru</label><select id="s-2fa-question">
+              <option value="En sevdiğin yemek nedir?" ${config.question === 'En sevdiğin yemek nedir?' ? 'selected' : ''}>En sevdiğin yemek nedir?</option>
+              <option value="En sevdiğin isim nedir?" ${config.question === 'En sevdiğin isim nedir?' ? 'selected' : ''}>En sevdiğin isim nedir?</option>
+              <option value="En sevdiğin eşya nedir?" ${config.question === 'En sevdiğin eşya nedir?' ? 'selected' : ''}>En sevdiğin eşya nedir?</option>
+            </select></div>
+            <div class="form-group"><label>Yeni cevap</label><input type="text" id="s-2fa-answer" autocomplete="off" placeholder="Cevabını yaz" /></div>
+          </div>
+          <div id="s-2fa-email-info" class="form-hint" style="display:${config.method === 'email' ? 'block' : 'none'};margin:12px 0">Kod, ${escHtml(config.email)} adresine gönderilecek.</div>
+          <div class="form-group"><label>Hesap şifren</label><input type="password" id="s-2fa-password" autocomplete="current-password" placeholder="Değişikliği onaylamak için" /></div>
+          <button class="btn btn-primary" id="save-2fa-btn"><i class="fas fa-save"></i> 2AD ayarını kaydet</button>
+          <div id="s-2fa-msg" class="form-error mt-4"></div>
+          <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border)">
+            <div style="font-weight:700;margin-bottom:5px"><i class="fas fa-envelope" style="color:var(--accent-red2);margin-right:6px"></i>E-posta adresini değiştir</div>
+            <div class="form-hint" style="margin-bottom:12px">Yeni adrese kod gönderilir. Değişiklik için hesap şifren de gerekir.</div>
+            <div class="form-group"><label>Yeni e-posta</label><input type="email" id="s-new-email" placeholder="yeni@ornek.com" autocomplete="email" /></div>
+            <div class="form-group"><label>Hesap şifren</label><input type="password" id="s-email-password" autocomplete="current-password" /></div>
+            <button class="btn btn-outline" id="request-email-change"><i class="fas fa-paper-plane"></i> Kod gönder</button>
+            <div id="s-email-code-box" style="display:none;margin-top:12px"><div class="form-group"><label>E-posta kodu</label><input type="text" id="s-email-code" inputmode="numeric" maxlength="6" placeholder="000000" /></div><button class="btn btn-primary" id="confirm-email-change">E-postayı doğrula ve kaydet</button></div>
+            <div id="s-email-msg" class="form-error mt-4"></div>
+          </div>
+        </div>
+      </div>`;
+    const syncTwoFactorFields = () => {
+      const method = $('#s-2fa-method').value;
+      $('#s-2fa-question-fields').style.display = method === 'question' ? 'block' : 'none';
+      $('#s-2fa-email-info').style.display = method === 'email' ? 'block' : 'none';
+    };
+    $('#s-2fa-method').addEventListener('change', syncTwoFactorFields);
+    $('#save-2fa-btn').addEventListener('click', async () => {
+      const method = $('#s-2fa-method').value;
+      const msg = $('#s-2fa-msg');
+      try {
+        const updated = await api('/profile/2fa', { method: 'PUT', body: JSON.stringify({ method, question: $('#s-2fa-question')?.value, answer: $('#s-2fa-answer')?.value, password: $('#s-2fa-password').value }) });
+        msg.style.color = 'var(--green)'; msg.textContent = '2AD ayarın güncellendi';
+        if (currentUser) { currentUser.two_factor_method = updated.method; currentUser.two_factor_question = updated.question; }
+        $('#s-2fa-password').value = ''; if ($('#s-2fa-answer')) $('#s-2fa-answer').value = '';
+      } catch (e) { msg.style.color = ''; msg.textContent = e.message; }
+    });
+    let emailChallenge = '';
+    $('#request-email-change').addEventListener('click', async () => {
+      const msg = $('#s-email-msg');
+      try {
+        const result = await api('/profile/email/request', { method: 'POST', body: JSON.stringify({ new_email: $('#s-new-email').value.trim(), password: $('#s-email-password').value }) });
+        emailChallenge = result.challenge; $('#s-email-code-box').style.display = 'block'; msg.style.color = 'var(--green)'; msg.textContent = `${result.maskedEmail} adresine kod gönderildi.`;
+      } catch (e) { msg.style.color = ''; msg.textContent = e.message; }
+    });
+    $('#confirm-email-change').addEventListener('click', async () => {
+      const msg = $('#s-email-msg');
+      try {
+        const result = await api('/profile/email/confirm', { method: 'POST', body: JSON.stringify({ challenge: emailChallenge, code: $('#s-email-code').value.trim() }) });
+        currentUser.email = result.email; msg.style.color = 'var(--green)'; msg.textContent = 'E-posta adresin güncellendi.'; $('#s-email-code-box').style.display = 'none'; $('#s-new-email').value = ''; $('#s-email-password').value = '';
+      } catch (e) { msg.style.color = ''; msg.textContent = e.message; }
     });
 
   } else if (section === 'appearance') {
@@ -4157,6 +4229,33 @@ function renderLogin(app) {
     if (!login || !password) { $('#login-error').textContent = 'Tüm alanları doldurun'; return; }
     try {
       const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) });
+      if (data.two_factor_required) {
+        app.innerHTML = `<div class="auth-page"><div class="auth-card auth-card--enhanced card card-body">
+          <div style="text-align:center"><div class="auth-site-wordmark"><i class="fas fa-shield-halved"></i> Güvenlik doğrulaması</div>
+          <p class="auth-subtitle">Şifren doğru. Hesabına devam etmek için ikinci adımı tamamla.</p></div>
+          <div class="form-group" style="padding:16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
+            <label>${data.method === 'email' ? 'E-posta kodu' : escHtml(data.question)}</label>
+            <p class="form-hint">${data.method === 'email' ? `${escHtml(data.maskedEmail)} adresine 6 haneli bir kod gönderdik.` : 'Cevabını büyük/küçük harfe dikkat etmeden yazabilirsin.'}</p>
+            <input type="text" id="login-2fa-value" inputmode="${data.method === 'email' ? 'numeric' : 'text'}" autocomplete="one-time-code" placeholder="${data.method === 'email' ? '000000' : 'Cevabın'}" maxlength="${data.method === 'email' ? '6' : '120'}" />
+          </div>
+          <button class="btn btn-primary" style="width:100%" id="login-2fa-btn"><i class="fas fa-check"></i> Doğrula ve giriş yap</button>
+          <div id="login-2fa-error" class="form-error mt-4" style="text-align:center"></div>
+        </div></div>`;
+        const verify = async () => {
+          const value = $('#login-2fa-value').value.trim();
+          if (!value) { $('#login-2fa-error').textContent = 'Doğrulama bilgisi gerekli'; return; }
+          try {
+            const verified = await api('/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, value }) });
+            currentToken = verified.token; currentUser = verified.user;
+            localStorage.setItem('token', currentToken);
+            updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate('/');
+          } catch (e) { $('#login-2fa-error').textContent = e.message; }
+        };
+        $('#login-2fa-btn').addEventListener('click', verify);
+        $('#login-2fa-value').addEventListener('keydown', e => { if (e.key === 'Enter') verify(); });
+        $('#login-2fa-value').focus();
+        return;
+      }
       // Silinme talebi verilmiş hesap
       if (data.pending_delete) {
         const deleteAt = new Date(data.delete_at);
@@ -4254,6 +4353,26 @@ function renderRegister(app) {
         <div class="form-hint">15 yaş altı kabul edilmez (¬‿¬) hııhıı</div>
         <div class="form-hint">Doğum tarihi bir daha değiştirilemez.</div>
       </div>
+      <div class="form-group auth-2fa-choice">
+        <label><i class="fas fa-shield-halved" style="color:var(--accent-red2)"></i> İki aşamalı doğrulama</label>
+        <select id="reg-2fa-method">
+          <option value="none">Kullanmak istemiyorum</option>
+          <option value="email">E-posta kodu kullan</option>
+          <option value="question">Güvenlik sorusu kullan</option>
+        </select>
+        <div class="form-hint">Şifrene ek olarak hesabını koruyacak yöntemi seçebilirsin.</div>
+      </div>
+      <div id="reg-question-fields" class="form-group" style="display:none;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
+        <label>Güvenlik sorusu</label>
+        <select id="reg-2fa-question">
+          <option value="En sevdiğin yemek nedir?">En sevdiğin yemek nedir?</option>
+          <option value="En sevdiğin isim nedir?">En sevdiğin isim nedir?</option>
+          <option value="En sevdiğin eşya nedir?">En sevdiğin eşya nedir?</option>
+        </select>
+        <label style="margin-top:10px">Cevabın</label>
+        <input type="text" id="reg-2fa-answer" autocomplete="off" placeholder="Cevabını yaz" />
+        <div class="form-hint">Büyük/küçük harf ve fazla boşluk farkı gözetilmez.</div>
+      </div>
       <div class="form-group">
         <label>Hesap gizliliği</label>
         <label class="checkbox-label"><input type="checkbox" id="reg-private" /> Hesabımı gizli yap</label>
@@ -4317,6 +4436,10 @@ function renderRegister(app) {
     else { pw.type = 'password'; icon.className = 'fas fa-eye'; }
   });
 
+  $('#reg-2fa-method').addEventListener('change', () => {
+    $('#reg-question-fields').style.display = $('#reg-2fa-method').value === 'question' ? 'block' : 'none';
+  });
+
   $('#reg-avatar').addEventListener('change', e => {
     const file = e.target.files[0];
     const preview = $('#reg-avatar-preview');
@@ -4372,7 +4495,10 @@ function renderRegister(app) {
       const formData = new FormData();
       const show_level_badge = $('#reg-show-level').checked;
       const show_level_progress = $('#reg-show-progress').checked;
-      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      const two_factor_method = $('#reg-2fa-method').value;
+      const two_factor_question = $('#reg-2fa-question').value;
+      const two_factor_answer = $('#reg-2fa-answer').value;
+      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       currentToken = data.token; currentUser = data.user;

@@ -231,7 +231,7 @@ function loadSection(section) {
   const main = $('#admin-main');
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
-    dashboard: renderDashboard, users: renderUsers,
+    dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
     forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages,
@@ -448,7 +448,7 @@ async function renderUsers(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Kullanıcı</th><th>E-posta</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Kullanıcı</th><th>E-posta</th><th>2AD</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
           <tbody id="users-tbody"></tbody>
         </table>
       </div>
@@ -462,7 +462,7 @@ async function renderUsers(main) {
 
 function renderUsersTable(users) {
   const tbody = $('#users-tbody'); if (!tbody) return;
-  if (!users.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
   tbody.innerHTML = users.map(u => `<tr>
     <td style="color:var(--text3);font-size:11px">#${u.id}</td>
     <td>
@@ -475,6 +475,7 @@ function renderUsersTable(users) {
       </div>
     </td>
     <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
+    <td><span class="badge ${u.two_factor_method && u.two_factor_method !== 'none' ? 'badge-green' : 'badge-gray'}"><i class="fas ${u.two_factor_method === 'email' ? 'fa-envelope' : u.two_factor_method === 'question' ? 'fa-circle-question' : 'fa-minus'}"></i> ${u.two_factor_method === 'email' ? 'E-posta' : u.two_factor_method === 'question' ? 'Soru' : 'Kapalı'}</span></td>
     <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
     <td><span class="badge badge-gray">${u.level_id||1}</span></td>
     <td style="font-size:12px;color:var(--text2)">
@@ -488,6 +489,7 @@ function renderUsersTable(users) {
     <td>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-outline btn-xs edit-user-btn" data-id="${u.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
+        ${adminProfile?.is_super_admin ? `<button class="btn btn-outline btn-xs user-2fa-btn" data-id="${u.id}" title="2AD yönetimi"><i class="fas fa-shield-halved"></i></button>` : ''}
         <button class="btn btn-blue btn-xs perm-user-btn" data-id="${u.id}" title="Yetkiler"><i class="fas fa-shield"></i></button>
         <button class="btn btn-outline btn-xs restrict-user-btn" data-id="${u.id}" title="Kısıtlama"><i class="fas fa-user-lock"></i></button>
         ${u.banned
@@ -505,13 +507,35 @@ function renderUsersTable(users) {
     const del = e.target.closest('.del-user-btn');
     const perm = e.target.closest('.perm-user-btn');
     const restrict = e.target.closest('.restrict-user-btn');
+    const twoFactor = e.target.closest('.user-2fa-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
     if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (del) { if (!confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (perm) { const u = users.find(x => x.id == perm.dataset.id); if (u) showPermModal(u); }
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
+    if (twoFactor) { const u = users.find(x => x.id == twoFactor.dataset.id); if (u) showAdminTwoFactorModal(u); }
   });
+}
+
+async function showAdminTwoFactorModal(user) {
+  let config = user;
+  try { config = await adminApi('/user/' + user.id + '/2fa'); } catch (e) { toast(e.message, 'error'); return; }
+  showModal('2AD Yönetimi — ' + config.username, `<div class="form-group"><label>Yöntem</label><select id="adm-2fa-method"><option value="none" ${config.two_factor_method === 'none' ? 'selected' : ''}>Kapalı</option><option value="email" ${config.two_factor_method === 'email' ? 'selected' : ''}>E-posta kodu</option><option value="question" ${config.two_factor_method === 'question' ? 'selected' : ''}>Güvenlik sorusu</option></select></div><div id="adm-2fa-question-fields" style="display:${config.two_factor_method === 'question' ? 'block' : 'none'}"><div class="form-group"><label>Soru</label><select id="adm-2fa-question"><option value="En sevdiğin yemek nedir?" ${config.two_factor_question === 'En sevdiğin yemek nedir?' ? 'selected' : ''}>En sevdiğin yemek nedir?</option><option value="En sevdiğin isim nedir?" ${config.two_factor_question === 'En sevdiğin isim nedir?' ? 'selected' : ''}>En sevdiğin isim nedir?</option><option value="En sevdiğin eşya nedir?" ${config.two_factor_question === 'En sevdiğin eşya nedir?' ? 'selected' : ''}>En sevdiğin eşya nedir?</option></select></div><div class="form-group"><label>Yeni cevap</label><input id="adm-2fa-answer" type="text" autocomplete="off" placeholder="Yeni cevap zorunlu" /></div></div><div class="form-hint" style="margin-bottom:12px">Kayıtlı güvenlik cevabı görüntülenemez.</div><button class="btn btn-primary" id="adm-2fa-save" style="width:100%">Kaydet</button><div id="adm-2fa-error" class="form-error mt-4"></div>`);
+  $('#adm-2fa-method').addEventListener('change', () => { $('#adm-2fa-question-fields').style.display = $('#adm-2fa-method').value === 'question' ? 'block' : 'none'; });
+  $('#adm-2fa-save').addEventListener('click', async () => {
+    try { await adminApi('/user/' + user.id + '/2fa', { method:'PUT', body:JSON.stringify({ method:$('#adm-2fa-method').value, question:$('#adm-2fa-question')?.value, answer:$('#adm-2fa-answer')?.value }) }); toast('Kullanıcının 2AD ayarı güncellendi'); hideModal(); loadSection('users'); } catch (e) { $('#adm-2fa-error').textContent = e.message; }
+  });
+}
+
+async function renderTwoFactorUsers(main) {
+  let users = [];
+  try { users = await adminApi('/users'); } catch (e) { main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)">${escHtml(e.message)}</div></div>`; return; }
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-shield-halved"></i></div> 2AD Yönetimi <span style="font-size:13px;font-weight:400;color:var(--text2)">(${users.length} kullanıcı)</span></div><div class="adm-search"><i class="fas fa-search"></i><input id="2fa-user-search" placeholder="Kullanıcı veya e-posta ara..." style="min-width:240px" /></div></div><div class="card"><div class="table-wrap"><table><thead><tr><th>Kullanıcı</th><th>E-posta</th><th>Yöntem</th><th>Güvenlik sorusu</th><th>İşlem</th></tr></thead><tbody id="2fa-users-tbody"></tbody></table></div></div>`;
+  const render = list => { $('#2fa-users-tbody').innerHTML = list.length ? list.map(user => `<tr><td><strong>${escHtml(user.username)}</strong></td><td style="color:var(--text2)">${escHtml(user.email)}</td><td>${user.two_factor_method === 'email' ? '<span class="badge badge-green"><i class="fas fa-envelope"></i> E-posta</span>' : user.two_factor_method === 'question' ? '<span class="badge badge-green"><i class="fas fa-circle-question"></i> Soru</span>' : '<span class="badge badge-gray"><i class="fas fa-minus"></i> Kapalı</span>'}</td><td style="color:var(--text2)">${user.two_factor_method === 'question' ? escHtml(user.two_factor_question || '-') : '-'}</td><td><button class="btn btn-outline btn-xs admin-2fa-edit" data-id="${user.id}"><i class="fas fa-pen"></i> Düzenle</button></td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text3)">Kullanıcı bulunamadı</td></tr>'; };
+  render(users);
+  $('#2fa-user-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); render(users.filter(user => user.username.toLowerCase().includes(q) || user.email.toLowerCase().includes(q))); });
+  $('#2fa-users-tbody').addEventListener('click', event => { const button = event.target.closest('.admin-2fa-edit'); const user = users.find(item => item.id == button?.dataset.id); if (user) showAdminTwoFactorModal(user); });
 }
 
 async function showRestrictionModal(user) {
@@ -2519,10 +2543,9 @@ async function renderSettings(main) {
     const pw = document.getElementById('s-newpw').value, pw2 = document.getElementById('s-newpw2').value;
     if (!pw) { msg.textContent='Şifre boş olamaz'; return; }
     if (pw !== pw2) { msg.textContent='Şifreler eşleşmiyor'; return; }
-    const hashHex = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pw)))).map(b=>b.toString(16).padStart(2,'0')).join('');
-    await saveSetting('admin_password', hashHex, msg);
+    if (pw.length < 12) { msg.textContent='Admin şifresi en az 12 karakter olmalı'; return; }
+    await saveSetting('admin_password', pw, msg);
     await saveSetting('admin_username', adminUsername, msg);
-    adminToken = hashHex; sessionStorage.setItem('admin_token', adminToken);
     msg.style.color='var(--green)'; msg.textContent='Şifre güncellendi';
   });
   document.getElementById('s-first-visit-auth-save')?.addEventListener('click', async () => {

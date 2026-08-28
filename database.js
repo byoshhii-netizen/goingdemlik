@@ -1,5 +1,5 @@
 const { Pool } = require('pg');
-const crypto = require('crypto');
+const { hashPassword } = require('./password');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -27,6 +27,10 @@ async function initDb() {
       username TEXT UNIQUE NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      two_factor_method TEXT NOT NULL DEFAULT 'none',
+      two_factor_question TEXT DEFAULT '',
+      two_factor_answer_hash TEXT DEFAULT '',
+      email_verified INTEGER NOT NULL DEFAULT 1,
       avatar TEXT DEFAULT '',
       bio TEXT DEFAULT '',
       links TEXT DEFAULT '[]',
@@ -49,6 +53,12 @@ async function initDb() {
       last_active TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tag_permission TEXT DEFAULT 'everyone';
@@ -124,6 +134,20 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
     );
+    CREATE TABLE IF NOT EXISTS auth_challenges (
+      id BIGSERIAL PRIMARY KEY,
+      challenge_hash TEXT UNIQUE NOT NULL,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      purpose TEXT NOT NULL DEFAULT 'login',
+      method TEXT NOT NULL,
+      code_hash TEXT DEFAULT '',
+      target_value TEXT DEFAULT '',
+      expires_at TIMESTAMP NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE auth_challenges ADD COLUMN IF NOT EXISTS target_value TEXT DEFAULT '';
+    CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON auth_challenges(expires_at);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
     UPDATE sessions SET expires_at=created_at + INTERVAL '30 days' WHERE expires_at IS NULL;
     ALTER TABLE sessions ALTER COLUMN expires_at SET DEFAULT (NOW() + INTERVAL '30 days');
@@ -942,7 +966,10 @@ async function initDb() {
   await query("INSERT INTO settings (key,value) VALUES ('admin_username','Tarator') ON CONFLICT (key) DO NOTHING");
   const { rows: pwRows } = await query("SELECT value FROM settings WHERE key='admin_password'");
   if (pwRows.length === 0) {
-    const hash = crypto.createHash('sha256').update('admin123').digest('hex');
+    if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length < 12) {
+      throw new Error('İlk admin kurulumu için en az 12 karakterlik ADMIN_PASSWORD ayarlanmalı');
+    }
+    const hash = hashPassword(process.env.ADMIN_PASSWORD);
     await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['admin_password', hash]);
   }
 
