@@ -1619,7 +1619,7 @@ app.delete('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
 // ===== GROUPS =====
 app.get('/api/groups', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
-  const { rows } = await query(`SELECT g.*, u.username as owner_name, EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=${userId}) AS is_member FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' ORDER BY g.created_at DESC`);
+  const { rows } = await query(`SELECT g.*, u.username as owner_name, EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=${userId}) AS is_member FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' OR g.owner_id=${userId} OR EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id=g.id AND gm2.user_id=${userId}) ORDER BY g.created_at DESC`);
   res.json(rows);
 });
 

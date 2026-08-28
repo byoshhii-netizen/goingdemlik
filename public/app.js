@@ -941,7 +941,7 @@ async function showMyGroupsModal() {
   showModal('Gruplarım', '<div class="loading-center"><div class="spinner"></div></div>');
   try {
     const groups = await api('/my-groups');
-    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><span class="my-group-status"><i class="fas fa-check"></i> Üyesiniz</span><i class="fas fa-chevron-right"></i></a>`).join('')}</div><button type="button" class="btn btn-primary my-groups-explore-btn" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
+    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div><button type="button" class="btn btn-primary my-groups-explore-btn" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
     $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
@@ -2502,7 +2502,7 @@ async function renderGroupList(app) {
 
 function groupCardHTML(g) {
   const visibility = g.visibility || (g.type === 'private' ? 'private' : g.invite_only ? 'invite' : 'public');
-  if (visibility === 'private') return '';
+  if (visibility === 'private' && !g.is_member) return '';
   const typeBadge = visibility === 'invite' ? `<span class="badge badge-orange"><i class="fas fa-key"></i> Kod ile katılım</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Herkese açık</span>`;
   return `<div class="group-card" onclick="navigate('/grup/${escHtml(g.slug)}')">
     <div class="group-cover">
@@ -2529,11 +2529,10 @@ function showNewGroupModal() {
       <input type="file" id="gr-cover-file" accept="image/*" style="margin-bottom:8px" />
       <div id="gr-cover-preview" style="display:none"></div>
     </div>
-    <div class="form-group"><label>Bu tür</label><select id="gr-visibility"><option value="public">Herkese açık · Herkes direkt katılabilir</option><option value="invite">Davetli · Listede görünür, kod ile girilir</option><option value="private">Gizli · Listelerde görünmez, kod ile girilir</option></select></div>
+    <div class="form-group"><label>Bu tür</label><select id="gr-visibility"><option value="public">Herkese açık · Herkes direkt katılabilir</option><option value="private">Gizli · Listelerde görünmez, kod ile girilir</option></select></div>
     <div class="form-group">
       <label class="checkbox-label"><input type="checkbox" id="gr-chat" checked /> Sohbete izin ver</label>
       <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gr-photos" checked /> Fotoğrafa izin ver</label>
-      <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gr-invite" /> Sadece davet ile katılım</label>
     </div>
     <button class="btn btn-primary" id="gr-submit" style="width:100%">Oluştur</button>
     <div id="gr-error" class="form-error mt-4"></div>
@@ -2877,7 +2876,7 @@ async function renderGroupDetail(app, slug) {
         <input type="file" id="gs-cover-file" accept="image/*" style="margin-bottom:8px" />
         ${group.cover_image ? `<img id="gs-cover-preview" src="${escHtml(group.cover_image)}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />` : `<div id="gs-cover-preview" style="display:none"></div>`}
       </div>
-      <div class="form-group"><label>Bu tür</label><select id="gs-visibility"><option value="public" ${visibility === 'public' ? 'selected' : ''}>Herkese açık</option><option value="invite" ${visibility === 'invite' ? 'selected' : ''}>Davetli · Kod ile</option><option value="private" ${visibility === 'private' ? 'selected' : ''}>Gizli · Kod ile</option></select></div>
+      <div class="form-group"><label>Bu tür</label><select id="gs-visibility"><option value="public" ${visibility === 'public' ? 'selected' : ''}>Herkese açık</option><option value="private" ${visibility === 'private' ? 'selected' : ''}>Gizli · Kod ile</option></select></div>
       <div class="form-group">
         <label class="checkbox-label"><input type="checkbox" id="gs-chat" ${group.allow_chat ? 'checked' : ''} /> Sohbet</label>
         <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gs-photos" ${group.allow_photos ? 'checked' : ''} /> Fotoğraf</label>
@@ -2970,7 +2969,7 @@ function chatMsgHTML(m, canModerate = false) {
       <div class="chat-msg-meta">
         ${isOwn ? '' : `<span class="chat-msg-name">${escHtml(m.username || 'Silindi')}${m.badge_name ? ` <span class="badge" style="background:${escHtml(m.badge_color||'#6b7280')};padding:3px 8px;border-radius:4px;margin-left:6px">${m.badge_icon ? `<i class="${escHtml(m.badge_icon)}" style="margin-right:6px"></i>` : ''}${escHtml(m.badge_name)}</span>` : ''}</span>`}
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
-        ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i> düzenlendi</span>' : ''}
+        ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
         ${currentUser && (isOwn || canModerate) && m.content ? `<button class="btn btn-ghost edit-msg" data-id="${m.id}" data-content="${escHtml(m.content)}" title="Mesajı düzenle" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-pen"></i></button>` : ''}
         ${currentUser ? `<button class="btn btn-ghost del-msg" data-id="${m.id}" title="${deleteLabel}" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-trash"></i></button>` : ''}
       </div>
