@@ -487,18 +487,20 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 
 /* ===== LAYOUT ===== */
 .container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
-.page { 
-  padding: 40px 0;
-  flex: 1;
-  width: 100%;
-}
+
+/* App container - sidebar margin */
 #app {
-  display: flex;
-  gap: 0;
+  margin-left: 220px;
 }
-#app > .container.page {
-  width: 100%;
+
+/* Desktop: sidebar visible, margin ekli */
+@media (max-width: 768px) {
+  #app {
+    margin-left: 0;
+  }
 }
+
+.page { padding: 40px 0; }
 .page-header { margin-bottom: 32px; }
 .page-title { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
 .page-subtitle { color: var(--text-secondary); }

@@ -9,10 +9,24 @@ async function loadGroupChannels(groupSlug) {
   try {
     currentGroupSlug = groupSlug;
     
-    // Sidebar'ı görünür yap
+    // Sidebar'ı DOM'da aktifleştir
     const sidebar = document.getElementById('group-channels-sidebar');
     if (sidebar) {
-      sidebar.classList.add('visible');
+      // Mobilde visible class ekle (desktop'de CSS default flex)
+      const isMobile = window.innerWidth <= 768;
+      if (isMobile) {
+        sidebar.classList.add('visible');
+      }
+      
+      // Mobilde overlay click'te sidebar'ı kapat
+      if (isMobile && !sidebar.hasListener) {
+        sidebar.addEventListener('click', (e) => {
+          if (e.target === sidebar) {
+            sidebar.classList.remove('visible');
+          }
+        });
+        sidebar.hasListener = true;
+      }
     }
 
     const response = await fetch(`/api/group/${groupSlug}/channels`);
@@ -63,6 +77,15 @@ async function selectChannel(groupSlug, channelId, channelName, channelIcon) {
   // UI güncelle
   document.querySelectorAll('.channel-item').forEach(item => item.classList.remove('active'));
   event.target.closest('.channel-item')?.classList.add('active');
+
+  // Mobilde sidebar'ı kapat
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    const sidebar = document.getElementById('group-channels-sidebar');
+    if (sidebar) {
+      sidebar.classList.remove('visible');
+    }
+  }
 
   // Kanal mesajlarını yükle
   await loadChannelMessages(groupSlug, channelId);
