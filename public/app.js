@@ -3597,6 +3597,7 @@ function chatMsgHTML(m, canModerate = false) {
       </div>
       ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}
       ${m.image_url ? `<img src="${escHtml(m.image_url)}" class="chat-msg-img" alt="" onclick="window.open(this.src)" />` : ''}
+      <button class="edit-msg" data-id="${m.id}" data-content="${escHtml(m.content || '')}" style="display:none"></button>
     </div>
   </div>`;
 }
