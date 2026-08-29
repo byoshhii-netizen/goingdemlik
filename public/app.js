@@ -7,11 +7,59 @@ let firstVisitAuthEnabled = false;
 let activeVoiceCall = null;
 let voiceCallPoll = null;
 let incomingCallPoll = null;
+let groupChatSelection = new Set();
+let groupChatSelectionMode = false;
 
 localStorage.removeItem('cigcig_theme');
 document.documentElement.style.colorScheme = 'dark';
 function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
 applyDisplayTheme();
+
+function playNotificationTone() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = window.__cigcigNotifyCtx || new AudioContextClass();
+    window.__cigcigNotifyCtx = ctx;
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    oscillator.type = 'triangle';
+    oscillator.frequency.value = 760;
+    gain.gain.value = 0.035;
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
+    oscillator.start();
+    const now = ctx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(0.035, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    oscillator.stop(now + 0.2);
+  } catch {}
+}
+
+function triggerGroupMessageNotification(groupName, senderName, previewText) {
+  playNotificationTone();
+  if ('Notification' in window) {
+    const permission = Notification.permission;
+    if (permission === 'granted') {
+      new Notification(groupName ? `${groupName} — ${senderName}` : senderName, {
+        body: previewText || 'Yeni bir mesaj var.',
+        tag: 'cigcig-group-message'
+      });
+      return;
+    }
+    if (permission === 'default') {
+      Notification.requestPermission().then(permissionState => {
+        if (permissionState === 'granted') {
+          new Notification(groupName ? `${groupName} — ${senderName}` : senderName, {
+            body: previewText || 'Yeni bir mesaj var.',
+            tag: 'cigcig-group-message'
+          });
+        }
+      }).catch(() => {});
+    }
+  }
+}
 
 const SITE_URL = 'https://cigcig.xyz';
 
@@ -2854,6 +2902,89 @@ async function renderGroupDetail(app, slug) {
   const chatEl = $('#chat-messages');
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
   const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', message.edited_at || '', message.deleted_for_me ? 1 : 0].join(':')).join('|');
+  const messageIdToRow = id => chatEl?.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(id))}"]`);
+  const getChatSelectionCount = () => groupChatSelection.size;
+  const updateSelectionToolbar = () => {
+    const selected = [...groupChatSelection];
+    const toolbar = document.getElementById('chat-selection-toolbar');
+    if (!toolbar) return;
+    const canDeleteEveryone = selected.length > 0 && selected.every(id => {
+      const msg = messages.find(m => String(m.id) === String(id));
+      return !!msg && (msg.user_id === currentUser?.id || isOwner || isMod);
+    });
+    const canDeleteMe = selected.length > 0 && (isOwner || isMod || selected.every(id => {
+      const msg = messages.find(m => String(m.id) === String(id));
+      return !!msg && (msg.user_id === currentUser?.id || msg.user_id !== currentUser?.id);
+    }));
+    toolbar.classList.toggle('hidden', !groupChatSelectionMode || selected.length === 0);
+    const deleteEveryoneBtn = document.getElementById('chat-bulk-delete-everyone');
+    const deleteMeBtn = document.getElementById('chat-bulk-delete-me');
+    if (deleteEveryoneBtn) deleteEveryoneBtn.disabled = !canDeleteEveryone;
+    if (deleteMeBtn) deleteMeBtn.disabled = !canDeleteMe;
+    const countLabel = document.getElementById('chat-selection-count');
+    if (countLabel) countLabel.textContent = `${selected.length} seçildi`;
+  };
+  const clearChatSelection = () => {
+    groupChatSelection.clear();
+    groupChatSelectionMode = false;
+    document.querySelectorAll('.chat-msg-select').forEach(box => { box.checked = false; box.closest('.chat-msg')?.classList.remove('selected'); });
+    updateSelectionToolbar();
+  };
+
+  const toolbar = document.createElement('div');
+  toolbar.id = 'chat-selection-toolbar';
+  toolbar.className = 'chat-selection-toolbar hidden';
+  toolbar.innerHTML = `
+    <div class="chat-selection-row">
+      <span id="chat-selection-count">0 seçildi</span>
+      <button class="btn btn-ghost btn-sm" id="chat-select-all" type="button"><i class="fas fa-check-square"></i> Hepsini seç</button>
+      <button class="btn btn-ghost btn-sm" id="chat-clear-selection" type="button"><i class="fas fa-times"></i> Temizle</button>
+      <button class="btn btn-danger btn-sm" id="chat-bulk-delete-everyone" type="button" disabled><i class="fas fa-trash"></i> Herkesten sil</button>
+      <button class="btn btn-outline btn-sm" id="chat-bulk-delete-me" type="button" disabled><i class="fas fa-eye-slash"></i> Benden sil</button>
+    </div>
+  `;
+  const chatContainer = document.querySelector('.chat-container');
+  if (chatContainer && !document.getElementById('chat-selection-toolbar')) {
+    chatContainer.insertBefore(toolbar, chatContainer.firstChild);
+  }
+
+  toolbar.querySelector('#chat-select-all')?.addEventListener('click', () => {
+    const ids = messages.filter(msg => !msg.deleted_for_me).map(msg => String(msg.id));
+    groupChatSelection = new Set(ids);
+    groupChatSelectionMode = true;
+    document.querySelectorAll('.chat-msg-select').forEach(box => {
+      const id = box.dataset.id;
+      const checked = ids.includes(String(id));
+      box.checked = checked;
+      box.closest('.chat-msg')?.classList.toggle('selected', checked);
+    });
+    updateSelectionToolbar();
+  });
+  toolbar.querySelector('#chat-clear-selection')?.addEventListener('click', clearChatSelection);
+  toolbar.querySelector('#chat-bulk-delete-me')?.addEventListener('click', async () => {
+    const ids = [...groupChatSelection];
+    if (!ids.length) return;
+    for (const id of ids) {
+      try { await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'error'); }
+    }
+    clearChatSelection();
+    try { const fresh = await api('/group/' + slug + '/messages'); const chatEl2 = $('#chat-messages'); if (chatEl2) { chatEl2.innerHTML = fresh.map(m => chatMsgHTML(m, isOwner || isMod)).join(''); enhanceLinkPreviews(chatEl2); } messages.splice(0, messages.length, ...fresh); } catch (e) { toast(e.message, 'error'); }
+  });
+  toolbar.querySelector('#chat-bulk-delete-everyone')?.addEventListener('click', async () => {
+    const ids = [...groupChatSelection];
+    if (!ids.length) return;
+    for (const id of ids) {
+      const msg = messages.find(m => String(m.id) === String(id));
+      if (!msg || !(msg.user_id === currentUser?.id || isOwner || isMod)) {
+        toast('Sadece kendi mesajını herkesten silebilirsin veya yönetici olmalısın.', 'error');
+        return;
+      }
+      try { await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'error'); }
+    }
+    clearChatSelection();
+    try { const fresh = await api('/group/' + slug + '/messages'); const chatEl2 = $('#chat-messages'); if (chatEl2) { chatEl2.innerHTML = fresh.map(m => chatMsgHTML(m, isOwner || isMod)).join(''); enhanceLinkPreviews(chatEl2); } messages.splice(0, messages.length, ...fresh); } catch (e) { toast(e.message, 'error'); }
+  });
+  updateSelectionToolbar();
 
   // Önceki mesajları yükle
   let oldestMsgId = messages.length > 0 ? messages[0].id : null;
@@ -2959,6 +3090,13 @@ async function renderGroupDetail(app, slug) {
         const chatEl2 = $('#chat-messages');
         if (chatEl2 && newMsgs.length && chatSignature(newMsgs) !== lastChatSignature) {
           const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
+          const incoming = newest.filter(item => Number(item.user_id) !== Number(currentUser?.id));
+          if (incoming.length && document.hidden) {
+            const first = incoming[0];
+            const senderName = first.username || 'Birisi';
+            const preview = first.content || (first.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı');
+            triggerGroupMessageNotification(group.name, senderName, preview);
+          }
           chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod)).join('');
           enhanceLinkPreviews(chatEl2);
           lastChatSignature = chatSignature(newMsgs);
@@ -2972,6 +3110,76 @@ async function renderGroupDetail(app, slug) {
   $('#chat-messages')?.addEventListener('click', async e => {
     const del = e.target.closest('.del-msg');
     const edit = e.target.closest('.edit-msg');
+    const msgToggle = e.target.closest('.msg-menu-trigger');
+    const selectBox = e.target.closest('.chat-msg-select');
+
+    if (selectBox) {
+      const id = String(selectBox.dataset.id);
+      const checked = selectBox.checked;
+      const row = selectBox.closest('.chat-msg');
+      if (checked) groupChatSelection.add(id); else groupChatSelection.delete(id);
+      row?.classList.toggle('selected', checked);
+      groupChatSelectionMode = true;
+      updateSelectionToolbar();
+      return;
+    }
+
+    if (msgToggle) {
+      const msgId = msgToggle.dataset.id;
+      const msg = messages.find(m => String(m.id) === String(msgId));
+      const isOwn = !!currentUser && Number(msg?.user_id) === Number(currentUser.id);
+      const menu = document.createElement('div');
+      menu.className = 'msg-menu-popover';
+      menu.innerHTML = `
+        <button class="msg-menu-item" data-action="select" data-id="${msgId}"><i class="fas fa-check-square"></i> Seç</button>
+        ${currentUser && isOwn ? `<button class="msg-menu-item" data-action="edit" data-id="${msgId}"><i class="fas fa-pen"></i> Düzenle</button>` : ''}
+        ${currentUser && (isOwn || isOwner || isMod) ? `<button class="msg-menu-item danger" data-action="delete-everyone" data-id="${msgId}"><i class="fas fa-trash"></i> Herkesten sil</button>` : ''}
+        ${currentUser ? `<button class="msg-menu-item" data-action="delete-me" data-id="${msgId}"><i class="fas fa-eye-slash"></i> Benden sil</button>` : ''}
+      `;
+      document.body.appendChild(menu);
+      const rect = msgToggle.getBoundingClientRect();
+      menu.style.left = `${Math.min(window.innerWidth - 220, rect.left + 10)}px`;
+      menu.style.top = `${Math.min(window.innerHeight - 180, rect.bottom + 8)}px`;
+      menu.addEventListener('click', async event => {
+        const item = event.target.closest('.msg-menu-item');
+        if (!item) return;
+        const action = item.dataset.action;
+        const id = item.dataset.id;
+        try {
+          if (action === 'select') {
+            groupChatSelectionMode = true;
+            groupChatSelection.add(String(id));
+            const row = messageIdToRow(id);
+            row?.classList.add('selected');
+            const checkbox = row?.querySelector('.chat-msg-select');
+            if (checkbox) checkbox.checked = true;
+            updateSelectionToolbar();
+          } else if (action === 'edit') {
+            const target = document.querySelector(`.edit-msg[data-id="${CSS.escape(id)}"]`);
+            if (target) target.click();
+          } else if (action === 'delete-me') {
+            await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' });
+            const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(id)}"]`);
+            if (row && !row.classList.contains('own') && !(isOwner || isMod)) {
+              row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>';
+            } else if (row) row.remove();
+          } else if (action === 'delete-everyone') {
+            await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' });
+            const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(id)}"]`);
+            row?.remove();
+          }
+        } catch (err) { toast(err.message, 'error'); }
+        menu.remove();
+      });
+      document.addEventListener('click', function closeMenu(ev) {
+        if (!menu.contains(ev.target) && !msgToggle.contains(ev.target)) {
+          menu.remove();
+          document.removeEventListener('click', closeMenu);
+        }
+      }, { once: true });
+      return;
+    }
+
     if (edit) {
       const message = edit.closest('.chat-msg');
       showModal('Mesajı düzenle', `<div class="form-group"><label>Mesaj</label><textarea id="edit-group-message" rows="5">${escHtml(edit.dataset.content || '')}</textarea></div><button class="btn btn-primary" id="save-group-message-edit" style="width:100%">Kaydet</button><div id="edit-group-message-error" class="form-error mt-4"></div>`);
@@ -3205,13 +3413,17 @@ function chatMsgHTML(m, canModerate = false) {
   if (m.deleted_for_me) return `<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
   const profileLink = m.username ? profileRoute(m.username) : '#';
   const avatar = hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`;
-  return `<div class="chat-msg ${isOwn ? 'own' : ''}">
+  const canAction = currentUser && (isOwn || canModerate);
+  const selectBox = groupChatSelectionMode ? `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />` : '';
+  return `<div class="chat-msg ${isOwn ? 'own' : ''}" data-message-id="${m.id}">
+    ${selectBox}
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
         ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
-        ${currentUser && (isOwn || canModerate) && m.content ? `<button class="btn btn-ghost edit-msg" data-id="${m.id}" data-content="${escHtml(m.content)}" title="Mesajı düzenle" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-pen"></i></button>` : ''}
+        ${currentUser ? `<button class="btn btn-ghost msg-menu-trigger" data-id="${m.id}" title="Mesaj seçenekleri" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-ellipsis-v"></i></button>` : ''}
+        ${currentUser && isOwn && m.content ? `<button class="btn btn-ghost edit-msg" data-id="${m.id}" data-content="${escHtml(m.content)}" title="Mesajı düzenle" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-pen"></i></button>` : ''}
         ${currentUser ? `<button class="btn btn-ghost del-msg" data-id="${m.id}" title="${deleteLabel}" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-trash"></i></button>` : ''}
       </div>
       ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}

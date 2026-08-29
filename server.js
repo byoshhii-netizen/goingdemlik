@@ -2159,7 +2159,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   }
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
-    query(`SELECT b.* FROM books b WHERE b.user_id=$1 AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
+    query(`SELECT b.* FROM books b WHERE (b.user_id=$1 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$1)) AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
