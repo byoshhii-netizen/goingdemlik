@@ -357,6 +357,28 @@
     .modal-close { background: rgba(255,255,255,0.06); border: none; color: var(--text2); font-size: 14px; width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
     .modal-close:hover { color: var(--text); background: rgba(255,255,255,0.1); }
     .modal-body { padding: 0 24px 24px; }
+    .badge-preview-icon { width: 38px; height: 38px; border: 1px solid; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 38px; }
+    .badge-assign-modal { display: flex; flex-direction: column; gap: 14px; }
+    .badge-assign-intro { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border-red); background: var(--bg4); border-radius: 12px; }
+    .badge-assign-intro > div { display: flex; flex-direction: column; gap: 3px; }
+    .badge-assign-intro strong { font-size: 14px; }
+    .badge-assign-intro small { color: var(--text2); font-size: 11px; }
+    .badge-user-search { width: 100%; position: relative; }
+    .badge-user-search input { padding-left: 34px; }
+    .badge-user-search > i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text3); z-index: 1; }
+    .badge-user-list { display: flex; flex-direction: column; gap: 7px; max-height: 360px; overflow-y: auto; padding-right: 3px; }
+    .badge-user-option { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg3); color: var(--text); text-align: left; transition: border-color .18s, background .18s, transform .18s; }
+    .badge-user-option:hover:not(:disabled) { border-color: var(--border-red); background: var(--bg4); transform: translateX(2px); }
+    .badge-user-option:disabled { opacity: .65; cursor: wait; }
+    .badge-user-avatar { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface2); color: var(--text2); overflow: hidden; }
+    .badge-user-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .badge-user-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .badge-user-copy strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .badge-user-copy small { color: var(--text3); font-size: 10px; }
+    .badge-user-select { margin-left: auto; color: var(--red2); font-size: 11px; white-space: nowrap; }
+    .badge-user-empty { text-align: center; padding: 28px 12px; color: var(--text3); }
+    .badge-user-empty i { font-size: 22px; display: block; margin-bottom: 8px; }
+    .badge-user-empty p { font-size: 12px; }
 
     /* BADGE */
     .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 600; }

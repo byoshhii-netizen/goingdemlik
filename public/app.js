@@ -802,7 +802,7 @@ async function renderRealsFeed(app) {
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
-          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private ? `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>
+          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username ? `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${r.is_private ? (followStates.get(r.username)?.friend_status === 'pending' ? 'Arkadaşlık isteği gönderildi' : followStates.get(r.username)?.friend_status === 'accepted' ? 'Arkadaşsınız' : 'Arkadaş isteği gönder') : (followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et')}</button>` : ''}</div>
           <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : ''}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
@@ -860,6 +860,13 @@ async function renderRealsFeed(app) {
       try {
         const username = btn.dataset.username;
         const state = followStates.get(username) || {};
+        if (state.is_private) {
+          await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
+          followStates.set(username, { ...state, friend_status: 'pending', friend_requester_id: currentUser?.id });
+          btn.textContent = 'Arkadaşlık isteği gönderildi';
+          btn.disabled = true;
+          return;
+        }
         const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: state.following ? 'DELETE' : 'POST' });
         followStates.set(username, { ...state, ...result });
         btn.textContent = result.following ? 'Takiptesin' : result.pending ? 'İstek gönderildi' : 'Takip et';
@@ -4061,9 +4068,10 @@ async function renderProfile(app, username) {
     return;
   }
 
-  const { user, forums, books, groups, photos = [], reals, songs, level, levels, book_page_count } = data;
+  const { user, forums, books, groups, common_groups = [], photos = [], reals, songs, level, levels, book_page_count } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileReals = Array.isArray(reals) ? reals : [];
+  const commonGroups = Array.isArray(common_groups) ? common_groups : [];
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'reals', 'saved', 'songs'];
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
@@ -4080,6 +4088,14 @@ async function renderProfile(app, username) {
   if (!isOwn && currentUser) {
     try { followState = await api('/users/' + encodeURIComponent(username) + '/follow-status'); } catch {}
   }
+  const commonGroupsHTML = commonGroups.length ? `<section class="profile-common-groups">
+    <div class="profile-common-groups-heading"><span class="profile-common-groups-icon"><i class="fas fa-users"></i></span><div><strong>Aynı olduğunuz gruplar</strong><small>Birlikte bulunduğunuz topluluklar</small></div></div>
+    <div class="profile-common-groups-list">${commonGroups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="profile-common-group">
+      <span class="profile-common-group-avatar"><i class="fas fa-users"></i></span>
+      <span class="profile-common-group-copy"><strong>${escHtml(group.name)}</strong><small>${Number(group.member_count) || 0} üye</small></span>
+      <i class="fas fa-chevron-right profile-common-group-arrow"></i>
+    </a>`).join('')}</div>
+  </section>` : '';
   const bindFollowButton = () => {
     const button = document.getElementById('profile-follow-btn');
     if (!button) return;
@@ -4087,8 +4103,10 @@ async function renderProfile(app, username) {
       button.disabled = true;
       try {
         if (user.is_private) {
-          await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
-          button.textContent = 'Takip isteği gönderildi';
+          await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
+          followState.friend_status = 'pending';
+          followState.friend_requester_id = currentUser?.id;
+          button.innerHTML = '<i class="fas fa-clock"></i> Arkadaşlık isteği gönderildi';
           button.classList.remove('btn-primary');
           button.classList.add('btn-outline');
           button.disabled = true;
@@ -4110,7 +4128,7 @@ async function renderProfile(app, username) {
       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}</div>
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
+      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.friend_status ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px" ${followState.friend_status ? 'disabled' : ''}>${followState.friend_status === 'pending' ? '<i class="fas fa-clock"></i> Arkadaşlık isteği gönderildi' : followState.friend_status === 'accepted' ? '<i class="fas fa-user-check"></i> Arkadaşsınız' : '<i class="fas fa-user-plus"></i> Arkadaş isteği gönder'}</button>` : ''}</div></div>${commonGroupsHTML}</div>`;
     bindFollowButton();
     return;
   }
@@ -4218,13 +4236,14 @@ async function renderProfile(app, username) {
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
-          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
+           <button id="profile-follow-btn" class="btn ${user.is_private ? (followState.friend_status ? 'btn-outline' : 'btn-primary') : (followState.following || followState.pending ? 'btn-outline' : 'btn-primary')} btn-sm" ${user.is_private && followState.friend_status ? 'disabled' : ''}>${user.is_private ? (followState.friend_status === 'pending' ? '<i class="fas fa-clock"></i> Arkadaşlık isteği gönderildi' : followState.friend_status === 'accepted' ? '<i class="fas fa-user-check"></i> Arkadaşsınız' : '<i class="fas fa-user-plus"></i> Arkadaş isteği gönder') : (followState.following ? '<i class="fas fa-user-check"></i> Takiptesin' : followState.pending ? '<i class="fas fa-clock"></i> İstek gönderildi' : '<i class="fas fa-user-plus"></i> Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
         </div>` : ''}
       </div>
-    </div>
+     </div>
+     ${commonGroupsHTML}
 
     <div class="tabs">${profileTabOrder.filter(tab => isOwn || tab !== 'saved').map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || item !== 'saved') ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler' })[tab]}</button>` : '').join('')}</div>
 

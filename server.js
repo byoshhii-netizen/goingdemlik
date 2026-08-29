@@ -2142,8 +2142,15 @@ app.get('/api/users/:username/follow-status', optionalAuth, async (req, res) => 
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private });
   const { rows } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
-  const { rows: friendship } = await query("SELECT 1 FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [req.user.id, target[0].id]);
-  res.json({ following: rows[0]?.status === 'accepted' || friendship.length > 0, pending: rows[0]?.status === 'pending', is_private: !!target[0].is_private });
+  const { rows: friendship } = await query("SELECT status, requester_id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) LIMIT 1", [req.user.id, target[0].id]);
+  const friendStatus = friendship[0]?.status || null;
+  res.json({
+    following: rows[0]?.status === 'accepted' || friendStatus === 'accepted',
+    pending: rows[0]?.status === 'pending',
+    is_private: !!target[0].is_private,
+    friend_status: friendStatus,
+    friend_requester_id: friendship[0]?.requester_id || null
+  });
 });
 
 app.post('/api/users/:username/follow', authMiddleware, async (req, res) => {
@@ -2218,11 +2225,23 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   const user = users[0];
   const isOwner = req.user && req.user.id === user.id;
   const isFollower = req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length > 0;
+  let commonGroups = [];
+  if (req.user && !isOwner) {
+    const { rows } = await query(`
+      SELECT g.id, g.name, g.slug, g.member_count, g.visibility
+      FROM groups g
+      INNER JOIN group_members viewer_members ON viewer_members.group_id = g.id AND viewer_members.user_id = $1
+      INNER JOIN group_members profile_members ON profile_members.group_id = g.id AND profile_members.user_id = $2
+      ORDER BY g.name ASC
+      LIMIT 20
+    `, [req.user.id, user.id]);
+    commonGroups = rows;
+  }
   const { rows: followCounts } = await query(`SELECT
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower) {
-    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
+    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], common_groups: commonGroups, videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
@@ -2241,7 +2260,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
       FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, photos, videos, reals, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), forums, books, groups, common_groups: commonGroups, photos, videos, reals, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
