@@ -3576,14 +3576,7 @@ async function renderGroupDetail(app, slug) {
     }
   });
 
-  // ===== KANAL SİSTEMİ ENTEGRASYON =====
-  if (isMember || isOwner) {
-    setTimeout(() => {
-      setupChannelSystem(slug, isOwner, isMod, isMember || isOwner);
-      integrateChannelsIntoGroupUI(slug, isOwner);
-    }, 100);
-  }
-  // ===== KANAL SİSTEMİ ENTEGRASYON SONU =====
+
 }
 
 function chatMsgHTML(m, canModerate = false) {
