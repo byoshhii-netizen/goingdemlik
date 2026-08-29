@@ -2687,7 +2687,7 @@ function showNewGroupModal() {
         cover_image = r.url;
       }
       const visibility = $('#gr-visibility').value;
-      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, banner_image: banner_image || cover_image, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
+      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, banner_image, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
       toast('Grup oluşturuldu'); hideModal(); navigate('/grup/' + g.slug);
     } catch (e) { $('#gr-error').textContent = e.message; }
   });
@@ -3125,8 +3125,8 @@ async function renderGroupDetail(app, slug) {
 
     $('#gs-submit').addEventListener('click', async () => {
       try {
-        let banner_image = group.banner_image || group.cover_image || '';
-        let cover_image = group.cover_image || group.banner_image || '';
+        let banner_image = group.banner_image || '';
+        let cover_image = group.cover_image || '';
         const bannerFile = $('#gs-banner-file').files[0];
         if (bannerFile) {
           const fd = new FormData(); fd.append('file', bannerFile);
@@ -3139,7 +3139,7 @@ async function renderGroupDetail(app, slug) {
           const r = await apiForm('/upload', fd);
           cover_image = r.url;
         }
-        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, banner_image: banner_image || cover_image, visibility: $('#gs-visibility').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
+        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, banner_image, visibility: $('#gs-visibility').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
         toast('Grup güncellendi'); hideModal(); renderRoute(location.pathname);
       } catch (e) { $('#gs-error').textContent = e.message; }
     });

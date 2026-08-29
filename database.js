@@ -349,11 +349,14 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       reviewed_at TIMESTAMP,
       reviewed_by BIGINT,
-      UNIQUE(group_id, user_id),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL
     );
+    ALTER TABLE group_join_requests DROP CONSTRAINT IF EXISTS group_join_requests_group_id_user_id_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_group_join_requests_pending_unique
+      ON group_join_requests(group_id, user_id)
+      WHERE status = 'pending';
 
     CREATE TABLE IF NOT EXISTS moderator_permissions (
       id BIGSERIAL PRIMARY KEY,

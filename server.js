@@ -1676,11 +1676,10 @@ app.post('/api/groups', authMiddleware, async (req, res) => {
     const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
     const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
-    const resolvedBanner = banner_image || cover_image || '';
     const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query(
       'INSERT INTO groups (name,slug,description,cover_image,banner_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1) RETURNING id',
-      [name, tempSlug, description||'', cover_image||'', resolvedBanner, req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
+      [name, tempSlug, description||'', cover_image||'', banner_image||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
     const id = rows[0].id;
     const realSlug = makeSlug(name, id);
     await query('UPDATE groups SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -1702,8 +1701,8 @@ app.put('/api/group/:slug', authMiddleware, async (req, res) => {
   if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
   const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
-  const resolvedCover = cover_image !== undefined ? cover_image : (group.cover_image || group.banner_image || '');
-  const resolvedBanner = banner_image !== undefined ? banner_image : (group.banner_image || group.cover_image || '');
+  const resolvedCover = cover_image !== undefined ? cover_image : (group.cover_image || '');
+  const resolvedBanner = banner_image !== undefined ? banner_image : (group.banner_image || '');
   await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,banner_image=$4,type=$5,visibility=$6,allow_chat=$7,allow_photos=$8,invite_only=$9 WHERE id=$10',
     [name||group.name, description??group.description, resolvedCover, resolvedBanner,
      groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==undefined?(allow_chat?1:0):group.allow_chat,
@@ -1829,8 +1828,15 @@ app.post('/api/group/:slug/join-request', authMiddleware, async (req, res) => {
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   const { rows: existing } = await query('SELECT id FROM group_join_requests WHERE group_id=$1 AND user_id=$2 AND status=$3', [group.id, req.user.id, 'pending']);
   if (existing.length) return res.status(400).json({ error: 'Zaten istek gönderilmiş' });
-  await query('INSERT INTO group_join_requests (group_id, user_id, status) VALUES ($1, $2, $3)', [group.id, req.user.id, 'pending']);
-  res.json({ ok: true });
+  try {
+    await query('INSERT INTO group_join_requests (group_id, user_id, status) VALUES ($1, $2, $3)', [group.id, req.user.id, 'pending']);
+    res.json({ ok: true });
+  } catch (e) {
+    if (String(e.message).includes('idx_group_join_requests_pending_unique') || String(e.message).includes('group_join_requests')) {
+      return res.status(400).json({ error: 'Zaten istek gönderilmiş' });
+    }
+    throw e;
+  }
 });
 
 app.get('/api/group/:slug/join-requests', authMiddleware, async (req, res) => {
@@ -1856,10 +1862,18 @@ app.post('/api/group/:slug/join-request/:requestId/respond', authMiddleware, asy
   const { rows: requests } = await query('SELECT * FROM group_join_requests WHERE id=$1 AND group_id=$2', [req.params.requestId, group.id]);
   if (!requests.length) return res.status(404).json({ error: 'İstek bulunamadı' });
   const request = requests[0];
+  if (request.status !== 'pending') return res.json({ ok: true });
+
   if (action === 'approve') {
-    await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
+    const { rows: existingMemberRows } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, request.user_id]);
+    if (existingMemberRows.length) {
+      await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
+      return res.json({ ok: true });
+    }
+
     await query('INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, $3)', [group.id, request.user_id, 'member']);
     await query('UPDATE groups SET member_count=member_count+1 WHERE id=$1', [group.id]);
+    await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
   } else if (action === 'reject') {
     await query('UPDATE group_join_requests SET status=$1, rejection_reason=$2, reviewed_at=NOW(), reviewed_by=$3 WHERE id=$4', 
       ['rejected', rejectionReason || '', req.user.id, request.id]);
