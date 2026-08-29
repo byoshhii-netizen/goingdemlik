@@ -334,7 +334,14 @@
       const newBtn=document.createElement('button'); newBtn.className='btn btn-primary'; newBtn.innerText='Yeni Rozet'; newBtn.onclick=openCreateBadgeModal; top.appendChild(newBtn);
       list.appendChild(top);
       if(!badges.length){list.innerHTML+='<div class="history-item"><span class="history-title">Rozet yok.</span></div>'; return}
-      badges.forEach(b=>{const row=document.createElement('div'); row.className='badge-row'; row.innerHTML=`<div class="badge-info"><strong>${b.name}</strong><small>${b.description||''}</small></div><div style="display:flex;gap:8px"><span class="badge-chip" style="background:${b.color?b.color+'33':'rgba(255,255,255,0.06)'};border:1px solid ${b.color||'#ffffff22'}">${b.name}</span><button class="btn btn-outline" data-id="${b.id}">Sil</button></div>`; row.querySelector('button').onclick=()=>{ if(confirm('Silinsin mi?')){ deleteBadge(b.id); } }; list.appendChild(row)});
+      badges.forEach(b=>{
+        const row=document.createElement('div'); 
+        row.className='badge-row'; 
+        row.innerHTML=`<div class="badge-info"><strong>${b.name}</strong><small>${b.description||''}</small></div><div style="display:flex;gap:8px"><span class="badge-chip" style="background:${b.color?b.color+'33':'rgba(255,255,255,0.06)'};border:1px solid ${b.color||'#ffffff22'}">${b.name}</span><button class="btn btn-outline" data-id="${b.id}" data-action="assign">Kullanıcıya Ver</button><button class="btn btn-outline" data-id="${b.id}" data-action="delete">Sil</button></div>`; 
+        row.querySelector('[data-action="delete"]').onclick=()=>{ if(confirm('Silinsin mi?')){ deleteBadge(b.id); } }; 
+        row.querySelector('[data-action="assign"]').onclick=()=>{ openAssignBadgeModal(b); }; 
+        list.appendChild(row);
+      });
     }
 
     function deleteBadge(id){ const badges=getAllBadges().filter(x=>x.id!==id); saveBadges(badges); // remove from users
@@ -344,13 +351,112 @@
 
     function createBadge(){ const name=document.getElementById('cig_new_name').value.trim(); const color=document.getElementById('cig_new_color').value.trim()||'#ffd633'; const desc=document.getElementById('cig_new_desc').value.trim(); if(!name){ alert('İsim girin'); return } const badges=getAllBadges(); const id='badge_'+Date.now(); badges.push({id,name,color,description:desc}); saveBadges(badges); renderBadgeManagerBody(); alert('Oluşturuldu'); }
 
+    function openAssignBadgeModal(badge){
+      setModalTitle(badge.name + ' - Kullanıcı Seç');
+      const container=document.createElement('div');
+      
+      // Search input
+      const searchDiv=document.createElement('div');
+      searchDiv.style.marginBottom='12px';
+      const searchInput=document.createElement('input');
+      searchInput.type='text';
+      searchInput.id='cig_user_search';
+      searchInput.placeholder='Kullanıcı ara...';
+      searchInput.style.width='100%';
+      searchInput.style.padding='8px';
+      searchInput.style.borderRadius='4px';
+      searchInput.style.border='1px solid #444';
+      searchInput.style.background='#1a1a1a';
+      searchInput.style.color='#fff';
+      searchDiv.appendChild(searchInput);
+      container.appendChild(searchDiv);
+      
+      // User list
+      const userListDiv=document.createElement('div');
+      userListDiv.id='cig_badge_user_list';
+      userListDiv.style.maxHeight='400px';
+      userListDiv.style.overflowY='auto';
+      container.appendChild(userListDiv);
+      
+      setModalBody('');
+      document.getElementById('modal-body').appendChild(container);
+      
+      searchInput.addEventListener('input', ()=>renderAssignUserList(badge, userListDiv));
+      renderAssignUserList(badge, userListDiv);
+      showModal();
+    }
+
+    function renderAssignUserList(badge, container){
+      const users=getAllUsersLocal();
+      const filter=document.getElementById('cig_user_search')?.value.trim().toLowerCase()||'';
+      const filtered=users.filter(u=>u.nickname.toLowerCase().includes(filter));
+      
+      container.innerHTML='';
+      if(!filtered.length){ container.innerHTML='<div style="padding:8px;color:#999">Kullanıcı bulunamadı.</div>'; return; }
+      
+      filtered.forEach(user=>{
+        const hasBadge=Array.isArray(user.badges)&&user.badges.includes(badge.id);
+        const row=document.createElement('div');
+        row.style.display='flex';
+        row.style.justifyContent='space-between';
+        row.style.alignItems='center';
+        row.style.padding='8px';
+        row.style.borderBottom='1px solid #333';
+        row.style.cursor='pointer';
+        
+        const nameEl=document.createElement('div');
+        nameEl.innerHTML=`<strong>${user.nickname}</strong><small style="color:#888;display:block">${hasBadge?'✓ Verildi':'Verilmedi'}</small>`;
+        nameEl.style.fontSize='0.9rem';
+        row.appendChild(nameEl);
+        
+        const btn=document.createElement('button');
+        btn.className='btn '+(hasBadge?'btn-danger':'btn-primary');
+        btn.innerText=hasBadge?'Geri Al':'Ver';
+        btn.style.padding='4px 12px';
+        btn.style.fontSize='0.85rem';
+        btn.onclick=(e)=>{
+          e.stopPropagation();
+          if(hasBadge){
+            user.badges=user.badges.filter(b=>b!==badge.id);
+          } else {
+            if(!Array.isArray(user.badges)) user.badges=[];
+            user.badges.push(badge.id);
+          }
+          localStorage.setItem('cigcig_user_'+user.nickname, JSON.stringify(user));
+          renderAssignUserList(badge, container);
+        };
+        row.appendChild(btn);
+        container.appendChild(row);
+      });
+    }
+
+
     function getAvailableIconsForUser(user){ const icons=[]; const roles=Array.isArray(user.roles)?user.roles:(user.role? [user.role]:[]); if(roles.includes('admin')) icons.push({id:'role_admin',name:'Admin',color:'#e74c3c',char:'A'}); if(roles.includes('vip')) icons.push({id:'role_vip',name:'VIP',color:'#9b59b6',char:'V'}); if(roles.includes('plus')) icons.push({id:'role_plus',name:'Plus',color:'#f1c40f',char:'+'}); const all=getAllBadges(); if(Array.isArray(user.badges)) user.badges.forEach(bid=>{ const b=all.find(x=>x.id===bid); if(b) icons.push({id:b.id,name:b.name,color:b.color||'#777',char:(b.name&&b.name[0])||'R'}) }); return icons }
 
     function openConfigureIconsModal(user){ const available=getAvailableIconsForUser(user); setModalTitle(user.nickname+' - Simge Ayarları'); const container=document.createElement('div'); const instruct=document.createElement('div'); instruct.style.marginBottom='8px'; instruct.style.color='#bbb'; instruct.innerText='Gösterilecek en fazla 3 simge seçin.'; container.appendChild(instruct); const grid=document.createElement('div'); grid.style.display='flex'; grid.style.flexWrap='wrap'; grid.style.gap='8px'; const selected=Array.isArray(user.displayIcons)?user.displayIcons.slice(0):[]; available.forEach(icon=>{ const btn=document.createElement('button'); btn.className='badge-chip'; btn.style.cursor='pointer'; btn.style.border='1px solid '+(icon.color||'#ffffff22'); btn.style.background=icon.color?(icon.color+'33'):'rgba(255,255,255,0.06)'; btn.dataset.id=icon.id; btn.innerText=icon.name+' '+(icon.char||''); if(selected.includes(icon.id)) btn.style.transform='scale(0.98)'; btn.onclick=()=>{ const idx=selected.indexOf(icon.id); if(idx===-1){ if(selected.length>=3){ alert('En fazla 3'); return } selected.push(icon.id); btn.style.opacity='0.9'; btn.style.transform='scale(0.98)'; } else { selected.splice(idx,1); btn.style.opacity='1'; btn.style.transform=''; } }; grid.appendChild(btn) }); container.appendChild(grid); setModalBody(''); document.getElementById('modal-body').appendChild(container); const saveBtn=document.createElement('button'); saveBtn.className='btn btn-primary'; saveBtn.innerText='Kaydet'; saveBtn.onclick=()=>{ user.displayIcons=selected; localStorage.setItem('cigcig_user_'+user.nickname,JSON.stringify(user)); renderUserListCig(); closeModal() }; const cancel=document.createElement('button'); cancel.className='btn btn-outline'; cancel.innerText='İptal'; cancel.style.marginRight='8px'; cancel.onclick=closeModal; const actions=document.createElement('div'); actions.style.marginTop='8px'; actions.appendChild(cancel); actions.appendChild(saveBtn); document.getElementById('modal-body').appendChild(actions); showModal(); }
 
     function renderUserListCig(){
-      // create simple list in modal showing users and their icons
-      const users=getAllUsersLocal(); const container=document.createElement('div'); if(!users.length){ container.innerHTML='<div>Hiç kullanıcı yok.</div>'; } users.forEach(user=>{ const row=document.createElement('div'); row.style.display='flex'; row.style.justifyContent='space-between'; row.style.alignItems='center'; row.style.padding='6px 0'; const left=document.createElement('div'); left.style.display='flex'; left.style.alignItems='center'; left.style.gap='8px'; const name=document.createElement('span'); name.innerText=user.nickname; left.appendChild(name); const iconsDiv=document.createElement('div'); iconsDiv.className='user-icons'; const display=Array.isArray(user.displayIcons)?user.displayIcons:[]; const avail=getAvailableIconsForUser(user); display.forEach(id=>{ const icon=avail.find(a=>a.id===id); if(!icon) return; const el=document.createElement('span'); el.className='user-icon'; el.style.background=icon.color||'#666'; el.title=icon.name; el.innerText=icon.char||icon.name[0]||'?'; iconsDiv.appendChild(el); }); left.appendChild(iconsDiv); row.appendChild(left); const actions=document.createElement('div'); const cfg=document.createElement('button'); cfg.className='btn btn-outline'; cfg.innerText='Simge Ayarla'; cfg.onclick=()=>openConfigureIconsModal(user); actions.appendChild(cfg); row.appendChild(actions); container.appendChild(row); }); setModalTitle('Kullanıcılar'); setModalBody(''); document.getElementById('modal-body').appendChild(container); showModal(); }
+      const users=getAllUsersLocal(); 
+      const container=document.createElement('div'); 
+      if(!users.length){ container.innerHTML='<div style="padding:8px;color:#999">Hiç kullanıcı yok.</div>'; } 
+      users.forEach(user=>{ 
+        const row=document.createElement('div'); 
+        row.style.display='flex'; 
+        row.style.justifyContent='space-between'; 
+        row.style.alignItems='center'; 
+        row.style.padding='8px'; 
+        row.style.borderBottom='1px solid #333';
+        const name=document.createElement('span'); 
+        name.innerText=user.nickname;
+        name.style.fontWeight='500';
+        row.appendChild(name); 
+        container.appendChild(row); 
+      }); 
+      setModalTitle('Kullanıcılar'); 
+      setModalBody(''); 
+      document.getElementById('modal-body').appendChild(container); 
+      showModal(); 
+    }
 
     // wire dropdown button
     const dbg=document.getElementById('dropdown-badges'); if(dbg){ dbg.addEventListener('click',function(e){ e.preventDefault(); openBadgeManagerModal(); }); }
