@@ -2694,7 +2694,12 @@ function groupCardHTML(g) {
   const visibility = g.visibility || (g.type === 'private' ? 'private' : g.invite_only ? 'invite' : 'public');
   if (visibility === 'private' && !g.is_member) return '';
   const coverUrl = g.cover_image || g.banner_image || '';
-  const typeBadge = visibility === 'invite' ? `<span class="badge badge-orange"><i class="fas fa-key"></i> Kod ile katılım</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Herkese açık</span>`;
+  let typeBadge = `<span class="badge badge-green"><i class="fas fa-globe"></i> Herkese açık</span>`;
+  if (visibility === 'invite') {
+    typeBadge = `<span class="badge badge-orange"><i class="fas fa-key"></i> Kod ile katılım</span>`;
+  } else if (visibility === 'private') {
+    typeBadge = `<span class="badge badge-red"><i class="fas fa-lock"></i> Gizli grup</span>`;
+  }
   return `<div class="group-card" onclick="navigate('/grup/${escHtml(g.slug)}')">
     <div class="group-cover">
       ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<div class="group-cover-placeholder"><i class="fas fa-users"></i></div>`}
