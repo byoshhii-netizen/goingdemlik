@@ -8,6 +8,13 @@ let channelMessagePoll = null;
 async function loadGroupChannels(groupSlug) {
   try {
     currentGroupSlug = groupSlug;
+    
+    // Sidebar'ı görünür yap
+    const sidebar = document.getElementById('group-channels-sidebar');
+    if (sidebar) {
+      sidebar.classList.add('visible');
+    }
+
     const response = await fetch(`/api/group/${groupSlug}/channels`);
     const channels = await response.json();
     groupChannels = channels;
