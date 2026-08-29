@@ -1481,8 +1481,15 @@ app.get('/api/books', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
   const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color,
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
-    FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) ORDER BY b.created_at DESC`);
-  res.json(rows.filter(book => !book.is_hidden || book.user_id == userId).map(sanitizeBook));
+    FROM books b LEFT JOIN users u ON b.user_id=u.id
+    WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      AND (
+        b.is_hidden = 0
+        OR b.user_id = ${userId}
+        OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})
+      )
+    ORDER BY b.created_at DESC`);
+  res.json(rows.map(sanitizeBook));
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
