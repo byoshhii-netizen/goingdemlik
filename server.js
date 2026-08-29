@@ -1167,10 +1167,36 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
       ? `@${actorUser.username} sizi "${contextTitle}" başlıklı konuda etiketledi`
       : type === 'comment_mention'
       ? `@${actorUser.username} sizi "${contextTitle}" konusundaki bir yorumda etiketledi`
+      : type === 'group_mention'
+      ? `@${actorUser.username} seni "${contextTitle}" grubunda etiketledi`
       : `@${actorUser.username} bir mesajında sizi etiketledi`;
     await query(
       'INSERT INTO notifications (user_id, type, actor_username, actor_avatar, title, body, link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [rows[0].id, type, actorUser.username, actorUser.avatar || '', contextTitle, body, link]
+      [rows[0].id, type, actorUser.username, actorUser.avatar || '', contextTitle || 'Etiketlendin', body, link]
+    );
+  }
+}
+
+async function notifyGroupMentions(group, actorUser, content) {
+  const mentions = [...new Set(
+    (content.match(/@([a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]+)/g) || []).map(m => m.slice(1).toLowerCase())
+  )];
+  for (const username of mentions) {
+    if (username === actorUser.username.toLowerCase()) continue;
+    const { rows: targetRows } = await query('SELECT id, allow_mentions, tag_permission FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
+    if (!targetRows.length) continue;
+    const targetUser = targetRows[0];
+    const permission = targetUser.tag_permission || (targetUser.allow_mentions === 0 ? 'nobody' : 'everyone');
+    if (permission === 'nobody') continue;
+    if (permission === 'friends') {
+      const { rows: friendship } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [actorUser.id, targetUser.id]);
+      if (!friendship.length) continue;
+    }
+    const { rows: memberRows } = await query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, targetUser.id]);
+    if (!memberRows.length) continue;
+    await query(
+      'INSERT INTO notifications (user_id, type, actor_username, actor_avatar, title, body, link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [targetUser.id, 'group_mention', actorUser.username, actorUser.avatar || '', group.name || 'Grup', `@${actorUser.username} seni "${group.name}" grubunda etiketledi`, `/grup/${group.slug}`]
     );
   }
 }
@@ -1930,6 +1956,7 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
     [group.id, req.user.id, content||'', image_url||'']);
+  await notifyGroupMentions(group, req.user, content || '').catch(() => {});
   const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });

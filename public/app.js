@@ -3044,6 +3044,51 @@ async function renderGroupDetail(app, slug) {
       if (input) input.placeholder = 'Mesaj yaz...';
     };
     $('#chat-attachment-remove')?.addEventListener('click', resetAttachment);
+    const suggestMention = () => {
+      const input = $('#chat-input');
+      if (!input) return;
+      const lastWord = input.value.slice(0, input.selectionStart || 0).split(/\s+/).pop() || '';
+      if (!lastWord.startsWith('@') || lastWord.length <= 1) {
+        const box = $('#chat-mention-suggestions');
+        if (box) box.classList.remove('visible');
+        return;
+      }
+      const query = lastWord.slice(1).toLowerCase();
+      const matches = members
+        .map(m => m.username)
+        .filter(Boolean)
+        .filter(username => username.toLowerCase().includes(query))
+        .filter((username, index, arr) => arr.indexOf(username) === index)
+        .slice(0, 8);
+      let box = $('#chat-mention-suggestions');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'chat-mention-suggestions';
+        box.className = 'mention-suggestions';
+        input.parentElement?.appendChild(box);
+      }
+      if (!matches.length) {
+        box.classList.remove('visible');
+        return;
+      }
+      box.innerHTML = matches.map(username => `<button type="button" class="mention-suggestion-item" data-username="${escHtml(username)}"><span class="mention-tag">@</span>${escHtml(username)}</button>`).join('');
+      box.classList.add('visible');
+      box.querySelectorAll('.mention-suggestion-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const before = input.value.slice(0, input.selectionStart || 0);
+          const after = input.value.slice(input.selectionStart || 0);
+          const lastIndex = before.lastIndexOf(' ');
+          const start = lastIndex >= 0 ? lastIndex + 1 : 0;
+          const prefix = before.slice(0, start);
+          input.value = prefix + '@' + btn.dataset.username + ' ' + after.trimStart();
+          input.focus();
+          const pos = (prefix + '@' + btn.dataset.username + ' ').length;
+          input.setSelectionRange(pos, pos);
+          box.classList.remove('visible');
+        });
+      });
+    };
+
     const sendMsg = async () => {
       const input = $('#chat-input');
       const content = input?.value.trim();
@@ -3067,6 +3112,8 @@ async function renderGroupDetail(app, slug) {
       } catch (e) { toast(e.message, 'error'); }
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
+    $('#chat-input')?.addEventListener('input', suggestMention);
+    $('#chat-input')?.addEventListener('keyup', suggestMention);
     $('#chat-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
 
     $('#chat-img-input')?.addEventListener('change', async e => {
