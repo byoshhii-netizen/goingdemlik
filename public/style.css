@@ -1345,6 +1345,12 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .msg-menu-item.danger { color: #ff9d9d; }
 .chat-input-bar { border-top: 1px solid var(--border); padding: 10px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; position: relative; }
 .chat-input-bar #chat-input { flex: 1; min-width: 0; }
+.chat-emoji-toggle { opacity: 0; pointer-events: none; transition: opacity .15s ease, transform .15s ease; }
+.chat-input-bar:focus-within .chat-emoji-toggle,
+.chat-input-bar:hover .chat-emoji-toggle {
+  opacity: 1;
+  pointer-events: auto;
+}
 .emoji-picker {
   position: absolute;
   right: 12px;

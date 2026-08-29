@@ -2879,8 +2879,8 @@ async function renderGroupDetail(app, slug) {
             ${(window._chatCanMod = isOwner || isMod, '')}
             ${canSend ? `<div class="chat-input-bar">
               ${group.allow_photos ? `<label class="btn btn-ghost btn-sm" for="chat-img-input" title="Fotoğraf ekle" style="flex-shrink:0"><i class="fas fa-image"></i></label><input id="chat-img-input" type="file" accept="image/*" style="display:none" />` : ''}
-              <button type="button" class="btn btn-ghost btn-sm" id="chat-emoji-toggle" title="Emoji ekle" style="flex-shrink:0"><i class="fas fa-face-smile"></i></button>
               <input id="chat-input" type="text" placeholder="Mesaj yaz..." style="flex:1;min-width:0" />
+              <button type="button" class="btn btn-ghost btn-sm chat-emoji-toggle" id="chat-emoji-toggle" title="Emoji ekle" style="flex-shrink:0;opacity:0;pointer-events:none"><i class="fas fa-face-smile"></i></button>
               <button class="btn btn-primary btn-sm" id="send-msg-btn" style="flex-shrink:0"><i class="fas fa-paper-plane"></i></button>
             </div>` : (currentUser && !isMember ? `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Mesaj göndermek için gruba katılın.</div>` : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Giriş yaparak katılabilirsiniz.</div>`)}
           </div>` : `<div class="card card-body" style="text-align:center;color:var(--text-muted)"><i class="fas fa-comment-slash" style="font-size:32px;margin-bottom:8px;display:block"></i>Sohbet kapatılmış.</div>`}
