@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VMB Yönetim Paneli</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <style>
+    :root {
+      --bg: #050507;
+      --bg2: #0d0d12;
+      --bg3: #13131a;
+      --bg4: #1a1a24;
+      --surface: #1e1e2a;
+      --vmb-yellow: #fbbf24;
+      --vmb-red: #ef4444;
+      --text: #f0f0f5;
+      --text2: #9090a8;
+      --text3: #5a5a70;
+      --border: rgba(255,255,255,0.06);
+      --border-vmb: rgba(251,191,36,0.2);
+      --radius: 12px;
+      --font: 'Inter', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { overflow-x: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ===== LOGIN ===== */
+    #vmb-login {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .vmb-login-box {
+      width: 100%;
+      max-width: 420px;
+      background: var(--bg3);
+      border: 1px solid var(--border-vmb);
+      border-radius: 18px;
+      padding: 48px 40px;
+      box-shadow: 0 0 60px rgba(251,191,36,0.1), 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .vmb-login-icon {
+      width: 80px;
+      height: 80px;
+      background: linear-gradient(135deg, var(--vmb-yellow), #ca8a04);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      color: #fff;
+      margin: 0 auto 24px;
+      box-shadow: 0 0 30px rgba(251,191,36,0.4);
+    }
+
+    .vmb-login-title {
+      font-size: 28px;
+      font-weight: 700;
+      text-align: center;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .vmb-login-subtitle {
+      text-align: center;
+      color: var(--text2);
+      font-size: 13px;
+      margin-bottom: 28px;
+    }
+
+    .vmb-form-group {
+      margin-bottom: 16px;
+    }
+
+    .vmb-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text2);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .vmb-input {
+      width: 100%;
+      padding: 11px 14px;
+      background: var(--bg4);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: var(--font);
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .vmb-input:focus {
+      border-color: var(--vmb-yellow);
+      box-shadow: 0 0 12px rgba(251,191,36,0.15);
+    }
+
+    .vmb-btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, var(--vmb-yellow), #ca8a04);
+      border: none;
+      border-radius: 10px;
+      color: #000;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 8px;
+    }
+
+    .vmb-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(251,191,36,0.3);
+    }
+
+    .vmb-btn:active {
+      transform: translateY(0);
+    }
+
+    .vmb-error {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #fca5a5;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-size: 13px;
+    }
+
+    /* ===== ADMIN PANEL ===== */
+    #vmb-panel {
+      display: none;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    #vmb-panel.visible {
+      display: flex;
+    }
+
+    .vmb-topbar {
+      height: 60px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 24px;
+      gap: 16px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(12px);
+    }
+
+    .vmb-topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 16px;
+      letter-spacing: 2px;
+    }
+
+    .vmb-topbar-brand-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--vmb-yellow), #ca8a04);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      color: #fff;
+    }
+
+    .vmb-topbar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .vmb-logout-btn {
+      padding: 8px 14px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .vmb-logout-btn:hover {
+      background: rgba(255,255,255,0.12);
+    }
+
+    .vmb-body {
+      display: flex;
+      flex: 1;
+    }
+
+    .vmb-sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+      padding: 20px 12px;
+      overflow-y: auto;
+    }
+
+    .vmb-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--text2);
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.18s;
+      border: 1px solid transparent;
+      margin-bottom: 4px;
+    }
+
+    .vmb-nav-item:hover {
+      background: rgba(255,255,255,0.04);
+      color: var(--text);
+    }
+
+    .vmb-nav-item.active {
+      background: linear-gradient(135deg, rgba(251,191,36,0.12), rgba(251,191,36,0.08));
+      color: var(--vmb-yellow);
+      border-color: var(--border-vmb);
+    }
+
+    .vmb-nav-icon {
+      font-size: 14px;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+
+    .vmb-nav-item.active .vmb-nav-icon {
+      background: rgba(251,191,36,0.2);
+      color: var(--vmb-yellow);
+    }
+
+    .vmb-main {
+      flex: 1;
+      padding: 28px 32px;
+      overflow-y: auto;
+    }
+
+    .vmb-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .vmb-section-title {
+      font-size: 24px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .vmb-section-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, rgba(251,191,36,0.2), rgba(251,191,36,0.1));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      color: var(--vmb-yellow);
+    }
+
+    .vmb-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 20px;
+      transition: all 0.2s;
+    }
+
+    .vmb-card:hover {
+      border-color: var(--border-vmb);
+    }
+
+    .vmb-card-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text2);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .vmb-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+    }
+
+    .vmb-table th {
+      text-align: left;
+      padding: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text2);
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .vmb-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    .vmb-table tr:hover {
+      background: rgba(255,255,255,0.02);
+    }
+
+    .vmb-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      background: linear-gradient(135deg, rgba(251,191,36,0.15), rgba(251,191,36,0.1));
+      border: 1px solid var(--border-vmb);
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--vmb-yellow);
+    }
+
+    .vmb-admin-badge {
+      background: linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.1));
+      border-color: rgba(239,68,68,0.3);
+      color: #fca5a5;
+    }
+
+    .vmb-action-btn {
+      padding: 6px 12px;
+      background: rgba(251,191,36,0.1);
+      border: 1px solid var(--border-vmb);
+      border-radius: 6px;
+      color: var(--vmb-yellow);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.2s;
+      margin-right: 6px;
+      margin-bottom: 6px;
+    }
+
+    .vmb-action-btn:hover {
+      background: rgba(251,191,36,0.2);
+    }
+
+    .vmb-action-btn.danger {
+      background: rgba(239,68,68,0.1);
+      border-color: rgba(239,68,68,0.3);
+      color: #fca5a5;
+    }
+
+    .vmb-action-btn.danger:hover {
+      background: rgba(239,68,68,0.2);
+    }
+
+    .vmb-modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .vmb-modal.show {
+      display: flex;
+    }
+
+    .vmb-modal-content {
+      background: var(--bg3);
+      border: 1px solid var(--border-vmb);
+      border-radius: 16px;
+      padding: 28px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 0 60px rgba(251,191,36,0.1);
+    }
+
+    .vmb-modal-header {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .vmb-modal-close {
+      background: none;
+      border: none;
+      color: var(--text2);
+      cursor: pointer;
+      font-size: 18px;
+      transition: color 0.2s;
+    }
+
+    .vmb-modal-close:hover {
+      color: var(--text);
+    }
+
+    @media (max-width: 768px) {
+      .vmb-sidebar {
+        width: 180px;
+      }
+
+      .vmb-main {
+        padding: 20px 16px;
+      }
+
+      .vmb-topbar {
+        padding: 0 16px;
+      }
+
+      .vmb-modal-content {
+        padding: 20px;
+        width: 95%;
+      }
+    }
+
+    @media (max-width: 600px) {
+      .vmb-body {
+        flex-direction: column;
+      }
+
+      .vmb-sidebar {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        padding: 10px;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        overflow-x: auto;
+      }
+
+      .vmb-nav-item {
+        flex-shrink: 0;
+      }
+
+      .vmb-main {
+        padding: 16px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- LOGIN SCREEN -->
+  <div id="vmb-login">
+    <div class="vmb-login-box">
+      <div class="vmb-login-icon">
+        <i class="fas fa-shield"></i>
+      </div>
+      <h1 class="vmb-login-title">VMB Yönetim</h1>
+      <p class="vmb-login-subtitle">Müdafaa Birliği Yönetim Paneli</p>
+      <div id="login-error" class="vmb-error" style="display:none;"></div>
+      <div class="vmb-form-group">
+        <label class="vmb-label">Kullanıcı Adı</label>
+        <input id="vmb-username" type="text" class="vmb-input" placeholder="Kullanıcı adını girin" />
+      </div>
+      <div class="vmb-form-group">
+        <label class="vmb-label">Şifre</label>
+        <input id="vmb-password" type="password" class="vmb-input" placeholder="Şifrenizi girin" />
+      </div>
+      <button id="vmb-login-btn" class="vmb-btn">Giriş Yap</button>
+    </div>
+  </div>
+
+  <!-- ADMIN PANEL -->
+  <div id="vmb-panel">
+    <!-- TOP BAR -->
+    <div class="vmb-topbar">
+      <div class="vmb-topbar-brand">
+        <div class="vmb-topbar-brand-icon">
+          <i class="fas fa-shield"></i>
+        </div>
+        <span>VMB YÖNETİM</span>
+      </div>
+      <div class="vmb-topbar-right">
+        <span id="vmb-user-display" style="font-size: 12px; color: var(--text2);"></span>
+        <button id="vmb-logout-btn" class="vmb-logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış</button>
+      </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="vmb-body">
+      <!-- SIDEBAR -->
+      <div class="vmb-sidebar">
+        <div class="vmb-nav-item active" data-section="members">
+          <div class="vmb-nav-icon"><i class="fas fa-users"></i></div>
+          <span>VMB Üyeleri</span>
+        </div>
+        <div class="vmb-nav-item" data-section="badges">
+          <div class="vmb-nav-icon"><i class="fas fa-award"></i></div>
+          <span>Rozetler</span>
+        </div>
+        <div class="vmb-nav-item" data-section="files">
+          <div class="vmb-nav-icon"><i class="fas fa-folder"></i></div>
+          <span>Dosyalar</span>
+        </div>
+        <div class="vmb-nav-item" data-section="page">
+          <div class="vmb-nav-icon"><i class="fas fa-pencil"></i></div>
+          <span>VMB Sayfası</span>
+        </div>
+      </div>
+
+      <!-- MAIN CONTENT -->
+      <div class="vmb-main" id="vmb-content">
+        <!-- Content will be dynamically loaded here -->
+      </div>
+    </div>
+  </div>
+
+  <!-- MODALS -->
+  <div class="vmb-modal" id="user-select-modal">
+    <div class="vmb-modal-content">
+      <div class="vmb-modal-header">
+        <span>Kullanıcı Seç</span>
+        <button class="vmb-modal-close" onclick="document.getElementById('user-select-modal').classList.remove('show');">&times;</button>
+      </div>
+      <div style="margin-bottom: 16px;">
+        <input type="text" id="user-search" class="vmb-input" placeholder="Kullanıcı adıyla ara..." />
+      </div>
+      <div id="user-list" style="max-height: 400px; overflow-y: auto;"></div>
+    </div>
+  </div>
+
+  <!-- MEMBER DETAILS MODAL -->
+  <div class="vmb-modal" id="member-details-modal">
+    <div class="vmb-modal-content">
+      <div class="vmb-modal-header">
+        <span>Üye Detayları</span>
+        <button class="vmb-modal-close" onclick="document.getElementById('member-details-modal').classList.remove('show');">&times;</button>
+      </div>
+      <div id="member-details-content" style="color: var(--text2);"></div>
+    </div>
+  </div>
+
+  <script src="vmb-admin.js"></script>
+</body>
+</html>
