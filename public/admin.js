@@ -2271,6 +2271,24 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-comment-dots" style="color:var(--red2);margin-right:8px"></i>Mesaj Bildirimi Sesi</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Mesaj sesi URL'si</label><input id="s-message-sound-url" type="url" value="${escHtml(settings['message_notification_sound_url']||'')}" placeholder="https://site.com/message.mp3" /></div>
+          <div class="form-group"><label>Ses dosyası</label><input id="s-message-sound-file" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" /></div>
+          <button class="btn btn-primary" id="s-message-sound-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Mesaj sesini kaydet</button>
+          <div id="s-message-sound-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span><i class="fas fa-at" style="color:var(--red2);margin-right:8px"></i>Etiket Bildirimi Sesi</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Etiket sesi URL'si</label><input id="s-mention-sound-url" type="url" value="${escHtml(settings['mention_notification_sound_url']||'')}" placeholder="https://site.com/mention.mp3" /></div>
+          <div class="form-group"><label>Ses dosyası</label><input id="s-mention-sound-file" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" /></div>
+          <button class="btn btn-primary" id="s-mention-sound-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Etiket sesini kaydet</button>
+          <div id="s-mention-sound-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Güvenlik</span></div>
         <div class="card-body">
           <div class="form-group"><label>Ana Admin Kullanıcı Adı</label><input id="s-admin-username" value="${escHtml(settings['admin_username'] || 'Tarator')}" /></div>
@@ -2561,6 +2579,28 @@ async function renderSettings(main) {
       }
       await saveSetting('call_ringtone_url', url, msg); msg.style.color = 'var(--green)'; msg.textContent = 'Arama zil sesi kaydedildi';
     } catch (error) { msg.textContent = error.message; }
+  });
+
+  const saveNotificationSound = async (key, fileInputId, urlInputId, endpoint, msgId, label) => {
+    const msg = document.getElementById(msgId);
+    try {
+      const file = document.getElementById(fileInputId)?.files[0];
+      let url = document.getElementById(urlInputId)?.value.trim() || '';
+      if (file) {
+        const form = new FormData(); form.append('sound', file);
+        const response = await fetch(endpoint, { method:'POST', headers:{'X-Admin-Token':adminToken}, body:form });
+        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Dosya yüklenemedi'); url = result.url;
+      }
+      await saveSetting(key, url, msg);
+      msg.style.color = 'var(--green)'; msg.textContent = label;
+    } catch (error) { msg.textContent = error.message; }
+  };
+
+  document.getElementById('s-message-sound-save')?.addEventListener('click', async () => {
+    await saveNotificationSound('message_notification_sound_url', 's-message-sound-file', 's-message-sound-url', '/api/admin/upload-message-sound', 's-message-sound-msg', 'Mesaj bildirimi sesi kaydedildi');
+  });
+  document.getElementById('s-mention-sound-save')?.addEventListener('click', async () => {
+    await saveNotificationSound('mention_notification_sound_url', 's-mention-sound-file', 's-mention-sound-url', '/api/admin/upload-mention-sound', 's-mention-sound-msg', 'Etiket bildirimi sesi kaydedildi');
   });
   document.getElementById('s-pw-save').addEventListener('click', async () => {
     const msg = document.getElementById('s-pw-msg');

@@ -3147,6 +3147,18 @@ app.post('/api/admin/upload-call-ringtone', adminMiddleware, upload.single('ring
   catch (error) { res.status(400).json({ error: error.message || 'Ses dosyası yüklenemedi' }); }
 });
 
+app.post('/api/admin/upload-message-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Mesaj bildirimi sesi gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Mesaj bildirimi sesi yüklenemedi' }); }
+});
+
+app.post('/api/admin/upload-mention-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Etiket bildirimi sesi gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Etiket bildirimi sesi yüklenemedi' }); }
+});
+
 // Logo dosya yükleme (cihazdan)
 app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async (req, res) => {
   res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
@@ -3811,7 +3823,12 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','light_primary_color','light_background_color','device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text','first_visit_auth','call_ringtone_url')");
+  const keys = [
+    'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
+    'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
+    'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url'
+  ];
+  const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';

@@ -37,8 +37,24 @@ function playNotificationTone() {
   } catch {}
 }
 
-function triggerGroupMessageNotification(groupName, senderName, previewText) {
-  playNotificationTone();
+async function playConfiguredNotificationSound(type = 'message') {
+  try {
+    const settings = await fetch('/api/settings/public').then(r => r.json()).catch(() => ({}));
+    const url = type === 'mention' ? settings.mention_notification_sound_url : settings.message_notification_sound_url;
+    if (!url) {
+      playNotificationTone();
+      return;
+    }
+    const audio = new Audio(url);
+    audio.volume = 0.8;
+    audio.play().catch(() => playNotificationTone());
+  } catch {
+    playNotificationTone();
+  }
+}
+
+async function triggerGroupMessageNotification(groupName, senderName, previewText) {
+  await playConfiguredNotificationSound('message');
   if ('Notification' in window) {
     const permission = Notification.permission;
     if (permission === 'granted') {
@@ -55,6 +71,24 @@ function triggerGroupMessageNotification(groupName, senderName, previewText) {
             body: previewText || 'Yeni bir mesaj var.',
             tag: 'cigcig-group-message'
           });
+        }
+      }).catch(() => {});
+    }
+  }
+}
+
+async function triggerMentionNotification(mentionText) {
+  await playConfiguredNotificationSound('mention');
+  if ('Notification' in window) {
+    const permission = Notification.permission;
+    if (permission === 'granted') {
+      new Notification('Etiketlendin', { body: mentionText || 'Birisi seni etiketledi.', tag: 'cigcig-mention' });
+      return;
+    }
+    if (permission === 'default') {
+      Notification.requestPermission().then(permissionState => {
+        if (permissionState === 'granted') {
+          new Notification('Etiketlendin', { body: mentionText || 'Birisi seni etiketledi.', tag: 'cigcig-mention' });
         }
       }).catch(() => {});
     }
@@ -3185,7 +3219,7 @@ async function renderGroupDetail(app, slug) {
             const first = incoming[0];
             const senderName = first.username || 'Birisi';
             const preview = first.content || (first.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı');
-            triggerGroupMessageNotification(group.name, senderName, preview);
+            await triggerGroupMessageNotification(group.name, senderName, preview);
           }
           chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod)).join('');
           enhanceLinkPreviews(chatEl2);
