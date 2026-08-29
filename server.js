@@ -235,7 +235,8 @@ async function createTwoFactorChallenge(user, purpose = 'login') {
   const method = user.two_factor_method || 'none';
   const code = method === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
   await query('DELETE FROM auth_challenges WHERE user_id=$1 OR expires_at <= NOW()', [user.id]);
-  await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, purpose, method, code ? hashChallengeValue(code) : '']);
+  const verificationHash = method === 'question' ? user.two_factor_answer_hash : (code ? hashChallengeValue(code) : '');
+  await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, purpose, method, verificationHash]);
   if (code) await sendEmailCode(user.email, user.username, code);
   return { challenge, method, question: method === 'question' ? user.two_factor_question : '', maskedEmail: method === 'email' ? maskEmail(user.email) : '' };
 }
@@ -384,12 +385,14 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/,
+      /^\/api\/admin\/group\/\d+\/(status|messages)$/, /^\/api\/admin\/group\/\d+$/,
       /^\/api\/admin\/levels?(?:\/\d+)?$/
     ];
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
+    if (/\/group\//.test(req.path) && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Grup yönetimi yalnızca ana admin yetkisindedir' });
     if (/\/badge$/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
     if (/\/levels?(?:\/\d+)?$/.test(req.path) && !permissions.can_manage_levels) return res.status(403).json({ error: 'Seviye yönetme yetkisi yok' });
   }
@@ -406,6 +409,24 @@ async function denyIfRestricted(req, res, restrictionType) {
   if (!restriction) return false;
   const duration = restriction.expires_at ? new Date(restriction.expires_at).toLocaleString('tr-TR') : 'süresiz';
   return res.status(403).json({ error: `Bu işlem ${duration} tarihine kadar kısıtlandı. Neden: ${restriction.reason}`, restriction });
+}
+
+async function getActiveGroupMemberRestriction(groupId, userId) {
+  if (!userId) return null;
+  const { rows } = await query(`SELECT * FROM group_member_restrictions
+    WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL
+    ORDER BY created_at DESC LIMIT 1`, [groupId, userId]);
+  return rows[0] || null;
+}
+
+async function denyIfGroupUnavailable(req, res, group) {
+  if (group.moderation_status && group.moderation_status !== 'active') {
+    const label = group.moderation_status === 'banned' ? 'yasaklandı' : 'askıya alındı';
+    return res.status(403).json({ error: `Bu grup ${label}. Neden: ${group.moderation_reason || 'Yönetim kararı'}`, group_status: group.moderation_status, reason: group.moderation_reason || '' });
+  }
+  const restriction = await getActiveGroupMemberRestriction(group.id, req.user?.id);
+  if (restriction) return res.status(403).json({ error: `Bu gruba erişiminiz yasaklandı. Neden: ${restriction.reason}`, group_status: 'member_banned', reason: restriction.reason });
+  return false;
 }
 
 async function updateUserLevel(userId) {
@@ -683,7 +704,6 @@ app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); }
 
 // New admin entry path
 app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
-app.get('/vmb-yonetim', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'vmb-admin.html')); });
 
 app.post('/api/admin/auth/login', async (req, res) => {
   const username = String(req.body.username || '').trim();
@@ -1147,10 +1167,36 @@ async function parseMentionsAndNotify(content, actorUser, type, link, contextTit
       ? `@${actorUser.username} sizi "${contextTitle}" başlıklı konuda etiketledi`
       : type === 'comment_mention'
       ? `@${actorUser.username} sizi "${contextTitle}" konusundaki bir yorumda etiketledi`
+      : type === 'group_mention'
+      ? `@${actorUser.username} seni "${contextTitle}" grubunda etiketledi`
       : `@${actorUser.username} bir mesajında sizi etiketledi`;
     await query(
       'INSERT INTO notifications (user_id, type, actor_username, actor_avatar, title, body, link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [rows[0].id, type, actorUser.username, actorUser.avatar || '', contextTitle, body, link]
+      [rows[0].id, type, actorUser.username, actorUser.avatar || '', contextTitle || 'Etiketlendin', body, link]
+    );
+  }
+}
+
+async function notifyGroupMentions(group, actorUser, content) {
+  const mentions = [...new Set(
+    (content.match(/@([a-zA-Z0-9_çğıöşüÇĞİÖŞÜ]+)/g) || []).map(m => m.slice(1).toLowerCase())
+  )];
+  for (const username of mentions) {
+    if (username === actorUser.username.toLowerCase()) continue;
+    const { rows: targetRows } = await query('SELECT id, allow_mentions, tag_permission FROM users WHERE LOWER(username)=$1 AND is_deleted=0', [username]);
+    if (!targetRows.length) continue;
+    const targetUser = targetRows[0];
+    const permission = targetUser.tag_permission || (targetUser.allow_mentions === 0 ? 'nobody' : 'everyone');
+    if (permission === 'nobody') continue;
+    if (permission === 'friends') {
+      const { rows: friendship } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [actorUser.id, targetUser.id]);
+      if (!friendship.length) continue;
+    }
+    const { rows: memberRows } = await query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, targetUser.id]);
+    if (!memberRows.length) continue;
+    await query(
+      'INSERT INTO notifications (user_id, type, actor_username, actor_avatar, title, body, link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [targetUser.id, 'group_mention', actorUser.username, actorUser.avatar || '', group.name || 'Grup', `@${actorUser.username} seni "${group.name}" grubunda etiketledi`, `/grup/${group.slug}`]
     );
   }
 }
@@ -1435,19 +1481,25 @@ app.get('/api/books', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
   const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color,
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
-    FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) ORDER BY b.created_at DESC`);
-  res.json(rows.filter(book => !book.is_hidden || book.user_id == userId || book.has_book_access || req.user?.is_admin).map(sanitizeBook));
+    FROM books b LEFT JOIN users u ON b.user_id=u.id
+    WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      AND (
+        b.is_hidden = 0
+        OR b.user_id = ${userId}
+        OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})
+      )
+    ORDER BY b.created_at DESC`);
+  res.json(rows.map(sanitizeBook));
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  const hasAccess = await canAccessBook(book, req.user?.id) || req.user?.is_admin;
-  if (book.password_hash && !hasAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true, book: sanitizeBook({ ...book, password_hash: undefined }) });
-  if (book.is_hidden && !hasAccess) {
-    return res.status(403).json({ error: 'Bu kitap gizli' });
-  }
+  const isOwner = req.user?.id == book.user_id;
+  const hasPasswordAccess = await canAccessBook(book, req.user?.id);
+  if (book.password_hash && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true, book: sanitizeBook({ ...book, password_hash: undefined }) });
+  if (book.is_hidden && !isOwner && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap gizli' });
   const { rows: chapters } = await query('SELECT * FROM book_chapters WHERE book_id=$1 ORDER BY order_num ASC', [book.id]);
   const { rows: pages } = await query('SELECT id,title,page_num,slug,chapter_id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
   res.json({ book: sanitizeBook(book), chapters, pages });
@@ -1494,11 +1546,16 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
   // Başlık güncellendiyse ve is_unnamed sıfırlanmadıysa, is_unnamed'i sıfırla
   const newIsUnnamed = is_unnamed !== undefined ? (is_unnamed ? 1 : 0) : book.is_unnamed;
-  if (book_password && String(book_password).length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
-  const passwordHash = book_password ? hashPassword(book_password) : (book.password_hash || '');
-  await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,password_hash=$8,updated_at=NOW() WHERE id=$9',
-    [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, passwordHash, book.id]);
-  if (book_password) await query('DELETE FROM book_access WHERE book_id=$1 AND user_id<>$2', [book.id, req.user.id]);
+  const newPassword = typeof book_password === 'string' ? book_password.trim() : '';
+  if (newPassword && newPassword.length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
+  const updateValues = [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, book.id];
+  if (newPassword) {
+    await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,password_hash=$8,updated_at=NOW() WHERE id=$9',
+      [...updateValues.slice(0, 7), hashPassword(newPassword), updateValues[7]]);
+    await query('DELETE FROM book_access WHERE book_id=$1 AND user_id<>$2', [book.id, req.user.id]);
+  } else {
+    await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,updated_at=NOW() WHERE id=$8', updateValues);
+  }
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(sanitizeBook(rows[0]));
 });
@@ -1541,11 +1598,10 @@ app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
-  const hasAccess = await canAccessBook(book, req.user?.id) || req.user?.is_admin;
-  if (book.password_hash && !hasAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true });
-  if (book.is_hidden && !hasAccess) {
-    return res.status(403).json({ error: 'Bu kitap gizli' });
-  }
+  const isOwner = req.user?.id == book.user_id;
+  const hasPasswordAccess = await canAccessBook(book, req.user?.id);
+  if (book.password_hash && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true });
+  if (book.is_hidden && !isOwner && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap gizli' });
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
   if (!pRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const page = pRows[0];
@@ -1633,6 +1689,7 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE g.slug=$1`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   let isMember = false, role = null, joinRequestStatus = null;
   if (req.user) {
     const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
@@ -1649,13 +1706,13 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
 app.post('/api/groups', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   try {
-    const { name, description, cover_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+    const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
     const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
     const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query(
-      'INSERT INTO groups (name,slug,description,cover_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1) RETURNING id',
-      [name, tempSlug, description||'', cover_image||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
+      'INSERT INTO groups (name,slug,description,cover_image,banner_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1) RETURNING id',
+      [name, tempSlug, description||'', cover_image||'', banner_image||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
     const id = rows[0].id;
     const realSlug = makeSlug(name, id);
     await query('UPDATE groups SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -1673,11 +1730,14 @@ app.put('/api/group/:slug', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { name, description, cover_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+  const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
   const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
-  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,type=$4,visibility=$5,allow_chat=$6,allow_photos=$7,invite_only=$8 WHERE id=$9',
-    [name||group.name, description??group.description, cover_image??group.cover_image,
+  const resolvedCover = cover_image !== undefined ? cover_image : (group.cover_image || '');
+  const resolvedBanner = banner_image !== undefined ? banner_image : (group.banner_image || '');
+  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,banner_image=$4,type=$5,visibility=$6,allow_chat=$7,allow_photos=$8,invite_only=$9 WHERE id=$10',
+    [name||group.name, description??group.description, resolvedCover, resolvedBanner,
      groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==undefined?(allow_chat?1:0):group.allow_chat,
      allow_photos!==undefined?(allow_photos?1:0):group.allow_photos,
      groupVisibility === 'public' ? 0 : 1, group.id]);
@@ -1704,6 +1764,7 @@ app.post('/api/group/:slug/join', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   if ((group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public')) !== 'public') return res.status(403).json({ error: 'Bu grup sadece davet kodu ile katılabilir' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
@@ -1716,6 +1777,7 @@ app.post('/api/group/:slug/leave', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = rows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   if (group.owner_id == req.user.id) return res.status(400).json({ error: 'Grup sahibi ayrılamaz' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!ex.length) return res.status(400).json({ error: 'Üye değilsiniz' });
@@ -1738,6 +1800,37 @@ app.post('/api/group/:slug/invite', authMiddleware, async (req, res) => {
   res.json({ invite_code: code, max_uses: maxUses, expires_at: expiresAt });
 });
 
+app.get('/api/group/:slug/invites', authMiddleware, async (req, res) => {
+  const { rows: groupRows } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  if (groupRows[0].owner_id != req.user.id) return res.status(403).json({ error: 'Yalnızca kurucu davet geçmişini görebilir' });
+  const { rows } = await query(`
+    SELECT gi.id, gi.invite_code, gi.max_uses, gi.use_count, gi.expires_at, gi.revoked_at, gi.created_at,
+           u.username AS created_by_name,
+           CASE
+             WHEN gi.revoked_at IS NOT NULL THEN 'revoked'
+             WHEN gi.expires_at IS NOT NULL AND gi.expires_at <= NOW() THEN 'expired'
+             WHEN gi.max_uses > 0 AND gi.use_count >= gi.max_uses THEN 'exhausted'
+             ELSE 'active'
+           END AS status
+    FROM group_invites gi
+    LEFT JOIN users u ON u.id=gi.created_by
+    WHERE gi.group_id=$1
+    ORDER BY gi.created_at DESC
+  `, [groupRows[0].id]);
+  res.json(rows);
+});
+
+app.patch('/api/group/:slug/invites/:inviteId', authMiddleware, async (req, res) => {
+  const { rows: groupRows } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  if (groupRows[0].owner_id != req.user.id) return res.status(403).json({ error: 'Yalnızca kurucu davet kodlarını yönetebilir' });
+  const active = req.body.active === true || req.body.active === 'true';
+  const { rows } = await query('UPDATE group_invites SET revoked_at=$1 WHERE id=$2 AND group_id=$3 RETURNING id, revoked_at', [active ? null : new Date(), req.params.inviteId, groupRows[0].id]);
+  if (!rows.length) return res.status(404).json({ error: 'Davet kodu bulunamadı' });
+  res.json({ ok: true, active: !rows[0].revoked_at });
+});
+
 app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   const { invite_code } = req.body;
@@ -1745,6 +1838,7 @@ app.post('/api/group/join-invite', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM group_invites WHERE invite_code=$1', [invite_code.toUpperCase()]);
   if (!rows.length) return res.status(404).json({ error: 'Geçersiz davet kodu' });
   const invite = rows[0];
+  if (invite.revoked_at) return res.status(410).json({ error: 'Davet kodu devre dışı bırakılmış' });
   if (invite.expires_at && new Date(invite.expires_at) <= new Date()) return res.status(410).json({ error: 'Davet kodunun süresi dolmuş' });
   if (invite.max_uses > 0 && invite.use_count >= invite.max_uses) return res.status(410).json({ error: 'Davet kodunun kullanım hakkı dolmuş' });
   const { rows: groupRows } = await query('SELECT id FROM groups WHERE id=$1', [invite.group_id]);
@@ -1767,8 +1861,15 @@ app.post('/api/group/:slug/join-request', authMiddleware, async (req, res) => {
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
   const { rows: existing } = await query('SELECT id FROM group_join_requests WHERE group_id=$1 AND user_id=$2 AND status=$3', [group.id, req.user.id, 'pending']);
   if (existing.length) return res.status(400).json({ error: 'Zaten istek gönderilmiş' });
-  await query('INSERT INTO group_join_requests (group_id, user_id, status) VALUES ($1, $2, $3)', [group.id, req.user.id, 'pending']);
-  res.json({ ok: true });
+  try {
+    await query('INSERT INTO group_join_requests (group_id, user_id, status) VALUES ($1, $2, $3)', [group.id, req.user.id, 'pending']);
+    res.json({ ok: true });
+  } catch (e) {
+    if (String(e.message).includes('idx_group_join_requests_pending_unique') || String(e.message).includes('group_join_requests')) {
+      return res.status(400).json({ error: 'Zaten istek gönderilmiş' });
+    }
+    throw e;
+  }
 });
 
 app.get('/api/group/:slug/join-requests', authMiddleware, async (req, res) => {
@@ -1794,10 +1895,18 @@ app.post('/api/group/:slug/join-request/:requestId/respond', authMiddleware, asy
   const { rows: requests } = await query('SELECT * FROM group_join_requests WHERE id=$1 AND group_id=$2', [req.params.requestId, group.id]);
   if (!requests.length) return res.status(404).json({ error: 'İstek bulunamadı' });
   const request = requests[0];
+  if (request.status !== 'pending') return res.json({ ok: true });
+
   if (action === 'approve') {
-    await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
+    const { rows: existingMemberRows } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, request.user_id]);
+    if (existingMemberRows.length) {
+      await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
+      return res.json({ ok: true });
+    }
+
     await query('INSERT INTO group_members (group_id, user_id, role) VALUES ($1, $2, $3)', [group.id, request.user_id, 'member']);
     await query('UPDATE groups SET member_count=member_count+1 WHERE id=$1', [group.id]);
+    await query('UPDATE group_join_requests SET status=$1, reviewed_at=NOW(), reviewed_by=$2 WHERE id=$3', ['approved', req.user.id, request.id]);
   } else if (action === 'reject') {
     await query('UPDATE group_join_requests SET status=$1, rejection_reason=$2, reviewed_at=NOW(), reviewed_by=$3 WHERE id=$4', 
       ['rejected', rejectionReason || '', req.user.id, request.id]);
@@ -1808,6 +1917,7 @@ app.post('/api/group/:slug/join-request/:requestId/respond', authMiddleware, asy
 app.get('/api/group/:slug/members', async (req, res) => {
   const { rows: gRows } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  if (await denyIfGroupUnavailable(req, res, gRows[0])) return;
   const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.level_id FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
   res.json(rows);
 });
@@ -1816,6 +1926,7 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   const groupVisibility = group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public');
   if (groupVisibility !== 'public') {
     if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
@@ -1843,14 +1954,20 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   if (!group.allow_chat) return res.status(403).json({ error: 'Sohbet kapalı' });
   const { rows: m } = await query('SELECT id, muted_until FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!m.length) return res.status(403).json({ error: 'Üye değilsiniz' });
-  if (m[0].muted_until && new Date(m[0].muted_until) > new Date()) return res.status(403).json({ error: 'Bu grupta geçici olarak susturuldunuz' });
+  if (m[0].muted_until && new Date(m[0].muted_until) > new Date()) {
+    const remainingMs = new Date(m[0].muted_until) - new Date();
+    const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+    return res.status(403).json({ error: `SUSTURULDUN. Kalan süre: ${remainingMinutes} dakika`, muted: true, remaining_minutes: remainingMinutes });
+  }
   const { content, image_url } = req.body;
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
     [group.id, req.user.id, content||'', image_url||'']);
+  await notifyGroupMentions(group, req.user, content || '').catch(() => {});
   const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
@@ -1859,12 +1976,13 @@ app.put('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => {
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   const { rows: msgRows } = await query('SELECT * FROM group_messages WHERE id=$1 AND group_id=$2', [req.params.id, group.id]);
   if (!msgRows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
   const msg = msgRows[0];
   const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
-  const canEdit = msg.user_id == req.user.id || member[0].role === 'owner' || member[0].role === 'moderator';
+  const canEdit = msg.user_id == req.user.id;
   if (!canEdit) return res.status(403).json({ error: 'Bu mesajı düzenleme yetkiniz yok' });
   const content = String(req.body.content || '').trim();
   if (!content && !msg.image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
@@ -1877,12 +1995,14 @@ app.delete('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => 
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   const { rows: msgRows } = await query('SELECT * FROM group_messages WHERE id=$1 AND group_id=$2', [req.params.id, group.id]);
   if (!msgRows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
   const msg = msgRows[0];
   const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
-  const canModerate = member[0].role === 'owner' || member[0].role === 'moderator';
+  const { rows: permissions } = await query('SELECT can_delete_messages FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const canModerate = member[0].role === 'owner' || (member[0].role === 'moderator' && permissions[0]?.can_delete_messages);
   if (msg.user_id == req.user.id || canModerate) {
     await query('DELETE FROM group_messages WHERE id=$1', [msg.id]);
     return res.json({ ok: true, scope: canModerate && msg.user_id != req.user.id ? 'moderated' : 'everyone' });
@@ -1929,17 +2049,47 @@ app.post('/api/group/:slug/ban/:userId', authMiddleware, async (req, res) => {
   const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   const group = gRows[0];
+  if (await denyIfGroupUnavailable(req, res, group)) return;
   const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   const { rows: perm } = await query('SELECT * FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   const canBan = group.owner_id==req.user.id || (member[0]?.role==='moderator' && perm[0]?.can_ban_members);
   if (!canBan) return res.status(403).json({ error: 'Yetki yok' });
   const userId = parseInt(req.params.userId);
   if (userId === req.user.id) return res.status(400).json({ error: 'Kendinizi yasaklayamazsınız' });
-  const { rows: target } = await query('SELECT ip FROM users WHERE id=$1', [userId]);
-  if (!target.length || !target[0].ip) return res.status(400).json({ error: 'Bu kullanıcının kayıtlı IP adresi bulunamadı' });
-  await query('DELETE FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, userId]);
-  await query('UPDATE groups SET member_count=GREATEST(0,member_count-1) WHERE id=$1', [group.id]);
-  await query("UPDATE users SET banned=1, ban_type='ip', banned_ip=$1 WHERE id=$2", [target[0].ip, userId]);
+  const reason = String(req.body.reason || '').trim();
+  if (!reason) return res.status(400).json({ error: 'Yasaklama nedeni zorunlu' });
+  await query(`INSERT INTO group_member_restrictions (group_id,user_id,restriction_type,reason,created_by)
+    VALUES ($1,$2,'ban',$3,$4)
+    ON CONFLICT (group_id,user_id,restriction_type) DO UPDATE SET reason=EXCLUDED.reason, created_by=EXCLUDED.created_by, created_at=NOW(), revoked_at=NULL`, [group.id, userId, reason, req.user.id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/group/:slug/bans', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  if (group.owner_id !== req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows } = await query(`SELECT gr.*, u.username, u.avatar, u.name_color,
+    gm.role, gm.muted_until
+    FROM group_member_restrictions gr
+    LEFT JOIN users u ON u.id=gr.user_id
+    LEFT JOIN group_members gm ON gm.group_id=gr.group_id AND gm.user_id=gr.user_id
+    WHERE gr.group_id=$1 AND gr.revoked_at IS NULL
+    ORDER BY gr.created_at DESC`, [group.id]);
+  res.json(rows);
+});
+
+app.post('/api/group/:slug/ban/:userId/revoke', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const { rows: perm } = await query('SELECT * FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const canUnban = group.owner_id === req.user.id || (member[0]?.role === 'moderator' && perm[0]?.can_ban_members);
+  if (!canUnban) return res.status(403).json({ error: 'Yetki yok' });
+  const userId = parseInt(req.params.userId);
+  const result = await query('UPDATE group_member_restrictions SET revoked_at=NOW() WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL RETURNING id', [group.id, userId]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Aktif yasak bulunamadı' });
   res.json({ ok: true });
 });
 
@@ -1974,7 +2124,8 @@ app.post('/api/group/:slug/mute/:userId', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), async (req, res) => {
-  const { rows } = await query('SELECT allow_photos FROM groups WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (rows.length && await denyIfGroupUnavailable(req, res, rows[0])) return;
   if (!rows.length || !rows[0].allow_photos) return res.status(403).json({ error: 'Fotoğraf yükleme kapalı' });
   if (!req.file) return res.status(400).json({ error: 'Dosya bulunamadı' });
   try {
@@ -2075,7 +2226,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   }
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
-    query(`SELECT b.* FROM books b WHERE b.user_id=$1 AND (b.is_hidden=0 OR b.user_id=$2 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$2) OR $3=1) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0, req.user?.is_admin ? 1 : 0]).then(r => r.rows.map(sanitizeBook)),
+    query(`SELECT b.* FROM books b WHERE (b.user_id=$1 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$1)) AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null),
     query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows),
@@ -2593,8 +2744,10 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
 
 // Like toggle
 app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
-  const photoId = req.params.id;
-  const userId = req.user.id;
+  const photoId = Number.parseInt(req.params.id, 10);
+  const userId = Number(req.user.id);
+  if (!Number.isSafeInteger(photoId) || photoId < 1) return res.status(400).json({ error: 'Geçersiz fotoğraf.' });
+  try {
   const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
     WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -2612,6 +2765,10 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
     }
     const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM photo_likes WHERE photo_id=$1', [photoId]);
     return res.json({ liked: true, like_count: counts[0].like_count });
+  }
+  } catch (error) {
+    console.error('Photo like failed:', error);
+    return res.status(500).json({ error: 'Fotoğraf beğenilemedi. Lütfen tekrar deneyin.' });
   }
 });
 
@@ -2875,6 +3032,26 @@ app.get('/api/admin/groups', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/admin/group/:id/messages', adminMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id, name, slug FROM groups WHERE id=$1', [req.params.id]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed
+    FROM group_messages gm LEFT JOIN users u ON u.id=gm.user_id
+    WHERE gm.group_id=$1 ORDER BY gm.created_at ASC LIMIT 500`, [groups[0].id]);
+  res.json({ group: groups[0], messages: rows });
+});
+
+app.patch('/api/admin/group/:id/status', adminMiddleware, async (req, res) => {
+  const status = String(req.body.status || '').trim();
+  const reason = String(req.body.reason || '').trim();
+  if (!['active', 'suspended', 'banned'].includes(status)) return res.status(400).json({ error: 'Geçersiz grup durumu' });
+  if (status !== 'active' && !reason) return res.status(400).json({ error: 'Askıya alma veya yasaklama nedeni zorunlu' });
+  const { rows } = await query("UPDATE groups SET moderation_status=$1, moderation_reason=$2, moderated_at=CASE WHEN $1='active' THEN NULL ELSE NOW() END, moderated_by=$3 WHERE id=$4 RETURNING *", [status, status === 'active' ? '' : reason, req.adminUser.id, req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  await logAction(req.adminUser.username, status === 'active' ? 'restore_group' : `${status}_group`, rows[0].slug);
+  res.json(rows[0]);
+});
+
 app.delete('/api/admin/group/:id', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM groups WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
@@ -3008,6 +3185,18 @@ app.post('/api/admin/upload-call-ringtone', adminMiddleware, upload.single('ring
   if (!req.file) return res.status(400).json({ error: 'Ses dosyası gerekli' });
   try { res.json({ url: await handleUpload(req.file) }); }
   catch (error) { res.status(400).json({ error: error.message || 'Ses dosyası yüklenemedi' }); }
+});
+
+app.post('/api/admin/upload-message-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Mesaj bildirimi sesi gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Mesaj bildirimi sesi yüklenemedi' }); }
+});
+
+app.post('/api/admin/upload-mention-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Etiket bildirimi sesi gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Etiket bildirimi sesi yüklenemedi' }); }
 });
 
 // Logo dosya yükleme (cihazdan)
@@ -3674,7 +3863,12 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('site_name','site_description','primary_color','background_color','light_primary_color','light_background_color','device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text','first_visit_auth','call_ringtone_url')");
+  const keys = [
+    'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
+    'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
+    'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url'
+  ];
+  const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';
@@ -5109,7 +5303,7 @@ function makeVideoSlug(title, id) {
   return `${base}-${id}`;
 }
 
-const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
+const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed, u.is_private,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
   (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
@@ -5121,7 +5315,7 @@ app.get('/api/videos', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
+  const { rows } = await query(`${videoSelect} AND v.is_reals=1 AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
   res.json(rows);
 });
 
@@ -5134,7 +5328,7 @@ app.get('/api/video-settings', async (req, res) => {
 });
 
 app.get('/api/video/:slug', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} AND (v.slug=$2 OR v.id::text=$2)`, [req.user?.id || 0, req.params.slug]);
+  const { rows } = await query(`${videoSelect} AND (v.slug=$2 OR v.id::text=$2) AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted'))`, [req.user?.id || 0, req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   res.json(rows[0]);
 });
@@ -5192,20 +5386,46 @@ app.get('/api/video/:slug/saved', authMiddleware, async (req, res) => {
   res.json({ saved: !!rows.length });
 });
 
-app.get('/api/video/:slug/comments', async (req, res) => {
-  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id WHERE v.slug=$1 OR v.id::text=$1 ORDER BY c.created_at ASC`, [req.params.slug]);
+app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
+  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id
+    WHERE (v.slug=$1 OR v.id::text=$1) AND (COALESCE((SELECT is_private FROM users WHERE id=v.user_id),0)=0 OR v.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY c.created_at ASC`, [req.params.slug, req.user?.id || 0]);
   res.json(rows);
 });
 
 app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'comment')) return;
   const content = String(req.body.content || '').trim();
-  const { rows: video } = await query('SELECT id,allow_comments FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
+  const { rows: video } = await query(`SELECT v.id,v.user_id,v.allow_comments,u.is_private FROM videos v JOIN users u ON u.id=v.user_id WHERE v.slug=$1 OR v.id::text=$1`, [req.params.slug]);
   if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  if (video[0].is_private && video[0].user_id != req.user.id && !(await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, video[0].user_id])).rows.length) return res.status(403).json({ error: 'Bu hesap gizli.' });
   if (video[0].allow_comments !== 1) return res.status(403).json({ error: 'Yorumlar kapalı' });
   if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO video_comments (video_id,user_id,content) VALUES ($1,$2,$3) RETURNING *', [video[0].id, req.user.id, content.slice(0, 1000)]);
   res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar });
+});
+
+app.post('/api/video/:slug/comments/:commentId/like', authMiddleware, async (req, res) => {
+  const { rows: comments } = await query(`SELECT c.id FROM video_comments c JOIN videos v ON v.id=c.video_id
+    WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
+  if (!comments.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const { rows: existing } = await query('SELECT id FROM video_comment_likes WHERE comment_id=$1 AND user_id=$2', [comments[0].id, req.user.id]);
+  if (existing.length) {
+    await query('DELETE FROM video_comment_likes WHERE id=$1', [existing[0].id]);
+    return res.json({ liked: false });
+  }
+  await query('INSERT INTO video_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [comments[0].id, req.user.id]);
+  res.json({ liked: true });
+});
+
+app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT c.id, c.user_id, v.user_id AS video_owner_id
+    FROM video_comments c JOIN videos v ON v.id=c.video_id
+    WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const comment = rows[0];
+  if (comment.user_id != req.user.id && comment.video_owner_id != req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok' });
+  await query('DELETE FROM video_comments WHERE id=$1', [comment.id]);
+  res.json({ ok: true });
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
@@ -5248,318 +5468,280 @@ app.put('/api/reklampanel/:code', adminMiddleware, upload.fields([{name:'audio',
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 
-// ===== VMB ADMIN AUTHENTICATION =====
-// Separate admin login for VMB (username: Cambaz, password: 123123)
+// ===== VMB (Müdafaa Birliği) API Routes =====
+
+// VMB Admin Authentication
 app.post('/api/vmb/admin/auth/login', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Kullanıcı adı ve şifre gerekli' });
-  
-  // Check if it's the VMB admin credentials (Cambaz/123123)
-  const vmbAdminUsername = 'Cambaz';
-  const vmbAdminPassword = '123123'; // This should be hashed in production
-  
-  if (username === vmbAdminUsername && password === vmbAdminPassword) {
-    const token = generateToken('vmb_admin');
-    await query('INSERT INTO admin_sessions (token) VALUES ($1)', [token]);
-    return res.json({ token, is_vmb_admin: true, username: 'VMB Yönetim' });
-  }
-  
-  return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
+  try {
+    const { username, password } = req.body;
+    if (username !== 'Cambaz' || password !== '123123') {
+      return res.status(401).json({ error: 'Hatalı kullanıcı adı veya şifre' });
+    }
+    const token = crypto.randomBytes(32).toString('hex');
+    await query('INSERT INTO admin_sessions (token, expires_at) VALUES ($1, NOW() + INTERVAL \'8 hours\')', [token]);
+    res.json({ token, username });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// VMB Admin middleware
-const vmbAdminMiddleware = async (req, res, next) => {
-  const token = req.headers['authorization']?.replace('Bearer ', '') || getSessionCookie(req);
-  if (!token) return res.status(401).json({ error: 'Yetkisiz' });
-  const { rows } = await query('SELECT token FROM admin_sessions WHERE token=$1 AND created_at > NOW() - INTERVAL \'30 days\'', [token]);
-  if (!rows.length) return res.status(401).json({ error: 'Token geçersiz veya süresi dolmuş' });
-  req.vmbAdminToken = token;
-  next();
-};
+// VMB Admin Middleware
+async function vmbAdminMiddleware(req, res, next) {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Token gerekli' });
+    const { rows } = await query('SELECT * FROM admin_sessions WHERE token = $1 AND expires_at > NOW()', [token]);
+    if (!rows.length) return res.status(401).json({ error: 'Token geçersiz' });
+    next();
+  } catch (e) { res.status(500).json({ error: e.message }); }
+}
 
-// ===== VMB ADMIN PANEL - MEMBERS =====
+// Get VMB Members
 app.get('/api/vmb/admin/members', vmbAdminMiddleware, async (req, res) => {
   try {
     const { rows } = await query(`
-      SELECT vm.*, u.username, u.avatar, u.created_at as user_created_at,
-        (SELECT COUNT(*) FROM vmb_user_badges WHERE user_id=u.id) as badge_count,
-        (SELECT MAX(accessed_at) FROM vmb_file_access WHERE user_id=u.id) as last_access
-      FROM vmb_members vm
-      LEFT JOIN users u ON vm.user_id=u.id
-      ORDER BY vm.joined_at DESC
+      SELECT m.user_id, u.username, u.avatar, m.joined_at, m.last_activity, m.last_file_access,
+             COUNT(DISTINCT ub.badge_id) as badge_count,
+             MAX(al.accessed_at) as last_access
+      FROM vmb_members m
+      LEFT JOIN users u ON m.user_id = u.id
+      LEFT JOIN vmb_user_badges ub ON u.id = ub.user_id
+      LEFT JOIN vmb_access_logs al ON m.user_id = al.user_id
+      GROUP BY m.user_id, u.username, u.avatar, m.joined_at, m.last_activity, m.last_file_access
+      ORDER BY m.joined_at DESC
     `);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== VMB ADMIN PANEL - BADGES =====
+// Get Member Details
+app.get('/api/vmb/admin/user/:userId/details', vmbAdminMiddleware, async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const user = (await query('SELECT id, username, email, created_at FROM users WHERE id = $1', [userId])).rows[0];
+    const member = (await query('SELECT * FROM vmb_members WHERE user_id = $1', [userId])).rows[0];
+    const badges = (await query(`
+      SELECT b.id, b.name, b.icon, b.color, b.badge_type as type, ub.granted_at
+      FROM vmb_user_badges ub
+      JOIN vmb_badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = $1
+      ORDER BY ub.granted_at DESC
+    `, [userId])).rows;
+    const recent_access = (await query(`
+      SELECT al.id, vf.name as file_name, al.accessed_at
+      FROM vmb_access_logs al
+      LEFT JOIN vmb_files vf ON al.file_id = vf.id
+      WHERE al.user_id = $1
+      ORDER BY al.accessed_at DESC
+      LIMIT 5
+    `, [userId])).rows;
+    res.json({ user, member, badges, recent_access });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Get VMB Badges
 app.get('/api/vmb/admin/badges', vmbAdminMiddleware, async (req, res) => {
   try {
-    const { rows } = await query('SELECT * FROM vmb_badges ORDER BY id DESC');
+    const { rows } = await query(`
+      SELECT id, name, icon, color, badge_type as type, description
+      FROM vmb_badges
+      WHERE is_system = 1
+      ORDER BY badge_type DESC, name
+    `);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Grant Badge to User
 app.post('/api/vmb/admin/user/:userId/badge', vmbAdminMiddleware, async (req, res) => {
   try {
+    const { userId } = req.params;
     const { badge_id } = req.body;
-    const userId = req.params.userId;
-    if (!badge_id) return res.status(400).json({ error: 'Rozet ID gerekli' });
     
     // Check if user exists
-    const { rows: userRows } = await query('SELECT id FROM users WHERE id=$1', [userId]);
-    if (!userRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    const userRes = await query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (!userRes.rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
     
     // Check if badge exists
-    const { rows: badgeRows } = await query('SELECT * FROM vmb_badges WHERE id=$1', [badge_id]);
-    if (!badgeRows.length) return res.status(404).json({ error: 'Rozet bulunamadı' });
+    const badgeRes = await query('SELECT id FROM vmb_badges WHERE id = $1', [badge_id]);
+    if (!badgeRes.rows.length) return res.status(404).json({ error: 'Rozet bulunamadı' });
     
-    // Add badge to user
-    const { rows } = await query(
-      'INSERT INTO vmb_user_badges (user_id, badge_id, granted_by) VALUES ($1, $2, 0) ON CONFLICT DO NOTHING RETURNING *',
-      [userId, badge_id]
-    );
+    // Add to vmb_members if not exists
+    await query('INSERT INTO vmb_members (user_id) VALUES ($1) ON CONFLICT DO NOTHING', [userId]);
     
-    // Send notification if it's a member badge
-    if (badgeRows[0].type === 'member') {
-      await query(`
-        INSERT INTO notifications (user_id, type, related_user_id, content, created_at)
-        VALUES ($1, 'badge', 0, 'Vecd ile Müdafaa Birliği\'nin bir üyesisiniz.', NOW())
-      `, [userId]);
-    }
+    // Grant badge
+    await query(`
+      INSERT INTO vmb_user_badges (user_id, badge_id, granted_at)
+      VALUES ($1, $2, NOW())
+      ON CONFLICT DO NOTHING
+    `, [userId, badge_id]);
     
-    res.json({ ok: true, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/vmb/admin/user/:userId/badge/:badgeId', vmbAdminMiddleware, async (req, res) => {
-  try {
-    const { userId, badgeId } = req.params;
-    await query('DELETE FROM vmb_user_badges WHERE user_id=$1 AND badge_id=$2', [userId, badgeId]);
+    // Send notification
+    await query(`
+      INSERT INTO notifications (user_id, type, title, body, link, created_at)
+      VALUES ($1, 'badge', 'VMB Rozeti', 'Vecd ile Müdafaa Birliğin\'in bir üyesisiniz.', '/vmb', NOW())
+    `, [userId]);
+    
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Member details for admin panel
-app.get('/api/vmb/admin/user/:userId/details', vmbAdminMiddleware, async (req, res) => {
+// Remove Badge from User
+app.delete('/api/vmb/admin/user/:userId/badge/:badgeId', vmbAdminMiddleware, async (req, res) => {
   try {
-    const { userId } = req.params;
-    
-    // Get user info
-    const userRes = await query('SELECT id, username, email FROM users WHERE id=$1', [userId]);
-    if (!userRes.rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-    const user = userRes.rows[0];
-    
-    // Get VMB member info
-    const memberRes = await query('SELECT * FROM vmb_members WHERE user_id=$1', [userId]);
-    const member = memberRes.rows[0] || {};
-    
-    // Get user badges
-    const badgesRes = await query(`
-      SELECT vub.*, vb.name, vb.type, vb.icon, vb.color
-      FROM vmb_user_badges vub
-      LEFT JOIN vmb_badges vb ON vub.badge_id = vb.id
-      WHERE vub.user_id=$1
-    `, [userId]);
-    
-    // Get file access history
-    const accessRes = await query(`
-      SELECT vfa.*, vf.name as file_name
-      FROM vmb_file_access vfa
-      LEFT JOIN vmb_files vf ON vfa.file_id = vf.id
-      WHERE vfa.user_id=$1
-      ORDER BY vfa.accessed_at DESC
-      LIMIT 10
-    `, [userId]);
-    
-    res.json({
-      user: user,
-      member: member,
-      badges: badgesRes.rows,
-      recent_access: accessRes.rows
-    });
+    const { userId, badgeId } = req.params;
+    await query('DELETE FROM vmb_user_badges WHERE user_id = $1 AND badge_id = $2', [userId, badgeId]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== VMB ADMIN PANEL - FILES MANAGEMENT =====
+// Get VMB Files (Admin)
 app.get('/api/vmb/admin/files', vmbAdminMiddleware, async (req, res) => {
   try {
     const { rows } = await query(`
-      SELECT vf.*, u.username,
-        (SELECT COUNT(*) FROM vmb_folders WHERE file_id=vf.id) as folder_count,
-        (SELECT COUNT(*) FROM vmb_file_access WHERE file_id=vf.id) as access_count
+      SELECT vf.id, vf.name, vf.description, u.username, vf.created_at, vf.is_hidden,
+             COUNT(DISTINCT vfold.id) as folder_count,
+             COUNT(DISTINCT al.user_id) as access_count
       FROM vmb_files vf
-      LEFT JOIN users u ON vf.created_by=u.id
+      LEFT JOIN users u ON vf.created_by = u.id
+      LEFT JOIN vmb_folders vfold ON vf.id = vfold.file_id
+      LEFT JOIN vmb_access_logs al ON vf.id = al.file_id
+      GROUP BY vf.id, vf.name, vf.description, u.username, vf.created_at, vf.is_hidden
       ORDER BY vf.created_at DESC
     `);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/vmb/admin/file/:fileId/details', vmbAdminMiddleware, async (req, res) => {
+// Get File Details (Admin)
+app.get('/api/vmb/admin/file/:fileId', vmbAdminMiddleware, async (req, res) => {
   try {
-    const { fileId } = req.params;
-    const { rows: files } = await query('SELECT * FROM vmb_files WHERE id=$1', [fileId]);
-    if (!files.length) return res.status(404).json({ error: 'Dosya bulunamadı' });
-    
-    const { rows: accesses } = await query(`
-      SELECT vfa.*, u.username FROM vmb_file_access vfa
-      LEFT JOIN users u ON vfa.user_id=u.id
-      WHERE vfa.file_id=$1
-      ORDER BY vfa.accessed_at DESC
-    `, [fileId]);
-    
-    res.json({ file: files[0], accesses });
+    const { rows } = await query('SELECT * FROM vmb_files WHERE id = $1', [req.params.fileId]);
+    res.json(rows[0] || { error: 'Dosya bulunamadı' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Update File (Admin)
 app.put('/api/vmb/admin/file/:fileId', vmbAdminMiddleware, async (req, res) => {
   try {
     const { name, description, is_hidden } = req.body;
-    const { fileId } = req.params;
-    
-    const { rows } = await query(
-      'UPDATE vmb_files SET name=$1, description=$2, is_hidden=$3, updated_at=NOW() WHERE id=$4 RETURNING *',
-      [name || '', description || '', is_hidden ? 1 : 0, fileId]
-    );
-    
+    const { rows } = await query(`
+      UPDATE vmb_files
+      SET name = COALESCE($1, name),
+          description = COALESCE($2, description),
+          is_hidden = COALESCE($3, is_hidden),
+          updated_at = NOW()
+      WHERE id = $4
+      RETURNING *
+    `, [name, description, is_hidden, req.params.fileId]);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Delete File (Admin)
 app.delete('/api/vmb/admin/file/:fileId', vmbAdminMiddleware, async (req, res) => {
   try {
-    const { fileId } = req.params;
-    await query('DELETE FROM vmb_files WHERE id=$1', [fileId]);
+    await query('DELETE FROM vmb_files WHERE id = $1', [req.params.fileId]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== VMB PUBLIC - GET MEMBER STATUS & BADGES =====
-app.get('/api/vmb/user/status', authMiddleware, async (req, res) => {
+// ===== VMB Public Routes (User) =====
+
+// Check VMB Status (Has VMB Badge)
+app.get('/api/vmb/user/status', async (req, res) => {
   try {
-    const userId = req.user.id;
-    
-    const { rows: badges } = await query(`
-      SELECT vub.*, vb.name, vb.icon, vb.color, vb.type
-      FROM vmb_user_badges vub
-      LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id
-      WHERE vub.user_id=$1
-    `, [userId]);
-    
-    const hasMemberBadge = badges.some(b => b.type === 'member');
-    const hasAdminBadge = badges.some(b => b.type === 'admin');
-    
-    res.json({
-      has_vmb_badge: hasMemberBadge,
-      has_vmb_admin_badge: hasAdminBadge,
-      badges
-    });
+    if (!currentUser) return res.json({ hasVmb: false });
+    const { rows } = await query(`
+      SELECT COUNT(*) as count
+      FROM vmb_user_badges ub
+      JOIN vmb_badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = $1 AND b.name = 'VMB'
+    `, [currentUser.id]);
+    res.json({ hasVmb: rows[0].count > 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== VMB PUBLIC - FILES ACCESS =====
-app.get('/api/vmb/files', authMiddleware, async (req, res) => {
+// Get VMB Files (Public)
+app.get('/api/vmb/files', async (req, res) => {
   try {
+    if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
+    
     // Check if user has VMB badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type IN (\'member\', \'admin\')',
-      [req.user.id]
-    );
+    const badge = await query(`
+      SELECT COUNT(*) as count FROM vmb_user_badges ub
+      JOIN vmb_badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = $1 AND b.name = 'VMB'
+    `, [req.user.id]);
     
-    if (!badges.length) return res.status(403).json({ error: 'VMB rozeti gerekli' });
+    if (!badge.rows[0].count) return res.status(403).json({ error: 'Erişim reddedildi' });
     
-    const hasAdminBadge = badges.some(b => b.type === 'admin');
-    
-    // Get files (show all to admin, hide hidden files from members)
     const { rows } = await query(`
-      SELECT vf.*, u.username,
-        CASE WHEN vf.is_hidden=1 THEN 'hidden' ELSE 'visible' END as visibility
-      FROM vmb_files vf
-      LEFT JOIN users u ON vf.created_by=u.id
-      WHERE vf.is_hidden=0 OR ($1::BOOLEAN AND vf.is_hidden=1)
-      ORDER BY vf.created_at DESC
-    `, [hasAdminBadge]);
-    
+      SELECT id, name, description, created_at
+      FROM vmb_files
+      WHERE is_hidden = 0
+      ORDER BY created_at DESC
+    `);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/vmb/file/:fileId', authMiddleware, async (req, res) => {
+// Get File Contents
+app.get('/api/vmb/file/:fileId', async (req, res) => {
   try {
-    // Check if user has VMB badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type IN (\'member\', \'admin\')',
-      [req.user.id]
-    );
+    if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
     
-    if (!badges.length) return res.status(403).json({ error: 'VMB rozeti gerekli' });
+    const badge = await query(`
+      SELECT COUNT(*) as count FROM vmb_user_badges ub
+      JOIN vmb_badges b ON ub.badge_id = b.id
+      WHERE ub.user_id = $1 AND b.name = 'VMB'
+    `, [req.user.id]);
     
-    // Get file
-    const { rows: files } = await query('SELECT * FROM vmb_files WHERE id=$1', [req.params.fileId]);
-    if (!files.length) return res.status(404).json({ error: 'Dosya bulunamadı' });
+    if (!badge.rows[0].count) return res.status(403).json({ error: 'Erişim reddedildi' });
     
-    const file = files[0];
-    const hasAdminBadge = badges.some(b => b.type === 'admin');
+    const file = (await query('SELECT * FROM vmb_files WHERE id = $1', [req.params.fileId])).rows[0];
+    if (!file) return res.status(404).json({ error: 'Dosya bulunamadı' });
     
-    // Check if file is hidden and user is not admin
-    if (file.is_hidden && !hasAdminBadge) {
-      return res.status(403).json({ error: 'Bu dosyaya erişim yetkiniz yok' });
-    }
-    
-    // Track access
+    // Log access
     await query(`
-      INSERT INTO vmb_file_access (file_id, user_id, accessed_at)
-      VALUES ($1, $2, NOW())
-      ON CONFLICT (file_id, user_id) DO UPDATE SET accessed_at=NOW()
-    `, [req.params.fileId, req.user.id]);
+      INSERT INTO vmb_access_logs (user_id, file_id, access_type, accessed_at)
+      VALUES ($1, $2, 'view', NOW())
+    `, [req.user.id, req.params.fileId]);
     
     res.json(file);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ===== VMB PUBLIC - FOLDERS =====
-app.get('/api/vmb/file/:fileId/folders', authMiddleware, async (req, res) => {
+// Get Root Folders
+app.get('/api/vmb/file/:fileId/folders', async (req, res) => {
   try {
-    // Check if user has VMB badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type IN (\'member\', \'admin\')',
-      [req.user.id]
-    );
+    if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
     
-    if (!badges.length) return res.status(403).json({ error: 'VMB rozeti gerekli' });
-    
-    // Get folders (root folders only, no parent)
     const { rows } = await query(`
-      SELECT * FROM vmb_folders
-      WHERE file_id=$1 AND parent_folder_id IS NULL
+      SELECT id, name, description, order_num
+      FROM vmb_folders
+      WHERE file_id = $1 AND parent_folder_id IS NULL
+      WHERE is_hidden = 0
       ORDER BY order_num, name
     `, [req.params.fileId]);
-    
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/vmb/folder/:folderId/contents', authMiddleware, async (req, res) => {
+// Get Folder Contents
+app.get('/api/vmb/folder/:folderId/contents', async (req, res) => {
   try {
-    // Check if user has VMB badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type IN (\'member\', \'admin\')',
-      [req.user.id]
-    );
+    if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
     
-    if (!badges.length) return res.status(403).json({ error: 'VMB rozeti gerekli' });
-    
-    // Get subfolder and pages
     const { rows: folders } = await query(`
-      SELECT * FROM vmb_folders
-      WHERE parent_folder_id=$1
+      SELECT id, name, description, order_num
+      FROM vmb_folders
+      WHERE parent_folder_id = $1 AND is_hidden = 0
       ORDER BY order_num, name
     `, [req.params.folderId]);
     
     const { rows: pages } = await query(`
-      SELECT * FROM vmb_pages
-      WHERE folder_id=$1
+      SELECT id, title, order_num
+      FROM vmb_pages
+      WHERE folder_id = $1
       ORDER BY order_num, title
     `, [req.params.folderId]);
     
@@ -5567,103 +5749,21 @@ app.get('/api/vmb/folder/:folderId/contents', authMiddleware, async (req, res) =
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/vmb/file/:fileId/folder', authMiddleware, async (req, res) => {
+// Get Page Content
+app.get('/api/vmb/page/:pageId', async (req, res) => {
   try {
-    // Check if user has admin badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type=\'admin\'',
-      [req.user.id]
-    );
+    if (!req.user) return res.status(401).json({ error: 'Giriş gerekli' });
     
-    if (!badges.length) return res.status(403).json({ error: 'Dosya yöneticisi rozeti gerekli' });
+    const page = (await query('SELECT * FROM vmb_pages WHERE id = $1', [req.params.pageId])).rows[0];
+    if (!page) return res.status(404).json({ error: 'Sayfa bulunamadı' });
     
-    const { name, parent_folder_id } = req.body;
-    if (!name) return res.status(400).json({ error: 'Klasör adı gerekli' });
+    // Log access
+    await query(`
+      INSERT INTO vmb_access_logs (user_id, page_id, access_type, accessed_at)
+      VALUES ($1, $2, 'view', NOW())
+    `, [req.user.id, req.params.pageId]);
     
-    const { rows } = await query(`
-      INSERT INTO vmb_folders (file_id, parent_folder_id, name, created_by, order_num)
-      VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(order_num), 0) + 1 FROM vmb_folders WHERE file_id=$1 AND parent_folder_id IS NOT DISTINCT FROM $2))
-      RETURNING *
-    `, [req.params.fileId, parent_folder_id || null, name.slice(0, 200), req.user.id]);
-    
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ===== VMB PUBLIC - PAGES =====
-app.get('/api/vmb/page/:pageId', authMiddleware, async (req, res) => {
-  try {
-    // Check if user has VMB badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type IN (\'member\', \'admin\')',
-      [req.user.id]
-    );
-    
-    if (!badges.length) return res.status(403).json({ error: 'VMB rozeti gerekli' });
-    
-    const { rows } = await query('SELECT * FROM vmb_pages WHERE id=$1', [req.params.pageId]);
-    if (!rows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
-    
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post('/api/vmb/folder/:folderId/page', authMiddleware, async (req, res) => {
-  try {
-    // Check if user has admin badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type=\'admin\'',
-      [req.user.id]
-    );
-    
-    if (!badges.length) return res.status(403).json({ error: 'Dosya yöneticisi rozeti gerekli' });
-    
-    const { title, content } = req.body;
-    if (!title) return res.status(400).json({ error: 'Sayfa başlığı gerekli' });
-    
-    const { rows } = await query(`
-      INSERT INTO vmb_pages (folder_id, title, content, created_by, order_num)
-      VALUES ($1, $2, $3, $4, (SELECT COALESCE(MAX(order_num), 0) + 1 FROM vmb_pages WHERE folder_id=$1))
-      RETURNING *
-    `, [req.params.folderId, title.slice(0, 200), content || '', req.user.id]);
-    
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.put('/api/vmb/page/:pageId', authMiddleware, async (req, res) => {
-  try {
-    // Check if user has admin badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type=\'admin\'',
-      [req.user.id]
-    );
-    
-    if (!badges.length) return res.status(403).json({ error: 'Dosya yöneticisi rozeti gerekli' });
-    
-    const { title, content } = req.body;
-    
-    const { rows } = await query(
-      'UPDATE vmb_pages SET title=$1, content=$2, updated_at=NOW() WHERE id=$3 RETURNING *',
-      [title || '', content || '', req.params.pageId]
-    );
-    
-    res.json(rows[0]);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.delete('/api/vmb/page/:pageId', authMiddleware, async (req, res) => {
-  try {
-    // Check if user has admin badge
-    const { rows: badges } = await query(
-      'SELECT vub.*, vb.type FROM vmb_user_badges vub LEFT JOIN vmb_badges vb ON vub.badge_id=vb.id WHERE vub.user_id=$1 AND vb.type=\'admin\'',
-      [req.user.id]
-    );
-    
-    if (!badges.length) return res.status(403).json({ error: 'Dosya yöneticisi rozeti gerekli' });
-    
-    await query('DELETE FROM vmb_pages WHERE id=$1', [req.params.pageId]);
-    res.json({ ok: true });
+    res.json(page);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5694,6 +5794,14 @@ initDb().then(() => {
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(comment_id, user_id)
   )`).then(() => {
+    return query(`CREATE TABLE IF NOT EXISTS video_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT NOT NULL REFERENCES video_comments(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(comment_id, user_id)
+    )`);
+  }).then(() => {
     app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
   });
 }).catch(err => {

@@ -313,6 +313,7 @@ async function initDb() {
       slug TEXT UNIQUE,
       description TEXT DEFAULT '',
       cover_image TEXT DEFAULT '',
+      banner_image TEXT DEFAULT '',
       owner_id BIGINT,
       type TEXT DEFAULT 'public',
       allow_chat INTEGER DEFAULT 1,
@@ -322,6 +323,7 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE SET NULL
     );
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS banner_image TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS group_members (
       id BIGSERIAL PRIMARY KEY,
@@ -347,11 +349,14 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       reviewed_at TIMESTAMP,
       reviewed_by BIGINT,
-      UNIQUE(group_id, user_id),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(reviewed_by) REFERENCES users(id) ON DELETE SET NULL
     );
+    ALTER TABLE group_join_requests DROP CONSTRAINT IF EXISTS group_join_requests_group_id_user_id_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_group_join_requests_pending_unique
+      ON group_join_requests(group_id, user_id)
+      WHERE status = 'pending';
 
     CREATE TABLE IF NOT EXISTS moderator_permissions (
       id BIGSERIAL PRIMARY KEY,
@@ -394,11 +399,13 @@ async function initDb() {
       max_uses INTEGER DEFAULT 0,
       use_count INTEGER DEFAULT 0,
       expires_at TIMESTAMP,
+      revoked_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS max_uses INTEGER DEFAULT 0;
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS use_count INTEGER DEFAULT 0;
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
+    ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS photos (
@@ -699,6 +706,23 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(content_type, content_id)
     );
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'active';
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_reason TEXT DEFAULT '';
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMP;
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS idx_groups_moderation_status ON groups(moderation_status);
+    CREATE TABLE IF NOT EXISTS group_member_restrictions (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      restriction_type TEXT NOT NULL CHECK (restriction_type IN ('ban')),
+      reason TEXT NOT NULL,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      revoked_at TIMESTAMP,
+      UNIQUE(group_id, user_id, restriction_type)
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_member_restrictions_active ON group_member_restrictions(group_id, user_id, revoked_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_artist INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS artist_display_name TEXT DEFAULT '';
@@ -955,26 +979,55 @@ async function initDb() {
     ALTER TABLE playlists ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 1;
     CREATE UNIQUE INDEX IF NOT EXISTS playlists_public_id_unique ON playlists(public_id) WHERE public_id IS NOT NULL;
 
-    -- ===== VMB (MÜDAFAA BİRLİĞİ) TABLOLARI =====
+    -- ===== VMB (Müdafaa Birliği) Tables =====
+    CREATE TABLE IF NOT EXISTS vmb_badges (
+      id BIGSERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      icon TEXT DEFAULT 'fas fa-shield',
+      color TEXT DEFAULT '#fbbf24',
+      badge_type TEXT DEFAULT 'member',
+      is_system INTEGER DEFAULT 1,
+      is_deletable INTEGER DEFAULT 1,
+      description TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS vmb_user_badges (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      badge_id BIGINT NOT NULL,
+      granted_by BIGINT,
+      granted_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, badge_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(badge_id) REFERENCES vmb_badges(id) ON DELETE CASCADE,
+      FOREIGN KEY(granted_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_vmb_user_badges_user ON vmb_user_badges(user_id);
+    CREATE INDEX IF NOT EXISTS idx_vmb_user_badges_badge ON vmb_user_badges(badge_id);
+
     CREATE TABLE IF NOT EXISTS vmb_members (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL UNIQUE,
       joined_at TIMESTAMP DEFAULT NOW(),
-      last_activity TIMESTAMP DEFAULT NOW(),
-      is_admin INTEGER DEFAULT 0,
+      last_activity TIMESTAMP,
+      last_file_access TIMESTAMP,
+      last_folder_accessed BIGINT,
+      notification_sent_at TIMESTAMP,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_vmb_members_user ON vmb_members(user_id);
 
     CREATE TABLE IF NOT EXISTS vmb_files (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
-      created_by BIGINT NOT NULL,
+      created_by BIGINT,
       is_hidden INTEGER DEFAULT 0,
-      cover_image TEXT DEFAULT '',
+      parent_file_id BIGINT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
     );
     CREATE INDEX IF NOT EXISTS idx_vmb_files_created_by ON vmb_files(created_by);
 
@@ -983,15 +1036,14 @@ async function initDb() {
       file_id BIGINT NOT NULL,
       parent_folder_id BIGINT,
       name TEXT NOT NULL,
+      description TEXT DEFAULT '',
       order_num INTEGER DEFAULT 0,
-      created_by BIGINT NOT NULL,
+      is_hidden INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(file_id) REFERENCES vmb_files(id) ON DELETE CASCADE,
-      FOREIGN KEY(parent_folder_id) REFERENCES vmb_folders(id) ON DELETE CASCADE,
-      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY(parent_folder_id) REFERENCES vmb_folders(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_vmb_folders_file_id ON vmb_folders(file_id);
+    CREATE INDEX IF NOT EXISTS idx_vmb_folders_file ON vmb_folders(file_id);
     CREATE INDEX IF NOT EXISTS idx_vmb_folders_parent ON vmb_folders(parent_folder_id);
 
     CREATE TABLE IF NOT EXISTS vmb_pages (
@@ -1000,56 +1052,34 @@ async function initDb() {
       title TEXT NOT NULL,
       content TEXT NOT NULL,
       order_num INTEGER DEFAULT 0,
-      created_by BIGINT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
-      FOREIGN KEY(folder_id) REFERENCES vmb_folders(id) ON DELETE CASCADE,
-      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE CASCADE
+      FOREIGN KEY(folder_id) REFERENCES vmb_folders(id) ON DELETE CASCADE
     );
-    CREATE INDEX IF NOT EXISTS idx_vmb_pages_folder_id ON vmb_pages(folder_id);
+    CREATE INDEX IF NOT EXISTS idx_vmb_pages_folder ON vmb_pages(folder_id);
 
-    CREATE TABLE IF NOT EXISTS vmb_file_access (
+    CREATE TABLE IF NOT EXISTS vmb_access_logs (
       id BIGSERIAL PRIMARY KEY,
-      file_id BIGINT NOT NULL,
       user_id BIGINT NOT NULL,
+      file_id BIGINT,
+      folder_id BIGINT,
+      page_id BIGINT,
+      access_type TEXT DEFAULT 'view',
       accessed_at TIMESTAMP DEFAULT NOW(),
-      last_folder_id BIGINT,
-      last_page_id BIGINT,
-      FOREIGN KEY(file_id) REFERENCES vmb_files(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-      UNIQUE(file_id, user_id)
+      FOREIGN KEY(file_id) REFERENCES vmb_files(id) ON DELETE SET NULL,
+      FOREIGN KEY(folder_id) REFERENCES vmb_folders(id) ON DELETE SET NULL,
+      FOREIGN KEY(page_id) REFERENCES vmb_pages(id) ON DELETE SET NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_vmb_file_access_user ON vmb_file_access(user_id);
+    CREATE INDEX IF NOT EXISTS idx_vmb_access_logs_user ON vmb_access_logs(user_id);
+    CREATE INDEX IF NOT EXISTS idx_vmb_access_logs_file ON vmb_access_logs(file_id);
 
-    CREATE TABLE IF NOT EXISTS vmb_badges (
-      id BIGSERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      icon TEXT DEFAULT 'fas fa-shield',
-      color TEXT DEFAULT '#fbbf24',
-      type TEXT NOT NULL DEFAULT 'member',
-      description TEXT DEFAULT '',
-      is_special INTEGER DEFAULT 0,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS vmb_user_badges (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL,
-      badge_id BIGINT NOT NULL,
-      granted_at TIMESTAMP DEFAULT NOW(),
-      granted_by BIGINT,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(badge_id) REFERENCES vmb_badges(id) ON DELETE CASCADE,
-      FOREIGN KEY(granted_by) REFERENCES users(id) ON DELETE SET NULL,
-      UNIQUE(user_id, badge_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_vmb_user_badges_user ON vmb_user_badges(user_id);
-
-    -- Create default VMB badges
-    INSERT INTO vmb_badges (name, icon, color, type, description, is_special)
-    VALUES ('VMB', 'fas fa-shield', '#fbbf24', 'member', 'Müdafaa Birliği üyesi', 1),
-           ('VMB Yönetim', 'fas fa-shield-check', '#ef4444', 'admin', 'VMB Dosya Yöneticisi', 1)
-    ON CONFLICT DO NOTHING;
+    -- Insert default VMB badges
+    INSERT INTO vmb_badges (name, icon, color, badge_type, is_system, is_deletable, description)
+    VALUES
+      ('VMB', 'fas fa-shield', '#fbbf24', 'member', 1, 0, 'Müdafaa Birliği Üyesi'),
+      ('VMB Yönetim', 'fas fa-shield-alt', '#ef4444', 'admin', 1, 0, 'Müdafaa Birliği Yönetim Takımı')
+    ON CONFLICT (name) DO NOTHING;
   `);
 
   // Seed default levels

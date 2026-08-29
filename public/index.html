@@ -74,8 +74,9 @@
   </script>
   <!-- SEO_END -->
 
-  <link rel="icon" href="/cigcig.png" type="image/png" />
-  <link rel="apple-touch-icon" href="/cigcig.png" />
+  <link rel="icon" href="/cigcig.png?v=20260829" type="image/png" />
+  <link rel="apple-touch-icon" href="/cigcig.png?v=20260829" />
+  <link rel="manifest" href="/manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Elsie:wght@400;900&family=Inter:wght@300;400;500;600;700;800;900&family=Nunito:wght@700;800&family=Literata:ital,opsz,wght@0,7..72,300;0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,300;1,7..72,400;1,7..72,500;1,7..72,600;1,7..72,700&display=swap" rel="stylesheet" />
@@ -95,31 +96,6 @@
     .badge-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03)}
     .badge-info small{display:block;color:#bbb}
     .modal-body .badge-manager-top{display:flex;gap:8px;align-items:center;margin-bottom:8px}
-
-    /* VMB Floating Button */
-    .vmb-floating-btn{
-      position:fixed;
-      top:20px;right:20px;
-      background:linear-gradient(135deg,#fbbf24,#ca8a04);
-      color:#000;
-      width:56px;height:56px;
-      border-radius:14px;
-      display:none;
-      align-items:center;justify-content:center;
-      gap:6px;
-      text-decoration:none;
-      font-weight:700;
-      font-size:12px;
-      z-index:1000;
-      box-shadow:0 4px 12px rgba(251,191,36,0.3);
-      transition:all 0.3s ease;
-      flex-direction:column;
-    }
-    .vmb-floating-btn:hover{transform:scale(1.1);box-shadow:0 6px 20px rgba(251,191,36,0.5)}
-    .vmb-floating-btn i{font-size:24px}
-    @media (max-width:768px){
-      .vmb-floating-btn{display:flex}
-    }
   </style>
   <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2328160993003590" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -129,6 +105,7 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="/" data-link class="nav-brand">
+        <img src="/cigcig.png?v=20260829" class="site-logo" alt="CigCig" />
         <span class="site-wordmark">CigCig</span>
       </a>
       <div class="nav-links">
@@ -255,12 +232,6 @@
     <a href="/muzikler" data-link id="mbb-music" aria-label="Müzikler" title="Müzikler"><i class="fas fa-music"></i></a>
     <a href="/giris" data-link id="mbb-auth" aria-label="Giriş" title="Profil"><i class="fas fa-user"></i><img id="mbb-avatar" class="mobile-bottom-avatar" alt="" /></a>
   </nav>
-
-  <!-- VMB FLOATING BUTTON (MOBILE ONLY) -->
-  <a href="/vmb/dosyalar" data-link class="vmb-floating-btn" aria-label="Müdafaa Birliği" title="Müdafaa Birliği">
-    <i class="fas fa-shield"></i>
-    <span>VMB</span>
-  </a>
 
   <script>
 // ===== DİNAMİK TEMA RENGİ + LOGO + SİTE ADI (ANA SİTE) =====
