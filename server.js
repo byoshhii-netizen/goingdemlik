@@ -1958,7 +1958,11 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   if (!group.allow_chat) return res.status(403).json({ error: 'Sohbet kapalı' });
   const { rows: m } = await query('SELECT id, muted_until FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!m.length) return res.status(403).json({ error: 'Üye değilsiniz' });
-  if (m[0].muted_until && new Date(m[0].muted_until) > new Date()) return res.status(403).json({ error: 'Bu grupta geçici olarak susturuldunuz' });
+  if (m[0].muted_until && new Date(m[0].muted_until) > new Date()) {
+    const remainingMs = new Date(m[0].muted_until) - new Date();
+    const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
+    return res.status(403).json({ error: `SUSTURULDUN. Kalan süre: ${remainingMinutes} dakika`, muted: true, remaining_minutes: remainingMinutes });
+  }
   const { content, image_url } = req.body;
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
@@ -2057,6 +2061,35 @@ app.post('/api/group/:slug/ban/:userId', authMiddleware, async (req, res) => {
   await query(`INSERT INTO group_member_restrictions (group_id,user_id,restriction_type,reason,created_by)
     VALUES ($1,$2,'ban',$3,$4)
     ON CONFLICT (group_id,user_id,restriction_type) DO UPDATE SET reason=EXCLUDED.reason, created_by=EXCLUDED.created_by, created_at=NOW(), revoked_at=NULL`, [group.id, userId, reason, req.user.id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/group/:slug/bans', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  if (group.owner_id !== req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows } = await query(`SELECT gr.*, u.username, u.avatar, u.name_color,
+    gm.role, gm.muted_until
+    FROM group_member_restrictions gr
+    LEFT JOIN users u ON u.id=gr.user_id
+    LEFT JOIN group_members gm ON gm.group_id=gr.group_id AND gm.user_id=gr.user_id
+    WHERE gr.group_id=$1 AND gr.revoked_at IS NULL
+    ORDER BY gr.created_at DESC`, [group.id]);
+  res.json(rows);
+});
+
+app.post('/api/group/:slug/ban/:userId/revoke', authMiddleware, async (req, res) => {
+  const { rows: gRows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = gRows[0];
+  const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const { rows: perm } = await query('SELECT * FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  const canUnban = group.owner_id === req.user.id || (member[0]?.role === 'moderator' && perm[0]?.can_ban_members);
+  if (!canUnban) return res.status(403).json({ error: 'Yetki yok' });
+  const userId = parseInt(req.params.userId);
+  const result = await query('UPDATE group_member_restrictions SET revoked_at=NOW() WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL RETURNING id', [group.id, userId]);
+  if (!result.rowCount) return res.status(404).json({ error: 'Aktif yasak bulunamadı' });
   res.json({ ok: true });
 });
 

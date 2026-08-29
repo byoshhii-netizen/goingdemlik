@@ -2690,6 +2690,16 @@ async function renderGroupList(app) {
   });
 }
 
+function formatRemainingDuration(ms) {
+  const totalMinutes = Math.max(1, Math.ceil(ms / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days) return `${days} gün${hours ? ` ${hours} saat` : ''}${minutes && !hours ? ` ${minutes} dakika` : ''}`;
+  if (hours) return `${hours} saat${minutes ? ` ${minutes} dakika` : ''}`;
+  return `${minutes} dakika`;
+}
+
 function groupCardHTML(g) {
   const visibility = g.visibility || (g.type === 'private' ? 'private' : g.invite_only ? 'invite' : 'public');
   if (visibility === 'private' && !g.is_member) return '';
@@ -2820,7 +2830,11 @@ async function renderGroupDetail(app, slug) {
   const isMod = role === 'moderator';
   const visibility = group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public');
   const isOpenGroup = visibility === 'public';
-  const canSend = currentUser && isMember && group.allow_chat;
+  const currentGroupMember = currentUser ? members.find(m => Number(m.user_id) === Number(currentUser.id)) : null;
+  const mutedUntil = currentGroupMember && currentGroupMember.muted_until ? new Date(currentGroupMember.muted_until) : null;
+  const isMuted = !!(mutedUntil && mutedUntil > new Date());
+  const mutedRemainingText = isMuted ? formatRemainingDuration(mutedUntil.getTime() - Date.now()) : '';
+  const canSend = currentUser && isMember && group.allow_chat && !isMuted;
   const heroBanner = group.banner_image || group.cover_image || '';
   const previewCover = group.cover_image || group.banner_image || '';
 
@@ -2902,6 +2916,7 @@ async function renderGroupDetail(app, slug) {
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
+            <button class="btn btn-outline btn-sm" id="group-banned-btn"><i class="fas fa-ban"></i> Yasaklılar</button>
             ${(visibility === 'private' || visibility === 'invite') ? `<button class="btn btn-outline btn-sm" id="join-requests-btn"><i class="fas fa-user-plus"></i> Gelen İstekler</button>` : ''}
             ${(visibility !== 'public') ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-history"></i> Davet Kodları</button>` : ''}` : ''}
         </div>
@@ -2920,7 +2935,7 @@ async function renderGroupDetail(app, slug) {
               ${group.allow_photos ? `<label class="btn btn-ghost btn-sm" for="chat-img-input" title="Fotoğraf ekle" style="flex-shrink:0"><i class="fas fa-image"></i></label><input id="chat-img-input" type="file" accept="image/*" style="display:none" />` : ''}
               <input id="chat-input" type="text" placeholder="Mesaj yaz..." style="flex:1;min-width:0" />
               <button class="btn btn-primary btn-sm" id="send-msg-btn" style="flex-shrink:0"><i class="fas fa-paper-plane"></i></button>
-            </div>` : (currentUser && !isMember ? `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Mesaj göndermek için gruba katılın.</div>` : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Giriş yaparak katılabilirsiniz.</div>`)}
+            </div>` : isMuted ? `<div style="padding:14px 12px;text-align:center;color:var(--text-muted);font-size:13px;background:rgba(255,81,81,0.08);border:1px solid rgba(255,81,81,0.18);border-radius:10px"><i class="fas fa-volume-xmark" style="font-size:18px;color:var(--accent-red2);margin-bottom:6px;display:block"></i><strong style="color:var(--accent-red2)">SUSTURULDUN</strong><div style="margin-top:6px">Kalan süre: ${escHtml(mutedRemainingText)}</div></div>` : (currentUser && !isMember ? `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Mesaj göndermek için gruba katılın.</div>` : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Giriş yaparak katılabilirsiniz.</div>`)}
           </div>` : `<div class="card card-body" style="text-align:center;color:var(--text-muted)"><i class="fas fa-comment-slash" style="font-size:32px;margin-bottom:8px;display:block"></i>Sohbet kapatılmış.</div>`}
       </div>
       <div>
@@ -3051,6 +3066,36 @@ async function renderGroupDetail(app, slug) {
       if (older.length < 60) $('#load-more-msgs-wrap').style.display = 'none';
     } catch(e) { toast(e.message, 'error'); }
     finally { btn.disabled = false; btn.innerHTML = '<i class="fas fa-history"></i> Önceki Mesajlar'; }
+  });
+
+  $('#group-banned-btn')?.addEventListener('click', async () => {
+    try {
+      const bans = await api('/group/' + slug + '/bans');
+      const content = bans.length ? bans.map(item => `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:1">
+            ${item.avatar ? `<img src="${escHtml(item.avatar)}" style="width:34px;height:34px;border-radius:50%;object-fit:cover" alt="" />` : `<div style="width:34px;height:34px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;font-weight:700">?</div>`}
+            <div style="min-width:0;flex:1">
+              <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(item.username || 'Üye')}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(item.reason || 'Yasak sebebi yok')}</div>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm revoke-ban-btn" data-user-id="${item.user_id}"><i class="fas fa-unlock"></i> Kaldır</button>
+        </div>
+      `).join('') : '<div class="empty-state"><i class="fas fa-ban"></i><p>Aktif yasaklı üye yok.</p></div>';
+      showModal('Yasaklı Üyeler', content);
+      document.querySelectorAll('.revoke-ban-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const userId = btn.dataset.userId;
+          try {
+            await api('/group/' + slug + '/ban/' + userId + '/revoke', { method: 'POST' });
+            toast('Yasak kaldırıldı');
+            hideModal();
+            renderRoute(location.pathname);
+          } catch (e) { toast(e.message, 'error'); }
+        });
+      });
+    } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#join-btn')?.addEventListener('click', async () => {
