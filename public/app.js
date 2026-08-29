@@ -2607,10 +2607,11 @@ async function renderGroupList(app) {
 function groupCardHTML(g) {
   const visibility = g.visibility || (g.type === 'private' ? 'private' : g.invite_only ? 'invite' : 'public');
   if (visibility === 'private' && !g.is_member) return '';
+  const coverUrl = g.cover_image || g.banner_image || '';
   const typeBadge = visibility === 'invite' ? `<span class="badge badge-orange"><i class="fas fa-key"></i> Kod ile katılım</span>` : `<span class="badge badge-green"><i class="fas fa-globe"></i> Herkese açık</span>`;
   return `<div class="group-card" onclick="navigate('/grup/${escHtml(g.slug)}')">
     <div class="group-cover">
-      ${g.cover_image ? `<img src="${escHtml(g.cover_image)}" alt="" />` : `<div class="group-cover-placeholder"><i class="fas fa-users"></i></div>`}
+      ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<div class="group-cover-placeholder"><i class="fas fa-users"></i></div>`}
     </div>
     <div class="group-info">
       <div class="group-name">${escHtml(g.name)}</div>
@@ -2629,6 +2630,11 @@ function showNewGroupModal() {
     <div class="form-group"><label>Grup Adı</label><input id="gr-name" type="text" /></div>
     <div class="form-group"><label>Açıklama</label><textarea id="gr-desc" rows="3"></textarea></div>
     <div class="form-group">
+      <label>Banner Resmi (opsiyonel)</label>
+      <input type="file" id="gr-banner-file" accept="image/*" style="margin-bottom:8px" />
+      <div id="gr-banner-preview" style="display:none"></div>
+    </div>
+    <div class="form-group">
       <label>Kapak Resmi (opsiyonel)</label>
       <input type="file" id="gr-cover-file" accept="image/*" style="margin-bottom:8px" />
       <div id="gr-cover-preview" style="display:none"></div>
@@ -2641,6 +2647,16 @@ function showNewGroupModal() {
     <button class="btn btn-primary" id="gr-submit" style="width:100%">Oluştur</button>
     <div id="gr-error" class="form-error mt-4"></div>
   `);
+
+  $('#gr-banner-file').addEventListener('change', e => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const prev = $('#gr-banner-preview');
+      prev.outerHTML = `<img id="gr-banner-preview" src="${ev.target.result}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />`;
+    };
+    reader.readAsDataURL(file);
+  });
 
   $('#gr-cover-file').addEventListener('change', e => {
     const file = e.target.files[0]; if (!file) return;
@@ -2656,7 +2672,14 @@ function showNewGroupModal() {
     const name = $('#gr-name').value.trim();
     if (!name) { $('#gr-error').textContent = 'İsim zorunlu'; return; }
     try {
+      let banner_image = '';
       let cover_image = '';
+      const bannerFile = $('#gr-banner-file').files[0];
+      if (bannerFile) {
+        const fd = new FormData(); fd.append('file', bannerFile);
+        const r = await apiForm('/upload', fd);
+        banner_image = r.url;
+      }
       const coverFile = $('#gr-cover-file').files[0];
       if (coverFile) {
         const fd = new FormData(); fd.append('file', coverFile);
@@ -2664,7 +2687,7 @@ function showNewGroupModal() {
         cover_image = r.url;
       }
       const visibility = $('#gr-visibility').value;
-      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
+      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, banner_image: banner_image || cover_image, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
       toast('Grup oluşturuldu'); hideModal(); navigate('/grup/' + g.slug);
     } catch (e) { $('#gr-error').textContent = e.message; }
   });
@@ -2707,14 +2730,16 @@ async function renderGroupDetail(app, slug) {
   const visibility = group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public');
   const isOpenGroup = visibility === 'public';
   const canSend = currentUser && isMember && group.allow_chat;
+  const heroBanner = group.banner_image || group.cover_image || '';
+  const previewCover = group.cover_image || group.banner_image || '';
 
   // Üye olmayan kullanıcılar için önizleme sayfası göster
   if (!isMember && !isOwner) {
     const hasPending = joinRequestStatus && joinRequestStatus.status === 'pending';
     app.innerHTML = `<div class="container page">
       <div style="max-width:540px;margin:40px auto;text-align:center">
-        ${group.cover_image
-          ? `<img src="${escHtml(group.cover_image)}" style="width:100%;border-radius:var(--radius);aspect-ratio:16/6;object-fit:cover;margin-bottom:24px" alt="" />`
+        ${previewCover
+          ? `<img src="${escHtml(previewCover)}" style="width:100%;border-radius:var(--radius);aspect-ratio:16/6;object-fit:cover;margin-bottom:24px" alt="" />`
           : `<div style="width:100%;aspect-ratio:16/6;background:var(--bg-card2);border-radius:var(--radius);display:flex;align-items:center;justify-content:center;margin-bottom:24px;font-size:56px;color:var(--text-muted)"><i class="fas fa-users"></i></div>`}
         <h1 style="font-size:26px;font-weight:800;margin-bottom:10px">${escHtml(group.name)}</h1>
         ${group.description ? `<p style="color:var(--text-secondary);font-size:15px;margin-bottom:18px;line-height:1.65">${escHtml(group.description)}</p>` : ''}
@@ -2775,7 +2800,7 @@ async function renderGroupDetail(app, slug) {
 
   app.innerHTML = `<div class="container page">
     <div class="group-hero">
-      ${group.cover_image ? `<img src="${escHtml(group.cover_image)}" class="group-hero-cover" alt="" />` : `<div class="group-hero-cover group-hero-cover-placeholder"><i class="fas fa-users"></i></div>`}
+      ${heroBanner ? `<img src="${escHtml(heroBanner)}" class="group-hero-cover" alt="" />` : `<div class="group-hero-cover group-hero-cover-placeholder"><i class="fas fa-users"></i></div>`}
       <div class="group-hero-content">
         <div class="group-hero-copy">
           <div class="group-hero-eyebrow"><i class="fas fa-users"></i> TOPLULUK</div>
@@ -2786,6 +2811,7 @@ async function renderGroupDetail(app, slug) {
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
+            ${(visibility === 'private' || visibility === 'invite') ? `<button class="btn btn-outline btn-sm" id="join-requests-btn"><i class="fas fa-user-plus"></i> Gelen İstekler</button>` : ''}
             ${(visibility !== 'public') ? `<button class="btn btn-outline btn-sm" id="gen-invite-btn"><i class="fas fa-history"></i> Davet Kodları</button>` : ''}` : ''}
         </div>
       </div>
@@ -2986,6 +3012,41 @@ async function renderGroupDetail(app, slug) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
+  $('#join-requests-btn')?.addEventListener('click', async () => {
+    try {
+      const requests = await api('/group/' + slug + '/join-requests');
+      if (!requests.length) {
+        showModal('Gelen İstekler', `<div class="empty-state"><i class="fas fa-inbox"></i><p>Bekleyen istek yok.</p></div>`);
+        return;
+      }
+      const listHTML = requests.map(r => `
+        <div id="req-item-${r.id}" style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">
+          ${r.avatar ? `<img src="${escHtml(r.avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;flex-shrink:0" alt="" />` : `<div style="width:36px;height:36px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-weight:700">?</div>`}
+          <span style="flex:1;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(r.username)}</span>
+          <button class="btn btn-primary btn-sm req-accept" data-id="${r.id}" style="font-size:11px">Kabul</button>
+          <button class="btn btn-outline btn-sm req-reject" data-id="${r.id}" style="font-size:11px">Reddet</button>
+        </div>`).join('');
+      showModal('Gelen İstekler', `<div>${listHTML}</div>`);
+
+      document.querySelector('.modal-body')?.addEventListener('click', async e => {
+        const acceptBtn = e.target.closest('.req-accept');
+        const rejectBtn = e.target.closest('.req-reject');
+        const reqId = acceptBtn?.dataset.id || rejectBtn?.dataset.id;
+        if (!reqId) return;
+        const action = acceptBtn ? 'approve' : 'reject';
+        try {
+          await api(`/group/${slug}/join-request/${reqId}/respond`, { method: 'POST', body: JSON.stringify({ action }) });
+          const item = document.getElementById('req-item-' + reqId);
+          if (item) {
+            item.style.opacity = '0.4';
+            item.querySelectorAll('button').forEach(b => b.disabled = true);
+            item.innerHTML += `<span style="font-size:11px;color:var(--text-muted);margin-left:6px">${action === 'approve' ? '✓ Kabul edildi' : '✗ Reddedildi'}</span>`;
+          }
+        } catch (e2) { toast(e2.message, 'error'); }
+      }, { once: true });
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
   $('#gen-invite-btn')?.addEventListener('click', async () => {
     showModal('Davet Kodları', `<div id="invite-manager"><div class="loading-center"><div class="spinner"></div></div></div>`);
     const manager = $('#invite-manager');
@@ -3023,6 +3084,11 @@ async function renderGroupDetail(app, slug) {
       <div class="form-group"><label>Grup Adı</label><input id="gs-name" type="text" value="${escHtml(group.name)}" /></div>
       <div class="form-group"><label>Açıklama</label><textarea id="gs-desc" rows="3">${escHtml(group.description || '')}</textarea></div>
       <div class="form-group">
+        <label>Banner Resmi</label>
+        <input type="file" id="gs-banner-file" accept="image/*" style="margin-bottom:8px" />
+        ${group.banner_image || group.cover_image ? `<img id="gs-banner-preview" src="${escHtml(group.banner_image || group.cover_image)}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />` : `<div id="gs-banner-preview" style="display:none"></div>`}
+      </div>
+      <div class="form-group">
         <label>Kapak Resmi</label>
         <input type="file" id="gs-cover-file" accept="image/*" style="margin-bottom:8px" />
         ${group.cover_image ? `<img id="gs-cover-preview" src="${escHtml(group.cover_image)}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />` : `<div id="gs-cover-preview" style="display:none"></div>`}
@@ -3037,6 +3103,16 @@ async function renderGroupDetail(app, slug) {
       <div id="gs-error" class="form-error mt-4"></div>
     `);
 
+    $('#gs-banner-file').addEventListener('change', e => {
+      const file = e.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const prev = $('#gs-banner-preview');
+        prev.outerHTML = `<img id="gs-banner-preview" src="${ev.target.result}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />`;
+      };
+      reader.readAsDataURL(file);
+    });
+
     $('#gs-cover-file').addEventListener('change', e => {
       const file = e.target.files[0]; if (!file) return;
       const reader = new FileReader();
@@ -3049,14 +3125,21 @@ async function renderGroupDetail(app, slug) {
 
     $('#gs-submit').addEventListener('click', async () => {
       try {
-        let cover_image = group.cover_image || '';
+        let banner_image = group.banner_image || group.cover_image || '';
+        let cover_image = group.cover_image || group.banner_image || '';
+        const bannerFile = $('#gs-banner-file').files[0];
+        if (bannerFile) {
+          const fd = new FormData(); fd.append('file', bannerFile);
+          const r = await apiForm('/upload', fd);
+          banner_image = r.url;
+        }
         const coverFile = $('#gs-cover-file').files[0];
         if (coverFile) {
           const fd = new FormData(); fd.append('file', coverFile);
           const r = await apiForm('/upload', fd);
           cover_image = r.url;
         }
-        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, visibility: $('#gs-visibility').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
+        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, banner_image: banner_image || cover_image, visibility: $('#gs-visibility').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
         toast('Grup güncellendi'); hideModal(); renderRoute(location.pathname);
       } catch (e) { $('#gs-error').textContent = e.message; }
     });

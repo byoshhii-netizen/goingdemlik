@@ -313,6 +313,7 @@ async function initDb() {
       slug TEXT UNIQUE,
       description TEXT DEFAULT '',
       cover_image TEXT DEFAULT '',
+      banner_image TEXT DEFAULT '',
       owner_id BIGINT,
       type TEXT DEFAULT 'public',
       allow_chat INTEGER DEFAULT 1,
@@ -322,6 +323,7 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE SET NULL
     );
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS banner_image TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS group_members (
       id BIGSERIAL PRIMARY KEY,

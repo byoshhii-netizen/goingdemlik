@@ -947,11 +947,15 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .group-hero-cover { display: block; width: 100%; height: clamp(150px, 20vw, 240px); object-fit: cover; background: linear-gradient(135deg, rgba(189,162,117,.25), var(--bg-card2)); }
 .group-hero-cover-placeholder { display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 52px; }
 .group-hero-content { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 20px 22px; }
-.group-hero-copy { min-width: 0; }
+.group-hero-copy { min-width: 0; flex: 1 1 auto; }
 .group-hero-eyebrow { margin-bottom: 7px; color: var(--accent-red2); font-size: 11px; font-weight: 800; letter-spacing: .1em; }
 .group-hero-title { margin: 0; font-size: clamp(24px, 3vw, 32px); font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
 .group-hero-desc { margin: 7px 0 0; max-width: 720px; color: var(--text-secondary); line-height: 1.5; overflow-wrap: anywhere; }
-.group-hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
+.group-hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; min-width: 0; }
+.group-hero-actions .btn { max-width: 100%; white-space: nowrap; }
+.chat-msg-body { min-width: 0; }
+.chat-msg-meta { min-width: 0; }
+.chat-msg-name { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .groups-grid { grid-template-columns: 1fr; gap: 14px; }
   .groups-grid .group-card { min-height: 0; }
@@ -959,6 +963,7 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
   .group-hero-cover { height: 145px; }
   .group-hero-content { align-items: stretch; flex-direction: column; padding: 16px; gap: 14px; }
   .group-hero-actions { justify-content: flex-start; }
+  .group-hero-actions .btn { width: 100%; justify-content: center; }
   .group-detail-layout > :last-child { min-height:0; }
   .chat-container { height: 480px; border-radius: 14px; }
   .chat-messages { padding: 14px 12px; gap: 12px; }

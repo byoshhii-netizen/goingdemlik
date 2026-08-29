@@ -1673,13 +1673,14 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
 app.post('/api/groups', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   try {
-    const { name, description, cover_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+    const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
     const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
+    const resolvedBanner = banner_image || cover_image || '';
     const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query(
-      'INSERT INTO groups (name,slug,description,cover_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1) RETURNING id',
-      [name, tempSlug, description||'', cover_image||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
+      'INSERT INTO groups (name,slug,description,cover_image,banner_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1) RETURNING id',
+      [name, tempSlug, description||'', cover_image||'', resolvedBanner, req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
     const id = rows[0].id;
     const realSlug = makeSlug(name, id);
     await query('UPDATE groups SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -1699,10 +1700,12 @@ app.put('/api/group/:slug', authMiddleware, async (req, res) => {
   const group = rows[0];
   if (await denyIfGroupUnavailable(req, res, group)) return;
   if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { name, description, cover_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+  const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
   const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
-  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,type=$4,visibility=$5,allow_chat=$6,allow_photos=$7,invite_only=$8 WHERE id=$9',
-    [name||group.name, description??group.description, cover_image??group.cover_image,
+  const resolvedCover = cover_image !== undefined ? cover_image : (group.cover_image || group.banner_image || '');
+  const resolvedBanner = banner_image !== undefined ? banner_image : (group.banner_image || group.cover_image || '');
+  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,banner_image=$4,type=$5,visibility=$6,allow_chat=$7,allow_photos=$8,invite_only=$9 WHERE id=$10',
+    [name||group.name, description??group.description, resolvedCover, resolvedBanner,
      groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==undefined?(allow_chat?1:0):group.allow_chat,
      allow_photos!==undefined?(allow_photos?1:0):group.allow_photos,
      groupVisibility === 'public' ? 0 : 1, group.id]);
