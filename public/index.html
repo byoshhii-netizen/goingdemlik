@@ -89,6 +89,7 @@
     })();
   </script>
   <link rel="stylesheet" href="/style.css?v=20260826-photo-audio-2" />
+  <link rel="stylesheet" href="/channels-style.css?v=20260829" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
     .user-icons{display:inline-flex;gap:6px;margin-left:8px}
@@ -298,6 +299,8 @@
 })();
 </script>
   <script src="/app.js?v=20260828-registration-fix"></script>
+  <script src="/channels.js?v=20260829"></script>
+  <script src="/channels-integration.js?v=20260829"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---
@@ -360,6 +363,94 @@
     window.renderUserListCig = renderUserListCig;
   })();
   </script>
+
+  <!-- KANAL SİSTEMİ HTML -->
+  <div id="group-channels-sidebar" class="group-channels-sidebar">
+    <div class="group-channels-header">
+      <span>Kanallar</span>
+      <div class="group-channels-header-actions">
+        <button id="channel-create-btn" class="group-channels-header-btn" title="Kanal Oluştur">
+          <i class="fas fa-plus"></i>
+        </button>
+      </div>
+    </div>
+    <div id="group-channels-list" class="group-channels-list"></div>
+  </div>
+
+  <!-- Kanal Ayarları Modal -->
+  <div id="channel-settings-modal" class="channel-settings-modal">
+    <div class="channel-settings-box">
+      <div class="channel-settings-title" id="channel-settings-title">Kanal Ayarları</div>
+      
+      <div class="channel-settings-group">
+        <label class="channel-settings-label">Kanal Adı</label>
+        <input type="text" id="channel-name-input" class="channel-settings-input" placeholder="Kanal adı" />
+      </div>
+
+      <div class="channel-settings-group">
+        <label class="channel-settings-label">Kanal Simgesi</label>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <input type="text" id="channel-icon-input" class="channel-settings-input" placeholder="Font Awesome ikon (fas fa-...)" />
+          <div id="channel-icon-preview" style="width: 40px; height: 40px; display: grid; place-items: center; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border); flex-shrink: 0; font-size: 18px;"><i class="fas fa-hashtag"></i></div>
+        </div>
+      </div>
+
+      <div class="channel-settings-group">
+        <label class="channel-settings-label">Açıklama</label>
+        <textarea id="channel-description-input" class="channel-settings-textarea" placeholder="Kanal açıklaması"></textarea>
+      </div>
+
+      <div class="channel-settings-group">
+        <div class="channel-settings-checkbox">
+          <input type="checkbox" id="channel-can-write" />
+          <label for="channel-can-write">Üyeler yazabilir</label>
+        </div>
+        <div class="channel-settings-checkbox">
+          <input type="checkbox" id="channel-can-view-history" checked />
+          <label for="channel-can-view-history">Geçmiş görülebilir</label>
+        </div>
+      </div>
+
+      <div class="channel-settings-group">
+        <label class="channel-settings-label">Görünürlük</label>
+        <select id="channel-visibility" class="channel-settings-select">
+          <option value="all">Tüm Üyeler Görebilir</option>
+          <option value="members">Sadece Üyeler</option>
+          <option value="moderators">Sadece Moderatörler</option>
+          <option value="approval_only">Sadece Onaylananlar (Onay Kanalı)</option>
+        </select>
+      </div>
+
+      <div class="channel-settings-actions">
+        <button id="channel-settings-save" class="btn-channel primary"><i class="fas fa-check"></i> Kaydet</button>
+        <button id="channel-settings-cancel" class="btn-channel outline"><i class="fas fa-times"></i> Vazgeç</button>
+        <button id="channel-settings-delete" class="btn-channel danger" style="display: none;"><i class="fas fa-trash"></i> Sil</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Onay Sistemi Ayarları -->
+  <div id="approval-settings-modal" class="channel-settings-modal">
+    <div class="channel-settings-box">
+      <div class="channel-settings-title">Onay Sistemi</div>
+      
+      <div class="channel-settings-group">
+        <div class="channel-settings-checkbox">
+          <input type="checkbox" id="approval-toggle" />
+          <label for="approval-toggle">Yeni üyeler için onay sistemi aktif et</label>
+        </div>
+      </div>
+
+      <div id="approval-requests-section" style="display: none;">
+        <label class="channel-settings-label">Bekleyen Talepler</label>
+        <div id="approval-requests-container" class="approval-requests-list"></div>
+      </div>
+
+      <div class="channel-settings-actions">
+        <button id="approval-settings-close" class="btn-channel outline"><i class="fas fa-times"></i> Kapat</button>
+      </div>
+    </div>
+  </div>
 
   <!-- FLOATING DM WIDGET -->
 </body>

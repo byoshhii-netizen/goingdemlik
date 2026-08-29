@@ -978,6 +978,67 @@ async function initDb() {
     ALTER TABLE playlists ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
     ALTER TABLE playlists ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 1;
     CREATE UNIQUE INDEX IF NOT EXISTS playlists_public_id_unique ON playlists(public_id) WHERE public_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS group_channels (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      icon TEXT DEFAULT 'fas fa-hashtag',
+      description TEXT DEFAULT '',
+      is_default INTEGER DEFAULT 0,
+      can_view_history INTEGER DEFAULT 1,
+      can_write INTEGER DEFAULT 1,
+      visibility TEXT DEFAULT 'all',
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(group_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_channels_group ON group_channels(group_id);
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS icon TEXT DEFAULT 'fas fa-hashtag';
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS is_default INTEGER DEFAULT 0;
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS can_view_history INTEGER DEFAULT 1;
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS can_write INTEGER DEFAULT 1;
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'all';
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS created_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+
+    CREATE TABLE IF NOT EXISTS group_channel_messages (
+      id BIGSERIAL PRIMARY KEY,
+      channel_id BIGINT NOT NULL REFERENCES group_channels(id) ON DELETE CASCADE,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      content TEXT NOT NULL,
+      image_url TEXT DEFAULT '',
+      edited_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_channel_messages_channel ON group_channel_messages(channel_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS group_approval_systems (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL UNIQUE REFERENCES groups(id) ON DELETE CASCADE,
+      is_enabled INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE group_approval_systems ADD COLUMN IF NOT EXISTS is_enabled INTEGER DEFAULT 0;
+    ALTER TABLE group_approval_systems ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+    ALTER TABLE group_approval_systems ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+    CREATE TABLE IF NOT EXISTS group_approval_requests (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT DEFAULT 'pending',
+      requested_at TIMESTAMP DEFAULT NOW(),
+      reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      reviewed_at TIMESTAMP,
+      rejection_reason TEXT DEFAULT '',
+      UNIQUE(group_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_approval_requests_pending ON group_approval_requests(group_id, status);
+
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS moderators_can_manage INTEGER DEFAULT 0;
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS moderators_can_write INTEGER DEFAULT 0;
   `);
 
   // Seed default levels

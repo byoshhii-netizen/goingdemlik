@@ -3575,6 +3575,15 @@ async function renderGroupDetail(app, slug) {
       try { await api(`/group/${slug}/moderator/${uid}`, { method: 'POST' }); toast('Moderatör yapıldı'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
     }
   });
+
+  // ===== KANAL SİSTEMİ ENTEGRASYON =====
+  if (isMember || isOwner) {
+    setTimeout(() => {
+      setupChannelSystem(slug, isOwner, isMod, isMember || isOwner);
+      integrateChannelsIntoGroupUI(slug, isOwner);
+    }, 100);
+  }
+  // ===== KANAL SİSTEMİ ENTEGRASYON SONU =====
 }
 
 function chatMsgHTML(m, canModerate = false) {

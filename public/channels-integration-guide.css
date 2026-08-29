@@ -1,0 +1,91 @@
+/* ===== GRUP KANAL ENTEGRASYON TASLAK ===== */
+
+/* Bu kod grup sayfasında eklenmelidir */
+
+// Grup sayfası yükleme fonksiyonunda (örneğin loadGroupPage veya benzeri):
+// loadGroupChannels(groupSlug); çağrısını ekleyin
+
+// Grup mesajları bölümünün yapısı şöyle olmalı:
+/*
+<div class="group-layout">
+  <div class="group-channels-sidebar" id="group-channels-sidebar"></div>
+  <div class="group-content">
+    <div class="group-header">
+      <h1>Grup Adı</h1>
+      <div class="group-header-actions">
+        <button class="mobile-channels-toggle" onclick="toggleChannelsSidebar()">
+          <i class="fas fa-bars"></i>
+        </button>
+      </div>
+    </div>
+    <div id="group-channel-messages-area" class="group-channel-messages"></div>
+    <div id="channel-message-form"></div>
+  </div>
+</div>
+*/
+
+// CSS: Responsive grid layout
+.group-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: calc(100vh - 60px);
+  gap: 0;
+}
+
+.group-content {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+
+.group-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.group-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.group-header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .group-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .group-channels-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    z-index: 998;
+    width: 100% !important;
+    height: 100% !important;
+    border-right: none;
+    background: var(--bg-primary);
+  }
+
+  .group-channels-sidebar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: -1;
+  }
+
+  .mobile-channels-toggle {
+    display: flex !important;
+  }
+}

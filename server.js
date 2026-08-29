@@ -5503,6 +5503,365 @@ initDb().then(() => {
       UNIQUE(comment_id, user_id)
     )`);
   }).then(() => {
+    // ===== KANAL SİSTEMİ API'LAR =====
+
+    // Gruba kanal listesi getir
+    app.get('/api/group/:slug/channels', optionalAuth, async (req, res) => {
+      try {
+        const { slug } = req.params;
+        const result = await query(`
+          SELECT gc.id, gc.name, gc.icon, gc.description, gc.is_default, 
+                 gc.can_view_history, gc.can_write, gc.visibility, gc.created_by,
+                 u.username as created_by_username, 
+                 COUNT(gcm.id) as message_count
+          FROM group_channels gc
+          LEFT JOIN users u ON gc.created_by = u.id
+          LEFT JOIN group_channel_messages gcm ON gc.id = gcm.channel_id
+          WHERE gc.group_id = (SELECT id FROM groups WHERE slug = $1)
+          GROUP BY gc.id, u.id
+          ORDER BY gc.is_default DESC, gc.created_at ASC
+        `, [slug]);
+        res.json(result.rows);
+      } catch (e) {
+        console.error('Kanal listesi hatası:', e.message);
+        res.status(500).json({ error: 'Kanal listesi alınamadı' });
+      }
+    });
+
+    // Kanal oluştur
+    app.post('/api/group/:slug/channels', authMiddleware, async (req, res) => {
+      try {
+        const { slug } = req.params;
+        const { name, icon = 'fas fa-hashtag', description = '' } = req.body;
+        if (!name || !name.trim()) return res.status(400).json({ error: 'Kanal adı gerekli' });
+
+        const groupRes = await query('SELECT id, owner_id FROM groups WHERE slug = $1', [slug]);
+        if (groupRes.rows.length === 0) return res.status(404).json({ error: 'Grup bulunamadı' });
+        const groupId = groupRes.rows[0].id;
+        const ownerId = groupRes.rows[0].owner_id;
+
+        // Sadece sahibi ve moderatörler kanal oluşturabilir
+        const memberRes = await query(
+          'SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2',
+          [groupId, req.user.id]
+        );
+        if (!memberRes.rows.length || (memberRes.rows[0].role !== 'owner' && memberRes.rows[0].role !== 'moderator')) {
+          return res.status(403).json({ error: 'Kanal oluşturmak için yetkiniz yok' });
+        }
+
+        const result = await query(
+          `INSERT INTO group_channels (group_id, name, icon, description, created_by) 
+           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [groupId, name.trim(), icon, description, req.user.id]
+        );
+
+        res.json(result.rows[0]);
+      } catch (e) {
+        console.error('Kanal oluşturma hatası:', e.message);
+        res.status(500).json({ error: 'Kanal oluşturulamadı' });
+      }
+    });
+
+    // Kanal güncelle
+    app.put('/api/group/:slug/channel/:channelId', authMiddleware, async (req, res) => {
+      try {
+        const { slug, channelId } = req.params;
+        const { name, icon, description, can_write, can_view_history, visibility } = req.body;
+
+        const channelRes = await query(
+          `SELECT gc.* FROM group_channels gc
+           JOIN groups g ON gc.group_id = g.id
+           WHERE gc.id = $1 AND g.slug = $2`,
+          [channelId, slug]
+        );
+        if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
+
+        const groupId = channelRes.rows[0].group_id;
+        const memberRes = await query(
+          'SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2',
+          [groupId, req.user.id]
+        );
+        if (!memberRes.rows.length || (memberRes.rows[0].role !== 'owner' && memberRes.rows[0].role !== 'moderator')) {
+          return res.status(403).json({ error: 'Kanal güncellemek için yetkiniz yok' });
+        }
+
+        const updates = [];
+        const values = [];
+        let paramNum = 1;
+        if (name) { updates.push(`name = $${paramNum++}`); values.push(name); }
+        if (icon) { updates.push(`icon = $${paramNum++}`); values.push(icon); }
+        if (description !== undefined) { updates.push(`description = $${paramNum++}`); values.push(description); }
+        if (can_write !== undefined) { updates.push(`can_write = $${paramNum++}`); values.push(can_write); }
+        if (can_view_history !== undefined) { updates.push(`can_view_history = $${paramNum++}`); values.push(can_view_history); }
+        if (visibility) { updates.push(`visibility = $${paramNum++}`); values.push(visibility); }
+        
+        values.push(channelId);
+        const result = await query(
+          `UPDATE group_channels SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramNum} RETURNING *`,
+          values
+        );
+
+        res.json(result.rows[0]);
+      } catch (e) {
+        console.error('Kanal güncelleme hatası:', e.message);
+        res.status(500).json({ error: 'Kanal güncellenemedi' });
+      }
+    });
+
+    // Kanal sil
+    app.delete('/api/group/:slug/channel/:channelId', authMiddleware, async (req, res) => {
+      try {
+        const { slug, channelId } = req.params;
+        const channelRes = await query(
+          `SELECT gc.* FROM group_channels gc
+           JOIN groups g ON gc.group_id = g.id
+           WHERE gc.id = $1 AND g.slug = $2`,
+          [channelId, slug]
+        );
+        if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
+        if (channelRes.rows[0].is_default) return res.status(400).json({ error: 'Varsayılan kanal silinemez' });
+
+        const groupId = channelRes.rows[0].group_id;
+        const memberRes = await query(
+          'SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2',
+          [groupId, req.user.id]
+        );
+        if (!memberRes.rows.length || (memberRes.rows[0].role !== 'owner' && memberRes.rows[0].role !== 'moderator')) {
+          return res.status(403).json({ error: 'Kanal silmek için yetkiniz yok' });
+        }
+
+        await query('DELETE FROM group_channels WHERE id = $1', [channelId]);
+        res.json({ success: true });
+      } catch (e) {
+        console.error('Kanal silme hatası:', e.message);
+        res.status(500).json({ error: 'Kanal silinemedi' });
+      }
+    });
+
+    // Kanal mesajları getir
+    app.get('/api/group/:slug/channel/:channelId/messages', optionalAuth, async (req, res) => {
+      try {
+        const { slug, channelId } = req.params;
+        const { limit = 50, offset = 0 } = req.query;
+
+        const channelRes = await query(
+          `SELECT gc.* FROM group_channels gc
+           JOIN groups g ON gc.group_id = g.id
+           WHERE gc.id = $1 AND g.slug = $2`,
+          [channelId, slug]
+        );
+        if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
+
+        const result = await query(
+          `SELECT gcm.id, gcm.channel_id, gcm.user_id, u.username, u.avatar, 
+                  gcm.content, gcm.image_url, gcm.edited_at, gcm.created_at
+           FROM group_channel_messages gcm
+           LEFT JOIN users u ON gcm.user_id = u.id
+           WHERE gcm.channel_id = $1
+           ORDER BY gcm.created_at DESC
+           LIMIT $2 OFFSET $3`,
+          [channelId, limit, offset]
+        );
+
+        res.json(result.rows.reverse());
+      } catch (e) {
+        console.error('Kanal mesajları hatası:', e.message);
+        res.status(500).json({ error: 'Mesajlar alınamadı' });
+      }
+    });
+
+    // Kanal mesajı gönder
+    app.post('/api/group/:slug/channel/:channelId/messages', authMiddleware, async (req, res) => {
+      try {
+        const { slug, channelId } = req.params;
+        const { content, image_url = '' } = req.body;
+        if (!content && !image_url) return res.status(400).json({ error: 'Mesaj içeriği gerekli' });
+
+        const channelRes = await query(
+          `SELECT gc.*, g.id as group_id FROM group_channels gc
+           JOIN groups g ON gc.group_id = g.id
+           WHERE gc.id = $1 AND g.slug = $2`,
+          [channelId, slug]
+        );
+        if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
+        if (!channelRes.rows[0].can_write) return res.status(403).json({ error: 'Bu kanala yazamıyorsunuz' });
+
+        const groupId = channelRes.rows[0].group_id;
+        const memberRes = await query(
+          'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2',
+          [groupId, req.user.id]
+        );
+        if (!memberRes.rows.length) return res.status(403).json({ error: 'Grubun üyesi değilsiniz' });
+
+        const result = await query(
+          `INSERT INTO group_channel_messages (channel_id, user_id, content, image_url)
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+          [channelId, req.user.id, content, image_url]
+        );
+
+        res.json(result.rows[0]);
+      } catch (e) {
+        console.error('Mesaj gönderme hatası:', e.message);
+        res.status(500).json({ error: 'Mesaj gönderilemedi' });
+      }
+    });
+
+    // Onay sistemi: aktif et/deaktif et
+    app.post('/api/group/:slug/approval/toggle', authMiddleware, async (req, res) => {
+      try {
+        const { slug } = req.params;
+        const groupRes = await query('SELECT id, owner_id FROM groups WHERE slug = $1', [slug]);
+        if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        const groupId = groupRes.rows[0].id;
+
+        // Sadece sahibi etkinleştirebilir
+        if (groupRes.rows[0].owner_id !== req.user.id) {
+          return res.status(403).json({ error: 'Onay sistemini değiştirmek için yetkiniz yok' });
+        }
+
+        const existing = await query('SELECT * FROM group_approval_systems WHERE group_id = $1', [groupId]);
+        let result;
+        if (existing.rows.length) {
+          result = await query(
+            'UPDATE group_approval_systems SET is_enabled = NOT is_enabled WHERE group_id = $1 RETURNING *',
+            [groupId]
+          );
+        } else {
+          result = await query(
+            'INSERT INTO group_approval_systems (group_id, is_enabled) VALUES ($1, 1) RETURNING *',
+            [groupId]
+          );
+        }
+
+        // Onay sistemi etkinleştiriliyorsa, onay kanalını otomatik oluştur
+        if (result.rows[0].is_enabled) {
+          const channelCheck = await query(
+            'SELECT * FROM group_channels WHERE group_id = $1 AND name = $2',
+            [groupId, 'onay']
+          );
+          if (!channelCheck.rows.length) {
+            await query(
+              `INSERT INTO group_channels (group_id, name, icon, is_default, can_write, visibility, created_by)
+               VALUES ($1, $2, $3, 1, 1, $4, $5)`,
+              [groupId, 'onay', 'fas fa-check-circle', 'approval_only', req.user.id]
+            );
+          }
+        }
+
+        res.json(result.rows[0]);
+      } catch (e) {
+        console.error('Onay sistemi hatası:', e.message);
+        res.status(500).json({ error: 'Onay sistemi değiştirilemedi' });
+      }
+    });
+
+    // Onay talebini oluştur (yeni üye)
+    app.post('/api/group/:slug/approval/request', authMiddleware, async (req, res) => {
+      try {
+        const { slug } = req.params;
+        const groupRes = await query('SELECT id FROM groups WHERE slug = $1', [slug]);
+        if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        const groupId = groupRes.rows[0].id;
+
+        const approvalRes = await query('SELECT is_enabled FROM group_approval_systems WHERE group_id = $1', [groupId]);
+        if (!approvalRes.rows.length || !approvalRes.rows[0].is_enabled) {
+          return res.status(400).json({ error: 'Onay sistemi aktif değil' });
+        }
+
+        const result = await query(
+          `INSERT INTO group_approval_requests (group_id, user_id, status) 
+           VALUES ($1, $2, 'pending') 
+           ON CONFLICT (group_id, user_id) DO NOTHING
+           RETURNING *`,
+          [groupId, req.user.id]
+        );
+
+        if (result.rows.length === 0) {
+          return res.status(400).json({ error: 'Zaten onay talebiniz var veya onaylanmışsınız' });
+        }
+
+        res.json(result.rows[0]);
+      } catch (e) {
+        console.error('Onay talebi hatası:', e.message);
+        res.status(500).json({ error: 'Onay talebi oluşturulamadı' });
+      }
+    });
+
+    // Onay taleplerini listele
+    app.get('/api/group/:slug/approval/requests', authMiddleware, async (req, res) => {
+      try {
+        const { slug } = req.params;
+        const groupRes = await query('SELECT id, owner_id FROM groups WHERE slug = $1', [slug]);
+        if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        const groupId = groupRes.rows[0].id;
+
+        // Sadece sahibi görebilir
+        if (groupRes.rows[0].owner_id !== req.user.id) {
+          return res.status(403).json({ error: 'Yetkili değilsiniz' });
+        }
+
+        const result = await query(
+          `SELECT gar.*, u.username, u.avatar, u.bio
+           FROM group_approval_requests gar
+           LEFT JOIN users u ON gar.user_id = u.id
+           WHERE gar.group_id = $1 AND gar.status = 'pending'
+           ORDER BY gar.requested_at ASC`,
+          [groupId]
+        );
+
+        res.json(result.rows);
+      } catch (e) {
+        console.error('Onay talepleri hatası:', e.message);
+        res.status(500).json({ error: 'Onay talepleri alınamadı' });
+      }
+    });
+
+    // Onay talebini yanıtla
+    app.post('/api/group/:slug/approval/respond/:requestId', authMiddleware, async (req, res) => {
+      try {
+        const { slug, requestId } = req.params;
+        const { approved, rejection_reason = '' } = req.body;
+
+        const groupRes = await query('SELECT id, owner_id FROM groups WHERE slug = $1', [slug]);
+        if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        const groupId = groupRes.rows[0].id;
+
+        if (groupRes.rows[0].owner_id !== req.user.id) {
+          return res.status(403).json({ error: 'Yetkili değilsiniz' });
+        }
+
+        const requestRes = await query('SELECT * FROM group_approval_requests WHERE id = $1 AND group_id = $2', [requestId, groupId]);
+        if (!requestRes.rows.length) return res.status(404).json({ error: 'Talep bulunamadı' });
+
+        const userId = requestRes.rows[0].user_id;
+        if (approved) {
+          // Kullanıcıyı gruba ekle
+          await query(
+            `INSERT INTO group_members (group_id, user_id, role) 
+             VALUES ($1, $2, 'member') 
+             ON CONFLICT (group_id, user_id) DO NOTHING`,
+            [groupId, userId]
+          );
+          await query(
+            `UPDATE group_approval_requests SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2`,
+            [req.user.id, requestId]
+          );
+        } else {
+          await query(
+            `UPDATE group_approval_requests SET status = 'rejected', rejection_reason = $1, reviewed_by = $2, reviewed_at = NOW() WHERE id = $3`,
+            [rejection_reason, req.user.id, requestId]
+          );
+        }
+
+        res.json({ success: true });
+      } catch (e) {
+        console.error('Onay yanıtı hatası:', e.message);
+        res.status(500).json({ error: 'Onay yanıtı işlenemedi' });
+      }
+    });
+
+    // ===== KANAL SİSTEMİ API'LAR SONU =====
+
     app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
   });
 }).catch(err => {
