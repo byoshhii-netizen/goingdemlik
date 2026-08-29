@@ -2914,7 +2914,6 @@ async function renderGroupDetail(app, slug) {
             ${canSend ? `<div class="chat-input-bar">
               ${group.allow_photos ? `<label class="btn btn-ghost btn-sm" for="chat-img-input" title="Fotoğraf ekle" style="flex-shrink:0"><i class="fas fa-image"></i></label><input id="chat-img-input" type="file" accept="image/*" style="display:none" />` : ''}
               <input id="chat-input" type="text" placeholder="Mesaj yaz..." style="flex:1;min-width:0" />
-              <button type="button" class="btn btn-ghost btn-sm chat-emoji-toggle" id="chat-emoji-toggle" title="Emoji ekle" style="flex-shrink:0;opacity:0;pointer-events:none"><i class="fas fa-face-smile"></i></button>
               <button class="btn btn-primary btn-sm" id="send-msg-btn" style="flex-shrink:0"><i class="fas fa-paper-plane"></i></button>
             </div>` : (currentUser && !isMember ? `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Mesaj göndermek için gruba katılın.</div>` : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Giriş yaparak katılabilirsiniz.</div>`)}
           </div>` : `<div class="card card-body" style="text-align:center;color:var(--text-muted)"><i class="fas fa-comment-slash" style="font-size:32px;margin-bottom:8px;display:block"></i>Sohbet kapatılmış.</div>`}
@@ -2931,6 +2930,9 @@ async function renderGroupDetail(app, slug) {
         </div>
         <div class="group-sidebar-card">
           <div class="card-header"><span><i class="fas fa-users" style="color:var(--accent-red)"></i> Üyeler (${members.length})</span></div>
+          <div style="padding:10px 12px 0">
+            <input id="group-member-search" type="text" placeholder="Üye ara..." style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card2);color:var(--text-primary);font-size:13px" />
+          </div>
           <div id="members-list">${members.map(m => memberItemHTML(m, isOwner, slug)).join('')}</div>
         </div>
       </div>
@@ -3088,37 +3090,6 @@ async function renderGroupDetail(app, slug) {
       if (input) input.placeholder = 'Mesaj yaz...';
     };
     $('#chat-attachment-remove')?.addEventListener('click', resetAttachment);
-
-    const emojiList = ['😊','😂','😍','🔥','🎉','👍','👏','😎','💪','❤️','👀','😢','😡','✅','📌'];
-    const emojiPicker = document.createElement('div');
-    emojiPicker.className = 'emoji-picker hidden';
-    emojiPicker.innerHTML = emojiList.map(emoji => `<button type="button" class="emoji-item" data-emoji="${emoji}">${emoji}</button>`).join('');
-    const chatInputWrap = $('#chat-input')?.parentElement;
-    chatInputWrap?.appendChild(emojiPicker);
-    $('#chat-emoji-toggle')?.addEventListener('click', () => {
-      const input = $('#chat-input');
-      if (!input) return;
-      emojiPicker.classList.toggle('hidden');
-      input.focus();
-    });
-    emojiPicker.querySelectorAll('.emoji-item').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const input = $('#chat-input');
-        if (!input) return;
-        const start = input.selectionStart ?? input.value.length;
-        const end = input.selectionEnd ?? input.value.length;
-        input.value = input.value.slice(0, start) + btn.dataset.emoji + input.value.slice(end);
-        const pos = start + btn.dataset.emoji.length;
-        input.setSelectionRange(pos, pos);
-        input.focus();
-        emojiPicker.classList.add('hidden');
-      });
-    });
-    document.addEventListener('click', event => {
-      if (!event.target.closest('.emoji-item') && !event.target.closest('#chat-emoji-toggle') && !event.target.closest('.emoji-picker')) {
-        emojiPicker.classList.add('hidden');
-      }
-    });
 
     const suggestMention = () => {
       const input = $('#chat-input');
@@ -3494,6 +3465,15 @@ async function renderGroupDetail(app, slug) {
     $('#gs-delete').addEventListener('click', async () => {
       if (!confirm('Grubu silmek istediğinize emin misiniz?')) return;
       try { await api('/group/' + slug, { method: 'DELETE' }); toast('Grup silindi'); hideModal(); navigate('/gruplar'); } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  const groupMemberSearch = document.getElementById('group-member-search');
+  groupMemberSearch?.addEventListener('input', () => {
+    const q = groupMemberSearch.value.trim().toLowerCase();
+    document.querySelectorAll('#members-list .member-item').forEach(item => {
+      const username = (item.querySelector('div')?.textContent || '').trim().toLowerCase();
+      item.style.display = !q || username.includes(q) ? '' : 'none';
     });
   });
 
