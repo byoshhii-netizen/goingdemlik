@@ -1024,7 +1024,7 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
     if (password !== passwordConfirmation) return res.status(400).json({ error: 'Şifreler eşleşmiyor' });
 
-    const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND purpose=$2 AND expires_at > NOW() LIMIT 1', [
+    const { rows } = await query('SELECT * FROM auth_challenges WHERE code_hash=$1 AND purpose=$2 AND expires_at > NOW() LIMIT 1', [
       hashChallengeValue(resetToken), 'password_reset_verified'
     ]);
     const record = rows[0];
