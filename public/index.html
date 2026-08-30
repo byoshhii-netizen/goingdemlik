@@ -119,6 +119,11 @@
         <a href="/fotograflar" data-link class="nav-link">Fotoğraflar</a>
         <a href="/gruplar" data-link class="nav-link">Gruplar</a>
       </div>
+      <form class="global-search" id="global-search-form" role="search">
+        <i class="fas fa-search" aria-hidden="true"></i>
+        <input id="global-search-input" type="search" placeholder="Sitede ara..." autocomplete="off" aria-label="Sitede ara" />
+        <button type="submit" aria-label="Ara"><i class="fas fa-arrow-right"></i></button>
+      </form>
       <div class="nav-auth" id="nav-auth">
         <a href="/kayit" data-link class="btn btn-primary btn-sm">Kayıt Ol</a>
         <a href="/giris" data-link class="btn btn-outline btn-sm">Giriş Yap</a>
@@ -183,6 +188,11 @@
       </button>
     </div>
     <div class="mobile-menu hidden" id="mobile-menu">
+      <form class="global-search mobile-global-search" id="mobile-global-search-form" role="search">
+        <i class="fas fa-search" aria-hidden="true"></i>
+        <input id="mobile-global-search-input" type="search" placeholder="Sitede ara..." autocomplete="off" aria-label="Sitede ara" />
+        <button type="submit" aria-label="Ara"><i class="fas fa-arrow-right"></i></button>
+      </form>
       <!-- Giriş yapmamışsa auth butonları -->
       <div class="mobile-menu-auth" id="mobile-menu-auth">
         <a href="/kayit" data-link class="btn btn-primary btn-sm"><i class="fas fa-user-plus"></i> Kayıt Ol</a>

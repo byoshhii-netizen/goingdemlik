@@ -209,6 +209,16 @@ async function api(path, options = {}) {
   return data;
 }
 
+function bindGlobalSearch(formId, inputId) {
+  document.getElementById(formId)?.addEventListener('submit', event => {
+    event.preventDefault();
+    const value = document.getElementById(inputId)?.value.trim();
+    if (value) navigate('/arama?q=' + encodeURIComponent(value));
+  });
+}
+bindGlobalSearch('global-search-form', 'global-search-input');
+bindGlobalSearch('mobile-global-search-form', 'mobile-global-search-input');
+
 function callAvatar(user, size = 'call-avatar') {
   return hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" class="${size}" alt="" />` : `<div class="${size} call-avatar-placeholder"><i class="fas fa-user"></i></div>`;
 }
@@ -609,6 +619,7 @@ function renderRoute(fullPath) {
     }
     return renderHome(app);
   }
+  if (path === '/arama') return renderSearch(app, queryStr || '');
   if (path === '/forum' || path === '/konular') {
     // query string'i de geçir
     const qs = queryStr ? '?' + queryStr : '';
@@ -882,13 +893,18 @@ async function renderRealsFeed(app) {
     }));
     listEl.querySelectorAll('.reals-follow-btn').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation();
+      if (btn.disabled) return;
       try {
         const username = btn.dataset.username;
         const state = followStates.get(username) || {};
-        const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: state.following ? 'DELETE' : 'POST' });
+        const isFollowing = state.following || state.pending;
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+        const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: isFollowing ? 'DELETE' : 'POST' });
         followStates.set(username, { ...state, ...result });
         btn.textContent = result.following ? 'Takiptesin' : result.pending ? 'İstek gönderildi' : 'Takip et';
       } catch (error) { toast(error.message, 'error'); }
+      finally { btn.disabled = false; btn.classList.remove('is-loading'); }
     }));
     listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -5408,6 +5424,86 @@ function renderNotFound(app) {
     <p style="color:var(--text-secondary);margin-bottom:24px">O sayfa taze bitti abim, veremmi başkasını?</p>
     <a href="/" data-link class="btn btn-primary">Ana Sayfaya Dön</a>
   </div>`;
+}
+
+const SEARCH_GROUPS = {
+  forum: ['Konular', 'fa-comments'],
+  forum_comment: ['Konular · yorumlar', 'fa-comment'],
+  photo: ['Fotoğraflar', 'fa-image'],
+  photo_comment: ['Fotoğraflar · yorumlar', 'fa-comment'],
+  video: ['Videolar', 'fa-video'],
+  video_comment: ['Videolar · yorumlar', 'fa-comment'],
+  reals: ['Reals', 'fa-circle-play'],
+  reals_comment: ['Reals · yorumlar', 'fa-comment'],
+  song: ['Müzikler', 'fa-music'],
+  book: ['Kitaplar', 'fa-book'],
+  book_page: ['Kitaplar · sayfalar', 'fa-file-lines'],
+  profile: ['Profiller', 'fa-user'],
+  group: ['Gruplar', 'fa-users'],
+  group_channel: ['Gruplar · kanallar', 'fa-hashtag'],
+  story: ['Hikâyeler', 'fa-circle'],
+  playlist: ['Playlistler', 'fa-list'],
+};
+
+function searchExcerpt(text) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > 180 ? value.slice(0, 180) + '…' : value;
+}
+
+function searchResultHTML(result) {
+  const [label, icon] = SEARCH_GROUPS[result.type] || ['İçerikler', 'fa-magnifying-glass'];
+  return `<a class="search-result-card" href="${escHtml(result.route)}" data-link>
+    <span class="search-result-icon"><i class="fas ${icon}"></i></span>
+    <span class="search-result-copy">
+      <strong>${escHtml(result.title || label)}</strong>
+      ${result.excerpt ? `<small>${escHtml(searchExcerpt(result.excerpt))}</small>` : ''}
+      <em>${escHtml(label)}${result.author ? ` · @${escHtml(result.author)}` : ''}</em>
+    </span>
+    ${result.avatar ? `<img src="${escHtml(result.avatar)}" class="search-result-avatar" alt="" />` : '<i class="fas fa-arrow-up-right-from-square search-result-arrow"></i>'}
+  </a>`;
+}
+
+async function renderSearch(app, queryString = '') {
+  const query = new URLSearchParams(queryString).get('q')?.trim() || '';
+  document.title = (query ? `${query} · Arama` : 'Sitede Ara') + ' - ' + siteName;
+  app.innerHTML = `<div class="container page search-page">
+    <div class="page-header"><div class="page-title"><i class="fas fa-magnifying-glass" style="color:var(--accent-red)"></i> Sitede Ara</div></div>
+    <form class="search-bar search-page-form" id="search-page-form">
+      <i class="fas fa-search"></i><input id="search-page-input" type="search" value="${escHtml(query)}" placeholder="Başlık, içerik, yorum, müzik, kitap, profil veya grup ara..." autocomplete="off" />
+      <button class="btn btn-primary btn-sm" type="submit">Ara</button>
+    </form>
+    <div id="search-page-results"></div>
+  </div>`;
+  const input = $('#search-page-input');
+  $('#search-page-form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    const value = input.value.trim();
+    if (value) navigate('/arama?q=' + encodeURIComponent(value));
+  });
+  if (!query) {
+    $('#search-page-results').innerHTML = '<div class="search-empty"><i class="fas fa-compass"></i><p>Herhangi bir başlık, içerik veya yorumu arayabilirsin.</p></div>';
+    input.focus();
+    return;
+  }
+  const resultEl = $('#search-page-results');
+  resultEl.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  try {
+    const results = await api('/search?q=' + encodeURIComponent(query) + '&limit=12');
+    if (!results.length) {
+      resultEl.innerHTML = `<div class="search-empty"><i class="fas fa-face-frown"></i><p><b>${escHtml(query)}</b> için sonuç bulunamadı.</p></div>`;
+      return;
+    }
+    const groups = new Map();
+    results.forEach(result => {
+      const key = SEARCH_GROUPS[result.type]?.[0] || 'İçerikler';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(result);
+    });
+    resultEl.innerHTML = `<div class="search-summary"><b>${results.length}</b> sonuç bulundu</div>` +
+      Array.from(groups.entries()).map(([label, items]) => `<section class="search-results-section"><h2><i class="fas ${SEARCH_GROUPS[items[0].type]?.[1] || 'fa-magnifying-glass'}"></i>${escHtml(label)} <span>${items.length}</span></h2>${items.map(searchResultHTML).join('')}</section>`).join('');
+  } catch (error) {
+    resultEl.innerHTML = `<div class="search-empty search-error"><i class="fas fa-triangle-exclamation"></i><p>Arama şu anda yapılamıyor: ${escHtml(error.message)}</p></div>`;
+  }
 }
 
 async function checkUnreadMessages() {

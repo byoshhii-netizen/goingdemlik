@@ -5011,29 +5011,155 @@ app.get('/api/search/users', async (req, res) => {
   res.json(rows);
 });
 
-// Consolidated search across forums, photos and users
+// Site geneli arama: içerik ve yorumların ait oldukları gerçek route'ları döndürür.
 app.get('/api/search', async (req, res) => {
   try {
-    let q = (req.query.q || '').trim();
+    const q = String(req.query.q || '').trim();
     if (!q || q.length < 1) return res.json([]);
-    // normalize legacy brand mentions
-    q = q.replace(/teatube/ig, 'teatube');
-    const limit = Math.min(50, parseInt(req.query.limit) || 20);
+    const limit = Math.min(20, Math.max(5, parseInt(req.query.limit, 10) || 12));
     const term = `%${q}%`;
 
-    const forumsP = query(`SELECT id, title, slug, content, username, created_at FROM forums WHERE (title ILIKE $1 OR content ILIKE $1) AND hidden=0 LIMIT $2`, [term, limit]);
-    const photosP = query(`SELECT id, url, caption, username, created_at FROM photos WHERE caption ILIKE $1 LIMIT $2`, [term, limit]);
-    const usersP = query(`SELECT id, username, avatar FROM users WHERE username ILIKE $1 AND banned=0 LIMIT $2`, [term, limit]);
-
-    const [forumsR, photosR, usersR] = await Promise.all([forumsP, photosP, usersP]);
-
     const results = [];
-    forumsR.rows.forEach(r => results.push({ type: 'forum', id: r.id, title: r.title, slug: r.slug, excerpt: (r.content || '').substring(0, 240), username: r.username, created_at: r.created_at }));
-    photosR.rows.forEach(r => results.push({ type: 'photo', id: r.id, url: r.url, caption: r.caption, username: r.username, created_at: r.created_at }));
-    usersR.rows.forEach(r => results.push({ type: 'user', id: r.id, username: r.username, avatar: r.avatar }));
+    const queries = [
+      // Konular: hem başlık hem içerik
+      query(`SELECT f.id, f.title, f.slug, f.content, f.created_at, u.username AS author
+        FROM forums f JOIN users u ON u.id=f.user_id
+        WHERE (f.title ILIKE $1 OR f.content ILIKE $1
+          OR EXISTS (SELECT 1 FROM forum_tags ft JOIN tags t ON t.id=ft.tag_id
+            WHERE ft.forum_id=f.id AND t.name ILIKE $1))
+          AND COALESCE(u.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+        ORDER BY f.created_at DESC LIMIT $2`, [term, limit]),
+      // Forum yorumları, sonuç olarak yorumun ait olduğu konuya gider
+      query(`SELECT fc.id, fc.content, fc.created_at, f.title, f.slug, cu.username AS author
+        FROM forum_comments fc
+        JOIN forums f ON f.id=fc.forum_id
+        JOIN users cu ON cu.id=fc.user_id
+        JOIN users fu ON fu.id=f.user_id
+        WHERE fc.content ILIKE $1
+          AND COALESCE(cu.is_deleted,0)=0 AND COALESCE(fu.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+        ORDER BY fc.created_at DESC LIMIT $2`, [term, limit]),
+      // Fotoğraf başlığı şemada bulunmadığı için mevcut caption alanı aranır
+      query(`SELECT p.id, p.caption, p.created_at, u.username AS author
+        FROM photos p JOIN users u ON u.id=p.user_id
+        WHERE p.caption ILIKE $1 AND COALESCE(u.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+        ORDER BY p.created_at DESC LIMIT $2`, [term, limit]),
+      query(`SELECT pc.id, pc.content, pc.created_at, p.id AS photo_id, pu.username AS author
+        FROM photo_comments pc
+        JOIN photos p ON p.id=pc.photo_id
+        JOIN users cu ON cu.id=pc.user_id
+        JOIN users pu ON pu.id=p.user_id
+        WHERE pc.content ILIKE $1
+          AND COALESCE(cu.is_deleted,0)=0 AND COALESCE(pu.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+        ORDER BY pc.created_at DESC LIMIT $2`, [term, limit]),
+      // Video ve Reals başlık/açıklama/ses alanları
+      query(`SELECT v.id, v.slug, v.title, v.description, v.sound_name, v.is_reals, v.created_at, u.username AS author
+        FROM videos v JOIN users u ON u.id=v.user_id
+        WHERE (v.title ILIKE $1 OR v.description ILIKE $1 OR v.sound_name ILIKE $1)
+          AND COALESCE(u.is_deleted,0)=0 AND COALESCE(u.is_private,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs
+            WHERE cs.content_id=v.id AND cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END)
+        ORDER BY v.created_at DESC LIMIT $2`, [term, limit]),
+      query(`SELECT vc.id, vc.content, vc.created_at, v.slug, v.title, v.is_reals, vu.username AS author
+        FROM video_comments vc
+        JOIN videos v ON v.id=vc.video_id
+        JOIN users cu ON cu.id=vc.user_id
+        JOIN users vu ON vu.id=v.user_id
+        WHERE vc.content ILIKE $1
+          AND COALESCE(cu.is_deleted,0)=0 AND COALESCE(vu.is_deleted,0)=0 AND COALESCE(vu.is_private,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs
+            WHERE cs.content_id=v.id AND cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END)
+        ORDER BY vc.created_at DESC LIMIT $2`, [term, limit]),
+      // Müzikler: sözler de dahil olmak üzere şarkının aranabilir tüm metni
+      query(`SELECT s.id, s.slug, s.title, s.artist_name, s.genre, s.lyrics, s.created_at, u.username AS author
+        FROM songs s JOIN users u ON u.id=s.uploader_id
+        WHERE s.status='active'
+          AND (s.title ILIKE $1 OR s.artist_name ILIKE $1 OR s.distributor ILIKE $1 OR s.genre ILIKE $1 OR s.lyrics ILIKE $1)
+          AND COALESCE(u.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)
+        ORDER BY s.published_at DESC, s.created_at DESC LIMIT $2`, [term, limit]),
+      // Kitap bilgileri
+      query(`SELECT b.id, b.slug, b.title, b.preface, b.karakterler, b.kadro, b.created_at, u.username AS author
+        FROM books b JOIN users u ON u.id=b.user_id
+        WHERE b.is_hidden=0
+          AND (b.title ILIKE $1 OR b.preface ILIKE $1 OR b.karakterler ILIKE $1 OR b.kadro ILIKE $1)
+          AND COALESCE(u.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+        ORDER BY b.created_at DESC LIMIT $2`, [term, limit]),
+      // Kitap sayfaları/bölümleri: doğrudan eşleşen sayfaya götür
+      query(`SELECT bp.id, bp.slug AS page_slug, bp.title AS page_title, bp.content, bp.created_at,
+          b.slug, b.title, u.username AS author
+        FROM book_pages bp
+        JOIN books b ON b.id=bp.book_id
+        JOIN users u ON u.id=b.user_id
+        WHERE b.is_hidden=0 AND (bp.title ILIKE $1 OR bp.content ILIKE $1)
+          AND COALESCE(u.is_deleted,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+        ORDER BY bp.created_at DESC LIMIT $2`, [term, limit]),
+      // Kullanıcı profili ve görünen profil bilgileri
+      query(`SELECT id, username, bio, title, location, avatar, created_at
+        FROM users
+        WHERE banned=0 AND COALESCE(is_deleted,0)=0
+          AND (username ILIKE $1 OR bio ILIKE $1 OR title ILIKE $1 OR location ILIKE $1)
+        ORDER BY created_at DESC LIMIT $2`, [term, limit]),
+      // Yalnızca keşfedilebilir gruplar indekslenir
+      query(`SELECT g.id, g.slug, g.name, g.description, g.created_at, u.username AS author
+        FROM groups g LEFT JOIN users u ON u.id=g.owner_id
+        WHERE COALESCE(g.moderation_status,'active')='active'
+          AND COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END)='public'
+          AND (g.name ILIKE $1 OR g.description ILIKE $1)
+          AND (u.id IS NULL OR COALESCE(u.is_deleted,0)=0)
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='group' AND cs.content_id=g.id)
+        ORDER BY g.created_at DESC LIMIT $2`, [term, limit]),
+      query(`SELECT g.slug, g.name, gc.name AS channel_name, gc.description, gc.created_at, u.username AS author
+        FROM group_channels gc
+        JOIN groups g ON g.id=gc.group_id
+        LEFT JOIN users u ON u.id=g.owner_id
+        WHERE (gc.name ILIKE $1 OR gc.description ILIKE $1)
+          AND COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END)='public'
+          AND COALESCE(g.moderation_status,'active')='active'
+          AND (u.id IS NULL OR COALESCE(u.is_deleted,0)=0)
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='group' AND cs.content_id=g.id)
+        ORDER BY gc.created_at DESC LIMIT $2`, [term, limit]),
+      // Süresi geçmemiş hikâyeler
+      query(`SELECT st.id, st.public_id, st.caption, st.created_at, u.username AS author
+        FROM stories st JOIN users u ON u.id=st.user_id
+        WHERE st.caption ILIKE $1 AND st.expires_at > NOW() AND st.is_suspended=0
+          AND COALESCE(u.is_deleted,0)=0 AND COALESCE(u.is_private,0)=0
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='story' AND cs.content_id=st.id)
+        ORDER BY st.created_at DESC LIMIT $2`, [term, limit]),
+      // Herkese açık playlistler
+      query(`SELECT pl.id, pl.public_id, pl.name, pl.description, pl.created_at, u.username AS author
+        FROM playlists pl JOIN users u ON u.id=pl.user_id
+        WHERE pl.is_public=1 AND (pl.name ILIKE $1 OR pl.description ILIKE $1)
+          AND COALESCE(u.is_deleted,0)=0
+        ORDER BY pl.created_at DESC LIMIT $2`, [term, limit]),
+    ];
 
-    // return up to `limit` items, preserving type order
-    res.json(results.slice(0, limit));
+    const [
+      forums, forumComments, photos, photoComments, videos, videoComments,
+      songs, books, bookPages, users, groups, groupChannels, stories, playlists
+    ] = await Promise.all(queries);
+
+    forums.rows.forEach(r => results.push({ type: 'forum', title: r.title, excerpt: r.content, route: `/forum/${r.slug}`, author: r.author, created_at: r.created_at }));
+    forumComments.rows.forEach(r => results.push({ type: 'forum_comment', title: r.title, excerpt: r.content, route: `/forum/${r.slug}`, author: r.author, created_at: r.created_at }));
+    photos.rows.forEach(r => results.push({ type: 'photo', title: 'Fotoğraf', excerpt: r.caption, route: `/foto/${r.id}`, author: r.author, created_at: r.created_at }));
+    photoComments.rows.forEach(r => results.push({ type: 'photo_comment', title: 'Fotoğraf yorumu', excerpt: r.content, route: `/foto/${r.photo_id}`, author: r.author, created_at: r.created_at }));
+    videos.rows.forEach(r => results.push({ type: r.is_reals ? 'reals' : 'video', title: r.title, excerpt: [r.description, r.sound_name].filter(Boolean).join(' · '), route: `/${r.is_reals ? 'reals' : 'video'}/${r.slug}`, author: r.author, created_at: r.created_at }));
+    videoComments.rows.forEach(r => results.push({ type: r.is_reals ? 'reals_comment' : 'video_comment', title: r.title, excerpt: r.content, route: `/${r.is_reals ? 'reals' : 'video'}/${r.slug}`, author: r.author, created_at: r.created_at }));
+    songs.rows.forEach(r => results.push({ type: 'song', title: r.title, excerpt: [r.artist_name, r.genre, r.lyrics].filter(Boolean).join(' · '), route: `/muzik/${r.slug}`, author: r.author, created_at: r.created_at }));
+    books.rows.forEach(r => results.push({ type: 'book', title: r.title, excerpt: [r.preface, r.karakterler, r.kadro].filter(Boolean).join(' · '), route: `/kitap/${r.slug}`, author: r.author, created_at: r.created_at }));
+    bookPages.rows.forEach(r => results.push({ type: 'book_page', title: `${r.title} · ${r.page_title}`, excerpt: r.content, route: `/kitap/${r.slug}/sayfa/${r.page_slug}`, author: r.author, created_at: r.created_at }));
+    users.rows.forEach(r => results.push({ type: 'profile', title: `@${r.username}`, excerpt: [r.title, r.bio, r.location].filter(Boolean).join(' · '), route: `/profil/${profileRouteKey(r.username)}`, author: r.username, avatar: r.avatar, created_at: r.created_at }));
+    groups.rows.forEach(r => results.push({ type: 'group', title: r.name, excerpt: r.description, route: `/grup/${r.slug}`, author: r.author, created_at: r.created_at }));
+    groupChannels.rows.forEach(r => results.push({ type: 'group_channel', title: `${r.name} · #${r.channel_name}`, excerpt: r.description, route: `/grup/${r.slug}`, author: r.author, created_at: r.created_at }));
+    stories.rows.forEach(r => results.push({ type: 'story', title: 'Hikâye', excerpt: r.caption, route: `/hikaye/${r.public_id || r.id}`, author: r.author, created_at: r.created_at }));
+    playlists.rows.forEach(r => results.push({ type: 'playlist', title: r.name, excerpt: r.description, route: `/playlist/${r.public_id || r.id}`, author: r.author, created_at: r.created_at }));
+
+    res.json(results);
   } catch (err) {
     console.error('Search error', err);
     res.status(500).json({ error: 'Search failed' });
