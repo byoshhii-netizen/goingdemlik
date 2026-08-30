@@ -552,6 +552,18 @@ function navigate(path, push = true) {
   renderRoute(path);
 }
 
+function createForgotPasswordRoute() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  const values = new Uint32Array(24);
+  if (window.crypto?.getRandomValues) window.crypto.getRandomValues(values);
+  else values.forEach((_, index) => { values[index] = Math.floor(Math.random() * 0xffffffff); });
+  return '/' + Array.from(values, value => alphabet[value % alphabet.length]).join('');
+}
+
+function isForgotPasswordRoute(path) {
+  return /^\/[a-zA-Z0-9]{24}$/.test(path);
+}
+
 window.addEventListener('popstate', () => renderRoute(location.pathname + location.search));
 
 document.addEventListener('click', e => {
@@ -617,7 +629,7 @@ function renderRoute(fullPath) {
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
   if (path === '/kayit') return renderRegister(app);
-  if (path === '/sifremi-unuttum') return renderForgotPassword(app);
+  if (isForgotPasswordRoute(path)) return renderForgotPassword(app);
   if (path === '/mesajlar') return renderMessages(app, null);
   if (path.startsWith('/mesajlar/')) return renderMessages(app, segs[1]);
   if (path === '/arkadaslar') return renderFriends(app);
@@ -4885,7 +4897,7 @@ function renderLogin(app) {
         </div>
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="login-btn">Giriş Yap</button>
-      <div style="text-align:center;margin-top:12px"><a href="/sifremi-unuttum" data-link class="auth-link">Şifremi Unuttum</a></div>
+      <div style="text-align:center;margin-top:12px"><a href="${createForgotPasswordRoute()}" data-link class="auth-link">Şifremi Unuttum</a></div>
       <div id="login-error" class="form-error mt-4" style="text-align:center"></div>
       <div class="auth-footer">Hesabın yok mu? <a href="/kayit" data-link class="auth-link">Kayıt Ol</a></div>
     </div>
@@ -5249,7 +5261,7 @@ function renderForgotPassword(app) {
       try {
         const data = await api('/auth/forgot-password/request', { method: 'POST', body: JSON.stringify({ email }) });
         if (!data.challenge) {
-          error.textContent = data.message || 'Bu e-posta ile eşleşen hesap bulunamadı';
+          error.textContent = 'Bu e-posta ile kayıtlı bir hesap bulunamadı. Kayıt olurken kullandığın e-postayı yaz.';
           button.disabled = false;
           button.textContent = 'Kod Gönder';
           return;
