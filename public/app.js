@@ -617,6 +617,7 @@ function renderRoute(fullPath) {
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
   if (path === '/kayit') return renderRegister(app);
+  if (path === '/sifremi-unuttum') return renderForgotPassword(app);
   if (path === '/mesajlar') return renderMessages(app, null);
   if (path.startsWith('/mesajlar/')) return renderMessages(app, segs[1]);
   if (path === '/arkadaslar') return renderFriends(app);
@@ -4884,6 +4885,7 @@ function renderLogin(app) {
         </div>
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="login-btn">Giriş Yap</button>
+      <div style="text-align:center;margin-top:12px"><a href="/sifremi-unuttum" data-link class="auth-link">Şifremi Unuttum</a></div>
       <div id="login-error" class="form-error mt-4" style="text-align:center"></div>
       <div class="auth-footer">Hesabın yok mu? <a href="/kayit" data-link class="auth-link">Kayıt Ol</a></div>
     </div>
@@ -5160,6 +5162,7 @@ function renderRegister(app) {
       if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
     });
     if (!username || !email || !password || !birth_date) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#reg-error').textContent = 'Geçerli bir e-posta adresi girin'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
@@ -5207,6 +5210,159 @@ function renderRegister(app) {
 
   $('#reg-btn').addEventListener('click', doRegister);
   $('#reg-pw').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
+}
+
+function renderForgotPassword(app) {
+  if (currentUser) { navigate('/'); return; }
+  document.title = 'Şifremi Unuttum - ' + siteName;
+  let challenge = '';
+  let resetToken = '';
+
+  const renderEmailStep = () => {
+    app.innerHTML = `<div class="auth-page">
+      <div class="auth-card auth-card--enhanced card card-body">
+        <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
+        <div class="auth-site-wordmark">CigCig</div>
+        <div class="auth-title">Şifremi Unuttum</div>
+        <p class="auth-subtitle">Hesabındaki e-posta adresini yaz, sana doğrulama kodunu gönderelim.</p>
+        <div class="form-group">
+          <label>E-posta</label>
+          <input type="email" id="forgot-email" placeholder="ornek@mail.com" autocomplete="email" />
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-top:4px" id="forgot-send-btn">Kod Gönder</button>
+        <div id="forgot-email-error" class="form-error mt-4" style="text-align:center"></div>
+        <div class="auth-footer"><a href="/giris" data-link class="auth-link">Giriş ekranına dön</a></div>
+      </div>
+    </div>`;
+
+    const requestCode = async () => {
+      const email = $('#forgot-email').value.trim();
+      const error = $('#forgot-email-error');
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        error.textContent = 'Geçerli bir e-posta adresi girin';
+        return;
+      }
+      const button = $('#forgot-send-btn');
+      button.disabled = true;
+      button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gönderiliyor';
+      error.textContent = '';
+      try {
+        const data = await api('/auth/forgot-password/request', { method: 'POST', body: JSON.stringify({ email }) });
+        if (!data.challenge) {
+          error.textContent = data.message || 'Bu e-posta ile eşleşen hesap bulunamadı';
+          button.disabled = false;
+          button.textContent = 'Kod Gönder';
+          return;
+        }
+        challenge = data.challenge;
+        renderCodeStep(data.maskedEmail);
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+        button.textContent = 'Kod Gönder';
+      }
+    };
+    $('#forgot-send-btn').addEventListener('click', requestCode);
+    $('#forgot-email').addEventListener('keydown', e => { if (e.key === 'Enter') requestCode(); });
+    $('#forgot-email').focus();
+  };
+
+  const renderCodeStep = maskedEmail => {
+    app.innerHTML = `<div class="auth-page">
+      <div class="auth-card auth-card--enhanced card card-body">
+        <div style="text-align:center"><div class="auth-site-wordmark"><i class="fas fa-envelope" style="color:var(--accent-red2)"></i> Doğrulama kodunu gir</div>
+        <p class="auth-subtitle">${escHtml(maskedEmail)} adresine doğrulama kodun gönderildi.</p></div>
+        <div class="form-group">
+          <label>Doğrulama kodu</label>
+          <input type="text" id="forgot-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" />
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="forgot-verify-btn">Kodu Doğrula</button>
+        <div id="forgot-code-error" class="form-error mt-4" style="text-align:center"></div>
+        <div class="auth-footer"><a href="/giris" data-link class="auth-link">Giriş ekranına dön</a></div>
+      </div>
+    </div>`;
+
+    const verifyCode = async () => {
+      const code = $('#forgot-code').value.trim();
+      const error = $('#forgot-code-error');
+      if (!/^\d{6}$/.test(code)) {
+        error.textContent = '6 haneli doğrulama kodunu girin';
+        return;
+      }
+      const button = $('#forgot-verify-btn');
+      button.disabled = true;
+      button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Doğrulanıyor';
+      try {
+        const data = await api('/auth/forgot-password/verify', { method: 'POST', body: JSON.stringify({ challenge, code }) });
+        resetToken = data.reset_token;
+        renderResetStep();
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+        button.textContent = 'Kodu Doğrula';
+      }
+    };
+    $('#forgot-verify-btn').addEventListener('click', verifyCode);
+    $('#forgot-code').addEventListener('keydown', e => { if (e.key === 'Enter') verifyCode(); });
+    $('#forgot-code').focus();
+  };
+
+  const renderResetStep = () => {
+    app.innerHTML = `<div class="auth-page">
+      <div class="auth-card auth-card--enhanced card card-body">
+        <div style="text-align:center"><div class="auth-site-wordmark"><i class="fas fa-key" style="color:var(--accent-red2)"></i> Şifreni değiştir</div>
+        <p class="auth-subtitle">Bu sefer unutmayacağın birşey koy.</p></div>
+        <div class="form-group">
+          <label>Yeni şifre</label>
+          <div style="position:relative">
+            <input type="password" id="forgot-new-password" placeholder="••••••" autocomplete="new-password" style="padding-right:40px" />
+            <button type="button" id="forgot-new-password-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="forgot-new-password-icon"></i></button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Yeni şifre (tekrar)</label>
+          <input type="password" id="forgot-new-password-confirm" placeholder="••••••" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-primary" style="width:100%" id="forgot-reset-btn">Şifremi Değiştir</button>
+        <div id="forgot-reset-error" class="form-error mt-4" style="text-align:center"></div>
+      </div>
+    </div>`;
+
+    $('#forgot-new-password-toggle').addEventListener('click', () => {
+      const password = $('#forgot-new-password');
+      const icon = $('#forgot-new-password-icon');
+      if (password.type === 'password') { password.type = 'text'; icon.className = 'fas fa-eye-slash'; }
+      else { password.type = 'password'; icon.className = 'fas fa-eye'; }
+    });
+
+    const resetPassword = async () => {
+      const password = $('#forgot-new-password').value;
+      const confirmation = $('#forgot-new-password-confirm').value;
+      const error = $('#forgot-reset-error');
+      if (password.length < 6) { error.textContent = 'Şifre en az 6 karakter olmalı'; return; }
+      if (password !== confirmation) { error.textContent = 'Şifreler eşleşmiyor'; return; }
+      const button = $('#forgot-reset-btn');
+      button.disabled = true;
+      button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Kaydediliyor';
+      try {
+        await api('/auth/forgot-password/reset', {
+          method: 'POST',
+          body: JSON.stringify({ reset_token: resetToken, password, password_confirmation: confirmation })
+        });
+        navigate('/giris');
+        toast('Şifren değiştirildi. Yeni şifrenle giriş yapabilirsin.');
+      } catch (e) {
+        error.textContent = e.message;
+        button.disabled = false;
+        button.textContent = 'Şifremi Değiştir';
+      }
+    };
+    $('#forgot-reset-btn').addEventListener('click', resetPassword);
+    $('#forgot-new-password-confirm').addEventListener('keydown', e => { if (e.key === 'Enter') resetPassword(); });
+    $('#forgot-new-password').focus();
+  };
+
+  renderEmailStep();
 }
 
 function renderNotFound(app) {

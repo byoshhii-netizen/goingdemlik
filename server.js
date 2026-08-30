@@ -215,7 +215,7 @@ function maskEmail(email) {
   return `${visible}@${domain}`;
 }
 
-async function sendEmailCode(email, username, code, purpose = 'Giriş doğrulama kodun') {
+async function sendEmailCode(email, username, code) {
   if (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET) throw new Error('E-posta servisi yapılandırılmamış');
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -223,8 +223,8 @@ async function sendEmailCode(email, username, code, purpose = 'Giriş doğrulama
     body: JSON.stringify({
       from: EMAIL_FROM,
       to: [email],
-      subject: `CigCig ${purpose.toLocaleLowerCase('tr-TR')}`,
-      html: `<p>Merhaba ${escapeHtml(username)},</p><p>${escapeHtml(purpose)}:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${code}</p><p>Bu kod 10 dakika geçerlidir. Kodu kimseyle paylaşma.</p>`
+      subject: 'Doğrulama kodun',
+      html: `<p>Merhaba ${escapeHtml(username)},</p><p>Doğrulama kodun:</p><p style="font-size:28px;font-weight:700;letter-spacing:8px">${code}</p><p>Bu kod 10 dakika geçerlidir. Kodu kimseyle paylaşma.</p>`
     })
   });
   if (!response.ok) throw new Error('Doğrulama e-postası gönderilemedi');
@@ -814,11 +814,13 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
     const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const emailAddress = String(email || '').trim().toLowerCase();
     let parsedHomepageSections = homepage_sections;
     let parsedProfileVisibility = profile_visibility;
     try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
     try { if (typeof parsedProfileVisibility === 'string') parsedProfileVisibility = JSON.parse(parsedProfileVisibility); } catch { parsedProfileVisibility = null; }
-    if (!username || !email || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
+    if (!username || !emailAddress || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
+    if (!isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
@@ -850,7 +852,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
-    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, email]);
+    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [username, emailAddress]);
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     let avatar = '';
     if (req.file) avatar = await handleUpload(req.file);
@@ -858,13 +860,13 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
       'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *',
-      [username, email, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      [username, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
     if (registrationCode) {
       const challenge = createChallengeToken();
       try {
         await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, 'registration', 'email', hashChallengeValue(registrationCode)]);
-        await sendEmailCode(email, username, registrationCode, 'E-posta doğrulama kodun');
+        await sendEmailCode(emailAddress, username, registrationCode);
       } catch (error) {
         await query('DELETE FROM auth_challenges WHERE user_id=$1 AND purpose=$2', [user.id, 'registration']);
         await query('DELETE FROM users WHERE id=$1', [user.id]);
@@ -896,6 +898,12 @@ app.post('/api/auth/login', async (req, res) => {
       await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hashPassword(password), user.id]);
     }
     if (user.banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
+    if (user.password_reset_required) {
+      return res.status(403).json({
+        error: 'Şifreni değiştirmeden hesabına giremezsin. E-postandaki kodla devam et.',
+        password_reset_required: true
+      });
+    }
     if (user.two_factor_method === 'email' && user.email_verified === 0) return res.status(403).json({ error: 'Önce kayıt sırasında e-posta adresini doğrulamalısın' });
     // Silinme talebi verilmiş hesap — kullanıcıya bildir
     if (user.is_deleted) {
@@ -951,6 +959,86 @@ app.post('/api/auth/verify-registration-email', async (req, res) => {
     await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'E-posta doğrulama işlemi başarısız' }); }
+});
+
+app.post('/api/auth/forgot-password/request', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!isValidEmail(email)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
+
+    const { rows } = await query('SELECT id,username,email FROM users WHERE LOWER(email)=LOWER($1) AND COALESCE(is_deleted,0)=0 LIMIT 1', [email]);
+    const user = rows[0];
+    // Hesap varlığını açığa çıkarmadan, sadece kayıtlı hesaplar için akışı başlat.
+    if (!user) return res.json({ ok: true, sent: false, message: 'Bu e-posta kayıtlıysa doğrulama kodu gönderildi.' });
+    if (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET) return res.status(503).json({ error: 'E-posta servisi yapılandırılmamış' });
+
+    const challenge = createChallengeToken();
+    const code = String(crypto.randomInt(100000, 1000000));
+    await query("DELETE FROM auth_challenges WHERE user_id=$1 AND purpose IN ('password_reset','password_reset_verified')", [user.id]);
+    await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,target_value,expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL \'10 minutes\')', [
+      hashChallengeValue(challenge), user.id, 'password_reset', 'email', hashChallengeValue(code), email
+    ]);
+    try {
+      await sendEmailCode(email, user.username, code);
+    } catch (error) {
+      await query("DELETE FROM auth_challenges WHERE user_id=$1 AND purpose='password_reset'", [user.id]);
+      throw error;
+    }
+    res.json({ ok: true, sent: true, challenge, maskedEmail: maskEmail(email) });
+  } catch (e) {
+    res.status(500).json({ error: 'Doğrulama kodu gönderilemedi' });
+  }
+});
+
+app.post('/api/auth/forgot-password/verify', async (req, res) => {
+  try {
+    const challenge = String(req.body?.challenge || '');
+    const code = String(req.body?.code || '').trim();
+    if (!/^[a-f0-9]{64}$/i.test(challenge) || !/^\d{6}$/.test(code)) return res.status(400).json({ error: 'Geçerli bir doğrulama kodu girin' });
+    const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND purpose=$2 AND method=$3 AND expires_at > NOW() LIMIT 1', [
+      hashChallengeValue(challenge), 'password_reset', 'email'
+    ]);
+    const record = rows[0];
+    if (!record || record.attempts >= 5) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+    await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
+    if (hashChallengeValue(code) !== record.code_hash) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+
+    const resetToken = createChallengeToken();
+    await query('UPDATE auth_challenges SET purpose=$1,code_hash=$2,attempts=0,expires_at=NOW()+INTERVAL \'10 minutes\' WHERE id=$3', [
+      'password_reset_verified', hashChallengeValue(resetToken), record.id
+    ]);
+    await query('UPDATE users SET password_reset_required=1,password_reset_expires_at=NOW()+INTERVAL \'10 minutes\' WHERE id=$1', [record.user_id]);
+    await query('DELETE FROM sessions WHERE user_id=$1', [record.user_id]);
+    res.json({ ok: true, reset_token: resetToken });
+  } catch (e) {
+    res.status(500).json({ error: 'Kod doğrulanamadı' });
+  }
+});
+
+app.post('/api/auth/forgot-password/reset', async (req, res) => {
+  try {
+    const resetToken = String(req.body?.reset_token || '');
+    const password = String(req.body?.password || '');
+    const passwordConfirmation = String(req.body?.password_confirmation || '');
+    if (!/^[a-f0-9]{64}$/i.test(resetToken)) return res.status(400).json({ error: 'Şifre yenileme oturumu geçersiz' });
+    if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
+    if (password !== passwordConfirmation) return res.status(400).json({ error: 'Şifreler eşleşmiyor' });
+
+    const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND purpose=$2 AND expires_at > NOW() LIMIT 1', [
+      hashChallengeValue(resetToken), 'password_reset_verified'
+    ]);
+    const record = rows[0];
+    if (!record) return res.status(401).json({ error: 'Şifre yenileme oturumu geçersiz veya süresi dolmuş' });
+
+    await query('UPDATE users SET password_hash=$1,password_reset_required=0,password_reset_expires_at=NULL WHERE id=$2', [
+      hashPassword(password), record.user_id
+    ]);
+    await query('DELETE FROM sessions WHERE user_id=$1', [record.user_id]);
+    await query('DELETE FROM auth_challenges WHERE user_id=$1 AND purpose IN (\'password_reset\',\'password_reset_verified\')', [record.user_id]);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Şifre değiştirilemedi' });
+  }
 });
 
 app.get('/api/profile/2fa', authMiddleware, async (req, res) => {
