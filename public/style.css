@@ -453,8 +453,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
   .nav-mobile-toggle { display: block; margin-left: 4px; }
-  /* Mobil başlıkta marka ortada durmasın; alan işlemlere ayrılsın. */
-  .nav-brand { display: none !important; }
+  /* Mobilde yalnızca ortadaki CigCig yazısı görünsün; logo görseli görünmesin. */
+  .nav-brand { display: flex !important; position: absolute; left: 50%; transform: translateX(-50%); flex: none; }
+  .nav-brand .site-logo { display: none !important; }
+  .nav-brand .site-wordmark { display: inline; }
   #nav-user { display: none !important; }
   .mobile-header-action { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; font-size: 17px; }
   .mobile-new-wrap { order: 1; }
