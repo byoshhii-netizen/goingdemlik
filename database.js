@@ -157,6 +157,12 @@ async function initDb() {
       token TEXT PRIMARY KEY,
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '8 hours')
     );
+    CREATE TABLE IF NOT EXISTS vmb_admin_sessions (
+      token TEXT PRIMARY KEY,
+      username TEXT NOT NULL DEFAULT 'Cambaz',
+      created_at TIMESTAMP DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '12 hours')
+    );
 
     CREATE TABLE IF NOT EXISTS levels (
       id BIGSERIAL PRIMARY KEY,
@@ -184,6 +190,7 @@ async function initDb() {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    ALTER TABLE settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
     INSERT INTO settings (key, value) VALUES
       ('route_protection_enabled', '0'),
       ('protected_routes', '["/admin","/yonetim","/yonetici","/yonet"]'),
@@ -202,10 +209,12 @@ async function initDb() {
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
       slug TEXT UNIQUE NOT NULL,
+      is_hidden INTEGER NOT NULL DEFAULT 0,
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE vmb_files ADD COLUMN IF NOT EXISTS is_hidden INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS vmb_folders (
       id BIGSERIAL PRIMARY KEY,
@@ -213,6 +222,7 @@ async function initDb() {
       parent_id BIGINT REFERENCES vmb_folders(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
+      is_hidden INTEGER NOT NULL DEFAULT 0,
       order_num INTEGER DEFAULT 0,
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMP DEFAULT NOW(),
@@ -221,6 +231,7 @@ async function initDb() {
     -- Tablo önceki bir sürümde oluşturulduysa CREATE TABLE IF NOT EXISTS
     -- mevcut tabloya yeni kolon eklemez.
     ALTER TABLE vmb_folders ADD COLUMN IF NOT EXISTS parent_id BIGINT;
+    ALTER TABLE vmb_folders ADD COLUMN IF NOT EXISTS is_hidden INTEGER NOT NULL DEFAULT 0;
     DO $$
     BEGIN
       IF NOT EXISTS (
@@ -243,6 +254,7 @@ async function initDb() {
       page_num INTEGER DEFAULT 1,
       slug TEXT UNIQUE NOT NULL,
       image_url TEXT DEFAULT '',
+      is_hidden INTEGER NOT NULL DEFAULT 0,
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
@@ -250,6 +262,7 @@ async function initDb() {
     -- Eski vmb_pages tablosu varsa yeni kolonları mevcut tabloya da ekle.
     ALTER TABLE vmb_pages ADD COLUMN IF NOT EXISTS page_num INTEGER DEFAULT 1;
     ALTER TABLE vmb_pages ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
+    ALTER TABLE vmb_pages ADD COLUMN IF NOT EXISTS is_hidden INTEGER NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_vmb_pages_folder_order ON vmb_pages(folder_id, page_num);
 
     CREATE TABLE IF NOT EXISTS vmb_assets (
@@ -259,10 +272,26 @@ async function initDb() {
       url TEXT NOT NULL,
       mime_type TEXT DEFAULT '',
       size_bytes BIGINT DEFAULT 0,
+      is_hidden INTEGER NOT NULL DEFAULT 0,
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_vmb_assets_folder ON vmb_assets(folder_id, created_at);
+
+    -- VMB üyelerinin hangi dosya, klasör ve belgeye ne zaman girdiğini tutar.
+    -- Her ziyaret ayrı satırdır; panel son aktiviteyi ve toplam okumayı buradan hesaplar.
+    CREATE TABLE IF NOT EXISTS vmb_activity (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      activity_type TEXT NOT NULL CHECK (activity_type IN ('file','folder','page','asset')),
+      file_id BIGINT REFERENCES vmb_files(id) ON DELETE CASCADE,
+      folder_id BIGINT REFERENCES vmb_folders(id) ON DELETE CASCADE,
+      page_id BIGINT REFERENCES vmb_pages(id) ON DELETE CASCADE,
+      detail TEXT DEFAULT '',
+      viewed_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vmb_activity_user_time ON vmb_activity(user_id, viewed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_vmb_activity_file_time ON vmb_activity(file_id, viewed_at DESC);
 
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
@@ -818,6 +847,10 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_display TEXT DEFAULT 'level';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_vmb INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS vmb_granted_at TIMESTAMP;
+    UPDATE users
+      SET badge_name='VMB', badge_icon='fas fa-shield', badge_color='#facc15'
+      WHERE is_vmb=1
+        AND LOWER(COALESCE(badge_name,'')) NOT IN ('vmb','vmb yönetim');
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;

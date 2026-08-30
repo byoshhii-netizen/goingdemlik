@@ -58,19 +58,6 @@ async function renderBadges(main) {
         <div id="badge-assign-msg" style="color:var(--text-muted)"></div>
       </div>
     </div>
-    <div class="card vmb-admin-card" style="margin-top:16px;border-color:rgba(250,204,21,.4)">
-      <div class="card-header"><span><i class="fas fa-shield" style="color:#facc15;margin-right:8px"></i> VMB özel rozeti</span><span style="font-size:12px;color:#facc15">Gizli · Sistem rozeti · Silinemez</span></div>
-      <div class="card-body">
-        <p style="font-size:13px;color:var(--text2);margin:0 0 12px">VMB rozeti normal rozet listesinde görünmez. Rozet verilen kullanıcı özel VMB alanına erişir ve bildirim alır.</p>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="vmb-user-select" style="min-width:220px">${users.map(u=>`<option value="${escHtml(u.id)}">${escHtml(u.username)}${u.is_vmb ? ' · VMB üyesi' : ''}</option>`).join('')}</select>
-          <button class="btn btn-primary" id="vmb-grant-btn"><i class="fas fa-shield"></i> VMB ver</button>
-          <button class="btn btn-outline" id="vmb-revoke-btn">Rozeti kaldır</button>
-        </div>
-        <div id="vmb-assign-msg" style="margin-top:10px;color:var(--text-muted)"></div>
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--text2)"><strong style="color:#facc15">Aktif VMB üyeleri:</strong> ${users.filter(u=>u.is_vmb).map(u=>escHtml(u.username)).join(', ') || 'Henüz yok'}</div>
-      </div>
-    </div>
   `;
 
   $('#adm-badges-refresh')?.addEventListener('click', () => loadSection('badges'));
@@ -95,24 +82,6 @@ async function renderBadges(main) {
   $('#assign-badge-btn')?.addEventListener('click', async () => {
     const bid = $('#badge-select').value; const uid = $('#user-select').value; if (!bid || !uid) return;
     try { const b = badges.find(x=>String(x.id)===String(bid)); await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) }); $('#badge-assign-msg').textContent = 'Rozet verildi'; } catch (e) { $('#badge-assign-msg').textContent = e.message; }
-  });
-  async function updateVmb(grant) {
-    const uid = $('#vmb-user-select')?.value;
-    const msg = $('#vmb-assign-msg');
-    if (!uid) return;
-    try {
-      await adminApi('/user/' + uid + '/vmb', { method: 'PUT', body: JSON.stringify({ is_vmb: grant }) });
-      if (msg) { msg.style.color = 'var(--green)'; msg.textContent = grant ? 'VMB rozeti verildi; kullanıcıya bildirim gönderildi.' : 'VMB rozeti kaldırıldı.'; }
-      toast(grant ? 'VMB rozeti verildi' : 'VMB rozeti kaldırıldı');
-      setTimeout(() => loadSection('badges'), 500);
-    } catch (e) {
-      if (msg) { msg.style.color = 'var(--red2)'; msg.textContent = e.message; }
-      toast(e.message, 'error');
-    }
-  }
-  $('#vmb-grant-btn')?.addEventListener('click', () => updateVmb(true));
-  $('#vmb-revoke-btn')?.addEventListener('click', () => {
-    if (confirm('Bu kullanıcının VMB erişimi kaldırılacak. Devam edilsin mi?')) updateVmb(false);
   });
 }
 

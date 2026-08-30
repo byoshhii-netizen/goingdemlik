@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>VMB Yönetim Merkezi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="vmb-panel.css?v=20260831">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <main id="login-screen" class="auth-shell">
+    <section class="login-card">
+      <div class="brand-mark"><span>V</span><i class="fa fa-shield-halved"></i></div>
+      <div class="eyebrow">ÖZEL ERİŞİM · VMB</div>
+      <h1>Yönetim<br><em>Merkezi</em></h1>
+      <p class="login-copy">VMB üyeliklerini, rozetlerini ve özel arşivini tek bir güvenli merkezden yönet.</p>
+      <form id="login-form">
+        <label for="login-username">Kullanıcı adı</label>
+        <input id="login-username" autocomplete="username" placeholder="Panel kullanıcı adı" required>
+        <label for="login-password">Şifre</label>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="Panel şifresi" required>
+        <button class="primary-btn full" type="submit"><span>Panele gir</span><i class="fa fa-arrow-right"></i></button>
+        <p id="login-error" class="form-error" role="alert"></p>
+      </form>
+      <div class="login-footer"><i class="fa fa-lock"></i> Bu alan yalnızca yetkili VMB yönetimi içindir</div>
+    </section>
+  </main>
+
+  <div id="panel-shell" class="panel-shell hidden">
+    <header class="topbar">
+      <div class="topbar-brand"><div class="mini-mark"><i class="fa fa-shield-halved"></i></div><div><strong>VMB</strong><span>Yönetim Merkezi</span></div></div>
+      <div class="topbar-meta"><span class="live-dot"></span><span id="topbar-user">Cambaz</span><button id="logout-btn" class="icon-btn" title="Çıkış"><i class="fa fa-arrow-right-from-bracket"></i></button></div>
+    </header>
+    <div class="panel-layout">
+      <aside class="sidebar">
+        <div class="sidebar-caption">KONTROL ODASI</div>
+        <nav id="main-nav">
+          <button class="nav-btn active" data-section="members"><span class="nav-icon gold"><i class="fa fa-users"></i></span><span><b>VMB Üyeleri</b><small>Üyelik ve erişim</small></span></button>
+          <button class="nav-btn" data-section="badges"><span class="nav-icon violet"><i class="fa fa-award"></i></span><span><b>Rozetler</b><small>VMB yetkileri</small></span></button>
+          <button class="nav-btn" data-section="files"><span class="nav-icon blue"><i class="fa fa-folder-tree"></i></span><span><b>VMB Dosyaları</b><small>Arşiv ve içerik</small></span></button>
+        </nav>
+        <div class="sidebar-note"><i class="fa fa-circle-info"></i><div><strong>Gizlilik aktif</strong><p>Gizli arşiv öğeleri yalnızca VMB Yönetim rozetlilerine görünür.</p></div></div>
+      </aside>
+      <section class="content-area">
+        <div id="stats-strip" class="stats-strip"></div>
+        <div id="page-content"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="modal-root" class="modal-root hidden"></div>
+  <div id="toast-root" class="toast-root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/js/all.min.js"></script>
+  <script src="vmb-panel.js?v=20260831"></script>
+</body>
+</html>

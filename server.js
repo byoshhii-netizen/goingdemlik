@@ -24,6 +24,8 @@ const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || 'Cambaz');
+const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '123123');
 
 // Cloudinary config — Railway'de CLOUDINARY_URL env var olarak ekle
 // Format: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
@@ -165,11 +167,19 @@ const adminAuthLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Çok fazla admin giriş denemesi. 15 dakika bekleyin.' },
 });
+const vmbAdminAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.VMB_ADMIN_AUTH_RATE_LIMIT_MAX || 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Çok fazla VMB paneli giriş denemesi. Biraz bekleyin.' },
+});
 
 app.use('/api', generalLimiter);
 app.use('/api/auth', authLimiter);
 app.use(['/api/photos', '/api/stories', '/api/upload-video'], uploadLimiter);
 app.use(['/api/admin/auth', '/api/reklampanel'], adminAuthLimiter);
+app.use('/api/vmb-admin/auth', vmbAdminAuthLimiter);
 
 
 function escapeHtml(str) {
@@ -286,11 +296,21 @@ function sanitizeUser(u) {
 }
 
 function isReservedVmbBadgeName(value) {
-  return String(value || '').trim().toLocaleUpperCase('tr-TR') === 'VMB';
+  const badge = String(value || '').trim().toLocaleLowerCase('tr-TR');
+  return badge === 'vmb' || badge === 'vmb yönetim';
 }
 
 function hasVmbManagementBadge(user) {
   return String(user?.badge_name || '').trim().toLocaleLowerCase('tr-TR') === 'vmb yönetim';
+}
+
+function hasVmbBadge(user) {
+  const badge = String(user?.badge_name || '').trim().toLocaleLowerCase('tr-TR');
+  return !!user?.is_vmb && (badge === 'vmb' || badge === 'vmb yönetim');
+}
+
+function boolValue(value) {
+  return value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
 }
 
 app.get('/api/link-preview', async (req, res) => {
@@ -345,17 +365,45 @@ async function authMiddleware(req, res, next) {
 
 async function requireVmbMiddleware(req, res, next) {
   await authMiddleware(req, res, () => {
-    if (!req.user.is_vmb) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+    if (!hasVmbBadge(req.user)) return res.status(404).json({ error: 'Sayfa bulunamadı' });
     next();
   });
 }
 
 async function requireVmbManagerMiddleware(req, res, next) {
   await authMiddleware(req, res, () => {
-    if (!req.user.is_vmb) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+    if (!hasVmbBadge(req.user)) return res.status(404).json({ error: 'Sayfa bulunamadı' });
     if (!hasVmbManagementBadge(req.user)) return res.status(403).json({ error: 'Bu işlem için VMB Yönetim rozeti gerekli' });
     next();
   });
+}
+
+async function vmbAdminMiddleware(req, res, next) {
+  const token = String(req.headers['x-vmb-admin-token'] || '').trim();
+  if (!token) return res.status(401).json({ error: 'VMB panel oturumu gerekli' });
+  try {
+    const { rows } = await query(
+      'SELECT username FROM vmb_admin_sessions WHERE token=$1 AND expires_at > NOW()',
+      [token]
+    );
+    if (!rows.length) return res.status(401).json({ error: 'VMB panel oturumu geçersiz veya süresi dolmuş' });
+    req.vmbAdmin = { username: rows[0].username };
+    next();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+async function recordVmbActivity(userId, activityType, fileId, folderId, pageId, detail) {
+  try {
+    await query(
+      `INSERT INTO vmb_activity(user_id,activity_type,file_id,folder_id,page_id,detail)
+       VALUES($1,$2,$3,$4,$5,$6)`,
+      [userId, activityType, fileId || null, folderId || null, pageId || null, String(detail || '').slice(0, 240)]
+    );
+  } catch (error) {
+    console.error('VMB aktivite kaydı başarısız:', error.message);
+  }
 }
 
 async function optionalAuth(req, res, next) {
@@ -772,6 +820,29 @@ app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); }
 // New admin entry path
 app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
 
+// VMB yönetimi, ana admin panelinden ayrı ve yalnızca özel panel hesabıyla açılır.
+app.get(['/vmb-panel', '/vmb-panel.html'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'vmb-panel.html'));
+});
+
+app.post('/api/vmb-admin/auth/login', async (req, res) => {
+  const username = String(req.body.username || '').trim();
+  const password = String(req.body.password || '');
+  if (username !== VMB_PANEL_USERNAME || password !== VMB_PANEL_PASSWORD) {
+    return res.status(401).json({ error: 'VMB panel bilgileri doğrulanamadı' });
+  }
+  const token = generateToken('vmb-admin');
+  await query('INSERT INTO vmb_admin_sessions(token,username) VALUES($1,$2)', [token, VMB_PANEL_USERNAME]);
+  await logAction(VMB_PANEL_USERNAME, 'vmb_panel_login', '', 'VMB yönetim paneli girişi', getIp(req), getClientInfo(req));
+  res.json({ token, username: VMB_PANEL_USERNAME });
+});
+
+app.delete('/api/vmb-admin/auth/logout', vmbAdminMiddleware, async (req, res) => {
+  const token = String(req.headers['x-vmb-admin-token'] || '').trim();
+  await query('DELETE FROM vmb_admin_sessions WHERE token=$1', [token]);
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/auth/login', async (req, res) => {
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
@@ -881,31 +952,6 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// VMB, normal rozetlerden bağımsız ve herkese açık rozet listesinde görünmeyen sistem üyeliğidir.
-app.put('/api/admin/user/:id/vmb', adminMiddleware, async (req, res) => {
-  try {
-    if (!req.adminUser.isSuperAdmin && !hasAdminPermission(req.adminUser.permissions, 'can_assign_badges')) {
-      return res.status(403).json({ error: 'VMB rozeti verme yetkiniz yok' });
-    }
-    const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-    const user = rows[0];
-    const grant = req.body.is_vmb === true || req.body.is_vmb === 1 || req.body.is_vmb === '1' || req.body.is_vmb === 'true';
-    const wasMember = !!user.is_vmb;
-    await query('UPDATE users SET is_vmb=$1, vmb_granted_at=$2 WHERE id=$3', [grant ? 1 : 0, grant ? (wasMember ? user.vmb_granted_at || new Date() : new Date()) : null, user.id]);
-    if (grant && !wasMember) {
-      await query(
-        `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [user.id, 'vmb_granted', 'VMB', '', 'VMB üyeliği', "Vecd ile Müdafaa Birliğin'in bir üyesisiniz.", '/vmb']
-      );
-    }
-    await logAction(req.adminUser.username || 'admin', grant ? 'grant_vmb' : 'revoke_vmb', user.username);
-    const { rows: updated } = await query('SELECT * FROM users WHERE id=$1', [user.id]);
-    res.json(sanitizeUser(updated[0]));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
 // Direct URL'lerde de VMB alanını üyelik olmadan sunma. Oturum açılırken HttpOnly cookie
 // bırakıldığı için tarayıcıdan doğrudan gelen yetkili istekler burada doğrulanabilir.
 app.get(/^\/vmb(?:\/dosyalar(?:\/.*)?|\/dosyalara(?:\/.*)?)?$/, async (req, res) => {
@@ -913,10 +959,10 @@ app.get(/^\/vmb(?:\/dosyalar(?:\/.*)?|\/dosyalara(?:\/.*)?)?$/, async (req, res)
     const token = getSessionCookie(req);
     if (!token) return res.redirect('/');
     const { rows } = await query(
-      'SELECT u.is_vmb FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW() AND u.banned=0',
+      "SELECT u.is_vmb, u.badge_name FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW() AND u.banned=0",
       [token]
     );
-    if (!rows[0]?.is_vmb) return res.redirect('/');
+    if (!hasVmbBadge(rows[0])) return res.redirect('/');
     return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   } catch {
     return res.redirect('/');
@@ -1439,6 +1485,7 @@ app.delete('/api/notifications/:id', authMiddleware, async (req, res) => {
 // ===== VMB ÖZEL ALANI =====
 app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
   try {
+    const includeHidden = hasVmbManagementBadge(req.user);
     const { rows: settingRows } = await query(
       "SELECT key,value FROM settings WHERE key IN ('vmb_group_url','vmb_intro','vmb_founder','vmb_image_url','vmb_files')"
     );
@@ -1453,15 +1500,18 @@ app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
         vf.slug, vf.created_at, COUNT(DISTINCT vf2.id)::int AS folder_count,
         COUNT(DISTINCT vp.id)::int AS page_count
       FROM vmb_files vf
-      LEFT JOIN vmb_folders vf2 ON vf2.file_id=vf.id
-      LEFT JOIN vmb_pages vp ON vp.folder_id=vf2.id
+      LEFT JOIN vmb_folders vf2 ON vf2.file_id=vf.id AND (vf2.is_hidden=0 OR $1)
+      LEFT JOIN vmb_pages vp ON vp.folder_id=vf2.id AND (vp.is_hidden=0 OR $1)
+      WHERE vf.is_hidden=0 OR $1
       GROUP BY vf.id
       ORDER BY vf.updated_at DESC, vf.created_at DESC
-    `);
+    `, [includeHidden]);
     files = [...libraryFiles, ...files];
     const { rows: members } = await query(
       `SELECT id,username,avatar,avatar_removed,bio,created_at
-       FROM users WHERE is_vmb=1 AND banned=0 ORDER BY username ASC`
+       FROM users WHERE is_vmb=1 AND banned=0
+         AND LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim')
+       ORDER BY username ASC`
     );
     res.json({
       badge: { name: 'VMB', icon: 'fas fa-shield', color: '#facc15' },
@@ -1477,15 +1527,17 @@ app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
 });
 
 app.get('/api/vmb/files', requireVmbMiddleware, async (req, res) => {
+  const includeHidden = hasVmbManagementBadge(req.user);
   const { rows: files } = await query(`
     SELECT vf.id, vf.title, vf.description, vf.slug, vf.created_at, vf.updated_at,
       COUNT(DISTINCT f.id)::int AS folder_count, COUNT(DISTINCT p.id)::int AS page_count
     FROM vmb_files vf
     LEFT JOIN vmb_folders f ON f.file_id=vf.id
     LEFT JOIN vmb_pages p ON p.folder_id=f.id
+    WHERE vf.is_hidden=0 OR $1
     GROUP BY vf.id
     ORDER BY vf.updated_at DESC, vf.created_at DESC
-  `);
+  `, [includeHidden]);
   const { rows: legacyRows } = await query("SELECT value FROM settings WHERE key='vmb_files'");
   let legacyFiles = [];
   try {
@@ -1496,48 +1548,58 @@ app.get('/api/vmb/files', requireVmbMiddleware, async (req, res) => {
 });
 
 app.get('/api/vmb/files/:slug', requireVmbMiddleware, async (req, res) => {
-  const { rows: fileRows } = await query('SELECT * FROM vmb_files WHERE slug=$1', [req.params.slug]);
+  const includeHidden = hasVmbManagementBadge(req.user);
+  const { rows: fileRows } = await query('SELECT * FROM vmb_files WHERE slug=$1 AND (is_hidden=0 OR $2)', [req.params.slug, includeHidden]);
   if (!fileRows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
   const file = fileRows[0];
   const { rows: folders } = await query(`
     SELECT f.*, COUNT(DISTINCT p.id)::int AS page_count, COUNT(DISTINCT a.id)::int AS asset_count
     FROM vmb_folders f
-    LEFT JOIN vmb_pages p ON p.folder_id=f.id
-    LEFT JOIN vmb_assets a ON a.folder_id=f.id
-    WHERE f.file_id=$1 AND f.parent_id IS NULL
+    LEFT JOIN vmb_pages p ON p.folder_id=f.id AND (p.is_hidden=0 OR $2)
+    LEFT JOIN vmb_assets a ON a.folder_id=f.id AND (a.is_hidden=0 OR $2)
+    WHERE f.file_id=$1 AND f.parent_id IS NULL AND (f.is_hidden=0 OR $2)
     GROUP BY f.id ORDER BY f.order_num ASC, f.name ASC
-  `, [file.id]);
+  `, [file.id, includeHidden]);
+  await recordVmbActivity(req.user.id, 'file', file.id, null, null, file.title);
   res.json({ file, folders, assets: [], can_manage: hasVmbManagementBadge(req.user) });
 });
 
 app.get('/api/vmb/folder/:id', requireVmbMiddleware, async (req, res) => {
+  const includeHidden = hasVmbManagementBadge(req.user);
   const { rows: folderRows } = await query(`
     SELECT f.*, vf.title AS file_title, vf.slug AS file_slug
-    FROM vmb_folders f INNER JOIN vmb_files vf ON vf.id=f.file_id WHERE f.id=$1
-  `, [req.params.id]);
+    FROM vmb_folders f INNER JOIN vmb_files vf ON vf.id=f.file_id
+    WHERE f.id=$1 AND (f.is_hidden=0 OR $2) AND (vf.is_hidden=0 OR $2)
+  `, [req.params.id, includeHidden]);
   if (!folderRows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
   const folder = folderRows[0];
   const [childResult, pageResult, assetResult] = await Promise.all([
     query(`SELECT f.*, COUNT(DISTINCT p.id)::int AS page_count, COUNT(DISTINCT a.id)::int AS asset_count
-      FROM vmb_folders f LEFT JOIN vmb_pages p ON p.folder_id=f.id LEFT JOIN vmb_assets a ON a.folder_id=f.id
-      WHERE f.file_id=$1 AND f.parent_id=$2 GROUP BY f.id ORDER BY f.order_num ASC, f.name ASC`, [folder.file_id, folder.id]),
-    query('SELECT id,title,page_num,slug,image_url,created_at,updated_at FROM vmb_pages WHERE folder_id=$1 ORDER BY page_num ASC', [folder.id]),
-    query('SELECT * FROM vmb_assets WHERE folder_id=$1 ORDER BY created_at DESC', [folder.id])
+      FROM vmb_folders f LEFT JOIN vmb_pages p ON p.folder_id=f.id AND (p.is_hidden=0 OR $3)
+      LEFT JOIN vmb_assets a ON a.folder_id=f.id AND (a.is_hidden=0 OR $3)
+      WHERE f.file_id=$1 AND f.parent_id=$2 AND (f.is_hidden=0 OR $3)
+      GROUP BY f.id ORDER BY f.order_num ASC, f.name ASC`, [folder.file_id, folder.id, includeHidden]),
+    query('SELECT id,title,page_num,slug,image_url,is_hidden,created_at,updated_at FROM vmb_pages WHERE folder_id=$1 AND (is_hidden=0 OR $2) ORDER BY page_num ASC', [folder.id, includeHidden]),
+    query('SELECT * FROM vmb_assets WHERE folder_id=$1 AND (is_hidden=0 OR $2) ORDER BY created_at DESC', [folder.id, includeHidden])
   ]);
+  await recordVmbActivity(req.user.id, 'folder', folder.file_id, folder.id, null, folder.name);
   res.json({ folder, folders: childResult.rows, pages: pageResult.rows, assets: assetResult.rows, can_manage: hasVmbManagementBadge(req.user) });
 });
 
 app.get('/api/vmb/folder/:id/page/:pageSlug', requireVmbMiddleware, async (req, res) => {
+  const includeHidden = hasVmbManagementBadge(req.user);
   const { rows } = await query(`
     SELECT p.*, f.name AS folder_name, f.file_id, vf.title AS file_title, vf.slug AS file_slug
     FROM vmb_pages p INNER JOIN vmb_folders f ON f.id=p.folder_id
     INNER JOIN vmb_files vf ON vf.id=f.file_id
-    WHERE p.folder_id=$1 AND p.slug=$2
-  `, [req.params.id, req.params.pageSlug]);
+    WHERE p.folder_id=$1 AND p.slug=$2 AND (p.is_hidden=0 OR $3)
+      AND (f.is_hidden=0 OR $3) AND (vf.is_hidden=0 OR $3)
+  `, [req.params.id, req.params.pageSlug, includeHidden]);
   if (!rows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const page = rows[0];
-  const { rows: prev } = await query('SELECT slug,title FROM vmb_pages WHERE folder_id=$1 AND page_num=$2', [page.folder_id, page.page_num - 1]);
-  const { rows: next } = await query('SELECT slug,title FROM vmb_pages WHERE folder_id=$1 AND page_num=$2', [page.folder_id, page.page_num + 1]);
+  const { rows: prev } = await query('SELECT slug,title FROM vmb_pages WHERE folder_id=$1 AND page_num=$2 AND (is_hidden=0 OR $3)', [page.folder_id, page.page_num - 1, includeHidden]);
+  const { rows: next } = await query('SELECT slug,title FROM vmb_pages WHERE folder_id=$1 AND page_num=$2 AND (is_hidden=0 OR $3)', [page.folder_id, page.page_num + 1, includeHidden]);
+  await recordVmbActivity(req.user.id, 'page', page.file_id, page.folder_id, page.id, page.title);
   res.json({ page, prev: prev[0] || null, next: next[0] || null });
 });
 
@@ -1661,6 +1723,295 @@ app.post('/api/vmb/folders/:id/assets', requireVmbManagerMiddleware, (req, res, 
 app.delete('/api/vmb/assets/:id', requireVmbManagerMiddleware, async (req, res) => {
   const result = await query('DELETE FROM vmb_assets WHERE id=$1 RETURNING id', [req.params.id]);
   if (!result.rows.length) return res.status(404).json({ error: 'Dosya bulunamadı' });
+  res.json({ ok: true });
+});
+
+// ===== VMB YÖNETİM PANELİ API =====
+app.get('/api/vmb-admin/me', vmbAdminMiddleware, (req, res) => {
+  res.json({ username: req.vmbAdmin.username, sections: ['members', 'badges', 'files'] });
+});
+
+app.get('/api/vmb-admin/overview', vmbAdminMiddleware, async (req, res) => {
+  const [memberCount, managerCount, fileCount, hiddenCount, activityCount] = await Promise.all([
+    query('SELECT COUNT(*)::int AS count FROM users WHERE is_vmb=1 AND LOWER(COALESCE(badge_name,\'\')) IN (\'vmb\',\'vmb yönetim\')'),
+    query("SELECT COUNT(*)::int AS count FROM users WHERE is_vmb=1 AND LOWER(COALESCE(badge_name,''))='vmb yönetim'"),
+    query('SELECT COUNT(*)::int AS count FROM vmb_files'),
+    query('SELECT COUNT(*)::int AS count FROM vmb_files WHERE is_hidden=1'),
+    query('SELECT COUNT(*)::int AS count FROM vmb_activity')
+  ]);
+  res.json({
+    members: memberCount.rows[0].count,
+    managers: managerCount.rows[0].count,
+    files: fileCount.rows[0].count,
+    hidden_files: hiddenCount.rows[0].count,
+    activity: activityCount.rows[0].count
+  });
+});
+
+app.get('/api/vmb-admin/members', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT u.id,u.username,u.email,u.avatar,u.avatar_removed,u.bio,u.created_at,u.last_active,u.is_vmb,u.badge_name,
+      u.badge_icon,u.badge_color,u.vmb_granted_at,
+      (SELECT json_build_object(
+        'type',a.activity_type,'detail',a.detail,'viewed_at',a.viewed_at,
+        'file_id',a.file_id,'folder_id',a.folder_id,'page_id',a.page_id
+       ) FROM vmb_activity a WHERE a.user_id=u.id ORDER BY a.viewed_at DESC LIMIT 1) AS last_activity,
+      (SELECT COUNT(*)::int FROM vmb_activity a WHERE a.user_id=u.id) AS activity_count
+    FROM users u
+    WHERE u.is_vmb=1 AND LOWER(COALESCE(u.badge_name,'')) IN ('vmb','vmb yönetim')
+    ORDER BY COALESCE(u.vmb_granted_at,u.created_at) DESC, u.username ASC
+  `);
+  res.json(rows);
+});
+
+app.get('/api/vmb-admin/members/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows: memberRows } = await query(
+    `SELECT id,username,email,avatar,avatar_removed,bio,created_at,last_active,is_vmb,badge_name,badge_icon,badge_color,vmb_granted_at
+     FROM users WHERE id=$1 AND is_vmb=1 AND LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim')`,
+    [req.params.id]
+  );
+  if (!memberRows.length) return res.status(404).json({ error: 'VMB üyesi bulunamadı' });
+  const [activity, reads] = await Promise.all([
+    query(`SELECT a.*,vf.title AS file_title,f.name AS folder_name,p.title AS page_title
+      FROM vmb_activity a
+      LEFT JOIN vmb_files vf ON vf.id=a.file_id
+      LEFT JOIN vmb_folders f ON f.id=a.folder_id
+      LEFT JOIN vmb_pages p ON p.id=a.page_id
+      WHERE a.user_id=$1 ORDER BY a.viewed_at DESC LIMIT 100`, [req.params.id]),
+    query(`SELECT vf.id,vf.title,vf.is_hidden,MAX(a.viewed_at) AS last_viewed,COUNT(*)::int AS visits
+      FROM vmb_activity a INNER JOIN vmb_files vf ON vf.id=a.file_id
+      WHERE a.user_id=$1 GROUP BY vf.id ORDER BY last_viewed DESC`, [req.params.id])
+  ]);
+  res.json({ member: memberRows[0], activity: activity.rows, reads: reads.rows });
+});
+
+app.get('/api/vmb-admin/users', vmbAdminMiddleware, async (req, res) => {
+  const search = String(req.query.search || '').trim();
+  const { rows } = await query(
+    `SELECT id,username,email,avatar,is_vmb,badge_name,badge_icon,badge_color
+     FROM users
+     WHERE ($1='' OR username ILIKE $2 OR email ILIKE $2)
+     ORDER BY username ASC LIMIT 100`,
+    [search, `%${search}%`]
+  );
+  res.json(rows);
+});
+
+app.get('/api/vmb-admin/badges', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT badge_name AS name,
+      CASE WHEN LOWER(badge_name)='vmb yönetim' THEN 'fas fa-crown' ELSE 'fas fa-shield-halved' END AS icon,
+      CASE WHEN LOWER(badge_name)='vmb yönetim' THEN '#fbbf24' ELSE '#facc15' END AS color,
+      COUNT(*)::int AS member_count
+    FROM users
+    WHERE is_vmb=1 AND LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim')
+    GROUP BY badge_name ORDER BY CASE WHEN LOWER(badge_name)='vmb yönetim' THEN 1 ELSE 0 END
+  `);
+  res.json([
+    { name: 'VMB', icon: 'fas fa-shield-halved', color: '#facc15', description: 'VMB özel alanını görüntüleme rozeti.', member_count: Number(rows.find(row => row.name === 'VMB')?.member_count || 0) },
+    { name: 'VMB Yönetim', icon: 'fas fa-crown', color: '#fbbf24', description: 'VMB arşivinde ekleme, düzenleme, gizleme ve silme yetkisi.', member_count: Number(rows.find(row => row.name === 'VMB Yönetim')?.member_count || 0) }
+  ]);
+});
+
+app.put('/api/vmb-admin/users/:id/badge', vmbAdminMiddleware, async (req, res) => {
+  const requested = String(req.body.badge || '').trim();
+  const badge = requested === 'VMB Yönetim' ? 'VMB Yönetim' : requested === 'VMB' ? 'VMB' : '';
+  const { rows } = await query('SELECT id,username,is_vmb,badge_name FROM users WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const current = rows[0];
+  if (!badge) {
+    await query(`UPDATE users SET is_vmb=0,badge_name=CASE WHEN LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim') THEN '' ELSE badge_name END,
+      badge_icon=CASE WHEN LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim') THEN '' ELSE badge_icon END,
+      badge_color=CASE WHEN LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim') THEN '#6b7280' ELSE badge_color END,
+      vmb_granted_at=NULL WHERE id=$1`, [req.params.id]);
+  } else {
+    await query(`UPDATE users SET is_vmb=1,badge_name=$1,badge_icon=$2,badge_color=$3,vmb_granted_at=COALESCE(vmb_granted_at,NOW()) WHERE id=$4`,
+      [badge, badge === 'VMB Yönetim' ? 'fas fa-crown' : 'fas fa-shield-halved', badge === 'VMB Yönetim' ? '#fbbf24' : '#facc15', req.params.id]);
+    if (!current.is_vmb || String(current.badge_name || '').toLowerCase() !== badge.toLowerCase()) {
+      await query(`INSERT INTO notifications(user_id,type,actor_username,title,body,link)
+        VALUES($1,'vmb_granted','VMB Paneli','VMB erişimi güncellendi',$2,'/vmb')`,
+        [req.params.id, `${badge} rozeti hesabınıza tanımlandı.`]);
+    }
+  }
+  await logAction(req.vmbAdmin.username, badge ? 'vmb_badge_granted' : 'vmb_badge_revoked', rows[0].username, badge);
+  const { rows: updated } = await query('SELECT id,username,is_vmb,badge_name,badge_icon,badge_color,vmb_granted_at FROM users WHERE id=$1', [req.params.id]);
+  res.json(updated[0]);
+});
+
+app.put('/api/vmb-admin/users/:id/membership', vmbAdminMiddleware, async (req, res) => {
+  const active = boolValue(req.body.active);
+  const { rows } = await query('SELECT id,username,badge_name FROM users WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const existingBadge = String(rows[0].badge_name || '').toLocaleLowerCase('tr-TR');
+  const badge = existingBadge === 'vmb yönetim' ? 'VMB Yönetim' : 'VMB';
+  await query(`UPDATE users SET is_vmb=$1,
+    badge_name=CASE WHEN $1=1 THEN $2 ELSE CASE WHEN LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim') THEN '' ELSE badge_name END END,
+    badge_icon=CASE WHEN $1=1 THEN CASE WHEN $2='VMB Yönetim' THEN 'fas fa-crown' ELSE 'fas fa-shield-halved' END ELSE CASE WHEN LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim') THEN '' ELSE badge_icon END END,
+    badge_color=CASE WHEN $1=1 THEN CASE WHEN $2='VMB Yönetim' THEN '#fbbf24' ELSE '#facc15' END ELSE CASE WHEN LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim') THEN '#6b7280' ELSE badge_color END END,
+    vmb_granted_at=CASE WHEN $1=1 THEN COALESCE(vmb_granted_at,NOW()) ELSE NULL END WHERE id=$3`,
+    [active, badge, req.params.id]);
+  await logAction(req.vmbAdmin.username, active ? 'vmb_membership_activated' : 'vmb_membership_cancelled', rows[0].username);
+  res.json({ ok: true, active: !!active });
+});
+
+app.get('/api/vmb-admin/files', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT vf.*,u.username AS created_by_username,
+      COUNT(DISTINCT f.id)::int AS folder_count,COUNT(DISTINCT p.id)::int AS page_count,
+      COUNT(DISTINCT a.user_id)::int AS reader_count,MAX(a.viewed_at) AS last_read_at
+    FROM vmb_files vf LEFT JOIN users u ON u.id=vf.created_by
+      LEFT JOIN vmb_folders f ON f.file_id=vf.id LEFT JOIN vmb_pages p ON p.folder_id=f.id
+      LEFT JOIN vmb_activity a ON a.file_id=vf.id
+    GROUP BY vf.id,u.username ORDER BY vf.updated_at DESC,vf.created_at DESC
+  `);
+  res.json(rows);
+});
+
+app.get('/api/vmb-admin/files/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows: files } = await query('SELECT vf.*,u.username AS created_by_username FROM vmb_files vf LEFT JOIN users u ON u.id=vf.created_by WHERE vf.id=$1', [req.params.id]);
+  if (!files.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  const [folders, pages, assets, readers] = await Promise.all([
+    query(`SELECT f.*,u.username AS created_by_username FROM vmb_folders f LEFT JOIN users u ON u.id=f.created_by WHERE f.file_id=$1 ORDER BY f.parent_id NULLS FIRST,f.order_num,f.name`, [req.params.id]),
+    query(`SELECT p.*,f.name AS folder_name,u.username AS created_by_username FROM vmb_pages p INNER JOIN vmb_folders f ON f.id=p.folder_id LEFT JOIN users u ON u.id=p.created_by WHERE f.file_id=$1 ORDER BY f.name,p.page_num,p.id`, [req.params.id]),
+    query(`SELECT a.*,f.name AS folder_name,u.username AS created_by_username FROM vmb_assets a INNER JOIN vmb_folders f ON f.id=a.folder_id LEFT JOIN users u ON u.id=a.created_by WHERE f.file_id=$1 ORDER BY a.created_at DESC`, [req.params.id]),
+    query(`SELECT u.id,u.username,u.avatar,MAX(a.viewed_at) AS last_viewed,COUNT(*)::int AS visits,
+      STRING_AGG(DISTINCT a.activity_type,', ' ORDER BY a.activity_type) AS opened_types
+      FROM vmb_activity a INNER JOIN users u ON u.id=a.user_id WHERE a.file_id=$1 GROUP BY u.id ORDER BY last_viewed DESC`, [req.params.id])
+  ]);
+  res.json({ file: files[0], folders: folders.rows, pages: pages.rows, assets: assets.rows, readers: readers.rows });
+});
+
+app.post('/api/vmb-admin/files', vmbAdminMiddleware, async (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title || title.length > 120) return res.status(400).json({ error: 'Dosya adı 1-120 karakter olmalı' });
+  const { rows } = await query('INSERT INTO vmb_files(title,description,slug,is_hidden) VALUES($1,$2,$3,$4) RETURNING *',
+    [title, String(req.body.description || '').trim(), `vmb-${randomUUID().slice(0, 8)}`, boolValue(req.body.is_hidden)]);
+  await logAction(req.vmbAdmin.username, 'vmb_file_created', title);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb-admin/files/:id', vmbAdminMiddleware, async (req, res) => {
+  const title = String(req.body.title || '').trim();
+  if (!title || title.length > 120) return res.status(400).json({ error: 'Dosya adı 1-120 karakter olmalı' });
+  const { rows } = await query('UPDATE vmb_files SET title=$1,description=$2,is_hidden=$3,updated_at=NOW() WHERE id=$4 RETURNING *',
+    [title, String(req.body.description || '').trim(), boolValue(req.body.is_hidden), req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.delete('/api/vmb-admin/files/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query('DELETE FROM vmb_files WHERE id=$1 RETURNING title', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  await logAction(req.vmbAdmin.username, 'vmb_file_deleted', rows[0].title);
+  res.json({ ok: true });
+});
+
+app.post('/api/vmb-admin/folders', vmbAdminMiddleware, async (req, res) => {
+  const fileId = Number(req.body.file_id);
+  const parentId = req.body.parent_id ? Number(req.body.parent_id) : null;
+  const name = String(req.body.name || '').trim();
+  if (!Number.isSafeInteger(fileId) || !name || name.length > 120) return res.status(400).json({ error: 'Geçerli bir klasör adı gerekli' });
+  const { rows: fileRows } = await query('SELECT id FROM vmb_files WHERE id=$1', [fileId]);
+  if (!fileRows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  if (parentId) {
+    const { rows: parentRows } = await query('SELECT id FROM vmb_folders WHERE id=$1 AND file_id=$2', [parentId, fileId]);
+    if (!parentRows.length) return res.status(400).json({ error: 'Üst klasör geçersiz' });
+  }
+  const { rows } = await query('INSERT INTO vmb_folders(file_id,parent_id,name,description,is_hidden,created_by) VALUES($1,$2,$3,$4,$5,NULL) RETURNING *',
+    [fileId, parentId, name, String(req.body.description || '').trim(), boolValue(req.body.is_hidden)]);
+  await query('UPDATE vmb_files SET updated_at=NOW() WHERE id=$1', [fileId]);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb-admin/folders/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM vmb_folders WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  const name = String(req.body.name || '').trim();
+  if (!name || name.length > 120) return res.status(400).json({ error: 'Geçerli bir klasör adı gerekli' });
+  const { rows: updated } = await query('UPDATE vmb_folders SET name=$1,description=$2,is_hidden=$3,updated_at=NOW() WHERE id=$4 RETURNING *',
+    [name, String(req.body.description || '').trim(), boolValue(req.body.is_hidden), req.params.id]);
+  await query('UPDATE vmb_files SET updated_at=NOW() WHERE id=$1', [rows[0].file_id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/vmb-admin/folders/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query('DELETE FROM vmb_folders WHERE id=$1 RETURNING file_id', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  await query('UPDATE vmb_files SET updated_at=NOW() WHERE id=$1', [rows[0].file_id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/vmb-admin/folders/:id/pages', vmbAdminMiddleware, async (req, res) => {
+  const { rows: folders } = await query('SELECT * FROM vmb_folders WHERE id=$1', [req.params.id]);
+  if (!folders.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  const title = String(req.body.title || '').trim();
+  const content = String(req.body.content || '').trim();
+  if (!title || !content) return res.status(400).json({ error: 'Belge başlığı ve içeriği zorunlu' });
+  const { rows: last } = await query('SELECT COALESCE(MAX(page_num),0)::int AS page_num FROM vmb_pages WHERE folder_id=$1', [req.params.id]);
+  const { rows } = await query(`INSERT INTO vmb_pages(folder_id,title,content,page_num,slug,image_url,is_hidden,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7,NULL) RETURNING *`,
+    [req.params.id, title, content, last[0].page_num + 1, `vmb-page-${randomUUID().slice(0, 8)}`, String(req.body.image_url || '').trim(), boolValue(req.body.is_hidden)]);
+  await query('UPDATE vmb_folders SET updated_at=NOW() WHERE id=$1', [req.params.id]);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb-admin/pages/:id', vmbAdminMiddleware, async (req, res) => {
+  const title = String(req.body.title || '').trim();
+  const content = String(req.body.content || '').trim();
+  if (!title || !content) return res.status(400).json({ error: 'Belge başlığı ve içeriği zorunlu' });
+  const { rows } = await query('UPDATE vmb_pages SET title=$1,content=$2,image_url=$3,is_hidden=$4,updated_at=NOW() WHERE id=$5 RETURNING *',
+    [title, content, String(req.body.image_url || '').trim(), boolValue(req.body.is_hidden), req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Belge bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.delete('/api/vmb-admin/pages/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query('DELETE FROM vmb_pages WHERE id=$1 RETURNING folder_id', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Belge bulunamadı' });
+  res.json({ ok: true });
+});
+
+app.post('/api/vmb-admin/folders/:id/assets', vmbAdminMiddleware, (req, res, next) => {
+  vmbUpload.single('file')(req, res, error => {
+    if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu 50 MB sınırını geçemez.' : error.message });
+    next();
+  });
+}, async (req, res) => {
+  const { rows: folders } = await query('SELECT id FROM vmb_folders WHERE id=$1', [req.params.id]);
+  if (!folders.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  if (!req.file) return res.status(400).json({ error: 'Dosya seçin' });
+  const url = await handleVmbUpload(req.file);
+  const { rows } = await query(`INSERT INTO vmb_assets(folder_id,name,url,mime_type,size_bytes,is_hidden,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,NULL) RETURNING *`,
+    [req.params.id, String(req.body.name || req.file.originalname || 'Dosya').trim().slice(0, 180), url, req.file.mimetype || 'application/octet-stream', req.file.size || 0, boolValue(req.body.is_hidden)]);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb-admin/assets/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query('UPDATE vmb_assets SET name=$1,is_hidden=$2 WHERE id=$3 RETURNING *',
+    [String(req.body.name || '').trim().slice(0, 180), boolValue(req.body.is_hidden), req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Arşiv dosyası bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.delete('/api/vmb-admin/assets/:id', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query('DELETE FROM vmb_assets WHERE id=$1 RETURNING id', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Arşiv dosyası bulunamadı' });
+  res.json({ ok: true });
+});
+
+app.get('/api/vmb-admin/settings', vmbAdminMiddleware, async (req, res) => {
+  const { rows } = await query("SELECT key,value FROM settings WHERE key IN ('vmb_group_url','vmb_intro','vmb_founder','vmb_image_url')");
+  res.json(Object.fromEntries(rows.map(row => [row.key, row.value])));
+});
+
+app.put('/api/vmb-admin/settings', vmbAdminMiddleware, async (req, res) => {
+  const allowed = ['vmb_group_url','vmb_intro','vmb_founder','vmb_image_url'];
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      await query('INSERT INTO settings(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()', [key, String(req.body[key] || '').trim()]);
+    }
+  }
   res.json({ ok: true });
 });
 
