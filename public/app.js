@@ -972,8 +972,6 @@ function updateNavUI() {
   const mobNew = $('#mobile-new-dropdown');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
-  const desktopNav = document.querySelector('.nav-links');
-  const existingVmbLink = $('#vmb-nav-link');
 
   if (currentUser) {
     authEl.classList.add('hidden');
@@ -991,17 +989,12 @@ function updateNavUI() {
     if (mobAuth) mobAuth.classList.add('hidden');
     if (mobNew) mobNew.classList.add('hidden');
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
-    if (currentUser.is_vmb && desktopNav && !existingVmbLink) {
-      desktopNav.insertAdjacentHTML('beforeend', '<a href="/vmb" data-link class="nav-link vmb-nav-link" id="vmb-nav-link"><i class="fas fa-shield"></i> VMB</a>');
-    } else if (!currentUser.is_vmb) {
-      existingVmbLink?.remove();
-    }
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="${profileRoute(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
-      ${currentUser.is_vmb ? '<a href="/vmb" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield" style="width:18px"></i> VMB</a>' : ''}
+      <a href="/vmb-panel" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield-halved" style="width:18px"></i> VMB</a>
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
     $('#mob-logout')?.addEventListener('click', async () => {
@@ -1026,7 +1019,6 @@ function updateNavUI() {
       }
     }
   } else {
-    existingVmbLink?.remove();
     authEl.classList.remove('hidden');
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -6233,10 +6225,15 @@ async function renderNotifications(app) {
   }
 }
 
+function hasVmbAccess(user = currentUser) {
+  const badge = String(user?.badge_name || '').trim().toLocaleLowerCase('tr-TR');
+  return !!user && (Number(user.is_vmb) === 1 || badge === 'vmb' || badge === 'vmb yönetim');
+}
+
 async function renderVmb(app, section = 'home') {
   document.title = (section === 'files' ? 'VMB Dosyaları' : 'VMB') + ' - ' + siteName;
   updatePageMeta('VMB - ' + siteName, 'Vecd ile Müdafaa Birliği özel alanı.', '');
-  if (!currentUser?.is_vmb) return renderNotFound(app);
+  if (!hasVmbAccess()) return renderNotFound(app);
 
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let data;
@@ -6449,7 +6446,7 @@ function showVmbAssetModal(folderId, onDone) {
 async function renderVmbFiles(app) {
   document.title = 'VMB Dosyaları - ' + siteName;
   updatePageMeta('VMB Dosyaları - ' + siteName, 'VMB özel dosya arşivi.', '');
-  if (!currentUser?.is_vmb) return renderNotFound(app);
+  if (!hasVmbAccess()) return renderNotFound(app);
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let data;
   try { data = await api('/vmb/files'); } catch { return renderNotFound(app); }

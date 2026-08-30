@@ -851,6 +851,14 @@ async function initDb() {
       SET badge_name='VMB', badge_icon='fas fa-shield', badge_color='#facc15'
       WHERE is_vmb=1
         AND LOWER(COALESCE(badge_name,'')) NOT IN ('vmb','vmb yönetim');
+    -- Eski sürümlerde rozet atanmış ancak is_vmb alanı güncellenmemiş olabilir.
+    -- Özel VMB rozetini üyelik kaynağıyla senkronla.
+    UPDATE users
+      SET is_vmb=1, vmb_granted_at=COALESCE(vmb_granted_at,NOW()),
+          badge_name=CASE WHEN LOWER(COALESCE(badge_name,''))='vmb yönetim' THEN 'VMB Yönetim' ELSE 'VMB' END,
+          badge_icon=CASE WHEN LOWER(COALESCE(badge_name,''))='vmb yönetim' THEN 'fas fa-crown' ELSE 'fas fa-shield-halved' END,
+          badge_color=CASE WHEN LOWER(COALESCE(badge_name,''))='vmb yönetim' THEN '#fbbf24' ELSE '#facc15' END
+      WHERE LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim');
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;

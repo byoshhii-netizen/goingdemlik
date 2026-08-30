@@ -306,7 +306,9 @@ function hasVmbManagementBadge(user) {
 
 function hasVmbBadge(user) {
   const badge = String(user?.badge_name || '').trim().toLocaleLowerCase('tr-TR');
-  return !!user?.is_vmb && (badge === 'vmb' || badge === 'vmb yönetim');
+  // Özel rozet eski kayıtlarda is_vmb alanından önce atanmış olabilir.
+  // Rozet üyeliğin kendisi olduğu için iki kaynağı da uyumlu kabul et.
+  return !!user && (Number(user.is_vmb) === 1 || badge === 'vmb' || badge === 'vmb yönetim');
 }
 
 function boolValue(value) {
