@@ -957,6 +957,11 @@ async function initAuth() {
     const data = await api('/auth/me');
     currentUser = data.user;
     updateNavUI();
+    // Özel sayfalar kullanıcı doğrulanmadan önce ilk kez 404 çizmiş olabilir.
+    // Oturum doğrulandıktan sonra mevcut VMB adresini yeniden oluştur.
+    if (location.pathname === '/vmb' || location.pathname.startsWith('/vmb/')) {
+      renderRoute(location.pathname + location.search);
+    }
   } catch {
     currentToken = null;
     localStorage.removeItem('token');
