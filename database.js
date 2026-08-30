@@ -196,6 +196,56 @@ async function initDb() {
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
+    -- VMB dosya kütüphanesi: eski vmb_files ayarı geriye dönük olarak korunur.
+    CREATE TABLE IF NOT EXISTS vmb_files (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      slug TEXT UNIQUE NOT NULL,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS vmb_folders (
+      id BIGSERIAL PRIMARY KEY,
+      file_id BIGINT NOT NULL REFERENCES vmb_files(id) ON DELETE CASCADE,
+      parent_id BIGINT REFERENCES vmb_folders(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      order_num INTEGER DEFAULT 0,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vmb_folders_file_parent ON vmb_folders(file_id, parent_id, order_num);
+
+    CREATE TABLE IF NOT EXISTS vmb_pages (
+      id BIGSERIAL PRIMARY KEY,
+      folder_id BIGINT NOT NULL REFERENCES vmb_folders(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      page_num INTEGER DEFAULT 1,
+      slug TEXT UNIQUE NOT NULL,
+      image_url TEXT DEFAULT '',
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vmb_pages_folder_order ON vmb_pages(folder_id, page_num);
+
+    CREATE TABLE IF NOT EXISTS vmb_assets (
+      id BIGSERIAL PRIMARY KEY,
+      folder_id BIGINT NOT NULL REFERENCES vmb_folders(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL,
+      mime_type TEXT DEFAULT '',
+      size_bytes BIGINT DEFAULT 0,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vmb_assets_folder ON vmb_assets(folder_id, created_at);
+
     CREATE TABLE IF NOT EXISTS forums (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,

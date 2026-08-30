@@ -1225,6 +1225,72 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .vmb-empty { padding:34px 18px; color:var(--text-muted); text-align:center; }
 .vmb-empty i { display:block; color:rgba(250,204,21,.7); font-size:30px; margin-bottom:10px; }
 .vmb-empty p { margin:0; }
+.vmb-header-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+.vmb-readonly-pill { display:inline-flex; align-items:center; gap:7px; padding:9px 12px; border-radius:10px; border:1px solid rgba(250,204,21,.22); color:#facc15; background:rgba(250,204,21,.07); font-size:12px; white-space:nowrap; }
+.vmb-library-hero { display:flex; align-items:center; gap:14px; padding:18px 20px; margin-bottom:16px; border:1px solid rgba(250,204,21,.2); border-radius:var(--radius); background:linear-gradient(100deg,rgba(250,204,21,.1),rgba(255,255,255,.025)); }
+.vmb-library-hero-icon, .vmb-file-hero-icon { width:50px; height:50px; flex:0 0 50px; display:flex; align-items:center; justify-content:center; border-radius:15px; color:#171305; background:linear-gradient(135deg,#ffe58a,#c08a13); box-shadow:0 8px 24px rgba(250,204,21,.16); font-size:20px; }
+.vmb-library-hero strong { display:block; font-size:16px; }
+.vmb-library-hero p { margin:4px 0 0; color:var(--text-secondary); font-size:13px; }
+.vmb-library-count { margin-left:auto; color:#facc15; font-weight:800; font-size:13px; white-space:nowrap; }
+.vmb-library-list, .vmb-folder-list, .vmb-page-list, .vmb-assets-list, .vmb-legacy-list { display:grid; gap:10px; }
+.vmb-library-card, .vmb-folder-card, .vmb-asset-card, .vmb-page-card { position:relative; display:flex; align-items:center; gap:13px; min-width:0; padding:15px; border:1px solid var(--border); border-radius:14px; background:var(--bg-card2); transition:transform .18s ease,border-color .18s ease,background .18s ease; }
+.vmb-library-card:hover, .vmb-folder-card:hover, .vmb-asset-card:hover, .vmb-page-card:hover { transform:translateY(-2px); border-color:rgba(250,204,21,.46); background:rgba(250,204,21,.055); }
+.vmb-library-icon, .vmb-folder-icon { width:43px; height:43px; flex:0 0 43px; display:flex; align-items:center; justify-content:center; border-radius:12px; color:#facc15; background:rgba(250,204,21,.1); font-size:17px; }
+.vmb-library-copy, .vmb-folder-copy, .vmb-asset-copy { min-width:0; flex:1; }
+.vmb-library-copy strong, .vmb-folder-copy strong, .vmb-asset-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vmb-library-copy p { margin:4px 0; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.vmb-library-copy small, .vmb-folder-copy small, .vmb-asset-copy small { display:block; color:var(--text-muted); font-size:11px; }
+.vmb-library-copy small i { color:#facc15; margin-right:3px; }
+.vmb-library-actions, .vmb-item-actions { display:flex; align-items:center; gap:5px; flex:0 0 auto; }
+.vmb-library-actions .btn, .vmb-item-actions .btn { min-width:34px; }
+.vmb-legacy-card { margin-top:16px; }
+.vmb-legacy-list { grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); }
+.vmb-legacy-file { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 13px; border:1px solid var(--border); border-radius:12px; color:var(--text-secondary); background:var(--bg-card2); }
+.vmb-legacy-file span { display:flex; align-items:center; gap:9px; min-width:0; }
+.vmb-legacy-file strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-primary); font-size:13px; }
+.vmb-legacy-file span i, .vmb-legacy-file > i { color:#facc15; }
+.vmb-breadcrumbs { display:flex; align-items:center; flex-wrap:wrap; gap:9px; margin-bottom:16px; color:var(--text-muted); font-size:12px; }
+.vmb-breadcrumbs a { color:#facc15; }
+.vmb-breadcrumbs > i { font-size:9px; color:var(--text-muted); }
+.vmb-breadcrumbs strong { color:var(--text-primary); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vmb-file-hero, .vmb-folder-hero { display:flex; align-items:center; gap:16px; padding:22px; margin-bottom:16px; border:1px solid rgba(250,204,21,.22); border-radius:var(--radius); background:linear-gradient(115deg,rgba(250,204,21,.11),var(--bg-card) 62%); }
+.vmb-file-hero-copy { min-width:0; flex:1; }
+.vmb-file-hero-copy h1 { margin:0 0 7px; font-size:clamp(24px,4vw,34px); overflow-wrap:anywhere; }
+.vmb-file-hero-copy p { margin:0; color:var(--text-secondary); line-height:1.55; }
+.vmb-folder-toolbar { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+.vmb-folder-toolbar > span { display:flex; align-items:center; gap:8px; margin-right:auto; padding:10px 12px; border-radius:10px; color:var(--text-muted); background:rgba(255,255,255,.03); font-size:12px; }
+.vmb-folder-toolbar > span i { color:#facc15; }
+.vmb-content-card { padding:20px; margin-bottom:16px; }
+.vmb-page-card { padding:0; overflow:hidden; }
+.vmb-page-card > a { display:flex; align-items:center; gap:12px; flex:1; min-width:0; padding:14px; color:inherit; }
+.vmb-page-card > a > span:nth-child(2) { min-width:0; flex:1; }
+.vmb-page-card strong, .vmb-page-card small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vmb-page-card small { margin-top:4px; color:var(--text-muted); font-size:11px; }
+.vmb-page-card > a > i { color:var(--text-muted); margin-left:auto; }
+.vmb-page-number { width:33px; height:33px; flex:0 0 33px; display:flex; align-items:center; justify-content:center; border-radius:10px; color:#facc15; background:rgba(250,204,21,.1); font-size:12px; font-weight:800; }
+.vmb-page-card-actions { display:flex; align-items:center; gap:3px; padding:0 9px 0 0; }
+.vmb-asset-card { color:inherit; text-decoration:none; }
+.vmb-asset-icon { width:37px; height:37px; flex:0 0 37px; display:flex; align-items:center; justify-content:center; border-radius:10px; color:#facc15; background:rgba(250,204,21,.1); }
+.vmb-asset-card > i { color:var(--text-muted); font-size:12px; }
+.vmb-asset-delete { width:30px; height:30px; border:0; border-radius:8px; color:#f87171; background:rgba(239,68,68,.08); cursor:pointer; }
+.vmb-modal-intro { display:flex; align-items:center; gap:12px; padding:13px; margin-bottom:18px; border:1px solid rgba(250,204,21,.18); border-radius:12px; background:rgba(250,204,21,.06); }
+.vmb-modal-icon { width:38px; height:38px; flex:0 0 38px; display:flex; align-items:center; justify-content:center; border-radius:10px; color:#facc15; background:rgba(250,204,21,.12); }
+.vmb-modal-intro strong, .vmb-modal-intro small { display:block; }
+.vmb-modal-intro small { margin-top:3px; color:var(--text-muted); font-size:11px; line-height:1.4; }
+.vmb-modal-submit { width:100%; justify-content:center; min-height:44px; }
+.vmb-reader-wrap { max-width:900px; margin:0 auto; }
+.vmb-reader { overflow:hidden; }
+.vmb-reader .ebook-toolbar { position:sticky; top:0; z-index:2; }
+.vmb-reader .ebook-toolbar > a { margin-right:auto; }
+.vmb-reader-badge { color:#facc15; font-size:11px; white-space:nowrap; }
+.vmb-reader-content { min-height:55vh; }
+.vmb-reader-content .book-text { white-space:pre-wrap; }
+.vmb-reader .ebook-nav { align-items:center; }
+.vmb-reader .ebook-nav-btn { flex:1; min-width:0; }
+.vmb-reader .ebook-nav-btn small, .vmb-reader .ebook-nav-btn span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vmb-reader .ebook-nav-btn small { color:var(--text-muted); font-size:10px; text-transform:uppercase; letter-spacing:1px; }
+.vmb-reader-position { display:flex; align-items:center; justify-content:center; width:32px; height:32px; flex:0 0 32px; border-radius:50%; color:#171305; background:#facc15; font-size:12px; font-weight:800; }
+.vmb-reader-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 @media (max-width:700px) {
   .vmb-hero { grid-template-columns:1fr; padding:16px; gap:18px; }
   .vmb-hero-art { max-height:260px; }
@@ -1234,6 +1300,20 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
   .vmb-members-section, .vmb-files-card { padding:14px; }
   .vmb-file-card { align-items:flex-start; flex-wrap:wrap; }
   .vmb-file-card .btn { margin-left:52px; }
+  .vmb-library-hero, .vmb-file-hero, .vmb-folder-hero { align-items:flex-start; flex-wrap:wrap; padding:15px; }
+  .vmb-library-count { margin-left:63px; margin-top:-6px; }
+  .vmb-header-actions { width:100%; justify-content:flex-start; }
+  .vmb-header-actions .btn { flex:1; justify-content:center; }
+  .vmb-file-hero .vmb-header-actions, .vmb-folder-hero .vmb-header-actions { margin-left:63px; }
+  .vmb-library-card, .vmb-folder-card, .vmb-asset-card { align-items:flex-start; }
+  .vmb-library-actions, .vmb-item-actions { margin-left:auto; }
+  .vmb-library-actions .btn-primary, .vmb-item-actions .btn-outline { padding:8px 10px; }
+  .vmb-content-card { padding:14px; }
+  .vmb-page-card-actions { padding-right:5px; }
+  .vmb-reader .ebook-toolbar { flex-wrap:wrap; gap:8px; }
+  .vmb-reader-badge { width:100%; order:3; }
+  .vmb-reader .ebook-nav { padding:12px; gap:8px; }
+  .vmb-reader-actions .btn { flex:1; justify-content:center; }
 }
 
 /* ===== FORUM DETAIL ===== */

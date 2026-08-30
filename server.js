@@ -289,6 +289,10 @@ function isReservedVmbBadgeName(value) {
   return String(value || '').trim().toLocaleUpperCase('tr-TR') === 'VMB';
 }
 
+function hasVmbManagementBadge(user) {
+  return String(user?.badge_name || '').trim().toLocaleLowerCase('tr-TR') === 'vmb yönetim';
+}
+
 app.get('/api/link-preview', async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '').trim();
@@ -342,6 +346,14 @@ async function authMiddleware(req, res, next) {
 async function requireVmbMiddleware(req, res, next) {
   await authMiddleware(req, res, () => {
     if (!req.user.is_vmb) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+    next();
+  });
+}
+
+async function requireVmbManagerMiddleware(req, res, next) {
+  await authMiddleware(req, res, () => {
+    if (!req.user.is_vmb) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+    if (!hasVmbManagementBadge(req.user)) return res.status(403).json({ error: 'Bu işlem için VMB Yönetim rozeti gerekli' });
     next();
   });
 }
@@ -533,6 +545,13 @@ const upload = multer({
   }
 });
 
+// VMB arşivi, görsel/video/ses dışında belge ve arşiv dosyalarını da kabul eder.
+// Yönetim kontrolü upload route'unda yapılır; bu middleware diğer yüklemeleri etkilemez.
+const vmbUpload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
+
 const avatarUpload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -584,6 +603,43 @@ async function handleUpload(file) {
   } else {
     return '/uploads/' + file.filename;
   }
+}
+
+async function handleVmbUpload(file) {
+  const ext = path.extname(file.originalname || '').toLowerCase();
+  const key = `vmb/${randomUUID()}${ext}`;
+  if (USE_R2) {
+    await new Upload({
+      client: r2Client,
+      params: {
+        Bucket: process.env.R2_BUCKET_NAME,
+        Key: key,
+        Body: file.buffer || fs.createReadStream(file.path),
+        ContentType: file.mimetype || 'application/octet-stream'
+      },
+      partSize: 20 * 1024 * 1024,
+      queueSize: 3,
+      leavePartsOnError: false
+    }).done();
+    if (file.path) fs.promises.unlink(file.path).catch(() => {});
+    const publicBase = (process.env.R2_PUBLIC_URL || `${R2_ENDPOINT}/${process.env.R2_BUCKET_NAME}`).replace(/\/$/, '');
+    return `${publicBase}/${key}`;
+  }
+  if (USE_CLOUDINARY) {
+    return new Promise((resolve, reject) => {
+      if (!file.buffer || file.buffer.length === 0) return reject(new Error('Dosya buffer boş'));
+      const stream = cloudinary.uploader.upload_stream(
+        { public_id: key.replace(/\.[^.]+$/, ''), resource_type: 'raw' },
+        (err, result) => {
+          if (err) return reject(new Error('Cloudinary yükleme hatası: ' + (err.message || JSON.stringify(err))));
+          if (!result?.secure_url) return reject(new Error('Cloudinary URL alınamadı'));
+          resolve(result.secure_url);
+        }
+      );
+      stream.end(file.buffer);
+    });
+  }
+  return '/uploads/' + file.filename;
 }
 
 async function handleLargeVideoUpload(file) {
@@ -852,7 +908,7 @@ app.put('/api/admin/user/:id/vmb', adminMiddleware, async (req, res) => {
 
 // Direct URL'lerde de VMB alanını üyelik olmadan sunma. Oturum açılırken HttpOnly cookie
 // bırakıldığı için tarayıcıdan doğrudan gelen yetkili istekler burada doğrulanabilir.
-app.get(['/vmb', '/vmb/dosyalar', '/vmb/dosyalara'], async (req, res) => {
+app.get(/^\/vmb(?:\/dosyalar(?:\/.*)?|\/dosyalara(?:\/.*)?)?$/, async (req, res) => {
   try {
     const token = getSessionCookie(req);
     if (!token) return res.redirect('/');
@@ -1392,6 +1448,17 @@ app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
       const parsed = JSON.parse(settings.vmb_files || '[]');
       if (Array.isArray(parsed)) files = parsed;
     } catch {}
+    const { rows: libraryFiles } = await query(`
+      SELECT vf.id, vf.title AS name, vf.description,
+        vf.slug, vf.created_at, COUNT(DISTINCT vf2.id)::int AS folder_count,
+        COUNT(DISTINCT vp.id)::int AS page_count
+      FROM vmb_files vf
+      LEFT JOIN vmb_folders vf2 ON vf2.file_id=vf.id
+      LEFT JOIN vmb_pages vp ON vp.folder_id=vf2.id
+      GROUP BY vf.id
+      ORDER BY vf.updated_at DESC, vf.created_at DESC
+    `);
+    files = [...libraryFiles, ...files];
     const { rows: members } = await query(
       `SELECT id,username,avatar,avatar_removed,bio,created_at
        FROM users WHERE is_vmb=1 AND banned=0 ORDER BY username ASC`
@@ -1403,19 +1470,198 @@ app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
       founder: settings.vmb_founder || 'VMB Kurucusu',
       group_url: settings.vmb_group_url || '/grup/vmb',
       files,
+      can_manage: hasVmbManagementBadge(req.user),
       members
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/vmb/files', requireVmbMiddleware, async (req, res) => {
-  const { rows } = await query("SELECT value FROM settings WHERE key='vmb_files'");
-  let files = [];
+  const { rows: files } = await query(`
+    SELECT vf.id, vf.title, vf.description, vf.slug, vf.created_at, vf.updated_at,
+      COUNT(DISTINCT f.id)::int AS folder_count, COUNT(DISTINCT p.id)::int AS page_count
+    FROM vmb_files vf
+    LEFT JOIN vmb_folders f ON f.file_id=vf.id
+    LEFT JOIN vmb_pages p ON p.folder_id=f.id
+    GROUP BY vf.id
+    ORDER BY vf.updated_at DESC, vf.created_at DESC
+  `);
+  const { rows: legacyRows } = await query("SELECT value FROM settings WHERE key='vmb_files'");
+  let legacyFiles = [];
   try {
-    const parsed = JSON.parse(rows[0]?.value || '[]');
-    if (Array.isArray(parsed)) files = parsed;
+    const parsed = JSON.parse(legacyRows[0]?.value || '[]');
+    if (Array.isArray(parsed)) legacyFiles = parsed;
   } catch {}
-  res.json({ files });
+  res.json({ files, legacy_files: legacyFiles, can_manage: hasVmbManagementBadge(req.user) });
+});
+
+app.get('/api/vmb/files/:slug', requireVmbMiddleware, async (req, res) => {
+  const { rows: fileRows } = await query('SELECT * FROM vmb_files WHERE slug=$1', [req.params.slug]);
+  if (!fileRows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  const file = fileRows[0];
+  const { rows: folders } = await query(`
+    SELECT f.*, COUNT(DISTINCT p.id)::int AS page_count, COUNT(DISTINCT a.id)::int AS asset_count
+    FROM vmb_folders f
+    LEFT JOIN vmb_pages p ON p.folder_id=f.id
+    LEFT JOIN vmb_assets a ON a.folder_id=f.id
+    WHERE f.file_id=$1 AND f.parent_id IS NULL
+    GROUP BY f.id ORDER BY f.order_num ASC, f.name ASC
+  `, [file.id]);
+  res.json({ file, folders, assets: [], can_manage: hasVmbManagementBadge(req.user) });
+});
+
+app.get('/api/vmb/folder/:id', requireVmbMiddleware, async (req, res) => {
+  const { rows: folderRows } = await query(`
+    SELECT f.*, vf.title AS file_title, vf.slug AS file_slug
+    FROM vmb_folders f INNER JOIN vmb_files vf ON vf.id=f.file_id WHERE f.id=$1
+  `, [req.params.id]);
+  if (!folderRows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  const folder = folderRows[0];
+  const [childResult, pageResult, assetResult] = await Promise.all([
+    query(`SELECT f.*, COUNT(DISTINCT p.id)::int AS page_count, COUNT(DISTINCT a.id)::int AS asset_count
+      FROM vmb_folders f LEFT JOIN vmb_pages p ON p.folder_id=f.id LEFT JOIN vmb_assets a ON a.folder_id=f.id
+      WHERE f.file_id=$1 AND f.parent_id=$2 GROUP BY f.id ORDER BY f.order_num ASC, f.name ASC`, [folder.file_id, folder.id]),
+    query('SELECT id,title,page_num,slug,image_url,created_at,updated_at FROM vmb_pages WHERE folder_id=$1 ORDER BY page_num ASC', [folder.id]),
+    query('SELECT * FROM vmb_assets WHERE folder_id=$1 ORDER BY created_at DESC', [folder.id])
+  ]);
+  res.json({ folder, folders: childResult.rows, pages: pageResult.rows, assets: assetResult.rows, can_manage: hasVmbManagementBadge(req.user) });
+});
+
+app.get('/api/vmb/folder/:id/page/:pageSlug', requireVmbMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT p.*, f.name AS folder_name, f.file_id, vf.title AS file_title, vf.slug AS file_slug
+    FROM vmb_pages p INNER JOIN vmb_folders f ON f.id=p.folder_id
+    INNER JOIN vmb_files vf ON vf.id=f.file_id
+    WHERE p.folder_id=$1 AND p.slug=$2
+  `, [req.params.id, req.params.pageSlug]);
+  if (!rows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+  const page = rows[0];
+  const { rows: prev } = await query('SELECT slug,title FROM vmb_pages WHERE folder_id=$1 AND page_num=$2', [page.folder_id, page.page_num - 1]);
+  const { rows: next } = await query('SELECT slug,title FROM vmb_pages WHERE folder_id=$1 AND page_num=$2', [page.folder_id, page.page_num + 1]);
+  res.json({ page, prev: prev[0] || null, next: next[0] || null });
+});
+
+app.post('/api/vmb/files', requireVmbManagerMiddleware, async (req, res) => {
+  const title = String(req.body.title || '').trim();
+  const description = String(req.body.description || '').trim();
+  if (!title || title.length > 120) return res.status(400).json({ error: 'Dosya adı 1-120 karakter olmalı' });
+  const { rows } = await query('INSERT INTO vmb_files(title,description,slug,created_by) VALUES($1,$2,$3,$4) RETURNING *',
+    [title, description, `vmb-${randomUUID().slice(0, 8)}`, req.user.id]);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb/files/:slug', requireVmbManagerMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM vmb_files WHERE slug=$1', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  const title = String(req.body.title ?? rows[0].title).trim();
+  const description = String(req.body.description ?? rows[0].description).trim();
+  if (!title || title.length > 120) return res.status(400).json({ error: 'Dosya adı 1-120 karakter olmalı' });
+  const { rows: updated } = await query('UPDATE vmb_files SET title=$1,description=$2,updated_at=NOW() WHERE id=$3 RETURNING *',
+    [title, description, rows[0].id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/vmb/files/:slug', requireVmbManagerMiddleware, async (req, res) => {
+  const result = await query('DELETE FROM vmb_files WHERE slug=$1 RETURNING id', [req.params.slug]);
+  if (!result.rows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  res.json({ ok: true });
+});
+
+app.post('/api/vmb/folders', requireVmbManagerMiddleware, async (req, res) => {
+  const fileId = Number(req.body.file_id);
+  const parentId = req.body.parent_id ? Number(req.body.parent_id) : null;
+  const name = String(req.body.name || '').trim();
+  if (!Number.isSafeInteger(fileId) || !name || name.length > 120) return res.status(400).json({ error: 'Geçerli bir klasör adı gerekli' });
+  const { rows: fileRows } = await query('SELECT id FROM vmb_files WHERE id=$1', [fileId]);
+  if (!fileRows.length) return res.status(404).json({ error: 'VMB dosyası bulunamadı' });
+  if (parentId) {
+    const { rows: parentRows } = await query('SELECT id FROM vmb_folders WHERE id=$1 AND file_id=$2', [parentId, fileId]);
+    if (!parentRows.length) return res.status(400).json({ error: 'Üst klasör geçersiz' });
+  }
+  const { rows } = await query('INSERT INTO vmb_folders(file_id,parent_id,name,description,created_by) VALUES($1,$2,$3,$4,$5) RETURNING *',
+    [fileId, parentId, name, String(req.body.description || '').trim(), req.user.id]);
+  await query('UPDATE vmb_files SET updated_at=NOW() WHERE id=$1', [fileId]);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb/folders/:id', requireVmbManagerMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM vmb_folders WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  const name = String(req.body.name ?? rows[0].name).trim();
+  if (!name || name.length > 120) return res.status(400).json({ error: 'Geçerli bir klasör adı gerekli' });
+  const { rows: updated } = await query('UPDATE vmb_folders SET name=$1,description=$2,updated_at=NOW() WHERE id=$3 RETURNING *',
+    [name, String(req.body.description ?? rows[0].description).trim(), rows[0].id]);
+  await query('UPDATE vmb_files SET updated_at=NOW() WHERE id=$1', [rows[0].file_id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/vmb/folders/:id', requireVmbManagerMiddleware, async (req, res) => {
+  const result = await query('DELETE FROM vmb_folders WHERE id=$1 RETURNING file_id', [req.params.id]);
+  if (!result.rows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  await query('UPDATE vmb_files SET updated_at=NOW() WHERE id=$1', [result.rows[0].file_id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/vmb/folders/:id/pages', requireVmbManagerMiddleware, async (req, res) => {
+  const { rows: folderRows } = await query('SELECT * FROM vmb_folders WHERE id=$1', [req.params.id]);
+  if (!folderRows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  const title = String(req.body.title || '').trim();
+  const content = String(req.body.content || '').trim();
+  if (!title || !content) return res.status(400).json({ error: 'Sayfa adı ve içerik zorunlu' });
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS count FROM vmb_pages WHERE folder_id=$1', [req.params.id]);
+  const { rows } = await query(`INSERT INTO vmb_pages(folder_id,title,content,page_num,slug,image_url,created_by)
+    VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [req.params.id, title, content, countRows[0].count + 1, `vmb-page-${randomUUID().slice(0, 8)}`, String(req.body.image_url || ''), req.user.id]);
+  await query('UPDATE vmb_folders SET updated_at=NOW() WHERE id=$1', [req.params.id]);
+  res.json(rows[0]);
+});
+
+app.put('/api/vmb/folder/:id/page/:pageSlug', requireVmbManagerMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM vmb_pages WHERE folder_id=$1 AND slug=$2', [req.params.id, req.params.pageSlug]);
+  if (!rows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+  const title = String(req.body.title ?? rows[0].title).trim();
+  const content = String(req.body.content ?? rows[0].content).trim();
+  if (!title || !content) return res.status(400).json({ error: 'Sayfa adı ve içerik zorunlu' });
+  const { rows: updated } = await query('UPDATE vmb_pages SET title=$1,content=$2,image_url=$3,updated_at=NOW() WHERE id=$4 RETURNING *',
+    [title, content, String(req.body.image_url ?? rows[0].image_url).trim(), rows[0].id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/vmb/folder/:id/page/:pageSlug', requireVmbManagerMiddleware, async (req, res) => {
+  const result = await query('DELETE FROM vmb_pages WHERE folder_id=$1 AND slug=$2 RETURNING id,folder_id', [req.params.id, req.params.pageSlug]);
+  if (!result.rows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+  await query(`WITH ordered AS (
+    SELECT id, ROW_NUMBER() OVER (ORDER BY page_num ASC, id ASC)::int AS next_num
+    FROM vmb_pages WHERE folder_id=$1
+  ) UPDATE vmb_pages p SET page_num=ordered.next_num FROM ordered WHERE p.id=ordered.id`, [req.params.id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/vmb/folders/:id/assets', requireVmbManagerMiddleware, (req, res, next) => {
+  vmbUpload.single('file')(req, res, error => {
+    if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Dosya boyutu 50 MB sınırını geçemez.' : error.message });
+    next();
+  });
+}, async (req, res) => {
+  const { rows: folderRows } = await query('SELECT id FROM vmb_folders WHERE id=$1', [req.params.id]);
+  if (!folderRows.length) return res.status(404).json({ error: 'Klasör bulunamadı' });
+  if (!req.file) return res.status(400).json({ error: 'Dosya seçin' });
+  try {
+    const url = await handleVmbUpload(req.file);
+    const name = String(req.body.name || req.file.originalname || 'Dosya').trim().slice(0, 180);
+    const { rows } = await query(`INSERT INTO vmb_assets(folder_id,name,url,mime_type,size_bytes,created_by)
+      VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [req.params.id, name || 'Dosya', url, req.file.mimetype || 'application/octet-stream', req.file.size || 0, req.user.id]);
+    res.json(rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: 'Dosya yüklenemedi: ' + e.message });
+  }
+});
+
+app.delete('/api/vmb/assets/:id', requireVmbManagerMiddleware, async (req, res) => {
+  const result = await query('DELETE FROM vmb_assets WHERE id=$1 RETURNING id', [req.params.id]);
+  if (!result.rows.length) return res.status(404).json({ error: 'Dosya bulunamadı' });
+  res.json({ ok: true });
 });
 
 // ===== FORUMS =====

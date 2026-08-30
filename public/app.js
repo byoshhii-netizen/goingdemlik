@@ -636,6 +636,9 @@ function renderRoute(fullPath) {
   if (path === '/bildirimler') return renderNotifications(app);
   if (path === '/vmb') return renderVmb(app, 'home');
   if (path === '/vmb/dosyalar' || path === '/vmb/dosyalara') return renderVmb(app, 'files');
+  if (path.startsWith('/vmb/dosyalar/') && segs.length === 3) return renderVmbFile(app, segs[2]);
+  if (path.startsWith('/vmb/dosyalar/') && segs.length === 5 && segs[3] === 'klasor') return renderVmbFolder(app, segs[4]);
+  if (path.startsWith('/vmb/dosyalar/') && segs.length === 7 && segs[3] === 'klasor' && segs[5] === 'sayfa') return renderVmbPageReader(app, segs[4], segs[6]);
   if (path === '/muzikler') return renderMusicList(app);
   if (path.startsWith('/muzik/')) return renderMusicDetail(app, segs[1]);
   if (path === '/reklampanel') return renderAdPortal(app);
@@ -6255,24 +6258,19 @@ async function renderVmb(app, section = 'home') {
   const files = Array.isArray(data.files) ? data.files : [];
   const filesHTML = files.length ? files.map((file, index) => {
     const item = typeof file === 'string' ? { name: file, url: file } : (file || {});
-    const href = safeLink(item.url || item.link || item.href);
+    const href = item.slug
+      ? { href: `/vmb/dosyalar/${encodeURIComponent(item.slug)}`, external: false }
+      : safeLink(item.url || item.link || item.href);
     const name = item.name || item.title || `VMB dosyası ${index + 1}`;
     const description = item.description || item.desc || '';
     const linkHTML = href.href !== '#'
-      ? `<a class="btn btn-outline btn-sm" href="${href.href}" ${href.external ? 'target="_blank" rel="noopener noreferrer"' : 'data-link'}><i class="fas fa-download"></i> Aç</a>`
+      ? `<a class="btn btn-outline btn-sm" href="${href.href}" ${href.external ? 'target="_blank" rel="noopener noreferrer"' : 'data-link'}><i class="fas fa-${item.slug ? 'folder-open' : 'download'}"></i> Aç</a>`
       : '<span class="vmb-file-missing">Bağlantı eklenmemiş</span>';
-    return `<article class="vmb-file-card"><div class="vmb-file-icon"><i class="fas fa-file-shield"></i></div><div class="vmb-file-copy"><strong>${escHtml(name)}</strong>${description ? `<p>${escHtml(description)}</p>` : ''}</div>${linkHTML}</article>`;
+    return `<article class="vmb-file-card"><div class="vmb-file-icon"><i class="fas fa-${item.slug ? 'folder-tree' : 'file-shield'}"></i></div><div class="vmb-file-copy"><strong>${escHtml(name)}</strong>${description ? `<p>${escHtml(description)}</p>` : ''}</div>${linkHTML}</article>`;
   }).join('') : '<div class="vmb-empty"><i class="fas fa-folder-open"></i><p>Henüz VMB dosyası eklenmemiş.</p></div>';
 
   if (section === 'files') {
-    app.innerHTML = `<div class="container page vmb-page">
-      <div class="vmb-page-header">
-        <div><div class="vmb-kicker"><i class="fas fa-shield"></i> VMB ÖZEL ALANI</div><h1 class="page-title">VMB Dosyaları</h1><p class="page-subtitle">Yalnızca VMB üyelerinin erişebildiği dosyalar.</p></div>
-        <a href="/vmb" data-link class="btn btn-outline"><i class="fas fa-arrow-left"></i> VMB ana sayfası</a>
-      </div>
-      <section class="card vmb-files-card"><div class="vmb-section-heading"><span><i class="fas fa-folder-open"></i> Dosyalar</span><small>${files.length} kayıt</small></div><div class="vmb-files-list">${filesHTML}</div></section>
-    </div>`;
-    return;
+    return renderVmbFiles(app);
   }
 
   const memberHTML = members.length ? members.map(member => {
@@ -6301,6 +6299,301 @@ async function renderVmb(app, section = 'home') {
     </div>
     <section class="card vmb-members-section"><div class="vmb-section-heading"><span><i class="fas fa-user-shield"></i> VMB üyeleri</span><small>${members.length} üye</small></div><div class="vmb-members-grid">${memberHTML}</div></section>
   </div>`;
+}
+
+function isVmbManager() {
+  return !!currentUser && String(currentUser.badge_name || '').trim().toLocaleLowerCase('tr-TR') === 'vmb yönetim';
+}
+
+function vmbSafeDate(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function vmbFileIcon(mime = '') {
+  if (mime.startsWith('image/')) return 'fa-image';
+  if (mime.startsWith('video/')) return 'fa-film';
+  if (mime.startsWith('audio/')) return 'fa-volume-up';
+  if (mime.includes('pdf')) return 'fa-file-pdf';
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('7z')) return 'fa-file-archive';
+  return 'fa-file-lines';
+}
+
+function vmbFormatBytes(bytes) {
+  const size = Number(bytes || 0);
+  if (!size) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  return `${(size / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function showVmbFileModal(file = null, onDone) {
+  const editing = !!file;
+  showModal(editing ? 'VMB dosyasını düzenle' : 'Yeni VMB dosyası', `
+    <div class="vmb-modal-intro"><span class="vmb-modal-icon"><i class="fas fa-shield-halved"></i></span><div><strong>${editing ? 'Dosya bilgilerini güncelle' : 'Yeni bir alan aç'}</strong><small>VMB üyelerinin güvenle erişeceği bir çalışma alanı.</small></div></div>
+    <div class="form-group"><label>Dosya adı</label><input id="vmb-file-title" maxlength="120" value="${editing ? escHtml(file.title || file.name || '') : ''}" placeholder="Örn. Yönetim arşivi" /></div>
+    <div class="form-group"><label>Kısa açıklama <span class="text-muted">(isteğe bağlı)</span></label><textarea id="vmb-file-description" rows="3" maxlength="300" placeholder="Bu dosyanın içinde neler var?">${editing ? escHtml(file.description || '') : ''}</textarea></div>
+    <button class="btn btn-primary vmb-modal-submit" id="vmb-file-submit"><i class="fas fa-${editing ? 'check' : 'plus'}"></i> ${editing ? 'Değişiklikleri kaydet' : 'Dosyayı oluştur'}</button>
+    <div id="vmb-file-error" class="form-error mt-4"></div>
+  `);
+  $('#vmb-file-submit').addEventListener('click', async () => {
+    const title = $('#vmb-file-title').value.trim();
+    const description = $('#vmb-file-description').value.trim();
+    if (!title) return ($('#vmb-file-error').textContent = 'Dosya adı zorunlu');
+    const button = $('#vmb-file-submit');
+    button.disabled = true;
+    try {
+      const result = await api(editing ? `/vmb/files/${encodeURIComponent(file.slug)}` : '/vmb/files', {
+        method: editing ? 'PUT' : 'POST',
+        body: JSON.stringify({ title, description })
+      });
+      hideModal();
+      toast(editing ? 'Dosya güncellendi' : 'Dosya oluşturuldu');
+      onDone?.(result);
+    } catch (error) {
+      $('#vmb-file-error').textContent = error.message;
+      button.disabled = false;
+    }
+  });
+}
+
+function showVmbFolderModal(fileId, parentId = null, folder = null, onDone) {
+  const editing = !!folder;
+  showModal(editing ? 'Klasörü düzenle' : 'Yeni klasör', `
+    <div class="vmb-modal-intro"><span class="vmb-modal-icon"><i class="fas fa-folder-open"></i></span><div><strong>${editing ? 'Klasör bilgilerini güncelle' : 'Dosyanın içine klasör ekle'}</strong><small>İç içe klasörlerle arşivini düzenli tut.</small></div></div>
+    <div class="form-group"><label>Klasör adı</label><input id="vmb-folder-name" maxlength="120" value="${editing ? escHtml(folder.name || '') : ''}" placeholder="Örn. Toplantı notları" /></div>
+    <div class="form-group"><label>Açıklama <span class="text-muted">(isteğe bağlı)</span></label><textarea id="vmb-folder-description" rows="3" maxlength="300">${editing ? escHtml(folder.description || '') : ''}</textarea></div>
+    <button class="btn btn-primary vmb-modal-submit" id="vmb-folder-submit"><i class="fas fa-${editing ? 'check' : 'folder-plus'}"></i> ${editing ? 'Klasörü kaydet' : 'Klasör oluştur'}</button>
+    <div id="vmb-folder-error" class="form-error mt-4"></div>
+  `);
+  $('#vmb-folder-submit').addEventListener('click', async () => {
+    const name = $('#vmb-folder-name').value.trim();
+    if (!name) return ($('#vmb-folder-error').textContent = 'Klasör adı zorunlu');
+    const button = $('#vmb-folder-submit');
+    button.disabled = true;
+    try {
+      const result = await api(editing ? `/vmb/folders/${folder.id}` : '/vmb/folders', {
+        method: editing ? 'PUT' : 'POST',
+        body: JSON.stringify({ file_id: fileId, parent_id: parentId, name, description: $('#vmb-folder-description').value.trim() })
+      });
+      hideModal();
+      toast(editing ? 'Klasör güncellendi' : 'Klasör oluşturuldu');
+      onDone?.(result);
+    } catch (error) {
+      $('#vmb-folder-error').textContent = error.message;
+      button.disabled = false;
+    }
+  });
+}
+
+function showVmbPageModal(folderId, page = null, onDone) {
+  const editing = !!page;
+  showModal(editing ? 'Sayfayı düzenle' : 'Yeni sayfa', `
+    <div class="vmb-modal-intro"><span class="vmb-modal-icon"><i class="fas fa-file-pen"></i></span><div><strong>${editing ? 'Sayfa içeriğini güncelle' : 'Okuma deneyimine yeni bir sayfa ekle'}</strong><small>Kitaplardaki gibi başlık ve akıcı metin düzeni kullanılır.</small></div></div>
+    <div class="form-group"><label>Sayfa adı</label><input id="vmb-page-title" maxlength="180" value="${editing ? escHtml(page.title || '') : ''}" placeholder="Örn. 1. Toplantı" /></div>
+    <div class="form-group"><label>İçerik</label><textarea id="vmb-page-content" rows="15" placeholder="Sayfanın içeriğini buraya yazın...">${editing ? escHtml(page.content || '') : ''}</textarea></div>
+    <div class="form-group"><label>Görsel bağlantısı <span class="text-muted">(isteğe bağlı)</span></label><input id="vmb-page-image" type="url" value="${editing ? escHtml(page.image_url || '') : ''}" placeholder="https://..." /></div>
+    <button class="btn btn-primary vmb-modal-submit" id="vmb-page-submit"><i class="fas fa-${editing ? 'check' : 'plus'}"></i> ${editing ? 'Sayfayı kaydet' : 'Sayfa ekle'}</button>
+    <div id="vmb-page-error" class="form-error mt-4"></div>
+  `);
+  $('#vmb-page-submit').addEventListener('click', async () => {
+    const title = $('#vmb-page-title').value.trim();
+    const content = $('#vmb-page-content').value.trim();
+    if (!title || !content) return ($('#vmb-page-error').textContent = 'Sayfa adı ve içerik zorunlu');
+    const button = $('#vmb-page-submit');
+    button.disabled = true;
+    try {
+      const result = await api(editing ? `/vmb/folder/${folderId}/page/${encodeURIComponent(page.slug)}` : `/vmb/folders/${folderId}/pages`, {
+        method: editing ? 'PUT' : 'POST',
+        body: JSON.stringify({ title, content, image_url: $('#vmb-page-image').value.trim() })
+      });
+      hideModal();
+      toast(editing ? 'Sayfa güncellendi' : 'Sayfa eklendi');
+      onDone?.(result);
+    } catch (error) {
+      $('#vmb-page-error').textContent = error.message;
+      button.disabled = false;
+    }
+  });
+}
+
+function showVmbAssetModal(folderId, onDone) {
+  showModal('Dosya yükle', `
+    <div class="vmb-modal-intro"><span class="vmb-modal-icon"><i class="fas fa-cloud-arrow-up"></i></span><div><strong>Her türden dosyayı arşive ekle</strong><small>Belge, görsel, ses, video veya arşiv dosyası · 50 MB’a kadar</small></div></div>
+    <div class="form-group"><label>Dosya</label><input id="vmb-asset-file" type="file" /></div>
+    <div class="form-group"><label>Görünen ad <span class="text-muted">(isteğe bağlı)</span></label><input id="vmb-asset-name" maxlength="180" placeholder="Dosya adını değiştirmek için yazın" /></div>
+    <button class="btn btn-primary vmb-modal-submit" id="vmb-asset-submit"><i class="fas fa-upload"></i> Arşive yükle</button>
+    <div id="vmb-asset-error" class="form-error mt-4"></div>
+  `);
+  $('#vmb-asset-submit').addEventListener('click', async () => {
+    const file = $('#vmb-asset-file').files[0];
+    if (!file) return ($('#vmb-asset-error').textContent = 'Bir dosya seçin');
+    const button = $('#vmb-asset-submit');
+    button.disabled = true;
+    const form = new FormData();
+    form.append('file', file);
+    form.append('name', $('#vmb-asset-name').value.trim());
+    try {
+      await apiForm(`/vmb/folders/${folderId}/assets`, form);
+      hideModal();
+      toast('Dosya arşive eklendi');
+      onDone?.();
+    } catch (error) {
+      $('#vmb-asset-error').textContent = error.message;
+      button.disabled = false;
+    }
+  });
+}
+
+async function renderVmbFiles(app) {
+  document.title = 'VMB Dosyaları - ' + siteName;
+  updatePageMeta('VMB Dosyaları - ' + siteName, 'VMB özel dosya arşivi.', '');
+  if (!currentUser?.is_vmb) return renderNotFound(app);
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let data;
+  try { data = await api('/vmb/files'); } catch { return renderNotFound(app); }
+  const files = Array.isArray(data.files) ? data.files : [];
+  const legacy = Array.isArray(data.legacy_files) ? data.legacy_files : [];
+  const canManage = !!data.can_manage;
+  const cards = files.length ? files.map(file => `
+    <article class="vmb-library-card" data-vmb-file="${escHtml(file.slug)}">
+      <div class="vmb-library-icon"><i class="fas fa-folder-tree"></i></div>
+      <div class="vmb-library-copy"><strong>${escHtml(file.title)}</strong><p>${escHtml(file.description || 'VMB içinde düzenlenebilir bir çalışma alanı.')}</p><small><i class="fas fa-folder"></i> ${file.folder_count || 0} klasör · <i class="fas fa-file-lines"></i> ${file.page_count || 0} sayfa</small></div>
+      <div class="vmb-library-actions"><button class="btn btn-primary btn-sm vmb-open-file" data-slug="${escHtml(file.slug)}"><i class="fas fa-arrow-right"></i> Aç</button>${canManage ? `<button class="btn btn-ghost btn-sm vmb-edit-file" data-id="${file.id}"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm vmb-delete-file" data-slug="${escHtml(file.slug)}"><i class="fas fa-trash"></i></button>` : ''}</div>
+    </article>`).join('') : '';
+  const legacyCards = legacy.map((item, index) => {
+    const raw = typeof item === 'string' ? { name: item, url: item } : (item || {});
+    const url = String(raw.url || raw.link || raw.href || '');
+    return url ? `<a class="vmb-legacy-file" href="${escHtml(url)}" target="_blank" rel="noopener noreferrer"><span><i class="fas fa-link"></i><strong>${escHtml(raw.name || raw.title || `Bağlantı ${index + 1}`)}</strong></span><i class="fas fa-arrow-up-right-from-square"></i></a>` : '';
+  }).join('');
+  app.innerHTML = `<div class="container page vmb-page">
+    <div class="vmb-page-header"><div><div class="vmb-kicker"><i class="fas fa-shield"></i> VMB ÖZEL ALANI</div><h1 class="page-title">Dosya arşivi</h1><p class="page-subtitle">Klasörlere ayrılmış sayfaları oku, arşiv dosyalarını aç.</p></div><div class="vmb-header-actions"><a href="/vmb" data-link class="btn btn-outline"><i class="fas fa-arrow-left"></i> VMB ana sayfası</a>${canManage ? '<button class="btn btn-primary" id="vmb-new-file"><i class="fas fa-plus"></i> Yeni dosya</button>' : '<span class="vmb-readonly-pill"><i class="fas fa-eye"></i> Salt okunur</span>'}</div></div>
+    <section class="vmb-library-hero"><div class="vmb-library-hero-icon"><i class="fas fa-box-archive"></i></div><div><strong>VMB kütüphanesi</strong><p>${canManage ? 'VMB Yönetim rozetiyle içerik ekleyebilir ve düzenleyebilirsin.' : 'VMB üyeleri bu arşivi görüntüleyebilir ve okuyabilir.'}</p></div><span class="vmb-library-count">${files.length} dosya</span></section>
+    <section class="card vmb-files-card"><div class="vmb-section-heading"><span><i class="fas fa-folder-tree"></i> Çalışma alanları</span><small>${files.length} dosya</small></div><div class="vmb-library-list">${cards || '<div class="vmb-empty"><i class="fas fa-folder-open"></i><p>Henüz çalışma alanı oluşturulmamış.</p></div>'}</div></section>
+    ${legacyCards ? `<section class="card vmb-files-card vmb-legacy-card"><div class="vmb-section-heading"><span><i class="fas fa-link"></i> Eski bağlantılar</span><small>salt okunur</small></div><div class="vmb-legacy-list">${legacyCards}</div></section>` : ''}
+  </div>`;
+  $('#vmb-new-file')?.addEventListener('click', () => showVmbFileModal(null, () => renderVmbFiles(app)));
+  $$('.vmb-open-file').forEach(button => button.addEventListener('click', () => navigate(`/vmb/dosyalar/${encodeURIComponent(button.dataset.slug)}`)));
+  $$('.vmb-library-card').forEach(card => card.addEventListener('click', event => {
+    if (!event.target.closest('button')) navigate(`/vmb/dosyalar/${encodeURIComponent(card.dataset.vmbFile)}`);
+  }));
+  $$('.vmb-edit-file').forEach(button => button.addEventListener('click', async () => {
+    const file = files.find(item => String(item.id) === String(button.dataset.id));
+    if (file) showVmbFileModal(file, () => renderVmbFiles(app));
+  }));
+  $$('.vmb-delete-file').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Bu dosya ve içindeki tüm klasörler silinsin mi?')) return;
+    try { await api(`/vmb/files/${encodeURIComponent(button.dataset.slug)}`, { method: 'DELETE' }); toast('Dosya silindi'); renderVmbFiles(app); } catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+function vmbFolderCards(folders, canManage, fileId, onDone) {
+  return folders.length ? folders.map(folder => `
+    <article class="vmb-folder-card" data-folder-id="${folder.id}">
+      <div class="vmb-folder-icon"><i class="fas fa-folder"></i></div><div class="vmb-folder-copy"><strong>${escHtml(folder.name)}</strong><small>${folder.page_count || 0} sayfa · ${folder.asset_count || 0} dosya</small></div>
+      <div class="vmb-item-actions"><button class="btn btn-outline btn-sm vmb-open-folder" data-id="${folder.id}"><i class="fas fa-arrow-right"></i> Aç</button>${canManage ? `<button class="btn btn-ghost btn-sm vmb-edit-folder" data-id="${folder.id}"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm vmb-delete-folder" data-id="${folder.id}"><i class="fas fa-trash"></i></button>` : ''}</div>
+    </article>`).join('') : '<div class="vmb-empty"><i class="fas fa-folder-plus"></i><p>Bu alanda henüz klasör yok.</p></div>';
+}
+
+async function renderVmbFile(app, slug) {
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let data;
+  try { data = await api(`/vmb/files/${encodeURIComponent(slug)}`); } catch { return renderNotFound(app); }
+  const { file, folders } = data;
+  const canManage = !!data.can_manage;
+  app.innerHTML = `<div class="container page vmb-page">
+    <div class="vmb-breadcrumbs"><a href="/vmb/dosyalar" data-link><i class="fas fa-folder-tree"></i> Dosya arşivi</a><i class="fas fa-chevron-right"></i><strong>${escHtml(file.title)}</strong></div>
+    <section class="vmb-file-hero"><div class="vmb-file-hero-icon"><i class="fas fa-folder-open"></i></div><div class="vmb-file-hero-copy"><div class="vmb-kicker">VMB ÇALIŞMA ALANI</div><h1>${escHtml(file.title)}</h1><p>${escHtml(file.description || 'Klasörleri, sayfaları ve arşiv dosyalarını burada bulabilirsin.')}</p></div><div class="vmb-header-actions">${canManage ? `<button class="btn btn-outline" id="vmb-edit-current-file"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-primary" id="vmb-new-root-folder"><i class="fas fa-folder-plus"></i> Klasör ekle</button>` : '<span class="vmb-readonly-pill"><i class="fas fa-eye"></i> Görüntüleme modu</span>'}</div></section>
+    <section class="card vmb-content-card"><div class="vmb-section-heading"><span><i class="fas fa-folder"></i> Klasörler</span><small>${folders.length} klasör</small></div><div id="vmb-folder-list" class="vmb-folder-list">${vmbFolderCards(folders, canManage, file.id)}</div></section>
+  </div>`;
+  $('#vmb-edit-current-file')?.addEventListener('click', () => showVmbFileModal(file, () => renderVmbFile(app, slug)));
+  $('#vmb-new-root-folder')?.addEventListener('click', () => showVmbFolderModal(file.id, null, null, () => renderVmbFile(app, slug)));
+  $$('.vmb-open-folder').forEach(button => button.addEventListener('click', () => navigate(`/vmb/dosyalar/${encodeURIComponent(slug)}/klasor/${button.dataset.id}`)));
+  $$('.vmb-folder-card').forEach(card => card.addEventListener('click', event => {
+    if (!event.target.closest('button')) navigate(`/vmb/dosyalar/${encodeURIComponent(slug)}/klasor/${card.dataset.folderId}`);
+  }));
+  $$('.vmb-edit-folder').forEach(button => button.addEventListener('click', () => {
+    const folder = folders.find(item => String(item.id) === String(button.dataset.id));
+    if (folder) showVmbFolderModal(file.id, null, folder, () => renderVmbFile(app, slug));
+  }));
+  $$('.vmb-delete-folder').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
+    try { await api(`/vmb/folders/${button.dataset.id}`, { method: 'DELETE' }); toast('Klasör silindi'); renderVmbFile(app, slug); } catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+async function renderVmbFolder(app, folderId) {
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let data;
+  try { data = await api(`/vmb/folder/${folderId}`); } catch { return renderNotFound(app); }
+  const { folder, folders, pages, assets } = data;
+  const canManage = !!data.can_manage;
+  const assetCards = assets.length ? assets.map(asset => `<a class="vmb-asset-card" href="${escHtml(asset.url)}" target="_blank" rel="noopener noreferrer"><span class="vmb-asset-icon"><i class="fas ${vmbFileIcon(asset.mime_type)}"></i></span><span class="vmb-asset-copy"><strong>${escHtml(asset.name)}</strong><small>${escHtml(asset.mime_type || 'Dosya')} ${vmbFormatBytes(asset.size_bytes) ? `· ${vmbFormatBytes(asset.size_bytes)}` : ''}</small></span><i class="fas fa-arrow-up-right-from-square"></i>${canManage ? `<button class="vmb-asset-delete" data-id="${asset.id}" title="Arşivden kaldır"><i class="fas fa-trash"></i></button>` : ''}</a>`).join('') : '<div class="vmb-empty"><i class="fas fa-file-circle-plus"></i><p>Bu klasörde dosya yok.</p></div>';
+  const pageCards = pages.length ? pages.map(page => `<article class="vmb-page-card"><a href="/vmb/dosyalar/${escHtml(folder.file_slug)}/klasor/${folder.id}/sayfa/${escHtml(page.slug)}" data-link><span class="vmb-page-number">${page.page_num}</span><span><strong>${escHtml(page.title)}</strong><small>Okumak için aç</small></span><i class="fas fa-arrow-right"></i></a>${canManage ? `<div class="vmb-page-card-actions"><button class="btn btn-ghost btn-sm vmb-edit-page" data-slug="${escHtml(page.slug)}"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm vmb-delete-page" data-slug="${escHtml(page.slug)}"><i class="fas fa-trash"></i></button></div>` : ''}</article>`).join('') : '<div class="vmb-empty"><i class="fas fa-file-circle-plus"></i><p>Bu klasörde henüz sayfa yok.</p></div>';
+  app.innerHTML = `<div class="container page vmb-page">
+    <div class="vmb-breadcrumbs"><a href="/vmb/dosyalar" data-link><i class="fas fa-folder-tree"></i> Dosya arşivi</a><i class="fas fa-chevron-right"></i><a href="/vmb/dosyalar/${escHtml(folder.file_slug)}" data-link>${escHtml(folder.file_title)}</a><i class="fas fa-chevron-right"></i><strong>${escHtml(folder.name)}</strong></div>
+    <section class="vmb-folder-hero"><div class="vmb-file-hero-icon"><i class="fas fa-folder-open"></i></div><div class="vmb-file-hero-copy"><div class="vmb-kicker">VMB KLASÖRÜ</div><h1>${escHtml(folder.name)}</h1><p>${escHtml(folder.description || 'Bu klasördeki sayfaları okuyabilir ve arşiv dosyalarını açabilirsin.')}</p></div><div class="vmb-header-actions">${canManage ? '<button class="btn btn-outline" id="vmb-edit-current-folder"><i class="fas fa-pen"></i> Klasörü düzenle</button><button class="btn btn-primary" id="vmb-new-child-folder"><i class="fas fa-folder-plus"></i> Alt klasör</button>' : '<span class="vmb-readonly-pill"><i class="fas fa-eye"></i> Salt okunur</span>'}</div></section>
+    <div class="vmb-folder-toolbar">${canManage ? '<button class="btn btn-primary" id="vmb-new-page"><i class="fas fa-file-circle-plus"></i> Yeni sayfa</button><button class="btn btn-outline" id="vmb-upload-asset"><i class="fas fa-cloud-arrow-up"></i> Dosya yükle</button>' : '<span><i class="fas fa-lock"></i> İçerik yalnızca VMB Yönetim tarafından düzenlenebilir.</span>'}</div>
+    <section class="card vmb-content-card"><div class="vmb-section-heading"><span><i class="fas fa-folder"></i> Alt klasörler</span><small>${folders.length}</small></div><div class="vmb-folder-list">${vmbFolderCards(folders, canManage, folder.file_id)}</div></section>
+    <section class="card vmb-content-card"><div class="vmb-section-heading"><span><i class="fas fa-book-open"></i> Okunabilir sayfalar</span><small>${pages.length} sayfa</small></div><div class="vmb-page-list">${pageCards}</div></section>
+    <section class="card vmb-content-card"><div class="vmb-section-heading"><span><i class="fas fa-paperclip"></i> Arşiv dosyaları</span><small>${assets.length} dosya</small></div><div class="vmb-assets-list">${assetCards}</div></section>
+  </div>`;
+  $('#vmb-edit-current-folder')?.addEventListener('click', () => showVmbFolderModal(folder.file_id, folder.parent_id, folder, () => renderVmbFolder(app, folderId)));
+  $('#vmb-new-child-folder')?.addEventListener('click', () => showVmbFolderModal(folder.file_id, folder.id, null, () => renderVmbFolder(app, folderId)));
+  $('#vmb-new-page')?.addEventListener('click', () => showVmbPageModal(folder.id, null, () => renderVmbFolder(app, folderId)));
+  $('#vmb-upload-asset')?.addEventListener('click', () => showVmbAssetModal(folder.id, () => renderVmbFolder(app, folderId)));
+  $$('.vmb-open-folder').forEach(button => button.addEventListener('click', () => navigate(`/vmb/dosyalar/${encodeURIComponent(folder.file_slug)}/klasor/${button.dataset.id}`)));
+  $$('.vmb-folder-card').forEach(card => card.addEventListener('click', event => { if (!event.target.closest('button')) navigate(`/vmb/dosyalar/${encodeURIComponent(folder.file_slug)}/klasor/${card.dataset.folderId}`); }));
+  $$('.vmb-edit-folder').forEach(button => button.addEventListener('click', () => {
+    const child = folders.find(item => String(item.id) === String(button.dataset.id));
+    if (child) showVmbFolderModal(folder.file_id, folder.id, child, () => renderVmbFolder(app, folderId));
+  }));
+  $$('.vmb-delete-folder').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
+    try { await api(`/vmb/folders/${button.dataset.id}`, { method: 'DELETE' }); toast('Klasör silindi'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
+  }));
+  $$('.vmb-edit-page').forEach(button => button.addEventListener('click', () => {
+    const page = pages.find(item => String(item.slug) === String(button.dataset.slug));
+    if (page) showVmbPageModal(folder.id, page, () => renderVmbFolder(app, folderId));
+  }));
+  $$('.vmb-delete-page').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Bu sayfa silinsin mi?')) return;
+    try { await api(`/vmb/folder/${folder.id}/page/${encodeURIComponent(button.dataset.slug)}`, { method: 'DELETE' }); toast('Sayfa silindi'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
+  }));
+  $$('.vmb-asset-delete').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault(); event.stopPropagation();
+    if (!confirm('Bu arşiv dosyası kaldırılsın mı?')) return;
+    try { await api(`/vmb/assets/${button.dataset.id}`, { method: 'DELETE' }); toast('Dosya kaldırıldı'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
+  }));
+}
+
+async function renderVmbPageReader(app, folderId, pageSlug) {
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let data;
+  try { data = await api(`/vmb/folder/${folderId}/page/${encodeURIComponent(pageSlug)}`); } catch { return renderNotFound(app); }
+  const { page, prev, next } = data;
+  const fontSize = parseInt(localStorage.getItem('ebook-font-size') || '17', 10);
+  const canManage = isVmbManager();
+  app.innerHTML = `<div class="container page vmb-page">
+    <div class="vmb-breadcrumbs"><a href="/vmb/dosyalar" data-link><i class="fas fa-folder-tree"></i> Dosya arşivi</a><i class="fas fa-chevron-right"></i><a href="/vmb/dosyalar/${escHtml(page.file_slug)}/klasor/${page.folder_id}" data-link>${escHtml(page.folder_name)}</a><i class="fas fa-chevron-right"></i><strong>${escHtml(page.title)}</strong></div>
+    <div class="vmb-reader-wrap">
+      <div class="ebook-reader vmb-reader">
+        <div class="ebook-toolbar"><a href="/vmb/dosyalar/${escHtml(page.file_slug)}/klasor/${page.folder_id}" data-link class="btn btn-ghost btn-sm"><i class="fas fa-arrow-left"></i> Klasöre dön</a><div class="font-size-controls"><button id="vmb-font-dec" title="Küçük">A-</button><span id="vmb-font-label">${fontSize}px</span><button id="vmb-font-inc" title="Büyük">A+</button></div><span class="vmb-reader-badge"><i class="fas fa-book-open"></i> VMB okuma modu</span></div>
+        <article class="ebook-page-content vmb-reader-content" id="vmb-reader-content" style="font-size:${fontSize}px">${page.image_url ? `<img src="${escHtml(page.image_url)}" class="ebook-page-image" alt="" />` : ''}<div class="book-title-heading">${escHtml(page.title)}</div><div class="book-text">${escHtml(String(page.content || '').trim())}</div></article>
+        <div class="ebook-nav">${prev ? `<a href="/vmb/dosyalar/${escHtml(page.file_slug)}/klasor/${page.folder_id}/sayfa/${escHtml(prev.slug)}" data-link class="ebook-nav-btn"><i class="fas fa-arrow-left"></i><div><small>Önceki</small><span>${escHtml(prev.title)}</span></div></a>` : '<div></div>'}<span class="vmb-reader-position">${page.page_num}</span>${next ? `<a href="/vmb/dosyalar/${escHtml(page.file_slug)}/klasor/${page.folder_id}/sayfa/${escHtml(next.slug)}" data-link class="ebook-nav-btn"><div><small>Sonraki</small><span>${escHtml(next.title)}</span></div><i class="fas fa-arrow-right"></i></a>` : '<div></div>'}</div>
+      </div>
+      ${canManage ? `<div class="vmb-reader-actions"><button class="btn btn-outline" id="vmb-reader-edit"><i class="fas fa-pen"></i> Sayfayı düzenle</button><button class="btn btn-ghost" id="vmb-reader-delete"><i class="fas fa-trash"></i> Sayfayı sil</button></div>` : ''}
+    </div>
+  </div>`;
+  const content = $('#vmb-reader-content');
+  $('#vmb-font-dec').addEventListener('click', () => { const current = parseInt(content.style.fontSize) || fontSize; if (current > 12) { content.style.fontSize = `${current - 1}px`; $('#vmb-font-label').textContent = `${current - 1}px`; localStorage.setItem('ebook-font-size', current - 1); } });
+  $('#vmb-font-inc').addEventListener('click', () => { const current = parseInt(content.style.fontSize) || fontSize; if (current < 26) { content.style.fontSize = `${current + 1}px`; $('#vmb-font-label').textContent = `${current + 1}px`; localStorage.setItem('ebook-font-size', current + 1); } });
+  $('#vmb-reader-edit')?.addEventListener('click', () => showVmbPageModal(page.folder_id, page, () => renderVmbPageReader(app, folderId, pageSlug)));
+  $('#vmb-reader-delete')?.addEventListener('click', async () => {
+    if (!confirm('Bu sayfa silinsin mi?')) return;
+    try { await api(`/vmb/folder/${page.folder_id}/page/${encodeURIComponent(page.slug)}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate(`/vmb/dosyalar/${page.file_slug}/klasor/${page.folder_id}`); } catch (error) { toast(error.message, 'error'); }
+  });
 }
 
 async function renderFriends(app) {
