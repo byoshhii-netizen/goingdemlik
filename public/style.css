@@ -453,9 +453,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
   .nav-mobile-toggle { display: block; margin-left: 4px; }
-  .nav-brand { position: absolute; left: 50%; transform: translateX(-50%); flex: none; }
-  .nav-brand span:not(.site-wordmark) { display: none; }
-  .nav-brand .site-wordmark { display: inline; }
+  /* Mobil başlıkta marka ortada durmasın; alan işlemlere ayrılsın. */
+  .nav-brand { display: none !important; }
   #nav-user { display: none !important; }
   .mobile-header-action { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; font-size: 17px; }
   .mobile-new-wrap { order: 1; }

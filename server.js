@@ -954,9 +954,13 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Direct URL'lerde de VMB alanını üyelik olmadan sunma. Oturum açılırken HttpOnly cookie
-// bırakıldığı için tarayıcıdan doğrudan gelen yetkili istekler burada doğrulanabilir.
-app.get(/^\/vmb(?:\/dosyalar(?:\/.*)?|\/dosyalara(?:\/.*)?)?$/, async (req, res) => {
+// VMB tanıtım sayfası herkese açık; özel dosya yolları üyelik gerektirir.
+app.get('/vmb', (req, res) => {
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Özel dosya yolları doğrudan URL ile açıldığında da üyelik kontrolü yapılır.
+app.get(/^\/vmb\/(?:dosyalar|dosyalara)(?:\/.*)?$/, async (req, res) => {
   try {
     const token = getSessionCookie(req);
     if (!token) return res.redirect('/');
@@ -1485,6 +1489,18 @@ app.delete('/api/notifications/:id', authMiddleware, async (req, res) => {
 });
 
 // ===== VMB ÖZEL ALANI =====
+app.get('/api/vmb/public', async (req, res) => {
+  try {
+    const { rows } = await query(
+      "SELECT key,value FROM settings WHERE key IN ('vmb_group_url','vmb_intro','vmb_founder','vmb_image_url')"
+    );
+    const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
+    res.json({ ...settings, members: [], files: [] });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
   try {
     const includeHidden = hasVmbManagementBadge(req.user);

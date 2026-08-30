@@ -6238,12 +6238,14 @@ function hasVmbAccess(user = currentUser) {
 async function renderVmb(app, section = 'home') {
   document.title = (section === 'files' ? 'VMB Dosyaları' : 'VMB') + ' - ' + siteName;
   updatePageMeta('VMB - ' + siteName, 'Vecd ile Müdafaa Birliği özel alanı.', '');
-  if (!hasVmbAccess()) return renderNotFound(app);
+  if (section === 'files' && !hasVmbAccess()) {
+    return renderLogin(app);
+  }
 
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let data;
   try {
-    data = await api('/vmb');
+    data = await api(hasVmbAccess() ? '/vmb' : '/vmb/public');
   } catch {
     return renderNotFound(app);
   }
