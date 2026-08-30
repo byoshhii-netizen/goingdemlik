@@ -994,7 +994,7 @@ function updateNavUI() {
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
-      <a href="/vmb-panel" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield-halved" style="width:18px"></i> VMB</a>
+      <a href="/vmb" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield-halved" style="width:18px"></i> VMB</a>
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
     $('#mob-logout')?.addEventListener('click', async () => {
