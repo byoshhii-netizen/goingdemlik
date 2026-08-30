@@ -187,7 +187,12 @@ async function initDb() {
     INSERT INTO settings (key, value) VALUES
       ('route_protection_enabled', '0'),
       ('protected_routes', '["/admin","/yonetim","/yonetici","/yonet"]'),
-      ('route_redirect', '/')
+      ('route_redirect', '/'),
+      ('vmb_group_url', '/grup/vmb'),
+      ('vmb_intro', 'Vecd ile Müdafaa Birliği: güven, dayanışma ve sorumluluk etrafında bir araya gelen özel topluluk.'),
+      ('vmb_founder', 'VMB Kurucusu'),
+      ('vmb_image_url', '/vmb-emblem.svg'),
+      ('vmb_files', '[]')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
@@ -444,8 +449,16 @@ async function initDb() {
         name TEXT NOT NULL,
         icon TEXT DEFAULT '',
         color TEXT DEFAULT '#6b7280',
+        is_hidden INTEGER DEFAULT 0,
+        is_system INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT NOW()
       );
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS is_hidden INTEGER DEFAULT 0;
+      ALTER TABLE badges ADD COLUMN IF NOT EXISTS is_system INTEGER DEFAULT 0;
+      INSERT INTO badges (name, icon, color, is_hidden, is_system, created_at)
+      SELECT 'VMB', 'fas fa-shield', '#facc15', 1, 1, NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM badges WHERE name='VMB');
+      UPDATE badges SET icon='fas fa-shield', color='#facc15', is_hidden=1, is_system=1 WHERE name='VMB';
 
       CREATE TABLE IF NOT EXISTS gifts (
         id BIGSERIAL PRIMARY KEY,
@@ -735,6 +748,8 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_icon TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_color TEXT DEFAULT '#6b7280';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_display TEXT DEFAULT 'level';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_vmb INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS vmb_granted_at TIMESTAMP;
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;

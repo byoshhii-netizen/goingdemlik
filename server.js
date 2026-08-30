@@ -285,6 +285,10 @@ function sanitizeUser(u) {
   return rest;
 }
 
+function isReservedVmbBadgeName(value) {
+  return String(value || '').trim().toLocaleUpperCase('tr-TR') === 'VMB';
+}
+
 app.get('/api/link-preview', async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '').trim();
@@ -333,6 +337,13 @@ async function authMiddleware(req, res, next) {
   if (users[0].banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
   req.user = users[0];
   next();
+}
+
+async function requireVmbMiddleware(req, res, next) {
+  await authMiddleware(req, res, () => {
+    if (!req.user.is_vmb) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+    next();
+  });
 }
 
 async function optionalAuth(req, res, next) {
@@ -384,7 +395,7 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/user\/\d+\/2fa$/,
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
-      /^\/api\/admin\/user\/\d+\/badge$/, /^\/api\/admin\/songs\/\d+\/ban$/,
+      /^\/api\/admin\/user\/\d+\/(badge|vmb)$/, /^\/api\/admin\/songs\/\d+\/ban$/,
       /^\/api\/admin\/group\/\d+\/(status|messages)$/, /^\/api\/admin\/group\/\d+$/,
       /^\/api\/admin\/levels?(?:\/\d+)?$/
     ];
@@ -778,7 +789,7 @@ app.get('/api/admin/me', adminMiddleware, (req, res) => {
 // ===== ADMIN BADGES API =====
 app.get('/api/admin/badges', adminMiddleware, async (req, res) => {
   try {
-    const { rows } = await query('SELECT * FROM badges ORDER BY id DESC');
+    const { rows } = await query('SELECT * FROM badges WHERE COALESCE(is_hidden,0)=0 ORDER BY id DESC');
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -787,6 +798,7 @@ app.post('/api/admin/badges', adminMiddleware, async (req, res) => {
   try {
     const { name, icon, color } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim gerekli' });
+    if (isReservedVmbBadgeName(name)) return res.status(400).json({ error: 'VMB adı özel sistem rozeti için ayrılmıştır' });
     const { rows } = await query('INSERT INTO badges(name,icon,color,created_at) VALUES($1,$2,$3,NOW()) RETURNING *', [name, icon||'', color||'#6b7280']);
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -795,6 +807,8 @@ app.post('/api/admin/badges', adminMiddleware, async (req, res) => {
 app.delete('/api/admin/badges/:id', adminMiddleware, async (req, res) => {
   try {
     const id = req.params.id;
+    const { rows: badgeRows } = await query('SELECT is_system FROM badges WHERE id=$1', [id]);
+    if (badgeRows[0]?.is_system) return res.status(403).json({ error: 'Sistem rozeti silinemez' });
     await query('DELETE FROM badges WHERE id=$1', [id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -805,9 +819,52 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
   try {
     const id = req.params.id;
     const { badge_name, badge_icon, badge_color } = req.body;
+    if (isReservedVmbBadgeName(badge_name)) return res.status(400).json({ error: 'VMB özel rozeti ayrı VMB işlemiyle verilir' });
     await query('UPDATE users SET badge_name=$1, badge_icon=$2, badge_color=$3 WHERE id=$4', [badge_name||null, badge_icon||null, badge_color||null, id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// VMB, normal rozetlerden bağımsız ve herkese açık rozet listesinde görünmeyen sistem üyeliğidir.
+app.put('/api/admin/user/:id/vmb', adminMiddleware, async (req, res) => {
+  try {
+    if (!req.adminUser.isSuperAdmin && !hasAdminPermission(req.adminUser.permissions, 'can_assign_badges')) {
+      return res.status(403).json({ error: 'VMB rozeti verme yetkiniz yok' });
+    }
+    const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    const user = rows[0];
+    const grant = req.body.is_vmb === true || req.body.is_vmb === 1 || req.body.is_vmb === '1' || req.body.is_vmb === 'true';
+    const wasMember = !!user.is_vmb;
+    await query('UPDATE users SET is_vmb=$1, vmb_granted_at=$2 WHERE id=$3', [grant ? 1 : 0, grant ? (wasMember ? user.vmb_granted_at || new Date() : new Date()) : null, user.id]);
+    if (grant && !wasMember) {
+      await query(
+        `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [user.id, 'vmb_granted', 'VMB', '', 'VMB üyeliği', "Vecd ile Müdafaa Birliğin'in bir üyesisiniz.", '/vmb']
+      );
+    }
+    await logAction(req.adminUser.username || 'admin', grant ? 'grant_vmb' : 'revoke_vmb', user.username);
+    const { rows: updated } = await query('SELECT * FROM users WHERE id=$1', [user.id]);
+    res.json(sanitizeUser(updated[0]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Direct URL'lerde de VMB alanını üyelik olmadan sunma. Oturum açılırken HttpOnly cookie
+// bırakıldığı için tarayıcıdan doğrudan gelen yetkili istekler burada doğrulanabilir.
+app.get(['/vmb', '/vmb/dosyalar', '/vmb/dosyalara'], async (req, res) => {
+  try {
+    const token = getSessionCookie(req);
+    if (!token) return res.redirect('/');
+    const { rows } = await query(
+      'SELECT u.is_vmb FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW() AND u.banned=0',
+      [token]
+    );
+    if (!rows[0]?.is_vmb) return res.redirect('/');
+    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  } catch {
+    return res.redirect('/');
+  }
 });
 
 // ===== AUTH =====
@@ -1321,6 +1378,44 @@ app.post('/api/notifications/read-all', authMiddleware, async (req, res) => {
 app.delete('/api/notifications/:id', authMiddleware, async (req, res) => {
   await query('DELETE FROM notifications WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
   res.json({ ok: true });
+});
+
+// ===== VMB ÖZEL ALANI =====
+app.get('/api/vmb', requireVmbMiddleware, async (req, res) => {
+  try {
+    const { rows: settingRows } = await query(
+      "SELECT key,value FROM settings WHERE key IN ('vmb_group_url','vmb_intro','vmb_founder','vmb_image_url','vmb_files')"
+    );
+    const settings = Object.fromEntries(settingRows.map(row => [row.key, row.value]));
+    let files = [];
+    try {
+      const parsed = JSON.parse(settings.vmb_files || '[]');
+      if (Array.isArray(parsed)) files = parsed;
+    } catch {}
+    const { rows: members } = await query(
+      `SELECT id,username,avatar,avatar_removed,bio,created_at
+       FROM users WHERE is_vmb=1 AND banned=0 ORDER BY username ASC`
+    );
+    res.json({
+      badge: { name: 'VMB', icon: 'fas fa-shield', color: '#facc15' },
+      image_url: settings.vmb_image_url || '',
+      intro: settings.vmb_intro || 'Vecd ile Müdafaa Birliği: özel üyeler alanı.',
+      founder: settings.vmb_founder || 'VMB Kurucusu',
+      group_url: settings.vmb_group_url || '/grup/vmb',
+      files,
+      members
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/vmb/files', requireVmbMiddleware, async (req, res) => {
+  const { rows } = await query("SELECT value FROM settings WHERE key='vmb_files'");
+  let files = [];
+  try {
+    const parsed = JSON.parse(rows[0]?.value || '[]');
+    if (Array.isArray(parsed)) files = parsed;
+  } catch {}
+  res.json({ files });
 });
 
 // ===== FORUMS =====
@@ -2369,6 +2464,7 @@ app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
   const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_progress, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
   const canSetBadge = req.user.is_vip || req.user.is_plus;
+  if (canSetBadge && isReservedVmbBadgeName(badge_name)) return res.status(400).json({ error: 'VMB özel rozeti profil ayarlarından verilemez' });
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
   let resolvedColorMode = name_color_mode ?? req.user.name_color_mode ?? 'solid';
   let resolvedGradient = name_gradient !== undefined ? name_gradient : (req.user.name_gradient || '');
@@ -3006,6 +3102,7 @@ app.put('/api/admin/user/:id', adminMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = rows[0];
   const { username, email, password, is_vip, is_plus, name_color, level_id, title, badge_name, badge_icon, badge_color } = req.body;
+  if (isReservedVmbBadgeName(badge_name)) return res.status(400).json({ error: 'VMB özel rozeti ayrı VMB işlemiyle verilir' });
   const newPwHash = password ? hashPassword(password) : user.password_hash;
   await query('UPDATE users SET username=$1,email=$2,password_hash=$3,is_vip=$4,is_plus=$5,name_color=$6,level_id=$7,title=$8,badge_name=$9,badge_icon=$10,badge_color=$11 WHERE id=$12',
     [username||user.username, email||user.email, newPwHash,

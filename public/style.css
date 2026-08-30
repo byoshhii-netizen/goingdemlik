@@ -399,6 +399,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   transition: all 0.2s;
 }
 .nav-link:hover, .nav-link.active { color: var(--text-primary); background: rgba(189,162,117,0.1); }
+.vmb-nav-link { color: #facc15 !important; }
+.vmb-nav-link:hover, .vmb-nav-link.active { color: #fff3a3 !important; background: rgba(250,204,21,0.12) !important; }
+.vmb-nav-link i, .vmb-mobile-link i { color: #facc15; }
 .mobile-header-action { display: none; background: none; border: 0; color: var(--text-secondary); position: relative; }
 .nav-auth { display: flex; gap: 8px; align-items: center; }
 .nav-user { position: relative; display: flex; align-items: center; gap: 8px; }
@@ -440,6 +443,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .mobile-menu { display: none; flex-direction: column; padding: 8px 20px 12px; gap: 2px; }
 .mobile-nav-link { padding: 10px 12px; border-radius: var(--radius-sm); color: var(--text-secondary); font-size: 15px; }
 .mobile-nav-link:hover { color: var(--text-primary); background: rgba(189,162,117,0.08); }
+.vmb-mobile-link { color: #facc15 !important; font-weight: 700; background: rgba(250,204,21,0.06); }
 .nav-mobile-toggle { display: none; background: none; border: none; color: var(--text-primary); font-size: 20px; }
 .mobile-header-action { display: none; background: none; border: 0; color: var(--text-secondary); position: relative; }
 .mobile-new-wrap, .nav-mobile-new-toggle, .mobile-new-dropdown { display: none; }
@@ -1178,6 +1182,59 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
 .level-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; border: 1px solid; }
 .progress-bar { background: var(--bg-card2); border-radius: 4px; height: 6px; overflow: hidden; margin-top: 6px; }
 .progress-fill { height: 100%; background: var(--grad-red); border-radius: 4px; transition: width 0.4s; }
+
+/* ===== VMB ÖZEL ALANI ===== */
+.vmb-page { max-width: 1040px; }
+.vmb-hero { display:grid; grid-template-columns:minmax(230px, .9fr) minmax(0, 1.35fr); gap:28px; align-items:center; padding:26px; margin-bottom:18px; border:1px solid rgba(250,204,21,.35); border-radius:var(--radius); background:linear-gradient(135deg,rgba(250,204,21,.12),var(--bg-card) 48%,rgba(250,204,21,.04)); box-shadow:0 14px 50px rgba(0,0,0,.2); }
+.vmb-hero-art { overflow:hidden; border-radius:18px; background:#171305; border:1px solid rgba(250,204,21,.3); aspect-ratio:3/2; }
+.vmb-hero-art img { width:100%; height:100%; display:block; object-fit:cover; }
+.vmb-kicker { color:#facc15; font-size:11px; font-weight:800; letter-spacing:1.8px; margin-bottom:9px; }
+.vmb-hero-copy h1 { margin:0 0 10px; font-size:clamp(28px,4vw,44px); line-height:1.05; }
+.vmb-hero-copy p { margin:0; color:var(--text-secondary); line-height:1.7; max-width:620px; }
+.vmb-hero-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:20px; }
+.vmb-group-button { background:linear-gradient(135deg,#facc15,#a87500); color:#171305 !important; font-weight:800; }
+.vmb-files-button { border-color:rgba(250,204,21,.45); color:#facc15; }
+.vmb-page-header { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:22px; }
+.vmb-page-header .page-title { margin-bottom:6px; }
+.vmb-info-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:18px; }
+.vmb-info-card { display:flex; align-items:flex-start; gap:14px; padding:20px; }
+.vmb-info-icon { width:40px; height:40px; flex:0 0 40px; display:flex; align-items:center; justify-content:center; color:#facc15; border:1px solid rgba(250,204,21,.35); border-radius:12px; background:rgba(250,204,21,.1); }
+.vmb-info-card small { display:block; color:#facc15; font-size:10px; letter-spacing:1.4px; font-weight:800; margin-bottom:7px; }
+.vmb-info-card p { margin:0; color:var(--text-secondary); line-height:1.55; }
+.vmb-members-section, .vmb-files-card { padding:20px; }
+.vmb-section-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; font-weight:800; }
+.vmb-section-heading span { display:flex; align-items:center; gap:8px; }
+.vmb-section-heading span i { color:#facc15; }
+.vmb-section-heading small { color:var(--text-muted); font-size:12px; font-weight:500; }
+.vmb-members-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
+.vmb-member-card { display:flex; align-items:center; gap:10px; min-width:0; padding:11px; color:inherit; border:1px solid var(--border); border-radius:12px; background:var(--bg-card2); transition:border-color .15s,transform .15s; }
+.vmb-member-card:hover { border-color:rgba(250,204,21,.5); transform:translateY(-1px); }
+.vmb-member-card img, .vmb-member-avatar-fallback { width:42px; height:42px; flex:0 0 42px; border-radius:50%; object-fit:cover; background:var(--bg-tertiary); }
+.vmb-member-avatar-fallback { display:flex; align-items:center; justify-content:center; color:#facc15; }
+.vmb-member-card span:not(.vmb-member-avatar-fallback) { min-width:0; flex:1; }
+.vmb-member-card strong, .vmb-member-card small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vmb-member-card small { color:var(--text-muted); font-size:11px; margin-top:3px; }
+.vmb-member-card > i { color:var(--text-muted); font-size:12px; }
+.vmb-files-list { display:grid; gap:10px; }
+.vmb-file-card { display:flex; align-items:center; gap:12px; padding:13px; border:1px solid var(--border); border-radius:12px; background:var(--bg-card2); }
+.vmb-file-icon { width:40px; height:40px; flex:0 0 40px; display:flex; align-items:center; justify-content:center; color:#facc15; border-radius:10px; background:rgba(250,204,21,.1); }
+.vmb-file-copy { flex:1; min-width:0; }
+.vmb-file-copy strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vmb-file-copy p { margin:4px 0 0; color:var(--text-muted); font-size:12px; }
+.vmb-file-missing { color:var(--text-muted); font-size:12px; }
+.vmb-empty { padding:34px 18px; color:var(--text-muted); text-align:center; }
+.vmb-empty i { display:block; color:rgba(250,204,21,.7); font-size:30px; margin-bottom:10px; }
+.vmb-empty p { margin:0; }
+@media (max-width:700px) {
+  .vmb-hero { grid-template-columns:1fr; padding:16px; gap:18px; }
+  .vmb-hero-art { max-height:260px; }
+  .vmb-info-grid { grid-template-columns:1fr; }
+  .vmb-page-header { align-items:flex-start; flex-direction:column; }
+  .vmb-page-header .btn { width:100%; justify-content:center; }
+  .vmb-members-section, .vmb-files-card { padding:14px; }
+  .vmb-file-card { align-items:flex-start; flex-wrap:wrap; }
+  .vmb-file-card .btn { margin-left:52px; }
+}
 
 /* ===== FORUM DETAIL ===== */
 .forum-detail { max-width: 800px; margin: 0 auto; overflow: hidden; }

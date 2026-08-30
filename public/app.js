@@ -634,6 +634,8 @@ function renderRoute(fullPath) {
   if (path.startsWith('/mesajlar/')) return renderMessages(app, segs[1]);
   if (path === '/arkadaslar') return renderFriends(app);
   if (path === '/bildirimler') return renderNotifications(app);
+  if (path === '/vmb') return renderVmb(app, 'home');
+  if (path === '/vmb/dosyalar' || path === '/vmb/dosyalara') return renderVmb(app, 'files');
   if (path === '/muzikler') return renderMusicList(app);
   if (path.startsWith('/muzik/')) return renderMusicDetail(app, segs[1]);
   if (path === '/reklampanel') return renderAdPortal(app);
@@ -967,6 +969,8 @@ function updateNavUI() {
   const mobNew = $('#mobile-new-dropdown');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
+  const desktopNav = document.querySelector('.nav-links');
+  const existingVmbLink = $('#vmb-nav-link');
 
   if (currentUser) {
     authEl.classList.add('hidden');
@@ -984,11 +988,17 @@ function updateNavUI() {
     if (mobAuth) mobAuth.classList.add('hidden');
     if (mobNew) mobNew.classList.add('hidden');
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
+    if (currentUser.is_vmb && desktopNav && !existingVmbLink) {
+      desktopNav.insertAdjacentHTML('beforeend', '<a href="/vmb" data-link class="nav-link vmb-nav-link" id="vmb-nav-link"><i class="fas fa-shield"></i> VMB</a>');
+    } else if (!currentUser.is_vmb) {
+      existingVmbLink?.remove();
+    }
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="${profileRoute(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
+      ${currentUser.is_vmb ? '<a href="/vmb" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield" style="width:18px"></i> VMB</a>' : ''}
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
     $('#mob-logout')?.addEventListener('click', async () => {
@@ -1013,6 +1023,7 @@ function updateNavUI() {
       }
     }
   } else {
+    existingVmbLink?.remove();
     authEl.classList.remove('hidden');
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -6217,6 +6228,79 @@ async function renderNotifications(app) {
     const list = $('#notif-page-list');
     if (list) list.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${e.message}</p></div>`;
   }
+}
+
+async function renderVmb(app, section = 'home') {
+  document.title = (section === 'files' ? 'VMB Dosyaları' : 'VMB') + ' - ' + siteName;
+  updatePageMeta('VMB - ' + siteName, 'Vecd ile Müdafaa Birliği özel alanı.', '');
+  if (!currentUser?.is_vmb) return renderNotFound(app);
+
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let data;
+  try {
+    data = await api('/vmb');
+  } catch {
+    return renderNotFound(app);
+  }
+
+  const safeLink = value => {
+    const raw = String(value || '').trim();
+    if (/^https?:\/\//i.test(raw)) return { href: escHtml(raw), external: true };
+    if (raw.startsWith('/')) return { href: escHtml(raw), external: false };
+    return { href: '#', external: false };
+  };
+  const groupLink = safeLink(data.group_url);
+  const imageUrl = String(data.image_url || '/vmb-emblem.svg');
+  const members = Array.isArray(data.members) ? data.members : [];
+  const files = Array.isArray(data.files) ? data.files : [];
+  const filesHTML = files.length ? files.map((file, index) => {
+    const item = typeof file === 'string' ? { name: file, url: file } : (file || {});
+    const href = safeLink(item.url || item.link || item.href);
+    const name = item.name || item.title || `VMB dosyası ${index + 1}`;
+    const description = item.description || item.desc || '';
+    const linkHTML = href.href !== '#'
+      ? `<a class="btn btn-outline btn-sm" href="${href.href}" ${href.external ? 'target="_blank" rel="noopener noreferrer"' : 'data-link'}><i class="fas fa-download"></i> Aç</a>`
+      : '<span class="vmb-file-missing">Bağlantı eklenmemiş</span>';
+    return `<article class="vmb-file-card"><div class="vmb-file-icon"><i class="fas fa-file-shield"></i></div><div class="vmb-file-copy"><strong>${escHtml(name)}</strong>${description ? `<p>${escHtml(description)}</p>` : ''}</div>${linkHTML}</article>`;
+  }).join('') : '<div class="vmb-empty"><i class="fas fa-folder-open"></i><p>Henüz VMB dosyası eklenmemiş.</p></div>';
+
+  if (section === 'files') {
+    app.innerHTML = `<div class="container page vmb-page">
+      <div class="vmb-page-header">
+        <div><div class="vmb-kicker"><i class="fas fa-shield"></i> VMB ÖZEL ALANI</div><h1 class="page-title">VMB Dosyaları</h1><p class="page-subtitle">Yalnızca VMB üyelerinin erişebildiği dosyalar.</p></div>
+        <a href="/vmb" data-link class="btn btn-outline"><i class="fas fa-arrow-left"></i> VMB ana sayfası</a>
+      </div>
+      <section class="card vmb-files-card"><div class="vmb-section-heading"><span><i class="fas fa-folder-open"></i> Dosyalar</span><small>${files.length} kayıt</small></div><div class="vmb-files-list">${filesHTML}</div></section>
+    </div>`;
+    return;
+  }
+
+  const memberHTML = members.length ? members.map(member => {
+    const avatar = member.avatar && !member.avatar_removed
+      ? `<img src="${escHtml(member.avatar)}" alt="" />`
+      : '<span class="vmb-member-avatar-fallback"><i class="fas fa-user"></i></span>';
+    return `<a href="${profileRoute(member.username)}" data-link class="vmb-member-card">${avatar}<span><strong>${escHtml(member.username)}</strong><small>${member.bio ? escHtml(member.bio) : 'VMB üyesi'}</small></span><i class="fas fa-arrow-right"></i></a>`;
+  }).join('') : '<div class="vmb-empty"><i class="fas fa-users-slash"></i><p>Henüz üye bulunmuyor.</p></div>';
+
+  app.innerHTML = `<div class="container page vmb-page">
+    <section class="vmb-hero">
+      <div class="vmb-hero-art"><img src="${escHtml(imageUrl)}" alt="VMB görseli" /></div>
+      <div class="vmb-hero-copy">
+        <div class="vmb-kicker"><i class="fas fa-shield"></i> ÖZEL ÜYELİK ALANI</div>
+        <h1>Vecd ile Müdafaa Birliği</h1>
+        <p>${escHtml(data.intro || '')}</p>
+        <div class="vmb-hero-actions">
+          ${groupLink.href !== '#' ? `<a href="${groupLink.href}" class="btn vmb-group-button" ${groupLink.external ? 'target="_blank" rel="noopener noreferrer"' : 'data-link'}><i class="fas fa-users"></i> VMB grubuna git</a>` : ''}
+          <a href="/vmb/dosyalar" data-link class="btn btn-outline vmb-files-button"><i class="fas fa-folder-open"></i> Dosyalar${files.length ? ` (${files.length})` : ''}</a>
+        </div>
+      </div>
+    </section>
+    <div class="vmb-info-grid">
+      <section class="card vmb-info-card"><div class="vmb-info-icon"><i class="fas fa-flag"></i></div><div><small>VMB TANITIMI</small><p>${escHtml(data.intro || 'VMB üyeleri için özel alan.')}</p></div></section>
+      <section class="card vmb-info-card"><div class="vmb-info-icon"><i class="fas fa-crown"></i></div><div><small>VMB KURUCUSU</small><p>${escHtml(data.founder || 'VMB Kurucusu')}</p></div></section>
+    </div>
+    <section class="card vmb-members-section"><div class="vmb-section-heading"><span><i class="fas fa-user-shield"></i> VMB üyeleri</span><small>${members.length} üye</small></div><div class="vmb-members-grid">${memberHTML}</div></section>
+  </div>`;
 }
 
 async function renderFriends(app) {
