@@ -218,6 +218,21 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
+    -- Tablo önceki bir sürümde oluşturulduysa CREATE TABLE IF NOT EXISTS
+    -- mevcut tabloya yeni kolon eklemez.
+    ALTER TABLE vmb_folders ADD COLUMN IF NOT EXISTS parent_id BIGINT;
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='vmb_folders_parent_id_fkey'
+          AND conrelid='vmb_folders'::regclass
+      ) THEN
+        ALTER TABLE vmb_folders
+          ADD CONSTRAINT vmb_folders_parent_id_fkey
+          FOREIGN KEY (parent_id) REFERENCES vmb_folders(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
     CREATE INDEX IF NOT EXISTS idx_vmb_folders_file_parent ON vmb_folders(file_id, parent_id, order_num);
 
     CREATE TABLE IF NOT EXISTS vmb_pages (
