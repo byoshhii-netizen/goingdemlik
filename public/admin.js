@@ -2324,6 +2324,21 @@ async function renderSettings(main) {
           <div id="s-first-visit-auth-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card adm-feature-card">
+        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Siteye Giriş Zorunluluğu</span><span class="adm-setting-status ${settings['auth_required']==='1'?'is-on':''}">${settings['auth_required']==='1'?'AÇIK':'KAPALI'}</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy">
+            <strong>Siteyi yalnızca giriş yapanlar gezsin</strong>
+            <p>Açıkken hesabıyla giriş yapmamış ziyaretçiler site sayfalarına erişemez ve giriş ekranına yönlendirilir. Hesabı açık olan kullanıcıların oturumu etkilenmez. Kapatıldığında sayfalar herkese açılır; yorum, mesaj ve paylaşım gibi mevcut giriş gerektiren işlemler yine giriş istemeye devam eder.</p>
+          </div>
+          <label class="adm-toggle-row" for="s-auth-required">
+            <span><i class="fas fa-user-check"></i> Site genelinde giriş zorunluluğunu etkinleştir</span>
+            <span class="adm-toggle"><input type="checkbox" id="s-auth-required" ${settings['auth_required']==='1'?'checked':''}><span></span></span>
+          </label>
+          <button class="btn btn-primary" id="s-auth-required-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Giriş Zorunluluğu Ayarını Kaydet</button>
+          <div id="s-auth-required-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card adm-feature-card settings-wide">
         <div class="card-header"><span><i class="fas fa-table-columns" style="color:var(--red2);margin-right:8px"></i>Profil Sekmeleri</span></div>
         <div class="card-body">
@@ -2532,6 +2547,13 @@ async function renderSettings(main) {
     await saveSetting('protected_routes', JSON.stringify(routes), msg);
     await saveSetting('route_redirect', redirect, msg);
     msg.style.color = 'var(--green)'; msg.textContent = 'Route koruma ayarları kaydedildi';
+  });
+
+  document.getElementById('s-auth-required-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-auth-required-msg');
+    await saveSetting('auth_required', document.getElementById('s-auth-required').checked ? '1' : '0', msg);
+    msg.style.color = 'var(--green)';
+    msg.textContent = 'Siteye giriş zorunluluğu ayarı kaydedildi';
   });
 
   const profileTabOptions = [

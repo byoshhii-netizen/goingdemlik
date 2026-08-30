@@ -195,6 +195,7 @@ async function initDb() {
       ('route_protection_enabled', '0'),
       ('protected_routes', '["/admin","/yonetim","/yonetici","/yonet"]'),
       ('route_redirect', '/'),
+      ('auth_required', '0'),
       ('vmb_group_url', '/grup/vmb'),
       ('vmb_intro', 'Vecd ile Müdafaa Birliği: güven, dayanışma ve sorumluluk etrafında bir araya gelen özel topluluk.'),
       ('vmb_founder', 'VMB Kurucusu'),

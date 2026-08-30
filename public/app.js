@@ -4,6 +4,7 @@ let activeStoryAudio = null;
 let storyComposerAudio = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
+let siteAuthRequired = false;
 let activeVoiceCall = null;
 let voiceCallPoll = null;
 let incomingCallPoll = null;
@@ -593,6 +594,13 @@ function renderRoute(fullPath) {
   }
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
+
+  // Site geneli giriş zorunluluğu: giriş/kayıt/şifre yenileme akışları
+  // anonim ziyaretçiye açık kalır; diğer tüm SPA sayfaları giriş ister.
+  if (siteAuthRequired && !currentUser && path !== '/giris' && path !== '/kayit' && !isForgotPasswordRoute(path)) {
+    const returnTo = path + (queryStr ? '?' + queryStr : '');
+    return navigate('/giris?returnTo=' + encodeURIComponent(returnTo), false);
+  }
 
   if (path === '/') {
     if (firstVisitAuthEnabled && !currentUser && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
@@ -4890,6 +4898,10 @@ async function renderSettingsSection(section) {
 
 function renderLogin(app) {
   if (currentUser) { navigate('/'); return; }
+  const requestedPath = new URLSearchParams(location.search).get('returnTo');
+  const returnTo = requestedPath && requestedPath.startsWith('/') && !requestedPath.startsWith('//')
+    ? requestedPath
+    : '/';
   document.title = 'Giriş Yap - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced card card-body">
@@ -4946,7 +4958,7 @@ function renderLogin(app) {
             const verified = await api('/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, value }) });
             currentToken = verified.token; currentUser = verified.user;
             localStorage.setItem('token', currentToken);
-            updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate('/');
+            updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate(returnTo);
           } catch (e) { $('#login-2fa-error').textContent = e.message; }
         };
         $('#login-2fa-btn').addEventListener('click', verify);
@@ -4990,7 +5002,7 @@ function renderLogin(app) {
             currentToken = loginData.token; currentUser = loginData.user;
             localStorage.setItem('token', currentToken);
             updateNavUI(); toast('Hesabın geri alındı, hoş geldin ' + currentUser.username + '!');
-            navigate('/');
+            navigate(returnTo);
           } catch(e) { toast(e.message, 'error'); }
         });
         $('#keep-delete-btn').addEventListener('click', () => {
@@ -5002,7 +5014,7 @@ function renderLogin(app) {
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
-      navigate('/');
+      navigate(returnTo);
     } catch (e) { $('#login-error').textContent = e.message; }
   };
 
@@ -5419,6 +5431,7 @@ async function init() {
     const ps = await fetch('/api/public-settings').then(r => r.json());
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
+    siteAuthRequired = ps.auth_required === '1';
     if (ps.light_primary_color) document.documentElement.style.setProperty('--light-accent', ps.light_primary_color);
     if (ps.light_background_color) document.documentElement.style.setProperty('--light-bg', ps.light_background_color);
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';

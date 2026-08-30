@@ -873,10 +873,39 @@ app.post('/api/admin/auth/login', async (req, res) => {
 
 // VMB tarzı route koruması: admin panelinden tanımlanan hassas yolları gizler.
 app.use(async (req, res, next) => {
-  if (req.path.startsWith('/api/') || req.path === '/gubukgak' || req.method !== 'GET') return next();
+  // API'ler kendi auth middleware'lerini kullanır. Admin/VMB giriş ekranları da
+  // site geneli giriş zorunluluğu açıkken erişilebilir kalmalıdır.
+  if (
+    req.path.startsWith('/api/') ||
+    req.path === '/gubukgak' ||
+    req.path === '/vmb-panel' ||
+    req.path === '/vmb-panel.html' ||
+    req.method !== 'GET' ||
+    path.extname(req.path)
+  ) return next();
   try {
-    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect')");
+    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect','auth_required')");
     const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
+
+    const isLoginRoute = req.path === '/giris' ||
+      req.path === '/kayit' ||
+      /^\/[a-zA-Z0-9]{24}$/.test(req.path);
+    if (settings.auth_required === '1' && !isLoginRoute) {
+      const token = req.headers['authorization']?.replace('Bearer ', '') || getSessionCookie(req);
+      let authenticated = false;
+      if (token) {
+        const { rows: users } = await query(
+          'SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW() AND COALESCE(u.banned,0)=0 LIMIT 1',
+          [token]
+        );
+        authenticated = users.length > 0;
+      }
+      if (!authenticated) {
+        const returnTo = req.originalUrl || req.path;
+        return res.redirect('/giris?returnTo=' + encodeURIComponent(returnTo));
+      }
+    }
+
     let routes = [];
     try { routes = JSON.parse(settings.protected_routes || '[]'); } catch {}
     const matched = routes.find(route => {
@@ -4010,7 +4039,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth', 'auth_required'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -4666,7 +4695,7 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
-    'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url'
+    'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
