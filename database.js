@@ -247,6 +247,9 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
+    -- Eski vmb_pages tablosu varsa yeni kolonları mevcut tabloya da ekle.
+    ALTER TABLE vmb_pages ADD COLUMN IF NOT EXISTS page_num INTEGER DEFAULT 1;
+    ALTER TABLE vmb_pages ADD COLUMN IF NOT EXISTS image_url TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_vmb_pages_folder_order ON vmb_pages(folder_id, page_num);
 
     CREATE TABLE IF NOT EXISTS vmb_assets (
