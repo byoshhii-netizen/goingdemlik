@@ -181,6 +181,42 @@ function mediaFilterOptions(selected = 'none') {
   return MEDIA_FILTERS.map(item => `<option value="${item.value}" ${item.value === selected ? 'selected' : ''}>${item.label}</option>`).join('');
 }
 
+function openAvatarCrop(file, onApply) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  showModal('Profil Fotoğrafını Kırp', `<div class="avatar-cropper">
+    <div class="avatar-crop-stage"><canvas id="avatar-crop-canvas" width="420" height="420"></canvas><div class="avatar-crop-mask"></div></div>
+    <div class="avatar-crop-tools"><i class="fas fa-camera"></i><input id="avatar-crop-zoom" type="range" min="1" max="3" step="0.01" value="1" /></div>
+    <div class="avatar-crop-actions"><button class="btn btn-outline" id="avatar-crop-cancel">Vazgeç</button><button class="btn btn-primary" id="avatar-crop-apply"><i class="fas fa-check"></i> Uygula</button></div>
+  </div>`);
+  const canvas = $('#avatar-crop-canvas');
+  const context = canvas.getContext('2d');
+  const image = new Image();
+  let scale = 1, offsetX = 0, offsetY = 0, dragging = false, startX = 0, startY = 0;
+  const draw = () => {
+    if (!image.naturalWidth) return;
+    const base = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
+    const width = image.naturalWidth * base * scale;
+    const height = image.naturalHeight * base * scale;
+    const x = (canvas.width - width) / 2 + offsetX;
+    const y = (canvas.height - height) / 2 + offsetY;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, x, y, width, height);
+  };
+  image.onload = draw;
+  image.src = url;
+  $('#avatar-crop-zoom').addEventListener('input', e => { scale = Number(e.target.value); draw(); });
+  canvas.addEventListener('pointerdown', e => { dragging = true; startX = e.clientX - offsetX; startY = e.clientY - offsetY; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e => { if (!dragging) return; offsetX = e.clientX - startX; offsetY = e.clientY - startY; draw(); });
+  canvas.addEventListener('pointerup', () => { dragging = false; });
+  $('#avatar-crop-cancel').addEventListener('click', () => { URL.revokeObjectURL(url); hideModal(); });
+  $('#avatar-crop-apply').addEventListener('click', () => canvas.toBlob(blob => {
+    URL.revokeObjectURL(url);
+    hideModal();
+    onApply(new File([blob], 'profil-fotografi.jpg', { type: 'image/jpeg' }));
+  }, 'image/jpeg', 0.92));
+}
+
 function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initialFilter = 'none', onApply } = {}) {
   if (!file || !file.type.startsWith('image/')) return;
   const url = URL.createObjectURL(file);
@@ -4545,7 +4581,7 @@ async function renderSettingsSection(section) {
         <div class="card-header"><span>Profil Bilgileri</span></div>
         <div class="card-body">
           <div class="form-group" style="display:flex;align-items:center;gap:16px">
-            <div id="settings-avatar-preview">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="settings-avatar" alt="Profil fotoğrafı" />` : `<div class="settings-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
+            ${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="settings-avatar" alt="Profil fotoğrafı" />` : `<div class="settings-avatar-placeholder"><i class="fas fa-user"></i></div>`}
             <div style="flex:1">
               <label>Avatar Yükle</label>
               <input type="file" id="avatar-file" accept="image/*" style="padding:6px" />
@@ -4620,14 +4656,7 @@ async function renderSettingsSection(section) {
         $('#profile-msg').textContent = '';
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
-    $('#avatar-file').addEventListener('change', e => openAvatarCrop(e.target.files[0], file => {
-      selectedAvatarFile = file;
-      $('#s-remove-avatar').checked = false;
-      const previewUrl = URL.createObjectURL(file);
-      const preview = $('#settings-avatar-preview');
-      if (preview) preview.innerHTML = `<img src="${previewUrl}" class="settings-avatar" alt="Yeni profil fotoğrafı önizlemesi" /><small style="display:block;color:var(--accent-red2);font-size:11px;margin-top:5px">Kaydetmeden önceki önizleme</small>`;
-      toast('Profil fotoğrafı hazır — Kaydet’e basınca uygulanır');
-    }));
+    $('#avatar-file').addEventListener('change', e => openAvatarCrop(e.target.files[0], file => { selectedAvatarFile = file; $('#s-remove-avatar').checked = false; toast('Profil fotoğrafı hazır'); }));
 
   } else if (section === 'username') {
     const changes = currentUser.username_changes || 0;
