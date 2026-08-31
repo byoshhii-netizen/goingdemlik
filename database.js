@@ -1309,6 +1309,13 @@ KVKK'nın 11. maddesi kapsamında; kişisel verilerinize erişim, düzeltme, sil
 Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
   }
 
+  // Kaydedilen başkasına ait playlistler, kopyayı alan kullanıcıya ait
+  // olsa da orijinal sahibini gösterebilmelidir.
+  await query(`
+    ALTER TABLE playlists ADD COLUMN IF NOT EXISTS source_playlist_id BIGINT;
+    CREATE INDEX IF NOT EXISTS idx_playlists_source_playlist_id ON playlists(source_playlist_id);
+  `);
+
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 

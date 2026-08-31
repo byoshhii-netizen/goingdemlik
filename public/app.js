@@ -1496,7 +1496,7 @@ async function renderHome(app) {
         <a href="/playlist/${escHtml(pl.public_id || pl.id)}" data-link class="card card-body" style="display:block;text-decoration:none;color:inherit">
           <div style="display:flex;align-items:center;gap:12px">
             <div class="home-playlist-cover" style="width:54px;height:54px;border-radius:16px;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden">
-              ${pl.cover_url ? `<img src="${escHtml(pl.cover_url)}" alt="" />` : escHtml(pl.emoji || '🎵')}
+              ${pl.cover_url ? `<img src="${escHtml(pl.cover_url)}" alt="" />` : '<i class="fas fa-image" aria-hidden="true"></i>'}
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(pl.name)}</div>
@@ -7188,13 +7188,14 @@ async function renderMusicList(app) {
 
   const showAddToPlaylistMenu = (songId, btnEl) => {
     document.querySelectorAll('.pl-add-dropdown').forEach(d => d.remove());
-    if (!userPlaylists.length) {
+    const editablePlaylists = userPlaylists.filter(pl => !pl.source_playlist_id);
+    if (!editablePlaylists.length) {
       toast('Önce bir playlist oluşturun!', 'error'); return;
     }
     const menu = document.createElement('div');
     menu.className = 'pl-add-dropdown dropdown-menu';
     menu.style.cssText = 'position:absolute;right:0;top:calc(100% + 4px);z-index:9999;min-width:180px';
-    menu.innerHTML = userPlaylists.map(pl =>
+    menu.innerHTML = editablePlaylists.map(pl =>
       `<button class="dropdown-item" data-plid="${pl.id}" data-songid="${songId}"><i class="fas fa-list"></i> ${escHtml(pl.name)}</button>`
     ).join('');
     btnEl.style.position = 'relative';
@@ -8372,7 +8373,7 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Fotoğraf müziğini aç/kapat" aria-label="Fotoğraf müziğini aç/kapat"><i class="fas fa-volume-mute"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
@@ -8537,34 +8538,62 @@ async function renderPhotoDetail(app, photoId) {
 }
 
 let activePhotoAudio=null, photoAudioObserver=null;
-function setupPhotoAudio(feed, options = {}) {
-  photoAudioObserver?.disconnect(); activePhotoAudio?.pause(); activePhotoAudio=null;
-  let muted=localStorage.getItem('cigcig_photo_audio_muted');
-  muted=muted===null ? false : muted==='1';
-  if (options.playImmediately) muted = false;
-  let volume=Math.min(1,Math.max(0,Number(localStorage.getItem('cigcig_photo_audio_volume')||'0.8')));
+function setupPhotoAudio(feed) {
+  // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
+  // tıklamasıyla açılır ve parça bitince kendiliğinden kapanır.
+  photoAudioObserver?.disconnect();
+  activePhotoAudio?.pause();
+  activePhotoAudio=null;
   document.getElementById('photo-audio-control')?.remove();
-  const stop=()=>{activePhotoAudio?.pause();activePhotoAudio=null;};
-  const syncMuteButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{button.classList.toggle('muted',muted);button.querySelector('i').className='fas '+(muted?'fa-volume-mute':'fa-volume-up');});
-  const play=(card, force=false)=>{const b=card.querySelector('.photo-song');if(!b?.dataset.audio||(!force&&activePhotoAudio?._photoId===card.dataset.photoId))return;stop();const a=new Audio(b.dataset.audio);a._photoId=card.dataset.photoId;a.muted=muted;a.volume=volume;a.currentTime=Number(b.dataset.start)||0;a.onended=()=>{ if (activePhotoAudio===a) activePhotoAudio=null; };activePhotoAudio=a;a.play().catch(()=>{ if (activePhotoAudio===a) activePhotoAudio=null; });};
-  feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();muted=!muted;localStorage.setItem('cigcig_photo_audio_muted',muted?'1':'0');if(muted){activePhotoAudio?.pause();}else{const card=button.closest('[data-photo-id]');if(card)play(card,true);}if(activePhotoAudio){activePhotoAudio.muted=muted;activePhotoAudio.volume=volume;}syncMuteButtons();}));
-  syncMuteButtons();
-  if (options.disableAutoplay) return;
-  const ratios = new Map();
-  photoAudioObserver=new IntersectionObserver(entries=>{entries.forEach(entry=>ratios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));const visible=[...ratios.entries()].filter(([,ratio])=>ratio>.1).sort((a,b)=>b[1]-a[1])[0];if(visible)play(visible[0]);else stop();},{threshold:[0,.1,.7]});
-  feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
-  requestAnimationFrame(() => {
-    const firstVisible = [...feed.querySelectorAll('[data-photo-id]')].find(card => {
-      const rect = card.getBoundingClientRect();
-      return rect.top < window.innerHeight * .7 && rect.bottom > window.innerHeight * .3;
-    });
-    if (firstVisible) play(firstVisible);
+
+  const syncButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{
+    const isPlaying=activePhotoAudio?._photoId===button.closest('[data-photo-id]')?.dataset.photoId;
+    button.classList.toggle('is-playing', isPlaying);
+    button.title=isPlaying?'Müziği durdur':'Müziği aç';
+    button.setAttribute('aria-label', button.title);
+    const icon=button.querySelector('i');
+    if (icon) icon.className='fas '+(isPlaying?'fa-volume-high':'fa-volume-off');
   });
-  const resumePhotoAudio = () => {
-    const current = [...ratios.entries()].filter(([, ratio]) => ratio > .1).sort((a, b) => b[1] - a[1])[0];
-    if (current && !activePhotoAudio) play(current[0]);
+  const stop=()=>{
+    activePhotoAudio?.pause();
+    activePhotoAudio=null;
+    syncButtons();
   };
-  document.addEventListener('pointerdown', resumePhotoAudio, { once: true, capture: true });
+  const play=(card)=>{
+    const songButton=card.querySelector('.photo-song');
+    if (!songButton?.dataset.audio) return;
+    if (activePhotoAudio?._photoId===card.dataset.photoId) {
+      stop();
+      return;
+    }
+    stop();
+    const audio=new Audio(songButton.dataset.audio);
+    audio._photoId=card.dataset.photoId;
+    audio.volume=0.8;
+    audio.currentTime=Number(songButton.dataset.start)||0;
+    audio.addEventListener('ended',()=>{
+      if (activePhotoAudio===audio) {
+        activePhotoAudio=null;
+        syncButtons();
+      }
+    });
+    activePhotoAudio=audio;
+    syncButtons();
+    audio.play().catch(()=>{
+      if (activePhotoAudio===audio) {
+        activePhotoAudio=null;
+        syncButtons();
+      }
+    });
+  };
+
+  feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    const card=button.closest('[data-photo-id]');
+    if (card) play(card);
+  }));
+  syncButtons();
 }
 
 document.addEventListener('click', e => {
@@ -8809,15 +8838,16 @@ async function renderMyPlaylists(app) {
             <div class="pl-card-icon">
               ${pl.cover_url
                 ? `<img src="${escHtml(pl.cover_url)}" alt="" />`
-                : `<span>${escHtml(pl.emoji || '🎵')}</span>`}
+                : `<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>`}
             </div>
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>
               <div class="pl-card-meta"><span>${pl.song_count} şarkı</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
               ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
+              <div class="pl-card-owner"><i class="fas fa-user"></i> ${escHtml(pl.owner_username || currentUser.username || 'Bilinmiyor')}</div>
             </div>
             <div class="pl-card-actions">
-              <button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
+              ${!pl.source_playlist_id ? `<button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
               <button class="btn btn-ghost btn-sm pl-del-btn" data-id="${pl.id}" title="Sil" style="color:var(--accent-red2)"><i class="fas fa-trash"></i></button>
             </div>
           </div>`).join('')}
@@ -8834,7 +8864,7 @@ async function renderMyPlaylists(app) {
         btn.addEventListener('click', e => {
           e.stopPropagation();
           const pl = playlistById.get(String(btn.dataset.id));
-          if (pl) showCreatePlaylistModal('edit', pl.id, pl.name, pl.description, !!pl.is_public, renderList, pl.emoji, pl.cover_url);
+          if (pl) showCreatePlaylistModal('edit', pl.id, pl.name, pl.description, !!pl.is_public, renderList, pl.cover_url);
         });
       });
       el.querySelectorAll('.pl-del-btn').forEach(btn => {
@@ -8855,44 +8885,36 @@ async function renderMyPlaylists(app) {
   renderList();
 
   document.getElementById('pl-create-btn')?.addEventListener('click', () => {
-    showCreatePlaylistModal('create', null, '', '', true, renderList, '🎵', '');
+    showCreatePlaylistModal('create', null, '', '', true, renderList, '');
   });
 }
 
-function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave, emoji = '🎵', coverUrl = '') {
-  const commonEmojis = ['🎵', '🔥', '🌙', '💿', '🎧', '💔', '🌿', '🚗', '❤️', '☕'];
+function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave, coverUrl = '') {
   showModal(mode === 'create' ? 'Yeni playlist' : 'Playlisti düzenle', `
     <div class="pl-editor">
       <div class="pl-editor-intro">
         <div class="pl-editor-kicker">${mode === 'create' ? 'MÜZİK KÜTÜPHANEN' : 'PLAYLİST AYARLARI'}</div>
         <h4>${mode === 'create' ? 'Ruh haline bir soundtrack seç.' : 'Playlistini kendi tarzına göre güncelle.'}</h4>
-        <p>Başlık, emoji ve kapak görseliyle listene karakter kat.</p>
+        <p>Başlık ve kapak görseliyle listene karakter kat.</p>
       </div>
 
       <div class="pl-cover-picker" id="plm-cover-picker" tabindex="0" role="button">
         <div class="pl-cover-preview ${coverUrl ? 'has-image' : ''}" id="plm-cover-preview">
-          ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<span>${escHtml(emoji || '🎵')}</span>`}
+          ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>`}
         </div>
         <div class="pl-cover-copy">
           <strong>Kapak görseli</strong>
           <span>JPG, PNG veya WEBP · en fazla 8 MB</span>
-          <em id="plm-cover-status">${coverUrl ? 'Görseli değiştirmek için tıkla' : 'Bir görsel seç veya emoji kullan'}</em>
+          <em id="plm-cover-status">${coverUrl ? 'Görseli değiştirmek için tıkla' : 'Bir görsel seç'}</em>
         </div>
         <i class="fas fa-camera pl-cover-camera"></i>
         <input type="file" id="plm-cover" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden />
       </div>
       ${coverUrl ? `<button type="button" class="pl-cover-remove" id="plm-cover-remove"><i class="fas fa-trash-alt"></i> Kapağı kaldır</button>` : ''}
 
-      <div class="pl-editor-row">
-        <div class="pl-emoji-field">
-          <label for="plm-emoji">Emoji</label>
-          <input id="plm-emoji" maxlength="8" value="${escHtml(emoji || '🎵')}" aria-label="Playlist emojisi" />
-          <div class="pl-emoji-suggestions">${commonEmojis.map(item => `<button type="button" class="pl-emoji-option" data-emoji="${item}">${item}</button>`).join('')}</div>
-        </div>
-        <div class="pl-name-field form-group">
-          <label for="plm-name">Playlist adı <span>*</span></label>
-          <input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn. Gece yolculuğu" autocomplete="off" />
-        </div>
+      <div class="form-group pl-name-field">
+        <label for="plm-name">Playlist adı <span>*</span></label>
+        <input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn. Gece yolculuğu" autocomplete="off" />
       </div>
 
       <div class="form-group pl-description-field">
@@ -8920,7 +8942,7 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
   const coverStatus = document.getElementById('plm-cover-status');
   const refreshCoverPreview = (src, label) => {
     coverPreview.classList.toggle('has-image', !!src);
-    coverPreview.innerHTML = src ? `<img src="${escHtml(src)}" alt="" />` : `<span>${escHtml(document.getElementById('plm-emoji')?.value || '🎵')}</span>`;
+    coverPreview.innerHTML = src ? `<img src="${escHtml(src)}" alt="" />` : '<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>';
     if (coverStatus) coverStatus.textContent = label;
   };
   coverPicker?.addEventListener('click', () => coverInput?.click());
@@ -8939,22 +8961,12 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
     selectedCover = null;
     removeCover = true;
     if (coverInput) coverInput.value = '';
-    refreshCoverPreview('', 'Emoji kapak olarak kullanılacak');
-  });
-  document.querySelectorAll('.pl-emoji-option').forEach(button => {
-    button.addEventListener('click', () => {
-      document.getElementById('plm-emoji').value = button.dataset.emoji;
-      if (!selectedCover && !coverUrl) refreshCoverPreview('', 'Bir görsel seç veya emoji kullan');
-    });
-  });
-  document.getElementById('plm-emoji')?.addEventListener('input', () => {
-    if (!selectedCover && !coverUrl) refreshCoverPreview('', 'Bir görsel seç veya emoji kullan');
+    refreshCoverPreview('', 'Bir görsel seç');
   });
 
   document.getElementById('plm-save')?.addEventListener('click', async () => {
     const n = document.getElementById('plm-name').value.trim();
     const d = document.getElementById('plm-desc').value.trim();
-    const em = document.getElementById('plm-emoji').value.trim() || '🎵';
     const isPublicValue = document.getElementById('plm-public').checked;
     const msg = document.getElementById('plm-msg');
     const btn = document.getElementById('plm-save');
@@ -8966,12 +8978,11 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
         payload = new FormData();
         payload.append('name', n);
         payload.append('description', d);
-        payload.append('emoji', em);
         payload.append('is_public', String(isPublicValue));
         payload.append('cover', selectedCover);
         if (mode === 'edit' && removeCover) payload.append('remove_cover', 'true');
       } else {
-        payload = { name: n, description: d, emoji: em, is_public: isPublicValue };
+        payload = { name: n, description: d, is_public: isPublicValue };
         if (mode === 'edit' && (removeCover || coverUrl)) payload.cover_url = removeCover ? '' : coverUrl;
       }
       if (mode === 'create') {
@@ -9001,19 +9012,20 @@ async function renderPlaylistDetail(app, plId) {
 
   document.title = escHtml(playlist.name) + ' – Playlist | ' + siteName;
   let songs = playlist.songs || [];
+  const canManagePlaylist = () => playlist.is_owner && !playlist.source_playlist_id;
 
   const render = () => {
     app.innerHTML = `<div class="container page">
       <a href="${playlist.is_owner ? '/playlistlerim' : '/'}" data-link class="pl-back-link"><i class="fas fa-chevron-left"></i> ${playlist.is_owner ? 'Playlistlerim' : 'CigCig ana sayfa'}</a>
       <div class="pl-detail-hero">
         <div class="pl-detail-cover">
-          ${playlist.cover_url ? `<img src="${escHtml(playlist.cover_url)}" alt="" />` : `<span>${escHtml(playlist.emoji || '🎵')}</span>`}
+          ${playlist.cover_url ? `<img src="${escHtml(playlist.cover_url)}" alt="" />` : '<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>'}
         </div>
         <div class="pl-detail-copy">
           <div class="pl-detail-kicker"><span>PLAYLIST</span><span class="pl-detail-dot"></span><span>${playlist.is_public ? 'HERKESE AÇIK' : 'GİZLİ'}</span></div>
           <h1>${escHtml(playlist.name)}</h1>
           ${playlist.description ? `<p>${escHtml(playlist.description)}</p>` : ''}
-          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
+          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> ${escHtml(playlist.owner_username)}</span>` : ''}</div>
         </div>
       </div>
       <div class="pl-detail-toolbar">
@@ -9021,8 +9033,8 @@ async function renderPlaylistDetail(app, plId) {
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
             <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
-          ${playlist.is_owner ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
-          ${playlist.is_owner ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
+          ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
+          ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
           ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kendi playlistlerine ekle"><i class="fas fa-bookmark"></i> Kütüphaneme ekle</button>` : ''}
         </div>
         <button class="pl-copy-link" id="pl-copy-link" title="Playlist linkini kopyala"><i class="fas fa-link"></i> Linki kopyala</button>
@@ -9031,8 +9043,8 @@ async function renderPlaylistDetail(app, plId) {
       ${songs.length ? `
       <div class="pl-songs-table" id="pl-songs-table">
         ${songs.map((s, i) => `
-          <div class="pl-song-row" data-id="${s.id}" ${playlist.is_owner ? 'draggable="true"' : ''}>
-            ${playlist.is_owner ? '<div class="pl-drag-handle" title="Sürükle"><i class="fas fa-grip-vertical"></i></div>' : ''}
+          <div class="pl-song-row" data-id="${s.id}" ${canManagePlaylist() ? 'draggable="true"' : ''}>
+            ${canManagePlaylist() ? '<div class="pl-drag-handle" title="Sürükle"><i class="fas fa-grip-vertical"></i></div>' : ''}
             <div class="pl-song-num">${i+1}</div>
             <div class="pl-song-info">
               <div class="music-cover-wrap">
@@ -9044,7 +9056,7 @@ async function renderPlaylistDetail(app, plId) {
                 <div class="music-artist">${escHtml(s.artist_name)}</div>
               </div>
             </div>
-            ${playlist.is_owner ? `<button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>` : ''}
+            ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>` : ''}
           </div>`).join('')}
       </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Şarkı eklemek için "Şarkı Ekle" butonuna tıklayın.</p></div>`}
     </div>`;
@@ -9106,7 +9118,7 @@ async function renderPlaylistDetail(app, plId) {
     document.getElementById('pl-edit-btn')?.addEventListener('click', () => {
       showCreatePlaylistModal('edit', plId, playlist.name, playlist.description || '', playlist.is_public, async () => {
         try { playlist = await api('/playlists/' + plId); render(); } catch {}
-      }, playlist.emoji || '🎵', playlist.cover_url || '');
+      }, playlist.cover_url || '');
     });
 
     // Şarkı ekle butonu – müzik listesinden seçme modalı
@@ -9125,7 +9137,7 @@ async function renderPlaylistDetail(app, plId) {
       } catch(err) { toast(err.message, 'error'); }
     });
 
-    if (playlist.is_owner) {
+    if (canManagePlaylist()) {
       setupPlaylistDnD(app.querySelector('#pl-songs-table'), songs, plId, (reordered) => {
         songs = reordered;
       });

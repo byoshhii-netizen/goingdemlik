@@ -4914,11 +4914,13 @@ app.get('/playlist/:id', (req, res) => res.send(injectMeta('Playlist – CigCig 
 app.get('/api/playlists', authMiddleware, async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT p.*, CAST(COUNT(ps.id) AS INTEGER) as song_count
+      `SELECT p.*, owner.username AS owner_username, CAST(COUNT(ps.id) AS INTEGER) as song_count
        FROM playlists p
        LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id
+       LEFT JOIN playlists source_playlist ON source_playlist.id = p.source_playlist_id
+       LEFT JOIN users owner ON owner.id = COALESCE(source_playlist.user_id, p.user_id)
        WHERE p.user_id = $1
-       GROUP BY p.id
+       GROUP BY p.id, owner.username
        ORDER BY p.created_at DESC`,
       [req.user.id]
     );
@@ -4928,12 +4930,12 @@ app.get('/api/playlists', authMiddleware, async (req, res) => {
 
 app.post('/api/playlists', authMiddleware, playlistCoverUpload.single('cover'), async (req, res) => {
   try {
-    const { name, description, emoji, cover_url, is_public } = req.body;
+    const { name, description, cover_url, is_public } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
     const uploadedCover = req.file ? await handleUpload(req.file) : (cover_url || '');
     const { rows } = await query(
       'INSERT INTO playlists (user_id, public_id, name, description, emoji, cover_url, is_public) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [req.user.id, createPlaylistPublicId(), name.trim(), description?.trim() || '', (emoji || '🎵').slice(0, 8), uploadedCover, parseFormBoolean(is_public, true) ? 1 : 0]
+      [req.user.id, createPlaylistPublicId(), name.trim(), description?.trim() || '', '', uploadedCover, parseFormBoolean(is_public, true) ? 1 : 0]
     );
     res.json(rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -4941,7 +4943,13 @@ app.post('/api/playlists', authMiddleware, playlistCoverUpload.single('cover'), 
 
 app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
   try {
-    const { rows: pl } = await query('SELECT * FROM playlists WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+    const { rows: pl } = await query(`
+      SELECT p.*, owner.username AS owner_username
+      FROM playlists p
+      LEFT JOIN playlists source_playlist ON source_playlist.id = p.source_playlist_id
+      LEFT JOIN users owner ON owner.id = COALESCE(source_playlist.user_id, p.user_id)
+      WHERE p.public_id=$1 OR p.id::text=$1
+    `, [req.params.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const isOwner = !!req.user && String(pl[0].user_id) === String(req.user.id);
     if (!pl[0].is_public && !isOwner) return res.status(404).json({ error: 'Playlist bulunamadı' });
@@ -4959,14 +4967,14 @@ app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
 
 app.put('/api/playlists/:id', authMiddleware, playlistCoverUpload.single('cover'), async (req, res) => {
   try {
-    const { name, description, emoji, cover_url, is_public, remove_cover } = req.body;
+    const { name, description, cover_url, is_public, remove_cover } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
     const nextCover = req.file
       ? await handleUpload(req.file)
       : (parseFormBoolean(remove_cover, false) ? '' : (Object.prototype.hasOwnProperty.call(req.body, 'cover_url') ? (cover_url || '') : null));
     const { rows } = await query(
-      'UPDATE playlists SET name=$1, description=$2,emoji=$3,cover_url=COALESCE($4, cover_url),is_public=$5 WHERE (public_id=$6 OR id::text=$6) AND user_id=$7 RETURNING *',
-      [name.trim(), description?.trim() || '', (emoji || '🎵').slice(0,8), nextCover, parseFormBoolean(is_public, true) ? 1 : 0, req.params.id, req.user.id]
+      'UPDATE playlists SET name=$1, description=$2,emoji=$3,cover_url=COALESCE($4, cover_url),is_public=$5 WHERE (public_id=$6 OR id::text=$6) AND user_id=$7 AND source_playlist_id IS NULL RETURNING *',
+      [name.trim(), description?.trim() || '', '', nextCover, parseFormBoolean(is_public, true) ? 1 : 0, req.params.id, req.user.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     res.json(rows[0]);
@@ -4978,8 +4986,8 @@ app.post('/api/playlists/:id/save', authMiddleware, async (req, res) => {
     const { rows: source } = await query('SELECT * FROM playlists WHERE public_id=$1 OR id::text=$1', [req.params.id]);
     if (!source.length || !source[0].is_public) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const p = source[0];
-    const { rows: created } = await query(`INSERT INTO playlists (user_id,public_id,name,description,emoji,cover_url,is_public)
-      VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`, [req.user.id, createPlaylistPublicId(), p.name, p.description, p.emoji || '🎵', p.cover_url || '']);
+    const { rows: created } = await query(`INSERT INTO playlists (user_id,public_id,name,description,emoji,cover_url,is_public,source_playlist_id)
+      VALUES ($1,$2,$3,$4,$5,$6,1,$7) RETURNING *`, [req.user.id, createPlaylistPublicId(), p.name, p.description, '', p.cover_url || '', p.source_playlist_id || p.id]);
     await query(`INSERT INTO playlist_songs (playlist_id,song_id,position)
       SELECT $1,song_id,position FROM playlist_songs WHERE playlist_id=$2 ORDER BY position`, [created[0].id, p.id]);
     res.json(created[0]);
@@ -4997,7 +5005,7 @@ app.delete('/api/playlists/:id', authMiddleware, async (req, res) => {
 app.post('/api/playlists/:id/songs', authMiddleware, async (req, res) => {
   try {
     const { song_id } = req.body;
-    const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2', [req.params.id, req.user.id]);
+    const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2 AND source_playlist_id IS NULL', [req.params.id, req.user.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const { rows: song } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [song_id]);
     if (!song.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
@@ -5015,7 +5023,7 @@ app.post('/api/playlists/:id/songs', authMiddleware, async (req, res) => {
 
 app.delete('/api/playlists/:id/songs/:songId', authMiddleware, async (req, res) => {
   try {
-    const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2', [req.params.id, req.user.id]);
+    const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2 AND source_playlist_id IS NULL', [req.params.id, req.user.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     await query('DELETE FROM playlist_songs WHERE playlist_id=$1 AND song_id=$2', [pl[0].id, req.params.songId]);
     res.json({ ok: true });
@@ -5026,7 +5034,7 @@ app.put('/api/playlists/:id/reorder', authMiddleware, async (req, res) => {
   try {
     const { order } = req.body;
     if (!Array.isArray(order)) return res.status(400).json({ error: 'order array gerekli' });
-    const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2', [req.params.id, req.user.id]);
+    const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2 AND source_playlist_id IS NULL', [req.params.id, req.user.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     for (let i = 0; i < order.length; i++) {
       await query('UPDATE playlist_songs SET position=$1 WHERE playlist_id=$2 AND song_id=$3', [i, pl[0].id, order[i]]);
