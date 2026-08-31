@@ -456,7 +456,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   background: var(--bg-active);
   color: var(--accent-red2);
 }
-.mobile-global-search { display: none; flex: none; width: 100%; max-width: none; margin-bottom: 6px; }
 .nav-user { position: relative; display: flex; align-items: center; gap: 8px; }
 .nav-user-btn {
   display: flex; align-items: center; gap: 8px;
@@ -505,8 +504,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 @media (max-width: 768px) {
   .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
-  .global-search { display: none; }
-  .mobile-global-search { display: flex; }
   .nav-mobile-toggle { display: block; margin-left: 4px; }
   /* Mobilde yalnızca ortadaki CigCig yazısı görünsün; logo görseli görünmesin. */
   .nav-brand { display: flex !important; position: absolute; left: 50%; transform: translateX(-50%); flex: none; }
@@ -3036,7 +3033,6 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 @media (min-width: 769px) and (max-width: 1100px) {
   .nav-container { gap:10px; }
-  .global-search { flex-basis:190px; min-width:140px; }
 }
 @media (max-width: 768px) {
   .search-page-form { align-items:stretch; flex-wrap:wrap; }

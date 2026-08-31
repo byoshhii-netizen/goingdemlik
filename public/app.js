@@ -287,16 +287,6 @@ async function api(path, options = {}) {
   return data;
 }
 
-function bindGlobalSearch(formId, inputId) {
-  document.getElementById(formId)?.addEventListener('submit', event => {
-    event.preventDefault();
-    const value = document.getElementById(inputId)?.value.trim();
-    if (value) navigate('/arama?q=' + encodeURIComponent(value));
-  });
-}
-bindGlobalSearch('global-search-form', 'global-search-input');
-bindGlobalSearch('mobile-global-search-form', 'mobile-global-search-input');
-
 function callAvatar(user, size = 'call-avatar') {
   return hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" class="${size}" alt="" />` : `<div class="${size} call-avatar-placeholder"><i class="fas fa-user"></i></div>`;
 }
