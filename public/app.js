@@ -895,11 +895,29 @@ async function renderRealsFeed(app) {
 
   // fetch reals
   let reals = [];
-  try { reals = await api('/reals'); } catch (e) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
+  let realsAds = [];
+  try {
+    [reals, realsAds] = await Promise.all([api('/reals'), api('/reals-ads')]);
+  } catch (e) {
+    try { reals = await api('/reals'); } catch {}
+    realsAds = [];
+    if (!reals.length) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
+  }
   const listEl = document.getElementById('reals-list');
   if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
 
   const orderedReals = shuffleArray(reals);
+  const activeRealsAds = Array.isArray(realsAds) ? realsAds.filter(ad => ad.active === 1 || ad.active === true) : [];
+  let feedItems = [];
+  orderedReals.forEach((real, realIndex) => {
+    feedItems.push(real);
+    const count = realIndex + 1;
+    const dueAds = activeRealsAds.filter(ad => ad.frequency_mode === 'count' && count % Math.max(1, Number(ad.frequency_value) || 1) === 0);
+    if (dueAds.length) {
+      const selected = dueAds[(Math.floor(count / Math.max(1, Number(dueAds[0].frequency_value) || 1)) - 1) % dueAds.length];
+      feedItems.push({ ...selected, isRealsAd: true, feedKey: `ad-${selected.id}-${count}` });
+    }
+  });
   listEl.addEventListener('selectstart', event => event.preventDefault());
   let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
   const followStates = new Map();
@@ -915,7 +933,8 @@ async function renderRealsFeed(app) {
   let watchedIds = new Set();
   let idx = 0;
   let items = [];
-  async function openRealsComments(video) {
+  async function openRealsComments(video, isAd = false) {
+    const commentBase = isAd ? '/reals-ads/' + encodeURIComponent(video.id) : '/video/' + encodeURIComponent(video.id);
     const activeVideo = items[idx]?.querySelector('video');
     const wasPlaying = activeVideo && !activeVideo.paused;
     const previousScrollTop = listEl.scrollTop;
@@ -940,22 +959,22 @@ async function renderRealsFeed(app) {
     sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
     sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
     try {
-      const comments = await api('/video/' + encodeURIComponent(video.id) + '/comments');
+      const comments = await api(commentBase + '/comments');
       const list = sheet.querySelector('.reals-comments-list');
       if (!list || !document.body.contains(sheet)) return;
-      list.innerHTML = comments.length ? comments.map(comment => renderVideoComment(comment, currentUser?.id === video.user_id)).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
+      list.innerHTML = comments.length ? comments.map(comment => renderVideoComment(comment, !isAd && currentUser?.id === video.user_id)).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
       list.addEventListener('click', async event => {
         const likeButton = event.target.closest('.video-comment-like');
         const deleteButton = event.target.closest('.video-comment-delete');
         if (deleteButton) {
           if (!confirm('Bu yorum silinsin mi?')) return;
-          try { await api('/video/' + encodeURIComponent(video.id) + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' }); deleteButton.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
+          try { await api(commentBase + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' }); deleteButton.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
           return;
         }
         if (!likeButton) return;
         try {
           likeButton.disabled = true;
-          const result = await api('/video/' + encodeURIComponent(video.id) + '/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
+          const result = await api(commentBase + '/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
           const count = likeButton.querySelector('.video-comment-count');
           count.textContent = Math.max(0, (parseInt(count.textContent) || 0) + (result.liked ? 1 : -1));
           likeButton.classList.toggle('liked', result.liked);
@@ -974,10 +993,10 @@ async function renderRealsFeed(app) {
       const button = event.currentTarget.querySelector('button');
       button.disabled = true;
       try {
-        const comment = await api('/video/' + encodeURIComponent(video.id) + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        const comment = await api(commentBase + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
         const list = sheet.querySelector('.reals-comments-list');
         list.querySelector('.reals-comments-empty')?.remove();
-        list.insertAdjacentHTML('beforeend', renderVideoComment(comment, currentUser?.id === video.user_id));
+        list.insertAdjacentHTML('beforeend', renderVideoComment(comment, !isAd && currentUser?.id === video.user_id));
         input.value = '';
         list.scrollTop = list.scrollHeight;
       } catch (error) { toast(error.message, 'error'); } finally { button.disabled = false; }
@@ -995,7 +1014,28 @@ async function renderRealsFeed(app) {
   }
 
   function renderItems() {
-    listEl.innerHTML = orderedReals.map(r => `
+    listEl.innerHTML = feedItems.map(r => {
+      if (r.isRealsAd) {
+        const site = normalizeExternalUrl(r.site_url || '#');
+        return `
+      <div class="reals-item reals-ad-item" data-id="ad-${r.id}" data-ad-id="${r.id}" data-video-url="${escHtml(r.video_url)}">
+        <div class="reals-video-box reals-ad-box">
+        <video class="reals-video reals-ad-video" preload="auto" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
+        <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
+        <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
+        <div class="reals-meta">
+          <div class="reals-ad-byline"><span class="reals-ad-badge"><i class="fas fa-bullhorn"></i> REKLAM</span><span>Sponsorlu içerik</span></div>
+          <a class="reals-ad-title-link" href="${escHtml(site)}" target="_blank" rel="noopener noreferrer" data-ad-click>${escHtml(r.title || '')}<i class="fas fa-arrow-up-right-from-square"></i></a>
+          ${r.description ? `<div class="reals-desc">${escHtml(r.description)}</div>` : ''}
+          <div class="reals-right-actions">
+            ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn ad-like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
+            ${r.allow_comments !== 0 ? `<button class="reals-action-btn comment-btn ad-comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>` : ''}
+          </div>
+        </div>
+        </div>
+      </div>`;
+      }
+      return `
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
         <div class="reals-video-box">
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
@@ -1017,10 +1057,12 @@ async function renderRealsFeed(app) {
           </div>
         </div>
         </div>
-      </div>`).join('');
+      </div>`;
+    }).join('');
     items = Array.from(document.querySelectorAll('.reals-item'));
+    const getFeedItem = item => feedItems.find(feedItem => String(feedItem.isRealsAd ? `ad-${feedItem.id}` : feedItem.id) === item.dataset.id);
     items.forEach(it => {
-      const video = orderedReals.find(item => String(item.id) === it.dataset.id);
+      const video = getFeedItem(it);
       const likeButton = it.querySelector('.like-btn');
       if (likeButton && video?.liked) {
         likeButton.classList.add('active');
@@ -1033,6 +1075,7 @@ async function renderRealsFeed(app) {
       let clickTimer = null;
       it.addEventListener('click', event => {
         if (event.target.closest('button,a')) return;
+        if (it.classList.contains('reals-ad-item')) return;
         clearTimeout(clickTimer);
         clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
       });
@@ -1045,8 +1088,19 @@ async function renderRealsFeed(app) {
         clearTimeout(clickTimer);
         it.querySelector('.like-btn')?.click();
       });
-      vid.addEventListener('play', () => { it.querySelector('.reals-play-overlay i').className = 'fas fa-pause'; it.classList.remove('reals-is-paused'); });
-      vid.addEventListener('pause', () => { it.querySelector('.reals-play-overlay i').className = 'fas fa-play'; it.classList.add('reals-is-paused'); });
+      vid.addEventListener('play', () => {
+        const icon = it.querySelector('.reals-play-overlay i');
+        if (icon) icon.className = 'fas fa-pause';
+        it.classList.remove('reals-is-paused');
+      });
+      vid.addEventListener('pause', () => {
+        if (it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
+          vid.play().catch(() => {});
+          return;
+        }
+        it.querySelector('.reals-play-overlay i')?.classList.replace('fa-pause', 'fa-play');
+        it.classList.add('reals-is-paused');
+      });
     });
     listEl.querySelectorAll('.mute-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation(); const vid = btn.closest('.reals-video-box').querySelector('video');
@@ -1064,9 +1118,18 @@ async function renderRealsFeed(app) {
       }
       btn.innerHTML = '<i class="fas fa-volume-' + (vid.muted ? 'mute' : 'up') + '"></i>';
     }));
+    listEl.querySelectorAll('[data-ad-click]').forEach(link => link.addEventListener('click', event => {
+      const ad = getFeedItem(link.closest('.reals-ad-item'));
+      if (ad) api(`/reals-ads/${ad.id}/click`, { method: 'POST' }).catch(() => {});
+    }));
     listEl.querySelectorAll('.reals-close-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/'); }));
     listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const id = it.dataset.id; try { btn.disabled=true; const result = await api(`/video/${id}/like`, { method:'POST' }); const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked); btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart'; } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const item = getFeedItem(it); const id = it.dataset.id; try {
+        btn.disabled = true;
+        const result = await api(item?.isRealsAd ? `/reals-ads/${item.id}/like` : `/video/${id}/like`, { method:'POST' });
+        const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked);
+        btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart';
+      } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
     }));
     listEl.querySelectorAll('.reals-follow-btn').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation();
@@ -1085,23 +1148,23 @@ async function renderRealsFeed(app) {
     }));
     listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
-      const video = orderedReals.find(item => String(item.id) === btn.closest('.reals-item').dataset.id);
-      if (video) openRealsComments(video);
+      const video = getFeedItem(btn.closest('.reals-item'));
+      if (video) openRealsComments(video, !!video.isRealsAd);
     }));
     listEl.querySelectorAll('.save-btn').forEach(btn => btn.addEventListener('click', async e => {
       e.stopPropagation(); const slug = btn.closest('.reals-item').dataset.slug;
       try { const result = await api(`/video/${slug}/save`, { method: 'POST' }); btn.classList.toggle('active', result.saved); btn.querySelector('i').className = result.saved ? 'fas fa-bookmark' : 'far fa-bookmark'; } catch (error) { toast(error.message, 'error'); }
     }));
     listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); if (!video) return;
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = getFeedItem(it); if (!video) return;
       const shareUrl = `${location.origin}/reals/${encodeURIComponent(video.id)}`;
       try { await navigator.clipboard.writeText(shareUrl); toast('Reals bağlantısı kopyalandı'); } catch { toast(shareUrl); }
     }));
     listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); if (video) showForwardVideoModal(video);
+      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = getFeedItem(it); if (video && !video.isRealsAd) showForwardVideoModal(video);
     }));
     listEl.querySelectorAll('.reals-desc').forEach(desc => desc.addEventListener('click', e => {
-      e.stopPropagation(); const it = desc.closest('.reals-item'); const video = orderedReals.find(r => String(r.id) === it.dataset.id); const vid = it.querySelector('video');
+      e.stopPropagation(); const it = desc.closest('.reals-item'); const video = getFeedItem(it); const vid = it.querySelector('video');
       if (!video) return; const wasPlaying = !vid.paused; if (wasPlaying) vid.pause();
       window.__realsResumeVideo = () => { if (wasPlaying && location.pathname === '/reals') vid.play().catch(() => {}); };
       showModal('Reals açıklaması', `<div class="reals-description-modal"><p>${escHtml(video.description || '')}</p><button class="btn btn-primary" id="reals-description-close">Kapat</button></div>`);
@@ -1112,7 +1175,7 @@ async function renderRealsFeed(app) {
   function showIndex(i, shouldScroll = true) {
     if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
     const previousId = items[idx]?.dataset.id;
-    if (previousId && i !== idx) watchedIds.add(Number(previousId));
+    if (previousId && i !== idx && !items[idx]?.dataset.adId) watchedIds.add(Number(previousId));
     idx = i;
     activeRealsAudio?.pause();
     activeRealsAudio = null;
@@ -1125,9 +1188,12 @@ async function renderRealsFeed(app) {
         setRealsVideoSource(vid, videoUrl);
         vid.muted = realsMuted || j !== idx;
         if (j === idx) {
-          api('/video/' + it.dataset.id + '/view', { method: 'POST' }).catch(() => {});
+          const viewPromise = it.dataset.adId
+            ? api('/reals-ads/' + it.dataset.adId + '/view', { method: 'POST' })
+            : api('/video/' + it.dataset.id + '/view', { method: 'POST' });
+          viewPromise.catch(() => {});
           vid.play().catch(() => {});
-          if (!realsMuted && it.dataset.songAudio) {
+          if (!realsMuted && !it.dataset.adId && it.dataset.songAudio) {
             activeRealsAudio = trackMediaAudio(new Audio(it.dataset.songAudio));
             activeRealsAudio.currentTime = Number(it.dataset.songStart) || 0;
             activeRealsAudio.loop = true;
@@ -1145,6 +1211,16 @@ async function renderRealsFeed(app) {
 
   renderItems();
   showIndex(0);
+  activeRealsAds.filter(ad => ad.frequency_mode === 'time').forEach(ad => {
+    const amount = Math.max(1, Number(ad.frequency_value) || 1);
+    const unitMs = ad.frequency_unit === 'hours' ? 3600000 : 60000;
+    window.setTimeout(() => {
+      if (location.pathname !== '/reals' || feedItems.some(item => item.isRealsAd && String(item.id) === String(ad.id))) return;
+      feedItems.splice(Math.min(idx + 1, feedItems.length), 0, { ...ad, isRealsAd: true, feedKey: `ad-${ad.id}-time` });
+      renderItems();
+      showIndex(Math.min(idx + 1, items.length - 1), false);
+    }, amount * unitMs);
+  });
 
   let scrollFrame = null;
   listEl.addEventListener('scroll', () => {
@@ -7212,14 +7288,22 @@ async function renderAdPortal(app) {
 }
 function renderAdPortalEditor(ad, code) {
   const el=$('#ad-portal-content'); if(!el)return;
-  el.innerHTML=`<div class="card"><div class="card-body"><div style="display:flex;gap:16px;align-items:center;margin-bottom:18px">${ad.cover_url?`<img src="${escHtml(ad.cover_url)}" style="width:72px;height:72px;border-radius:12px;object-fit:cover"/>`:''}<div><div style="font-size:12px;color:var(--text-muted)">Panel ID: <b>${escHtml(code)}</b></div><div style="font-size:18px;font-weight:700">${escHtml(ad.title)}</div><div style="font-size:13px;color:var(--text-secondary)">${ad.play_count} dinlenme · ${ad.click_count} site tıklaması</div></div></div><div class="form-group"><label>Reklam adı</label><input id="ap-title" value="${escHtml(ad.title)}" /></div><div class="form-group"><label>Site adresi</label><input id="ap-site" value="${escHtml(ad.site_url||'')}" /></div><div class="form-row"><div class="form-group"><label>Yeni ses dosyası</label><input id="ap-audio" type="file" accept="audio/*" /></div><div class="form-group"><label>Yeni kapak</label><input id="ap-cover" type="file" accept="image/*" /></div></div><button class="btn btn-primary" id="ap-save">Değişiklikleri Kaydet</button>${currentUser ? `<button class="btn btn-outline" id="ap-boost" style="margin-left:8px"><i class="fas fa-bolt"></i> Boost Satın Al</button>` : '<a href="/giris" data-link class="btn btn-outline" style="margin-left:8px">Boost için giriş yap</a>'}<div id="ap-error" class="form-error mt-4"></div></div></div>`;
-  $('#ap-save').addEventListener('click',async()=>{const fd=new FormData();fd.append('title',$('#ap-title').value.trim());fd.append('site_url',$('#ap-site').value.trim());const au=$('#ap-audio').files[0],co=$('#ap-cover').files[0];if(au)fd.append('audio',au);if(co)fd.append('cover',co);try{const r=await fetch('/api/reklampanel/'+code,{method:'PUT',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Hata');renderAdPortalEditor(d,code);toast('Reklam güncellendi');}catch(e){$('#ap-error').textContent=e.message;}});
+  const isRealsAd = ad.ad_type === 'reals';
+  const frequencyUnit = ad.frequency_unit || (isRealsAd ? 'reals' : '');
+  const frequencyMode = ad.frequency_mode || 'count';
+  el.innerHTML=`<div class="ad-portal-shell"><div class="ad-portal-hero"><div class="ad-portal-icon"><i class="fas ${isRealsAd ? 'fa-circle-play' : 'fa-music'}"></i></div><div><span class="ad-portal-kicker">${isRealsAd ? 'REALS REKLAMI' : 'MÜZİK REKLAMI'}</span><h2>${escHtml(ad.title)}</h2><p>Panel kodu: <b>${escHtml(code)}</b></p></div></div><div class="ad-portal-stats"><div><b>${Number(isRealsAd ? ad.view_count : ad.play_count || 0).toLocaleString('tr-TR')}</b><span>${isRealsAd ? 'Görüntülenme' : 'Dinlenme'}</span></div><div><b>${Number(ad.click_count || 0).toLocaleString('tr-TR')}</b><span>Site tıklaması</span></div><div><b>${Number(ad.like_count || 0).toLocaleString('tr-TR')}</b><span>Beğeni</span></div></div><div class="card"><div class="card-body"><div class="form-group"><label>Reklam başlığı</label><input id="ap-title" value="${escHtml(ad.title)}" /></div><div class="form-group"><label>Açıklama</label><textarea id="ap-description" rows="3">${escHtml(ad.description||'')}</textarea></div><div class="form-group"><label>Başlığa tıklanınca açılacak link</label><input id="ap-site" value="${escHtml(ad.site_url||'')}" /></div>${isRealsAd ? `<div class="form-row"><div class="form-group"><label>Gösterim kuralı</label><select id="ap-frequency-mode"><option value="count" ${frequencyMode==='count'?'selected':''}>Her Reals sayısında</option><option value="time" ${frequencyMode==='time'?'selected':''}>Süre sonunda</option></select></div><div class="form-group"><label id="ap-frequency-label">${frequencyMode==='count'?'Kaç Reals?':'Süre'}</label><input id="ap-frequency-value" type="number" min="1" value="${Number(ad.frequency_value)||3}" /></div></div><div class="form-group" id="ap-frequency-unit-wrap" ${frequencyMode==='count'?'hidden':''}><label>Zaman birimi</label><select id="ap-frequency-unit"><option value="minutes" ${frequencyUnit==='minutes'?'selected':''}>Dakika</option><option value="hours" ${frequencyUnit==='hours'?'selected':''}>Saat</option></select></div><label class="checkbox-label"><input id="ap-show-likes" type="checkbox" ${ad.show_likes ? 'checked' : ''}/> Beğeniler açık</label><label class="checkbox-label"><input id="ap-allow-comments" type="checkbox" ${ad.allow_comments ? 'checked' : ''}/> Yorumlar açık</label>` : `<div class="form-row"><div class="form-group"><label>Yeni ses dosyası</label><input id="ap-audio" type="file" accept="audio/*" /></div></div>`}<div class="form-group"><label>${isRealsAd ? 'Yeni reklam videosu' : 'Yeni kapak görseli'}</label><input id="${isRealsAd ? 'ap-video' : 'ap-cover'}" type="file" accept="${isRealsAd ? 'video/*' : 'image/*'}" /></div>${isRealsAd ? '<div class="form-group"><label>Yeni kapak görseli</label><input id="ap-cover" type="file" accept="image/*" /></div>' : ''}<button class="btn btn-primary" id="ap-save"><i class="fas fa-save"></i> Değişiklikleri Kaydet</button><div id="ap-error" class="form-error mt-4"></div></div></div></div>`;
+  $('#ap-frequency-mode')?.addEventListener('change', e => {
+    const timed = e.target.value === 'time';
+    $('#ap-frequency-label').textContent = timed ? 'Süre' : 'Kaç Reals?';
+    $('#ap-frequency-unit-wrap').hidden = !timed;
+  });
+  $('#ap-save').addEventListener('click',async()=>{const fd=new FormData();fd.append('title',$('#ap-title').value.trim());fd.append('description',$('#ap-description')?.value.trim()||'');fd.append('site_url',$('#ap-site').value.trim());if(isRealsAd){fd.append('frequency_mode',$('#ap-frequency-mode').value);fd.append('frequency_value',$('#ap-frequency-value').value);fd.append('frequency_unit',$('#ap-frequency-unit')?.value||'reals');fd.append('show_likes',$('#ap-show-likes').checked);fd.append('allow_comments',$('#ap-allow-comments').checked);const vf=$('#ap-video').files[0],co=$('#ap-cover').files[0];if(vf)fd.append('video',vf);if(co)fd.append('cover',co);}else{const au=$('#ap-audio')?.files[0],co=$('#ap-cover')?.files[0];if(au)fd.append('audio',au);if(co)fd.append('cover',co);}try{const r=await fetch('/api/reklampanel/'+code,{method:'PUT',body:fd});const d=await r.json();if(!r.ok)throw new Error(d.error||'Hata');renderAdPortalEditor(d,code);toast('Reklam güncellendi');}catch(e){$('#ap-error').textContent=e.message;}});
   $('#ap-boost')?.addEventListener('click', async () => { try { const products=await api('/shop/products'); const p=products.find(x=>x.type==='ad_boost'); if(!p) throw new Error('Boost ürünü mağazada etkin değil.'); const r=await api('/shop/checkout',{method:'POST',body:JSON.stringify({product_id:p.id,music_ad_code:code})}); location.href=r.payment_url; } catch(e) { $('#ap-error').textContent=e.message; } });
 }
 
 function showAdSubmissionModal() {
-  showModal('Reklam Gönder', `<div class="form-group"><label>Reklam türü</label><select id="ad-submit-type"><option value="photo">Fotoğraf reklamı</option><option value="music">Müzik reklamı</option></select></div><div class="form-group"><label>Başlık</label><input id="ad-submit-title" maxlength="120"/></div><div class="form-group"><label>Açıklama</label><textarea id="ad-submit-description"></textarea></div><div class="form-group"><label>Site adresi</label><input id="ad-submit-site" placeholder="https://site.com"/></div><div class="form-group"><label id="ad-media-label">Reklam fotoğrafı</label><input id="ad-submit-media" type="file" accept="image/*"/></div><div class="form-group" id="ad-cover-group" hidden><label>Kapak fotoğrafı</label><input id="ad-submit-cover" type="file" accept="image/*"/></div><label class="checkbox-label"><input id="ad-submit-likes" type="checkbox" checked/> Beğeni açık</label><label class="checkbox-label"><input id="ad-submit-comments" type="checkbox" checked/> Yorum açık</label><label class="checkbox-label"><input id="ad-submit-shares" type="checkbox" checked/> Paylaşım açık</label><button class="btn btn-primary" id="ad-submit-save" style="width:100%;margin-top:12px">Onaya Gönder</button><div id="ad-submit-error" class="form-error mt-4"></div>`);
-  const type=$('#ad-submit-type'); type.onchange=()=>{const music=type.value==='music';$('#ad-media-label').textContent=music?'Ses dosyası':'Reklam fotoğrafı';$('#ad-submit-media').accept=music?'audio/*':'image/*';$('#ad-cover-group').hidden=!music;};
+  showModal('Reklam Gönder', `<div class="form-group"><label>Reklam türü</label><select id="ad-submit-type"><option value="photo">Fotoğraf reklamı</option><option value="music">Müzik reklamı</option><option value="reals">Reals video reklamı</option></select></div><div class="form-group"><label>Başlık</label><input id="ad-submit-title" maxlength="120"/></div><div class="form-group"><label>Açıklama</label><textarea id="ad-submit-description"></textarea></div><div class="form-group"><label>Site adresi</label><input id="ad-submit-site" placeholder="https://site.com"/></div><div class="form-group"><label id="ad-media-label">Reklam fotoğrafı</label><input id="ad-submit-media" type="file" accept="image/*"/></div><div class="form-group" id="ad-cover-group" hidden><label>Kapak fotoğrafı (opsiyonel)</label><input id="ad-submit-cover" type="file" accept="image/*"/></div><label class="checkbox-label"><input id="ad-submit-likes" type="checkbox" checked/> Beğeni açık</label><label class="checkbox-label"><input id="ad-submit-comments" type="checkbox" checked/> Yorum açık</label><label class="checkbox-label"><input id="ad-submit-shares" type="checkbox" checked/> Paylaşım açık</label><button class="btn btn-primary" id="ad-submit-save" style="width:100%;margin-top:12px">Onaya Gönder</button><div id="ad-submit-error" class="form-error mt-4"></div>`);
+  const type=$('#ad-submit-type'); type.onchange=()=>{const music=type.value==='music',reals=type.value==='reals';$('#ad-media-label').textContent=music?'Ses dosyası':reals?'Reals reklam videosu':'Reklam fotoğrafı';$('#ad-submit-media').accept=music?'audio/*':reals?'video/*':'image/*';$('#ad-cover-group').hidden=!music&&!reals;};
   $('#ad-submit-save').onclick=async()=>{const media=$('#ad-submit-media').files[0];if(!media)return $('#ad-submit-error').textContent='Reklam dosyasını seçin.';const fd=new FormData();fd.append('type',type.value);fd.append('title',$('#ad-submit-title').value.trim());fd.append('description',$('#ad-submit-description').value.trim());fd.append('site_url',$('#ad-submit-site').value.trim());fd.append('media',media);if($('#ad-submit-cover').files[0])fd.append('cover',$('#ad-submit-cover').files[0]);fd.append('show_likes',$('#ad-submit-likes').checked);fd.append('allow_comments',$('#ad-submit-comments').checked);fd.append('allow_shares',$('#ad-submit-shares').checked);try{const r=await apiForm('/ad-submissions',fd);hideModal();toast('Reklam onaya gönderildi. Panel kodunuz: '+r.portal_code);}catch(e){$('#ad-submit-error').textContent=e.message;}};
 }
 async function renderMusicList(app) {

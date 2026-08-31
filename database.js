@@ -955,7 +955,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS ad_submissions (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      type TEXT NOT NULL CHECK (type IN ('music','photo')),
+      type TEXT NOT NULL CHECK (type IN ('music','photo','reals')),
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
       site_url TEXT DEFAULT '',
@@ -968,6 +968,8 @@ async function initDb() {
       portal_code TEXT UNIQUE NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE ad_submissions DROP CONSTRAINT IF EXISTS ad_submissions_type_check;
+    ALTER TABLE ad_submissions ADD CONSTRAINT ad_submissions_type_check CHECK (type IN ('music','photo','reals'));
 
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
@@ -1150,6 +1152,66 @@ async function initDb() {
       pending_ad_id BIGINT REFERENCES music_ads(id) ON DELETE SET NULL,
       ad_started_at TIMESTAMP,
       updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Reals video reklamları. Reklamlar normal Reals içeriklerinden ayrıdır:
+    -- kendi panel kodları, istatistikleri, etkileşim ayarları ve yayın sıklıkları vardır.
+    CREATE TABLE IF NOT EXISTS reals_ads (
+      id BIGSERIAL PRIMARY KEY,
+      portal_code CHAR(6) UNIQUE NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      site_url TEXT NOT NULL,
+      video_url TEXT NOT NULL,
+      cover_url TEXT DEFAULT '',
+      show_likes INTEGER NOT NULL DEFAULT 1,
+      allow_comments INTEGER NOT NULL DEFAULT 1,
+      active INTEGER NOT NULL DEFAULT 1,
+      priority INTEGER NOT NULL DEFAULT 0,
+      frequency_mode TEXT NOT NULL DEFAULT 'count' CHECK (frequency_mode IN ('count','time')),
+      frequency_value INTEGER NOT NULL DEFAULT 3 CHECK (frequency_value > 0),
+      frequency_unit TEXT NOT NULL DEFAULT 'reals' CHECK (frequency_unit IN ('reals','minutes','hours')),
+      view_count INTEGER NOT NULL DEFAULT 0,
+      click_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS show_likes INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS allow_comments INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS frequency_mode TEXT NOT NULL DEFAULT 'count';
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS frequency_value INTEGER NOT NULL DEFAULT 3;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS frequency_unit TEXT NOT NULL DEFAULT 'reals';
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS click_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    CREATE INDEX IF NOT EXISTS idx_reals_ads_active_priority ON reals_ads(active, priority DESC, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS reals_ad_likes (
+      id BIGSERIAL PRIMARY KEY,
+      ad_id BIGINT NOT NULL REFERENCES reals_ads(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(ad_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS reals_ad_comments (
+      id BIGSERIAL PRIMARY KEY,
+      ad_id BIGINT NOT NULL REFERENCES reals_ads(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS reals_ad_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT NOT NULL REFERENCES reals_ad_comments(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(comment_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS playlists (

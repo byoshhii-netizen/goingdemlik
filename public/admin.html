@@ -476,6 +476,36 @@
     .adm-search input { padding-left: 32px; background: var(--bg4); border-color: var(--border); font-size: 13px; }
     .adm-search i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text3); font-size: 12px; }
 
+    /* REALS ADS */
+    .ad-admin-page { max-width: 1320px; animation: settingsIn .3s ease both; }
+    .ad-admin-hero { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:18px; padding:24px 26px; border:1px solid var(--border-red); border-radius:18px; background:radial-gradient(circle at 90% 10%,rgba(88,101,242,.2),transparent 34%),linear-gradient(135deg,rgba(189,162,117,.14),rgba(13,13,18,.96) 62%); box-shadow:0 18px 45px rgba(0,0,0,.2); }
+    .ad-admin-kicker,.ad-portal-kicker { display:block; color:var(--red2); font-size:10px; font-weight:800; letter-spacing:1.8px; margin-bottom:6px; }
+    .ad-admin-hero h1 { font-family:var(--font2); font-size:26px; margin-bottom:7px; }
+    .ad-admin-hero h1 i { color:var(--red2); margin-right:8px; }
+    .ad-admin-hero p { color:var(--text2); font-size:13px; }
+    .ad-admin-stats { margin-bottom:18px; }
+    .ad-admin-table-card { overflow:hidden; }
+    .ad-table-title { display:flex; align-items:center; gap:10px; min-width:190px; }
+    .ad-table-title img,.ad-table-placeholder { width:42px; height:54px; flex:0 0 42px; object-fit:cover; border-radius:8px; background:var(--bg4); }
+    .ad-table-placeholder { display:grid; place-items:center; color:var(--red2); font-size:17px; }
+    .ad-table-title div { display:grid; gap:4px; min-width:0; }
+    .ad-table-title strong { max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ad-table-title small,.ad-id-label { display:block; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text3); font-size:10px; }
+    .ad-rule-chip { display:inline-flex; align-items:center; gap:5px; padding:6px 8px; border-radius:8px; color:#c4b5fd; background:rgba(139,92,246,.12); border:1px solid rgba(139,92,246,.2); white-space:nowrap; font-size:11px; }
+    .ad-mini-stat { display:inline-flex; align-items:center; gap:4px; margin-right:8px; color:var(--text2); font-size:11px; }
+    .ad-mini-stat i { color:var(--red2); }
+    .ad-action-row { display:flex; gap:5px; white-space:nowrap; }
+    .ad-empty-cell { padding:45px 20px !important; text-align:center; color:var(--text3); }
+    .ad-empty-cell i,.ad-empty-cell strong,.ad-empty-cell span { display:block; }
+    .ad-empty-cell i { margin-bottom:10px; color:var(--red2); font-size:26px; }
+    .ad-empty-cell strong { color:var(--text2); margin-bottom:4px; }
+    .ad-empty-cell span { font-size:11px; }
+    .ad-form-shell { display:grid; gap:2px; }
+    .ad-form-intro { display:flex; align-items:center; gap:11px; padding:12px; margin-bottom:16px; border:1px solid var(--border-red); border-radius:12px; background:rgba(189,162,117,.06); }
+    .ad-form-intro > i { display:grid; place-items:center; width:38px; height:38px; flex:0 0 38px; border-radius:11px; color:#fff; background:linear-gradient(135deg,var(--red),#8a6b3e); }
+    .ad-form-intro div { display:grid; gap:4px; }
+    .ad-form-intro span { color:var(--text3); font-size:11px; line-height:1.4; }
+
     /* RESPONSIVE */
     @media (max-width: 1100px) {
       .adm-stats { grid-template-columns: repeat(2, 1fr); }
@@ -512,6 +542,11 @@
       .badge-admin-actions .assign-badge { flex:1; justify-content:center; }
       .user-badges-readonly-head { align-items:flex-start; flex-direction:column; gap:5px; }
       .badge-assign-summary { flex-direction:column; gap:4px; }
+      .ad-admin-hero { align-items:flex-start; flex-direction:column; padding:18px; }
+      .ad-admin-hero h1 { font-size:21px; }
+      .ad-admin-hero .btn { width:100%; justify-content:center; }
+      .ad-admin-stats { grid-template-columns:1fr; }
+      .ad-form-intro { align-items:flex-start; }
     }
     .admin-message-users-card { margin-top: 14px; }
     .admin-message-search-results { margin-top: 14px; }
@@ -593,6 +628,7 @@
       <div class="adm-nav-item" data-section="ad-submissions"><div class="adm-nav-icon"><i class="fas fa-inbox"></i></div> Reklam Havuzu</div>
       <div class="adm-nav-item" data-section="video-ads"><div class="adm-nav-icon"><i class="fas fa-bullhorn"></i></div> Video Reklamları</div>
       <div class="adm-nav-item" data-section="music-ads"><div class="adm-nav-icon"><i class="fas fa-headphones"></i></div> Müzik Reklamları</div>
+      <div class="adm-nav-item" data-section="reals-ads"><div class="adm-nav-icon"><i class="fas fa-circle-play"></i></div> Reals Reklamları</div>
       <div class="adm-nav-item" data-section="groups"><div class="adm-nav-icon"><i class="fas fa-users-cog"></i></div> Gruplar</div>
       <div class="adm-nav-item" data-section="artists"><div class="adm-nav-icon"><i class="fas fa-microphone-alt"></i></div> Artistler</div>
 

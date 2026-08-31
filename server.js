@@ -4098,11 +4098,139 @@ app.put('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => {
   const {rows}=await query('UPDATE photo_ads SET title=$1,description=$2,site_url=$3,show_likes=$4,allow_comments=$5,allow_shares=$6,active=$7,priority=$8,updated_at=NOW() WHERE id=$9 RETURNING *',[b.title||old.title,b.description??old.description,site,b.show_likes===undefined?old.show_likes:(b.show_likes?1:0),b.allow_comments===undefined?old.allow_comments:(b.allow_comments?1:0),b.allow_shares===undefined?old.allow_shares:(b.allow_shares?1:0),b.active===undefined?old.active:(b.active?1:0),b.priority??old.priority,old.id]);res.json(rows[0]);
 });
 app.delete('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => { await query('DELETE FROM photo_ads WHERE id=$1',[req.params.id]);res.json({ok:true}); });
+// ===== REALS ADVERTISING =====
+function normalizeRealsAdFrequency(body = {}, old = {}) {
+  const mode = body.frequency_mode === undefined ? (old.frequency_mode || 'count') : String(body.frequency_mode);
+  const frequencyMode = ['count', 'time'].includes(mode) ? mode : (old.frequency_mode || 'count');
+  const unit = body.frequency_unit === undefined ? (old.frequency_unit || (frequencyMode === 'count' ? 'reals' : 'minutes')) : String(body.frequency_unit);
+  const frequencyUnit = frequencyMode === 'count' ? 'reals' : (['minutes', 'hours'].includes(unit) ? unit : (old.frequency_unit || 'minutes'));
+  const parsedValue = body.frequency_value === undefined ? Number(old.frequency_value || (frequencyMode === 'count' ? 3 : 10)) : Number(body.frequency_value);
+  return {
+    frequency_mode: frequencyMode,
+    frequency_unit: frequencyUnit,
+    frequency_value: Number.isFinite(parsedValue) ? Math.max(1, Math.min(100000, Math.round(parsedValue))) : Number(old.frequency_value || 3)
+  };
+}
+function realsAdSelect(extra = '') {
+  return `SELECT a.*,
+    (SELECT COUNT(*)::int FROM reals_ad_likes l WHERE l.ad_id=a.id) AS like_count,
+    (SELECT COUNT(*)::int FROM reals_ad_comments c WHERE c.ad_id=a.id) AS comment_count
+    ${extra}`;
+}
+
+app.get('/api/reals-ads', async (req, res) => {
+  const { rows } = await query(`${realsAdSelect('FROM reals_ads a WHERE a.active=1 ORDER BY a.priority DESC,a.created_at ASC')}`);
+  res.json(rows);
+});
+app.post('/api/reals-ads/:id/view', async (req, res) => {
+  const { rows } = await query('UPDATE reals_ads SET view_count=COALESCE(view_count,0)+1 WHERE id=$1 AND active=1 RETURNING view_count', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Reals reklamı bulunamadı' });
+  res.json({ ok: true, view_count: rows[0].view_count });
+});
+app.post('/api/reals-ads/:id/click', async (req, res) => {
+  const { rows } = await query('UPDATE reals_ads SET click_count=COALESCE(click_count,0)+1 WHERE id=$1 AND active=1 RETURNING click_count', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Reals reklamı bulunamadı' });
+  res.json({ ok: true, click_count: rows[0].click_count });
+});
+app.post('/api/reals-ads/:id/like', authMiddleware, async (req, res) => {
+  const { rows: ads } = await query('SELECT id,show_likes FROM reals_ads WHERE id=$1 AND active=1', [req.params.id]);
+  if (!ads.length) return res.status(404).json({ error: 'Reals reklamı bulunamadı' });
+  if (ads[0].show_likes !== 1) return res.status(403).json({ error: 'Bu reklamda beğeniler kapalı' });
+  const { rows: existing } = await query('SELECT id FROM reals_ad_likes WHERE ad_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+  if (existing.length) await query('DELETE FROM reals_ad_likes WHERE id=$1', [existing[0].id]);
+  else await query('INSERT INTO reals_ad_likes (ad_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, req.user.id]);
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM reals_ad_likes WHERE ad_id=$1', [req.params.id]);
+  res.json({ liked: !existing.length, like_count: rows[0].count });
+});
+app.get('/api/reals-ads/:id/comments', optionalAuth, async (req, res) => {
+  const { rows } = await query(`SELECT c.id,c.ad_id,c.content,c.created_at,u.username,u.avatar,
+    (SELECT COUNT(*)::int FROM reals_ad_comment_likes l WHERE l.comment_id=c.id) AS like_count,
+    CASE WHEN $2::bigint=0 THEN false ELSE EXISTS(SELECT 1 FROM reals_ad_comment_likes l2 WHERE l2.comment_id=c.id AND l2.user_id=$2) END AS liked
+    FROM reals_ad_comments c JOIN users u ON u.id=c.user_id
+    WHERE c.ad_id=$1 ORDER BY c.created_at ASC`, [req.params.id, req.user?.id || 0]);
+  res.json(rows);
+});
+app.post('/api/reals-ads/:id/comments', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'comment')) return;
+  const { rows: ads } = await query('SELECT id,allow_comments FROM reals_ads WHERE id=$1 AND active=1', [req.params.id]);
+  if (!ads.length) return res.status(404).json({ error: 'Reals reklamı bulunamadı' });
+  if (ads[0].allow_comments !== 1) return res.status(403).json({ error: 'Bu reklamda yorumlar kapalı' });
+  const content = String(req.body.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
+  const { rows } = await query('INSERT INTO reals_ad_comments (ad_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,ad_id,content,created_at', [req.params.id, req.user.id, content.slice(0, 1000)]);
+  res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar, like_count: 0, liked: false });
+});
+app.post('/api/reals-ads/:id/comments/:commentId/like', authMiddleware, async (req, res) => {
+  const { rows: comments } = await query('SELECT id FROM reals_ad_comments WHERE id=$1 AND ad_id=$2', [req.params.commentId, req.params.id]);
+  if (!comments.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const { rows: existing } = await query('SELECT id FROM reals_ad_comment_likes WHERE comment_id=$1 AND user_id=$2', [req.params.commentId, req.user.id]);
+  if (existing.length) await query('DELETE FROM reals_ad_comment_likes WHERE id=$1', [existing[0].id]);
+  else await query('INSERT INTO reals_ad_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.commentId, req.user.id]);
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM reals_ad_comment_likes WHERE comment_id=$1', [req.params.commentId]);
+  res.json({ liked: !existing.length, like_count: rows[0].count });
+});
+app.delete('/api/reals-ads/:id/comments/:commentId', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT c.id,c.user_id FROM reals_ad_comments c WHERE c.id=$1 AND c.ad_id=$2', [req.params.commentId, req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok' });
+  await query('DELETE FROM reals_ad_comments WHERE id=$1', [rows[0].id]);
+  res.json({ ok: true });
+});
+app.get('/api/admin/reals-ads', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`${realsAdSelect('FROM reals_ads a ORDER BY a.priority DESC,a.created_at DESC')}`);
+  res.json(rows);
+});
+app.post('/api/admin/reals-ads', adminMiddleware, upload.fields([{ name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const video = req.files?.video?.[0] ? await handleUpload(req.files.video[0]) : '';
+    const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : '';
+    const title = String(b.title || '').trim();
+    const site = normalizedExternalUrl(b.site_url);
+    if (!title || !video || !site) return res.status(400).json({ error: 'Başlık, video ve geçerli site linki zorunlu.' });
+    const frequency = normalizeRealsAdFrequency(b);
+    const code = await uniqueAdPortalCode('reals_ads');
+    const { rows } = await query(`INSERT INTO reals_ads
+      (portal_code,title,description,site_url,video_url,cover_url,show_likes,allow_comments,active,priority,frequency_mode,frequency_value,frequency_unit)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [code, title, String(b.description || '').trim().slice(0, 2000), site, video, cover,
+        b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.active === 'false' ? 0 : 1,
+        Number.isFinite(Number(b.priority)) ? Math.round(Number(b.priority)) : 0, frequency.frequency_mode, frequency.frequency_value, frequency.frequency_unit]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/api/admin/reals-ads/:id', adminMiddleware, upload.fields([{ name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req, res) => {
+  try {
+    const old = (await query('SELECT * FROM reals_ads WHERE id=$1', [req.params.id])).rows[0];
+    if (!old) return res.status(404).json({ error: 'Reals reklamı bulunamadı.' });
+    const b = req.body || {};
+    const title = String(b.title ?? old.title).trim();
+    const site = normalizedExternalUrl(b.site_url ?? old.site_url);
+    if (!title || !site) return res.status(400).json({ error: 'Başlık ve geçerli site linki zorunlu.' });
+    const video = req.files?.video?.[0] ? await handleUpload(req.files.video[0]) : old.video_url;
+    const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : old.cover_url;
+    const frequency = normalizeRealsAdFrequency(b, old);
+    const { rows } = await query(`UPDATE reals_ads SET title=$1,description=$2,site_url=$3,video_url=$4,cover_url=$5,
+      show_likes=$6,allow_comments=$7,active=$8,priority=$9,frequency_mode=$10,frequency_value=$11,frequency_unit=$12,updated_at=NOW()
+      WHERE id=$13 RETURNING *`,
+      [title, String(b.description ?? old.description).trim().slice(0, 2000), site, video, cover,
+        b.show_likes === undefined ? old.show_likes : (b.show_likes === 'false' ? 0 : 1),
+        b.allow_comments === undefined ? old.allow_comments : (b.allow_comments === 'false' ? 0 : 1),
+        b.active === undefined ? old.active : (b.active === 'false' ? 0 : 1),
+        b.priority === undefined ? old.priority : Math.round(Number(b.priority) || 0),
+        frequency.frequency_mode, frequency.frequency_value, frequency.frequency_unit, old.id]);
+    res.json(rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/admin/reals-ads/:id', adminMiddleware, async (req, res) => {
+  await query('DELETE FROM reals_ads WHERE id=$1', [req.params.id]);
+  res.json({ ok: true });
+});
 app.post('/api/ad-submissions', authMiddleware, upload.fields([{name:'media',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
-  try { const b=req.body;if(!['music','photo'].includes(b.type)||!b.title?.trim()||!req.files?.media?.[0])return res.status(400).json({error:'Reklam türü, başlık ve dosya zorunlu.'});const site=normalizedExternalUrl(b.site_url);if(!site)return res.status(400).json({error:'Geçerli site adresi girin.'});const media=await handleUpload(req.files.media[0]),cover=req.files?.cover?.[0]?await handleUpload(req.files.cover[0]):'',code=await uniqueAdPortalCode('ad_submissions');const {rows}=await query(`INSERT INTO ad_submissions (user_id,type,title,description,site_url,media_url,cover_url,show_likes,allow_comments,allow_shares,portal_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[req.user.id,b.type,b.title.trim(),b.description||'',site,media,cover,b.show_likes==='false'?0:1,b.allow_comments==='false'?0:1,b.allow_shares==='false'?0:1,code]);res.json(rows[0]); } catch(e){res.status(500).json({error:e.message});}
+  try { const b=req.body;if(!['music','photo','reals'].includes(b.type)||!b.title?.trim()||!req.files?.media?.[0])return res.status(400).json({error:'Reklam türü, başlık ve dosya zorunlu.'});const site=normalizedExternalUrl(b.site_url);if(!site)return res.status(400).json({error:'Geçerli site adresi girin.'});const media=await handleUpload(req.files.media[0]),cover=req.files?.cover?.[0]?await handleUpload(req.files.cover[0]):'',code=await uniqueAdPortalCode('ad_submissions');const {rows}=await query(`INSERT INTO ad_submissions (user_id,type,title,description,site_url,media_url,cover_url,show_likes,allow_comments,allow_shares,portal_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[req.user.id,b.type,b.title.trim(),b.description||'',site,media,cover,b.show_likes==='false'?0:1,b.allow_comments==='false'?0:1,b.allow_shares==='false'?0:1,code]);res.json(rows[0]); } catch(e){res.status(500).json({error:e.message});}
 });
 app.get('/api/admin/ad-submissions', adminMiddleware, async (req,res) => res.json((await query('SELECT a.*,u.username FROM ad_submissions a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.created_at DESC')).rows));
-app.post('/api/admin/ad-submissions/:id/approve', adminMiddleware, async (req,res) => { const ad=(await query("SELECT * FROM ad_submissions WHERE id=$1 AND status='pending'",[req.params.id])).rows[0];if(!ad)return res.status(404).json({error:'Bekleyen reklam bulunamadı'});if(ad.type==='photo')await query('INSERT INTO photo_ads (portal_code,title,description,site_url,image_url,show_likes,allow_comments,allow_shares) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',[ad.portal_code,ad.title,ad.description,ad.site_url,ad.media_url,ad.show_likes,ad.allow_comments,ad.allow_shares]);else await query('INSERT INTO music_ads (portal_code,title,site_url,audio_url,cover_url,active) VALUES ($1,$2,$3,$4,$5,1)',[ad.portal_code,ad.title,ad.site_url,ad.media_url,ad.cover_url]);await query("UPDATE ad_submissions SET status='approved' WHERE id=$1",[ad.id]);res.json({ok:true}); });
+app.post('/api/admin/ad-submissions/:id/approve', adminMiddleware, async (req,res) => { const ad=(await query("SELECT * FROM ad_submissions WHERE id=$1 AND status='pending'",[req.params.id])).rows[0];if(!ad)return res.status(404).json({error:'Bekleyen reklam bulunamadı'});if(ad.type==='photo')await query('INSERT INTO photo_ads (portal_code,title,description,site_url,image_url,show_likes,allow_comments,allow_shares) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',[ad.portal_code,ad.title,ad.description,ad.site_url,ad.media_url,ad.show_likes,ad.allow_comments,ad.allow_shares]);else if(ad.type==='reals')await query('INSERT INTO reals_ads (portal_code,title,description,site_url,video_url,cover_url,show_likes,allow_comments,active) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1)',[ad.portal_code,ad.title,ad.description,ad.site_url,ad.media_url,ad.cover_url,ad.show_likes,ad.allow_comments]);else await query('INSERT INTO music_ads (portal_code,title,site_url,audio_url,cover_url,active) VALUES ($1,$2,$3,$4,$5,1)',[ad.portal_code,ad.title,ad.site_url,ad.media_url,ad.cover_url]);await query("UPDATE ad_submissions SET status='approved' WHERE id=$1",[ad.id]);res.json({ok:true}); });
 app.post('/api/admin/ad-submissions/:id/reject', adminMiddleware, async (req,res) => {await query("UPDATE ad_submissions SET status='rejected' WHERE id=$1",[req.params.id]);res.json({ok:true});});
 
 // ===== ADMIN =====
@@ -6943,11 +7071,38 @@ app.put('/api/admin/music-ads/:id', adminMiddleware, upload.fields([{name:'audio
 app.delete('/api/admin/music-ads/:id', adminMiddleware, async (req,res) => { await query('DELETE FROM music_ads WHERE id=$1',[req.params.id]); res.json({ok:true}); });
 
 // 6 haneli kod reklamverenin gizli panel anahtarıdır.
-app.get('/api/reklampanel/:code', async (req,res) => { const {rows}=await query('SELECT * FROM music_ads WHERE portal_code=$1',[req.params.code]); if(!rows.length)return res.status(404).json({error:'Reklam kodu bulunamadı.'}); res.json(rows[0]); });
-app.put('/api/reklampanel/:code', adminMiddleware, upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
-  try { const old=(await query('SELECT * FROM music_ads WHERE portal_code=$1',[req.params.code])).rows[0]; if(!old)return res.status(404).json({error:'Reklam kodu bulunamadı.'}); const b=req.body;
-    const audio=req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : old.audio_url, cover=req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : old.cover_url;
-    const {rows}=await query('UPDATE music_ads SET title=$1,site_url=$2,audio_url=$3,cover_url=$4,updated_at=NOW() WHERE id=$5 RETURNING *',[b.title?.trim()||old.title,b.site_url??old.site_url,audio,cover,old.id]); res.json(rows[0]);
+app.get('/api/reklampanel/:code', async (req,res) => {
+  const music = (await query('SELECT * FROM music_ads WHERE portal_code=$1', [req.params.code])).rows[0];
+  if (music) return res.json({ ...music, ad_type: 'music' });
+  const reals = (await query('SELECT * FROM reals_ads WHERE portal_code=$1', [req.params.code])).rows[0];
+  if (!reals) return res.status(404).json({ error: 'Reklam kodu bulunamadı.' });
+  res.json({ ...reals, ad_type: 'reals' });
+});
+app.put('/api/reklampanel/:code', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req,res) => {
+  try {
+    const music = (await query('SELECT * FROM music_ads WHERE portal_code=$1', [req.params.code])).rows[0];
+    const b = req.body || {};
+    if (music) {
+      const audio = req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : music.audio_url;
+      const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : music.cover_url;
+      const { rows } = await query('UPDATE music_ads SET title=$1,site_url=$2,audio_url=$3,cover_url=$4,updated_at=NOW() WHERE id=$5 RETURNING *',
+        [b.title?.trim() || music.title, b.site_url ?? music.site_url, audio, cover, music.id]);
+      return res.json({ ...rows[0], ad_type: 'music' });
+    }
+    const reals = (await query('SELECT * FROM reals_ads WHERE portal_code=$1', [req.params.code])).rows[0];
+    if (!reals) return res.status(404).json({ error: 'Reklam kodu bulunamadı.' });
+    const video = req.files?.video?.[0] ? await handleUpload(req.files.video[0]) : reals.video_url;
+    const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : reals.cover_url;
+    const site = normalizedExternalUrl(b.site_url ?? reals.site_url);
+    if (!site) return res.status(400).json({ error: 'Geçerli site adresi girin.' });
+    const frequency = normalizeRealsAdFrequency(b, reals);
+    const { rows } = await query(`UPDATE reals_ads SET title=$1,description=$2,site_url=$3,video_url=$4,cover_url=$5,
+      show_likes=$6,allow_comments=$7,frequency_mode=$8,frequency_value=$9,frequency_unit=$10,updated_at=NOW() WHERE id=$11 RETURNING *`,
+      [b.title?.trim() || reals.title, String(b.description ?? reals.description).trim().slice(0, 2000), site, video, cover,
+       b.show_likes === undefined ? reals.show_likes : (b.show_likes === 'false' ? 0 : 1),
+       b.allow_comments === undefined ? reals.allow_comments : (b.allow_comments === 'false' ? 0 : 1),
+       frequency.frequency_mode, frequency.frequency_value, frequency.frequency_unit, reals.id]);
+    res.json({ ...rows[0], ad_type: 'reals' });
   } catch(e) { res.status(500).json({error:e.message}); }
 });
 

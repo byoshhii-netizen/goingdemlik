@@ -383,7 +383,7 @@ function loadSection(section) {
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
     'account-deletions': renderAccountDeletions,
-    forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
+    forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
@@ -480,7 +480,8 @@ async function renderAdminPhotos(main) {
 }
 async function renderAdSubmissions(main) {
   const ads = await adminApi('/ad-submissions');
-  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Reklam Havuzu</div></div><div class="card"><table class="adm-table"><thead><tr><th>Tür</th><th>Reklam</th><th>Gönderen</th><th>Durum</th><th>İşlem</th></tr></thead><tbody>${ads.map(a=>`<tr><td>${escHtml(a.type)}</td><td>${escHtml(a.title)}</td><td>${escHtml(a.username||'')}</td><td>${escHtml(a.status)}</td><td>${a.status==='pending'?`<button class="btn btn-primary btn-xs ad-approve" data-id="${a.id}">Onayla</button> <button class="btn btn-danger btn-xs ad-reject" data-id="${a.id}">Reddet</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;
+  const typeLabels = { music: 'Müzik reklamı', photo: 'Fotoğraf reklamı', reals: 'Reals reklamı' };
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Reklam Havuzu</div></div><div class="card"><table class="adm-table"><thead><tr><th>Tür</th><th>Reklam</th><th>Gönderen</th><th>Durum</th><th>İşlem</th></tr></thead><tbody>${ads.map(a=>`<tr><td>${escHtml(typeLabels[a.type] || a.type)}</td><td>${escHtml(a.title)}</td><td>${escHtml(a.username||'')}</td><td>${escHtml(a.status)}</td><td>${a.status==='pending'?`<button class="btn btn-primary btn-xs ad-approve" data-id="${a.id}">Onayla</button> <button class="btn btn-danger btn-xs ad-reject" data-id="${a.id}">Reddet</button>`:''}</td></tr>`).join('')}</tbody></table></div>`;
   main.querySelectorAll('.ad-approve').forEach(b=>b.onclick=async()=>{await adminApi('/ad-submissions/'+b.dataset.id+'/approve',{method:'POST'});renderAdSubmissions(main);});
   main.querySelectorAll('.ad-reject').forEach(b=>b.onclick=async()=>{await adminApi('/ad-submissions/'+b.dataset.id+'/reject',{method:'POST'});renderAdSubmissions(main);});
 }
@@ -1310,6 +1311,76 @@ function showMusicAdModal(ad = null) {
     <div class="form-group"><label>Ses dosyası ${ad ? '(değiştirmek için seçin)' : ''}</label><input id="ma-audio" type="file" accept="audio/*" /></div><div class="form-group"><label>Kapak görseli</label><input id="ma-cover" type="file" accept="image/*" /></div>
     <label class="checkbox-label" style="margin-bottom:16px"><input id="ma-active" type="checkbox" ${!ad || ad.active ? 'checked':''} /> Aktif</label><button id="ma-save" class="btn btn-primary" style="width:100%">Kaydet</button><div id="ma-err" class="form-error mt-4"></div>`);
   $('#ma-save')?.addEventListener('click', async () => { const fd=new FormData(); fd.append('title',$('#ma-title').value.trim()); fd.append('site_url',$('#ma-site').value.trim()); fd.append('priority',$('#ma-priority').value); fd.append('boost_points',$('#ma-boost').value); fd.append('active',$('#ma-active').checked); const au=$('#ma-audio').files[0], co=$('#ma-cover').files[0]; if(au)fd.append('audio',au); if(co)fd.append('cover',co); try { const r=await fetch('/api/admin/music-ads'+(ad?'/'+ad.id:''),{method:ad?'PUT':'POST',headers:{'X-Admin-Token':adminToken},body:fd}); const d=await r.json(); if(!r.ok)throw new Error(d.error||'Hata'); hideModal(); loadSection('music-ads'); }catch(e){$('#ma-err').textContent=e.message;} });
+}
+
+// ===== REALS REKLAMLARI =====
+async function renderRealsAds(main) {
+  let ads = [];
+  try { ads = await adminApi('/reals-ads'); } catch (e) {
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    return;
+  }
+  const totalViews = ads.reduce((sum, ad) => sum + Number(ad.view_count || 0), 0);
+  const totalClicks = ads.reduce((sum, ad) => sum + Number(ad.click_count || 0), 0);
+  main.innerHTML = `<div class="ad-admin-page">
+    <div class="ad-admin-hero"><div><span class="ad-admin-kicker">REALS MONETIZATION</span><h1><i class="fas fa-circle-play"></i> Reals Reklamları</h1><p>Akışın içine doğal biçimde giren, durdurulamayan video reklamlarını ve yayın sıklığını yönet.</p></div><button class="btn btn-primary" id="ra-new"><i class="fas fa-plus"></i> Yeni reklam</button></div>
+    <div class="adm-stat-grid ad-admin-stats"><div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(88,101,242,.14);color:#8b9aff"><i class="fas fa-layer-group"></i></div><div><b>${ads.length}</b><span>Toplam reklam</span></div></div><div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(34,197,94,.14);color:#4ade80"><i class="fas fa-eye"></i></div><div><b>${totalViews.toLocaleString('tr-TR')}</b><span>Toplam görüntülenme</span></div></div><div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(249,115,22,.14);color:#fb923c"><i class="fas fa-arrow-pointer"></i></div><div><b>${totalClicks.toLocaleString('tr-TR')}</b><span>Toplam tıklama</span></div></div></div>
+    <div class="card ad-admin-table-card"><div class="table-wrap"><table><thead><tr><th>Reklam</th><th>Panel ID</th><th>Yayın kuralı</th><th>Görüntülenme</th><th>Tıklama</th><th>Etkileşim</th><th>Durum</th><th>İşlemler</th></tr></thead><tbody id="ra-tbody"></tbody></table></div></div>
+  </div>`;
+  const ruleText = ad => ad.frequency_mode === 'time'
+    ? `Her ${ad.frequency_value} ${ad.frequency_unit === 'hours' ? 'saat' : 'dakika'}`
+    : `Her ${ad.frequency_value} Reals`;
+  const renderTable = list => {
+    const tbody = $('#ra-tbody'); if (!tbody) return;
+    tbody.innerHTML = list.length ? list.map(ad => `<tr>
+      <td><div class="ad-table-title">${ad.cover_url ? `<img src="${escHtml(ad.cover_url)}" alt="" />` : '<span class="ad-table-placeholder"><i class="fas fa-circle-play"></i></span>'}<div><strong>${escHtml(ad.title)}</strong><small>${escHtml(ad.site_url || '')}</small></div></div></td>
+      <td><code>${escHtml(ad.portal_code)}</code><small class="ad-id-label">#${ad.id}</small></td>
+      <td><span class="ad-rule-chip"><i class="fas fa-clock"></i> ${ruleText(ad)}</span></td>
+      <td><strong>${Number(ad.view_count || 0).toLocaleString('tr-TR')}</strong></td>
+      <td><strong>${Number(ad.click_count || 0).toLocaleString('tr-TR')}</strong></td>
+      <td><span class="ad-mini-stat"><i class="fas fa-heart"></i> ${ad.like_count || 0}</span><span class="ad-mini-stat"><i class="fas fa-comment"></i> ${ad.comment_count || 0}</span></td>
+      <td>${ad.active ? '<span class="badge badge-green">Aktif</span>' : '<span class="badge badge-red">Pasif</span>'}</td>
+      <td><div class="ad-action-row"><button class="btn btn-outline btn-xs ra-edit" data-id="${ad.id}"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-danger btn-xs ra-delete" data-id="${ad.id}"><i class="fas fa-trash"></i></button></div></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="ad-empty-cell"><i class="fas fa-bullhorn"></i><strong>Henüz Reals reklamı yok</strong><span>İlk reklamı ekleyerek akışta görünür hale getirin.</span></td></tr>';
+  };
+  renderTable(ads);
+  $('#ra-new')?.addEventListener('click', () => showRealsAdModal());
+  main.querySelectorAll('.ra-edit').forEach(btn => btn.addEventListener('click', () => showRealsAdModal(ads.find(ad => String(ad.id) === btn.dataset.id))));
+  main.querySelectorAll('.ra-delete').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Bu Reals reklamı silinsin mi?')) return;
+    try { await adminApi('/reals-ads/' + btn.dataset.id, { method: 'DELETE' }); toast('Reals reklamı silindi'); renderRealsAds(main); } catch (e) { toast(e.message, 'error'); }
+  }));
+}
+
+function showRealsAdModal(ad = null) {
+  const isEdit = !!ad;
+  const mode = ad?.frequency_mode || 'count';
+  const unit = ad?.frequency_unit || 'minutes';
+  showModal(isEdit ? 'Reals Reklamını Düzenle' : 'Yeni Reals Reklamı', `<div class="ad-form-shell">
+    <div class="ad-form-intro"><i class="fas fa-circle-play"></i><div><strong>${isEdit ? 'Reklam ayarlarını güncelle' : 'Akışa yeni reklam ekle'}</strong><span>Reklam kullanıcı tarafından durdurulamaz; başlık üzerinden hedef sayfaya gidilir.</span></div></div>
+    <div class="form-group"><label>Başlık *</label><input id="ra-title" maxlength="120" value="${escHtml(ad?.title || '')}" placeholder="Örn. Yaz fırsatları" /></div>
+    <div class="form-group"><label>Açıklama</label><textarea id="ra-description" rows="3" maxlength="2000">${escHtml(ad?.description || '')}</textarea></div>
+    <div class="form-group"><label>Başlığa tıklanınca açılacak link *</label><input id="ra-site" type="url" value="${escHtml(ad?.site_url || '')}" placeholder="https://ornek.com" /></div>
+    <div class="form-row"><div class="form-group"><label>Reklam videosu ${isEdit ? '(değiştirmek için seçin)' : '*'}</label><input id="ra-video" type="file" accept="video/*" /></div><div class="form-group"><label>Kapak görseli</label><input id="ra-cover" type="file" accept="image/*" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Gösterim türü</label><select id="ra-mode"><option value="count" ${mode === 'count' ? 'selected' : ''}>Reals sayısına göre</option><option value="time" ${mode === 'time' ? 'selected' : ''}>Zamana göre</option></select></div><div class="form-group"><label id="ra-value-label">${mode === 'count' ? 'Kaç Reals sonra?' : 'Ne kadar sonra?'}</label><input id="ra-value" type="number" min="1" max="100000" value="${Number(ad?.frequency_value) || 3}" /></div></div>
+    <div class="form-group" id="ra-unit-wrap" ${mode === 'count' ? 'hidden' : ''}><label>Zaman birimi</label><select id="ra-unit"><option value="minutes" ${unit === 'minutes' ? 'selected' : ''}>Dakika</option><option value="hours" ${unit === 'hours' ? 'selected' : ''}>Saat</option></select></div>
+    <div class="form-row"><div class="form-group"><label>Öncelik</label><input id="ra-priority" type="number" value="${Number(ad?.priority) || 0}" /></div><div class="form-group"><label>Durum</label><label class="checkbox-label"><input id="ra-active" type="checkbox" ${!ad || ad.active ? 'checked' : ''} /> Akışta yayınla</label></div></div>
+    <label class="checkbox-label"><input id="ra-likes" type="checkbox" ${!ad || ad.show_likes ? 'checked' : ''} /> Beğeniler açık</label><label class="checkbox-label"><input id="ra-comments" type="checkbox" ${!ad || ad.allow_comments ? 'checked' : ''} /> Yorumlar açık</label>
+    <button class="btn btn-primary" id="ra-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> ${isEdit ? 'Değişiklikleri kaydet' : 'Reklamı oluştur'}</button><div id="ra-error" class="form-error mt-4"></div>
+  </div>`);
+  $('#ra-mode')?.addEventListener('change', e => {
+    const timed = e.target.value === 'time';
+    $('#ra-value-label').textContent = timed ? 'Ne kadar sonra?' : 'Kaç Reals sonra?';
+    $('#ra-unit-wrap').hidden = !timed;
+  });
+  $('#ra-save')?.addEventListener('click', async () => {
+    const btn = $('#ra-save'); btn.disabled = true;
+    const fd = new FormData();
+    fd.append('title', $('#ra-title').value.trim()); fd.append('description', $('#ra-description').value.trim()); fd.append('site_url', $('#ra-site').value.trim());
+    fd.append('frequency_mode', $('#ra-mode').value); fd.append('frequency_value', $('#ra-value').value); fd.append('frequency_unit', $('#ra-unit')?.value || 'reals'); fd.append('priority', $('#ra-priority').value); fd.append('active', $('#ra-active').checked); fd.append('show_likes', $('#ra-likes').checked); fd.append('allow_comments', $('#ra-comments').checked);
+    const video = $('#ra-video').files[0], cover = $('#ra-cover').files[0]; if (video) fd.append('video', video); if (cover) fd.append('cover', cover);
+    try { const response = await fetch('/api/admin/reals-ads' + (isEdit ? '/' + ad.id : ''), { method: isEdit ? 'PUT' : 'POST', headers: { 'X-Admin-Token': adminToken }, body: fd }); const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Reklam kaydedilemedi'); hideModal(); toast(isEdit ? 'Reklam güncellendi' : `Reklam oluşturuldu · Panel ID: ${data.portal_code}`); loadSection('reals-ads'); } catch (e) { $('#ra-error').textContent = e.message; } finally { btn.disabled = false; }
+  });
 }
 
 // ===== VIDEO ADS =====
