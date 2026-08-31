@@ -2166,6 +2166,10 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   overflow: hidden;
   transition: width 0.2s;
 }
+/* Masaüstünde konuşma listesi biraz daha ferah; mobildeki mevcut görünüm değişmez. */
+@media (min-width: 769px) {
+  .dm-sidebar { width: 360px; }
+}
 .dm-sidebar-header {
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);

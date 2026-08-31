@@ -566,6 +566,7 @@ async function adminMiddleware(req, res, next) {
   if (req.method !== 'GET') {
     const allowed = [
       /^\/api\/admin\/user\/\d+\/2fa$/,
+      /^\/api\/admin\/account-deletions\/\d+\/cancel$/,
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/(badge|vmb)$/, /^\/api\/admin\/songs\/\d+\/ban$/,
@@ -4143,6 +4144,35 @@ app.get('/api/admin/users', adminMiddleware, async (req, res) => {
   res.json(rows.map(u => ({ ...sanitizeUser(u), badges: Array.isArray(u.badges) ? u.badges : [] })));
 });
 
+// Silme talebi veren hesaplar yalnızca ana admin tarafından görülebilir.
+app.get('/api/admin/account-deletions', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu bölüm yalnızca ana admine açıktır' });
+  const { rows } = await query(`
+    SELECT id, username, email, avatar, delete_requested_at,
+           delete_requested_at + INTERVAL '10 days' AS delete_at,
+           GREATEST(
+             0,
+             CEIL(EXTRACT(EPOCH FROM (delete_requested_at + INTERVAL '10 days' - NOW())) / 86400)
+           )::int AS days_remaining
+    FROM users
+    WHERE is_deleted=1 AND delete_requested_at IS NOT NULL
+    ORDER BY delete_requested_at ASC
+  `);
+  res.json(rows);
+});
+
+// Silme talebi yalnızca ana admin tarafından iptal edilebilir.
+app.post('/api/admin/account-deletions/:id/cancel', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Hesap silme iptali yalnızca ana admine açıktır' });
+  const { rows } = await query(
+    'UPDATE users SET is_deleted=0, delete_requested_at=NULL WHERE id=$1 AND is_deleted=1 RETURNING id, username',
+    [req.params.id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Aktif silme talebi bulunamadı' });
+  await logAction(req.adminUser.username || 'admin', 'admin_cancel_account_delete', rows[0].username);
+  res.json({ ok: true, user: rows[0] });
+});
+
 app.get('/api/admin/user/:id', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
@@ -4403,15 +4433,25 @@ app.get('/api/admin/authority-logs', adminMiddleware, async (req, res) => {
 });
 
 app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Site ayarları yalnızca ana admine açıktır' });
   const { rows } = await query('SELECT * FROM settings');
   res.json(Object.fromEntries(rows.map(s => [s.key, s.value])));
 });
 
 app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
-  const { key, value } = req.body;
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Site ayarları yalnızca ana admine açıktır' });
+  const { key } = req.body;
+  let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
   if (key === 'admin_password' && String(value || '').length < 12) {
     return res.status(400).json({ error: 'Admin şifresi en az 12 karakter olmalı' });
+  }
+  if (key === 'photo_song_clip_seconds') {
+    const seconds = Number(value);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300) {
+      return res.status(400).json({ error: 'Fotoğraf müziği süresi 1-300 saniye arasında tam sayı olmalı' });
+    }
+    value = String(seconds);
   }
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
@@ -4447,7 +4487,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth', 'auth_required'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -5166,7 +5206,8 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
-    'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url'
+    'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url',
+    'photo_song_clip_seconds'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};

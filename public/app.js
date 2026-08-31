@@ -10,6 +10,7 @@ let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 const MEDIA_VOLUME_KEY = 'cigcig_volume';
 const MEDIA_CLIP_SECONDS = 30;
+let photoSongClipSeconds = MEDIA_CLIP_SECONDS;
 const managedMediaAudio = new Set();
 
 function getMediaVolume() {
@@ -36,8 +37,9 @@ function untrackMediaAudio(audio) {
   if (audio) managedMediaAudio.delete(audio);
 }
 
-function limitMediaAudioClip(audio, startSeconds, onClipEnd) {
+function limitMediaAudioClip(audio, startSeconds, onClipEnd, clipSeconds = MEDIA_CLIP_SECONDS) {
   const requestedStart = Math.max(0, Number(startSeconds) || 0);
+  const requestedClipSeconds = Math.max(1, Number(clipSeconds) || MEDIA_CLIP_SECONDS);
   let clipEnd = null;
   let finished = false;
 
@@ -45,7 +47,7 @@ function limitMediaAudioClip(audio, startSeconds, onClipEnd) {
     const duration = Number(audio.duration);
     if (Number.isFinite(duration) && duration >= 0) {
       const start = Math.min(requestedStart, duration);
-      clipEnd = Math.min(duration, start + MEDIA_CLIP_SECONDS);
+      clipEnd = Math.min(duration, start + requestedClipSeconds);
       if (audio.currentTime < start || audio.currentTime >= clipEnd) audio.currentTime = start;
     } else {
       audio.currentTime = requestedStart;
@@ -5816,6 +5818,10 @@ async function init() {
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
     siteAuthRequired = ps.auth_required === '1';
+    const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
+    if (Number.isInteger(configuredPhotoClip) && configuredPhotoClip >= 1 && configuredPhotoClip <= 300) {
+      photoSongClipSeconds = configuredPhotoClip;
+    }
     if (ps.light_primary_color) document.documentElement.style.setProperty('--light-accent', ps.light_primary_color);
     if (ps.light_background_color) document.documentElement.style.setProperty('--light-bg', ps.light_background_color);
     window.otherSongsEnabled = ps.other_songs_enabled !== '0';
@@ -8697,7 +8703,7 @@ function setupPhotoAudio(feed) {
         activePhotoAudio=null;
         syncButtons();
       }
-    });
+    }, photoSongClipSeconds);
     activePhotoAudio=audio;
     syncButtons();
     audio.play().catch(()=>{

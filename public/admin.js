@@ -382,6 +382,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
+    'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages,
@@ -395,6 +396,70 @@ function loadSection(section) {
     , 'homepage-sections': renderHomepageSections
   };
   if (map[section]) map[section](main);
+}
+
+async function renderAccountDeletions(main) {
+  let accounts = [];
+  try {
+    accounts = await adminApi('/account-deletions');
+  } catch (error) {
+    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-user-clock"></i></div> Hesap Silme Talepleri</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(error.message)}</div></div>`;
+    return;
+  }
+
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-user-clock"></i></div> Hesap Silme Talepleri <span style="font-size:13px;font-weight:400;color:var(--text2)">(${accounts.length})</span></div>
+      <button class="btn btn-outline btn-sm" id="account-deletions-refresh"><i class="fas fa-rotate"></i> Yenile</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:12px 16px;color:var(--text2);font-size:12px;line-height:1.6">
+        Bu liste, kullanıcıların 10 günlük bekleme süresi dolmadan verdiği silme taleplerini gösterir. İptal işlemi yalnızca ana admin tarafından yapılabilir.
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Kullanıcı</th><th>E-posta</th><th>Talep tarihi ve saati</th><th>Kalıcı silinme tarihi</th><th>Kalan süre</th><th>İşlem</th></tr></thead>
+          <tbody id="account-deletions-tbody"></tbody>
+        </table>
+      </div>
+    </div>`;
+
+  const tbody = $('#account-deletions-tbody');
+  if (!accounts.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:36px"><i class="fas fa-user-check" style="font-size:24px;display:block;margin-bottom:10px"></i>Bekleyen hesap silme talebi yok</td></tr>';
+  } else {
+    tbody.innerHTML = accounts.map(account => {
+      const days = Number(account.days_remaining);
+      const expired = days <= 0;
+      return `<tr>
+        <td><div style="display:flex;align-items:center;gap:8px">
+          ${account.avatar ? `<img src="${escHtml(account.avatar)}" style="width:30px;height:30px;border-radius:50%;object-fit:cover" alt="" />` : '<span style="width:30px;height:30px;border-radius:50%;background:var(--surface2);display:grid;place-items:center"><i class="fas fa-user"></i></span>'}
+          <strong>${escHtml(account.username)}</strong>
+        </div></td>
+        <td style="font-size:12px;color:var(--text2)">${escHtml(account.email || '-')}</td>
+        <td style="font-size:12px">${formatDate(account.delete_requested_at)}</td>
+        <td style="font-size:12px;color:var(--text2)">${formatDate(account.delete_at)}</td>
+        <td><span class="badge ${expired ? 'badge-red' : 'badge-green'}"><i class="fas fa-clock"></i> ${expired ? 'Süre doldu' : `${days} gün kaldı`}</span></td>
+        <td><button class="btn btn-primary btn-xs cancel-account-delete" data-id="${account.id}" data-username="${escHtml(account.username)}"><i class="fas fa-rotate-left"></i> Silmeyi iptal et</button></td>
+      </tr>`;
+    }).join('');
+  }
+
+  $('#account-deletions-refresh')?.addEventListener('click', () => loadSection('account-deletions'));
+  tbody?.addEventListener('click', async event => {
+    const button = event.target.closest('.cancel-account-delete');
+    if (!button) return;
+    if (!confirm(`${button.dataset.username} kullanıcısının hesap silme talebi iptal edilsin mi?`)) return;
+    button.disabled = true;
+    try {
+      await adminApi(`/account-deletions/${button.dataset.id}/cancel`, { method: 'POST' });
+      toast('Hesap silme talebi iptal edildi');
+      loadSection('account-deletions');
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  });
 }
 
 async function renderAdminStories(main) {
@@ -2441,6 +2506,15 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Fotoğraf Müzik Süresi</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Fotoğraflarda şarkı kaç saniye çalsın?</label><input id="s-photo-song-clip" type="number" min="1" max="300" step="1" value="${escHtml(settings['photo_song_clip_seconds'] || '30')}" /></div>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Fotoğraf akışındaki müzikler, seçilen başlangıç noktasından itibaren bu süre boyunca çalar. Sınır: 1-300 saniye.</small>
+          <button class="btn btn-primary" id="s-photo-song-clip-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Süreyi kaydet</button>
+          <div id="s-photo-song-clip-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-phone-volume" style="color:var(--red2);margin-right:8px"></i>Sesli Arama Sesi</span></div>
         <div class="card-body">
           <div class="form-group"><label>Zil sesi URL'si</label><input id="s-call-ringtone-url" type="url" value="${escHtml(settings['call_ringtone_url']||'')}" placeholder="https://site.com/ring.mp3" /></div>
@@ -2708,6 +2782,20 @@ async function renderSettings(main) {
       toast('Kaydedildi');
     } catch(e) { if(msgEl) msgEl.textContent=e.message; }
   }
+
+  document.getElementById('s-photo-song-clip-save')?.addEventListener('click', async () => {
+    const input = document.getElementById('s-photo-song-clip');
+    const msg = document.getElementById('s-photo-song-clip-msg');
+    const seconds = Number(input?.value);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 300) {
+      msg.style.color = 'var(--red2)';
+      msg.textContent = '1-300 arasında tam sayı girin.';
+      return;
+    }
+    await saveSetting('photo_song_clip_seconds', String(seconds), msg);
+    msg.style.color = 'var(--green)';
+    msg.textContent = `✓ Fotoğraf müziği ${seconds} saniye olarak kaydedildi.`;
+  });
 
   document.getElementById('s-light-theme-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-light-theme-msg');
