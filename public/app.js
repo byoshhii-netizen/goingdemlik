@@ -8312,8 +8312,10 @@ function bindPhotoFeed(feed) {
     e.preventDefault();
     e.stopPropagation();
     if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error');
+    if (x.disabled) return;
     const c = e.target.closest('[data-photo-id]');
     if (!c) return;
+    x.disabled = true;
     try {
       const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
       const n = x.querySelector('span');
@@ -8329,6 +8331,7 @@ function bindPhotoFeed(feed) {
         setTimeout(() => burst.remove(), 850);
       }
     } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
+    finally { x.disabled = false; }
   });
   feed.querySelectorAll('.photo-media-wrap').forEach(media => media.addEventListener('dblclick', event => {
     event.preventDefault();

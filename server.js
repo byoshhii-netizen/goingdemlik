@@ -3299,7 +3299,52 @@ app.post('/api/reals/upload-url', authMiddleware, async (req, res) => {
   }
 });
 
+let photoInteractionSchemaPromise;
+function ensurePhotoInteractionSchema() {
+  if (!photoInteractionSchemaPromise) {
+    photoInteractionSchemaPromise = query(`
+      CREATE TABLE IF NOT EXISTS photos (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        public_id TEXT DEFAULT '',
+        caption TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
+      ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_shares INTEGER DEFAULT 1;
+      CREATE TABLE IF NOT EXISTS photo_likes (
+        id BIGSERIAL PRIMARY KEY,
+        photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(photo_id, user_id)
+      );
+      CREATE TABLE IF NOT EXISTS photo_comments (
+        id BIGSERIAL PRIMARY KEY,
+        photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+        user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS photo_comment_likes (
+        id BIGSERIAL PRIMARY KEY,
+        comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(comment_id, user_id)
+      );
+    `).catch(error => {
+      photoInteractionSchemaPromise = null;
+      throw error;
+    });
+  }
+  return photoInteractionSchemaPromise;
+}
+
 app.get('/api/photos', optionalAuth, async (req, res) => {
+  await ensurePhotoInteractionSchema();
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
   const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
@@ -3316,6 +3361,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/photos/:id', optionalAuth, async (req, res) => {
+  await ensurePhotoInteractionSchema();
   const userId = req.user ? req.user.id : 0;
   const { rows } = await query(
     `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds,
@@ -3608,6 +3654,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   const userId = Number(req.user.id);
   if (!Number.isSafeInteger(photoId) || photoId < 1) return res.status(400).json({ error: 'Geçersiz fotoğraf.' });
   try {
+  await ensurePhotoInteractionSchema();
   const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
     WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -3618,7 +3665,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
     const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM photo_likes WHERE photo_id=$1', [photoId]);
     return res.json({ liked: false, like_count: counts[0].like_count });
   } else {
-    await query('INSERT INTO photo_likes (photo_id,user_id) VALUES ($1,$2)', [photoId, userId]);
+    await query('INSERT INTO photo_likes (photo_id,user_id) VALUES ($1,$2) ON CONFLICT (photo_id,user_id) DO NOTHING', [photoId, userId]);
     const { rows: owner } = await query('SELECT user_id FROM photos WHERE id=$1', [photoId]);
     if (owner[0] && owner[0].user_id !== userId) {
         await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [owner[0].user_id, 'photo_like', req.user.username, req.user.avatar || '', 'Fotoğrafın beğenildi', `@${req.user.username} fotoğrafını beğendi.`, '/foto/' + photoId]).catch(() => {});
@@ -3634,32 +3681,44 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
 
 // Photo comments
 app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
-  const photoId = req.params.id;
-  const userId = req.user ? req.user.id : 0;
-  const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
-  if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
-    (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
-    EXISTS(SELECT 1 FROM photo_comment_likes pcl2 WHERE pcl2.comment_id=pc.id AND pcl2.user_id=$2) AS liked
-    FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
-  res.json(rows);
+  try {
+    await ensurePhotoInteractionSchema();
+    const photoId = req.params.id;
+    const userId = req.user ? req.user.id : 0;
+    const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
+    if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
+    const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
+      (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
+      EXISTS(SELECT 1 FROM photo_comment_likes pcl2 WHERE pcl2.comment_id=pc.id AND pcl2.user_id=$2) AS liked
+      FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
+    res.json(rows);
+  } catch (error) {
+    console.error('Photo comments read failed:', error);
+    res.status(500).json({ error: 'Yorumlar yüklenemedi. Lütfen tekrar deneyin.' });
+  }
 });
 
 app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
-  if (await denyIfRestricted(req, res, 'comment')) return;
-  const photoId = req.params.id;
-  const { content } = req.body;
-  if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-  const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-  if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
-  await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
-  const { rows: photoOwner } = await query('SELECT p.user_id,p.title FROM photos p WHERE p.id=$1', [photoId]);
-  if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
-    await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
+  try {
+    await ensurePhotoInteractionSchema();
+    if (await denyIfRestricted(req, res, 'comment')) return;
+    const photoId = req.params.id;
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
+    const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
+    if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
+    await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
+    const { rows: photoOwner } = await query('SELECT p.user_id,p.title FROM photos p WHERE p.id=$1', [photoId]);
+    if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
+      await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
+    }
+    const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
+    res.json(c.rows[c.rows.length - 1]);
+  } catch (error) {
+    console.error('Photo comment failed:', error);
+    res.status(500).json({ error: 'Yorum gönderilemedi. Lütfen tekrar deneyin.' });
   }
-  const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
-  res.json(c.rows[c.rows.length-1]);
 });
 
 app.delete('/api/photos/comments/:id', authMiddleware, async (req, res) => {
@@ -3675,16 +3734,22 @@ app.delete('/api/photos/comments/:id', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/photos/comments/:id/like', authMiddleware, async (req, res) => {
-  const commentId = req.params.id;
-  const { rows: existing } = await query('SELECT id FROM photo_comment_likes WHERE comment_id=$1 AND user_id=$2', [commentId, req.user.id]);
-  if (existing.length) {
-    await query('DELETE FROM photo_comment_likes WHERE id=$1', [existing[0].id]);
-    return res.json({ liked: false });
+  try {
+    await ensurePhotoInteractionSchema();
+    const commentId = req.params.id;
+    const { rows: existing } = await query('SELECT id FROM photo_comment_likes WHERE comment_id=$1 AND user_id=$2', [commentId, req.user.id]);
+    if (existing.length) {
+      await query('DELETE FROM photo_comment_likes WHERE id=$1', [existing[0].id]);
+      return res.json({ liked: false });
+    }
+    const { rows: comment } = await query('SELECT id FROM photo_comments WHERE id=$1', [commentId]);
+    if (!comment.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+    await query('INSERT INTO photo_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT (comment_id,user_id) DO NOTHING', [commentId, req.user.id]);
+    res.json({ liked: true });
+  } catch (error) {
+    console.error('Photo comment like failed:', error);
+    res.status(500).json({ error: 'Yorum beğenilemedi. Lütfen tekrar deneyin.' });
   }
-  const { rows: comment } = await query('SELECT id FROM photo_comments WHERE id=$1', [commentId]);
-  if (!comment.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
-  await query('INSERT INTO photo_comment_likes (comment_id,user_id) VALUES ($1,$2)', [commentId, req.user.id]);
-  res.json({ liked: true });
 });
 
 // Admin: manage photos
