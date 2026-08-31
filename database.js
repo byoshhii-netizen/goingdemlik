@@ -1178,6 +1178,11 @@ async function initDb() {
     ALTER TABLE playlists ADD COLUMN IF NOT EXISTS emoji TEXT DEFAULT '🎵';
     ALTER TABLE playlists ADD COLUMN IF NOT EXISTS cover_url TEXT DEFAULT '';
     ALTER TABLE playlists ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 1;
+    -- Eski kayıtlarda public_id boşsa, URL'de sıralı veritabanı ID'si görünmesin.
+    -- Hash deterministik olduğu için migration her açılışta güvenle tekrar çalışabilir.
+    UPDATE playlists
+      SET public_id = 'id' || substr(md5('playlist:' || id::text), 1, 8)
+      WHERE public_id IS NULL OR btrim(public_id) = '';
     CREATE UNIQUE INDEX IF NOT EXISTS playlists_public_id_unique ON playlists(public_id) WHERE public_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS group_channels (

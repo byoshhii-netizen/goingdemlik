@@ -14,6 +14,12 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { query, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 
+function createPlaylistPublicId() {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const bytes = crypto.randomBytes(8);
+  return 'id' + Array.from(bytes, byte => alphabet[byte % alphabet.length]).join('');
+}
+
 function profileRouteKey(username) {
   return String(username || '').toLocaleLowerCase('tr-TR')
     .replace(/[çğıöşüÇĞİÖŞÜ]/g, char => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', Ç: 'c', Ğ: 'g', İ: 'i', Ö: 'o', Ş: 's', Ü: 'u' }[char] || char))
@@ -722,6 +728,16 @@ const avatarUpload = multer({
     const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
     if (allowedImages.includes(file.mimetype)) cb(null, true);
     else cb(new Error('Profil fotoğrafı JPEG, PNG, GIF, WEBP veya AVIF olmalı'));
+  }
+});
+
+const playlistCoverUpload = multer({
+  storage,
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedImages = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+    if (allowedImages.includes(file.mimetype) || file.mimetype?.startsWith('image/')) cb(null, true);
+    else cb(new Error('Playlist kapağı JPEG, PNG, GIF, WEBP veya AVIF olmalı'));
   }
 });
 
@@ -4910,13 +4926,14 @@ app.get('/api/playlists', authMiddleware, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/playlists', authMiddleware, async (req, res) => {
+app.post('/api/playlists', authMiddleware, playlistCoverUpload.single('cover'), async (req, res) => {
   try {
     const { name, description, emoji, cover_url, is_public } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
+    const uploadedCover = req.file ? await handleUpload(req.file) : (cover_url || '');
     const { rows } = await query(
       'INSERT INTO playlists (user_id, public_id, name, description, emoji, cover_url, is_public) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [req.user.id, 'pl_' + crypto.randomBytes(9).toString('base64url').toLowerCase(), name.trim(), description?.trim() || '', (emoji || '🎵').slice(0, 8), cover_url || '', is_public === false ? 0 : 1]
+      [req.user.id, createPlaylistPublicId(), name.trim(), description?.trim() || '', (emoji || '🎵').slice(0, 8), uploadedCover, parseFormBoolean(is_public, true) ? 1 : 0]
     );
     res.json(rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -4926,7 +4943,8 @@ app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
   try {
     const { rows: pl } = await query('SELECT * FROM playlists WHERE public_id=$1 OR id::text=$1', [req.params.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
-    if (!pl[0].is_public && (!req.user || pl[0].user_id !== req.user.id)) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    const isOwner = !!req.user && String(pl[0].user_id) === String(req.user.id);
+    if (!pl[0].is_public && !isOwner) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const { rows: songs } = await query(
       `SELECT ps.id as ps_id, ps.position, s.id, s.slug, s.title, s.artist_name, s.cover_url, s.audio_url, s.play_count
        FROM playlist_songs ps
@@ -4935,17 +4953,20 @@ app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
        ORDER BY ps.position ASC, ps.added_at ASC`,
       [pl[0].id]
     );
-    res.json({ ...pl[0], songs, is_owner: !!req.user && pl[0].user_id === req.user.id });
+    res.json({ ...pl[0], songs, is_owner: isOwner });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/playlists/:id', authMiddleware, async (req, res) => {
+app.put('/api/playlists/:id', authMiddleware, playlistCoverUpload.single('cover'), async (req, res) => {
   try {
-    const { name, description, emoji, cover_url, is_public } = req.body;
+    const { name, description, emoji, cover_url, is_public, remove_cover } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'Playlist adı gerekli' });
+    const nextCover = req.file
+      ? await handleUpload(req.file)
+      : (parseFormBoolean(remove_cover, false) ? '' : (Object.prototype.hasOwnProperty.call(req.body, 'cover_url') ? (cover_url || '') : null));
     const { rows } = await query(
-      'UPDATE playlists SET name=$1, description=$2,emoji=$3,cover_url=$4,is_public=$5 WHERE (public_id=$6 OR id::text=$6) AND user_id=$7 RETURNING *',
-      [name.trim(), description?.trim() || '', (emoji || '🎵').slice(0,8), cover_url || '', is_public === false ? 0 : 1, req.params.id, req.user.id]
+      'UPDATE playlists SET name=$1, description=$2,emoji=$3,cover_url=COALESCE($4, cover_url),is_public=$5 WHERE (public_id=$6 OR id::text=$6) AND user_id=$7 RETURNING *',
+      [name.trim(), description?.trim() || '', (emoji || '🎵').slice(0,8), nextCover, parseFormBoolean(is_public, true) ? 1 : 0, req.params.id, req.user.id]
     );
     if (!rows.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     res.json(rows[0]);
@@ -4958,7 +4979,7 @@ app.post('/api/playlists/:id/save', authMiddleware, async (req, res) => {
     if (!source.length || !source[0].is_public) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const p = source[0];
     const { rows: created } = await query(`INSERT INTO playlists (user_id,public_id,name,description,emoji,cover_url,is_public)
-      VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`, [req.user.id, 'pl_' + crypto.randomBytes(9).toString('base64url').toLowerCase(), p.name, p.description, p.emoji || '🎵', p.cover_url || '']);
+      VALUES ($1,$2,$3,$4,$5,$6,1) RETURNING *`, [req.user.id, createPlaylistPublicId(), p.name, p.description, p.emoji || '🎵', p.cover_url || '']);
     await query(`INSERT INTO playlist_songs (playlist_id,song_id,position)
       SELECT $1,song_id,position FROM playlist_songs WHERE playlist_id=$2 ORDER BY position`, [created[0].id, p.id]);
     res.json(created[0]);

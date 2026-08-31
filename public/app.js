@@ -1495,7 +1495,9 @@ async function renderHome(app) {
       el.innerHTML = playlists.slice(0,6).map(pl => `
         <a href="/playlist/${escHtml(pl.public_id || pl.id)}" data-link class="card card-body" style="display:block;text-decoration:none;color:inherit">
           <div style="display:flex;align-items:center;gap:12px">
-            <div style="width:54px;height:54px;border-radius:16px;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;font-size:20px">${escHtml(pl.emoji || '🎵')}</div>
+            <div class="home-playlist-cover" style="width:54px;height:54px;border-radius:16px;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden">
+              ${pl.cover_url ? `<img src="${escHtml(pl.cover_url)}" alt="" />` : escHtml(pl.emoji || '🎵')}
+            </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(pl.name)}</div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${pl.song_count} şarkı · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
@@ -8804,18 +8806,23 @@ async function renderMyPlaylists(app) {
       el.innerHTML = `<div class="pl-grid">
         ${playlists.map(pl => `
           <div class="pl-card" data-id="${escHtml(pl.public_id || pl.id)}" style="cursor:pointer">
-            <div class="pl-card-icon"><i class="fas fa-music"></i></div>
+            <div class="pl-card-icon">
+              ${pl.cover_url
+                ? `<img src="${escHtml(pl.cover_url)}" alt="" />`
+                : `<span>${escHtml(pl.emoji || '🎵')}</span>`}
+            </div>
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>
-              <div class="pl-card-meta">${pl.song_count} şarkı · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
+              <div class="pl-card-meta"><span>${pl.song_count} şarkı</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
               ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
             </div>
             <div class="pl-card-actions">
-              <button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" data-public="${pl.is_public ? '1' : '0'}" data-name="${escHtml(pl.name)}" data-desc="${escHtml(pl.description||'')}" title="Düzenle"><i class="fas fa-edit"></i></button>
-              <button class="btn btn-ghost btn-sm pl-del-btn" data-id="${pl.id}" data-name="${escHtml(pl.name)}" title="Sil" style="color:var(--accent-red2)"><i class="fas fa-trash"></i></button>
+              <button class="btn btn-ghost btn-sm pl-edit-btn" data-id="${pl.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
+              <button class="btn btn-ghost btn-sm pl-del-btn" data-id="${pl.id}" title="Sil" style="color:var(--accent-red2)"><i class="fas fa-trash"></i></button>
             </div>
           </div>`).join('')}
       </div>`;
+      const playlistById = new Map(playlists.map(pl => [String(pl.id), pl]));
       el.querySelectorAll('.pl-card').forEach(card => {
         card.addEventListener('click', e => {
           if (!e.target.closest('.pl-edit-btn') && !e.target.closest('.pl-del-btn')) {
@@ -8826,13 +8833,15 @@ async function renderMyPlaylists(app) {
       el.querySelectorAll('.pl-edit-btn').forEach(btn => {
         btn.addEventListener('click', e => {
           e.stopPropagation();
-          showCreatePlaylistModal('edit', btn.dataset.id, btn.dataset.name, btn.dataset.desc, btn.dataset.public === '1', renderList);
+          const pl = playlistById.get(String(btn.dataset.id));
+          if (pl) showCreatePlaylistModal('edit', pl.id, pl.name, pl.description, !!pl.is_public, renderList, pl.emoji, pl.cover_url);
         });
       });
       el.querySelectorAll('.pl-del-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          if (!confirm(`"${btn.dataset.name}" playlistini silmek istediğinize emin misiniz?`)) return;
+          const pl = playlistById.get(String(btn.dataset.id));
+          if (!pl || !confirm(`"${pl.name}" playlistini silmek istediğinize emin misiniz?`)) return;
           try {
             await api('/playlists/' + btn.dataset.id, { method: 'DELETE' });
             toast('Playlist silindi');
@@ -8846,32 +8855,134 @@ async function renderMyPlaylists(app) {
   renderList();
 
   document.getElementById('pl-create-btn')?.addEventListener('click', () => {
-    showCreatePlaylistModal('create', null, '', '', true, renderList);
+    showCreatePlaylistModal('create', null, '', '', true, renderList, '🎵', '');
   });
 }
 
-function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave) {
-  showModal(mode === 'create' ? '➕ Playlist Oluştur' : '✏️ Playlist Düzenle', `
-    <div class="form-group"><label>Playlist Adı *</label><input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn: Sabah Müzikleri" /></div>
-    <div class="form-group"><label>Açıklama (isteğe bağlı)</label><input id="plm-desc" value="${escHtml(desc||'')}" placeholder="Kısa açıklama..." /></div>
-    <div class="form-group"><label><input type="checkbox" id="plm-public" ${isPublic ? 'checked' : ''} /> Herkese açık</label></div>
-    <button class="btn btn-primary" id="plm-save" style="width:100%;justify-content:center">${mode === 'create' ? '<i class="fas fa-plus"></i> Oluştur' : '<i class="fas fa-save"></i> Kaydet'}</button>
-    <div id="plm-msg" style="margin-top:8px;font-size:12px;color:var(--accent-red2)"></div>
+function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave, emoji = '🎵', coverUrl = '') {
+  const commonEmojis = ['🎵', '🔥', '🌙', '💿', '🎧', '💔', '🌿', '🚗', '❤️', '☕'];
+  showModal(mode === 'create' ? 'Yeni playlist' : 'Playlisti düzenle', `
+    <div class="pl-editor">
+      <div class="pl-editor-intro">
+        <div class="pl-editor-kicker">${mode === 'create' ? 'MÜZİK KÜTÜPHANEN' : 'PLAYLİST AYARLARI'}</div>
+        <h4>${mode === 'create' ? 'Ruh haline bir soundtrack seç.' : 'Playlistini kendi tarzına göre güncelle.'}</h4>
+        <p>Başlık, emoji ve kapak görseliyle listene karakter kat.</p>
+      </div>
+
+      <div class="pl-cover-picker" id="plm-cover-picker" tabindex="0" role="button">
+        <div class="pl-cover-preview ${coverUrl ? 'has-image' : ''}" id="plm-cover-preview">
+          ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<span>${escHtml(emoji || '🎵')}</span>`}
+        </div>
+        <div class="pl-cover-copy">
+          <strong>Kapak görseli</strong>
+          <span>JPG, PNG veya WEBP · en fazla 8 MB</span>
+          <em id="plm-cover-status">${coverUrl ? 'Görseli değiştirmek için tıkla' : 'Bir görsel seç veya emoji kullan'}</em>
+        </div>
+        <i class="fas fa-camera pl-cover-camera"></i>
+        <input type="file" id="plm-cover" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden />
+      </div>
+      ${coverUrl ? `<button type="button" class="pl-cover-remove" id="plm-cover-remove"><i class="fas fa-trash-alt"></i> Kapağı kaldır</button>` : ''}
+
+      <div class="pl-editor-row">
+        <div class="pl-emoji-field">
+          <label for="plm-emoji">Emoji</label>
+          <input id="plm-emoji" maxlength="8" value="${escHtml(emoji || '🎵')}" aria-label="Playlist emojisi" />
+          <div class="pl-emoji-suggestions">${commonEmojis.map(item => `<button type="button" class="pl-emoji-option" data-emoji="${item}">${item}</button>`).join('')}</div>
+        </div>
+        <div class="pl-name-field form-group">
+          <label for="plm-name">Playlist adı <span>*</span></label>
+          <input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn. Gece yolculuğu" autocomplete="off" />
+        </div>
+      </div>
+
+      <div class="form-group pl-description-field">
+        <label for="plm-desc">Açıklama <small>İsteğe bağlı</small></label>
+        <textarea id="plm-desc" rows="2" placeholder="Bu listeyi özel yapan ne?">${escHtml(desc||'')}</textarea>
+      </div>
+
+      <label class="pl-visibility-card" for="plm-public">
+        <span class="pl-visibility-icon"><i class="fas fa-globe"></i></span>
+        <span class="pl-visibility-copy"><strong>Herkese açık</strong><small>Linke sahip olan herkes görebilir ve kendi playlistine ekleyebilir.</small></span>
+        <span class="pl-switch"><input type="checkbox" id="plm-public" ${isPublic ? 'checked' : ''} /><span></span></span>
+      </label>
+      <div class="pl-private-note"><i class="fas fa-lock"></i> Gizli yaptığında playlist, linki olan kişiler dahil başkalarına görünmez.</div>
+
+      <button class="btn btn-primary pl-save-button" id="plm-save">${mode === 'create' ? '<i class="fas fa-plus"></i> Playlist oluştur' : '<i class="fas fa-save"></i> Değişiklikleri kaydet'}</button>
+      <div id="plm-msg" class="pl-form-message"></div>
+    </div>
   `);
+
+  let selectedCover = null;
+  let removeCover = false;
+  const coverInput = document.getElementById('plm-cover');
+  const coverPicker = document.getElementById('plm-cover-picker');
+  const coverPreview = document.getElementById('plm-cover-preview');
+  const coverStatus = document.getElementById('plm-cover-status');
+  const refreshCoverPreview = (src, label) => {
+    coverPreview.classList.toggle('has-image', !!src);
+    coverPreview.innerHTML = src ? `<img src="${escHtml(src)}" alt="" />` : `<span>${escHtml(document.getElementById('plm-emoji')?.value || '🎵')}</span>`;
+    if (coverStatus) coverStatus.textContent = label;
+  };
+  coverPicker?.addEventListener('click', () => coverInput?.click());
+  coverPicker?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); coverInput?.click(); } });
+  coverInput?.addEventListener('change', () => {
+    const file = coverInput.files?.[0];
+    if (!file) return;
+    selectedCover = file;
+    removeCover = false;
+    const url = URL.createObjectURL(file);
+    refreshCoverPreview(url, file.name);
+    document.getElementById('plm-cover-remove')?.remove();
+  });
+  document.getElementById('plm-cover-remove')?.addEventListener('click', e => {
+    e.preventDefault();
+    selectedCover = null;
+    removeCover = true;
+    if (coverInput) coverInput.value = '';
+    refreshCoverPreview('', 'Emoji kapak olarak kullanılacak');
+  });
+  document.querySelectorAll('.pl-emoji-option').forEach(button => {
+    button.addEventListener('click', () => {
+      document.getElementById('plm-emoji').value = button.dataset.emoji;
+      if (!selectedCover && !coverUrl) refreshCoverPreview('', 'Bir görsel seç veya emoji kullan');
+    });
+  });
+  document.getElementById('plm-emoji')?.addEventListener('input', () => {
+    if (!selectedCover && !coverUrl) refreshCoverPreview('', 'Bir görsel seç veya emoji kullan');
+  });
+
   document.getElementById('plm-save')?.addEventListener('click', async () => {
     const n = document.getElementById('plm-name').value.trim();
     const d = document.getElementById('plm-desc').value.trim();
+    const em = document.getElementById('plm-emoji').value.trim() || '🎵';
     const isPublicValue = document.getElementById('plm-public').checked;
     const msg = document.getElementById('plm-msg');
     const btn = document.getElementById('plm-save');
     if (!n) { msg.textContent = 'Playlist adı zorunlu'; return; }
     btn.disabled = true;
     try {
+      let payload;
+      if (selectedCover) {
+        payload = new FormData();
+        payload.append('name', n);
+        payload.append('description', d);
+        payload.append('emoji', em);
+        payload.append('is_public', String(isPublicValue));
+        payload.append('cover', selectedCover);
+        if (mode === 'edit' && removeCover) payload.append('remove_cover', 'true');
+      } else {
+        payload = { name: n, description: d, emoji: em, is_public: isPublicValue };
+        if (mode === 'edit' && (removeCover || coverUrl)) payload.cover_url = removeCover ? '' : coverUrl;
+      }
       if (mode === 'create') {
-        await api('/playlists', { method: 'POST', body: JSON.stringify({ name: n, description: d, is_public: isPublicValue }) });
+        await (payload instanceof FormData
+          ? apiForm('/playlists', payload)
+          : api('/playlists', { method: 'POST', body: JSON.stringify(payload) }));
         toast('Playlist oluşturuldu!');
       } else {
-        await api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify({ name: n, description: d, is_public: isPublicValue }) });
+        await (payload instanceof FormData
+          ? apiForm('/playlists/' + plId, payload, 'PUT')
+          : api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify(payload) }));
         toast('Playlist güncellendi!');
       }
       hideModal();
@@ -8893,29 +9004,35 @@ async function renderPlaylistDetail(app, plId) {
 
   const render = () => {
     app.innerHTML = `<div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
-        <div>
-          <a href="/playlistlerim" data-link style="font-size:13px;color:var(--text-muted);text-decoration:none;display:flex;align-items:center;gap:6px;margin-bottom:6px"><i class="fas fa-chevron-left"></i> Playlistlerim</a>
-          <div class="page-title" style="display:flex;align-items:center;gap:10px;margin:0">
-            <i class="fas fa-list" style="color:var(--accent-red2)"></i> ${escHtml(playlist.name)}
-          </div>
-          <div style="font-size:13px;color:var(--text-muted);margin-top:4px">${songs.length} şarkı · ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</div>
+      <a href="${playlist.is_owner ? '/playlistlerim' : '/'}" data-link class="pl-back-link"><i class="fas fa-chevron-left"></i> ${playlist.is_owner ? 'Playlistlerim' : 'CigCig ana sayfa'}</a>
+      <div class="pl-detail-hero">
+        <div class="pl-detail-cover">
+          ${playlist.cover_url ? `<img src="${escHtml(playlist.cover_url)}" alt="" />` : `<span>${escHtml(playlist.emoji || '🎵')}</span>`}
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <div class="pl-detail-copy">
+          <div class="pl-detail-kicker"><span>PLAYLIST</span><span class="pl-detail-dot"></span><span>${playlist.is_public ? 'HERKESE AÇIK' : 'GİZLİ'}</span></div>
+          <h1>${escHtml(playlist.name)}</h1>
+          ${playlist.description ? `<p>${escHtml(playlist.description)}</p>` : ''}
+          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
+        </div>
+      </div>
+      <div class="pl-detail-toolbar">
+        <div class="pl-detail-actions">
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
             <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
           ${playlist.is_owner ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
           ${playlist.is_owner ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
-          ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kaydet"><i class="fas fa-save"></i> Kaydet</button>` : ''}
+          ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kendi playlistlerine ekle"><i class="fas fa-bookmark"></i> Kütüphaneme ekle</button>` : ''}
         </div>
+        <button class="pl-copy-link" id="pl-copy-link" title="Playlist linkini kopyala"><i class="fas fa-link"></i> Linki kopyala</button>
       </div>
 
       ${songs.length ? `
       <div class="pl-songs-table" id="pl-songs-table">
         ${songs.map((s, i) => `
-          <div class="pl-song-row" data-id="${s.id}" draggable="true">
-            <div class="pl-drag-handle" title="Sürükle"><i class="fas fa-grip-vertical"></i></div>
+          <div class="pl-song-row" data-id="${s.id}" ${playlist.is_owner ? 'draggable="true"' : ''}>
+            ${playlist.is_owner ? '<div class="pl-drag-handle" title="Sürükle"><i class="fas fa-grip-vertical"></i></div>' : ''}
             <div class="pl-song-num">${i+1}</div>
             <div class="pl-song-info">
               <div class="music-cover-wrap">
@@ -8927,7 +9044,7 @@ async function renderPlaylistDetail(app, plId) {
                 <div class="music-artist">${escHtml(s.artist_name)}</div>
               </div>
             </div>
-            <button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>
+            ${playlist.is_owner ? `<button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>` : ''}
           </div>`).join('')}
       </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Şarkı eklemek için "Şarkı Ekle" butonuna tıklayın.</p></div>`}
     </div>`;
@@ -8940,6 +9057,15 @@ async function renderPlaylistDetail(app, plId) {
       currentQueueIndex = 0;
       shuffledIndices = songs.map((_, i) => i);
       openMiniPlayer(songs[0].audio_url, songs[0].slug, songs[0], songs, 0);
+    });
+
+    document.getElementById('pl-copy-link')?.addEventListener('click', async e => {
+      const copyButton = e.currentTarget;
+      try {
+        await navigator.clipboard.writeText(location.href);
+        copyButton.innerHTML = '<i class="fas fa-check"></i> Kopyalandı';
+        setTimeout(() => { if (copyButton) copyButton.innerHTML = '<i class="fas fa-link"></i> Linki kopyala'; }, 1800);
+      } catch { toast('Link kopyalanamadı', 'error'); }
     });
 
     // Karışık çal
@@ -8980,7 +9106,7 @@ async function renderPlaylistDetail(app, plId) {
     document.getElementById('pl-edit-btn')?.addEventListener('click', () => {
       showCreatePlaylistModal('edit', plId, playlist.name, playlist.description || '', playlist.is_public, async () => {
         try { playlist = await api('/playlists/' + plId); render(); } catch {}
-      });
+      }, playlist.emoji || '🎵', playlist.cover_url || '');
     });
 
     // Şarkı ekle butonu – müzik listesinden seçme modalı
@@ -8991,6 +9117,7 @@ async function renderPlaylistDetail(app, plId) {
 
     // Drag & Drop sıralama
     document.getElementById('pl-save-btn')?.addEventListener('click', async () => {
+      if (!currentUser) { navigate('/giris'); return; }
       try {
         await api('/playlists/' + plId + '/save', { method: 'POST' });
         toast('Playlist kaydedildi');
@@ -8998,9 +9125,11 @@ async function renderPlaylistDetail(app, plId) {
       } catch(err) { toast(err.message, 'error'); }
     });
 
-    setupPlaylistDnD(app.querySelector('#pl-songs-table'), songs, plId, (reordered) => {
-      songs = reordered;
-    });
+    if (playlist.is_owner) {
+      setupPlaylistDnD(app.querySelector('#pl-songs-table'), songs, plId, (reordered) => {
+        songs = reordered;
+      });
+    }
   };
 
   render();
