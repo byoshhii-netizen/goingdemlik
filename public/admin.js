@@ -56,6 +56,29 @@ function userBadgesMarkup(user, emptyLabel = 'Rozet yok') {
     : `<span class="admin-user-badges-empty"><i class="fas fa-minus"></i> ${emptyLabel}</span>`;
 }
 
+function openUserBadgesModal(user) {
+  const badges = userBadgeList(user);
+  showModal(`Rozetler · ${user.username}`, `
+    <div class="user-badges-modal">
+      <div class="user-badges-modal-head">
+        ${user.avatar
+          ? `<img src="${escHtml(user.avatar)}" alt="" />`
+          : '<span class="user-badges-modal-avatar"><i class="fas fa-user"></i></span>'}
+        <div><strong>${escHtml(user.username)}</strong><span>${badges.length ? `${badges.length} rozet atanmış` : 'Henüz rozet atanmamış'}</span></div>
+      </div>
+      <div class="user-badges-modal-list">
+        ${badges.length
+          ? badges.map(badge => `
+            <div class="user-badge-modal-item">
+              ${badgeIconMarkup(badge, 'badge-visual-medium')}
+              <div><strong>${escHtml(badge.name || 'Rozet')}</strong><span>${badge.assigned_at ? `Atanma tarihi · ${formatDate(badge.assigned_at)}` : 'Kullanıcı rozeti'}</span></div>
+            </div>`).join('')
+          : '<div class="badge-users-empty"><i class="fas fa-award"></i><strong>Bu kullanıcıda rozet yok</strong><span>Rozet atamak için Rozet Yönetimi bölümünü kullan.</span></div>'}
+      </div>
+    </div>
+  `);
+}
+
 function adminSquareCoverFile(file, size = 1000) {
   if (!file || !String(file.type || '').startsWith('image/')) return Promise.resolve(file);
   return new Promise(resolve => {
@@ -602,7 +625,7 @@ function renderUsersTable(users) {
         </div>
       </div>
     </td>
-    <td>${userBadgesMarkup(u)}</td>
+    <td><button class="btn btn-outline btn-xs user-badges-btn" data-id="${u.id}" title="Kullanıcının rozetlerini görüntüle"><i class="fas fa-award"></i> Rozetler${userBadgeList(u).length ? ` <span class="user-badges-count">${userBadgeList(u).length}</span>` : ''}</button></td>
     <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
     <td><span class="badge ${u.two_factor_method && u.two_factor_method !== 'none' ? 'badge-green' : 'badge-gray'}"><i class="fas ${u.two_factor_method === 'email' ? 'fa-envelope' : u.two_factor_method === 'question' ? 'fa-circle-question' : 'fa-minus'}"></i> ${u.two_factor_method === 'email' ? 'E-posta' : u.two_factor_method === 'question' ? 'Soru' : 'Kapalı'}</span></td>
     <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
@@ -629,7 +652,7 @@ function renderUsersTable(users) {
     </td>
   </tr>`).join('');
 
-  tbody.addEventListener('click', async e => {
+  tbody.onclick = async e => {
     const edit = e.target.closest('.edit-user-btn');
     const ban = e.target.closest('.ban-user-btn');
     const unban = e.target.closest('.unban-user-btn');
@@ -637,6 +660,7 @@ function renderUsersTable(users) {
     const perm = e.target.closest('.perm-user-btn');
     const restrict = e.target.closest('.restrict-user-btn');
     const twoFactor = e.target.closest('.user-2fa-btn');
+    const badges = e.target.closest('.user-badges-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
     if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
@@ -644,7 +668,8 @@ function renderUsersTable(users) {
     if (perm) { const u = users.find(x => x.id == perm.dataset.id); if (u) showPermModal(u); }
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
     if (twoFactor) { const u = users.find(x => x.id == twoFactor.dataset.id); if (u) showAdminTwoFactorModal(u); }
-  });
+    if (badges) { const u = users.find(x => x.id == badges.dataset.id); if (u) openUserBadgesModal(u); }
+  };
 }
 
 async function showAdminTwoFactorModal(user) {
