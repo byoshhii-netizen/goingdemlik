@@ -415,6 +415,14 @@ function showMicrophonePermissionGuide(username, other, message = 'Arama yapabil
   });
 }
 
+const VOICE_RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ],
+  iceCandidatePoolSize: 10
+};
+
 async function startVoiceCall(username, other, microphoneStream = null) {
   try {
     const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
@@ -430,7 +438,7 @@ async function startVoiceCall(username, other, microphoneStream = null) {
       toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
       return;
     }
-    activeVoiceCall.peer = new RTCPeerConnection();
+    activeVoiceCall.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
     activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
     activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
     activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
@@ -467,7 +475,7 @@ async function acceptVoiceCall(call, other) {
       return;
     }
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
-    activeVoiceCall.peer = new RTCPeerConnection(); activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
+    activeVoiceCall.peer = new RTCPeerConnection(VOICE_RTC_CONFIG); activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
     activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
     activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
     activeVoiceCall.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(activeVoiceCall.peer.connectionState)) document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; };
