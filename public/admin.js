@@ -22,66 +22,176 @@ function applyThemeColor(hex) {
 }
 
 // ===== BADGES (ROZETLER) =====
+function badgeIconMarkup(badge, extraClass = '') {
+  const icon = String(badge?.icon || '').trim();
+  const color = escHtml(badge?.color || '#6b7280');
+  const iconMarkup = icon
+    ? (/^https?:\/\//i.test(icon)
+      ? `<img src="${escHtml(icon)}" alt="" />`
+      : `<i class="${escHtml(icon)}"></i>`)
+    : '<i class="fas fa-award"></i>';
+  return `<span class="badge-visual ${extraClass}" style="--badge-color:${color}">${iconMarkup}</span>`;
+}
+
+function badgeChipMarkup(badge) {
+  const icon = String(badge?.icon || '').trim();
+  const color = escHtml(badge?.color || '#6b7280');
+  return `<span class="admin-badge-chip" style="--badge-color:${color}">
+    ${icon ? (/^https?:\/\//i.test(icon) ? `<img src="${escHtml(icon)}" alt="" />` : `<i class="${escHtml(icon)}"></i>`) : '<i class="fas fa-award"></i>'}
+    <span>${escHtml(badge?.name || 'Rozet')}</span>
+  </span>`;
+}
+
+function userBadgeList(user) {
+  const badges = Array.isArray(user?.badges) && user.badges.length
+    ? user.badges
+    : (user?.badge_name ? [{ name: user.badge_name, icon: user.badge_icon, color: user.badge_color }] : []);
+  return badges;
+}
+
+function userBadgesMarkup(user, emptyLabel = 'Rozet yok') {
+  const badges = userBadgeList(user);
+  return badges.length
+    ? `<div class="admin-user-badges">${badges.map(badgeChipMarkup).join('')}</div>`
+    : `<span class="admin-user-badges-empty"><i class="fas fa-minus"></i> ${emptyLabel}</span>`;
+}
+
+async function openBadgeAssigner(badge) {
+  showModal(`"${badge.name}" rozetini ver`, `
+    <div class="badge-assign-intro">
+      ${badgeIconMarkup(badge, 'badge-visual-large')}
+      <div><strong>${escHtml(badge.name)}</strong><span>Kullanıcıları arat, rozeti ver veya tek tıkla geri al.</span></div>
+    </div>
+    <div class="badge-assign-search adm-search">
+      <i class="fas fa-search"></i>
+      <input id="badge-user-search" placeholder="İsimle kullanıcı ara..." autocomplete="off" />
+    </div>
+    <div class="badge-assign-summary" id="badge-assign-summary"><span class="spinner"></span> Kullanıcılar yükleniyor…</div>
+    <div class="badge-user-list" id="badge-user-list"></div>
+  `);
+
+  let users = [];
+  const list = $('#badge-user-list');
+  const summary = $('#badge-assign-summary');
+  const renderUsers = (query = '') => {
+    const q = query.trim().toLocaleLowerCase('tr-TR');
+    const filtered = users.filter(user => String(user.username || '').toLocaleLowerCase('tr-TR').includes(q));
+    summary.innerHTML = `<span><i class="fas fa-users"></i> ${filtered.length} kullanıcı</span><span><i class="fas fa-check-circle"></i> ${users.filter(user => user.assigned).length} kişide verildi</span>`;
+    list.innerHTML = filtered.length ? filtered.map(user => `
+      <div class="badge-user-row" data-id="${user.id}">
+        <div class="badge-user-identity">
+          ${user.avatar ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<span class="badge-user-avatar"><i class="fas fa-user"></i></span>'}
+          <div><strong>${escHtml(user.username)}</strong><small>${user.assigned ? `Verildi · ${formatDate(user.assigned_at)}` : 'Bu rozete sahip değil'}</small></div>
+        </div>
+        <button class="btn ${user.assigned ? 'btn-badge-assigned' : 'btn-primary'} btn-sm badge-toggle-user" data-id="${user.id}" data-assigned="${user.assigned ? '1' : '0'}">
+          <i class="fas ${user.assigned ? 'fa-check' : 'fa-plus'}"></i> ${user.assigned ? 'Verildi' : 'Ver'}
+        </button>
+      </div>`).join('') : '<div class="badge-users-empty"><i class="fas fa-user-slash"></i><strong>Kullanıcı bulunamadı</strong><span>Arama ifadenizi değiştirin.</span></div>';
+  };
+
+  try {
+    const result = await adminApi(`/badges/${badge.id}/users`);
+    users = result.users || [];
+    renderUsers();
+  } catch (e) {
+    summary.textContent = '';
+    list.innerHTML = `<div class="badge-users-empty"><i class="fas fa-circle-exclamation"></i><strong>Liste yüklenemedi</strong><span>${escHtml(e.message)}</span></div>`;
+  }
+
+  $('#badge-user-search')?.addEventListener('input', event => renderUsers(event.target.value));
+  list?.addEventListener('click', async event => {
+    const button = event.target.closest('.badge-toggle-user');
+    if (!button) return;
+    const user = users.find(item => String(item.id) === String(button.dataset.id));
+    if (!user) return;
+    const wasAssigned = user.assigned;
+    button.disabled = true;
+    try {
+      await adminApi(`/badges/${badge.id}/users/${user.id}`, { method: wasAssigned ? 'DELETE' : 'PUT' });
+      user.assigned = !wasAssigned;
+      user.assigned_at = user.assigned ? new Date().toISOString() : null;
+      button.disabled = false;
+      renderUsers($('#badge-user-search')?.value || '');
+      toast(user.assigned ? `${user.username} kullanıcısına rozet verildi` : `${user.username} kullanıcısından rozet alındı`);
+    } catch (e) {
+      button.disabled = false;
+      toast(e.message, 'error');
+    }
+  });
+}
+
 async function renderBadges(main) {
   let badges = [];
-  try { badges = await adminApi('/badges'); } catch (e) { /* ignore */ }
-  let users = [];
-  try { users = await adminApi('/users'); } catch (e) { users = []; }
+  try {
+    badges = await adminApi('/badges');
+  } catch (e) {
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)">${escHtml(e.message)}</div></div>`;
+    return;
+  }
 
   main.innerHTML = `
     <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-award"></i></div> Rozetler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${badges.length})</span></div>
-      <div><button class="btn btn-primary" id="adm-badges-refresh">Yenile</button></div>
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-award"></i></div> Rozet Yönetimi <span style="font-size:13px;font-weight:400;color:var(--text2)">(${badges.length})</span></div>
+      <button class="btn btn-outline" id="adm-badges-refresh"><i class="fas fa-rotate"></i> Yenile</button>
     </div>
-    <div class="card" style="margin-bottom:16px;padding:16px">
-      <div style="display:flex;gap:12px;align-items:center">
-        <input id="new-badge-name" placeholder="Rozet adı (ör: Katılımcı)" />
-        <input id="new-badge-icon" placeholder="ikon (fas fa-award) veya URL" />
-        <input id="new-badge-color" type="color" value="#6b7280" style="height:38px" />
-        <button class="btn btn-primary" id="create-badge">Oluştur</button>
+    <div class="badge-manager-hero">
+      <div class="badge-manager-hero-icon"><i class="fas fa-award"></i></div>
+      <div><span class="badge-manager-kicker">TOPLULUK ROZETLERİ</span><h2>Rozetleri doğru kişilere ulaştır</h2><p>Bir rozet birden fazla kullanıcıya verilebilir. Rozetin kartındaki menüden kullanıcıları aratabilir, verilen rozeti yine aynı yerden geri alabilirsin.</p></div>
+      <div class="badge-manager-hero-stat"><strong>${badges.reduce((sum, badge) => sum + Number(badge.assigned_count || 0), 0)}</strong><span>toplam atama</span></div>
+    </div>
+    <div class="card badge-create-card">
+      <div class="card-header"><span><i class="fas fa-plus-circle" style="color:var(--red2);margin-right:8px"></i> Yeni rozet oluştur</span><span class="badge-manager-hint">İkon için Font Awesome sınıfı veya görsel URL'si</span></div>
+      <div class="card-body badge-create-grid">
+        <input id="new-badge-name" placeholder="Rozet adı (ör. Katılımcı)" />
+        <input id="new-badge-icon" placeholder="fas fa-star veya https://..." />
+        <label class="badge-color-field"><span>Renk</span><input id="new-badge-color" type="color" value="#bda275" /></label>
+        <button class="btn btn-primary" id="create-badge"><i class="fas fa-plus"></i> Oluştur</button>
       </div>
     </div>
-    <div class="card">
-      <div class="card-header"><span>Mevcut Rozetler</span></div>
-      <div class="card-body" id="badges-list">
-        ${badges.length ? badges.map(b => `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid var(--border)"><div><strong style="margin-right:8px;color:${escHtml(b.color||'#6b7280')}">${escHtml(b.name)}</strong> ${b.icon ? `<span style="margin-left:6px">${escHtml(b.icon)}</span>` : ''}</div><div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm assign-badge" data-id="${escHtml(b.id)}">Kullanıcıya Ver</button><button class="btn btn-danger btn-sm delete-badge" data-id="${escHtml(b.id)}">Sil</button></div></div>`).join('') : '<div style="padding:12px;color:var(--text-muted)">Rozet yok</div>'}
+    <div class="card badge-list-card">
+      <div class="card-header"><span><i class="fas fa-layer-group" style="color:var(--blue2);margin-right:8px"></i> Mevcut rozetler</span><span class="badge-manager-hint">Bir kartı açarak kullanıcıya ver</span></div>
+      <div class="card-body badge-list" id="badges-list">
+        ${badges.length ? badges.map(badge => `
+          <div class="badge-admin-row">
+            <div class="badge-admin-main">
+              ${badgeIconMarkup(badge)}
+              <div><strong>${escHtml(badge.name)}</strong><span><i class="fas fa-user-check"></i> ${Number(badge.assigned_count || 0)} kullanıcıda verildi</span></div>
+            </div>
+            <div class="badge-admin-actions">
+              <button class="btn btn-primary btn-sm assign-badge" data-id="${badge.id}"><i class="fas fa-user-plus"></i> Kullanıcıya Ver</button>
+              <button class="btn btn-danger btn-sm delete-badge" data-id="${badge.id}" title="Rozeti sil"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>`).join('') : '<div class="badge-users-empty"><i class="fas fa-award"></i><strong>Henüz rozet yok</strong><span>Yukarıdaki alandan ilk rozeti oluşturabilirsin.</span></div>'}
       </div>
-    </div>
-    <div class="card" style="margin-top:16px">
-      <div class="card-header"><span>Kullanıcılara Rozet Ver</span></div>
-      <div class="card-body">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <select id="badge-select">${badges.map(b=>`<option value="${escHtml(b.id)}">${escHtml(b.name)}</option>`).join('')}</select>
-          <select id="user-select">${users.map(u=>`<option value="${u.id}">${escHtml(u.username)}</option>`).join('')}</select>
-          <button class="btn btn-primary" id="assign-badge-btn">Ver</button>
-        </div>
-        <div id="badge-assign-msg" style="color:var(--text-muted)"></div>
-      </div>
-    </div>
-  `;
+    </div>`;
 
   $('#adm-badges-refresh')?.addEventListener('click', () => loadSection('badges'));
   $('#create-badge')?.addEventListener('click', async () => {
-    const name = $('#new-badge-name').value.trim(); const icon = $('#new-badge-icon').value.trim(); const color = $('#new-badge-color').value;
-    if (!name) return toast('Rozet adı gerekli','error');
-    try { await adminApi('/badges', { method: 'POST', body: JSON.stringify({ name, icon, color }) }); toast('Rozet oluşturuldu'); loadSection('badges'); } catch (e) { toast(e.message,'error'); }
+    const name = $('#new-badge-name').value.trim();
+    const icon = $('#new-badge-icon').value.trim();
+    const color = $('#new-badge-color').value;
+    if (!name) return toast('Rozet adı gerekli', 'error');
+    try {
+      await adminApi('/badges', { method: 'POST', body: JSON.stringify({ name, icon, color }) });
+      toast('Rozet oluşturuldu');
+      loadSection('badges');
+    } catch (e) { toast(e.message, 'error'); }
   });
-  $('#badges-list')?.addEventListener('click', async e => {
-    const del = e.target.closest('.delete-badge');
-    const assign = e.target.closest('.assign-badge');
-    if (del) { if (!confirm('Rozeti silmek istediğinize emin misiniz?')) return; try { await adminApi('/badges/' + del.dataset.id, { method: 'DELETE' }); toast('Silindi'); loadSection('badges'); } catch (e) { toast(e.message,'error'); } }
-    if (assign) {
-      const bId = assign.dataset.id; const sel = $('#user-select'); if (!sel) return; const uid = sel.value; try {
-        const b = badges.find(x=>String(x.id)===String(bId)); if (!b) return toast('Rozet bulunamadı','error');
-        await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) });
-        toast('Rozet verildi');
-      } catch (e) { toast(e.message,'error'); }
+  $('#badges-list')?.addEventListener('click', async event => {
+    const deleteButton = event.target.closest('.delete-badge');
+    const assignButton = event.target.closest('.assign-badge');
+    if (assignButton) {
+      const badge = badges.find(item => String(item.id) === String(assignButton.dataset.id));
+      if (badge) openBadgeAssigner(badge);
     }
-  });
-
-  $('#assign-badge-btn')?.addEventListener('click', async () => {
-    const bid = $('#badge-select').value; const uid = $('#user-select').value; if (!bid || !uid) return;
-    try { const b = badges.find(x=>String(x.id)===String(bid)); await adminApi('/user/' + uid, { method: 'PUT', body: JSON.stringify({ badge_name: b.name, badge_icon: b.icon, badge_color: b.color }) }); $('#badge-assign-msg').textContent = 'Rozet verildi'; } catch (e) { $('#badge-assign-msg').textContent = e.message; }
+    if (deleteButton) {
+      if (!confirm('Bu rozet ve tüm kullanıcı atamaları silinsin mi?')) return;
+      try {
+        await adminApi('/badges/' + deleteButton.dataset.id, { method: 'DELETE' });
+        toast('Rozet silindi');
+        loadSection('badges');
+      } catch (e) { toast(e.message, 'error'); }
+    }
   });
 }
 
@@ -447,8 +557,8 @@ async function renderUsers(main) {
     </div>
     <div class="card">
       <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Kullanıcı</th><th>E-posta</th><th>2AD</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
+       <table>
+          <thead><tr><th>ID</th><th>Kullanıcı</th><th>Rozetler</th><th>E-posta</th><th>2AD</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
           <tbody id="users-tbody"></tbody>
         </table>
       </div>
@@ -462,7 +572,7 @@ async function renderUsers(main) {
 
 function renderUsersTable(users) {
   const tbody = $('#users-tbody'); if (!tbody) return;
-  if (!users.length) { tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
   tbody.innerHTML = users.map(u => `<tr>
     <td style="color:var(--text3);font-size:11px">#${u.id}</td>
     <td>
@@ -474,6 +584,7 @@ function renderUsersTable(users) {
         </div>
       </div>
     </td>
+    <td>${userBadgesMarkup(u)}</td>
     <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
     <td><span class="badge ${u.two_factor_method && u.two_factor_method !== 'none' ? 'badge-green' : 'badge-gray'}"><i class="fas ${u.two_factor_method === 'email' ? 'fa-envelope' : u.two_factor_method === 'question' ? 'fa-circle-question' : 'fa-minus'}"></i> ${u.two_factor_method === 'email' ? 'E-posta' : u.two_factor_method === 'question' ? 'Soru' : 'Kapalı'}</span></td>
     <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
@@ -564,13 +675,9 @@ function showEditUserModal(user) {
       <div class="form-group"><label>Ünvan</label><input id="eu-title" value="${escHtml(user.title||'')}" placeholder="Örn: Yazılımcı" /></div>
       <div class="form-group"><label>İsim Rengi</label><input id="eu-color" type="color" value="${user.name_color||'#f5f5f5'}" style="height:38px;cursor:pointer" /></div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label>Rozet Adı</label><input id="eu-badge-name" value="${escHtml(user.badge_name||'')}" placeholder="Örn: Katılımcı" /></div>
-      <div class="form-group"><label>Rozet İkonu</label><input id="eu-badge-icon" value="${escHtml(user.badge_icon||'fas fa-award')}" placeholder="fas fa-award veya ⭐" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Rozet Rengi</label><input id="eu-badge-color" type="color" value="${user.badge_color||'#6b7280'}" style="height:38px;cursor:pointer" /></div>
-      <div class="form-group"></div>
+    <div class="user-badges-readonly">
+      <div class="user-badges-readonly-head"><label style="margin:0">Kullanıcının rozetleri</label><span>Rozet ataması Rozetler bölümünden yapılır.</span></div>
+      ${userBadgesMarkup(user, 'Henüz atanmış rozet yok')}
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
       <label class="checkbox-label"><input type="checkbox" id="eu-vip" ${user.is_vip?'checked':''} /> VIP</label>
@@ -585,8 +692,7 @@ function showEditUserModal(user) {
     const body = { username: $('#eu-username').value.trim(), email: $('#eu-email').value.trim(),
       is_vip: $('#eu-vip').checked, is_plus: $('#eu-plus').checked,
       name_color: $('#eu-color').value, level_id: parseInt($('#eu-level').value)||1,
-      title: $('#eu-title').value.trim(),
-      badge_name: $('#eu-badge-name').value.trim(), badge_icon: $('#eu-badge-icon').value.trim(), badge_color: $('#eu-badge-color').value };
+      title: $('#eu-title').value.trim() };
     const pw = $('#eu-pw').value; if (pw) body.password = pw;
     try {
       await adminApi('/user/'+user.id, {method:'PUT', body:JSON.stringify(body)});

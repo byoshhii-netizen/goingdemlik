@@ -559,6 +559,26 @@ async function initDb() {
       WHERE NOT EXISTS (SELECT 1 FROM badges WHERE name='VMB');
       UPDATE badges SET icon='fas fa-shield', color='#facc15', is_hidden=1, is_system=1 WHERE name='VMB';
 
+      -- Bir kullanıcı birden fazla topluluk rozetine sahip olabilir.
+      -- Eski badge_name alanı geriye dönük uyumluluk ve VMB üyeliği için korunur.
+      CREATE TABLE IF NOT EXISTS user_badges (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        badge_id BIGINT NOT NULL REFERENCES badges(id) ON DELETE CASCADE,
+        assigned_at TIMESTAMP DEFAULT NOW(),
+        assigned_by TEXT DEFAULT '',
+        UNIQUE(user_id, badge_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_badges_user ON user_badges(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_badges_badge ON user_badges(badge_id);
+      INSERT INTO user_badges (user_id, badge_id, assigned_at, assigned_by)
+      SELECT u.id, b.id, COALESCE(u.created_at, NOW()), 'legacy'
+      FROM users u
+      JOIN badges b ON LOWER(TRIM(b.name)) = LOWER(TRIM(u.badge_name))
+      WHERE COALESCE(TRIM(u.badge_name), '') <> ''
+        AND COALESCE(b.is_system, 0) = 0
+      ON CONFLICT (user_id, badge_id) DO NOTHING;
+
       CREATE TABLE IF NOT EXISTS gifts (
         id BIGSERIAL PRIMARY KEY,
         code TEXT UNIQUE NOT NULL,

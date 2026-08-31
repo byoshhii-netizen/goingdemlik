@@ -367,6 +367,75 @@
     .badge-orange { background: rgba(249,115,22,0.1); color: #fb923c; border: 1px solid rgba(249,115,22,0.2); }
     .badge-gold { background: rgba(234,179,8,0.1); color: #facc15; border: 1px solid rgba(234,179,8,0.2); }
 
+    /* BADGE MANAGER */
+    .badge-manager-hero {
+      display:flex; align-items:center; gap:18px; margin-bottom:18px; padding:24px 26px;
+      border:1px solid rgba(189,162,117,.26); border-radius:16px;
+      background:radial-gradient(circle at 85% 15%,rgba(88,101,242,.2),transparent 34%),linear-gradient(135deg,rgba(189,162,117,.13),rgba(13,13,18,.96) 58%);
+      box-shadow:0 18px 42px rgba(0,0,0,.18); overflow:hidden;
+    }
+    .badge-manager-hero-icon {
+      width:56px; height:56px; flex:0 0 56px; display:grid; place-items:center; border-radius:16px;
+      color:#fff; font-size:23px; background:linear-gradient(135deg,var(--red),#8a6b3e); box-shadow:0 8px 22px var(--red-glow);
+    }
+    .badge-manager-kicker { display:block; margin-bottom:5px; color:var(--red2); font-size:10px; font-weight:800; letter-spacing:1.8px; }
+    .badge-manager-hero h2 { font-family:var(--font2); font-size:22px; line-height:1.15; margin-bottom:7px; }
+    .badge-manager-hero p { max-width:700px; color:var(--text2); font-size:12px; line-height:1.55; }
+    .badge-manager-hero-stat { margin-left:auto; min-width:105px; padding-left:20px; border-left:1px solid var(--border); text-align:center; }
+    .badge-manager-hero-stat strong { display:block; color:var(--red2); font-family:var(--font2); font-size:28px; }
+    .badge-manager-hero-stat span, .badge-manager-hint { color:var(--text3); font-size:10px; }
+    .badge-create-card, .badge-list-card { border-radius:16px; }
+    .badge-create-grid { display:grid; grid-template-columns:minmax(160px,1fr) minmax(210px,1.35fr) 92px auto; gap:10px; align-items:end; }
+    .badge-create-grid input:not([type=color]) { height:40px; border-color:rgba(255,255,255,.1); background:rgba(5,5,7,.55); }
+    .badge-color-field { display:flex; flex-direction:column; gap:5px; margin:0; color:var(--text3); font-size:10px; text-transform:uppercase; letter-spacing:.7px; }
+    .badge-color-field input { width:100%; height:40px; padding:4px; cursor:pointer; }
+    .badge-list-card { margin-top:18px; }
+    .badge-list { display:grid; gap:9px; padding:12px; }
+    .badge-admin-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 14px; border:1px solid rgba(255,255,255,.07); border-radius:13px; background:linear-gradient(105deg,rgba(255,255,255,.035),rgba(5,5,7,.38)); transition:border-color .18s,transform .18s,background .18s; }
+    .badge-admin-row:hover { border-color:var(--border-red); background:rgba(189,162,117,.055); transform:translateY(-1px); }
+    .badge-admin-main, .badge-user-identity { display:flex; align-items:center; gap:12px; min-width:0; }
+    .badge-admin-main > div { display:grid; gap:5px; min-width:0; }
+    .badge-admin-main strong { font-size:14px; }
+    .badge-admin-main > div > span { color:var(--text3); font-size:11px; }
+    .badge-admin-main > div > span i { margin-right:4px; color:var(--blue2); }
+    .badge-admin-actions { display:flex; align-items:center; gap:7px; flex-shrink:0; }
+    .badge-visual { width:42px; height:42px; flex:0 0 42px; display:grid; place-items:center; border-radius:12px; color:var(--badge-color); background:color-mix(in srgb,var(--badge-color) 13%,transparent); border:1px solid color-mix(in srgb,var(--badge-color) 35%,transparent); font-size:18px; box-shadow:0 0 18px color-mix(in srgb,var(--badge-color) 15%,transparent); }
+    .badge-visual img { width:23px; height:23px; object-fit:contain; border-radius:5px; }
+    .admin-user-badges { display:flex; flex-wrap:wrap; gap:4px; max-width:245px; }
+    .admin-badge-chip { display:inline-flex; align-items:center; gap:4px; max-width:115px; padding:4px 7px; overflow:hidden; border:1px solid color-mix(in srgb,var(--badge-color) 35%,transparent); border-radius:7px; color:var(--badge-color); background:color-mix(in srgb,var(--badge-color) 10%,transparent); font-size:10px; font-weight:700; white-space:nowrap; }
+    .admin-badge-chip i { font-size:10px; }
+    .admin-badge-chip img { width:12px; height:12px; object-fit:contain; }
+    .admin-badge-chip span { overflow:hidden; text-overflow:ellipsis; }
+    .admin-user-badges-empty { color:var(--text3); font-size:11px; white-space:nowrap; }
+    .admin-user-badges-empty i { margin-right:4px; }
+    .user-badges-readonly { margin-bottom:16px; padding:14px; border:1px solid rgba(189,162,117,.18); border-radius:11px; background:rgba(189,162,117,.045); }
+    .user-badges-readonly-head { display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .user-badges-readonly-head span { color:var(--text3); font-size:10px; }
+    .badge-assign-intro { display:flex; align-items:center; gap:12px; margin-bottom:18px; padding:12px; border:1px solid var(--border-red); border-radius:12px; background:rgba(189,162,117,.055); }
+    .badge-visual-large { width:46px; height:46px; flex-basis:46px; }
+    .badge-assign-intro > div { display:grid; gap:4px; }
+    .badge-assign-intro strong { font-size:14px; }
+    .badge-assign-intro span { color:var(--text2); font-size:11px; }
+    .badge-assign-search { margin-bottom:10px; }
+    .badge-assign-search input { height:40px; background:var(--bg4); border-color:rgba(255,255,255,.1); }
+    .badge-assign-summary { display:flex; justify-content:space-between; gap:10px; margin:0 2px 8px; color:var(--text3); font-size:11px; }
+    .badge-assign-summary span:last-child { color:#86efac; }
+    .badge-assign-summary i { margin-right:4px; }
+    .badge-user-list { display:grid; gap:6px; max-height:45vh; overflow:auto; padding:3px; }
+    .badge-user-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px; border:1px solid var(--border); border-radius:10px; background:var(--bg4); transition:border-color .18s,background .18s; }
+    .badge-user-row:hover { border-color:var(--border-red); background:var(--surface); }
+    .badge-user-identity img, .badge-user-avatar { width:32px; height:32px; flex:0 0 32px; display:grid; place-items:center; border-radius:50%; object-fit:cover; background:var(--surface2); color:var(--text3); font-size:11px; }
+    .badge-user-identity > div { display:grid; gap:3px; min-width:0; }
+    .badge-user-identity strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+    .badge-user-identity small { color:var(--text3); font-size:10px; }
+    .btn-badge-assigned { color:#86efac; background:rgba(34,197,94,.1); border:1px solid rgba(34,197,94,.25); }
+    .btn-badge-assigned:hover { color:#fff; background:rgba(220,38,38,.22); border-color:rgba(248,113,113,.5); }
+    .btn-badge-assigned:hover i::before { content:"\f2ed"; }
+    .badge-users-empty { display:grid; justify-items:center; gap:7px; padding:30px 12px; color:var(--text3); text-align:center; }
+    .badge-users-empty i { color:var(--red2); font-size:22px; }
+    .badge-users-empty strong { color:var(--text2); font-size:12px; }
+    .badge-users-empty span { font-size:11px; }
+
     /* TOAST */
     #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
     .toast { background: var(--bg4); border: 1px solid var(--border); border-radius: 10px; padding: 11px 16px; font-size: 13px; min-width: 220px; display: flex; align-items: center; gap: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); animation: toastIn 0.2s ease; }
@@ -417,6 +486,17 @@
       .modal { border-radius: 16px 16px 0 0; align-self: flex-end; max-height: 85vh; }
       .modal-overlay { align-items: flex-end; padding: 0; }
       input, textarea, select { font-size: 16px; }
+      .badge-manager-hero { align-items:flex-start; padding:18px; }
+      .badge-manager-hero h2 { font-size:19px; }
+      .badge-manager-hero-stat { display:none; }
+      .badge-create-grid { grid-template-columns:1fr 1fr; }
+      .badge-create-grid input:not([type=color]) { min-width:0; }
+      .badge-create-grid button { width:100%; justify-content:center; }
+      .badge-admin-row { align-items:flex-start; flex-direction:column; }
+      .badge-admin-actions { width:100%; }
+      .badge-admin-actions .assign-badge { flex:1; justify-content:center; }
+      .user-badges-readonly-head { align-items:flex-start; flex-direction:column; gap:5px; }
+      .badge-assign-summary { flex-direction:column; gap:4px; }
     }
     .admin-message-users-card { margin-top: 14px; }
     .admin-message-search-results { margin-top: 14px; }
@@ -562,6 +642,6 @@ function applyThemeColor(hex) {
   } catch(e) {}
 })();
 </script>
-<script src="admin.js?v=20260823-permissions"></script>
+<script src="admin.js?v=20260831-badge-manager"></script>
 </body>
 </html>

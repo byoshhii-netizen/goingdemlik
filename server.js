@@ -463,6 +463,7 @@ async function adminMiddleware(req, res, next) {
   if (req.method === 'GET') {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
+      [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
       [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
       [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
     ];
@@ -475,6 +476,7 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/(badge|vmb)$/, /^\/api\/admin\/songs\/\d+\/ban$/,
+      /^\/api\/admin\/badges(?:\/\d+(?:\/users(?:\/\d+)?)?)?$/,
       /^\/api\/admin\/group\/\d+\/(status|messages)$/, /^\/api\/admin\/group\/\d+$/,
       /^\/api\/admin\/levels?(?:\/\d+)?$/
     ];
@@ -483,7 +485,7 @@ async function adminMiddleware(req, res, next) {
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
     if (/\/group\//.test(req.path) && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Grup yönetimi yalnızca ana admin yetkisindedir' });
-    if (/\/badge$/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
+    if (/\/badge(?:s|\/|$)/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
     if (/\/levels?(?:\/\d+)?$/.test(req.path) && !permissions.can_manage_levels) return res.status(403).json({ error: 'Seviye yönetme yetkisi yok' });
   }
   next();
@@ -977,7 +979,15 @@ app.get('/api/admin/me', adminMiddleware, (req, res) => {
 // ===== ADMIN BADGES API =====
 app.get('/api/admin/badges', adminMiddleware, async (req, res) => {
   try {
-    const { rows } = await query('SELECT * FROM badges WHERE COALESCE(is_hidden,0)=0 ORDER BY id DESC');
+    const { rows } = await query(`
+      SELECT b.*,
+             COUNT(ub.id)::int AS assigned_count
+      FROM badges b
+      LEFT JOIN user_badges ub ON ub.badge_id = b.id
+      WHERE COALESCE(b.is_hidden,0)=0
+      GROUP BY b.id
+      ORDER BY b.id DESC
+    `);
     res.json(rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1002,7 +1012,86 @@ app.delete('/api/admin/badges/:id', adminMiddleware, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Assign badge to user
+// Rozet menüsünde aranabilir kullanıcı listesi.
+app.get('/api/admin/badges/:id/users', adminMiddleware, async (req, res) => {
+  try {
+    const badgeId = Number(req.params.id);
+    if (!Number.isInteger(badgeId) || badgeId < 1) return res.status(400).json({ error: 'Geçersiz rozet' });
+    const search = String(req.query.q || '').trim();
+    const { rows: badgeRows } = await query(
+      'SELECT id, name, icon, color FROM badges WHERE id=$1 AND COALESCE(is_hidden,0)=0',
+      [badgeId]
+    );
+    if (!badgeRows.length) return res.status(404).json({ error: 'Rozet bulunamadı' });
+    const { rows } = await query(`
+      SELECT u.id, u.username, u.avatar,
+             ub.assigned_at,
+             (ub.id IS NOT NULL) AS assigned
+      FROM users u
+      LEFT JOIN user_badges ub ON ub.user_id=u.id AND ub.badge_id=$1
+      WHERE COALESCE(u.is_deleted,0)=0
+        AND ($2 = '' OR u.username ILIKE '%' || $2 || '%')
+      ORDER BY (ub.id IS NOT NULL) DESC, LOWER(u.username) ASC
+      LIMIT 500
+    `, [badgeId, search]);
+    res.json({ badge: badgeRows[0], users: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Rozeti kullanıcıya ver.
+app.put('/api/admin/badges/:badgeId/users/:userId', adminMiddleware, async (req, res) => {
+  try {
+    const badgeId = Number(req.params.badgeId);
+    const userId = Number(req.params.userId);
+    const { rows: badgeRows } = await query('SELECT * FROM badges WHERE id=$1 AND COALESCE(is_hidden,0)=0', [badgeId]);
+    const { rows: userRows } = await query('SELECT id, username, badge_name FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0', [userId]);
+    if (!badgeRows.length) return res.status(404).json({ error: 'Rozet bulunamadı' });
+    if (!userRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    if (badgeRows[0].is_system || isReservedVmbBadgeName(badgeRows[0].name)) return res.status(400).json({ error: 'Sistem rozeti bu menüden verilemez' });
+    await query(
+      `INSERT INTO user_badges (user_id, badge_id, assigned_at, assigned_by)
+       VALUES ($1,$2,NOW(),$3)
+       ON CONFLICT (user_id, badge_id) DO NOTHING`,
+      [userId, badgeId, req.adminUser?.username || 'admin']
+    );
+    // Eski istemciler için ilk rozet alanlarını da doldur; yeni atamalar birbiri üzerine yazılmaz.
+    await query(`
+      UPDATE users SET badge_name=$1, badge_icon=$2, badge_color=$3
+      WHERE id=$4 AND COALESCE(TRIM(badge_name),'')=''
+    `, [badgeRows[0].name, badgeRows[0].icon || '', badgeRows[0].color || '#6b7280', userId]);
+    res.json({ ok: true, assigned: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Rozeti kullanıcıdan geri al.
+app.delete('/api/admin/badges/:badgeId/users/:userId', adminMiddleware, async (req, res) => {
+  try {
+    const badgeId = Number(req.params.badgeId);
+    const userId = Number(req.params.userId);
+    const { rows: badgeRows } = await query('SELECT * FROM badges WHERE id=$1 AND COALESCE(is_hidden,0)=0', [badgeId]);
+    const { rows: userRows } = await query('SELECT id, badge_name FROM users WHERE id=$1', [userId]);
+    if (!badgeRows.length) return res.status(404).json({ error: 'Rozet bulunamadı' });
+    if (!userRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    await query('DELETE FROM user_badges WHERE user_id=$1 AND badge_id=$2', [userId, badgeId]);
+    // Legacy görünüm alanı geri kalan rozetlerden biriyle senkron tutulur.
+    if (String(userRows[0].badge_name || '').trim().toLocaleLowerCase('tr-TR') === String(badgeRows[0].name || '').trim().toLocaleLowerCase('tr-TR')) {
+      const { rows: nextRows } = await query(`
+        SELECT b.name, b.icon, b.color
+        FROM user_badges ub JOIN badges b ON b.id=ub.badge_id
+        WHERE ub.user_id=$1 AND COALESCE(b.is_hidden,0)=0
+        ORDER BY ub.assigned_at DESC, ub.id DESC LIMIT 1
+      `, [userId]);
+      const next = nextRows[0];
+      await query(
+        'UPDATE users SET badge_name=$1,badge_icon=$2,badge_color=$3 WHERE id=$4',
+        [next?.name || null, next?.icon || null, next?.color || null, userId]
+      );
+    }
+    res.json({ ok: true, assigned: false });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Eski entegrasyonlar için tekil rozet endpointi.
 app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
   try {
     const id = req.params.id;
@@ -3828,8 +3917,24 @@ app.put('/api/admin/user/:id/2fa', adminMiddleware, async (req, res) => {
 });
 
 app.get('/api/admin/users', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM users ORDER BY created_at DESC');
-  res.json(rows.map(u => sanitizeUser(u)));
+  const { rows } = await query(`
+    SELECT u.*,
+           COALESCE(
+             json_agg(
+               json_build_object(
+                 'id', b.id, 'name', b.name, 'icon', b.icon, 'color', b.color,
+                 'assigned_at', ub.assigned_at
+               ) ORDER BY ub.assigned_at DESC
+             ) FILTER (WHERE b.id IS NOT NULL),
+             '[]'::json
+           ) AS badges
+    FROM users u
+    LEFT JOIN user_badges ub ON ub.user_id=u.id
+    LEFT JOIN badges b ON b.id=ub.badge_id AND COALESCE(b.is_hidden,0)=0
+    GROUP BY u.id
+    ORDER BY u.created_at DESC
+  `);
+  res.json(rows.map(u => ({ ...sanitizeUser(u), badges: Array.isArray(u.badges) ? u.badges : [] })));
 });
 
 app.get('/api/admin/user/:id', adminMiddleware, async (req, res) => {
