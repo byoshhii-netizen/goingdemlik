@@ -6,6 +6,7 @@ let storyComposerAudio = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
 let siteAuthRequired = false;
+let displayThemesEnabled = false;
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 
@@ -28,7 +29,9 @@ function getDisplayTheme() {
   return DISPLAY_THEME_IDS.has(saved) ? saved : 'default';
 }
 function applyDisplayTheme(theme = getDisplayTheme()) {
-  const selected = theme === 'dark' ? 'default' : (DISPLAY_THEME_IDS.has(theme) ? theme : 'default');
+  const selected = !displayThemesEnabled
+    ? 'legacy'
+    : (theme === 'dark' ? 'default' : (DISPLAY_THEME_IDS.has(theme) ? theme : 'default'));
   document.documentElement.dataset.theme = selected;
   document.body.dataset.theme = selected;
   document.documentElement.style.colorScheme = 'dark';
@@ -64,10 +67,17 @@ function renderThemePicker(panel) {
 function setupThemePicker() {
   const desktopSection = $('#desktop-theme-picker');
   if (desktopSection) {
-    desktopSection.hidden = false;
+    desktopSection.hidden = !displayThemesEnabled;
     const desktopLockBadge = $('#desktop-theme-lock-badge');
-    if (desktopLockBadge) desktopLockBadge.hidden = canUseDisplayThemes();
+    if (desktopLockBadge) desktopLockBadge.hidden = !displayThemesEnabled || canUseDisplayThemes();
     renderThemePicker($('#desktop-theme-panel'));
+  }
+  const mobileSection = $('#mobile-theme-picker-section');
+  if (mobileSection) mobileSection.hidden = !displayThemesEnabled;
+  if (!displayThemesEnabled) {
+    $('#desktop-theme-panel')?.classList.add('hidden');
+    $('#mobile-theme-panel')?.classList.add('hidden');
+    return;
   }
   const desktopToggle = $('#desktop-theme-toggle');
   if (desktopToggle && !desktopToggle.dataset.bound) {
@@ -5740,6 +5750,9 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
+    displayThemesEnabled = ps.theme_picker_enabled === '1';
+    localStorage.setItem('cigcig_theme_feature_enabled', displayThemesEnabled ? '1' : '0');
+    applyDisplayTheme();
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
     siteAuthRequired = ps.auth_required === '1';
@@ -5761,6 +5774,7 @@ async function init() {
     if (footer) {
       footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
     }
+    updateNavUI();
   } catch {}
   loadAnnouncements();
   renderRoute(location.pathname + location.search);

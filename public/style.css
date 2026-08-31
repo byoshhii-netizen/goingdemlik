@@ -3197,6 +3197,12 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   --bg-gradient: radial-gradient(900px 420px at 10% -10%, var(--bg-active), transparent 62%), var(--bg-primary);
 }
 /* Varsayılan tema admin panelindeki site renklerini kullanır. */
+body[data-theme="legacy"] {
+  --bg-primary:#121212; --bg-secondary:#050505; --bg-card:#0b0b0b; --bg-card2:#151515; --bg-tertiary:#101010;
+  --accent-red:#BDA275; --accent-red2:#d4b896; --accent-red-dark:#7B694C; --accent-contrast:#ffffff;
+  --bg-active:rgba(189,162,117,.08); --bg-hover:rgba(255,255,255,.04); --border:rgba(189,162,117,.18); --border-hover:rgba(189,162,117,.5); --glow:0 0 20px rgba(189,162,117,.15);
+  --grad-red:linear-gradient(135deg,#BDA275,#7B694C);
+}
 body[data-theme="default"] {
   --bg-primary:var(--admin-bg-primary,#101117); --bg-secondary:color-mix(in srgb,var(--admin-bg-primary,#101117) 72%,#000);
   --bg-card:color-mix(in srgb,var(--admin-bg-primary,#101117) 84%,#fff); --bg-card2:color-mix(in srgb,var(--admin-bg-primary,#101117) 72%,#fff); --bg-tertiary:color-mix(in srgb,var(--admin-bg-primary,#101117) 62%,#fff);

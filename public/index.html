@@ -84,13 +84,14 @@
   <script>
     (function () {
       const savedTheme = localStorage.getItem('cigcig_theme');
+      const themesEnabled = localStorage.getItem('cigcig_theme_feature_enabled') === '1';
       const supportedThemes = ['default', 'dark-purple', 'electric-purple', 'ocean-blue', 'fire-orange', 'forest-green', 'gold', 'midnight-blue', 'aurora', 'rose-gold'];
-      const theme = savedTheme === 'dark' ? 'default' : (supportedThemes.includes(savedTheme) ? savedTheme : 'default');
+      const theme = themesEnabled && savedTheme !== 'dark' && supportedThemes.includes(savedTheme) ? savedTheme : 'legacy';
       document.documentElement.dataset.theme = theme;
       document.documentElement.style.colorScheme = 'dark';
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=20260831-mobile-wordmark" />
+  <link rel="stylesheet" href="/style.css?v=20260831-theme-toggle" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
     .user-icons{display:inline-flex;gap:6px;margin-left:8px}
@@ -252,6 +253,7 @@
     const hex2    = '#'+toHex(lighter(r,1.15))+toHex(lighter(g,1.15))+toHex(lighter(b,1.15));
     const hexDark = '#'+toHex(darker(r,0.65))+toHex(darker(g,0.65))+toHex(darker(b,0.65));
     const root = document.documentElement.style;
+    const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
     root.setProperty('--admin-primary-color', hex);
     root.setProperty('--admin-primary-light', hex2);
     root.setProperty('--admin-primary-dark', hexDark);
@@ -260,7 +262,6 @@
     root.setProperty('--accent-red',      hex);
     root.setProperty('--accent-red2',     hex2);
     root.setProperty('--accent-red-dark', hexDark);
-    const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
     root.setProperty('--accent-contrast', luminance > 0.62 ? '#202124' : '#ffffff');
     root.setProperty('--grad-red',        `linear-gradient(135deg,${hex},${hexDark})`);
     root.setProperty('--bg-active',       `rgba(${r},${g},${b},0.08)`);
@@ -295,7 +296,7 @@
     .catch(()=>{});
 })();
 </script>
-  <script src="/app.js?v=20260831-messages-comments-fix"></script>
+  <script src="/app.js?v=20260831-theme-toggle"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---

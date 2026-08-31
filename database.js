@@ -201,7 +201,8 @@ async function initDb() {
       ('vmb_intro', 'Vecd ile Müdafaa Birliği: güven, dayanışma ve sorumluluk etrafında bir araya gelen özel topluluk.'),
       ('vmb_founder', 'VMB Kurucusu'),
       ('vmb_image_url', '/vmb-emblem.svg'),
-      ('vmb_files', '[]')
+      ('vmb_files', '[]'),
+      ('theme_picker_enabled', '0')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
