@@ -332,6 +332,82 @@ function boolValue(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
 }
 
+function profileBadgeKey(type, id = '') {
+  return type === 'custom' ? `custom:${id}` : type;
+}
+
+async function getUserProfileBadges(user, { includeInactive = false } = {}) {
+  if (!user?.id) return [];
+
+  const [customResult, preferenceResult, levelResult] = await Promise.all([
+    query(`
+      SELECT b.id, b.name, b.icon, b.color, ub.assigned_at
+      FROM user_badges ub
+      JOIN badges b ON b.id=ub.badge_id
+      WHERE ub.user_id=$1 AND COALESCE(b.is_hidden,0)=0
+      ORDER BY ub.assigned_at DESC NULLS LAST, ub.id DESC
+    `, [user.id]),
+    query('SELECT badge_key, is_active FROM user_badge_visibility WHERE user_id=$1', [user.id]),
+    query('SELECT id, name, icon, color FROM levels WHERE id=$1', [user.level_id]),
+  ]);
+
+  const preferences = new Map(preferenceResult.rows.map(row => [row.badge_key, Number(row.is_active) !== 0]));
+  const badges = [];
+  const addBadge = (badge) => {
+    if (!badge?.key || !badge.name) return;
+    const isActive = preferences.has(badge.key)
+      ? preferences.get(badge.key)
+      : (badge.key === 'level' ? Number(user.show_level_badge) !== 0 : true);
+    if (includeInactive || isActive) badges.push({ ...badge, is_active: isActive });
+  };
+
+  const customNames = new Set();
+  customResult.rows.forEach(row => {
+    const normalizedName = String(row.name || '').trim().toLocaleLowerCase('tr-TR');
+    customNames.add(normalizedName);
+    addBadge({
+      key: profileBadgeKey('custom', row.id),
+      type: 'custom',
+      name: row.name,
+      icon: row.icon || '',
+      color: row.color || '#6b7280',
+      assigned_at: row.assigned_at,
+    });
+  });
+
+  // Eski tekil rozet alanı, migrasyon çalışmadan önce oluşturulmuş kayıtlar için fallback'tir.
+  const legacyName = String(user.badge_name || '').trim();
+  const normalizedLegacyName = legacyName.toLocaleLowerCase('tr-TR');
+  if (legacyName && !isReservedVmbBadgeName(legacyName) && !customNames.has(normalizedLegacyName)) {
+    addBadge({
+      key: `legacy:${normalizedLegacyName}`,
+      type: 'custom',
+      name: legacyName,
+      icon: user.badge_icon || '',
+      color: user.badge_color || '#6b7280',
+    });
+  }
+
+  const level = levelResult.rows[0];
+  if (level) addBadge({ key: 'level', type: 'level', name: level.name, icon: level.icon || 'fas fa-star', color: level.color || '#dc2626' });
+  if (Number(user.is_vip) === 1) addBadge({ key: 'vip', type: 'vip', name: 'VIP', icon: 'fas fa-gem', color: '#fbbf24' });
+  if (Number(user.is_plus) === 1) addBadge({ key: 'plus', type: 'plus', name: 'Plus', icon: 'fas fa-plus-circle', color: '#818cf8' });
+  if (Number(user.is_admin) === 1) addBadge({ key: 'admin', type: 'admin', name: 'Yetkili', icon: 'fas fa-shield-halved', color: '#5865F2' });
+  if (Number(user.is_artist) === 1) addBadge({ key: 'artist', type: 'artist', name: 'Artist', icon: 'fas fa-microphone-alt', color: '#a855f7' });
+  if (hasVmbBadge(user)) {
+    const isManager = hasVmbManagementBadge(user);
+    addBadge({
+      key: 'vmb',
+      type: 'vmb',
+      name: isManager ? 'VMB Yönetim' : 'VMB',
+      icon: isManager ? 'fas fa-crown' : 'fas fa-shield-halved',
+      color: isManager ? '#fbbf24' : '#facc15',
+    });
+  }
+
+  return badges;
+}
+
 app.get('/api/link-preview', async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '').trim();
@@ -3163,13 +3239,14 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   const { rows: users } = await query(`SELECT * FROM users WHERE username=$1 OR ${profileRouteSql}=$2 LIMIT 1`, [req.params.username, profileRouteKey(req.params.username)]);
   if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = users[0];
+  const badges = await getUserProfileBadges(user);
   const isOwner = req.user && req.user.id === user.id;
   const isFollower = req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length > 0;
   const { rows: followCounts } = await query(`SELECT
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower) {
-    return res.json({ user: sanitizeUser(user), forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
+    return res.json({ user: sanitizeUser(user), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
@@ -3188,7 +3265,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
       FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
   ]);
-  res.json({ user: sanitizeUser(user), forums, books, groups, photos, videos, reals, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -3223,6 +3300,38 @@ app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
   await query('UPDATE users SET profile_visibility=$1 WHERE id=$2', [JSON.stringify(visibility), req.user.id]);
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
   res.json({ visibility, user: sanitizeUser(rows[0]) });
+});
+
+// Kullanıcının kazandığı rozetleri ve profil görünürlüğü tercihlerini yönetir.
+app.get('/api/me/badges', authMiddleware, async (req, res) => {
+  try {
+    res.json(await getUserProfileBadges(req.user, { includeInactive: true }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/api/me/badges/:key', authMiddleware, async (req, res) => {
+  try {
+    const key = decodeURIComponent(String(req.params.key || ''));
+    const isActive = boolValue(req.body?.is_active);
+    const allBadges = await getUserProfileBadges(req.user, { includeInactive: true });
+    const badge = allBadges.find(item => item.key === key);
+    if (!badge) return res.status(404).json({ error: 'Bu rozet hesabınızda bulunmuyor' });
+
+    await query(`
+      INSERT INTO user_badge_visibility (user_id, badge_key, is_active, updated_at)
+      VALUES ($1,$2,$3,NOW())
+      ON CONFLICT (user_id, badge_key)
+      DO UPDATE SET is_active=EXCLUDED.is_active, updated_at=NOW()
+    `, [req.user.id, key, isActive]);
+
+    // Eski seviye ayarı kullanan istemcilerle de aynı görünürlük korunur.
+    if (key === 'level') await query('UPDATE users SET show_level_badge=$1 WHERE id=$2', [isActive, req.user.id]);
+    res.json({ ...badge, is_active: !!isActive });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
@@ -3289,6 +3398,14 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
     allowedBadgeDisplay,
     is_private!==undefined?(parseBool(is_private)?1:0):(req.user.is_private??0),
     req.user.id]);
+  if (show_level_badge !== undefined) {
+    await query(`
+      INSERT INTO user_badge_visibility (user_id, badge_key, is_active, updated_at)
+      VALUES ($1,'level',$2,NOW())
+      ON CONFLICT (user_id, badge_key)
+      DO UPDATE SET is_active=EXCLUDED.is_active, updated_at=NOW()
+    `, [req.user.id, parseBool(show_level_badge) ? 1 : 0]);
+  }
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
   res.json(sanitizeUser(rows[0]));
 });

@@ -543,6 +543,12 @@ async function initDb() {
         FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
       );
 
+      -- Rozet alanları eski kurulumlarda daha aşağıdaki bakım bloğunda eklenir;
+      -- eski rozet migrasyonunun güvenli çalışması için burada da garanti edilir.
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_name TEXT DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_icon TEXT DEFAULT '';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS badge_color TEXT DEFAULT '#6b7280';
+
       CREATE TABLE IF NOT EXISTS badges (
         id BIGSERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -578,6 +584,18 @@ async function initDb() {
       WHERE COALESCE(TRIM(u.badge_name), '') <> ''
         AND COALESCE(b.is_system, 0) = 0
       ON CONFLICT (user_id, badge_id) DO NOTHING;
+
+      -- Kullanıcıların kazandıkları rozetleri profilinde gösterip göstermeme tercihi.
+      -- badge_key; özel rozetler için custom:<id>, sistem rozetleri için sabit anahtar kullanır.
+      CREATE TABLE IF NOT EXISTS user_badge_visibility (
+        id BIGSERIAL PRIMARY KEY,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        badge_key TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(user_id, badge_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_badge_visibility_user ON user_badge_visibility(user_id);
 
       CREATE TABLE IF NOT EXISTS gifts (
         id BIGSERIAL PRIMARY KEY,

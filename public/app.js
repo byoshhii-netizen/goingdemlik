@@ -544,6 +544,13 @@ function profileRoute(username) {
   return '/profil/' + encodeURIComponent(routeKey);
 }
 
+function profileBadgeHTML(badge, compact = false) {
+  if (!badge) return '';
+  const color = escHtml(badge.color || '#6b7280');
+  const icon = String(badge.icon || '').trim();
+  return `<span class="profile-badge${compact ? ' profile-badge-compact' : ''}" style="color:${color};border-color:${color}55;background:${color}15" title="${escHtml(badge.name || 'Rozet')}">${icon ? `<i class="${escHtml(icon)}"></i> ` : ''}${escHtml(badge.name || 'Rozet')}</span>`;
+}
+
 function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
 }
@@ -715,6 +722,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/reals/')) return renderVideoDetail(app, segs[1]);
   if (path.startsWith('/foto/')) return renderPhotoDetail(app, segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
+  if (path === '/rozetler') return renderBadges(app);
   if (path === '/ayarlar') return renderSettings(app);
   if (path === '/giris') return renderLogin(app);
   if (path === '/kayit') return renderRegister(app);
@@ -1116,6 +1124,7 @@ function updateNavUI() {
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="${profileRoute(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
+      <a href="/rozetler" data-link class="mobile-nav-link"><i class="fas fa-award" style="width:18px"></i> Rozetler</a>
       <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
@@ -4220,6 +4229,83 @@ function renderVideoComment(c, isOwner) {
   </div>`;
 }
 
+async function renderBadges(app) {
+  if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent('/rozetler'), false);
+  app.innerHTML = `<div class="container page badges-page"><div class="loading-center"><div class="spinner"></div></div></div>`;
+
+  let badges;
+  try {
+    badges = await api('/me/badges');
+  } catch (e) {
+    app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-award"></i><p>${escHtml(e.message || 'Rozetler yüklenemedi.')}</p></div></div>`;
+    return;
+  }
+
+  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', vmb: 'Topluluk rozeti' };
+  const badgeRows = badges.length ? badges.map(badge => `
+    <div class="badge-setting-row" data-badge-key="${escHtml(badge.key)}">
+      <div class="badge-setting-icon" style="color:${escHtml(badge.color || '#6b7280')};background:${escHtml(badge.color || '#6b7280')}18;border-color:${escHtml(badge.color || '#6b7280')}44">
+        <i class="${escHtml(badge.icon || 'fas fa-award')}"></i>
+      </div>
+      <div class="badge-setting-copy">
+        <strong>${escHtml(badge.name)}</strong>
+        <small>${typeLabels[badge.type] || 'Rozet'} · <span class="badge-setting-status">${badge.is_active ? 'Profilde görünüyor' : 'Profilde gizli'}</span></small>
+      </div>
+      <label class="badge-visibility-toggle" title="${badge.is_active ? 'Profilde gizle' : 'Profilde göster'}">
+        <input type="checkbox" data-badge-toggle="${escHtml(badge.key)}" ${badge.is_active ? 'checked' : ''} />
+        <span class="badge-toggle-slider"></span>
+      </label>
+    </div>`).join('') : `
+      <div class="empty-state badge-empty-state">
+        <i class="fas fa-award"></i>
+        <p>Henüz atanmış bir rozetin yok.</p>
+      </div>`;
+
+  app.innerHTML = `
+    <div class="container page badges-page">
+      <div class="page-header badges-page-header">
+        <div>
+          <h1><i class="fas fa-award"></i> Rozetlerin</h1>
+          <p>Profilinde görünmesini istediğin rozetleri seç.</p>
+        </div>
+        <a href="${profileRoute(currentUser.username)}" data-link class="btn btn-outline btn-sm"><i class="fas fa-user"></i> Profilimi gör</a>
+      </div>
+      <div class="card badges-settings-card">
+        <div class="card-header"><span><i class="fas fa-sliders"></i> Rozet görünürlüğü</span><span class="badge-count">${badges.length} rozet</span></div>
+        <div class="card-body">
+          <p class="settings-help">Rozeti pasif yaptığında sadece profilindeki rozet satırından gizlenir; rozet hesabından silinmez.</p>
+          <div class="badge-settings-list">${badgeRows}</div>
+        </div>
+      </div>
+    </div>`;
+
+  app.querySelectorAll('[data-badge-toggle]').forEach(toggle => {
+    toggle.addEventListener('change', async () => {
+      const key = toggle.dataset.badgeToggle;
+      const row = toggle.closest('.badge-setting-row');
+      const status = row?.querySelector('.badge-setting-status');
+      const previous = !toggle.checked;
+      toggle.disabled = true;
+      try {
+        const updated = await api('/me/badges/' + encodeURIComponent(key), {
+          method: 'PUT',
+          body: JSON.stringify({ is_active: toggle.checked })
+        });
+        toggle.checked = !!updated.is_active;
+        if (status) status.textContent = toggle.checked ? 'Profilde görünüyor' : 'Profilde gizli';
+        toggle.parentElement.title = toggle.checked ? 'Profilde gizle' : 'Profilde göster';
+        if (key === 'level') currentUser.show_level_badge = toggle.checked ? 1 : 0;
+        toast(toggle.checked ? 'Rozet profilinde gösteriliyor' : 'Rozet profilden gizlendi');
+      } catch (e) {
+        toggle.checked = previous;
+        toast(e.message || 'Rozet görünürlüğü güncellenemedi', 'error');
+      } finally {
+        toggle.disabled = false;
+      }
+    });
+  });
+}
+
 async function renderProfile(app, username) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
@@ -4240,10 +4326,10 @@ async function renderProfile(app, username) {
     return;
   }
 
-  const { user, forums, books, groups, photos = [], reals, songs, level, levels, book_page_count } = data;
+  const { user, forums, books, groups, photos = [], reals, songs, level, levels, book_page_count, badges = [] } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileReals = Array.isArray(reals) ? reals : [];
-  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'reals', 'saved', 'songs'];
+  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'reals', 'saved', 'songs', 'badges'];
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
     const configured = JSON.parse(settings.profile_tabs || '[]');
@@ -4286,7 +4372,8 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-      <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}</div>
+       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}</div>
+       ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
@@ -4344,28 +4431,11 @@ async function renderProfile(app, username) {
     </div>`;
   }
 
-  const levelColor = level?.color || '#6b7280';
-  const levelBadge = level && user.show_level_badge ? `<span class="level-badge" style="color:${levelColor};border-color:${levelColor};background:${levelColor}20"><i class="${escHtml(level.icon)}"></i> ${escHtml(level.name)}</span>` : '';
-
   const links = (() => { try { return JSON.parse(user.links || '[]'); } catch { return []; } })();
-  // Rozet satırı
-  const badgeItems = [];
-  if (level && user.show_level_badge) {
-    badgeItems.push(`<span class="profile-badge" style="color:${escHtml(levelColor)};border-color:${escHtml(levelColor)};background:${escHtml(levelColor)}20" title="Seviye: ${escHtml(level.name)}"><i class="${escHtml(level.icon)}"></i> ${escHtml(level.name)} <span style="font-size:10px;opacity:0.7">seviye</span></span>`);
-  }
-  if (user.is_artist) {
-    badgeItems.push(`<span class="profile-badge" style="color:#a855f7;border-color:#a855f733;background:#a855f715" title="Artist"><i class="fas fa-microphone-alt"></i> Artist</span>`);
-  }
-  if (user.badge_name) {
-    badgeItems.push(`<span class="profile-badge" style="color:${escHtml(user.badge_color||'#6b7280')};border-color:${escHtml(user.badge_color||'#6b7280')}33;background:${escHtml(user.badge_color||'#6b7280')}15" title="${escHtml(user.badge_name)}">${user.badge_icon ? `<i class="${escHtml(user.badge_icon)}"></i> ` : ''}${escHtml(user.badge_name)}</span>`);
-  }
-  if (user.is_vip) {
-    badgeItems.push(`<span class="profile-badge" style="color:#fbbf24;border-color:#fbbf2433;background:#fbbf2415" title="VIP"><i class="fas fa-gem"></i> VIP</span>`);
-  }
-  if (user.is_plus) {
-    badgeItems.push(`<span class="profile-badge" style="color:#818cf8;border-color:#818cf833;background:#818cf815" title="Plus"><i class="fas fa-plus-circle"></i> Plus</span>`);
-  }
-  const badgesHTML = badgeItems.length ? `<div class="profile-badges-row">${badgeItems.join('')}</div>` : '';
+  const badgesHTML = badges.length ? `<div class="profile-badges-row">${badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : '';
+  const badgesPanelHTML = badges.length
+    ? `<div class="profile-badges-panel">${badges.map(badge => `<div class="profile-badge-card">${profileBadgeHTML(badge)}<small>${badge.type === 'level' ? 'Seviye rozeti' : badge.type === 'admin' ? 'Yetkili rozeti' : 'Profil rozeti'}</small></div>`).join('')}</div>`
+    : '<div class="empty-state"><i class="fas fa-award"></i><p>Bu profilde gösterilen rozet yok.</p></div>';
 
   app.innerHTML = `<div class="container page">
     <div class="profile-header">
@@ -4374,7 +4444,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:18px"></i>` : ''}
+          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -4405,7 +4475,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">${profileTabOrder.filter(tab => isOwn || tab !== 'saved').map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || item !== 'saved') ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler' })[tab]}</button>` : '').join('')}</div>
+    <div class="tabs">${profileTabOrder.filter(tab => isOwn || tab !== 'saved').map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || item !== 'saved') ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Fotoğraflar', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -4427,6 +4497,10 @@ async function renderProfile(app, username) {
     </div>
     <div id="tab-songs" class="hidden">
       ${profileSongsHTML}
+    </div>
+    <div id="tab-badges" class="hidden">
+      ${badgesPanelHTML}
+      ${isOwn ? `<div style="text-align:center;margin-top:18px"><a href="/rozetler" data-link class="btn btn-outline btn-sm"><i class="fas fa-sliders"></i> Rozetleri yönet</a></div>` : ''}
     </div>
   </div>`;
   const tabPanels = profileTabOrder.map(tab => document.getElementById('tab-' + tab)).filter(Boolean);
@@ -4796,7 +4870,6 @@ async function renderSettingsSection(section) {
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
-          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-badge" ${currentUser.show_level_badge ? 'checked' : ''} /> Seviye rozetini göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
@@ -4806,7 +4879,6 @@ async function renderSettingsSection(section) {
       </div>`;
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
-        show_level_badge: $('#s-show-badge').checked,
         show_level_progress: $('#s-show-progress').checked,
         show_level_color: $('#s-show-color').checked,
       };

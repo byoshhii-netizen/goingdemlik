@@ -88,7 +88,7 @@
       document.documentElement.style.colorScheme = 'dark';
     })();
   </script>
-  <link rel="stylesheet" href="/style.css?v=20260831-mobile-wordmark" />
+  <link rel="stylesheet" href="/style.css?v=20260831-badge-visibility" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
     .user-icons{display:inline-flex;gap:6px;margin-left:8px}
@@ -156,7 +156,7 @@
             <a href="/arkadaslar" data-link class="dropdown-item" id="dropdown-friends"><i class="fas fa-user-friends"></i> Arkadaşlar</a>
             <a href="/siparislerim" data-link class="dropdown-item"><i class="fas fa-receipt"></i> Siparişlerim</a>
             <a href="/ayarlar" data-link class="dropdown-item"><i class="fas fa-cog"></i> Ayarlar</a>
-            <a href="#" id="dropdown-badges" class="dropdown-item"><i class="fas fa-award"></i> Rozetler</a>
+          <a href="/rozetler" data-link id="dropdown-badges" class="dropdown-item"><i class="fas fa-award"></i> Rozetler</a>
             <a href="/vmb" data-link class="dropdown-item" id="dropdown-vmb"><i class="fas fa-shield-halved"></i> VMB</a>
             <div class="dropdown-divider"></div>
             <button class="dropdown-item text-danger" id="logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış Yap</button>
@@ -297,7 +297,7 @@
     .catch(()=>{});
 })();
 </script>
-  <script src="/app.js?v=20260831-messages-comments-fix"></script>
+  <script src="/app.js?v=20260831-badge-visibility"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---
@@ -458,8 +458,8 @@
       showModal(); 
     }
 
-    // wire dropdown button
-    const dbg=document.getElementById('dropdown-badges'); if(dbg){ dbg.addEventListener('click',function(e){ e.preventDefault(); openBadgeManagerModal(); }); }
+    // Rozetler artık SPA içindeki gerçek /rozetler sayfasından açılır.
+    const dbg=document.getElementById('dropdown-badges'); if(dbg){ dbg.addEventListener('click',function(e){ e.preventDefault(); e.stopPropagation(); navigate('/rozetler'); }); }
 
     // expose for console (optional)
     window.cigcig_openBadgeManager = openBadgeManagerModal;
