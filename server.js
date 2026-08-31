@@ -79,8 +79,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Sesli aramalar için mikrofonu aynı origin'deki sayfaya aç; kamera hâlâ kapalı.
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
+  // Sesli arama geçici olarak kapalı; mikrofon erişimi açılmıyor.
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
@@ -2224,14 +2224,15 @@ app.get('/api/forum/:slug/liked', optionalAuth, async (req, res) => {
   res.json({ liked: !!lk.length });
 });
 
-app.get('/api/forum/:slug/comments', async (req, res) => {
+app.get('/api/forum/:slug/comments', optionalAuth, async (req, res) => {
   const { rows: fRows } = await query('SELECT id FROM forums WHERE slug=$1', [req.params.slug]);
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const { rows } = await query(`
     SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.level_id,
-      (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) as like_count
+      (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) as like_count,
+      EXISTS(SELECT 1 FROM forum_comment_likes fcl WHERE fcl.comment_id=fc.id AND fcl.user_id=$2) AS liked
     FROM forum_comments fc LEFT JOIN users u ON fc.user_id=u.id
-    WHERE fc.forum_id=$1 ORDER BY fc.created_at ASC`, [fRows[0].id]);
+    WHERE fc.forum_id=$1 ORDER BY fc.created_at ASC`, [fRows[0].id, req.user?.id || 0]);
   res.json(rows);
 });
 
@@ -6353,7 +6354,10 @@ app.get('/api/video/:slug/saved', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
-  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id
+  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed,
+    (SELECT COUNT(*) FROM video_comment_likes vcl WHERE vcl.comment_id=c.id) AS like_count,
+    EXISTS(SELECT 1 FROM video_comment_likes vcl2 WHERE vcl2.comment_id=c.id AND vcl2.user_id=$2) AS liked
+    FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id
     WHERE (v.slug=$1 OR v.id::text=$1) AND (COALESCE((SELECT is_private FROM users WHERE id=v.user_id),0)=0 OR v.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY c.created_at ASC`, [req.params.slug, req.user?.id || 0]);
   res.json(rows);
 });

@@ -6,9 +6,6 @@ let storyComposerAudio = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
 let siteAuthRequired = false;
-let activeVoiceCall = null;
-let voiceCallPoll = null;
-let incomingCallPoll = null;
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 
@@ -869,6 +866,8 @@ async function renderRealsFeed(app) {
           const count = likeButton.querySelector('.video-comment-count');
           count.textContent = Math.max(0, (parseInt(count.textContent) || 0) + (result.liked ? 1 : -1));
           likeButton.classList.toggle('liked', result.liked);
+          const icon = likeButton.querySelector('i');
+          if (icon) icon.className = `${result.liked ? 'fas' : 'far'} fa-heart`;
         } catch (error) { toast(error.message, 'error'); } finally { likeButton.disabled = false; }
       });
     } catch (error) {
@@ -1208,7 +1207,6 @@ async function loadNotifCount() {
     ['#nav-friends-badge', '#mobile-friends-badge', '#mob-friends-badge', '#dm-friends-badge'].forEach(selector => { const dot = $(selector); if (dot) dot.style.display = pendingCount ? 'inline-block' : 'none'; });
   } catch {}
 }
-setInterval(pollIncomingVoiceCall, 2500);
 
 async function openNotifDropdown() {
   const dd = $('#notif-dropdown');
@@ -2020,6 +2018,8 @@ async function renderForumDetail(app, slug) {
         const cnt = likeBtn.querySelector('.like-cnt');
         cnt.textContent = parseInt(cnt.textContent) + (r.liked ? 1 : -1);
         likeBtn.classList.toggle('liked', r.liked);
+        const icon = likeBtn.querySelector('i');
+        if (icon) icon.className = `${r.liked ? 'fas' : 'far'} fa-heart`;
       } catch {}
     }
   });
@@ -2041,8 +2041,8 @@ function commentHTML(c) {
           ${canReply ? `<button class="btn btn-ghost btn-sm reply-comment-btn" data-id="${c.id}" data-username="${escHtml(c.username || '')}" style="padding:2px 6px;color:var(--text-secondary)"><i class="fas fa-reply"></i></button>` : ''}
           ${canDel ? `<button class="btn btn-ghost btn-sm del-comment" data-id="${c.id}" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
         </div>
-        <button class="like-comment-btn forum-action-btn" data-id="${c.id}" style="padding:4px 10px;font-size:12px">
-          <i class="fas fa-heart"></i> <span class="like-cnt">${c.like_count || 0}</span>
+        <button class="like-comment-btn forum-action-btn${c.liked ? ' liked' : ''}" data-id="${c.id}" style="padding:4px 10px;font-size:12px">
+          <i class="${c.liked ? 'fas' : 'far'} fa-heart"></i> <span class="like-cnt">${c.like_count || 0}</span>
         </button>
       </div>
     </div>
@@ -4214,7 +4214,7 @@ function renderVideoComment(c, isOwner) {
           ${canEdit ? `<button class="btn btn-ghost btn-sm video-comment-edit" data-id="${c.id}" data-content="${escHtml(c.content)}" style="padding:2px 6px"><i class="fas fa-edit"></i></button>` : ''}
           ${canDelete ? `<button class="btn btn-ghost btn-sm video-comment-delete" data-id="${c.id}" title="Yorumu sil" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
         </div>
-        <button class="btn btn-ghost btn-sm video-comment-like" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-heart"></i> <span class="video-comment-count">${c.like_count || 0}</span></button>
+        <button class="btn btn-ghost btn-sm video-comment-like${c.liked ? ' liked' : ''}" data-id="${c.id}" style="padding:2px 6px"><i class="${c.liked ? 'fas' : 'far'} fa-heart"></i> <span class="video-comment-count">${c.like_count || 0}</span></button>
       </div>
     </div>
   </div>`;
@@ -6031,7 +6031,6 @@ async function renderDMChat(username) {
         </a>
       </div>
       <div class="dm-chat-header-right">
-        ${isSelfConversation ? '' : '<button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Sesli ara"><i class="fas fa-phone"></i><span>Sesli ara</span></button>'}
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -6074,10 +6073,6 @@ async function renderDMChat(username) {
 
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
-  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
-    if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) return toast('Tarayıcınız sesli aramayı desteklemiyor', 'error');
-    requestMicrophoneThenCall(username, other);
-  });
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
 
@@ -6263,8 +6258,8 @@ function dmMessageHTML(m, myId, selMode) {
     </div>
     ${!isOwn
       ? (hasUsableAvatar({ avatar: m.sender_avatar, avatar_removed: m.sender_avatar_removed })
-          ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0;align-self:flex-end" />`
-          : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0;align-self:flex-end"><i class="fas fa-user"></i></div>`)
+          ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0" />`
+          : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`)
       : ''}
     <div class="dm-msg-content">
       ${m.reply_to_id && m.reply_content

@@ -615,7 +615,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .video-ad-overlay .video-ad-link { display:grid; gap:8px; }
 .video-ad-overlay .video-ad-video { width:100%; max-height:120px; border-radius:8px; object-fit:cover; background:#000; }
 .video-ad-overlay .video-ad-copy { display:grid; gap:2px; }
-.video-comment-like.liked { color: var(--accent-red); }
+.video-comment-like:not(.liked), .like-comment-btn:not(.liked) { color: var(--text-secondary) !important; }
+.video-comment-like.liked, .like-comment-btn.liked { color: #fff !important; }
 .video-meta-block, .video-comments-card { background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius); padding: 18px; display:grid; gap:14px; }
 .video-title { font-size: clamp(20px, 2vw, 28px); font-weight: 800; line-height:1.2; }
 
@@ -729,7 +730,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .reals-comments-list .comment:last-child { border-bottom:0; }
 .reals-comment-form { display:flex; gap:8px; padding:12px 14px max(12px,env(safe-area-inset-bottom)); border-top:1px solid var(--border); background:#111; }
 .reals-comment-form input { min-width:0; min-height:42px; border-radius:21px; padding:10px 15px; }
-.reals-comment-form button { flex:0 0 42px; width:42px; height:42px; border:0; border-radius:50%; background:var(--accent-red); color:#fff; cursor:pointer; }
+.reals-comment-form button { flex:0 0 42px; width:42px; height:42px; border:1px solid var(--accent-red2) !important; border-radius:50%; background:var(--accent-red) !important; color:#171717 !important; cursor:pointer; box-shadow:0 2px 10px rgba(189,162,117,.28); }
 .reals-comment-login, .reals-comments-empty { padding:28px 16px; text-align:center; color:var(--text-muted); }
 .reals-comments-empty i { display:block; margin-bottom:8px; font-size:28px; color:var(--text-secondary); }
 .reals-comments-empty p { margin:0 0 4px; color:var(--text-primary); }
@@ -1509,9 +1510,9 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle i,
   .chat-input-bar { padding:8px; gap:6px; }
 
   .dm-messages { padding:12px 10px 8px; gap:8px; }
-  .dm-msg-wrap { gap:6px; align-items:flex-end; }
+  .dm-msg-wrap { gap:8px; align-items:flex-start; }
   .dm-msg-content { max-width:calc(100% - 40px) !important; }
-  .dm-msg-bubble { max-width:100%; width:fit-content; font-size:14px; line-height:1.4; padding:8px 10px; }
+  .dm-msg-bubble { max-width:100%; width:fit-content; font-size:15px; line-height:1.5; padding:10px 13px; }
   .dm-chat-header-right { max-width:42%; overflow:hidden; }
   .dm-chat-header-right .btn { padding:5px 7px; font-size:0; }
   .dm-chat-header-right .btn i { font-size:13px; }
@@ -2261,13 +2262,13 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 
 /* Message bubbles */
-.dm-msg-wrap { display: flex; align-items: flex-end; gap: 8px; width: 100%; min-width: 0; height: auto; min-height: 0; flex: 0 0 auto; }
+.dm-msg-wrap { display: flex; align-items: flex-start; gap: 8px; width: 100%; min-width: 0; height: auto; min-height: 0; flex: 0 0 auto; }
 .dm-msg-wrap.dm-own { flex-direction: row-reverse; }
 .dm-msg-content { display: flex; flex-direction: column; max-width: 68%; min-width: 0; height: auto; min-height: 0; flex: 0 1 auto; }
 .dm-msg-wrap.dm-own .dm-msg-content { align-items: flex-end; }
 .dm-msg-bubble {
-  padding: 5px 10px; border-radius: 12px;
-  font-size: 13px; line-height: 1.4;
+  padding: 10px 14px; border-radius: 14px;
+  font-size: 15px; line-height: 1.5;
   word-break: break-word; overflow-wrap: anywhere;
   white-space: normal;
   width: fit-content; max-width: 100%; height: auto; min-height: 0; flex: 0 0 auto;
@@ -2301,7 +2302,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   color: var(--text-muted) !important;
   font-style: italic; font-size: 12px;
 }
-.dm-msg-meta { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.dm-msg-meta { display: flex; align-items: center; gap: 4px; margin-top: 5px; min-height: 16px; }
+.dm-msg-wrap .avatar-sm { align-self: flex-start !important; margin-top: 3px; }
 .dm-reply-preview {
   background: var(--bg-card); background-image: linear-gradient(var(--dm-reply-bg, rgba(189,162,117,0.15)), var(--dm-reply-bg, rgba(189,162,117,0.15)));
   border-left: 3px solid var(--accent-line, var(--accent-red));
@@ -2369,7 +2371,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-input-img-btn:hover { color: var(--accent-red2); border-color:var(--accent-red2); }
 .dm-send-btn {
   width: 38px; height: 38px; border-radius: 50%;
-  background: #b8b8b8; border: none; color: #262626;
+  background: var(--accent-red); border: 1px solid var(--accent-red2); color: #171717;
   font-size: 14px; display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; transition: transform 0.15s, box-shadow 0.15s;
   box-shadow: 0 2px 8px rgba(0,0,0,.35);
@@ -2378,7 +2380,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-shared-story img { width: 42px; height: 52px; border-radius: 5px; object-fit: cover; background: #000; }
 .dm-shared-story div { display: flex; flex-direction: column; gap: 2px; }
 .dm-shared-story small { color: var(--text-muted); font-size: 11px; }
-.dm-send-btn:hover { transform: scale(1.06); background: #d0d0d0; color: #111; }
+.dm-send-btn:hover { transform: scale(1.06); background: var(--accent-red2); color: #171717; }
 .dm-input-bar > * { min-width: 0; }
 .dm-img-preview-wrap {
   display: none; position: relative; flex-shrink: 0; margin-bottom: 4px;
@@ -2445,7 +2447,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-mobile-back-btn { display: inline-flex !important; }
 
   .dm-msg-content { max-width: 82%; }
-  .dm-msg-bubble { font-size: 12px; padding: 4px 9px; line-height: 1.35; }
+  .dm-msg-bubble { font-size: 15px; padding: 10px 13px; line-height: 1.5; }
   .dm-input-bar { padding: 8px; gap: 6px; }
   .dm-input-wrap { min-height: 40px; padding: 0; border-radius: 0; align-items: flex-end; gap:6px; }
   .dm-input-wrap textarea { min-width: 0; width: 100%; min-height: 0; height: 40px; padding:9px 11px; font-size: 13px; line-height: 1.35; max-height: 80px; }
