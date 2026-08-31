@@ -187,6 +187,11 @@ function escapeHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function normalizeMediaFilter(value) {
+  const allowed = ['none', 'vivid', 'warm', 'cool', 'mono', 'fade', 'dramatic'];
+  return allowed.includes(String(value || 'none')) ? String(value || 'none') : 'none';
+}
+
 function getIp(req) {
   return (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || '').split(',')[0].trim();
 }
@@ -3318,15 +3323,16 @@ app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/photos/:id', authMiddleware, async (req, res) => {
+app.put('/api/photos/:id', authMiddleware, upload.single('image'), async (req, res) => {
   const { url, title, caption, location, song_id, song_start_seconds, show_likes, allow_comments, allow_shares } = req.body;
-  if (!url || typeof url !== 'string') return res.status(400).json({ error: 'Fotoğraf URL gerekli' });
   const { rows } = await query('SELECT user_id FROM photos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu fotoğrafı düzenleme yetkiniz yok' });
+  const nextUrl = req.file ? await handleUpload(req.file) : url;
+  if (!nextUrl || typeof nextUrl !== 'string') return res.status(400).json({ error: 'Fotoğraf URL gerekli' });
   const songStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
   await query('UPDATE photos SET url=$1, title=COALESCE($2, title), caption=$3, location=COALESCE($4, location), song_id=$5, song_start_seconds=$6, show_likes=COALESCE($7, show_likes), allow_comments=COALESCE($8, allow_comments), allow_shares=COALESCE($9, allow_shares) WHERE id=$10',
-    [url, title !== undefined ? String(title).trim() : null, caption||'', location !== undefined ? String(location).trim() : null, song_id || null, songStart, show_likes !== undefined ? (show_likes?1:0) : null, allow_comments !== undefined ? (allow_comments?1:0) : null, allow_shares !== undefined ? (allow_shares?1:0) : null, req.params.id]);
+    [nextUrl, title !== undefined ? String(title).trim() : null, caption||'', location !== undefined ? String(location).trim() : null, song_id || null, songStart, show_likes !== undefined ? (show_likes?1:0) : null, allow_comments !== undefined ? (allow_comments?1:0) : null, allow_shares !== undefined ? (allow_shares?1:0) : null, req.params.id]);
   const { rows: updated } = await query(
     'SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.show_likes, p.allow_comments, p.allow_shares, u.username, u.avatar FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE p.id=$1',
     [req.params.id]
@@ -3357,7 +3363,7 @@ function randomStoryPublicId() {
 
 app.get('/api/stories', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
       u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
@@ -3375,7 +3381,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
 
 app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
   u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
@@ -3407,7 +3413,7 @@ app.post('/api/stories', authMiddleware, async (req, res, next) => {
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
-    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8::integer,NOW() + ($8::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, durationHours]);
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,media_filter,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::integer,NOW() + ($9::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, normalizeMediaFilter(req.body.media_filter), durationHours]);
     res.json(rows[0]);
     notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(error => {
       console.warn('Story follower notifications failed:', error.message || error);
@@ -3436,13 +3442,13 @@ app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
 
 app.post('/api/stories/from-url', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'story')) return;
-  const { media_url, caption, song_id, song_start_seconds, duration_hours } = req.body;
+  const { media_url, caption, song_id, song_start_seconds, media_filter, duration_hours } = req.body;
   if (!media_url) return res.status(400).json({ error: 'Hikaye videosu gerekli' });
   const songId = song_id ? Number(song_id) : null;
   const songStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
   const durationHours = [5, 10, 24].includes(Number(duration_hours)) ? Number(duration_hours) : 24;
   try {
-    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,duration_hours,expires_at) VALUES ($1,$2,$3,'video',$4,$5,$6,$7::integer,NOW() + ($7::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), media_url, String(caption || '').trim(), songId, songStart, durationHours]);
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,media_filter,duration_hours,expires_at) VALUES ($1,$2,$3,'video',$4,$5,$6,$7,$8::integer,NOW() + ($8::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), media_url, String(caption || '').trim(), songId, songStart, normalizeMediaFilter(media_filter), durationHours]);
     res.json(rows[0]);
     notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(() => {});
   } catch (error) { res.status(500).json({ error: 'Hikaye kaydedilemedi: ' + error.message }); }
@@ -3463,7 +3469,7 @@ app.put('/api/stories/:id', authMiddleware, async (req, res) => {
   const songId = req.body.song_id === '' || req.body.song_id === null ? null : (req.body.song_id ?? rows[0].song_id);
   const songStart = Math.max(0, parseInt(req.body.song_start_seconds ?? rows[0].song_start_seconds, 10) || 0);
   const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : rows[0].duration_hours;
-  const { rows: updated } = await query('UPDATE stories SET caption=$1,song_id=$2,song_start_seconds=$3,duration_hours=$4,expires_at=created_at + ($4 * INTERVAL \'1 hour\') WHERE id=$5 RETURNING *', [caption, songId, songStart, durationHours, rows[0].id]);
+  const { rows: updated } = await query('UPDATE stories SET caption=$1,song_id=$2,song_start_seconds=$3,media_filter=$4,duration_hours=$5,expires_at=created_at + ($5 * INTERVAL \'1 hour\') WHERE id=$6 RETURNING *', [caption, songId, songStart, normalizeMediaFilter(req.body.media_filter ?? rows[0].media_filter), durationHours, rows[0].id]);
   res.json(updated[0]);
 });
 
@@ -6259,10 +6265,12 @@ function makeVideoSlug(title, id) {
 }
 
 const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed, u.is_private,
+  s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
   (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
-  FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
+  FROM videos v LEFT JOIN users u ON u.id=v.user_id LEFT JOIN songs s ON s.id=v.song_id
+  WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
 
 app.get('/api/videos', optionalAuth, async (req, res) => {
   const { rows } = await query(`${videoSelect} ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
@@ -6289,11 +6297,13 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/videos', authMiddleware, async (req, res) => {
-  const { title, description, video_url, banner_image, location, sound_name, allow_comments, show_likes, is_reals } = req.body;
+  const { title, description, video_url, banner_image, location, sound_name, song_id, song_start_seconds, media_filter, allow_comments, show_likes, is_reals } = req.body;
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
     const provisionalSlug = makeVideoSlug(title, randomUUID().slice(0, 8));
-  const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,allow_comments,show_likes,is_reals,slug)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0, provisionalSlug]);
+  const safeSongId = song_id ? Number(song_id) : null;
+  const safeStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
+  const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,song_id,song_start_seconds,media_filter,allow_comments,show_likes,is_reals,slug)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', safeSongId, safeStart, normalizeMediaFilter(media_filter), allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0, provisionalSlug]);
   const slug = makeVideoSlug(title, rows[0].id);
   await query('UPDATE videos SET slug=$1 WHERE id=$2', [slug, rows[0].id]);
   res.json({ slug, id: rows[0].id });
@@ -6304,8 +6314,8 @@ app.put('/api/video/:slug', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu videoyu düzenleme yetkiniz yok' });
   const b = req.body;
-  await query(`UPDATE videos SET title=$1,description=$2,video_url=$3,thumbnail_url=$4,location=$5,sound_name=$6,allow_comments=$7,show_likes=$8,is_reals=$9 WHERE id=$10`,
-    [b.title?.trim() || rows[0].title, b.description ?? rows[0].description, b.video_url || rows[0].video_url, b.banner_image ?? rows[0].thumbnail_url, b.location ?? rows[0].location, b.sound_name ?? rows[0].sound_name, b.allow_comments === undefined ? rows[0].allow_comments : (b.allow_comments ? 1 : 0), b.show_likes === undefined ? rows[0].show_likes : (b.show_likes ? 1 : 0), b.is_reals === undefined ? rows[0].is_reals : (b.is_reals ? 1 : 0), rows[0].id]);
+  await query(`UPDATE videos SET title=$1,description=$2,video_url=$3,thumbnail_url=$4,location=$5,sound_name=$6,song_id=$7,song_start_seconds=$8,media_filter=$9,allow_comments=$10,show_likes=$11,is_reals=$12 WHERE id=$13`,
+    [b.title?.trim() || rows[0].title, b.description ?? rows[0].description, b.video_url || rows[0].video_url, b.banner_image ?? rows[0].thumbnail_url, b.location ?? rows[0].location, b.sound_name ?? rows[0].sound_name, b.song_id ? Number(b.song_id) : null, Math.max(0, parseInt(b.song_start_seconds, 10) || 0), normalizeMediaFilter(b.media_filter ?? rows[0].media_filter), b.allow_comments === undefined ? rows[0].allow_comments : (b.allow_comments ? 1 : 0), b.show_likes === undefined ? rows[0].show_likes : (b.show_likes ? 1 : 0), b.is_reals === undefined ? rows[0].is_reals : (b.is_reals ? 1 : 0), rows[0].id]);
   res.json({ ok: true });
 });
 
