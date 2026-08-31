@@ -57,9 +57,20 @@ try {
 } catch {}
 
 // Fallback: local disk (Railway volume veya geliştirme)
-const UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
+let UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
 if (!USE_CLOUDINARY) {
-  try { if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) {}
+  try {
+    if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    fs.accessSync(UPLOAD_DIR, fs.constants.W_OK);
+  } catch (e) {
+    if (!process.env.UPLOAD_DIR) {
+      UPLOAD_DIR = path.join(__dirname, 'persistent', 'uploads');
+      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+      console.warn('Varsayılan upload klasörü kullanılamıyor; kalıcı klasöre geçildi:', e.message);
+    } else {
+      console.warn('Upload klasörü kullanılamıyor:', e.message);
+    }
+  }
 }
 
 app.use(express.json({ limit: '1mb' }));
@@ -593,11 +604,18 @@ const upload = multer({
   storage,
   limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const allowedImages = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+    const allowedImages = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/heic', 'image/heif'];
     const allowedVideos = ['video/mp4', 'video/webm', 'video/quicktime', 'video/ogg'];
     const allowedAudio = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/aac', 'audio/x-wav', 'audio/wave'];
-    if (allowedImages.includes(file.mimetype) || allowedVideos.includes(file.mimetype) || file.mimetype.startsWith('video/') || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
-    else cb(new Error('Sadece resim, video veya ses dosyaları kabul edilir'));
+    const extension = path.extname(file.originalname || '').toLowerCase();
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.heif'];
+    const isImage = allowedImages.includes(file.mimetype) || (file.mimetype === 'application/octet-stream' && imageExtensions.includes(extension));
+    if (isImage || allowedVideos.includes(file.mimetype) || file.mimetype.startsWith('video/') || allowedAudio.includes(file.mimetype) || file.mimetype.startsWith('audio/')) cb(null, true);
+    else {
+      const error = new Error('Sadece resim, video veya ses dosyaları kabul edilir');
+      error.status = 400;
+      cb(error);
+    }
   }
 });
 
@@ -631,6 +649,12 @@ const largeVideoUpload = multer({
     ? cb(null, true)
     : cb(new Error('Sadece video dosyasi yukleyebilirsiniz'))
 });
+
+function parseFormBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return !['false', '0', 'no', 'off'].includes(String(value).trim().toLowerCase());
+}
 
 // Yükleme helper'ı — Cloudinary ya da disk
 async function handleUpload(file) {
@@ -3318,7 +3342,7 @@ app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res)
     const { rows } = await query(`INSERT INTO photos (user_id,url,public_id,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`, [
       req.user.id, url, req.file.cloudinary_public_id || '', (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
-      songStart, b.show_likes === 'false' ? 0 : 1, b.allow_comments === 'false' ? 0 : 1, b.allow_shares === 'false' ? 0 : 1
+      songStart, parseFormBoolean(b.show_likes, true) ? 1 : 0, parseFormBoolean(b.allow_comments, true) ? 1 : 0, parseFormBoolean(b.allow_shares, true) ? 1 : 0
     ]);
     await notifyFollowersOfContent(req.user, 'new_photo', 'Yeni fotoğraf', `@${req.user.username} yeni bir fotoğraf paylaştı.`, '/foto/' + rows[0].id).catch(() => {});
     res.json(rows[0]);
@@ -3334,7 +3358,7 @@ app.put('/api/photos/:id', authMiddleware, upload.single('image'), async (req, r
   if (!nextUrl || typeof nextUrl !== 'string') return res.status(400).json({ error: 'Fotoğraf URL gerekli' });
   const songStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
   await query('UPDATE photos SET url=$1, title=COALESCE($2, title), caption=$3, location=COALESCE($4, location), song_id=$5, song_start_seconds=$6, show_likes=COALESCE($7, show_likes), allow_comments=COALESCE($8, allow_comments), allow_shares=COALESCE($9, allow_shares) WHERE id=$10',
-    [nextUrl, title !== undefined ? String(title).trim() : null, caption||'', location !== undefined ? String(location).trim() : null, song_id || null, songStart, show_likes !== undefined ? (show_likes?1:0) : null, allow_comments !== undefined ? (allow_comments?1:0) : null, allow_shares !== undefined ? (allow_shares?1:0) : null, req.params.id]);
+    [nextUrl, title !== undefined ? String(title).trim() : null, caption||'', location !== undefined ? String(location).trim() : null, song_id || null, songStart, show_likes !== undefined ? (parseFormBoolean(show_likes) ? 1 : 0) : null, allow_comments !== undefined ? (parseFormBoolean(allow_comments) ? 1 : 0) : null, allow_shares !== undefined ? (parseFormBoolean(allow_shares) ? 1 : 0) : null, req.params.id]);
   const { rows: updated } = await query(
     'SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.show_likes, p.allow_comments, p.allow_shares, u.username, u.avatar FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE p.id=$1',
     [req.params.id]
@@ -5755,8 +5779,12 @@ app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, re
 
 app.use((err, req, res, next) => {
   if (req.path.startsWith('/api/')) {
-    const status = err.status || 500;
-    const message = err.message || 'Sunucu hatası';
+    const status = err instanceof multer.MulterError
+      ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400)
+      : (err.status || 500);
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Dosya boyutu sınırını aşıyor.'
+      : (err.message || 'Sunucu hatası');
     return res.status(status).json({ error: message });
   }
   next(err);

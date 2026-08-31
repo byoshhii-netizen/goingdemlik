@@ -864,8 +864,6 @@ async function initDb() {
           badge_icon=CASE WHEN LOWER(COALESCE(badge_name,''))='vmb yönetim' THEN 'fas fa-crown' ELSE 'fas fa-shield-halved' END,
           badge_color=CASE WHEN LOWER(COALESCE(badge_name,''))='vmb yönetim' THEN '#fbbf24' ELSE '#facc15' END
       WHERE LOWER(COALESCE(badge_name,'')) IN ('vmb','vmb yönetim');
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS delete_requested_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_deleted INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS allow_mentions INTEGER DEFAULT 1;
@@ -1055,6 +1053,8 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(uploader_id) REFERENCES users(id) ON DELETE SET NULL
     );
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
 
     -- Müzik içi ses reklamları ve kullanıcı başına zorunlu reklam durumu
     CREATE TABLE IF NOT EXISTS music_ads (
