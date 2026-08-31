@@ -9,9 +9,92 @@ let siteAuthRequired = false;
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 
-localStorage.removeItem('cigcig_theme');
-document.documentElement.style.colorScheme = 'dark';
-function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
+const DISPLAY_THEMES = [
+  { id: 'default', label: 'Varsayılan', icon: 'fa-sliders', colors: ['#121212', '#202020', '#bda275'] },
+  { id: 'dark-purple', label: 'DarkMor', icon: 'fa-gem', colors: ['#120b20', '#2a1552', '#a855f7'] },
+  { id: 'electric-purple', label: 'Elektrik Moru', icon: 'fa-bolt', colors: ['#130c25', '#35156b', '#d16cff'] },
+  { id: 'ocean-blue', label: 'Okyanus Mavisi', icon: 'fa-water', colors: ['#061a2a', '#0b4568', '#29b6f6'] },
+  { id: 'fire-orange', label: 'Ateş Turuncusu', icon: 'fa-fire', colors: ['#24100a', '#61200d', '#ff7a18'] },
+  { id: 'forest-green', label: 'Yeşil Orman', icon: 'fa-leaf', colors: ['#081a15', '#0e422e', '#46d483'] },
+  { id: 'gold', label: 'Altın Sarısı', icon: 'fa-sun', colors: ['#211b05', '#5d4b08', '#ffd54a'] },
+  { id: 'midnight-blue', label: 'Gece Mavisi', icon: 'fa-star', colors: ['#141827', '#303b61', '#89b4fa'] },
+  { id: 'aurora', label: 'Aurora Borealis', icon: 'fa-wand-magic-sparkles', colors: ['#071a25', '#124c55', '#5eead4'] },
+  { id: 'rose-gold', label: 'Gül Altını', icon: 'fa-heart', colors: ['#211219', '#54283b', '#f58ca8'] }
+];
+const DISPLAY_THEME_IDS = new Set(DISPLAY_THEMES.map(theme => theme.id));
+function getDisplayTheme() {
+  const saved = localStorage.getItem('cigcig_theme');
+  if (saved === 'dark') return 'default';
+  return DISPLAY_THEME_IDS.has(saved) ? saved : 'default';
+}
+function applyDisplayTheme(theme = getDisplayTheme()) {
+  const selected = theme === 'dark' ? 'default' : (DISPLAY_THEME_IDS.has(theme) ? theme : 'default');
+  document.documentElement.dataset.theme = selected;
+  document.body.dataset.theme = selected;
+  document.documentElement.style.colorScheme = 'dark';
+}
+function canUseDisplayThemes() {
+  const enabled = value => value === true || Number(value) === 1;
+  return Boolean(currentUser && (enabled(currentUser.is_vip) || enabled(currentUser.is_plus) || enabled(currentUser.vip) || enabled(currentUser.plus)));
+}
+function themeOptionMarkup(theme, activeTheme) {
+  const colors = theme.id === 'default'
+    ? ['var(--admin-bg-primary, #121212)', 'var(--bg-card2)', 'var(--admin-primary-color, #bda275)']
+    : theme.colors;
+  const swatches = colors.map(color => `<span style="background:${color}"></span>`).join('');
+  return `<button type="button" class="theme-option ${theme.id === activeTheme ? 'active' : ''}" data-theme-id="${theme.id}" aria-label="${escHtml(theme.label)}"><span class="theme-option-preview" style="--theme-preview-a:${colors[0]};--theme-preview-b:${colors[1]};--theme-preview-accent:${colors[2]}"><span class="theme-preview-line"></span><span class="theme-preview-block"></span><span class="theme-preview-chip"></span></span><span class="theme-option-meta"><i class="fas ${theme.icon}"></i><b>${escHtml(theme.label)}</b></span><span class="theme-option-swatches">${swatches}</span>${theme.id === activeTheme ? '<i class="fas fa-check theme-option-check"></i>' : ''}</button>`;
+}
+function renderThemePicker(panel) {
+  if (!panel) return;
+  if (!canUseDisplayThemes()) {
+    panel.innerHTML = '<div class="theme-picker-locked"><i class="fas fa-lock"></i><span>Görünüm seçenekleri için VIP veya Plus üyeliği gerekli.</span></div>';
+    return;
+  }
+  const activeTheme = getDisplayTheme();
+  panel.innerHTML = `<div class="theme-picker-heading"><span><i class="fas fa-sparkles"></i> Tema seç</span><small>Önizle ve uygula</small></div><div class="theme-picker-options">${DISPLAY_THEMES.map(theme => themeOptionMarkup(theme, activeTheme)).join('')}</div>`;
+  panel.querySelectorAll('[data-theme-id]').forEach(option => option.addEventListener('click', event => {
+    event.stopPropagation();
+    const theme = option.dataset.themeId;
+    localStorage.setItem('cigcig_theme', theme);
+    applyDisplayTheme(theme);
+    document.querySelectorAll('.theme-picker-panel').forEach(otherPanel => renderThemePicker(otherPanel));
+    toast(`${DISPLAY_THEMES.find(item => item.id === theme)?.label || 'Tema'} uygulandı`);
+  }));
+}
+function setupThemePicker() {
+  const desktopSection = $('#desktop-theme-picker');
+  if (desktopSection) {
+    desktopSection.hidden = false;
+    const desktopLockBadge = $('#desktop-theme-lock-badge');
+    if (desktopLockBadge) desktopLockBadge.hidden = canUseDisplayThemes();
+    renderThemePicker($('#desktop-theme-panel'));
+  }
+  const desktopToggle = $('#desktop-theme-toggle');
+  if (desktopToggle && !desktopToggle.dataset.bound) {
+    desktopToggle.dataset.bound = '1';
+    desktopToggle.addEventListener('click', event => {
+      event.stopPropagation();
+      if (!canUseDisplayThemes()) {
+        toast('Görünüm seçenekleri için VIP veya Plus üyeliği gerekli.', 'error');
+        return;
+      }
+      $('#desktop-theme-panel')?.classList.toggle('hidden');
+    });
+  }
+  const mobileToggle = $('#mobile-theme-toggle');
+  if (mobileToggle && !mobileToggle.dataset.bound) {
+    mobileToggle.dataset.bound = '1';
+    mobileToggle.addEventListener('click', event => {
+      event.stopPropagation();
+      if (!canUseDisplayThemes()) {
+        toast('Görünüm seçenekleri için VIP veya Plus üyeliği gerekli.', 'error');
+        return;
+      }
+      $('#mobile-theme-panel')?.classList.toggle('hidden');
+    });
+  }
+  renderThemePicker($('#mobile-theme-panel'));
+}
 applyDisplayTheme();
 
 function playNotificationTone() {
@@ -1120,8 +1203,10 @@ function updateNavUI() {
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
       <a href="/vmb" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield-halved" style="width:18px"></i> VMB</a>
+      <div class="mobile-theme-picker" id="mobile-theme-picker-section"><button type="button" class="mobile-nav-link mobile-theme-toggle" id="mobile-theme-toggle"><i class="fas fa-palette" style="width:18px"></i><span>Görünüm</span>${canUseDisplayThemes() ? '<i class="fas fa-chevron-down theme-picker-chevron"></i>' : '<span class="theme-lock-badge"><i class="fas fa-lock"></i> VIP / Plus</span>'}</button><div class="theme-picker-panel hidden" id="mobile-theme-panel"></div></div>
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
+    setupThemePicker();
     $('#mob-logout')?.addEventListener('click', async () => {
       try { await api('/auth/logout', { method: 'POST' }); } catch {}
       currentToken = null; currentUser = null;
@@ -1155,6 +1240,7 @@ function updateNavUI() {
     if (mobNew) mobNew.classList.add('hidden');
     if (mobNewToggle) mobNewToggle.classList.add('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = '';
+    setupThemePicker();
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
@@ -8012,27 +8098,25 @@ async function loadStoriesBar(container) {
     const stories = await api('/stories');
     const groups = [];
     stories.forEach(story => {
-      let group = groups.find(item => item.user_id === story.user_id);
+      let group = groups.find(item => String(item.user_id) === String(story.user_id));
       if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, avatar_removed: story.avatar_removed, stories: [] }; groups.push(group); }
       group.stories.push(story);
     });
     groups.forEach(group => group.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
-    groups.flatMap(group => group.stories).forEach(story => {
-      if (story.media_type === 'image' && story.media_url) { const image = new Image(); image.src = story.media_url; }
-    });
     const ownUserId = currentUser?.id;
-    const visibleGroups = groups;
+    const visibleGroups = groups.slice();
     visibleGroups.sort((a, b) => {
       const aViewed = a.stories.every(story => story.viewed);
       const bViewed = b.stories.every(story => story.viewed);
       return Number(aViewed) - Number(bViewed);
     });
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
-    const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
-    const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
+    const ownGroup = visibleGroups.find(group => String(group.user_id) === String(ownUserId));
+    const otherGroups = visibleGroups.filter(group => String(group.user_id) !== String(ownUserId));
     container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
-      const group = groups[index];
+      const group = otherGroups[index] || (index === -1 ? ownGroup : null);
+      if (!group) return;
       let storyIndex = group.stories.findIndex(story => !story.viewed);
       if (storyIndex < 0) storyIndex = 0;
       const render = () => {
@@ -8203,8 +8287,8 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Fotoğraf müziğini aç/kapat" aria-label="Fotoğraf müziğini aç/kapat"><i class="fas fa-volume-mute"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
-function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" loading="lazy" decoding="async"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Fotoğraf müziğini aç/kapat" aria-label="Fotoğraf müziğini aç/kapat"><i class="fas fa-volume-mute"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}" loading="lazy" decoding="async"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   const sharePhoto = async c => {
     const url = location.origin + '/fotograflar#foto-' + c.dataset.photoId;

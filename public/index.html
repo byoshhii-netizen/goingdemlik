@@ -83,8 +83,10 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script>
     (function () {
-      localStorage.removeItem('cigcig_theme');
-      document.documentElement.dataset.theme = 'dark';
+      const savedTheme = localStorage.getItem('cigcig_theme');
+      const supportedThemes = ['default', 'dark-purple', 'electric-purple', 'ocean-blue', 'fire-orange', 'forest-green', 'gold', 'midnight-blue', 'aurora', 'rose-gold'];
+      const theme = savedTheme === 'dark' ? 'default' : (supportedThemes.includes(savedTheme) ? savedTheme : 'default');
+      document.documentElement.dataset.theme = theme;
       document.documentElement.style.colorScheme = 'dark';
     })();
   </script>
@@ -158,6 +160,11 @@
             <a href="/ayarlar" data-link class="dropdown-item"><i class="fas fa-cog"></i> Ayarlar</a>
             <a href="#" id="dropdown-badges" class="dropdown-item"><i class="fas fa-award"></i> Rozetler</a>
             <a href="/vmb" data-link class="dropdown-item" id="dropdown-vmb"><i class="fas fa-shield-halved"></i> VMB</a>
+            <div class="dropdown-divider"></div>
+            <div class="theme-picker-section" id="desktop-theme-picker" hidden>
+              <button class="dropdown-item theme-picker-toggle" id="desktop-theme-toggle" type="button"><i class="fas fa-palette"></i><span>Görünüm</span><span class="theme-lock-badge" id="desktop-theme-lock-badge"><i class="fas fa-lock"></i> VIP / Plus</span><i class="fas fa-chevron-down theme-picker-chevron"></i></button>
+              <div class="theme-picker-panel hidden" id="desktop-theme-panel"></div>
+            </div>
             <div class="dropdown-divider"></div>
             <button class="dropdown-item text-danger" id="logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış Yap</button>
           </div>
@@ -245,6 +252,10 @@
     const hex2    = '#'+toHex(lighter(r,1.15))+toHex(lighter(g,1.15))+toHex(lighter(b,1.15));
     const hexDark = '#'+toHex(darker(r,0.65))+toHex(darker(g,0.65))+toHex(darker(b,0.65));
     const root = document.documentElement.style;
+    root.setProperty('--admin-primary-color', hex);
+    root.setProperty('--admin-primary-light', hex2);
+    root.setProperty('--admin-primary-dark', hexDark);
+    root.setProperty('--admin-primary-contrast', luminance > 0.62 ? '#202124' : '#ffffff');
     // Accent / brand
     root.setProperty('--accent-red',      hex);
     root.setProperty('--accent-red2',     hex2);
@@ -263,23 +274,10 @@
     root.setProperty('--dm-own-bg',       `rgba(${r},${g},${b},0.15)`);
     root.setProperty('--dm-own-border',   `rgba(${r},${g},${b},0.3)`);
     root.setProperty('--dm-reply-bg',     `rgba(${r},${g},${b},0.08)`);
-    const themeTarget = document.body || root;
-    themeTarget.style.setProperty('--accent-red', hex);
-    themeTarget.style.setProperty('--accent-red2', hex2);
-    themeTarget.style.setProperty('--accent-red-dark', hexDark);
-    themeTarget.style.setProperty('--accent-contrast', luminance > 0.62 ? '#202124' : '#ffffff');
-    themeTarget.style.setProperty('--grad-red', `linear-gradient(135deg,${hex},${hexDark})`);
-    themeTarget.style.setProperty('--bg-active', `rgba(${r},${g},${b},0.08)`);
-    themeTarget.style.setProperty('--border', `rgba(${r},${g},${b},0.18)`);
-    themeTarget.style.setProperty('--border-hover', `rgba(${r},${g},${b},0.5)`);
-    themeTarget.style.setProperty('--glow', `0 0 20px rgba(${r},${g},${b},0.15)`);
-    themeTarget.style.setProperty('--dm-own-bg', `rgba(${r},${g},${b},0.15)`);
-    themeTarget.style.setProperty('--dm-own-border', `rgba(${r},${g},${b},0.3)`);
-    themeTarget.style.setProperty('--dm-reply-bg', `rgba(${r},${g},${b},0.08)`);
   }
   function applyBackgroundColor(hex) {
     if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
-    document.documentElement.style.setProperty('--bg-primary', hex);
+    document.documentElement.style.setProperty('--admin-bg-primary', hex);
   }
   fetch('/api/settings/public')
     .then(r=>r.json())
