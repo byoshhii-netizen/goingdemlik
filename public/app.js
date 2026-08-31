@@ -9,73 +9,9 @@ let siteAuthRequired = false;
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 
-const DISPLAY_THEMES = [
-  { id: 'dark', label: 'Gece Karanlığı', icon: 'fa-moon', colors: ['#14151d', '#272b3d', '#9b8cff'] },
-  { id: 'dark-purple', label: 'DarkMor', icon: 'fa-gem', colors: ['#120b20', '#2a1552', '#a855f7'] },
-  { id: 'electric-purple', label: 'Elektrik Moru', icon: 'fa-bolt', colors: ['#130c25', '#35156b', '#d16cff'] },
-  { id: 'ocean-blue', label: 'Okyanus Mavisi', icon: 'fa-water', colors: ['#061a2a', '#0b4568', '#29b6f6'] },
-  { id: 'fire-orange', label: 'Ateş Turuncusu', icon: 'fa-fire', colors: ['#24100a', '#61200d', '#ff7a18'] },
-  { id: 'forest-green', label: 'Yeşil Orman', icon: 'fa-leaf', colors: ['#081a15', '#0e422e', '#46d483'] },
-  { id: 'gold', label: 'Altın Sarısı', icon: 'fa-sun', colors: ['#211b05', '#5d4b08', '#ffd54a'] },
-  { id: 'midnight-blue', label: 'Gece Mavisi', icon: 'fa-star', colors: ['#141827', '#303b61', '#89b4fa'] },
-  { id: 'aurora', label: 'Aurora Borealis', icon: 'fa-wand-magic-sparkles', colors: ['#071a25', '#124c55', '#5eead4'] },
-  { id: 'rose-gold', label: 'Gül Altını', icon: 'fa-heart', colors: ['#211219', '#54283b', '#f58ca8'] }
-];
-const DISPLAY_THEME_IDS = new Set(DISPLAY_THEMES.map(theme => theme.id));
-function getDisplayTheme() {
-  const saved = localStorage.getItem('cigcig_theme');
-  return DISPLAY_THEME_IDS.has(saved) ? saved : 'dark';
-}
-function applyDisplayTheme(theme = getDisplayTheme()) {
-  const selected = DISPLAY_THEME_IDS.has(theme) ? theme : 'dark';
-  document.documentElement.dataset.theme = selected;
-  document.body.dataset.theme = selected;
-  document.documentElement.style.colorScheme = 'dark';
-}
-function isPlusMember() {
-  return Boolean(currentUser && (currentUser.is_plus || currentUser.plus || currentUser.plus_member));
-}
-function themeOptionMarkup(theme, activeTheme) {
-  const swatches = theme.colors.map(color => `<span style="background:${color}"></span>`).join('');
-  return `<button type="button" class="theme-option ${theme.id === activeTheme ? 'active' : ''}" data-theme-id="${theme.id}" aria-label="${escHtml(theme.label)}"><span class="theme-option-preview" style="--theme-preview-a:${theme.colors[0]};--theme-preview-b:${theme.colors[1]};--theme-preview-accent:${theme.colors[2]}"><span class="theme-preview-line"></span><span class="theme-preview-block"></span><span class="theme-preview-chip"></span></span><span class="theme-option-meta"><i class="fas ${theme.icon}"></i><b>${escHtml(theme.label)}</b></span><span class="theme-option-swatches">${swatches}</span>${theme.id === activeTheme ? '<i class="fas fa-check theme-option-check"></i>' : ''}</button>`;
-}
-function renderThemePicker(panel) {
-  if (!panel) return;
-  const activeTheme = getDisplayTheme();
-  panel.innerHTML = `<div class="theme-picker-heading"><span><i class="fas fa-sparkles"></i> Tema seç</span><small>Önizle ve uygula</small></div><div class="theme-picker-options">${DISPLAY_THEMES.map(theme => themeOptionMarkup(theme, activeTheme)).join('')}</div>`;
-  panel.querySelectorAll('[data-theme-id]').forEach(option => option.addEventListener('click', event => {
-    event.stopPropagation();
-    const theme = option.dataset.themeId;
-    localStorage.setItem('cigcig_theme', theme);
-    applyDisplayTheme(theme);
-    document.querySelectorAll('.theme-picker-panel').forEach(otherPanel => renderThemePicker(otherPanel));
-    toast(`${DISPLAY_THEMES.find(item => item.id === theme)?.label || 'Tema'} uygulandı`);
-  }));
-}
-function setupThemePicker() {
-  const desktopSection = $('#desktop-theme-picker');
-  if (desktopSection) {
-    desktopSection.hidden = !isPlusMember();
-    renderThemePicker($('#desktop-theme-panel'));
-  }
-  const desktopToggle = $('#desktop-theme-toggle');
-  if (desktopToggle && !desktopToggle.dataset.bound) {
-    desktopToggle.dataset.bound = '1';
-    desktopToggle.addEventListener('click', event => {
-      event.stopPropagation();
-      $('#desktop-theme-panel')?.classList.toggle('hidden');
-    });
-  }
-  const mobileToggle = $('#mobile-theme-toggle');
-  if (mobileToggle && !mobileToggle.dataset.bound) {
-    mobileToggle.dataset.bound = '1';
-    mobileToggle.addEventListener('click', event => {
-      event.stopPropagation();
-      $('#mobile-theme-panel')?.classList.toggle('hidden');
-    });
-  }
-  renderThemePicker($('#mobile-theme-panel'));
-}
+localStorage.removeItem('cigcig_theme');
+document.documentElement.style.colorScheme = 'dark';
+function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
 applyDisplayTheme();
 
 function playNotificationTone() {
@@ -1184,10 +1120,8 @@ function updateNavUI() {
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
       <a href="/vmb" data-link class="mobile-nav-link vmb-mobile-link"><i class="fas fa-shield-halved" style="width:18px"></i> VMB</a>
-      ${isPlusMember() ? `<div class="mobile-theme-picker" id="mobile-theme-picker-section"><button type="button" class="mobile-nav-link mobile-theme-toggle" id="mobile-theme-toggle"><i class="fas fa-palette" style="width:18px"></i><span>Görünüm</span><i class="fas fa-chevron-down theme-picker-chevron"></i></button><div class="theme-picker-panel hidden" id="mobile-theme-panel"></div></div>` : ''}
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
-    setupThemePicker();
     $('#mob-logout')?.addEventListener('click', async () => {
       try { await api('/auth/logout', { method: 'POST' }); } catch {}
       currentToken = null; currentUser = null;
@@ -1221,7 +1155,6 @@ function updateNavUI() {
     if (mobNew) mobNew.classList.add('hidden');
     if (mobNewToggle) mobNewToggle.classList.add('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = '';
-    setupThemePicker();
 
     const mbbAuth = $('#mbb-auth');
     if (mbbAuth) {
@@ -8079,7 +8012,7 @@ async function loadStoriesBar(container) {
     const stories = await api('/stories');
     const groups = [];
     stories.forEach(story => {
-      let group = groups.find(item => String(item.user_id) === String(story.user_id));
+      let group = groups.find(item => item.user_id === story.user_id);
       if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, avatar_removed: story.avatar_removed, stories: [] }; groups.push(group); }
       group.stories.push(story);
     });
@@ -8088,19 +8021,18 @@ async function loadStoriesBar(container) {
       if (story.media_type === 'image' && story.media_url) { const image = new Image(); image.src = story.media_url; }
     });
     const ownUserId = currentUser?.id;
-    const visibleGroups = groups.slice();
+    const visibleGroups = groups;
     visibleGroups.sort((a, b) => {
       const aViewed = a.stories.every(story => story.viewed);
       const bViewed = b.stories.every(story => story.viewed);
       return Number(aViewed) - Number(bViewed);
     });
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
-    const ownGroup = visibleGroups.find(group => String(group.user_id) === String(ownUserId));
-    const otherGroups = visibleGroups.filter(group => String(group.user_id) !== String(ownUserId));
+    const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
+    const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
     container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
-      const group = otherGroups[index] || (index === -1 ? ownGroup : null);
-      if (!group) return;
+      const group = groups[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
       if (storyIndex < 0) storyIndex = 0;
       const render = () => {
