@@ -56,6 +56,22 @@ function userBadgesMarkup(user, emptyLabel = 'Rozet yok') {
     : `<span class="admin-user-badges-empty"><i class="fas fa-minus"></i> ${emptyLabel}</span>`;
 }
 
+function adminSquareCoverFile(file, size = 1000) {
+  if (!file || !String(file.type || '').startsWith('image/')) return Promise.resolve(file);
+  return new Promise(resolve => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      const canvas = document.createElement('canvas'); canvas.width = size; canvas.height = size;
+      canvas.getContext('2d').drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+      canvas.toBlob(blob => { URL.revokeObjectURL(url); resolve(blob ? new File([blob], 'kapak-kare.jpg', { type: 'image/jpeg' }) : file); }, 'image/jpeg', .9);
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    image.src = url;
+  });
+}
+
 async function openBadgeAssigner(badge) {
   showModal(`"${badge.name}" rozetini ver`, `
     <div class="badge-assign-intro">
@@ -301,6 +317,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_view_logs')) visible.add('logs');
   if (hasPermission('can_suspend_content') || hasPermission('can_view_stories')) visible.add('stories');
   if (hasPermission('can_suspend_content') || hasPermission('can_view_reals')) visible.add('videos');
+  if (hasPermission('can_view_stories') || hasPermission('can_view_reals')) visible.add('content-analytics');
   if (hasPermission('can_suspend_content')) { visible.add('photos'); visible.add('forums'); visible.add('books'); }
   if (hasPermission('can_view_groups')) visible.add('groups');
   if (hasPermission('can_view_levels')) visible.add('levels');
@@ -347,6 +364,7 @@ function loadSection(section) {
     settings: renderSettings, messages: renderAdminMessages,
     announcements: renderAnnouncements,
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
+    'content-analytics': renderContentAnalytics,
     'shop': renderShop,
     'shop-orders': renderShopOrders,
     'shop-settings': renderShopSettings
@@ -360,7 +378,7 @@ async function renderAdminStories(main) {
   let stories = [];
   try { stories = await adminApi('/stories'); } catch (error) { main.innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; return; }
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-circle-play"></i></div> Hikayeler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${stories.length})</span></div></div><div class="card"><div style="overflow:auto"><table class="adm-table"><thead><tr><th>Medya</th><th>Sahip</th><th>Durum</th><th>Süre</th><th>Görüntülenme</th><th>Beğeni</th><th>Tarih</th><th>İşlemler</th></tr></thead><tbody>${stories.map(story => `<tr><td><a href="/hikaye/${escHtml(story.public_id || story.id)}" target="_blank"><img src="${escHtml(story.media_url)}" style="width:64px;height:82px;object-fit:contain;background:#000;border-radius:6px" /></a></td><td>${story.avatar ? `<img src="${escHtml(story.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:5px" />` : ''}${escHtml(story.username)}</td><td>${story.is_suspended ? '<span class="badge badge-red">Askıda</span>' : (new Date(story.expires_at) < new Date() ? '<span class="badge">Süresi doldu</span>' : '<span class="badge badge-green">Aktif</span>')}</td><td>${story.duration_hours} saat</td><td>${story.total_views || 0} toplam / ${story.unique_viewers || 0} kişi</td><td>${story.like_count || 0}</td><td>${formatDate(story.created_at)}</td><td><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn btn-outline btn-xs story-admin-viewers" data-id="${escHtml(story.public_id || story.id)}">Görenler</button><button class="btn btn-outline btn-xs story-admin-edit" data-id="${escHtml(story.public_id || story.id)}">Düzenle</button><button class="btn ${story.is_suspended ? 'btn-primary' : 'btn-outline'} btn-xs story-admin-suspend" data-id="${escHtml(story.public_id || story.id)}" data-suspended="${story.is_suspended ? '1' : '0'}">${story.is_suspended ? 'Aktifleştir' : 'Askıya al'}</button><button class="btn btn-danger btn-xs story-admin-delete" data-id="${escHtml(story.public_id || story.id)}">Sil</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
-  main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => { try { const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers'); showModal('Hikaye görüntüleyenleri', viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${escHtml(viewer.username)}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)}</small></span></div>`).join('')}</div>` : '<div class="empty-state">Henüz görüntüleyen yok.</div>'); } catch (error) { toast(error.message, 'error'); } });
+  main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => { try { const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers'); showModal('Hikaye görüntüleyenleri', viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${viewer.username ? escHtml(viewer.username) : '<i class="fas fa-user-secret"></i> Misafir'}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)} · IP: ${escHtml(viewer.ip || 'Bilinmiyor')}</small></span></div>`).join('')}</div>` : '<div class="empty-state">Henüz görüntüleyen yok.</div>'); } catch (error) { toast(error.message, 'error'); } });
   main.querySelectorAll('.story-admin-edit').forEach(button => button.onclick = async () => { const story = stories.find(item => String(item.public_id || item.id) === button.dataset.id); if (!story) return; showModal('Hikayeyi düzenle', `<div class="form-group"><label>Açıklama</label><textarea id="adm-story-caption">${escHtml(story.caption || '')}</textarea></div><div class="form-group"><label>Süre (saat)</label><input id="adm-story-duration" type="number" min="1" max="720" step="1" value="${Number(story.duration_hours) || 24}" /><small style="display:block;margin-top:5px;color:var(--text-muted)">1-720 saat arasında istediğin süreyi yazabilirsin.</small></div><button class="btn btn-primary" id="adm-story-save">Kaydet</button>`); $('#adm-story-save').onclick = async () => { const duration = Number($('#adm-story-duration').value); if (!Number.isInteger(duration) || duration < 1 || duration > 720) return toast('Süre 1-720 saat arasında tam sayı olmalı.', 'error'); try { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ caption: $('#adm-story-caption').value, duration_hours: duration }) }); hideModal(); toast('Hikaye güncellendi'); renderAdminStories(main); } catch (error) { toast(error.message, 'error'); } }; });
   main.querySelectorAll('.story-admin-suspend').forEach(button => button.onclick = async () => { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_suspended: button.dataset.suspended !== '1' }) }); toast(button.dataset.suspended === '1' ? 'Hikaye aktifleştirildi' : 'Hikaye askıya alındı'); renderAdminStories(main); });
   main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => { if (!confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return; await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' }); toast('Hikaye silindi'); renderAdminStories(main); });
@@ -2125,6 +2143,36 @@ function showAnnModal(ann, anns) {
 }
 
 // ===== ADMIN: MÜZİKLER =====
+async function renderContentAnalytics(main) {
+  const typeLabels = { '': 'Tüm içerikler', song: 'Müzikler', photo: 'Fotoğraflar', story: 'Hikâyeler', reals: 'Reals', video: 'Videolar' };
+  const load = async (type = '') => {
+    main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+    try {
+      const data = await adminApi('/content-analytics' + (type ? '?type=' + encodeURIComponent(type) : ''));
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      main.innerHTML = `
+        <div class="adm-section-header">
+          <div><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-chart-pie"></i></div>İzlenme Analitiği</div><div class="adm-section-subtitle">Müzik, fotoğraf, hikâye ve Reals görüntülemeleri; giriş yapan ve misafir ziyaretçiler ayrı ayrı görünür.</div></div>
+          <select id="analytics-type" style="min-width:170px"><option value="">Tüm içerikler</option><option value="song">Müzikler</option><option value="photo">Fotoğraflar</option><option value="story">Hikâyeler</option><option value="reals">Reals</option><option value="video">Videolar</option></select>
+        </div>
+        <div class="adm-stat-grid" style="margin-bottom:18px">
+          <div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(88,101,242,.14);color:#8b9aff"><i class="fas fa-eye"></i></div><div><b>${Number(data.total_events || 0).toLocaleString('tr-TR')}</b><span>Toplam görüntüleme</span></div></div>
+          <div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(34,197,94,.14);color:#4ade80"><i class="fas fa-user-check"></i></div><div><b>${Math.max(0, Number(data.total_events || 0) - Number(data.guest_events || 0)).toLocaleString('tr-TR')}</b><span>Giriş yapan görüntüleme</span></div></div>
+          <div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(245,158,11,.14);color:#fbbf24"><i class="fas fa-user-secret"></i></div><div><b>${Number(data.guest_events || 0).toLocaleString('tr-TR')}</b><span>Misafir görüntüleme</span></div></div>
+        </div>
+        <div class="card" style="overflow:auto">
+          <table class="adm-table"><thead><tr><th>İçerik</th><th>Hesap</th><th>IP adresi</th><th>Saat</th><th>Tekrar</th><th>İlk / son kayıt</th></tr></thead>
+          <tbody>${rows.length ? rows.map(row => `<tr><td><span class="adm-badge">${escHtml(typeLabels[row.content_type] || row.content_type)}</span><br><b>${escHtml(row.content_title || 'İsimsiz içerik')}</b><small style="display:block;color:var(--text3)">#${row.content_id}</small></td><td>${row.user_id ? `<b>${escHtml(row.username || 'İsimsiz kullanıcı')}</b>` : '<span style="color:#fbbf24"><i class="fas fa-user-secret"></i> Misafir</span>'}</td><td><code>${escHtml(row.ip || 'Bilinmiyor')}</code></td><td>${formatDate(row.viewed_hour)}</td><td><b>${Number(row.view_count || 0).toLocaleString('tr-TR')}</b></td><td>${formatDate(row.first_viewed_at)}<br><small>${formatDate(row.last_viewed_at)}</small></td></tr>`).join('') : '<tr><td colspan="6" style="text-align:center;padding:36px;color:var(--text3)">Henüz görüntüleme kaydı yok.</td></tr>'}</tbody></table>
+        </div>`;
+      const select = $('#analytics-type');
+      if (select) { select.value = type; select.addEventListener('change', () => load(select.value)); }
+    } catch (error) {
+      main.innerHTML = `<div class="adm-error">${escHtml(error.message)}</div>`;
+    }
+  };
+  load();
+}
+
 async function renderAdminSongs(main) {
   let songs = [];
   try { songs = await adminApi('/songs'); } catch (e) { main.innerHTML = `<p style="color:var(--red2);padding:20px">${e.message}</p>`; return; }
@@ -2232,7 +2280,7 @@ function showSongEditModal(song) {
     fd.append('play_count', document.getElementById('se-plays').value);
     fd.append('status', document.getElementById('se-status').value);
     const af = document.getElementById('se-audio').files[0]; if(af) fd.append('audio', af);
-    const cf = document.getElementById('se-cover').files[0]; if(cf) fd.append('cover', cf);
+    const cf = document.getElementById('se-cover').files[0]; if(cf) fd.append('cover', await adminSquareCoverFile(cf));
     try {
       const res = await fetch('/api/admin/songs/'+song.id, { method:'PUT', headers:{'X-Admin-Token':adminToken}, body:fd });
       const data = await res.json();

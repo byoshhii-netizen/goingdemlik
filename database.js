@@ -115,6 +115,25 @@ async function initDb() {
     );
     ALTER TABLE story_views ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 1;
 
+    -- Tüm medya görüntülemeleri: kullanıcı veya misafir, IP ve saat bazında.
+    -- Her oynatma/görüntüleme ayrı satırdır; admin paneli saatlik toplamı buradan hesaplar.
+    CREATE TABLE IF NOT EXISTS content_view_events (
+      id BIGSERIAL PRIMARY KEY,
+      content_type TEXT NOT NULL CHECK (content_type IN ('song','photo','story','reals','video')),
+      content_id BIGINT NOT NULL,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      ip TEXT NOT NULL DEFAULT '',
+      user_agent TEXT DEFAULT '',
+      viewed_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_content_view_events_lookup
+      ON content_view_events(content_type, content_id, viewed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_content_view_events_user_time
+      ON content_view_events(user_id, viewed_at DESC);
+    ALTER TABLE content_view_events DROP CONSTRAINT IF EXISTS content_view_events_content_type_check;
+    ALTER TABLE content_view_events ADD CONSTRAINT content_view_events_content_type_check
+      CHECK (content_type IN ('song','photo','story','reals','video'));
+
     CREATE TABLE IF NOT EXISTS story_likes (
       id BIGSERIAL PRIMARY KEY,
       story_id BIGINT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
@@ -1093,6 +1112,19 @@ async function initDb() {
     );
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS remastered_audio_url TEXT DEFAULT '';
+
+    CREATE TABLE IF NOT EXISTS song_recommendations (
+      id BIGSERIAL PRIMARY KEY,
+      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      recommended_song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(song_id, recommended_song_id),
+      CHECK(song_id <> recommended_song_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_song_recommendations_song
+      ON song_recommendations(song_id, position, created_at);
 
     -- Müzik içi ses reklamları ve kullanıcı başına zorunlu reklam durumu
     CREATE TABLE IF NOT EXISTS music_ads (

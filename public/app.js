@@ -529,6 +529,28 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function squareCoverFile(file, size = 1000) {
+  if (!file || !String(file.type || '').startsWith('image/')) return Promise.resolve(file);
+  return new Promise(resolve => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    image.onload = () => {
+      const side = Math.min(image.naturalWidth, image.naturalHeight);
+      const sx = (image.naturalWidth - side) / 2;
+      const sy = (image.naturalHeight - side) / 2;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      canvas.getContext('2d').drawImage(image, sx, sy, side, side, 0, 0, size, size);
+      canvas.toBlob(blob => {
+        URL.revokeObjectURL(objectUrl);
+        resolve(blob ? new File([blob], (file.name || 'kapak').replace(/\.[^.]+$/, '') + '-kare.jpg', { type: 'image/jpeg' }) : file);
+      }, 'image/jpeg', 0.9);
+    };
+    image.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+    image.src = objectUrl;
+  });
+}
+
 function normalizeExternalUrl(value) {
   const url = String(value || '').trim();
   if (!url || url === '#') return '#';
@@ -1041,6 +1063,7 @@ async function renderRealsFeed(app) {
         setRealsVideoSource(vid, videoUrl);
         vid.muted = realsMuted || j !== idx;
         if (j === idx) {
+          api('/video/' + it.dataset.id + '/view', { method: 'POST' }).catch(() => {});
           vid.play().catch(() => {});
           if (!realsMuted && it.dataset.songAudio) {
             activeRealsAudio = new Audio(it.dataset.songAudio);
@@ -4242,20 +4265,23 @@ async function renderBadges(app) {
   }
 
   const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', vmb: 'Topluluk rozeti' };
-  const badgeRows = badges.length ? badges.map(badge => `
+  const badgeRows = badges.length ? badges.map(badge => {
+    const isLockedAdminBadge = badge.key === 'admin';
+    return `
     <div class="badge-setting-row" data-badge-key="${escHtml(badge.key)}">
       <div class="badge-setting-icon" style="color:${escHtml(badge.color || '#6b7280')};background:${escHtml(badge.color || '#6b7280')}18;border-color:${escHtml(badge.color || '#6b7280')}44">
         <i class="${escHtml(badge.icon || 'fas fa-award')}"></i>
       </div>
       <div class="badge-setting-copy">
         <strong>${escHtml(badge.name)}</strong>
-        <small>${typeLabels[badge.type] || 'Rozet'} · <span class="badge-setting-status">${badge.is_active ? 'Profilde görünüyor' : 'Profilde gizli'}</span></small>
+        <small>${typeLabels[badge.type] || 'Rozet'} · <span class="badge-setting-status">${isLockedAdminBadge ? 'Zorunlu · Profilde görünüyor' : (badge.is_active ? 'Profilde görünüyor' : 'Profilde gizli')}</span></small>
       </div>
-      <label class="badge-visibility-toggle" title="${badge.is_active ? 'Profilde gizle' : 'Profilde göster'}">
-        <input type="checkbox" data-badge-toggle="${escHtml(badge.key)}" ${badge.is_active ? 'checked' : ''} />
+      <label class="badge-visibility-toggle${isLockedAdminBadge ? ' is-locked' : ''}" title="${isLockedAdminBadge ? 'Yetkili rozeti zorunludur' : (badge.is_active ? 'Profilde gizle' : 'Profilde göster')}">
+        <input type="checkbox" data-badge-toggle="${escHtml(badge.key)}" ${badge.is_active ? 'checked' : ''} ${isLockedAdminBadge ? 'disabled' : ''} />
         <span class="badge-toggle-slider"></span>
       </label>
-    </div>`).join('') : `
+    </div>`;
+  }).join('') : `
       <div class="empty-state badge-empty-state">
         <i class="fas fa-award"></i>
         <p>Henüz atanmış bir rozetin yok.</p>
@@ -4273,7 +4299,7 @@ async function renderBadges(app) {
       <div class="card badges-settings-card">
         <div class="card-header"><span><i class="fas fa-sliders"></i> Rozet görünürlüğü</span><span class="badge-count">${badges.length} rozet</span></div>
         <div class="card-body">
-          <p class="settings-help">Rozeti pasif yaptığında sadece profilindeki rozet satırından gizlenir; rozet hesabından silinmez.</p>
+      <p class="settings-help">Rozeti pasif yaptığında sadece profilindeki rozet satırından gizlenir; rozet hesabından silinmez. <strong>Yetkili rozeti hesap güvenliği nedeniyle zorunludur ve gizlenemez.</strong></p>
           <div class="badge-settings-list">${badgeRows}</div>
         </div>
       </div>
@@ -7574,11 +7600,14 @@ async function renderMusicDetail(app, slug) {
                 <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" />
               </div>
             </div>
+            ${song.remastered_audio_url ? `<button class="btn btn-outline btn-sm song-remastered-toggle" id="song-remastered-toggle"><i class="fas fa-wand-magic-sparkles"></i> Remastered versiyonu dinle</button>` : ''}
           </div>
 
           <div class="song-detail-actions-row">
             ${isUploader ? `
               <button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>
+              <button class="btn btn-outline btn-sm" id="song-remastered-btn"><i class="fas fa-wand-magic-sparkles"></i> Remastered ekle</button>
+              <button class="btn btn-outline btn-sm" id="song-recommend-btn"><i class="fas fa-headphones"></i> Dinleme önerisi ekle</button>
               <button class="btn btn-sm" id="song-delete-btn" style="background:rgba(220,38,38,0.12);color:var(--accent-red2);border:1px solid rgba(220,38,38,0.25)"><i class="fas fa-trash"></i> Sil</button>
             ` : ''}
           </div>
@@ -7602,6 +7631,12 @@ async function renderMusicDetail(app, slug) {
         </div>
       </div>
 
+      ${(song.recommendations || []).length ? `
+        <section class="song-recommendations">
+          <div class="song-lyrics-title"><i class="fas fa-headphones"></i> Şunu da dinleyebilirsiniz</div>
+          <div class="song-recommendations-grid">${song.recommendations.map(item => `<a class="song-recommendation-card" href="/muzik/${escHtml(item.slug)}" data-link><div class="music-cover-wrap">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" class="music-cover" />` : `<div class="music-cover music-cover-ph"><i class="fas fa-music"></i></div>`}</div><span><b>${escHtml(item.title)}</b><small>${escHtml(item.artist_name)}</small></span></a>`).join('')}</div>
+        </section>` : ''}
+
       ${hasLyrics ? `
         <div class="song-lyrics-section">
           <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
@@ -7617,6 +7652,7 @@ async function renderMusicDetail(app, slug) {
   const seek = document.getElementById('dp-seek');
   const curEl = document.getElementById('dp-cur');
   const durEl = document.getElementById('dp-dur');
+  let activeVariant = 'original';
 
   function fmt(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
@@ -7636,6 +7672,18 @@ async function renderMusicDetail(app, slug) {
   });
 
   let halfCounted = false;
+  const remasteredToggle = document.getElementById('song-remastered-toggle');
+  remasteredToggle?.addEventListener('click', () => {
+    activeVariant = activeVariant === 'original' ? 'remastered' : 'original';
+    audio.pause();
+    audio.src = activeVariant === 'remastered' ? song.remastered_audio_url : song.audio_url;
+    audio.load();
+    halfCounted = false;
+    remasteredToggle.innerHTML = activeVariant === 'remastered'
+      ? '<i class="fas fa-music"></i> Orijinal versiyonu dinle'
+      : '<i class="fas fa-wand-magic-sparkles"></i> Remastered versiyonu dinle';
+    playBtn.innerHTML = '<i class="fas fa-play"></i>';
+  });
   playBtn.addEventListener('click', async () => {
     if (audio.paused) {
       if (currentUser) {
@@ -7653,7 +7701,7 @@ async function renderMusicDetail(app, slug) {
   audio.addEventListener('timeupdate', () => {
     if (!halfCounted && audio.duration && (audio.currentTime / audio.duration) >= 0.5) {
       halfCounted = true;
-      fetch('/api/songs/'+slug+'/play-half', {method:'POST'}).catch(()=>{});
+      fetch('/api/songs/'+slug+'/play-half?variant=' + activeVariant, {method:'POST'}).catch(()=>{});
     }
   });
 
@@ -7717,7 +7765,7 @@ async function renderMusicDetail(app, slug) {
         <div class="form-group"><label>Müzik Türü</label><input id="ue-genre" value="${escHtml(song.genre||'')}" /></div>
         <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
         ${song.song_type === 'other' ? `<div class="form-group"><label>Paylaşma Sebebi</label><textarea id="ue-reason" rows="2">${escHtml(song.share_reason||'')}</textarea></div>` : ''}
-        <div class="form-group"><label>Yeni Kapak Fotoğrafı <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
+        <div class="form-group"><label>Yeni Kapak Fotoğrafı (1:1 kare) <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
           <input type="file" id="ue-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group"><label>Yeni Ses Dosyası <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
@@ -7737,7 +7785,7 @@ async function renderMusicDetail(app, slug) {
         fd.append('lyrics', document.getElementById('ue-lyrics')?.value.trim() || '');
         const dist = document.getElementById('ue-dist'); if (dist) fd.append('distributor', dist.value.trim());
         const reason = document.getElementById('ue-reason'); if (reason) fd.append('share_reason', reason.value.trim());
-        const coverFile = document.getElementById('ue-cover')?.files[0]; if (coverFile) fd.append('cover', coverFile);
+        const coverFile = document.getElementById('ue-cover')?.files[0]; if (coverFile) fd.append('cover', await squareCoverFile(coverFile));
         const audioFile = document.getElementById('ue-audio')?.files[0]; if (audioFile) fd.append('audio', audioFile);
         try {
           await apiForm('/songs/' + song.id, fd, 'PUT');
@@ -7751,6 +7799,52 @@ async function renderMusicDetail(app, slug) {
       });
     });
   }
+
+  const remasteredBtn = document.getElementById('song-remastered-btn');
+  remasteredBtn?.addEventListener('click', () => {
+    showModal('Remastered versiyon ekle', `
+      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının remastered ses dosyasını sonradan yükleyebilirsin. Mevcut remastered dosyası varsa yenisiyle değiştirilir.</p>
+      <div class="form-group"><label>Ses dosyası *</label><input type="file" id="remastered-audio" accept="audio/*" required /></div>
+      <button class="btn btn-primary" id="remastered-save" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Yükle</button>
+      <div id="remastered-msg" class="form-error mt-4"></div>
+    `);
+    document.getElementById('remastered-save')?.addEventListener('click', async () => {
+      const input = document.getElementById('remastered-audio');
+      const msg = document.getElementById('remastered-msg');
+      if (!input?.files[0]) { msg.textContent = 'Ses dosyası seçmelisin.'; return; }
+      const button = document.getElementById('remastered-save');
+      button.disabled = true; button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Yükleniyor...';
+      try {
+        const fd = new FormData(); fd.append('audio', input.files[0]);
+        await apiForm('/songs/' + song.id + '/remastered', fd);
+        hideModal(); toast('Remastered versiyon eklendi.'); navigate('/muzik/' + slug);
+      } catch (error) {
+        msg.textContent = error.message; button.disabled = false; button.innerHTML = '<i class="fas fa-upload"></i> Yükle';
+      }
+    });
+  });
+
+  const recommendBtn = document.getElementById('song-recommend-btn');
+  recommendBtn?.addEventListener('click', async () => {
+    let songs = [];
+    try { songs = await api('/songs'); } catch (error) { toast(error.message, 'error'); return; }
+    const existing = new Set((song.recommendations || []).map(item => String(item.id)));
+    const options = songs.filter(item => String(item.id) !== String(song.id) && !existing.has(String(item.id)))
+      .map(item => `<option value="${item.id}">${escHtml(item.title)} — ${escHtml(item.artist_name)}</option>`).join('');
+    showModal('Dinleme önerisi ekle', `
+      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının detayında “Şunu da dinleyebilirsiniz” bölümünde görünecek.</p>
+      <div class="form-group"><label>Şarkı seç *</label><select id="recommend-song">${options || '<option value="">Eklenebilecek şarkı yok</option>'}</select></div>
+      <button class="btn btn-primary" id="recommend-save" style="width:100%;justify-content:center" ${options ? '' : 'disabled'}><i class="fas fa-plus"></i> Öneriyi ekle</button>
+      <div id="recommend-msg" class="form-error mt-4"></div>
+    `);
+    document.getElementById('recommend-save')?.addEventListener('click', async () => {
+      const selected = document.getElementById('recommend-song')?.value;
+      try {
+        await api('/songs/' + song.id + '/recommendations', { method: 'POST', body: JSON.stringify({ song_id: selected }) });
+        hideModal(); toast('Dinleme önerisi eklendi.'); navigate('/muzik/' + slug);
+      } catch (error) { document.getElementById('recommend-msg').textContent = error.message; }
+    });
+  });
 }
 
 async function renderArtistApply(app) {
@@ -7874,8 +7968,8 @@ async function renderArtistPanel(app) {
           <div class="form-group"><label>Yayımlayıcı / Dağıtıcı İsmi</label><input id="s-distributor" placeholder="Kendi adın ya da şirket adı" /></div>
           <div class="form-group"><label>Şarkı Adı *</label><input id="s-title" /></div>
           <div class="form-group"><label>Şarkı Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
-          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
-          <div class="form-group"><label>Kapak Fotoğrafı</label><input type="file" id="s-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
           <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.own_rules)}</div>
           <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Şarkı yayınlama kurallarını okudum ve kabul ediyorum</label>
@@ -7883,9 +7977,9 @@ async function renderArtistPanel(app) {
         <div id="other-fields" style="display:none">
           <div class="form-group"><label>Şarkı Adı *</label><input id="s-title-o" /></div>
           <div class="form-group"><label>Şarkı Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
-          <div class="form-group"><label>Kapak Fotoğrafı</label><input type="file" id="s-cover-o" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover-o" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
           <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
-          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.other_rules)}</div>
           <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-other" style="width:auto" /> Başkasının şarkısını paylaşma kurallarını okudum ve kabul ediyorum</label>
@@ -7922,7 +8016,7 @@ async function renderArtistPanel(app) {
       fd.append('genre', document.getElementById('s-genre')?.value.trim()||'');
       fd.append('lyrics', document.getElementById('s-lyrics')?.value.trim()||'');
       fd.append('audio', audio);
-      const cover = document.getElementById('s-cover')?.files[0]; if(cover) fd.append('cover', cover);
+      const cover = document.getElementById('s-cover')?.files[0]; if(cover) fd.append('cover', await squareCoverFile(cover));
     } else {
       const title = document.getElementById('s-title-o')?.value.trim();
       const artist = document.getElementById('s-artist-o')?.value.trim();
@@ -7933,7 +8027,7 @@ async function renderArtistPanel(app) {
       fd.append('lyrics', document.getElementById('s-lyrics-o')?.value.trim()||'');
       fd.append('share_reason', document.getElementById('s-reason')?.value.trim()||'');
       fd.append('audio', audio);
-      const cover = document.getElementById('s-cover-o')?.files[0]; if(cover) fd.append('cover', cover);
+      const cover = document.getElementById('s-cover-o')?.files[0]; if(cover) fd.append('cover', await squareCoverFile(cover));
     }
     btn.disabled=true; btn.innerHTML='<div class="spinner" style="width:14px;height:14px"></div> Yükleniyor...';
     try {
@@ -7982,10 +8076,10 @@ async function renderShareSong(app) {
         </div>
         <div class="form-group">
           <label>Şarkı Dosyası * (MP3/WAV, max 50MB)</label>
-          <input type="file" id="ss-audio" accept="audio/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
+          <input type="file" id="ss-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group">
-          <label>Kapak Fotoğrafı (isteğe bağlı)</label>
+          <label>Kapak Fotoğrafı (isteğe bağlı, 1:1 kare)</label>
           <input type="file" id="ss-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group">
@@ -8039,7 +8133,7 @@ async function renderShareSong(app) {
     fd.append('lyrics', lyrics);
     fd.append('share_reason', reason);
     fd.append('audio', audio);
-    if (cover) fd.append('cover', cover);
+    if (cover) fd.append('cover', await squareCoverFile(cover));
 
     btn.disabled = true;
     btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Yükleniyor...';
@@ -8247,6 +8341,7 @@ async function renderStoryRoute(app, storyId) {
     const currentGroupIndex = currentGroup ? currentGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id) : -1;
     document.title = '@' + story.username + ' hikayesi - ' + siteName;
     app.innerHTML = `<div class="container page"><div class="story-route"><div class="story-route-media"><div class="story-route-head">${avatarImg(story)}<div><b>@${escHtml(story.username)}</b><small>${timeAgo(story.created_at)} · ${currentGroupIndex + 1}/${currentGroup?.stories.length || 1}</small></div></div><button class="story-route-tap story-route-tap-left" id="story-route-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}<button class="story-route-tap story-route-tap-right" id="story-route-next" aria-label="Sonraki hikaye" ${nextStory ? '' : 'disabled'}></button></div>${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<div class="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><input id="story-route-volume" type="range" min="0" max="100" value="80" aria-label="Hikaye sesi" /></div>` : ''}<div class="story-route-actions"><button class="btn btn-ghost" id="story-route-share"><i class="fas fa-share-alt"></i> Paylaş</button>${story.is_owner ? `<button class="btn btn-ghost" id="story-route-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button class="btn btn-ghost" id="story-route-edit"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-ghost text-danger" id="story-route-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div><div class="story-route-note">Bu hikaye artık akışta görünmüyor olabilir, ancak bağlantısından izlenebilir.</div></div></div>`;
+    api('/stories/' + encodeURIComponent(story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
     $('#story-route-prev')?.addEventListener('click', event => { event.preventDefault(); event.currentTarget.blur(); if (previousStory) navigate('/hikaye/' + encodeURIComponent(previousStory.public_id || previousStory.id)); });
     $('#story-route-next')?.addEventListener('click', event => { event.preventDefault(); event.currentTarget.blur(); if (nextStory) navigate('/hikaye/' + encodeURIComponent(nextStory.public_id || nextStory.id)); });
     $('#story-route-share')?.addEventListener('click', () => shareStory(story));
@@ -8278,6 +8373,9 @@ async function renderPhotos(app) {
 function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Fotoğraf müziğini aç/kapat" aria-label="Fotoğraf müziğini aç/kapat"><i class="fas fa-volume-mute"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
+  feed.querySelectorAll('[data-photo-id]').forEach(card => {
+    api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/view', { method: 'POST' }).catch(() => {});
+  });
   const sharePhoto = async c => {
     const url = location.origin + '/fotograflar#foto-' + c.dataset.photoId;
     const data = { title: 'CigCig fotoğrafı', text: 'Bu fotoğrafa göz at', url };

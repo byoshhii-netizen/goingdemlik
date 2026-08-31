@@ -223,6 +223,17 @@ function getClientInfo(req) {
   return { userAgent, device, operatingSystem, country, city };
 }
 
+async function recordContentView(contentType, contentId, req) {
+  if (!['song', 'photo', 'story', 'reals', 'video'].includes(contentType)) return;
+  const id = Number.parseInt(contentId, 10);
+  if (!Number.isSafeInteger(id) || id < 1) return;
+  await query(
+    `INSERT INTO content_view_events(content_type,content_id,user_id,ip,user_agent)
+     VALUES($1,$2,$3,$4,$5)`,
+    [contentType, id, req.user?.id || null, getIp(req), String(req.get('user-agent') || '').slice(0, 512)]
+  );
+}
+
 function normalizeSecurityAnswer(value) {
   return String(value || '').trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
 }
@@ -355,9 +366,9 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   const badges = [];
   const addBadge = (badge) => {
     if (!badge?.key || !badge.name) return;
-    const isActive = preferences.has(badge.key)
+    const isActive = badge.key === 'admin' ? true : (preferences.has(badge.key)
       ? preferences.get(badge.key)
-      : (badge.key === 'level' ? Number(user.show_level_badge) !== 0 : true);
+      : (badge.key === 'level' ? Number(user.show_level_badge) !== 0 : true));
     if (includeInactive || isActive) badges.push({ ...badge, is_active: isActive });
   };
 
@@ -540,7 +551,7 @@ async function adminMiddleware(req, res, next) {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
-      [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
+      [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
       [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
     ];
     const rule = readRules.find(([pattern]) => pattern.test(req.path));
@@ -1050,6 +1061,41 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/admin/me', adminMiddleware, (req, res) => {
   res.json({ username: req.adminUser.username, is_super_admin: req.adminUser.isSuperAdmin, permissions: req.adminUser.permissions || null });
+});
+
+// ===== ADMIN MEDYA GÖRÜNTÜLEME ANALİTİĞİ =====
+app.get('/api/admin/content-analytics', adminMiddleware, async (req, res) => {
+  try {
+    const allowedTypes = ['song', 'photo', 'story', 'reals', 'video'];
+    const type = allowedTypes.includes(String(req.query.type || '')) ? String(req.query.type) : '';
+    const params = [type];
+    const { rows } = await query(`
+      SELECT cve.content_type, cve.content_id,
+        COALESCE(s.title, NULLIF(p.caption,''), NULLIF(st.caption,''), v.title, 'İsimsiz içerik') AS content_title,
+        cve.user_id, u.username, cve.ip,
+        date_trunc('hour', cve.viewed_at) AS viewed_hour,
+        MIN(cve.viewed_at) AS first_viewed_at, MAX(cve.viewed_at) AS last_viewed_at,
+        COUNT(*)::int AS view_count
+      FROM content_view_events cve
+      LEFT JOIN songs s ON cve.content_type='song' AND s.id=cve.content_id
+      LEFT JOIN photos p ON cve.content_type='photo' AND p.id=cve.content_id
+      LEFT JOIN stories st ON cve.content_type='story' AND st.id=cve.content_id
+      LEFT JOIN videos v ON cve.content_type IN ('reals','video') AND v.id=cve.content_id
+      LEFT JOIN users u ON u.id=cve.user_id
+      WHERE ($1='' OR cve.content_type=$1)
+      GROUP BY cve.content_type,cve.content_id,content_title,cve.user_id,u.username,cve.ip,viewed_hour
+      ORDER BY viewed_hour DESC
+      LIMIT 2000
+    `, params);
+    res.json({
+      rows,
+      total_events: rows.reduce((total, row) => total + Number(row.view_count || 0), 0),
+      guest_events: rows.filter(row => !row.user_id).reduce((total, row) => total + Number(row.view_count || 0), 0)
+    });
+  } catch (error) {
+    console.error('Content analytics failed:', error.message);
+    res.status(500).json({ error: 'İçerik görüntüleme istatistikleri alınamadı' });
+  }
 });
 
 // ===== ADMIN BADGES API =====
@@ -3318,6 +3364,9 @@ app.put('/api/me/badges/:key', authMiddleware, async (req, res) => {
     const allBadges = await getUserProfileBadges(req.user, { includeInactive: true });
     const badge = allBadges.find(item => item.key === key);
     if (!badge) return res.status(404).json({ error: 'Bu rozet hesabınızda bulunmuyor' });
+    if (key === 'admin' && !isActive) {
+      return res.status(400).json({ error: 'Yetkili rozeti profilden kaldırılamaz.' });
+    }
 
     await query(`
       INSERT INTO user_badge_visibility (user_id, badge_key, is_active, updated_at)
@@ -3584,6 +3633,13 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   res.json(rows[0]);
 });
 
+app.post('/api/photos/:id/view', optionalAuth, async (req, res) => {
+  const { rows } = await query('SELECT id FROM photos WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
+  await recordContentView('photo', rows[0].id, req);
+  res.json({ ok: true });
+});
+
 app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res) => {
   if (await denyIfRestricted(req, res, 'photo')) return;
   if (!req.file) return res.status(400).json({ error: 'Fotoğraf seçin' });
@@ -3647,7 +3703,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
       (SELECT COUNT(*) FROM story_replies src WHERE src.story_id=s.id) AS reply_count,
-      (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
+      (SELECT COUNT(*) FROM content_view_events cve WHERE cve.content_type='story' AND cve.content_id=s.id) AS total_views,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
     WHERE s.expires_at > NOW() AND (s.is_suspended=0 OR s.user_id=$1) AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
@@ -3732,10 +3788,17 @@ app.post('/api/stories/from-url', authMiddleware, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Hikaye kaydedilemedi: ' + error.message }); }
 });
 
-app.post('/api/stories/:id/view', authMiddleware, async (req, res) => {
-  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, req.user.id]);
+app.post('/api/stories/:id/view', optionalAuth, async (req, res) => {
+  const viewerId = req.user?.id || 0;
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  await query('INSERT INTO story_views (story_id,viewer_id) VALUES ($1,$2) ON CONFLICT (story_id,viewer_id) DO NOTHING', [story[0].id, req.user.id]);
+  await recordContentView('story', story[0].id, req);
+  if (req.user?.id) {
+    await query(`INSERT INTO story_views (story_id,viewer_id,view_count,viewed_at)
+      VALUES ($1,$2,1,NOW())
+      ON CONFLICT (story_id,viewer_id)
+      DO UPDATE SET view_count=story_views.view_count+1, viewed_at=NOW()`, [story[0].id, req.user.id]);
+  }
   res.json({ ok: true });
 });
 
@@ -3769,8 +3832,13 @@ app.get('/api/stories/:id/viewers', authMiddleware, async (req, res) => {
 
 app.get('/api/admin/stories', adminMiddleware, async (req, res) => {
   const { rows } = await query(`SELECT s.*,u.username,u.avatar,
-    (SELECT COUNT(*) FROM story_views sv WHERE sv.story_id=s.id)::int AS unique_viewers,
-    (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id)::int AS total_views,
+    (SELECT COUNT(*) FROM (
+      SELECT COALESCE(cve.user_id::text, 'guest:' || cve.ip) AS visitor
+      FROM content_view_events cve
+      WHERE cve.content_type='story' AND cve.content_id=s.id
+      GROUP BY visitor
+    ) visitors)::int AS unique_viewers,
+    (SELECT COUNT(*) FROM content_view_events cve WHERE cve.content_type='story' AND cve.content_id=s.id)::int AS total_views,
     (SELECT COUNT(*) FROM story_likes sl WHERE sl.story_id=s.id)::int AS like_count
     FROM stories s JOIN users u ON u.id=s.user_id ORDER BY s.created_at DESC`);
   res.json(rows);
@@ -3789,7 +3857,12 @@ app.get('/api/admin/videos', adminMiddleware, async (req, res) => {
 app.get('/api/admin/stories/:id/viewers', adminMiddleware, async (req, res) => {
   const { rows: story } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  const { rows } = await query(`SELECT sv.view_count,sv.viewed_at,u.username,u.avatar FROM story_views sv JOIN users u ON u.id=sv.viewer_id WHERE sv.story_id=$1 ORDER BY sv.viewed_at DESC`, [story[0].id]);
+  const { rows } = await query(`SELECT cve.user_id,cve.ip,u.username,u.avatar,
+      COUNT(*)::int AS view_count, MIN(cve.viewed_at) AS first_viewed_at, MAX(cve.viewed_at) AS viewed_at
+    FROM content_view_events cve LEFT JOIN users u ON u.id=cve.user_id
+    WHERE cve.content_type='story' AND cve.content_id=$1
+    GROUP BY cve.user_id,cve.ip,u.username,u.avatar,date_trunc('hour',cve.viewed_at)
+    ORDER BY viewed_at DESC`, [story[0].id]);
   res.json(rows);
 });
 
@@ -4517,7 +4590,7 @@ app.get('/api/songs', async (req, res) => {
   if (distributor && !q) { params.push(`%${distributor}%`); where += ` AND s.distributor ILIKE $${params.length}`; }
   const { rows } = await query(
     `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url,
-            s.play_count, s.slug, s.song_type, s.published_at, s.share_reason,
+            s.remastered_audio_url, s.play_count, s.slug, s.song_type, s.published_at, s.share_reason,
             u.username as uploader, u.avatar as uploader_avatar
      FROM songs s LEFT JOIN users u ON s.uploader_id=u.id
      ${where} ORDER BY s.published_at DESC LIMIT 100`,
@@ -4529,7 +4602,15 @@ app.get('/api/songs', async (req, res) => {
 // Tek şarkı
 app.get('/api/songs/:slug', async (req, res) => {
   const { rows } = await query(
-    `SELECT s.*, u.username as uploader, u.avatar as uploader_avatar, u.is_artist
+    `SELECT s.*, u.username as uploader, u.avatar as uploader_avatar, u.is_artist,
+            COALESCE((SELECT json_agg(json_build_object(
+              'id', rs.id, 'title', rs.title, 'artist_name', rs.artist_name,
+              'cover_url', rs.cover_url, 'audio_url', rs.audio_url, 'slug', rs.slug,
+              'play_count', rs.play_count
+            ) ORDER BY sr.position, sr.created_at)
+            FROM song_recommendations sr
+            JOIN songs rs ON rs.id=sr.recommended_song_id
+            WHERE sr.song_id=s.id AND rs.status='active'), '[]'::json) AS recommendations
      FROM songs s LEFT JOIN users u ON s.uploader_id=u.id
      WHERE s.slug=$1`,
     [req.params.slug]
@@ -4540,13 +4621,55 @@ app.get('/api/songs/:slug', async (req, res) => {
 
 // Dinlenme sayısı artır
 app.post('/api/songs/:slug/play', async (req, res) => {
-  await query('UPDATE songs SET play_count=play_count+1 WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query('SELECT id FROM songs WHERE slug=$1 AND status=\'active\'', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
+  await recordContentView('song', rows[0].id, req);
   res.json({ ok: true });
 });
 
 // Yarı dinleme sayacı — şarkının %50'sine ulaşınca çağrılır
 app.post('/api/songs/:slug/play-half', async (req, res) => {
-  await query('UPDATE songs SET play_count=play_count+1 WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query('SELECT id FROM songs WHERE slug=$1 AND status=\'active\'', [req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
+  await recordContentView('song', rows[0].id, req);
+  res.json({ ok: true });
+});
+
+app.post('/api/songs/:id/remastered', authMiddleware, upload.single('audio'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Remastered ses dosyası gerekli.' });
+  const { rows: songs } = await query('SELECT id,uploader_id FROM songs WHERE id=$1', [req.params.id]);
+  if (!songs.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (songs[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca şarkı sahibi ekleyebilir.' });
+  try {
+    const audioUrl = await handleUpload(req.file);
+    const { rows } = await query('UPDATE songs SET remastered_audio_url=$1 WHERE id=$2 RETURNING id,remastered_audio_url', [audioUrl, songs[0].id]);
+    res.json({ ok: true, ...rows[0] });
+  } catch (error) {
+    res.status(500).json({ error: 'Remastered ses yüklenemedi: ' + error.message });
+  }
+});
+
+app.post('/api/songs/:id/recommendations', authMiddleware, async (req, res) => {
+  const targetId = Number.parseInt(req.body?.song_id, 10);
+  if (!Number.isSafeInteger(targetId) || targetId < 1) return res.status(400).json({ error: 'Geçerli bir öneri şarkısı seçin.' });
+  const { rows: owner } = await query('SELECT id,uploader_id FROM songs WHERE id=$1', [req.params.id]);
+  const { rows: target } = await query('SELECT id FROM songs WHERE id=$1 AND status=\'active\'', [targetId]);
+  if (!owner.length || !target.length) return res.status(404).json({ error: 'Şarkı bulunamadı.' });
+  if (owner[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca şarkı sahibi öneri ekleyebilir.' });
+  if (owner[0].id === targetId) return res.status(400).json({ error: 'Şarkı kendisini öneremez.' });
+  await query(`INSERT INTO song_recommendations(song_id,recommended_song_id,position)
+    VALUES($1,$2,(SELECT COALESCE(MAX(position),-1)+1 FROM song_recommendations WHERE song_id=$1))
+    ON CONFLICT (song_id,recommended_song_id) DO NOTHING`, [owner[0].id, targetId]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/songs/:id/recommendations/:recommendedId', authMiddleware, async (req, res) => {
+  const { rows: owner } = await query('SELECT uploader_id FROM songs WHERE id=$1', [req.params.id]);
+  if (!owner.length) return res.status(404).json({ error: 'Şarkı bulunamadı.' });
+  if (owner[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca şarkı sahibi düzenleyebilir.' });
+  await query('DELETE FROM song_recommendations WHERE song_id=$1 AND recommended_song_id=$2', [req.params.id, req.params.recommendedId]);
   res.json({ ok: true });
 });
 
@@ -6636,8 +6759,13 @@ app.put('/api/video/:slug', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/video/:id/view', async (req, res) => {
-  await query('UPDATE videos SET views=COALESCE(views,0)+1 WHERE id=$1 OR slug=$1', [req.params.id]);
+app.post('/api/video/:id/view', optionalAuth, async (req, res) => {
+  const videoKey = String(req.params.id || '');
+  const videoLookup = /^\d+$/.test(videoKey) ? 'id=$1' : 'slug=$1';
+  const { rows } = await query(`SELECT id,is_reals FROM videos WHERE ${videoLookup} LIMIT 1`, [videoKey]);
+  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  await query('UPDATE videos SET views=COALESCE(views,0)+1 WHERE id=$1', [rows[0].id]);
+  await recordContentView(rows[0].is_reals ? 'reals' : 'video', rows[0].id, req);
   res.json({ ok: true });
 });
 
