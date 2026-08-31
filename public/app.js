@@ -271,10 +271,6 @@ function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initia
   }, 'image/jpeg', 0.92));
 }
 
-function openAvatarCrop(file, onApply) {
-  openMediaEditor(file, { title: 'Profil Fotoğrafını Düzenle', aspect: 1, onApply });
-}
-
 $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
