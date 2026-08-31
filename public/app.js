@@ -8,6 +8,66 @@ let firstVisitAuthEnabled = false;
 let siteAuthRequired = false;
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
+const MEDIA_VOLUME_KEY = 'cigcig_volume';
+const MEDIA_CLIP_SECONDS = 30;
+const managedMediaAudio = new Set();
+
+function getMediaVolume() {
+  const value = Number.parseFloat(localStorage.getItem(MEDIA_VOLUME_KEY) ?? '0.8');
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.8;
+}
+
+function setMediaVolume(value) {
+  const volume = Math.min(1, Math.max(0, Number(value) || 0));
+  localStorage.setItem(MEDIA_VOLUME_KEY, String(volume));
+  managedMediaAudio.forEach(audio => { try { audio.volume = volume; } catch {} });
+  [storyComposerAudio, activePhotoAudio, activeStoryAudio, activeRealsAudio].forEach(audio => { try { if (audio) audio.volume = volume; } catch {} });
+  return volume;
+}
+
+function trackMediaAudio(audio) {
+  if (!audio) return audio;
+  managedMediaAudio.add(audio);
+  audio.volume = getMediaVolume();
+  return audio;
+}
+
+function untrackMediaAudio(audio) {
+  if (audio) managedMediaAudio.delete(audio);
+}
+
+function limitMediaAudioClip(audio, startSeconds, onClipEnd) {
+  const requestedStart = Math.max(0, Number(startSeconds) || 0);
+  let clipEnd = null;
+  let finished = false;
+
+  const setStartPosition = () => {
+    const duration = Number(audio.duration);
+    if (Number.isFinite(duration) && duration >= 0) {
+      const start = Math.min(requestedStart, duration);
+      clipEnd = Math.min(duration, start + MEDIA_CLIP_SECONDS);
+      if (audio.currentTime < start || audio.currentTime >= clipEnd) audio.currentTime = start;
+    } else {
+      audio.currentTime = requestedStart;
+    }
+  };
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    audio.pause();
+    if (clipEnd !== null) audio.currentTime = clipEnd;
+    onClipEnd?.();
+  };
+
+  audio.addEventListener('loadedmetadata', setStartPosition);
+  audio.addEventListener('durationchange', setStartPosition);
+  audio.addEventListener('timeupdate', () => {
+    if (clipEnd !== null && audio.currentTime >= clipEnd - 0.05) finish();
+  });
+  audio.addEventListener('ended', finish);
+  setStartPosition();
+  return audio;
+}
 
 localStorage.removeItem('cigcig_theme');
 document.documentElement.style.colorScheme = 'dark';
@@ -151,9 +211,9 @@ function showModal(title, bodyHTML) {
 }
 
 function hideModal() {
-  if (storyComposerAudio) { storyComposerAudio.pause(); storyComposerAudio.src = ''; storyComposerAudio = null; }
-  if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
-  if (activeRealsAudio) { activeRealsAudio.pause(); activeRealsAudio.src = ''; activeRealsAudio = null; }
+  if (storyComposerAudio) { storyComposerAudio.pause(); untrackMediaAudio(storyComposerAudio); storyComposerAudio.src = ''; storyComposerAudio = null; }
+  if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
+  if (activeRealsAudio) { activeRealsAudio.pause(); untrackMediaAudio(activeRealsAudio); activeRealsAudio.src = ''; activeRealsAudio = null; }
   window.__realsResumeVideo?.();
   window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
@@ -688,10 +748,11 @@ function renderRoute(fullPath) {
   document.getElementById('photo-audio-control')?.remove();
   photoAudioObserver?.disconnect();
   activePhotoAudio?.pause();
+  untrackMediaAudio(activePhotoAudio);
   activePhotoAudio = null;
   photoAudioObserver = null;
-  if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
-  if (activeRealsAudio) { activeRealsAudio.pause(); activeRealsAudio.src = ''; activeRealsAudio = null; }
+  if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
+  if (activeRealsAudio) { activeRealsAudio.pause(); untrackMediaAudio(activeRealsAudio); activeRealsAudio.src = ''; activeRealsAudio = null; }
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
@@ -993,10 +1054,9 @@ async function renderRealsFeed(app) {
         const item = btn.closest('.reals-item');
         if (item?.dataset.songAudio) {
           activeRealsAudio?.pause();
-          activeRealsAudio = new Audio(item.dataset.songAudio);
+          activeRealsAudio = trackMediaAudio(new Audio(item.dataset.songAudio));
           activeRealsAudio.currentTime = Number(item.dataset.songStart) || 0;
           activeRealsAudio.loop = true;
-          activeRealsAudio.volume = 0.8;
           activeRealsAudio.play().catch(() => {});
         }
       }
@@ -1066,10 +1126,9 @@ async function renderRealsFeed(app) {
           api('/video/' + it.dataset.id + '/view', { method: 'POST' }).catch(() => {});
           vid.play().catch(() => {});
           if (!realsMuted && it.dataset.songAudio) {
-            activeRealsAudio = new Audio(it.dataset.songAudio);
+            activeRealsAudio = trackMediaAudio(new Audio(it.dataset.songAudio));
             activeRealsAudio.currentTime = Number(it.dataset.songStart) || 0;
             activeRealsAudio.loop = true;
-            activeRealsAudio.volume = 0.8;
             activeRealsAudio.play().catch(() => {});
           }
         }
@@ -7312,7 +7371,7 @@ function playMusicAd(ad, onComplete) {
   let player = document.getElementById('global-music-player');
   if (!player) { player = document.createElement('div'); player.id = 'global-music-player'; document.body.appendChild(player); }
   player.classList.add('music-ad-player');
-  const audio = new Audio(ad.audio_url);
+  const audio = trackMediaAudio(new Audio(ad.audio_url));
   currentAudio = audio;
   player.innerHTML = `<div class="gplayer-inner" style="justify-content:center">
     <div class="gplayer-info" style="flex:0 1 460px">
@@ -7384,7 +7443,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   player.classList.remove('music-ad-player');
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
-  const audio = new Audio(audioUrl);
+  const audio = trackMediaAudio(new Audio(audioUrl));
   currentAudio = audio; currentSlug = slug;
   fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
 
@@ -7426,8 +7485,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
       <button class="gplayer-close" id="gp-close"><i class="fas fa-times"></i></button>
     </div>`;
   player.style.display = 'block';
-  const savedVol = parseFloat(localStorage.getItem('cigcig_volume') ?? '0.8');
-  audio.volume = savedVol;
+  const savedVol = getMediaVolume();
 
   function fmtTime(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
@@ -7516,20 +7574,17 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     updateVolIcon(Math.round(savedVol * 100));
     volSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
-      audio.volume = v / 100;
-      localStorage.setItem('cigcig_volume', v / 100);
+      setMediaVolume(v / 100);
       updateVolIcon(v);
     });
   }
   if (volBtn) {
     volBtn.addEventListener('click', () => {
       if (audio.volume > 0) {
-        audio.volume = 0; if(volSlider) volSlider.value = 0;
-        localStorage.setItem('cigcig_volume', '0');
+        setMediaVolume(0); if(volSlider) volSlider.value = 0;
         volBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
       } else {
-        audio.volume = 0.8; if(volSlider) volSlider.value = 80;
-        localStorage.setItem('cigcig_volume', '0.8');
+        setMediaVolume(0.8); if(volSlider) volSlider.value = 80;
         volBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
       }
     });
@@ -7710,8 +7765,7 @@ async function renderMusicDetail(app, slug) {
 
   seek?.addEventListener('input', e => { if(audio.duration) audio.currentTime=(parseFloat(e.target.value)/100)*audio.duration; });
 
-  const savedVol = parseFloat(localStorage.getItem('cigcig_volume') ?? '0.8');
-  audio.volume = savedVol;
+  const savedVol = getMediaVolume();
   const detailVolSlider = document.getElementById('detail-vol');
   const detailVolBtn = document.getElementById('detail-vol-btn');
   if (detailVolSlider) {
@@ -7723,18 +7777,15 @@ async function renderMusicDetail(app, slug) {
     updateVolIcon(Math.round(savedVol * 100));
     detailVolSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
-      audio.volume = v / 100;
-      localStorage.setItem('cigcig_volume', v / 100);
+      setMediaVolume(v / 100);
       updateVolIcon(v);
     });
     detailVolBtn?.addEventListener('click', () => {
       if (audio.volume > 0) {
-        audio.volume = 0; detailVolSlider.value = 0;
-        localStorage.setItem('cigcig_volume', '0');
+        setMediaVolume(0); detailVolSlider.value = 0;
         if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
       } else {
-        audio.volume = 0.8; detailVolSlider.value = 80;
-        localStorage.setItem('cigcig_volume', '0.8');
+        setMediaVolume(0.8); detailVolSlider.value = 80;
         if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
       }
     });
@@ -8209,11 +8260,32 @@ async function loadStoriesBar(container) {
         const storyKey = story.public_id || story.id;
         story.viewed = true;
         const previousStoryAudio = activeStoryAudio;
-        const previousStoryAudioSrc = previousStoryAudio?.src || '';
-        const previousStoryAudioTime = previousStoryAudio?.currentTime || 0;
         const previousStoryAudioPlaying = Boolean(previousStoryAudio && !previousStoryAudio.paused);
-        if (activeStoryAudio) { activeStoryAudio.pause(); activeStoryAudio.src = ''; activeStoryAudio = null; }
+        if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
         showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-tap-zone story-tap-left" id="story-tap-left" aria-label="Önceki hikaye"></div><div class="story-tap-zone story-tap-right" id="story-tap-right" aria-label="Sonraki hikaye"></div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img src="${escHtml(story.media_url)}" alt="" style="filter:${mediaFilterCss(story.media_filter)}" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><button class="btn btn-ghost" id="story-share"><i class="fas fa-share-alt"></i> Paylaş</button><button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>${story.is_owner ? `<button type="button" class="btn btn-ghost" id="story-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button type="button" class="btn btn-ghost" id="story-edit"><i class="fas fa-pen"></i> Düzenle</button><button type="button" class="btn btn-ghost text-danger" id="story-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>${story.is_owner ? '<small class="story-owner-hint">Hikayeni görenleri ve tekrar görüntüleme sayılarını inceleyebilirsin.</small>' : ''}<div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div></div>`);
+        const storySongButton = $('#story-song-play');
+        if (storySongButton) {
+          storySongButton.insertAdjacentHTML('afterend', `<input id="story-volume" class="story-volume-control" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Hikaye ses seviyesi" title="Ses seviyesi" />`);
+          $('#story-volume')?.addEventListener('input', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            setMediaVolume(Number(event.target.value) / 100);
+          });
+          $('#story-volume')?.addEventListener('click', event => event.stopPropagation());
+          $('#story-volume')?.addEventListener('pointerdown', event => event.stopPropagation());
+          storySongButton.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!activeStoryAudio) return;
+            const icon = storySongButton.querySelector('i');
+            if (activeStoryAudio.paused) {
+              activeStoryAudio.play().then(() => { if (icon) icon.className = 'fas fa-pause'; }).catch(() => {});
+            } else {
+              activeStoryAudio.pause();
+              if (icon) icon.className = 'fas fa-play';
+            }
+          });
+        }
         $('#modal-overlay')?.classList.add('story-fullscreen-overlay');
         api('/stories/' + storyKey + '/view', { method: 'POST' }).catch(() => {});
         $('#story-share')?.addEventListener('click', () => shareStory(story));
@@ -8221,7 +8293,34 @@ async function loadStoriesBar(container) {
         $('#story-edit')?.addEventListener('click', () => showStoryEditModal(story, render));
         $('#story-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; try { await api('/stories/' + storyKey, { method: 'DELETE' }); hideModal(); toast('Hikaye silindi'); loadStoriesBar(container); } catch (error) { toast(error.message, 'error'); } });
         $('#story-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + storyKey + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; render(); } catch (error) { toast(error.message, 'error'); } });
-        if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = previousStoryAudioSrc === story.song_audio_url ? previousStoryAudioTime : (Number(story.song_start_seconds) || 0); activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; if (previousStoryAudioPlaying || !previousStoryAudio) activeStoryAudio.play().catch(() => {}); }
+        if (story.song_audio_url) {
+          activeStoryAudio = trackMediaAudio(new Audio(story.song_audio_url));
+          const storyAudio = activeStoryAudio;
+          const storySongButton = $('#story-song-play');
+          limitMediaAudioClip(storyAudio, Number(story.song_start_seconds) || 0, () => {
+            if (storySongButton) {
+              storySongButton.classList.remove('is-playing');
+              const icon = storySongButton.querySelector('i');
+              if (icon) icon.className = 'fas fa-play';
+            }
+            if (activeStoryAudio === storyAudio) {
+              untrackMediaAudio(storyAudio);
+              activeStoryAudio = null;
+            }
+          });
+          if (previousStoryAudioPlaying || !previousStoryAudio) {
+            storyAudio.play().then(() => {
+              const icon = storySongButton?.querySelector('i');
+              if (icon) icon.className = 'fas fa-pause';
+            }).catch(() => {
+              const icon = storySongButton?.querySelector('i');
+              if (icon) icon.className = 'fas fa-play';
+            });
+          } else {
+            const icon = storySongButton?.querySelector('i');
+            if (icon) icon.className = 'fas fa-play';
+          }
+        }
         $('#story-reply-open')?.addEventListener('click', () => { $('#story-reply-box').hidden = !$('#story-reply-box').hidden; $('#story-reply-input')?.focus(); });
         $('#story-reply-send')?.addEventListener('click', async () => { const input = $('#story-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + storyKey + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt hikaye sahibine gönderildi'); hideModal(); } catch (error) { toast(error.message, 'error'); } });
         $('#story-tap-left')?.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); if (storyIndex > 0) { storyIndex--; render(); } });
@@ -8344,6 +8443,17 @@ async function renderStoryRoute(app, storyId) {
     const currentGroupIndex = currentGroup ? currentGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id) : -1;
     document.title = '@' + story.username + ' hikayesi - ' + siteName;
     app.innerHTML = `<div class="container page"><div class="story-route"><div class="story-route-media"><div class="story-route-head">${avatarImg(story)}<div><b>@${escHtml(story.username)}</b><small>${timeAgo(story.created_at)} · ${currentGroupIndex + 1}/${currentGroup?.stories.length || 1}</small></div></div><button class="story-route-tap story-route-tap-left" id="story-route-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}<button class="story-route-tap story-route-tap-right" id="story-route-next" aria-label="Sonraki hikaye" ${nextStory ? '' : 'disabled'}></button></div>${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<div class="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><input id="story-route-volume" type="range" min="0" max="100" value="80" aria-label="Hikaye sesi" /></div>` : ''}<div class="story-route-actions"><button class="btn btn-ghost" id="story-route-share"><i class="fas fa-share-alt"></i> Paylaş</button>${story.is_owner ? `<button class="btn btn-ghost" id="story-route-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button class="btn btn-ghost" id="story-route-edit"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-ghost text-danger" id="story-route-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div><div class="story-route-note">Bu hikaye artık akışta görünmüyor olabilir, ancak bağlantısından izlenebilir.</div></div></div>`;
+    const routeVolume = $('#story-route-volume');
+    if (routeVolume) {
+      routeVolume.value = Math.round(getMediaVolume() * 100);
+      routeVolume.addEventListener('input', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        setMediaVolume(Number(event.target.value) / 100);
+      });
+      routeVolume.addEventListener('click', event => event.stopPropagation());
+      routeVolume.addEventListener('pointerdown', event => event.stopPropagation());
+    }
     api('/stories/' + encodeURIComponent(story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
     $('#story-route-prev')?.addEventListener('click', event => { event.preventDefault(); event.currentTarget.blur(); if (previousStory) navigate('/hikaye/' + encodeURIComponent(previousStory.public_id || previousStory.id)); });
     $('#story-route-next')?.addEventListener('click', event => { event.preventDefault(); event.currentTarget.blur(); if (nextStory) navigate('/hikaye/' + encodeURIComponent(nextStory.public_id || nextStory.id)); });
@@ -8359,7 +8469,17 @@ async function renderStoryRoute(app, storyId) {
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
     $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
-    if (story.song_audio_url) { activeStoryAudio = new Audio(story.song_audio_url); activeStoryAudio.currentTime = Number(story.song_start_seconds) || 0; activeStoryAudio.volume = 0.8; activeStoryAudio.loop = true; activeStoryAudio.play().catch(() => {}); }
+    if (story.song_audio_url) {
+      activeStoryAudio = trackMediaAudio(new Audio(story.song_audio_url));
+      const routeAudio = activeStoryAudio;
+      limitMediaAudioClip(routeAudio, Number(story.song_start_seconds) || 0, () => {
+        if (activeStoryAudio === routeAudio) {
+          untrackMediaAudio(routeAudio);
+          activeStoryAudio = null;
+        }
+      });
+      routeAudio.play().catch(() => {});
+    }
     api('/stories/' + (story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
   } catch (error) {
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-circle-exclamation"></i><p>${escHtml(error.message || 'Hikaye bulunamadı')}</p></div></div>`;
@@ -8373,7 +8493,7 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${p.song_artist}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
@@ -8540,9 +8660,10 @@ async function renderPhotoDetail(app, photoId) {
 let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed) {
   // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
-  // tıklamasıyla açılır ve parça bitince kendiliğinden kapanır.
+  // tıklamasıyla açılır; seçilen yerden itibaren en fazla 30 saniye çalar.
   photoAudioObserver?.disconnect();
   activePhotoAudio?.pause();
+  untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
   document.getElementById('photo-audio-control')?.remove();
 
@@ -8556,6 +8677,7 @@ function setupPhotoAudio(feed) {
   });
   const stop=()=>{
     activePhotoAudio?.pause();
+    untrackMediaAudio(activePhotoAudio);
     activePhotoAudio=null;
     syncButtons();
   };
@@ -8567,12 +8689,11 @@ function setupPhotoAudio(feed) {
       return;
     }
     stop();
-    const audio=new Audio(songButton.dataset.audio);
+    const audio=trackMediaAudio(new Audio(songButton.dataset.audio));
     audio._photoId=card.dataset.photoId;
-    audio.volume=0.8;
-    audio.currentTime=Number(songButton.dataset.start)||0;
-    audio.addEventListener('ended',()=>{
+    limitMediaAudioClip(audio, Number(songButton.dataset.start)||0, ()=>{
       if (activePhotoAudio===audio) {
+        untrackMediaAudio(audio);
         activePhotoAudio=null;
         syncButtons();
       }
@@ -8593,6 +8714,15 @@ function setupPhotoAudio(feed) {
     const card=button.closest('[data-photo-id]');
     if (card) play(card);
   }));
+  feed.querySelectorAll('.photo-volume').forEach(slider => {
+    slider.addEventListener('input', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setMediaVolume(Number(event.target.value) / 100);
+    });
+    slider.addEventListener('click', event => event.stopPropagation());
+    slider.addEventListener('pointerdown', event => event.stopPropagation());
+  });
   syncButtons();
 }
 

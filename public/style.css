@@ -156,6 +156,8 @@ body[data-theme="gold"] {
 .story-song, .story-selected-song { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card2); color: var(--text-primary); text-align: left; }
 .story-fullscreen-overlay .story-song { width: min(100%, 280px); padding: 5px 8px; gap: 7px; border-radius: 7px; opacity: .85; }
 .story-fullscreen-overlay .story-song { flex: 0 1 auto; background: rgba(20,20,20,.96); border-color: rgba(255,255,255,.28); color: #fff; }
+.story-fullscreen-overlay .story-volume-control { order: 5; width: min(100%, 280px); }
+.story-fullscreen-overlay .story-song, .story-fullscreen-overlay .story-volume-control { position: relative; z-index: 6; }
 .story-fullscreen-overlay .story-song img { width: 24px; height: 24px; border-radius: 4px; }
 .story-fullscreen-overlay .story-song b { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .story-fullscreen-overlay .story-song small { font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -177,7 +179,15 @@ body[data-theme="gold"] {
 .story-song-option-play { color: var(--accent-red2); }
 .music-play-mini { z-index: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; background: rgba(0,0,0,.78) !important; color: #fff !important; border: 1px solid rgba(255,255,255,.3); }
 .music-play-mini:hover, .music-play-mini:focus-visible { background: var(--accent-red) !important; color: #fff !important; outline: 2px solid rgba(255,255,255,.8); outline-offset: -3px; }
-.story-volume, .story-route-song input { display: none; }
+.story-volume { display: none; }
+.story-volume-control, .story-route-song input { width: 92px; accent-color: var(--accent-red); cursor: pointer; }
+.story-audio-controls { display: flex; align-items: center; gap: 8px; width: min(100%, 360px); }
+.story-audio-controls .story-song { flex: 1; min-width: 0; }
+.story-route-song { display: flex; align-items: center; gap: 10px; }
+.story-route-song input { flex: 0 0 92px; }
+@media (max-width: 600px) {
+  .story-volume-control, .story-route-song input { width: 76px; }
+}
 .story-route { position: relative; max-width: 620px; margin: 0 auto; padding: 18px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
 .story-route > img, .story-route > video { width: 100%; max-height: 72vh; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
 .story-route-media { position: relative; width: min(100%, 420px); max-height: min(calc(100svh - 170px), 560px); display: flex; align-items: center; justify-content: center; }
@@ -960,6 +970,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .photo-audio-toggle:hover { background:var(--accent-red) !important; }
 .photo-audio-toggle { box-sizing:border-box !important; overflow:hidden !important; width:34px !important; height:34px !important; min-width:34px !important; max-width:34px !important; min-height:34px !important; max-height:34px !important; font-size:14px !important; line-height:1 !important; background-color:#111 !important; }
 .photo-audio-toggle i { display:block !important; width:14px !important; height:14px !important; line-height:14px !important; font-size:14px !important; color:#fff !important; opacity:1 !important; }
+.photo-audio-controls { position:absolute; right:10px; bottom:10px; z-index:3; display:flex; align-items:center; gap:7px; padding:3px 5px 3px 3px; border:1px solid rgba(255,255,255,.2); border-radius:20px; background:rgba(18,21,27,.92); backdrop-filter:blur(6px); }
+.photo-audio-controls .photo-audio-toggle { position:static; }
+.photo-volume { width:78px; accent-color:var(--accent-red); cursor:pointer; }
+@media (max-width:600px) { .photo-volume { width:62px; } }
 article.photo-card .photo-media-wrap button.photo-audio-toggle,
 .photo-detail-shell .photo-media-wrap button.photo-audio-toggle { background:rgba(18,21,27,.92) !important; background-color:rgba(18,21,27,.92) !important; border-color:rgba(255,255,255,.22) !important; color:#f4eee6 !important; box-shadow:0 5px 16px rgba(0,0,0,.35); }
 article.photo-card .photo-media-wrap button.photo-audio-toggle i,
