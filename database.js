@@ -1190,6 +1190,24 @@ async function initDb() {
     ALTER TABLE reals_ads ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
     CREATE INDEX IF NOT EXISTS idx_reals_ads_active_priority ON reals_ads(active, priority DESC, created_at DESC);
 
+    -- Admin tarafından kullanıcıya verilen reklam panelleri.
+    -- ad_id iki reklam tablosu arasında polimorfik olduğu için ad_type ile birlikte tutulur.
+    CREATE TABLE IF NOT EXISTS ad_panel_assignments (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ad_type TEXT NOT NULL CHECK (ad_type IN ('music','reals')),
+      ad_id BIGINT NOT NULL,
+      portal_code CHAR(6) NOT NULL,
+      assigned_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      assigned_by_admin_username TEXT DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(user_id, ad_type, ad_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ad_panel_assignments_user
+      ON ad_panel_assignments(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ad_panel_assignments_ad
+      ON ad_panel_assignments(ad_type, ad_id);
+
     CREATE TABLE IF NOT EXISTS reals_ad_likes (
       id BIGSERIAL PRIMARY KEY,
       ad_id BIGINT NOT NULL REFERENCES reals_ads(id) ON DELETE CASCADE,

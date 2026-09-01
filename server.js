@@ -557,6 +557,7 @@ async function adminMiddleware(req, res, next) {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
+      [/\/user\/\d+\/ad-panels/, hasAdminPermission(permissions, 'can_view_users')],
       [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
       [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
     ];
@@ -566,6 +567,7 @@ async function adminMiddleware(req, res, next) {
   if (req.method !== 'GET') {
     const allowed = [
       /^\/api\/admin\/user\/\d+\/2fa$/,
+      /^\/api\/admin\/user\/\d+\/ad-panels(?:\/\d+)?$/,
       /^\/api\/admin\/account-deletions\/\d+\/cancel$/,
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
@@ -576,6 +578,7 @@ async function adminMiddleware(req, res, next) {
     ];
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
+    if (/\/user\/\d+\/ad-panels/.test(req.path) && !hasAdminPermission(permissions, 'can_view_users')) return res.status(403).json({ error: 'Üye yönetimi yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
     if (/\/group\//.test(req.path) && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Grup yönetimi yalnızca ana admin yetkisindedir' });
@@ -3328,7 +3331,8 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
       FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
   ]);
-  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
+  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, ad_panels, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -4089,8 +4093,176 @@ function normalizedExternalUrl(value) {
 function newAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 async function uniqueAdPortalCode(table) { let code = newAdPortalCode(); while ((await query(`SELECT id FROM ${table} WHERE portal_code=$1`, [code])).rows.length) code = newAdPortalCode(); return code; }
 
+const AD_PANEL_TYPES = ['music', 'reals'];
+const AD_PANEL_TABLES = { music: 'music_ads', reals: 'reals_ads' };
+
+function normalizeAdPanelType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  return AD_PANEL_TYPES.includes(type) ? type : '';
+}
+
+async function resolveAdPanel(identifier, requestedType = '') {
+  const raw = String(identifier || '').trim();
+  const type = normalizeAdPanelType(requestedType);
+  if (!/^\d{1,18}$/.test(raw)) return { error: 'Reklam ID veya 6 haneli panel kodu geçerli değil.' };
+
+  const candidates = [];
+  const types = type ? [type] : AD_PANEL_TYPES;
+  for (const adType of types) {
+    const table = AD_PANEL_TABLES[adType];
+    const { rows } = await query(
+      `SELECT * FROM ${table}
+       WHERE portal_code=$1 OR id::text=$1
+       ORDER BY CASE WHEN portal_code=$1 THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [raw]
+    );
+    if (rows[0]) candidates.push({ ...rows[0], ad_type: adType });
+  }
+  if (!candidates.length) return { error: 'Reklam ID veya panel kodu bulunamadı.' };
+  const exactPortalMatches = candidates.filter(candidate => String(candidate.portal_code || '').trim() === raw);
+  const matches = exactPortalMatches.length ? exactPortalMatches : candidates;
+  if (matches.length > 1) return { error: 'Bu ID birden fazla reklamla eşleşiyor. Tür seçerek tekrar deneyin.', ambiguous: true };
+  return { ad: matches[0] };
+}
+
+function adPanelClientShape(ad) {
+  if (!ad) return null;
+  const isReals = ad.ad_type === 'reals';
+  return {
+    id: ad.id,
+    ad_type: ad.ad_type,
+    portal_code: String(ad.portal_code || '').trim(),
+    title: ad.title,
+    description: ad.description || '',
+    site_url: ad.site_url || '',
+    audio_url: isReals ? '' : (ad.audio_url || ''),
+    video_url: isReals ? (ad.video_url || '') : '',
+    cover_url: ad.cover_url || '',
+    active: Number(ad.active) === 1,
+    priority: Number(ad.priority || 0),
+    play_count: Number(ad.play_count || 0),
+    view_count: Number(ad.view_count || 0),
+    click_count: Number(ad.click_count || 0),
+    like_count: Number(ad.like_count || 0),
+    show_likes: Number(ad.show_likes ?? 1) === 1,
+    allow_comments: Number(ad.allow_comments ?? 1) === 1,
+    frequency_mode: ad.frequency_mode || 'count',
+    frequency_value: Number(ad.frequency_value || 3),
+    frequency_unit: ad.frequency_unit || 'reals',
+    created_at: ad.created_at,
+    updated_at: ad.updated_at
+  };
+}
+
+async function listAdPanelAssignments(userId) {
+  const [music, reals] = await Promise.all([
+    query(`SELECT a.id AS assignment_id, a.ad_type, a.ad_id, a.portal_code, a.created_at AS assigned_at,
+      m.title, m.site_url, m.cover_url, m.active, m.priority, m.play_count, m.click_count
+      FROM ad_panel_assignments a JOIN music_ads m ON m.id=a.ad_id
+      WHERE a.user_id=$1 AND a.ad_type='music'`, [userId]),
+    query(`SELECT a.id AS assignment_id, a.ad_type, a.ad_id, a.portal_code, a.created_at AS assigned_at,
+      r.title, r.description, r.site_url, r.video_url, r.cover_url, r.active, r.priority,
+      r.view_count, r.click_count, r.show_likes, r.allow_comments, r.frequency_mode,
+      r.frequency_value, r.frequency_unit
+      FROM ad_panel_assignments a JOIN reals_ads r ON r.id=a.ad_id
+      WHERE a.user_id=$1 AND a.ad_type='reals'`, [userId])
+  ]);
+  return [...music.rows, ...reals.rows]
+    .sort((a, b) => new Date(b.assigned_at || 0) - new Date(a.assigned_at || 0))
+    .map(row => ({ ...adPanelClientShape({ ...row, id: row.ad_id }), assignment_id: row.assignment_id, ad_id: row.ad_id, assigned_at: row.assigned_at }));
+}
+
+async function isAssignedAdPanel(userId, adType, adId) {
+  const { rows } = await query(
+    'SELECT 1 FROM ad_panel_assignments WHERE user_id=$1 AND ad_type=$2 AND ad_id=$3',
+    [userId, adType, adId]
+  );
+  return rows.length > 0;
+}
+
+async function attachAdPanelToUser(userId, identifier, requestedType, assignedByUserId, assignedByAdminUsername) {
+  const resolved = await resolveAdPanel(identifier, requestedType);
+  if (!resolved.ad) return resolved;
+  const ad = resolved.ad;
+  const { rows } = await query(
+    `INSERT INTO ad_panel_assignments
+      (user_id, ad_type, ad_id, portal_code, assigned_by_user_id, assigned_by_admin_username)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (user_id, ad_type, ad_id)
+     DO UPDATE SET portal_code=EXCLUDED.portal_code,
+       assigned_by_user_id=EXCLUDED.assigned_by_user_id,
+       assigned_by_admin_username=EXCLUDED.assigned_by_admin_username
+     RETURNING id AS assignment_id, created_at AS assigned_at`,
+    [userId, ad.ad_type, ad.id, String(ad.portal_code || '').trim(), assignedByUserId || null, assignedByAdminUsername || '']
+  );
+  return {
+    assignment: {
+      ...adPanelClientShape(ad),
+      assignment_id: rows[0].assignment_id,
+      ad_id: ad.id,
+      assigned_at: rows[0].assigned_at
+    },
+    already_assigned: rows[0].created_at ? false : false
+  };
+}
+
 app.get('/api/photo-ads/random', async (req,res) => res.json((await query('SELECT * FROM photo_ads WHERE active=1 ORDER BY RANDOM() LIMIT 1')).rows[0] || null));
 app.post('/api/photo-ads/:id/click', async (req,res) => { await query('UPDATE photo_ads SET click_count=click_count+1 WHERE id=$1 AND active=1',[req.params.id]); res.json({ok:true}); });
+
+// Kullanıcı profiline atanmış reklam panelleri
+app.get('/api/ad-panels', authMiddleware, async (req, res) => {
+  try {
+    res.json(await listAdPanelAssignments(req.user.id));
+  } catch (error) {
+    res.status(500).json({ error: 'Reklam panelleri alınamadı.' });
+  }
+});
+
+app.get('/api/ad-panels/resolve/:identifier', authMiddleware, async (req, res) => {
+  try {
+    const resolved = await resolveAdPanel(req.params.identifier, req.query.type);
+    if (!resolved.ad) return res.status(resolved.ambiguous ? 409 : 404).json({ error: resolved.error });
+    const ad = resolved.ad;
+    if (!req.user.is_admin && !(await isAssignedAdPanel(req.user.id, ad.ad_type, ad.id))) {
+      return res.status(403).json({ error: 'Bu reklam paneli profilinize atanmamış.' });
+    }
+    res.json(adPanelClientShape(ad));
+  } catch (error) {
+    res.status(500).json({ error: 'Reklam paneli açılamadı.' });
+  }
+});
+
+app.post('/api/ad-panels', authMiddleware, async (req, res) => {
+  try {
+    const result = await attachAdPanelToUser(
+      req.user.id,
+      req.body?.identifier,
+      req.body?.ad_type,
+      req.user.id,
+      req.user.username
+    );
+    if (!result.assignment) return res.status(result.ambiguous ? 409 : 404).json({ error: result.error });
+    await logAction(req.user.username, 'ad_panel_added', String(result.assignment.ad_id), `${result.assignment.ad_type} · ${result.assignment.portal_code}`, getIp(req), getClientInfo(req));
+    res.json(result.assignment);
+  } catch (error) {
+    res.status(500).json({ error: 'Reklam paneli eklenemedi.' });
+  }
+});
+
+app.delete('/api/ad-panels/:assignmentId', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      'DELETE FROM ad_panel_assignments WHERE id=$1 AND user_id=$2 RETURNING ad_type,ad_id',
+      [req.params.assignmentId, req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Reklam paneli bulunamadı.' });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Reklam paneli kaldırılamadı.' });
+  }
+});
+
 app.get('/api/admin/photo-ads', adminMiddleware, async (req,res) => res.json((await query('SELECT * FROM photo_ads ORDER BY priority DESC,created_at DESC')).rows));
 app.put('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => {
   const old=(await query('SELECT * FROM photo_ads WHERE id=$1',[req.params.id])).rows[0]; if(!old) return res.status(404).json({error:'Reklam bulunamadı'});
@@ -4254,6 +4426,7 @@ app.put('/api/admin/user/:id/2fa', adminMiddleware, async (req, res) => {
 app.get('/api/admin/users', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT u.*,
+         (SELECT COUNT(*)::int FROM ad_panel_assignments apa WHERE apa.user_id=u.id) AS ad_panel_count,
            COALESCE(
              json_agg(
                json_build_object(
@@ -4270,6 +4443,49 @@ app.get('/api/admin/users', adminMiddleware, async (req, res) => {
     ORDER BY u.created_at DESC
   `);
   res.json(rows.map(u => ({ ...sanitizeUser(u), badges: Array.isArray(u.badges) ? u.badges : [] })));
+});
+
+app.get('/api/admin/user/:id/ad-panels', adminMiddleware, async (req, res) => {
+  try {
+    const { rows: users } = await query('SELECT id,username FROM users WHERE id=$1', [req.params.id]);
+    if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+    res.json(await listAdPanelAssignments(req.params.id));
+  } catch (error) {
+    res.status(500).json({ error: 'Kullanıcının reklam panelleri alınamadı.' });
+  }
+});
+
+app.post('/api/admin/user/:id/ad-panels', adminMiddleware, async (req, res) => {
+  try {
+    const { rows: users } = await query('SELECT id,username FROM users WHERE id=$1', [req.params.id]);
+    if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+    const result = await attachAdPanelToUser(
+      users[0].id,
+      req.body?.identifier,
+      req.body?.ad_type,
+      req.adminUser.id,
+      req.adminUser.username
+    );
+    if (!result.assignment) return res.status(result.ambiguous ? 409 : 404).json({ error: result.error });
+    await logAction(req.adminUser.username, 'ad_panel_assigned', users[0].username, `${result.assignment.ad_type} · #${result.assignment.ad_id} · ${result.assignment.portal_code}`, getIp(req), getClientInfo(req));
+    res.json(result.assignment);
+  } catch (error) {
+    res.status(500).json({ error: 'Reklam paneli atanamadı.' });
+  }
+});
+
+app.delete('/api/admin/user/:id/ad-panels/:assignmentId', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      'DELETE FROM ad_panel_assignments WHERE id=$1 AND user_id=$2 RETURNING ad_type,ad_id',
+      [req.params.assignmentId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Reklam paneli ataması bulunamadı.' });
+    await logAction(req.adminUser.username, 'ad_panel_unassigned', req.params.id, `${rows[0].ad_type} · #${rows[0].ad_id}`, getIp(req), getClientInfo(req));
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Reklam paneli ataması kaldırılamadı.' });
+  }
 });
 
 // Silme talebi veren hesaplar yalnızca ana admin tarafından görülebilir.
@@ -7072,15 +7288,20 @@ app.delete('/api/admin/music-ads/:id', adminMiddleware, async (req,res) => { awa
 
 // 6 haneli kod reklamverenin gizli panel anahtarıdır.
 app.get('/api/reklampanel/:code', async (req,res) => {
-  const music = (await query('SELECT * FROM music_ads WHERE portal_code=$1', [req.params.code])).rows[0];
-  if (music) return res.json({ ...music, ad_type: 'music' });
-  const reals = (await query('SELECT * FROM reals_ads WHERE portal_code=$1', [req.params.code])).rows[0];
-  if (!reals) return res.status(404).json({ error: 'Reklam kodu bulunamadı.' });
-  res.json({ ...reals, ad_type: 'reals' });
+  const resolved = await resolveAdPanel(req.params.code, req.query.type);
+  if (!resolved.ad) return res.status(resolved.ambiguous ? 409 : 404).json({ error: resolved.error });
+  res.json(adPanelClientShape(resolved.ad));
 });
-app.put('/api/reklampanel/:code', upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req,res) => {
+app.put('/api/reklampanel/:code', authMiddleware, upload.fields([{ name: 'audio', maxCount: 1 }, { name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req,res) => {
   try {
     const music = (await query('SELECT * FROM music_ads WHERE portal_code=$1', [req.params.code])).rows[0];
+    const reals = music ? null : (await query('SELECT * FROM reals_ads WHERE portal_code=$1', [req.params.code])).rows[0];
+    const target = music || reals;
+    if (!target) return res.status(404).json({ error: 'Reklam kodu bulunamadı.' });
+    const targetType = music ? 'music' : 'reals';
+    if (!req.user.is_admin && !(await isAssignedAdPanel(req.user.id, targetType, target.id))) {
+      return res.status(403).json({ error: 'Bu reklam panelini düzenleme yetkiniz yok.' });
+    }
     const b = req.body || {};
     if (music) {
       const audio = req.files?.audio?.[0] ? await handleUpload(req.files.audio[0]) : music.audio_url;
@@ -7089,8 +7310,6 @@ app.put('/api/reklampanel/:code', upload.fields([{ name: 'audio', maxCount: 1 },
         [b.title?.trim() || music.title, b.site_url ?? music.site_url, audio, cover, music.id]);
       return res.json({ ...rows[0], ad_type: 'music' });
     }
-    const reals = (await query('SELECT * FROM reals_ads WHERE portal_code=$1', [req.params.code])).rows[0];
-    if (!reals) return res.status(404).json({ error: 'Reklam kodu bulunamadı.' });
     const video = req.files?.video?.[0] ? await handleUpload(req.files.video[0]) : reals.video_url;
     const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : reals.cover_url;
     const site = normalizedExternalUrl(b.site_url ?? reals.site_url);

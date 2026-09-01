@@ -709,6 +709,7 @@ function renderUsersTable(users) {
         <button class="btn btn-outline btn-xs edit-user-btn" data-id="${u.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
         ${adminProfile?.is_super_admin ? `<button class="btn btn-outline btn-xs user-2fa-btn" data-id="${u.id}" title="2AD yönetimi"><i class="fas fa-shield-halved"></i></button>` : ''}
         <button class="btn btn-blue btn-xs perm-user-btn" data-id="${u.id}" title="Yetkiler"><i class="fas fa-shield"></i></button>
+        <button class="btn btn-ad-panel btn-xs ad-panel-user-btn" data-id="${u.id}" title="Reklam Paneli"><i class="fas fa-bullhorn"></i>${u.ad_panel_count ? ` <span>${u.ad_panel_count}</span>` : ''}</button>
         <button class="btn btn-outline btn-xs restrict-user-btn" data-id="${u.id}" title="Kısıtlama"><i class="fas fa-user-lock"></i></button>
         ${u.banned
           ? `<button class="btn btn-green btn-xs unban-user-btn" data-id="${u.id}" title="Ban Kaldır"><i class="fas fa-unlock"></i></button>`
@@ -727,6 +728,7 @@ function renderUsersTable(users) {
     const restrict = e.target.closest('.restrict-user-btn');
     const twoFactor = e.target.closest('.user-2fa-btn');
     const badges = e.target.closest('.user-badges-btn');
+    const adPanel = e.target.closest('.ad-panel-user-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
     if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
@@ -735,6 +737,7 @@ function renderUsersTable(users) {
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
     if (twoFactor) { const u = users.find(x => x.id == twoFactor.dataset.id); if (u) showAdminTwoFactorModal(u); }
     if (badges) { const u = users.find(x => x.id == badges.dataset.id); if (u) openUserBadgesModal(u); }
+    if (adPanel) { const u = users.find(x => x.id == adPanel.dataset.id); if (u) showAdminAdPanelModal(u); }
   };
 }
 
@@ -825,6 +828,93 @@ function showBanModal(userId) {
   $('#ban-submit').addEventListener('click', async () => {
     try { await adminApi('/user/'+userId+'/ban',{method:'POST',body:JSON.stringify({ban_type:$('#ban-type').value})}); toast('Banlandı'); hideModal(); loadSection('users'); }
     catch (e) { $('#ban-error').textContent = e.message; }
+  });
+}
+
+async function showAdminAdPanelModal(user) {
+  let panels = [];
+  try { panels = await adminApi('/user/' + user.id + '/ad-panels'); } catch (e) {
+    showModal(`Reklam Paneli · ${user.username}`, `<div class="form-error">${escHtml(e.message)}</div>`);
+    return;
+  }
+
+  showModal(`Reklam Paneli · ${user.username}`, `
+    <div class="admin-ad-panel-modal">
+      <div class="admin-ad-panel-intro">
+        <div class="admin-ad-panel-intro-icon"><i class="fas fa-bullhorn"></i></div>
+        <div><strong>Bu kullanıcıya panel bağla</strong><span>Reklam ID'sini veya 6 haneli panel kodunu gir. Atanan reklam kullanıcının profilinde görünür.</span></div>
+      </div>
+      <div class="admin-ad-panel-form">
+        <div class="form-group" style="flex:1">
+          <label>Reklam ID / panel kodu</label>
+          <input id="admin-ad-panel-identifier" inputmode="numeric" maxlength="18" placeholder="Örn. 42 veya 123456" />
+        </div>
+        <div class="form-group" style="width:150px">
+          <label>Reklam türü</label>
+          <select id="admin-ad-panel-type">
+            <option value="">Otomatik bul</option>
+            <option value="music">Müzik</option>
+            <option value="reals">Reals</option>
+          </select>
+        </div>
+        <button class="btn btn-ad-panel" id="admin-ad-panel-add"><i class="fas fa-link"></i> Panel ata</button>
+      </div>
+      <div id="admin-ad-panel-error" class="form-error"></div>
+      <div class="admin-ad-panel-list" id="admin-ad-panel-list"></div>
+    </div>
+  `);
+
+  const list = $('#admin-ad-panel-list');
+  const error = $('#admin-ad-panel-error');
+  const render = () => {
+    list.innerHTML = panels.length ? panels.map(panel => `
+      <div class="admin-assigned-ad-panel">
+        <div class="admin-assigned-ad-panel-icon"><i class="fas ${panel.ad_type === 'reals' ? 'fa-circle-play' : 'fa-music'}"></i></div>
+        <div class="admin-assigned-ad-panel-copy">
+          <strong>${escHtml(panel.title || 'İsimsiz reklam')}</strong>
+          <span>${panel.ad_type === 'reals' ? 'Reals reklamı' : 'Müzik reklamı'} · Reklam ID <b>#${escHtml(panel.ad_id)}</b> · Panel kodu <b>${escHtml(panel.portal_code)}</b></span>
+        </div>
+        <button class="btn btn-danger btn-xs admin-ad-panel-remove" data-assignment-id="${panel.assignment_id}" title="Panel atamasını kaldır"><i class="fas fa-unlink"></i></button>
+      </div>
+    `).join('') : '<div class="admin-ad-panel-empty"><i class="fas fa-link-slash"></i><span>Bu kullanıcıya henüz reklam paneli atanmadı.</span></div>';
+  };
+  render();
+
+  $('#admin-ad-panel-add').addEventListener('click', async () => {
+    const identifier = $('#admin-ad-panel-identifier').value.trim();
+    if (!identifier) { error.textContent = 'Reklam ID veya panel kodu girin.'; return; }
+    const button = $('#admin-ad-panel-add');
+    button.disabled = true; error.textContent = '';
+    try {
+      const panel = await adminApi('/user/' + user.id + '/ad-panels', {
+        method: 'POST',
+        body: JSON.stringify({ identifier, ad_type: $('#admin-ad-panel-type').value })
+      });
+      panels = [panel, ...panels.filter(item => String(item.assignment_id) !== String(panel.assignment_id))];
+      $('#admin-ad-panel-identifier').value = '';
+      render();
+      toast('Reklam paneli kullanıcıya atandı');
+    } catch (e) {
+      error.textContent = e.message;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  list.addEventListener('click', async event => {
+    const button = event.target.closest('.admin-ad-panel-remove');
+    if (!button) return;
+    if (!confirm('Bu reklam paneli kullanıcının profilinden kaldırılsın mı?')) return;
+    button.disabled = true;
+    try {
+      await adminApi('/user/' + user.id + '/ad-panels/' + button.dataset.assignmentId, { method: 'DELETE' });
+      panels = panels.filter(item => String(item.assignment_id) !== String(button.dataset.assignmentId));
+      render();
+      toast('Reklam paneli ataması kaldırıldı');
+    } catch (e) {
+      error.textContent = e.message;
+      button.disabled = false;
+    }
   });
 }
 

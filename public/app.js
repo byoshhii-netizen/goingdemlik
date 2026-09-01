@@ -1,5 +1,15 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
+// Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
+// atama kontrollü PUT isteklerine mevcut oturum tokenını da ekle.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = (input, options = {}) => {
+  const url = typeof input === 'string' ? input : input?.url || '';
+  if (options.method === 'PUT' && url.startsWith('/api/reklampanel/') && currentToken) {
+    options = { ...options, headers: { ...(options.headers || {}), Authorization: 'Bearer ' + currentToken } };
+  }
+  return nativeFetch(input, options);
+};
 let activeStoryAudio = null;
 let activeRealsAudio = null;
 let storyComposerAudio = null;
@@ -823,7 +833,10 @@ function renderRoute(fullPath) {
   if (path.startsWith('/vmb/dosyalar/') && segs.length === 7 && segs[3] === 'klasor' && segs[5] === 'sayfa') return renderVmbPageReader(app, segs[4], segs[6]);
   if (path === '/muzikler') return renderMusicList(app);
   if (path.startsWith('/muzik/')) return renderMusicDetail(app, segs[1]);
-  if (path === '/reklampanel') return renderAdPortal(app);
+  if (path === '/reklampanel' || path.startsWith('/reklampanel/')) {
+    const requestedAdId = segs[1] || new URLSearchParams(queryStr || '').get('id') || '';
+    return renderAdPortal(app, requestedAdId);
+  }
   if (path === '/artist-basvuru') return renderArtistApply(app);
   if (path === '/artist-panel') return renderArtistPanel(app);
   if (path === '/sarki-yukle') return renderShareSong(app);
@@ -4491,7 +4504,7 @@ async function renderProfile(app, username) {
     return;
   }
 
-  const { user, forums, books, groups, photos = [], reals, songs, level, levels, book_page_count, badges = [] } = data;
+  const { user, forums, books, groups, photos = [], reals, songs, level, levels, book_page_count, badges = [], ad_panels = [] } = data;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileReals = Array.isArray(reals) ? reals : [];
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'reals', 'saved', 'songs', 'badges'];
@@ -4668,6 +4681,13 @@ async function renderProfile(app, username) {
       ${isOwn ? `<div style="text-align:center;margin-top:18px"><a href="/rozetler" data-link class="btn btn-outline btn-sm"><i class="fas fa-sliders"></i> Rozetleri yönet</a></div>` : ''}
     </div>
   </div>`;
+  if (isOwn && ad_panels.length) {
+    const panel = document.createElement('section');
+    panel.className = 'profile-ad-panel-card';
+    panel.innerHTML = `<div class="profile-ad-panel-heading"><span class="profile-ad-panel-mark"><i class="fas fa-bullhorn"></i></span><span><strong>Reklam Paneli</strong><small>Profiline atanmış reklamları kontrol et</small></span><a href="/reklampanel" data-link class="btn btn-ad-panel btn-sm">Tümünü aç</a></div><div class="profile-ad-panel-list">${ad_panels.map(ad => `<a href="/reklampanel?id=${encodeURIComponent(ad.portal_code)}" data-link class="profile-ad-panel-item"><span class="profile-ad-panel-type"><i class="fas ${ad.ad_type === 'reals' ? 'fa-circle-play' : 'fa-music'}"></i></span><span><b>${escHtml(ad.title || 'İsimsiz reklam')}</b><small>${ad.ad_type === 'reals' ? 'Reals' : 'Müzik'} · Reklam ID #${escHtml(ad.ad_id)} · Panel kodu ${escHtml(ad.portal_code)}</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div>`;
+    const tabs = app.querySelector('.tabs');
+    tabs?.parentElement.insertBefore(panel, tabs);
+  }
   const tabPanels = profileTabOrder.map(tab => document.getElementById('tab-' + tab)).filter(Boolean);
   const tabsContainer = app.querySelector('.tabs');
   tabPanels.forEach(panel => tabsContainer?.parentElement.appendChild(panel));
@@ -7277,14 +7297,67 @@ document.addEventListener('click', e => {
 });
 
 // ===== MÜZİK LİSTESİ =====
-async function renderAdPortal(app) {
+async function renderAdPortal(app, requestedAdId = '') {
   document.title = 'Reklam Paneli – ' + siteName;
-  app.innerHTML = `<div class="container page" style="max-width:760px"><div class="page-header"><div class="page-title"><i class="fas fa-bullhorn" style="color:var(--accent-red)"></i> Reklam Paneli</div><div class="page-subtitle">6 haneli reklam paneli kodunuzu girin.</div></div><div class="card card-body"><div style="display:flex;gap:8px"><input id="ad-portal-code" inputmode="numeric" maxlength="6" placeholder="123456" /><button class="btn btn-primary" id="ad-portal-open">Panele Gir</button></div><div id="ad-portal-error" class="form-error mt-4"></div></div><div id="ad-portal-content" style="margin-top:16px"></div></div>`;
-  const submitButton = currentUser ? `<button class="btn btn-outline" id="ad-submit-new" style="margin-top:12px"><i class="fas fa-plus"></i> Reklam Gönder</button>` : '';
-  document.getElementById('ad-portal-content').insertAdjacentHTML('beforebegin', submitButton);
+  app.innerHTML = `<div class="container page ad-portal-page" style="max-width:820px">
+    <div class="page-header"><div class="page-title"><i class="fas fa-bullhorn" style="color:#f97316"></i> Reklam Paneli</div><div class="page-subtitle">Atanmış reklamlarını buradan kontrol et veya ID / panel kodu ile aç.</div></div>
+    ${currentUser ? `<div class="ad-assigned-panels card" id="ad-assigned-panels"><div class="card-body"><div class="loading-center"><div class="spinner"></div></div></div></div>` : ''}
+    <div class="card card-body ad-portal-access-card">
+      <div class="ad-portal-access-head"><div><strong>Reklam paneli aç</strong><span>Reklam ID'sini veya 6 haneli panel kodunu gir.</span></div><i class="fas fa-key"></i></div>
+      <div class="ad-portal-access-row"><input id="ad-portal-code" inputmode="numeric" maxlength="18" placeholder="Örn. 42 veya 123456" value="${escHtml(requestedAdId)}" /><select id="ad-portal-type" aria-label="Reklam türü"><option value="">Otomatik</option><option value="music">Müzik</option><option value="reals">Reals</option></select><button class="btn btn-ad-panel" id="ad-portal-open"><i class="fas fa-arrow-right"></i> Panele Gir</button></div>
+      <div id="ad-portal-error" class="form-error mt-4"></div>
+      ${currentUser ? '<div class="ad-portal-actions"><button class="btn btn-ad-panel" id="ad-panel-add-new"><i class="fas fa-plus"></i> Farklı reklam ekle</button><button class="btn btn-outline" id="ad-submit-new"><i class="fas fa-paper-plane"></i> Yeni reklam gönder</button></div>' : ''}
+    </div>
+    <div id="ad-portal-content" style="margin-top:16px"></div>
+  </div>`;
+
+  const open = async (value = $('#ad-portal-code')?.value.trim()) => {
+    const identifier = String(value || '').trim();
+    if (!/^\d{1,18}$/.test(identifier)) { $('#ad-portal-error').textContent = 'Reklam ID veya panel kodu girin.'; return; }
+    $('#ad-portal-error').textContent = '';
+    try {
+      const type = $('#ad-portal-type')?.value || '';
+      const typeQuery = type ? '?type=' + encodeURIComponent(type) : '';
+      const ad = currentUser
+        ? await api('/ad-panels/resolve/' + encodeURIComponent(identifier) + typeQuery)
+        : await api('/reklampanel/' + encodeURIComponent(identifier) + typeQuery);
+      $('#ad-portal-code').value = String(ad.portal_code || identifier);
+      renderAdPortalEditor(ad, String(ad.portal_code || identifier));
+    } catch (e) { $('#ad-portal-error').textContent = e.message; }
+  };
+  $('#ad-portal-open').addEventListener('click', () => open());
+  $('#ad-portal-code').addEventListener('keydown', e => { if (e.key === 'Enter') open(); });
+  $('#ad-panel-add-new')?.addEventListener('click', () => {
+    const identifier = $('#ad-portal-code').value.trim();
+    if (!/^\d{1,18}$/.test(identifier)) {
+      $('#ad-portal-error').textContent = 'Önce eklemek istediğin reklam ID veya panel kodunu yaz.';
+      $('#ad-portal-code').focus();
+      return;
+    }
+    const button = $('#ad-panel-add-new');
+    button.disabled = true;
+    api('/ad-panels', { method: 'POST', body: JSON.stringify({ identifier, ad_type: $('#ad-portal-type')?.value || '' }) })
+      .then(panel => { toast('Farklı reklam panele eklendi'); renderAdPortal(app, panel.portal_code); })
+      .catch(error => { $('#ad-portal-error').textContent = error.message; })
+      .finally(() => { button.disabled = false; });
+  });
   $('#ad-submit-new')?.addEventListener('click', showAdSubmissionModal);
-  const open = async () => { const code=$('#ad-portal-code').value.trim(); if(!/^\d{6}$/.test(code)) return $('#ad-portal-error').textContent='6 haneli reklam kodunu girin.'; try { renderAdPortalEditor(await api('/reklampanel/'+code),code); } catch(e) { $('#ad-portal-error').textContent=e.message; } };
-  $('#ad-portal-open').addEventListener('click',open); $('#ad-portal-code').addEventListener('keydown',e=>{if(e.key==='Enter')open();});
+
+  if (currentUser) {
+    try {
+      const panels = await api('/ad-panels');
+      const panelBox = $('#ad-assigned-panels');
+      panelBox.innerHTML = `<div class="card-body"><div class="ad-assigned-panels-head"><div><strong>Profiline atanmış reklamlar</strong><span>${panels.length ? `${panels.length} reklam paneli hazır` : 'Henüz panel atanmadı'}</span></div><i class="fas fa-layer-group"></i></div><div class="ad-assigned-panels-list">${panels.length ? panels.map(panel => `<button class="ad-assigned-panel-card" data-ad-identifier="${escHtml(panel.portal_code)}"><span class="ad-assigned-panel-icon"><i class="fas ${panel.ad_type === 'reals' ? 'fa-circle-play' : 'fa-music'}"></i></span><span class="ad-assigned-panel-copy"><b>${escHtml(panel.title || 'İsimsiz reklam')}</b><small>${panel.ad_type === 'reals' ? 'Reals' : 'Müzik'} · Reklam ID #${escHtml(panel.ad_id)} · Kod ${escHtml(panel.portal_code)}</small></span><i class="fas fa-chevron-right"></i></button>`).join('') : '<div class="ad-assigned-panels-empty"><i class="fas fa-link-slash"></i><span>Admin bir reklam paneli atadığında burada görünecek.</span></div>'}</div></div>`;
+      panelBox.querySelectorAll('.ad-assigned-panel-card').forEach(button => button.addEventListener('click', () => {
+        $('#ad-portal-code').value = button.dataset.adIdentifier;
+        open(button.dataset.adIdentifier);
+      }));
+    } catch (e) {
+      $('#ad-assigned-panels').innerHTML = `<div class="card-body form-error">${escHtml(e.message)}</div>`;
+    }
+  }
+
+  if (requestedAdId) open(requestedAdId);
 }
 function renderAdPortalEditor(ad, code) {
   const el=$('#ad-portal-content'); if(!el)return;
