@@ -1444,6 +1444,7 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
   openNotifDropdown();
 });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
+$('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
@@ -1491,12 +1492,14 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('click', e => {
+  const mobNewForum = e.target.closest('#mob-new-forum');
   const mobNewBook = e.target.closest('#mob-new-book');
   const mobNewGroup = e.target.closest('#mob-new-group');
   const mobNewPhoto = e.target.closest('#mob-new-photo');
   const mobNewStory = e.target.closest('#mob-new-story');
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
+  if (mobNewForum) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
   if (mobNewBook) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
   if (mobNewGroup) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
   if (mobNewPhoto) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
@@ -1692,6 +1695,7 @@ async function renderForumList(app, queryString) {
           <div class="page-title">Konular</div>
           ${activeTag ? `<div class="page-subtitle"><i class="fas fa-hashtag" style="color:var(--accent-red2)"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli &nbsp;<a href="/forum" data-link style="font-size:12px;color:var(--accent-red2)"><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
+        <div>${currentUser ? '<button class="btn btn-primary" id="forum-new-btn"><i class="fas fa-plus"></i> Yeni Konu Aç</button>' : ''}</div>
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="forum-search" placeholder="Konu veya #etiket ara..." /></div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -1716,6 +1720,11 @@ async function renderForumList(app, queryString) {
       return false;
     });
     renderForumListItems(filtered);
+  });
+
+  $('#forum-new-btn')?.addEventListener('click', () => {
+    if (!currentUser) return navigate('/giris');
+    showNewForumModal();
   });
 }
 
