@@ -81,9 +81,11 @@ function limitMediaAudioClip(audio, startSeconds, onClipEnd, clipSeconds = MEDIA
   return audio;
 }
 
-localStorage.removeItem('cigcig_theme');
-document.documentElement.style.colorScheme = 'dark';
-function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
+// Tema bootstrap'i theme.js tarafından başlatılır; burada yalnızca ayarlar
+// geldikten sonra paleti güncelliyoruz.
+function applyDisplayTheme() {
+  window.CigCigTheme?.apply(window.CigCigTheme.getPreference());
+}
 applyDisplayTheme();
 
 function playNotificationTone() {
@@ -5132,10 +5134,26 @@ async function renderSettingsSection(section) {
     });
 
   } else if (section === 'appearance') {
+    const themeSettings = window.CigCigTheme?.getSettings() || window.CigCigPublicSettings || {};
+    const showThemePicker = themeSettings.theme_picker_enabled !== '0';
+    const autoAllowed = window.CigCigTheme?.isAutoAllowed?.() !== false;
+    const selectedTheme = window.CigCigTheme?.getPreference?.() || 'auto';
+    const themeOptions = [
+      ...(autoAllowed ? [['auto', 'Otomatik', 'fas fa-circle-half-stroke']] : []),
+      ['dark', 'Koyu', 'fas fa-moon'],
+      ['light', 'Açık', 'fas fa-sun']
+    ];
     el.innerHTML = `
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
+          ${showThemePicker ? `<div class="form-group theme-picker settings-theme-picker">
+            <div class="theme-picker-label"><i class="fas fa-adjust"></i><span>Renk teması</span></div>
+            <div class="theme-picker-options settings-theme-options" role="group" aria-label="Renk teması">
+              ${themeOptions.map(([value, label, icon]) => `<button type="button" class="theme-option ${selectedTheme === value ? 'active' : ''}" data-theme-choice="${value}" aria-pressed="${selectedTheme === value}"><i class="${icon}"></i><span>${label}</span></button>`).join('')}
+            </div>
+            <div class="theme-picker-hint">Otomatik mod, cihazının açık/koyu tercihine anında uyum sağlar.</div>
+          </div>` : ''}
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
@@ -5144,6 +5162,17 @@ async function renderSettingsSection(section) {
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    el.querySelectorAll('[data-theme-choice]').forEach(button => {
+      button.addEventListener('click', () => {
+        const next = button.dataset.themeChoice;
+        window.CigCigTheme?.setPreference(next);
+        el.querySelectorAll('[data-theme-choice]').forEach(option => {
+          const active = option.dataset.themeChoice === next;
+          option.classList.toggle('active', active);
+          option.setAttribute('aria-pressed', String(active));
+        });
+      });
+    });
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_progress: $('#s-show-progress').checked,
@@ -5993,6 +6022,7 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
+    window.CigCigTheme?.configure(ps);
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
     siteAuthRequired = ps.auth_required === '1';

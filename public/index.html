@@ -81,14 +81,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Elsie:wght@400;900&family=Inter:wght@300;400;500;600;700;800;900&family=Nunito:wght@700;800&family=Literata:ital,opsz,wght@0,7..72,300;0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,300;1,7..72,400;1,7..72,500;1,7..72,600;1,7..72,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-  <script>
-    (function () {
-      localStorage.removeItem('cigcig_theme');
-      document.documentElement.dataset.theme = 'dark';
-      document.documentElement.style.colorScheme = 'dark';
-    })();
-  </script>
-  <link rel="stylesheet" href="/style.css?v=20260901-ad-panels" />
+  <script src="/theme.js?v=20260902-theme"></script>
+  <link rel="stylesheet" href="/style.css?v=20260902-theme" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
     .user-icons{display:inline-flex;gap:6px;margin-left:8px}
@@ -236,54 +230,13 @@
   <script>
 // ===== DİNAMİK TEMA RENGİ + LOGO + SİTE ADI (ANA SİTE) =====
 (function() {
-  function applyThemeColor(hex) {
-    if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
-    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
-    const lighter = (v,f) => Math.min(255,Math.round(v*f));
-    const darker  = (v,f) => Math.max(0,Math.round(v*f));
-    const toHex   = v => v.toString(16).padStart(2,'0');
-    const hex2    = '#'+toHex(lighter(r,1.15))+toHex(lighter(g,1.15))+toHex(lighter(b,1.15));
-    const hexDark = '#'+toHex(darker(r,0.65))+toHex(darker(g,0.65))+toHex(darker(b,0.65));
-    const root = document.documentElement.style;
-    // Accent / brand
-    root.setProperty('--accent-red',      hex);
-    root.setProperty('--accent-red2',     hex2);
-    root.setProperty('--accent-red-dark', hexDark);
-    const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
-    root.setProperty('--accent-contrast', luminance > 0.62 ? '#202124' : '#ffffff');
-    root.setProperty('--grad-red',        `linear-gradient(135deg,${hex},${hexDark})`);
-    root.setProperty('--bg-active',       `rgba(${r},${g},${b},0.08)`);
-    // Hat / çizgi / border renkleri (tüm site)
-    root.setProperty('--border',          `rgba(${r},${g},${b},0.18)`);
-    root.setProperty('--border-hover',    `rgba(${r},${g},${b},0.5)`);
-    root.setProperty('--border-accent',   `rgba(${r},${g},${b},0.35)`);
-    root.setProperty('--accent-line',     hex);
-    root.setProperty('--glow',            `0 0 20px rgba(${r},${g},${b},0.15)`);
-    // Mesaj balonu renkleri
-    root.setProperty('--dm-own-bg',       `rgba(${r},${g},${b},0.15)`);
-    root.setProperty('--dm-own-border',   `rgba(${r},${g},${b},0.3)`);
-    root.setProperty('--dm-reply-bg',     `rgba(${r},${g},${b},0.08)`);
-    const themeTarget = document.body || root;
-    themeTarget.style.setProperty('--accent-red', hex);
-    themeTarget.style.setProperty('--accent-red2', hex2);
-    themeTarget.style.setProperty('--accent-red-dark', hexDark);
-    themeTarget.style.setProperty('--accent-contrast', luminance > 0.62 ? '#202124' : '#ffffff');
-    themeTarget.style.setProperty('--grad-red', `linear-gradient(135deg,${hex},${hexDark})`);
-    themeTarget.style.setProperty('--bg-active', `rgba(${r},${g},${b},0.08)`);
-    themeTarget.style.setProperty('--border', `rgba(${r},${g},${b},0.18)`);
-    themeTarget.style.setProperty('--border-hover', `rgba(${r},${g},${b},0.5)`);
-    themeTarget.style.setProperty('--glow', `0 0 20px rgba(${r},${g},${b},0.15)`);
-    themeTarget.style.setProperty('--dm-own-bg', `rgba(${r},${g},${b},0.15)`);
-    themeTarget.style.setProperty('--dm-own-border', `rgba(${r},${g},${b},0.3)`);
-    themeTarget.style.setProperty('--dm-reply-bg', `rgba(${r},${g},${b},0.08)`);
-  }
-  function applyBackgroundColor(hex) {
-    if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
-    document.documentElement.style.setProperty('--bg-primary', hex);
-  }
+  // Palet hesaplama ve kontrast yönetimi theme.js'te tek merkezden yapılır.
+  function applyThemeColor(hex) { window.CigCigTheme?.configure({ primary_color: hex }); }
+  function applyBackgroundColor(hex) { window.CigCigTheme?.configure({ background_color: hex }); }
   fetch('/api/settings/public')
     .then(r=>r.json())
     .then(d=>{
+      window.CigCigTheme?.configure(d);
       if(d.primary_color) applyThemeColor(d.primary_color);
       applyBackgroundColor(d.background_color || '#121212');
       const favicon = document.querySelector('link[rel="icon"]');
@@ -297,7 +250,7 @@
     .catch(()=>{});
 })();
 </script>
-  <script src="/app.js?v=20260901-ad-panels"></script>
+  <script src="/app.js?v=20260902-theme"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---
