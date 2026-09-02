@@ -891,12 +891,29 @@ app.get('/robots.txt', (req, res) => {
 });
 
 app.get('/sitemap.xml', async (req, res) => {
-  const [forums, books, groups, users, songs] = await Promise.all([
-    query('SELECT slug, title, banner_image, updated_at FROM forums ORDER BY updated_at DESC LIMIT 5000').then(r => r.rows),
-    query('SELECT slug, updated_at FROM books ORDER BY updated_at DESC LIMIT 2000').then(r => r.rows),
-    query('SELECT slug FROM groups LIMIT 2000').then(r => r.rows),
-    query('SELECT username FROM users WHERE banned=0 LIMIT 5000').then(r => r.rows),
-    query("SELECT slug, title, cover_url, published_at FROM songs WHERE status='active' ORDER BY published_at DESC LIMIT 2000").then(r => r.rows),
+  const [forums, books, bookPages, groups, users, songs, photos] = await Promise.all([
+    query(`SELECT f.slug, f.title, f.banner_image, f.updated_at FROM forums f LEFT JOIN users u ON u.id=f.user_id
+      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+      ORDER BY f.updated_at DESC LIMIT 5000`).then(r => r.rows),
+    query(`SELECT b.id, b.slug, b.updated_at FROM books b LEFT JOIN users u ON u.id=b.user_id
+      WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
+        AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      ORDER BY b.updated_at DESC LIMIT 2000`).then(r => r.rows),
+    query(`SELECT bp.slug AS page_slug, b.slug AS book_slug, bp.created_at AS updated_at
+      FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
+      WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
+        AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      ORDER BY bp.created_at DESC LIMIT 10000`).then(r => r.rows),
+    query("SELECT slug FROM groups WHERE COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active' LIMIT 2000").then(r => r.rows),
+    query("SELECT username FROM users WHERE banned=0 AND COALESCE(is_private,0)=0 AND COALESCE(is_deleted,0)=0 LIMIT 5000").then(r => r.rows),
+    query("SELECT s.slug, s.title, s.cover_url, s.published_at FROM songs s LEFT JOIN users u ON u.id=s.uploader_id WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id) ORDER BY s.published_at DESC LIMIT 2000").then(r => r.rows),
+    query(`SELECT p.id, p.url, p.title, p.caption, p.created_at FROM photos p
+      LEFT JOIN users u ON u.id=p.user_id
+      WHERE COALESCE(u.is_private,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+      ORDER BY p.created_at DESC LIMIT 10000`).then(r => r.rows),
   ]);
   const now = new Date().toISOString();
   const staticUrls = [
@@ -920,6 +937,11 @@ app.get('/sitemap.xml', async (req, res) => {
     return `  <url><loc>${SITE_URL}/kitap/${escapeHtml(b.slug)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.7</priority>\n  </url>`;
   }).join('\n');
 
+  const bookPageUrls = bookPages.map(page => {
+    const mod = page.updated_at ? `\n    <lastmod>${new Date(page.updated_at).toISOString()}</lastmod>` : '';
+    return `  <url><loc>${SITE_URL}/kitap/${escapeHtml(page.book_slug)}/sayfa/${escapeHtml(page.page_slug)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.6</priority>\n  </url>`;
+  }).join('\n');
+
   const groupUrls = groups.map(g =>
     `  <url><loc>${SITE_URL}/grup/${escapeHtml(g.slug)}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`
   ).join('\n');
@@ -936,6 +958,12 @@ app.get('/sitemap.xml', async (req, res) => {
     return `  <url><loc>${SITE_URL}/muzik/${escapeHtml(s.slug)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.6</priority>${imgTag}\n  </url>`;
   }).join('\n');
 
+  const photoUrls = photos.map(p => {
+    const mod = p.created_at ? `\n    <lastmod>${new Date(p.created_at).toISOString()}</lastmod>` : '';
+    const imageTitle = p.title || p.caption || 'CigCig fotoğrafı';
+    return `  <url><loc>${SITE_URL}/foto/${escapeHtml(p.id)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.5</priority>\n    <image:image><image:loc>${escapeHtml(p.url)}</image:loc><image:title>${escapeHtml(imageTitle)}</image:title></image:image>\n  </url>`;
+  }).join('\n');
+
   res.type('application/xml');
   res.set('Cache-Control', 'public, max-age=3600'); // 1 saat cache — sık değişmiyor
   res.send([
@@ -945,9 +973,11 @@ app.get('/sitemap.xml', async (req, res) => {
     staticUrls,
     forumUrls,
     bookUrls,
+    bookPageUrls,
     groupUrls,
     profileUrls,
     songUrls,
+    photoUrls,
     '</urlset>'
   ].join('\n'));
 });
@@ -2483,10 +2513,14 @@ app.get('/api/forum/:slug/comments', optionalAuth, async (req, res) => {
   const { rows: fRows } = await query('SELECT id FROM forums WHERE slug=$1', [req.params.slug]);
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const { rows } = await query(`
-    SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.level_id,
+    SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+      parent.username AS parent_username,
       (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) as like_count,
       EXISTS(SELECT 1 FROM forum_comment_likes fcl WHERE fcl.comment_id=fc.id AND fcl.user_id=$2) AS liked
-    FROM forum_comments fc LEFT JOIN users u ON fc.user_id=u.id
+    FROM forum_comments fc
+      LEFT JOIN users u ON fc.user_id=u.id
+      LEFT JOIN forum_comments parent_comment ON parent_comment.id=fc.parent_comment_id
+      LEFT JOIN users parent ON parent.id=parent_comment.user_id
     WHERE fc.forum_id=$1 ORDER BY fc.created_at ASC`, [fRows[0].id, req.user?.id || 0]);
   res.json(rows);
 });
@@ -2499,15 +2533,39 @@ app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
   if (!forum.allow_comments) return res.status(403).json({ error: 'Yorumlar kapalı' });
   const { content } = req.body;
   if (!content?.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-  const { rows } = await query('INSERT INTO forum_comments (forum_id,user_id,content) VALUES ($1,$2,$3) RETURNING id', [forum.id, req.user.id, content.trim()]);
+  let parentCommentId = req.body.parent_comment_id ? Number(req.body.parent_comment_id) : null;
+  if (parentCommentId !== null && (!Number.isSafeInteger(parentCommentId) || parentCommentId < 1)) {
+    return res.status(400).json({ error: 'Geçersiz yanıt hedefi' });
+  }
+  if (parentCommentId !== null) {
+    const { rows: parentRows } = await query('SELECT id FROM forum_comments WHERE id=$1 AND forum_id=$2', [parentCommentId, forum.id]);
+    if (!parentRows.length) return res.status(400).json({ error: 'Yanıtlanacak yorum bulunamadı' });
+  }
+  const { rows } = await query('INSERT INTO forum_comments (forum_id,user_id,parent_comment_id,content) VALUES ($1,$2,$3,$4) RETURNING id', [forum.id, req.user.id, parentCommentId, content.trim()]);
   await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
   if (forum.user_id && forum.user_id !== req.user.id) {
     await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [forum.user_id, 'forum_comment', req.user.username, req.user.avatar || '', 'Konuna yorum geldi', `@${req.user.username} konuna yorum yaptı.`, '/forum/' + req.params.slug]).catch(() => {});
   }
+  if (parentCommentId !== null) {
+    const { rows: parentRows } = await query('SELECT user_id FROM forum_comments WHERE id=$1', [parentCommentId]);
+    const parentUserId = parentRows[0]?.user_id;
+    if (parentUserId && parentUserId !== req.user.id && parentUserId !== forum.user_id) {
+      await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+        [parentUserId, 'forum_comment_reply', req.user.username, req.user.avatar || '', 'Yorumuna yanıt geldi', `@${req.user.username} yorumuna yanıt verdi.`, '/forum/' + req.params.slug]).catch(() => {});
+    }
+  }
   await updateUserLevel(req.user.id);
   // @mention bildirimleri
   await parseMentionsAndNotify(content, req.user, 'comment_mention', '/forum/' + req.params.slug, forum.title).catch(() => {});
-  const { rows: cRows } = await query(`SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.level_id FROM forum_comments fc LEFT JOIN users u ON fc.user_id=u.id WHERE fc.id=$1`, [rows[0].id]);
+  const { rows: cRows } = await query(`SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+    parent.username AS parent_username,
+    (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) AS like_count,
+    false AS liked
+    FROM forum_comments fc
+      LEFT JOIN users u ON fc.user_id=u.id
+      LEFT JOIN forum_comments parent_comment ON parent_comment.id=fc.parent_comment_id
+      LEFT JOIN users parent ON parent.id=parent_comment.user_id
+    WHERE fc.id=$1`, [rows[0].id]);
   res.json(cRows[0]);
 });
 
@@ -5265,19 +5323,46 @@ app.get('/api/music-rules', async (req, res) => {
 });
 
 // SEO route'ları müzik için
-app.get('/muzikler', (req, res) => res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe şarkılar, artist müzikleri.', `${SITE_URL}/muzikler`, '')));
+app.get('/muzikler', async (req, res) => {
+  let songs = [];
+  try {
+    const { rows } = await query(`SELECT s.slug, s.title, s.artist_name, s.genre, s.cover_url,
+        s.published_at, s.created_at, u.username
+      FROM songs s LEFT JOIN users u ON u.id=s.uploader_id
+      WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)
+      ORDER BY COALESCE(s.published_at,s.created_at) DESC LIMIT 100`);
+    songs = rows;
+  } catch (error) {
+    console.warn('[SEO] music list render failed:', error.message);
+  }
+  const songBody = songs.length
+    ? `<div class="seo-content-grid">${songs.map(song => `<article class="seo-content-card seo-song-card">
+        ${song.cover_url ? serverImage(song.cover_url, song.title, 'seo-content-image') : '<div class="seo-placeholder-icon">♫</div>'}
+        <div class="seo-content-card-body">
+          <h2><a href="/muzik/${escapeHtml(song.slug)}">${escapeHtml(song.title)}</a></h2>
+          <p>${escapeHtml(song.artist_name || 'CigCig sanatçısı')}${song.genre ? ` · ${escapeHtml(song.genre)}` : ''}</p>
+          <div class="seo-content-meta">Yükleyen: ${serverProfileLink(song.username)}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz yayınlanmış müzik bulunmuyor.</p>';
+  res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe şarkılar, artist müzikleri.', `${SITE_URL}/muzikler`, '', '', serverPageBody('CİGCİG MÜZİK', 'Müzikler', 'Topluluktan yeni şarkıları keşfet.', songBody)));
+});
 app.get('/muzik/:slug', async (req, res) => {
-  const { rows } = await query('SELECT * FROM songs WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query(`SELECT s.*, u.username
+    FROM songs s LEFT JOIN users u ON u.id=s.uploader_id
+    WHERE s.slug=$1 AND s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)`, [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const s = rows[0];
   const musicKw = `${s.title}, ${s.artist_name}, müzik, CigCig müzik, topluluk platformu, türkçe müzik`;
-  const musicLd = JSON.stringify({
+  const musicLd = safeJsonLd({
     '@context':'https://schema.org','@type':'MusicRecording',
     'name': s.title,
     'byArtist':{'@type':'MusicGroup','name':s.artist_name},
     'url': `${SITE_URL}/muzik/${s.slug}`,
-    'image': s.cover_url||undefined,
-    'datePublished': s.published_at||undefined,
+     ...(s.cover_url ? { image: s.cover_url } : {}),
+     ...(s.published_at ? { datePublished: s.published_at } : {}),
     'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL}
   });
   res.send(injectMeta(
@@ -5285,7 +5370,14 @@ app.get('/muzik/:slug', async (req, res) => {
     `${s.artist_name} - ${s.title} | CigCig müzik platformunda dinle ve keşfet.`,
     `${SITE_URL}/muzik/${s.slug}`,
     s.cover_url,
-    `<meta name="keywords" content="${musicKw}" />\n    <script type="application/ld+json">${musicLd}</script>`
+     `<meta name="keywords" content="${escapeHtml(musicKw)}" />\n    <script type="application/ld+json">${musicLd}</script>`,
+     serverPageBody('CİGCİG MÜZİK', s.title, `${s.artist_name} tarafından seslendirilen şarkı.`, `<article class="seo-article">
+       ${s.cover_url ? serverImage(s.cover_url, s.title, 'seo-hero-image') : ''}
+       <h2>${escapeHtml(s.artist_name)}</h2>
+       ${s.genre ? `<p class="seo-content-meta">Tür: ${escapeHtml(s.genre)}</p>` : ''}
+       ${s.lyrics ? `<div class="seo-lyrics"><h3>Şarkı sözleri</h3><div class="seo-article-text">${escapeHtml(s.lyrics)}</div></div>` : ''}
+       <p class="seo-content-meta">Yükleyen: ${serverProfileLink(s.username)}</p>
+     </article>`)
   ));
 });
 app.get('/artist-basvuru', (req, res) => res.send(injectMeta('Artist Başvurusu – CigCig Müzik', 'CigCig Müzik platformu artist rozetine başvur', `${SITE_URL}/artist-basvuru`, '')));
@@ -5706,7 +5798,36 @@ function adminIPCheck(req, res, next) {
 app.get('/panel-giris', (req, res) => res.status(404).end());
 app.get('/panel', (req, res) => res.status(404).end());
 
-function injectMeta(title, desc, url, imageUrl, extraMeta) {
+function injectCrawlableBody(html, bodyHtml) {
+  if (!bodyHtml) return html;
+  return html.replace('<div id="app"></div>', `<div id="app">${bodyHtml}</div>`);
+}
+
+function serverPageBody(eyebrow, title, description, content) {
+  return `<main class="container page seo-server-content">
+    <div class="page-header">
+      <div class="page-kicker">${escapeHtml(eyebrow)}</div>
+      <h1 class="page-title">${escapeHtml(title)}</h1>
+      ${description ? `<p class="page-subtitle">${escapeHtml(description)}</p>` : ''}
+    </div>
+    ${content}
+  </main>`;
+}
+
+function serverProfileLink(username) {
+  if (!username) return '<span>Anonim</span>';
+  return `<a href="/profil/${escapeHtml(profileRouteKey(username))}">${escapeHtml(username)}</a>`;
+}
+
+function serverImage(url, alt, className = '') {
+  return url ? `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt || '')}"${className ? ` class="${className}"` : ''} loading="lazy" />` : '';
+}
+
+function safeJsonLd(value) {
+  return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+function injectMeta(title, desc, url, imageUrl, extraMeta, bodyHtml) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const img = imageUrl || `${SITE_URL}/cigcig.png`;
   const extra = extraMeta || '';
@@ -5726,37 +5847,118 @@ function injectMeta(title, desc, url, imageUrl, extraMeta) {
   // SEO_START/SEO_END arasını değiştir — index.html başlığından bağımsız
   const injected = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,
     `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  if (injected !== html) return injected;
+  if (injected !== html) return injectCrawlableBody(injected, bodyHtml);
   // Yedek: regex ile herhangi bir title tag'ını değiştir
-  return html.replace(/<title>[^<]*<\/title>/, meta);
+  return injectCrawlableBody(html.replace(/<title>[^<]*<\/title>/, meta), bodyHtml);
 }
 
 app.get('/giris', (req, res) => res.send(injectMeta('Giriş – CigCig', 'CigCig hesabına giriş yap.', `${SITE_URL}/giris`, '')));
 app.get('/kayit', (req, res) => res.send(injectMeta('Kayıt Ol – CigCig', 'CigCig\'e ücretsiz kaydol.', `${SITE_URL}/kayit`, '')));
-app.get('/forum', (req, res) => {
+app.get('/forum', async (req, res) => {
   const tag = req.query.tag || '';
+  let topics = [];
+  try {
+    const term = tag ? `%${tag}%` : null;
+    const result = await query(`SELECT f.slug, f.title, f.content, f.created_at, f.updated_at,
+        f.banner_image, u.username,
+        (SELECT COUNT(*) FROM forum_comments fc WHERE fc.forum_id=f.id) AS comment_count
+      FROM forums f LEFT JOIN users u ON u.id=f.user_id
+      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+        AND ($1::text IS NULL OR f.title ILIKE $1 OR f.content ILIKE $1 OR f.custom_tags ILIKE $1
+          OR EXISTS (SELECT 1 FROM forum_tags ft JOIN tags t ON t.id=ft.tag_id WHERE ft.forum_id=f.id AND t.name ILIKE $1))
+      ORDER BY f.created_at DESC LIMIT 100`, [term]);
+    topics = result.rows;
+  } catch (error) {
+    console.warn('[SEO] forum list render failed:', error.message);
+  }
+  const topicBody = topics.length
+    ? `<div class="seo-content-grid">${topics.map(topic => `<article class="seo-content-card">
+        ${topic.banner_image ? serverImage(topic.banner_image, topic.title, 'seo-content-image') : ''}
+        <div class="seo-content-card-body">
+          <h2><a href="/forum/${escapeHtml(topic.slug)}">${escapeHtml(topic.title)}</a></h2>
+          <p>${escapeHtml(String(topic.content || '').replace(/\s+/g, ' ').slice(0, 220))}</p>
+          <div class="seo-content-meta"> ${serverProfileLink(topic.username)} · ${escapeHtml(topic.comment_count || 0)} yorum · ${topic.created_at ? escapeHtml(new Date(topic.created_at).toLocaleDateString('tr-TR')) : ''}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz yayınlanmış konu bulunmuyor.</p>';
   res.send(injectMeta(tag ? `${tag} Konuları – CigCig` : 'Konular – CigCig',
     tag ? `CigCig topluluk platformunda ${tag} etiketli konular.` : 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.',
-    `${SITE_URL}/forum${tag ? '?tag='+encodeURIComponent(tag) : ''}`, ''));
+    `${SITE_URL}/forum${tag ? '?tag='+encodeURIComponent(tag) : ''}`, '', '', serverPageBody('CİGCİG TOPLULUĞU', tag ? `${tag} konuları` : 'Topluluk konuları', 'Sorular, fikirler ve topluluktan gerçek konuşmalar.', topicBody)));
 });
-app.get('/kitaplar', (req, res) => res.send(injectMeta('E-Kitaplar – CigCig', 'CigCig e-kitaplarını ücretsiz oku. Kitap adını aratarak bul.', `${SITE_URL}/kitaplar`, '')));
-app.get('/gruplar', (req, res) => res.send(injectMeta('Gruplar – CigCig', 'CigCig topluluğundaki gruplara katıl.', `${SITE_URL}/gruplar`, '')));
+app.get('/kitaplar', async (req, res) => {
+  let books = [];
+  try {
+    const { rows } = await query(`SELECT b.slug, b.title, b.preface, b.cover_image, b.page_count,
+        b.updated_at, u.username
+      FROM books b LEFT JOIN users u ON u.id=b.user_id
+      WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
+        AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      ORDER BY b.updated_at DESC, b.created_at DESC LIMIT 100`);
+    books = rows;
+  } catch (error) {
+    console.warn('[SEO] book list render failed:', error.message);
+  }
+  const bookBody = books.length
+    ? `<div class="seo-content-grid">${books.map(book => `<article class="seo-content-card seo-book-card">
+        ${book.cover_image ? serverImage(book.cover_image, book.title, 'seo-content-image') : '<div class="seo-placeholder-icon">▣</div>'}
+        <div class="seo-content-card-body">
+          <h2><a href="/kitap/${escapeHtml(book.slug)}">${escapeHtml(book.title)}</a></h2>
+          <p>${escapeHtml((book.preface || `${book.title} adlı CigCig kitabı.`).replace(/\s+/g, ' ').slice(0, 220))}</p>
+          <div class="seo-content-meta">${escapeHtml(book.username || 'CigCig yazarı')} · ${escapeHtml(book.page_count || 0)} sayfa</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz yayınlanmış kitap bulunmuyor.</p>';
+  res.send(injectMeta('E-Kitaplar – CigCig', 'CigCig e-kitaplarını ücretsiz oku. Kitap adını aratarak bul.', `${SITE_URL}/kitaplar`, '', '', serverPageBody('CİGCİG KİTAPLIK', 'Kitaplar', 'Topluluğun yazdığı kitapları keşfet ve okumaya başla.', bookBody)));
+});
+app.get('/gruplar', async (req, res) => {
+  let groups = [];
+  try {
+    const { rows } = await query(`SELECT name,slug,description,cover_image,banner_image,member_count
+      FROM groups
+      WHERE COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active'
+      ORDER BY member_count DESC, created_at DESC LIMIT 100`);
+    groups = rows;
+  } catch (error) {
+    console.warn('[SEO] group list render failed:', error.message);
+  }
+  const groupBody = groups.length
+    ? `<div class="seo-content-grid">${groups.map(group => `<article class="seo-content-card">
+        ${serverImage(group.cover_image || group.banner_image, group.name, 'seo-content-image')}
+        <div class="seo-content-card-body">
+          <h2><a href="/grup/${escapeHtml(group.slug)}">${escapeHtml(group.name)}</a></h2>
+          <p>${escapeHtml(String(group.description || '').replace(/\s+/g, ' ').slice(0, 220))}</p>
+          <div class="seo-content-meta">${escapeHtml(group.member_count || 0)} üye</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz herkese açık grup bulunmuyor.</p>';
+  res.send(injectMeta('Gruplar – CigCig', 'CigCig topluluğundaki herkese açık gruplara katıl.', `${SITE_URL}/gruplar`, '', '', serverPageBody('CİGCİG GRUPLARI', 'Gruplar', 'İlgi alanlarına göre toplulukları keşfet.', groupBody)));
+});
 app.get('/ayarlar', (req, res) => res.send(injectMeta('Ayarlar – CigCig', 'Hesap ayarlarını düzenle.', `${SITE_URL}/ayarlar`, '')));
 app.get('/mesajlar', (req, res) => res.send(injectMeta('Mesajlar – CigCig', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar`, '')));
 app.get('/mesajlar/:username', (req, res) => res.send(injectMeta('Mesajlar – CigCig', 'Özel mesajlarınız.', `${SITE_URL}/mesajlar/${req.params.username}`, '')));
 app.get('/arkadaslar', (req, res) => res.send(injectMeta('Arkadaşlar – CigCig', 'Arkadaş listesi.', `${SITE_URL}/arkadaslar`, '')));
 
 app.get('/forum/:slug', async (req, res) => {
-  const { rows } = await query('SELECT * FROM forums WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query(`SELECT f.*, u.username, u.avatar,
+    (SELECT COUNT(*) FROM forum_comments fc WHERE fc.forum_id=f.id) AS comment_count,
+    (SELECT COUNT(*) FROM forum_likes fl WHERE fl.forum_id=f.id) AS like_count
+    FROM forums f LEFT JOIN users u ON u.id=f.user_id
+    WHERE f.slug=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const forum = rows[0];
+  const { rows: forumComments } = await query(`SELECT fc.id, fc.content, fc.created_at, u.username
+    FROM forum_comments fc LEFT JOIN users u ON u.id=fc.user_id
+    WHERE fc.forum_id=$1 ORDER BY fc.created_at ASC LIMIT 200`, [forum.id]);
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const desc = escapeHtml((forum.content || '').substring(0, 160).replace(/\n/g, ' '));
   const imgTag = forum.banner_image
     ? `<meta property="og:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:card" content="summary_large_image" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const forumKw = `${escapeHtml(forum.title)}, CigCig, topluluk platformu, konu`;
-  const forumLd = JSON.stringify({
+  const forumLd = safeJsonLd({
     '@context':'https://schema.org','@type':'DiscussionForumPosting',
     'headline': forum.title,
     'url': `${SITE_URL}/forum/${forum.slug}`,
@@ -5777,12 +5979,28 @@ app.get('/forum/:slug', async (req, res) => {
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}
     <script type="application/ld+json">${forumLd}</script>`;
+  const commentsBody = forumComments.length
+    ? `<section class="seo-comments"><h2>Yorumlar</h2>${forumComments.map(comment => `<article class="seo-comment">
+        <div class="seo-comment-author">${serverProfileLink(comment.username)} <time>${escapeHtml(new Date(comment.created_at).toLocaleDateString('tr-TR'))}</time></div>
+        <p>${escapeHtml(comment.content)}</p>
+      </article>`).join('')}</section>`
+    : '';
+  const forumBody = serverPageBody('CİGCİG FORUM', forum.title, 'Topluluk konusu ve yorumları.', `<article class="seo-article">
+    ${forum.banner_image ? serverImage(forum.banner_image, forum.title, 'seo-hero-image') : ''}
+    <div class="seo-content-meta">Konu sahibi: ${serverProfileLink(forum.username)} · ${escapeHtml(forum.comment_count || 0)} yorum</div>
+    <div class="seo-article-text">${escapeHtml(forum.content || '')}</div>
+  </article>${commentsBody}`);
   const r1 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(r1!==html?r1:html.replace(/<title>[^<]*<\/title>/,meta));
+  const rendered = injectCrawlableBody(r1 !== html ? r1 : html.replace(/<title>[^<]*<\/title>/,meta), forumBody);
+  res.send(rendered);
 });
 
 app.get('/kitap/:slug', async (req, res) => {
-  const { rows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query(`SELECT b.*, u.username AS author FROM books b
+    LEFT JOIN users u ON u.id=b.user_id
+    WHERE b.slug=$1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
+      AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const book = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -5791,7 +6009,7 @@ app.get('/kitap/:slug', async (req, res) => {
     ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
   const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, CigCig kitap, topluluk platformu, ücretsiz kitap oku`;
-  const bookLd = JSON.stringify({
+  const bookLd = safeJsonLd({
     '@context':'https://schema.org','@type':'Book',
     'name': book.title,
     'url': `${SITE_URL}/kitap/${book.slug}`,
@@ -5812,12 +6030,91 @@ app.get('/kitap/:slug', async (req, res) => {
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}
     <script type="application/ld+json">${bookLd}</script>`;
+  const { rows: bookPages } = await query(`SELECT title, content, page_num, slug
+    FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC LIMIT 200`, [book.id]);
+  const bookBody = serverPageBody('CİGCİG KİTAP', book.title, book.author ? `Yazar: ${book.author}` : 'CigCig topluluğunda yayınlanan kitap.', `<article class="seo-article">
+    ${book.cover_image ? serverImage(book.cover_image, book.title, 'seo-hero-image') : ''}
+    ${book.preface ? `<p class="seo-lead">${escapeHtml(book.preface)}</p>` : ''}
+    ${bookPages.length ? `<section class="seo-book-pages"><h2>İçindekiler</h2><ol>${bookPages.map(page => `<li><a href="/kitap/${escapeHtml(book.slug)}/sayfa/${escapeHtml(page.slug)}">${escapeHtml(page.title)}</a></li>`).join('')}</ol></section>` : ''}
+  </article>`);
   const r2 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta));
+  res.send(injectCrawlableBody(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta), bookBody));
+});
+
+app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
+  const { rows: pages } = await query(`SELECT bp.*, b.title AS book_title, b.slug AS book_slug, u.username AS author, b.cover_image
+    FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
+    WHERE bp.slug=$1 AND b.slug=$2 AND b.is_hidden=0 AND COALESCE(b.password_hash,'')=''
+      AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.pageSlug, req.params.slug]);
+  if (!pages.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  const page = pages[0];
+  const pageUrl = `${SITE_URL}/kitap/${page.book_slug}/sayfa/${page.slug}`;
+  const body = serverPageBody('CİGCİG KİTAP', `${page.book_title} · ${page.title}`, page.author ? `Yazar: ${page.author}` : '', `<article class="seo-article seo-page-article">
+    <p class="seo-breadcrumb"><a href="/kitap/${escapeHtml(page.book_slug)}">${escapeHtml(page.book_title)}</a> / ${escapeHtml(page.title)}</p>
+    ${page.image_url ? serverImage(page.image_url, page.title, 'seo-hero-image') : ''}
+    <div class="seo-article-text">${escapeHtml(page.content || '')}</div>
+  </article>`);
+  const html = injectMeta(`${page.title} – ${page.book_title} | CigCig`, String(page.content || '').replace(/\s+/g, ' ').slice(0, 160), pageUrl, page.cover_image || '', `<script type="application/ld+json">${safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'Chapter', name: page.title, isPartOf: { '@type': 'Book', name: page.book_title, url: `${SITE_URL}/kitap/${page.book_slug}` }, url: pageUrl, text: String(page.content || '').slice(0, 500), inLanguage: 'tr'
+  })}</script>`, body);
+  res.send(html);
+});
+
+app.get('/fotograflar', async (req, res) => {
+  let photos = [];
+  try {
+    const { rows } = await query(`SELECT p.id, p.url, p.title, p.caption, p.location, p.created_at, u.username
+      FROM photos p LEFT JOIN users u ON u.id=p.user_id
+      WHERE COALESCE(u.is_private,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+      ORDER BY p.created_at DESC LIMIT 100`);
+    photos = rows;
+  } catch (error) {
+    console.warn('[SEO] photo list render failed:', error.message);
+  }
+  const photoBody = photos.length
+    ? `<div class="seo-content-grid seo-photo-grid">${photos.map(photo => `<article class="seo-content-card">
+        ${serverImage(photo.url, photo.title || photo.caption || 'CigCig fotoğrafı', 'seo-content-image')}
+        <div class="seo-content-card-body">
+          <h2><a href="/foto/${escapeHtml(photo.id)}">${escapeHtml(photo.title || 'Fotoğraf')}</a></h2>
+          ${photo.caption ? `<p>${escapeHtml(photo.caption)}</p>` : ''}
+          <div class="seo-content-meta">${serverProfileLink(photo.username)}${photo.location ? ` · ${escapeHtml(photo.location)}` : ''}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz herkese açık fotoğraf bulunmuyor.</p>';
+  res.send(injectMeta('Fotoğraflar – CigCig', 'CigCig topluluğundan herkese açık fotoğraflar.', `${SITE_URL}/fotograflar`, '', '', serverPageBody('CİGCİG FOTOĞRAFLAR', 'Fotoğraflar', 'Topluluğun paylaştığı herkese açık fotoğrafları keşfet.', photoBody)));
+});
+
+app.get('/foto/:id', async (req, res) => {
+  const { rows } = await query(`SELECT p.*, u.username, u.avatar, s.title AS song_title, s.artist_name AS song_artist
+    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
+    WHERE p.id=$1 AND COALESCE(u.is_private,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`, [req.params.id]);
+  if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  const photo = rows[0];
+  const { rows: photoComments } = await query(`SELECT pc.content, pc.created_at, u.username
+    FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id
+    WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC LIMIT 200`, [photo.id]);
+  const title = photo.title || photo.caption || 'CigCig fotoğrafı';
+  const desc = String(photo.caption || title).replace(/\s+/g, ' ').slice(0, 160);
+  const url = `${SITE_URL}/foto/${photo.id}`;
+  const comments = photoComments.length ? `<section class="seo-comments"><h2>Yorumlar</h2>${photoComments.map(comment => `<article class="seo-comment"><div class="seo-comment-author">${serverProfileLink(comment.username)} <time>${escapeHtml(new Date(comment.created_at).toLocaleDateString('tr-TR'))}</time></div><p>${escapeHtml(comment.content)}</p></article>`).join('')}</section>` : '';
+  const body = serverPageBody('CİGCİG FOTOĞRAF', title, desc, `<article class="seo-article">
+    ${serverImage(photo.url, title, 'seo-hero-image')}
+    ${photo.caption ? `<div class="seo-article-text">${escapeHtml(photo.caption)}</div>` : ''}
+    <div class="seo-content-meta">Paylaşan: ${serverProfileLink(photo.username)}${photo.location ? ` · ${escapeHtml(photo.location)}` : ''}</div>
+  </article>${comments}`);
+  const html = injectMeta(`${title} – CigCig Fotoğraf`, desc, url, photo.url, `<script type="application/ld+json">${safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'ImageObject', name: title, contentUrl: photo.url, url, description: desc,
+    ...(photo.created_at ? { uploadDate: photo.created_at } : {}),
+    author: photo.username ? { '@type': 'Person', name: photo.username, url: `${SITE_URL}/profil/${profileRouteKey(photo.username)}` } : undefined
+  })}</script>`, body);
+  res.send(html);
 });
 
 app.get('/grup/:slug', async (req, res) => {
-  const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query("SELECT * FROM groups WHERE slug=$1 AND COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active'", [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const group = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -5833,14 +6130,35 @@ app.get('/grup/:slug', async (req, res) => {
     <meta property="og:url" content="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
+  const groupBody = serverPageBody('CİGCİG GRUP', group.name, group.description || 'CigCig topluluğundaki grup.', `<article class="seo-article">
+    ${group.cover_image ? serverImage(group.cover_image, group.name, 'seo-hero-image') : ''}
+    <div class="seo-article-text">${escapeHtml(group.description || '')}</div>
+  </article>`);
   const r3 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(r3!==html?r3:html.replace(/<title>[^<]*<\/title>/,meta));
+  res.send(injectCrawlableBody(r3!==html?r3:html.replace(/<title>[^<]*<\/title>/,meta), groupBody));
 });
 
 app.get('/profil/:username', async (req, res) => {
   const { rows } = await query(`SELECT * FROM users WHERE username=$1 OR ${profileRouteSql}=$2 LIMIT 1`, [req.params.username, profileRouteKey(req.params.username)]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const user = rows[0];
+  const isPrivate = !!user.is_private;
+  let profileForums = [], profileBooks = [], profilePhotos = [];
+  if (!isPrivate) {
+    [profileForums, profileBooks, profilePhotos] = await Promise.all([
+      query(`SELECT slug,title,content,created_at FROM forums
+        WHERE user_id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=forums.id)
+        ORDER BY created_at DESC LIMIT 30`, [user.id]).then(result => result.rows),
+      query(`SELECT b.slug,b.title,b.preface,b.cover_image,u.username AS author FROM books b
+        LEFT JOIN users u ON u.id=b.user_id
+        WHERE b.user_id=$1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
+          AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+        ORDER BY b.created_at DESC LIMIT 30`, [user.id]).then(result => result.rows),
+      query(`SELECT id,url,title,caption,created_at FROM photos
+        WHERE user_id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=photos.id)
+        ORDER BY created_at DESC LIMIT 30`, [user.id]).then(result => result.rows)
+    ]);
+  }
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const desc = escapeHtml((user.bio || `${user.username} adlı kullanıcının CigCig profili.`).substring(0, 160));
   const imgTag = user.avatar
@@ -5854,8 +6172,17 @@ app.get('/profil/:username', async (req, res) => {
     <meta property="og:url" content="${SITE_URL}/profil/${profileRouteKey(user.username)}" />
     <meta property="og:site_name" content="CigCig" />
     ${imgTag}`;
-  const r4 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(r4!==html?r4:html.replace(/<title>[^<]*<\/title>/,meta));
+  const sections = [];
+  if (profileForums.length) sections.push(`<section class="seo-profile-section"><h2>Konular</h2><ul>${profileForums.map(item => `<li><a href="/forum/${escapeHtml(item.slug)}">${escapeHtml(item.title)}</a><span>${escapeHtml(String(item.content || '').replace(/\s+/g, ' ').slice(0, 120))}</span></li>`).join('')}</ul></section>`);
+  if (profileBooks.length) sections.push(`<section class="seo-profile-section"><h2>Kitaplar</h2><ul>${profileBooks.map(item => `<li><a href="/kitap/${escapeHtml(item.slug)}">${escapeHtml(item.title)}</a><span>${escapeHtml(item.author || String(item.preface || '').replace(/\s+/g, ' ').slice(0, 120))}</span></li>`).join('')}</ul></section>`);
+  if (profilePhotos.length) sections.push(`<section class="seo-profile-section"><h2>Fotoğraflar</h2><div class="seo-profile-photos">${profilePhotos.map(item => `<a href="/foto/${escapeHtml(item.id)}">${serverImage(item.url, item.title || item.caption || 'Fotoğraf', 'seo-profile-photo')}</a>`).join('')}</div></section>`);
+  const profileBody = serverPageBody('CİGCİG PROFİLİ', user.username, isPrivate ? 'Bu profil gizlidir.' : (user.bio || `${user.username} adlı kullanıcının CigCig profili.`), `<article class="seo-profile-card">
+    ${user.avatar ? serverImage(user.avatar, user.username, 'seo-profile-avatar') : ''}
+    ${user.bio ? `<p class="seo-lead">${escapeHtml(user.bio)}</p>` : ''}
+    ${isPrivate ? '<p class="seo-empty">Bu profil gizli olduğu için içerikleri yalnızca izin verilen kişiler görebilir.</p>' : (sections.join('') || '<p class="seo-empty">Bu profilde henüz herkese açık içerik bulunmuyor.</p>')}
+  </article>`);
+  const r4 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  ${isPrivate ? '<meta name="robots" content="noindex, nofollow" />' : ''}\n  <!-- SEO_END -->`);
+  res.send(injectCrawlableBody(r4!==html?r4:html.replace(/<title>[^<]*<\/title>/,meta), profileBody));
 });
 
 

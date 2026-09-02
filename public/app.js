@@ -777,9 +777,15 @@ function renderRoute(fullPath) {
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
 
-  // Site geneli giriş zorunluluğu: giriş/kayıt/şifre yenileme akışları
-  // anonim ziyaretçiye açık kalır; diğer tüm SPA sayfaları giriş ister.
-  if (siteAuthRequired && !currentUser && path !== '/giris' && path !== '/kayit' && !isForgotPasswordRoute(path)) {
+  // İçerik sayfaları herkese açık kalır; böylece paylaşılmış bağlantılar ve
+  // arama motorları oturum açma ekranına yönlendirilmeden içeriği görebilir.
+  const publicContentRoute = path === '/forum' || path.startsWith('/forum/')
+    || path === '/kitaplar' || path.startsWith('/kitap/')
+    || path === '/gruplar' || path.startsWith('/grup/')
+    || path === '/fotograflar' || path.startsWith('/foto/')
+    || path === '/muzikler' || path.startsWith('/muzik/')
+    || path.startsWith('/profil/');
+  if (siteAuthRequired && !currentUser && !publicContentRoute && path !== '/giris' && path !== '/kayit' && !isForgotPasswordRoute(path)) {
     const returnTo = path + (queryStr ? '?' + queryStr : '');
     return navigate('/giris?returnTo=' + encodeURIComponent(returnTo), false);
   }
@@ -2109,7 +2115,7 @@ async function renderForumDetail(app, slug) {
             <textarea id="comment-input" placeholder="Yorumunuzu yazın..."></textarea>
             <button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i></button>
           </div>` : (!currentUser && forum.allow_comments ? `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>` : (!forum.allow_comments ? `<p class="text-muted" style="margin-bottom:16px">Yorumlar kapatılmış.</p>` : ''))}
-        <div id="comments-list">${comments.map(c => commentHTML(c)).join('')}</div>
+         <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
     </div>
   </div>`;
@@ -2153,13 +2159,18 @@ async function renderForumDetail(app, slug) {
   $('#comment-submit')?.addEventListener('click', async () => {
     let content = $('#comment-input').value.trim();
     if (!content) return;
-    if (commentReplyTarget) {
-      const mention = '@' + commentReplyTarget.username;
-      if (!content.startsWith(mention)) content = mention + ' ' + content;
-    }
     try {
-      const c = await api('/forum/' + slug + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
-      $('#comments-list').insertAdjacentHTML('beforeend', commentHTML(c));
+       await api('/forum/' + slug + '/comments', {
+         method: 'POST',
+         body: JSON.stringify({
+           content,
+           parent_comment_id: commentReplyTarget ? commentReplyTarget.id : null
+         })
+       });
+       // Sunucu ilişkiyi gerçek parent_comment_id ile kurar; ağacı yeniden çizmek
+       // yanıtların doğru yorumun altında kalmasını ve sıralamanın bozulmamasını sağlar.
+       comments = await api('/forum/' + slug + '/comments');
+       $('#comments-list').innerHTML = commentTreeHTML(comments);
       $('#comment-input').value = '';
       clearCommentReply();
       const title = $('.comments-title');
@@ -2189,7 +2200,9 @@ async function renderForumDetail(app, slug) {
       const id = del.dataset.id;
       try {
         await api('/forum/' + slug + '/comments/' + id, { method: 'DELETE' });
-        del.closest('.comment').remove();
+         del.closest('.comment-node')?.remove();
+         const title = $('.comments-title');
+         if (title) title.innerHTML = `<i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${$('#comments-list').querySelectorAll('.comment').length})`;
       } catch (e) { toast(e.message, 'error'); }
     }
 
@@ -2213,16 +2226,17 @@ function commentHTML(c) {
   const canDel = currentUser && currentUser.id === c.user_id;
   const canReply = !!currentUser;
   return `<div class="comment">
-    ${avatarImg(c, 'comment-avatar')}
+    ${c.username ? `<a href="${profileRoute(c.username)}" data-link class="comment-avatar-link" aria-label="${escHtml(c.username)} profili">${avatarImg(c, 'comment-avatar')}</a>` : avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
       <div class="comment-header">
         <span class="comment-author">${c.username ? `<a href="${profileRoute(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
         <span class="comment-time">${timeAgo(c.created_at)}</span>
       </div>
+      ${c.parent_comment_id && c.parent_username ? `<div class="comment-reply-context"><i class="fas fa-reply"></i> <span>${escHtml(c.parent_username)} adlı yoruma yanıt</span></div>` : ''}
       <div class="comment-content">${renderContent(c.content)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
         <div style="display:flex;align-items:center;gap:8px">
-          ${canReply ? `<button class="btn btn-ghost btn-sm reply-comment-btn" data-id="${c.id}" data-username="${escHtml(c.username || '')}" style="padding:2px 6px;color:var(--text-secondary)"><i class="fas fa-reply"></i></button>` : ''}
+          ${canReply ? `<button class="btn btn-ghost btn-sm reply-comment-btn" data-id="${c.id}" data-username="${escHtml(c.username || 'bu kullanıcı')}" style="padding:2px 6px;color:var(--text-secondary)"><i class="fas fa-reply"></i> Yanıtla</button>` : ''}
           ${canDel ? `<button class="btn btn-ghost btn-sm del-comment" data-id="${c.id}" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
         </div>
         <button class="like-comment-btn forum-action-btn${c.liked ? ' liked' : ''}" data-id="${c.id}" style="padding:4px 10px;font-size:12px">
@@ -2231,6 +2245,26 @@ function commentHTML(c) {
       </div>
     </div>
   </div>`;
+}
+
+function commentTreeHTML(comments) {
+  const items = Array.isArray(comments) ? comments : [];
+  if (!items.length) return '<div class="comments-empty">Henüz yorum yok. İlk yorumu sen yaz.</div>';
+  const byParent = new Map();
+  const ids = new Set(items.map(comment => String(comment.id)));
+  items.forEach(comment => {
+    const parentKey = comment.parent_comment_id ? String(comment.parent_comment_id) : '';
+    const key = parentKey && ids.has(parentKey) ? parentKey : 'root';
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(comment);
+  });
+  const renderBranch = parentKey => (byParent.get(parentKey) || []).map(comment => `
+    <div class="comment-node">
+      ${commentHTML(comment)}
+      ${byParent.has(String(comment.id)) ? `<div class="comment-replies">${renderBranch(String(comment.id))}</div>` : ''}
+    </div>
+  `).join('');
+  return renderBranch('root');
 }
 
 async function renderBookList(app) {

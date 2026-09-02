@@ -348,11 +348,27 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       forum_id BIGINT,
       user_id BIGINT,
+      parent_comment_id BIGINT,
       content TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(forum_id) REFERENCES forums(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY(parent_comment_id) REFERENCES forum_comments(id) ON DELETE CASCADE
     );
+    ALTER TABLE forum_comments ADD COLUMN IF NOT EXISTS parent_comment_id BIGINT;
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='forum_comments_parent_comment_id_fkey'
+          AND conrelid='forum_comments'::regclass
+      ) THEN
+        ALTER TABLE forum_comments
+          ADD CONSTRAINT forum_comments_parent_comment_id_fkey
+          FOREIGN KEY(parent_comment_id) REFERENCES forum_comments(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
+    CREATE INDEX IF NOT EXISTS idx_forum_comments_parent ON forum_comments(forum_id, parent_comment_id, created_at);
 
     CREATE TABLE IF NOT EXISTS forum_comment_likes (
       id BIGSERIAL PRIMARY KEY,

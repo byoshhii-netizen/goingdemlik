@@ -1,59 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<?xml-stylesheet type="text/css" href="https://www.xml-sitemaps.com/css/sitemap.css"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
-
-  <url>
-       <loc>https://cigcig.xyz/</loc>
-       <lastmod>2026-07-29T07:24:46+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>1.0000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/mesajlar</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/kitaplar</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/muzikler</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/gruplar</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/kayit</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/giris</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/arkadaslar</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
-  <url>
-       <loc>https://cigcig.xyz/forum</loc>
-       <lastmod>2026-07-30T19:57:04+00:00</lastmod>
-       <changefreq>daily</changefreq>
-       <priority>0.8000</priority>
-  </url>
+<!--
+  Production requests use server.js /sitemap.xml, which includes the current
+  public forums, books, book pages, music, photos, groups and profiles.
+  This file mirrors the public entry points for static hosting and tooling.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url><loc>https://cigcig.xyz/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>
+  <url><loc>https://cigcig.xyz/forum</loc><changefreq>hourly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://cigcig.xyz/kitaplar</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
+  <url><loc>https://cigcig.xyz/muzikler</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
+  <url><loc>https://cigcig.xyz/fotograflar</loc><changefreq>daily</changefreq><priority>0.8</priority></url>
+  <url><loc>https://cigcig.xyz/gruplar</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>
 </urlset>
