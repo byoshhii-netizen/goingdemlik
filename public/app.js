@@ -7217,6 +7217,7 @@ async function renderFriends(app) {
         <div id="friends-content">
           <div id="tab-content-friends">
             <div class="friends-panel">
+              <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-user-friends"></i></span><span><b>Arkadaşlarım</b><small>Takip ettiğin kullanıcıları buradan yönetebilirsin.</small></span></div>
               ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
                 : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
             </div>
