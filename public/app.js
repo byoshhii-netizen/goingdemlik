@@ -1064,7 +1064,7 @@ async function renderRealsFeed(app) {
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
-          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private ? `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>
+          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username ? (r.is_private ? `<button type="button" class="reals-friend-btn" data-username="${escHtml(r.username)}" ${followStates.get(r.username)?.friendship_status ? 'disabled' : ''}>${followStates.get(r.username)?.friendship_status === 'accepted' ? 'Arkadaşsınız' : followStates.get(r.username)?.friendship_status === 'pending' ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>` : `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}</div>
           <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
@@ -1166,6 +1166,19 @@ async function renderRealsFeed(app) {
         btn.textContent = result.following ? 'Takiptesin' : result.pending ? 'İstek gönderildi' : 'Takip et';
       } catch (error) { toast(error.message, 'error'); }
       finally { btn.disabled = false; btn.classList.remove('is-loading'); }
+    }));
+    listEl.querySelectorAll('.reals-friend-btn').forEach(btn => btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await api('/friends/request/' + encodeURIComponent(btn.dataset.username), { method: 'POST' });
+        btn.textContent = 'İstek gönderildi';
+        toast('Arkadaşlık isteği gönderildi');
+      } catch (error) {
+        btn.disabled = false;
+        toast(error.message, 'error');
+      }
     }));
     listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -3995,7 +4008,7 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
-        ${m.username ? `<a href="${profileLink}" data-link class="chat-msg-name" style="${m.name_color ? `color:${escHtml(m.name_color)}` : ''}">${escHtml(displayName)}</a>` : `<span class="chat-msg-name" style="opacity:.65">${escHtml(displayName)}</span>`}
+        ${!isOwn ? (m.username ? `<a href="${profileLink}" data-link class="chat-msg-name" style="${m.name_color ? `color:${escHtml(m.name_color)}` : ''}">${escHtml(displayName)}</a>` : `<span class="chat-msg-name" style="opacity:.65">${escHtml(displayName)}</span>`) : ''}
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
         ${canReply && currentUser && m.username ? `<button class="btn btn-ghost group-reply-btn" data-id="${m.id}" title="Yanıtla" aria-label="Yanıtla" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-reply"></i><span class="group-reply-label">Yanıtla</span></button>` : ''}
         ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
@@ -4296,8 +4309,13 @@ async function renderVideoDetail(app, slug) {
   updatePageMeta(video.title + ' – ' + siteName, video.description || 'CigCig videoları', video.banner_image || '');
   const isOwner = currentUser && currentUser.id === video.user_id;
   let followState = false;
+  let videoFriendState = null;
   if (currentUser && currentUser.username !== video.username) {
-    try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
+    try {
+      const res = await api('/users/' + encodeURIComponent(video.username) + '/follow-status');
+      followState = !!res.following;
+      videoFriendState = res;
+    } catch {}
   }
   const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
   const formattedDescription = descriptionText.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
@@ -4323,7 +4341,11 @@ async function renderVideoDetail(app, slug) {
           <div class="video-title">${escHtml(video.title)}</div>
           <div class="video-author-row">
             <a href="${profileRoute(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takiptesin' : 'Takip et'}</button>` : ''}
+            ${currentUser && currentUser.username !== video.username
+              ? (video.is_private
+                ? `<button class="btn btn-outline btn-sm" id="video-friend-btn" ${videoFriendState?.friendship_status ? 'disabled' : ''}>${videoFriendState?.friendship_status === 'accepted' ? 'Arkadaşsınız' : videoFriendState?.friendship_status === 'pending' ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>`
+                : `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takiptesin' : 'Takip et'}</button>`)
+              : ''}
           </div>
           <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
           <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
@@ -4368,6 +4390,19 @@ async function renderVideoDetail(app, slug) {
       followState = r.following;
       $('#follow-btn').textContent = followState ? 'Takiptesin' : 'Takip et';
     } catch {}
+  });
+  $('#video-friend-btn')?.addEventListener('click', async () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    const button = $('#video-friend-btn');
+    button.disabled = true;
+    try {
+      await api('/friends/request/' + encodeURIComponent(video.username), { method: 'POST' });
+      button.textContent = 'İstek gönderildi';
+      toast('Arkadaşlık isteği gönderildi');
+    } catch (e) {
+      button.disabled = false;
+      toast(e.message, 'error');
+    }
   });
 
   $('#video-share-btn')?.addEventListener('click', async () => {
@@ -4627,6 +4662,38 @@ async function renderProfile(app, username) {
       } catch (e) { toast(e.message, 'error'); button.disabled = false; }
     });
   };
+  const friendButtonLabel = () => {
+    if (followState.friendship_status === 'accepted') return 'Arkadaşsınız';
+    if (followState.friendship_status === 'pending') {
+      return followState.friend_request_incoming ? 'Arkadaşlık isteğini kabul et' : 'İstek gönderildi';
+    }
+    return 'Arkadaş ekle';
+  };
+  const bindFriendButton = () => {
+    const button = document.getElementById('profile-friend-btn');
+    if (!button) return;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        if (followState.friendship_status === 'pending' && followState.friend_request_incoming && followState.friendship_id) {
+          await api('/friends/respond/' + followState.friendship_id, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
+          toast('Arkadaşlık isteği kabul edildi');
+          renderProfile(app, username);
+          return;
+        }
+        if (followState.friendship_status === 'accepted' || followState.friendship_status === 'pending') return;
+        await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
+        followState.friendship_status = 'pending';
+        followState.friend_request_incoming = false;
+        button.textContent = friendButtonLabel();
+        button.classList.remove('btn-primary');
+        button.classList.add('btn-outline');
+      } catch (e) {
+        toast(e.message, 'error');
+        button.disabled = false;
+      }
+    });
+  };
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
@@ -4634,8 +4701,8 @@ async function renderProfile(app, username) {
        ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
-    bindFollowButton();
+      ${currentUser ? `<button id="profile-friend-btn" class="btn ${followState.friendship_status ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px" ${followState.friendship_status === 'accepted' || (followState.friendship_status === 'pending' && !followState.friend_request_incoming) ? 'disabled' : ''}>${friendButtonLabel()}</button>` : ''}</div></div></div>`;
+    bindFriendButton();
     return;
   }
   let savedVideos = [];
@@ -4725,7 +4792,9 @@ async function renderProfile(app, username) {
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
-          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
+          ${user.is_private
+            ? `<button id="profile-friend-btn" class="btn ${followState.friendship_status ? 'btn-outline' : 'btn-primary'} btn-sm" ${followState.friendship_status === 'accepted' || (followState.friendship_status === 'pending' && !followState.friend_request_incoming) ? 'disabled' : ''}>${friendButtonLabel()}</button>`
+            : `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.following ? 'Takiptesin' : 'Takip et'}</button>`}
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:240px;max-width:280px;overflow-y:auto;max-height:320px"></div>
@@ -4775,6 +4844,7 @@ async function renderProfile(app, username) {
   profileTabOrder.forEach(tab => document.getElementById('tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
   bindFollowButton();
+  bindFriendButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
       const list = await api('/users/' + encodeURIComponent(username) + '/' + button.dataset.followList);
@@ -4861,11 +4931,6 @@ async function renderProfile(app, username) {
       }
 
       getBlockStatus().then(renderMenu).catch(() => renderMenu({}));
-
-      document.getElementById('profile-friend-btn')?.addEventListener('click', e => {
-        e.stopPropagation();
-        moreMenu.style.display = moreMenu.style.display === 'none' ? 'block' : 'none';
-      });
 
       moreBtn.addEventListener('click', e => {
         e.stopPropagation();
@@ -6642,7 +6707,7 @@ function dmMessageHTML(m, myId, selMode) {
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}</a>`
       : ''}
     <div class="dm-msg-content">
-      ${m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`}
+      ${!isOwn ? (m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`) : ''}
       ${m.reply_to_id && m.reply_content
         ? `<div class="dm-reply-preview">
              <span style="color:var(--text-muted);font-size:11px;font-weight:600">${escHtml(m.reply_username || '')}</span>
@@ -7646,7 +7711,10 @@ async function playGuestMusicAdIfDue(onComplete) {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) return;
+  if (!document.hidden) {
+    window.__resumePhotoAudio?.();
+    return;
+  }
   activePhotoAudio?.pause();
   activeStoryAudio?.pause();
   storyComposerAudio?.pause();
@@ -7700,13 +7768,44 @@ function buildShuffledOrder(len, startIdx) {
   return arr;
 }
 
-function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
+function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio = null) {
   // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
   if (currentUser && !musicAdBypass && !song?.is_music_ad) {
+    // Reklam kontrolü ağ isteği olduğu için kullanıcı tıklamasının oynatma
+    // iznini kaybetmemesi adına aynı ses elementini şimdiden sessizce başlat.
+    // Reklam yoksa element ses açılarak doğrudan kullanılmaya devam eder.
+    const gestureAudio = new Audio(audioUrl);
+    gestureAudio.preload = 'auto';
+    gestureAudio.muted = true;
+    gestureAudio.volume = 0;
+    const gesturePlay = gestureAudio.play().catch(() => null);
     api('/music-ads/pending').then(result => {
-      if (result?.ad) return playMusicAd(result.ad, () => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
-      musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false;
-    }).catch(() => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
+      if (result?.ad) {
+        gestureAudio.pause();
+        return playMusicAd(result.ad, () => {
+          gestureAudio.muted = false;
+          gestureAudio.volume = getMediaVolume();
+          musicAdBypass = true;
+          openMiniPlayer(audioUrl, slug, song, queue, queueIndex, gestureAudio);
+          musicAdBypass = false;
+        });
+      }
+      gesturePlay.finally(() => {
+        gestureAudio.muted = false;
+        gestureAudio.volume = getMediaVolume();
+        musicAdBypass = true;
+        openMiniPlayer(audioUrl, slug, song, queue, queueIndex, gestureAudio);
+        musicAdBypass = false;
+      });
+    }).catch(() => {
+      gesturePlay.finally(() => {
+        gestureAudio.muted = false;
+        gestureAudio.volume = getMediaVolume();
+        musicAdBypass = true;
+        openMiniPlayer(audioUrl, slug, song, queue, queueIndex, gestureAudio);
+        musicAdBypass = false;
+      });
+    });
     return;
   }
   // If queue provided, update global queue state
@@ -7730,7 +7829,10 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   player.classList.remove('music-ad-player');
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
-  const audio = trackMediaAudio(new Audio(audioUrl));
+  const audio = trackMediaAudio(preparedAudio || new Audio(audioUrl));
+  audio.preload = 'auto';
+  audio.muted = false;
+  audio.volume = getMediaVolume();
   currentAudio = audio; currentSlug = slug;
   fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
 
@@ -7816,7 +7918,9 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   });
 
   document.getElementById('gp-play').addEventListener('click', () => {
-    if (audio.paused) { audio.play(); document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>'; }
+    if (audio.paused) {
+      audio.play().then(() => { document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>'; }).catch(() => toast('Müziği başlatmak için oynat düğmesine tekrar dokunun.', 'error'));
+    }
     else { audio.pause(); document.getElementById('gp-play').innerHTML='<i class="fas fa-play"></i>'; }
   });
   document.getElementById('gp-seek').addEventListener('input', e => {
@@ -7880,7 +7984,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   const detailPlay = document.getElementById('detail-play-btn');
   if (detailPlay) detailPlay.innerHTML = '<i class="fas fa-pause"></i> Durdur';
 
-  audio.play().catch(() => {});
+  audio.play().catch(() => toast('Müzik yüklenemedi. Oynat düğmesine tekrar dokunun.', 'error'));
 }
 
 // Kuyrukta önceki/sonraki indeksi hesapla
@@ -8780,7 +8884,7 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${p.song_artist}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${p.song_artist}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
@@ -8946,18 +9050,26 @@ async function renderPhotoDetail(app, photoId) {
 
 let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed) {
-  // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
-  // tıklamasıyla açılır; seçilen yerden itibaren en fazla 30 saniye çalar.
+  // Instagram benzeri davranış: fotoğraf sesleri kapalı başlar; kullanıcı
+  // açtığında yalnızca ekranda görünen fotoğrafın sesi çalar.
   photoAudioObserver?.disconnect();
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
   document.getElementById('photo-audio-control')?.remove();
 
+  let photoAudioEnabled = false;
+  const visibleRatios = new Map();
+  const getVisibleCard = () => {
+    const cards = [...feed.querySelectorAll('[data-photo-id]')].filter(card => card.querySelector('.photo-song[data-audio]'));
+    return cards
+      .filter(card => (visibleRatios.get(card) || 0) >= 0.55)
+      .sort((a, b) => (visibleRatios.get(b) || 0) - (visibleRatios.get(a) || 0))[0] || null;
+  };
   const syncButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{
-    const isPlaying=activePhotoAudio?._photoId===button.closest('[data-photo-id]')?.dataset.photoId;
+    const isPlaying=!!activePhotoAudio && !activePhotoAudio.paused && activePhotoAudio?._photoId===button.closest('[data-photo-id]')?.dataset.photoId;
     button.classList.toggle('is-playing', isPlaying);
-    button.title=isPlaying?'Müziği durdur':'Müziği aç';
+    button.title=isPlaying?'Müziği kapat':'Fotoğraf sesini aç';
     button.setAttribute('aria-label', button.title);
     const icon=button.querySelector('i');
     if (icon) icon.className='fas '+(isPlaying?'fa-volume-high':'fa-volume-off');
@@ -8971,14 +9083,11 @@ function setupPhotoAudio(feed) {
   const play=(card)=>{
     const songButton=card.querySelector('.photo-song');
     if (!songButton?.dataset.audio) return;
-    if (activePhotoAudio?._photoId===card.dataset.photoId) {
-      stop();
-      return;
-    }
     stop();
     const audio=trackMediaAudio(new Audio(songButton.dataset.audio));
     audio.preload='auto';
     audio.muted=false;
+    audio.volume=getMediaVolume();
     audio.load();
     audio._photoId=card.dataset.photoId;
     limitMediaAudioClip(audio, Number(songButton.dataset.start)||0, ()=>{
@@ -8998,22 +9107,34 @@ function setupPhotoAudio(feed) {
       }
     });
   };
+  const playVisible=()=>{
+    if (!photoAudioEnabled || document.hidden) return;
+    const card=getVisibleCard();
+    if (!card) { stop(); return; }
+    if (activePhotoAudio?._photoId===card.dataset.photoId && !activePhotoAudio.paused) return;
+    play(card);
+  };
 
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{
     event.preventDefault();
     event.stopPropagation();
     const card=button.closest('[data-photo-id]');
-    if (card) play(card);
+    if (!card) return;
+    if (photoAudioEnabled && activePhotoAudio?._photoId===card.dataset.photoId) {
+      photoAudioEnabled=false;
+      stop();
+      syncButtons();
+      return;
+    }
+    photoAudioEnabled=true;
+    play(card);
   }));
-  feed.querySelectorAll('.photo-volume').forEach(slider => {
-    slider.addEventListener('input', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      setMediaVolume(Number(event.target.value) / 100);
-    });
-    slider.addEventListener('click', event => event.stopPropagation());
-    slider.addEventListener('pointerdown', event => event.stopPropagation());
-  });
+  photoAudioObserver=new IntersectionObserver(entries=>{
+    entries.forEach(entry=>visibleRatios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));
+    playVisible();
+  }, { threshold:[0, .55, .8, 1] });
+  feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
+  window.__resumePhotoAudio=playVisible;
   syncButtons();
 }
 

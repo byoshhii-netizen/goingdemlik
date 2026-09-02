@@ -3294,17 +3294,26 @@ app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), asyn
 app.get('/api/users/:username/follow-status', optionalAuth, async (req, res) => {
   const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-  if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private });
+  if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private, friendship_status: null, friendship_id: null, friend_request_incoming: false });
   const { rows } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
-  const { rows: friendship } = await query("SELECT 1 FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [req.user.id, target[0].id]);
-  res.json({ following: rows[0]?.status === 'accepted' || friendship.length > 0, pending: rows[0]?.status === 'pending', is_private: !!target[0].is_private });
+  const { rows: friendship } = await query('SELECT id, status, requester_id, addressee_id FROM friendships WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1) ORDER BY id DESC LIMIT 1', [req.user.id, target[0].id]);
+  const relation = friendship[0] || null;
+  res.json({
+    following: rows[0]?.status === 'accepted' || relation?.status === 'accepted',
+    pending: rows[0]?.status === 'pending',
+    is_private: !!target[0].is_private,
+    friendship_status: relation?.status || null,
+    friendship_id: relation?.id || null,
+    friend_request_incoming: !!relation && relation.requester_id === target[0].id
+  });
 });
 
 app.post('/api/users/:username/follow', authMiddleware, async (req, res) => {
   const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (target[0].id === req.user.id) return res.status(400).json({ error: 'Kendinizi takip edemezsiniz' });
-  const status = target[0].is_private ? 'pending' : 'accepted';
+  if (target[0].is_private) return res.status(400).json({ error: 'Gizli hesaplar için arkadaşlık isteği gönderin' });
+  const status = 'accepted';
   await query(`INSERT INTO follows (follower_id, following_id, status) VALUES ($1,$2,$3)
     ON CONFLICT (follower_id, following_id) DO UPDATE SET status=EXCLUDED.status`, [req.user.id, target[0].id, status]);
   await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
