@@ -517,10 +517,12 @@ async function initDb() {
       user_id BIGINT,
       content TEXT,
       image_url TEXT DEFAULT '',
+      reply_to_id BIGINT,
       edited_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
-      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY(reply_to_id) REFERENCES group_messages(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS group_message_deletions (
@@ -549,6 +551,7 @@ async function initDb() {
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT REFERENCES group_messages(id) ON DELETE SET NULL;
 
     CREATE TABLE IF NOT EXISTS photos (
       id BIGSERIAL PRIMARY KEY,

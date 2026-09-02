@@ -475,7 +475,7 @@ async function renderAdminStories(main) {
 // ===== HOMEPAGE SECTIONS =====
 async function renderAdminPhotos(main) {
   const photos = await adminApi('/photos');
-  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Fotoğraflar</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Medya</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
   main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
 }
 async function renderAdSubmissions(main) {
@@ -499,7 +499,7 @@ async function renderHomepageSections(main) {
     { id: 'playlistler', label: 'Playlistler' },
     { id: 'magaza', label: 'Mağaza' },
     { id: 'reals', label: 'Reals' },
-    { id: 'fotograflar', label: 'Fotoğraflar' }
+    { id: 'fotograflar', label: 'Medya' }
   ];
 
   main.innerHTML = `
@@ -2395,7 +2395,7 @@ function showAnnModal(ann, anns) {
 
 // ===== ADMIN: MÜZİKLER =====
 async function renderContentAnalytics(main) {
-  const typeLabels = { '': 'Tüm içerikler', song: 'Müzikler', photo: 'Fotoğraflar', story: 'Hikâyeler', reals: 'Reals', video: 'Videolar' };
+  const typeLabels = { '': 'Tüm içerikler', song: 'Müzikler', photo: 'Medya', story: 'Hikâyeler', reals: 'Reals', video: 'Videolar' };
   const load = async (type = '') => {
     main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
     try {
@@ -2404,7 +2404,7 @@ async function renderContentAnalytics(main) {
       main.innerHTML = `
         <div class="adm-section-header">
           <div><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-chart-pie"></i></div>İzlenme Analitiği</div><div class="adm-section-subtitle">Müzik, fotoğraf, hikâye ve Reals görüntülemeleri; giriş yapan ve misafir ziyaretçiler ayrı ayrı görünür.</div></div>
-          <select id="analytics-type" style="min-width:170px"><option value="">Tüm içerikler</option><option value="song">Müzikler</option><option value="photo">Fotoğraflar</option><option value="story">Hikâyeler</option><option value="reals">Reals</option><option value="video">Videolar</option></select>
+          <select id="analytics-type" style="min-width:170px"><option value="">Tüm içerikler</option><option value="song">Müzikler</option><option value="photo">Medya</option><option value="story">Hikâyeler</option><option value="reals">Reals</option><option value="video">Videolar</option></select>
         </div>
         <div class="adm-stat-grid" style="margin-bottom:18px">
           <div class="adm-stat-card"><div class="adm-stat-icon" style="background:rgba(88,101,242,.14);color:#8b9aff"><i class="fas fa-eye"></i></div><div><b>${Number(data.total_events || 0).toLocaleString('tr-TR')}</b><span>Toplam görüntüleme</span></div></div>
@@ -2756,7 +2756,7 @@ async function renderSettings(main) {
       <div class="card adm-feature-card settings-wide">
         <div class="card-header"><span><i class="fas fa-table-columns" style="color:var(--red2);margin-right:8px"></i>Profil Sekmeleri</span></div>
         <div class="card-body">
-          <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Profillerdeki Forumlar, Kitaplar, Fotoğraflar gibi sekmelerin sırasını belirleyin.</p>
+          <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Profillerdeki Forumlar, Kitaplar, Medya gibi sekmelerin sırasını belirleyin.</p>
           <div id="profile-tabs-order" style="display:grid;gap:8px"></div>
           <button class="btn btn-primary" id="profile-tabs-save" style="width:100%;justify-content:center;margin-top:14px"><i class="fas fa-save"></i> Sekme Sırasını Kaydet</button>
           <div id="profile-tabs-msg" class="form-error mt-4"></div>
@@ -2986,7 +2986,7 @@ async function renderSettings(main) {
 
   const profileTabOptions = [
     ['forums', 'Forumlar', 'fas fa-comments'], ['books', 'Kitaplar', 'fas fa-book'],
-    ['photos', 'Fotoğraflar', 'fas fa-images'], ['groups', 'Gruplar', 'fas fa-users'],
+    ['photos', 'Medya', 'fas fa-images'], ['groups', 'Gruplar', 'fas fa-users'],
     ['reals', 'Reals', 'fas fa-circle-play'], ['saved', 'Kaydedilenler', 'fas fa-bookmark'], ['songs', 'Müzikler', 'fas fa-music']
   ];
   const profileTabsOrder = document.getElementById('profile-tabs-order');

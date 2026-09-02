@@ -3084,11 +3084,11 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     sql = sql.replace(' ORDER BY gm.created_at DESC LIMIT $3', '');
     params = [group.id, before_id];
   } else {
-    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1`;
     params = [group.id];
   }
   sql += ` ORDER BY gm.created_at DESC LIMIT $${params.length + 1}`;
@@ -3110,12 +3110,19 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
     return res.status(403).json({ error: `SUSTURULDUN. Kalan süre: ${remainingMinutes} dakika`, muted: true, remaining_minutes: remainingMinutes });
   }
-  const { content, image_url } = req.body;
+  const { content, image_url, reply_to_id } = req.body;
   if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
-  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url) VALUES ($1,$2,$3,$4) RETURNING id',
-    [group.id, req.user.id, content||'', image_url||'']);
+  let replyId = null;
+  if (reply_to_id !== undefined && reply_to_id !== null && String(reply_to_id).trim() !== '') {
+    replyId = Number.parseInt(reply_to_id, 10);
+    if (!Number.isInteger(replyId)) return res.status(400).json({ error: 'Geçersiz yanıt mesajı' });
+    const { rows: replyRows } = await query('SELECT id FROM group_messages WHERE id=$1 AND group_id=$2', [replyId, group.id]);
+    if (!replyRows.length) return res.status(400).json({ error: 'Yanıtlanacak mesaj bulunamadı' });
+  }
+  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url,reply_to_id) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+    [group.id, req.user.id, content||'', image_url||'', replyId]);
   await notifyGroupMentions(group, req.user, content || '').catch(() => {});
-  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
 
@@ -3134,7 +3141,7 @@ app.put('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => {
   const content = String(req.body.content || '').trim();
   if (!content && !msg.image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('UPDATE group_messages SET content=$1,edited_at=NOW() WHERE id=$2 RETURNING *', [content, msg.id]);
-  const { rows: full } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.id=$1`, [msg.id]);
+  const { rows: full } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.id=$1`, [msg.id]);
   res.json(full[0] || rows[0]);
 });
 
