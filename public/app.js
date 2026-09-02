@@ -2110,9 +2110,12 @@ async function renderForumDetail(app, slug) {
       <div class="comments-section">
         <div class="comments-title"><i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${comments.length})</div>
         ${currentUser && forum.allow_comments ? `
-          <div id="comment-reply-area" style="display:none;margin-bottom:12px;padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg-secondary);align-items:center;justify-content:space-between;gap:10px">
-            <span id="comment-reply-text" style="font-size:13px;color:var(--text-secondary)"></span>
-            <button type="button" class="btn btn-ghost btn-sm" id="comment-reply-clear" style="padding:2px 8px">✕</button>
+          <div id="comment-reply-area" class="comment-reply-area">
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
+              <i class="fas fa-arrow-turn-down-right" style="color:var(--accent-red2);font-size:12px;flex-shrink:0"></i>
+              <span id="comment-reply-text" style="font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+            </div>
+            <button type="button" class="btn btn-ghost btn-sm" id="comment-reply-clear" style="padding:4px 8px;flex-shrink:0"><i class="fas fa-times"></i></button>
           </div>
           <div class="comment-form">
             ${avatarImg(currentUser, 'comment-avatar')}
@@ -2155,7 +2158,7 @@ async function renderForumDetail(app, slug) {
   const clearCommentReply = () => {
     commentReplyTarget = null;
     const area = $('#comment-reply-area');
-    if (area) area.style.display = 'none';
+    if (area) area.classList.remove('active');
     const text = $('#comment-reply-text');
     if (text) text.textContent = '';
   };
@@ -2163,6 +2166,10 @@ async function renderForumDetail(app, slug) {
   $('#comment-submit')?.addEventListener('click', async () => {
     let content = $('#comment-input').value.trim();
     if (!content) return;
+    // Otomatik olarak @mention ekle eğer reply hedefi varsa
+    if (commentReplyTarget && commentReplyTarget.username && !content.startsWith('@' + commentReplyTarget.username)) {
+      content = '@' + commentReplyTarget.username + ' ' + content;
+    }
     try {
        await api('/forum/' + slug + '/comments', {
          method: 'POST',
@@ -2192,8 +2199,8 @@ async function renderForumDetail(app, slug) {
       const area = $('#comment-reply-area');
       const text = $('#comment-reply-text');
       if (area && text) {
-        area.style.display = 'flex';
-        text.textContent = `Yanıtlanıyor: ${replyBtn.dataset.username}`;
+        area.classList.add('active');
+        text.textContent = `${replyBtn.dataset.username} adlı yoruma yanıt veriyorsunuz`;
       }
       $('#comment-input')?.focus();
       return;
@@ -2230,20 +2237,20 @@ function commentHTML(c) {
   const canDel = currentUser && currentUser.id === c.user_id;
   const canReply = !!currentUser;
   return `<div class="comment">
-    ${c.username ? `<a href="${profileRoute(c.username)}" data-link class="comment-avatar-link" aria-label="${escHtml(c.username)} profili">${avatarImg(c, 'comment-avatar')}</a>` : avatarImg(c, 'comment-avatar')}
+    ${c.username ? `<a href="${profileRoute(c.username)}" data-link class="comment-avatar-link" title="${escHtml(c.username)} profiline git" aria-label="${escHtml(c.username)} profili">${avatarImg(c, 'comment-avatar')}</a>` : avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
       <div class="comment-header">
-        <span class="comment-author">${c.username ? `<a href="${profileRoute(c.username)}" data-link>${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
+        <span class="comment-author">${c.username ? `<a href="${profileRoute(c.username)}" data-link title="${escHtml(c.username)} profiline git">${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
         <span class="comment-time">${timeAgo(c.created_at)}</span>
       </div>
-      ${c.parent_comment_id && c.parent_username ? `<div class="comment-reply-context"><i class="fas fa-reply"></i> <span>${escHtml(c.parent_username)} adlı yoruma yanıt</span></div>` : ''}
+      ${c.parent_comment_id && c.parent_username ? `<div class="comment-reply-context"><div class="reply-context-indicator"><i class="fas fa-arrow-turn-down-right"></i><span class="reply-context-label">${escHtml(c.parent_username)} adlı yoruma yanıt</span></div></div>` : ''}
       <div class="comment-content">${renderContent(c.content)}</div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
-        <div style="display:flex;align-items:center;gap:8px">
-          ${canReply ? `<button class="btn btn-ghost btn-sm reply-comment-btn" data-id="${c.id}" data-username="${escHtml(c.username || 'bu kullanıcı')}" style="padding:2px 6px;color:var(--text-secondary)"><i class="fas fa-reply"></i> Yanıtla</button>` : ''}
-          ${canDel ? `<button class="btn btn-ghost btn-sm del-comment" data-id="${c.id}" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
+      <div class="comment-actions">
+        <div class="comment-action-buttons">
+          ${canReply ? `<button class="btn btn-ghost btn-sm reply-comment-btn" data-id="${c.id}" data-username="${escHtml(c.username || 'bu kullanıcı')}" title="Yanıtla"><i class="fas fa-reply"></i> Yanıtla</button>` : ''}
+          ${canDel ? `<button class="btn btn-ghost btn-sm del-comment" data-id="${c.id}" title="Sil"><i class="fas fa-trash"></i></button>` : ''}
         </div>
-        <button class="like-comment-btn forum-action-btn${c.liked ? ' liked' : ''}" data-id="${c.id}" style="padding:4px 10px;font-size:12px">
+        <button class="like-comment-btn forum-action-btn${c.liked ? ' liked' : ''}" data-id="${c.id}" title="${c.liked ? 'Beğenmeyi geri al' : 'Beğen'}">
           <i class="${c.liked ? 'fas' : 'far'} fa-heart"></i> <span class="like-cnt">${c.like_count || 0}</span>
         </button>
       </div>
@@ -4719,7 +4726,7 @@ async function renderProfile(app, username) {
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
-          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:200px;overflow:hidden"></div>
+          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:240px;max-width:280px;overflow-y:auto;max-height:320px"></div>
         </div>` : ''}
       </div>
     </div>
@@ -4820,10 +4827,14 @@ async function renderProfile(app, username) {
       function renderMenu(fs) {
         const items = buildMenuItems(fs);
         moreMenu.innerHTML = items.map(item =>
-          `<div class="profile-menu-item${item.danger ? ' danger' : ''}" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:10px;padding:11px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'}">
-            <i class="fas ${item.icon}" style="width:16px;text-align:center"></i> ${item.label}
+          `<div class="profile-menu-item${item.danger ? ' danger' : ''}" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
+            <i class="fas ${item.icon}" style="width:18px;text-align:center;flex-shrink:0"></i> <span>${item.label}</span>
           </div>`
         ).join('');
+        // Son item'ın border'ını kaldır
+        const lastItem = moreMenu.querySelector('.profile-menu-item:last-child');
+        if (lastItem) lastItem.style.borderBottom = 'none';
+        
         moreMenu.querySelectorAll('.profile-menu-item').forEach(el => {
           el.addEventListener('mouseover', () => el.style.background = 'var(--bg-hover)');
           el.addEventListener('mouseout', () => el.style.background = '');
@@ -7187,6 +7198,14 @@ async function renderFriends(app) {
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
+    <div class="friends-search-box card card-body" style="margin-bottom:20px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="fas fa-search" style="color:var(--accent-red)"></i> Kullanıcı Ara</div>
+      <div style="display:flex;gap:8px">
+        <input id="friend-search-input" type="text" placeholder="Kullanıcı adı..." style="flex:1;padding:9px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px" />
+        <button class="btn btn-primary btn-sm" id="friend-search-btn"><i class="fas fa-search"></i></button>
+      </div>
+      <div id="friend-search-results" style="margin-top:12px"></div>
+    </div>
     <div class="friends-page-grid">
       <div>
         <div class="tabs" style="margin-bottom:16px">
@@ -7197,35 +7216,30 @@ async function renderFriends(app) {
         </div>
         <div id="friends-content">
           <div id="tab-content-friends">
-            ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
-              : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
+            <div class="friends-panel">
+              ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
+                : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
+            </div>
           </div>
           <div id="tab-content-requests" style="display:none">
-            <div class="pending-requests-panel">
-              <div class="pending-requests-heading"><span class="pending-requests-icon"><i class="fas fa-user-plus"></i></span><span><b>Gelen arkadaşlık istekleri</b><small>Yeni istekleri buradan yönetebilirsin.</small></span></div>
+            <div class="friends-panel">
+              <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-user-plus"></i></span><span><b>Gelen arkadaşlık istekleri</b><small>Yeni istekleri buradan yönetebilirsin.</small></span></div>
               ${pending_in.length === 0 ? '<div class="empty-state"><i class="fas fa-inbox"></i><p>Bekleyen arkadaşlık isteği yok</p></div>' : pending_in.map(f => friendItemHTML(f, 'incoming', currentUser.id)).join('')}
             </div>
           </div>
           <div id="tab-content-sent" style="display:none">
-            <div class="pending-requests-panel sent-requests-panel">
-              <div class="pending-requests-heading"><span class="pending-requests-icon"><i class="fas fa-paper-plane"></i></span><span><b>Gönderilen arkadaşlık istekleri</b><small>Yanıt bekleyen isteklerini buradan takip edebilirsin.</small></span></div>
+            <div class="friends-panel">
+              <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-paper-plane"></i></span><span><b>Gönderilen arkadaşlık istekleri</b><small>Yanıt bekleyen isteklerini buradan takip edebilirsin.</small></span></div>
               ${pending_out.length === 0 ? '<div class="empty-state"><i class="fas fa-paper-plane"></i><p>Gönderilmiş bekleyen istek yok</p></div>' : pending_out.map(f => friendItemHTML(f, 'outgoing', currentUser.id)).join('')}
             </div>
           </div>
           <div id="tab-content-blocked" style="display:none">
-            ${blocks.length === 0 ? '<div class="empty-state"><i class="fas fa-ban"></i><p>Engellenen yok</p></div>'
-              : blocks.map(b => blockItemHTML(b)).join('')}
+            <div class="friends-panel">
+              <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-ban"></i></span><span><b>Engellenen kullanıcılar</b><small>Engellediğin kullanıcıları buradan yönetebilirsin.</small></span></div>
+              ${blocks.length === 0 ? '<div class="empty-state"><i class="fas fa-ban"></i><p>Engellenen yok</p></div>'
+                : blocks.map(b => blockItemHTML(b)).join('')}
+            </div>
           </div>
-        </div>
-      </div>
-      <div>
-        <div class="card card-body">
-          <div style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="fas fa-search" style="color:var(--accent-red)"></i> Kullanıcı Ara</div>
-          <div style="display:flex;gap:8px">
-            <input id="friend-search-input" type="text" placeholder="Kullanıcı adı..." style="flex:1;padding:9px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:13px" />
-            <button class="btn btn-primary btn-sm" id="friend-search-btn"><i class="fas fa-search"></i></button>
-          </div>
-          <div id="friend-search-results" style="margin-top:12px"></div>
         </div>
       </div>
     </div>
