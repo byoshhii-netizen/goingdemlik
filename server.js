@@ -558,7 +558,7 @@ async function adminMiddleware(req, res, next) {
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
       [/\/user\/\d+\/ad-panels/, hasAdminPermission(permissions, 'can_view_users')],
-      [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
+      [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/reals-ads/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
       [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
     ];
     const rule = readRules.find(([pattern]) => pattern.test(req.path));
@@ -574,6 +574,7 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/user\/\d+\/(badge|vmb)$/, /^\/api\/admin\/songs\/\d+\/ban$/,
       /^\/api\/admin\/badges(?:\/\d+(?:\/users(?:\/\d+)?)?)?$/,
       /^\/api\/admin\/group\/\d+\/(status|messages)$/, /^\/api\/admin\/group\/\d+$/,
+      /^\/api\/admin\/reals-ads(?:\/\d+)?$/,
       /^\/api\/admin\/levels?(?:\/\d+)?$/
     ];
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
@@ -584,6 +585,7 @@ async function adminMiddleware(req, res, next) {
     if (/\/group\//.test(req.path) && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Grup yönetimi yalnızca ana admin yetkisindedir' });
     if (/\/badge(?:s|\/|$)/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
     if (/\/levels?(?:\/\d+)?$/.test(req.path) && !permissions.can_manage_levels) return res.status(403).json({ error: 'Seviye yönetme yetkisi yok' });
+    if (/\/reals-ads(?:\/\d+)?$/.test(req.path) && !hasAdminPermission(permissions, 'can_view_reals')) return res.status(403).json({ error: 'Reals yönetme yetkisi yok' });
   }
   next();
 }
@@ -758,6 +760,17 @@ const largeVideoUpload = multer({
     ? cb(null, true)
     : cb(new Error('Sadece video dosyasi yukleyebilirsiniz'))
 });
+const realsAdUpload = multer({
+  storage: largeVideoStorage,
+  limits: { fileSize: 500 * 1024 * 1024, files: 2 },
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === 'video' && file.mimetype?.startsWith('video/')) return cb(null, true);
+    if (file.fieldname === 'cover' && file.mimetype?.startsWith('image/')) return cb(null, true);
+    const error = new Error(file.fieldname === 'video' ? 'Reklam videosu video dosyası olmalı' : 'Kapak görseli resim dosyası olmalı');
+    error.status = 400;
+    cb(error);
+  }
+});
 
 function parseFormBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -768,6 +781,22 @@ function parseFormBoolean(value, fallback = false) {
 // Yükleme helper'ı — Cloudinary ya da disk
 async function handleUpload(file) {
   if (USE_CLOUDINARY) {
+    if (file.path) {
+      try {
+        const public_id = 'teatube/' + randomUUID();
+        const isAudio = file.mimetype && file.mimetype.startsWith('audio/');
+        const isVideo = file.mimetype && file.mimetype.startsWith('video/');
+        const result = await cloudinary.uploader.upload(file.path, {
+          public_id,
+          resource_type: isAudio || isVideo ? 'video' : 'image'
+        });
+        if (!result?.secure_url) throw new Error('Cloudinary URL alınamadı');
+        file.cloudinary_public_id = result.public_id || '';
+        return result.secure_url;
+      } finally {
+        fs.promises.unlink(file.path).catch(() => {});
+      }
+    }
     return new Promise((resolve, reject) => {
       if (!file.buffer || file.buffer.length === 0) {
         return reject(new Error('Dosya buffer boş'));
@@ -4426,10 +4455,10 @@ app.get('/api/admin/reals-ads', adminMiddleware, async (req, res) => {
   const { rows } = await query(`${realsAdSelect('FROM reals_ads a ORDER BY a.priority DESC,a.created_at DESC')}`);
   res.json(rows);
 });
-app.post('/api/admin/reals-ads', adminMiddleware, upload.fields([{ name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req, res) => {
+app.post('/api/admin/reals-ads', adminMiddleware, realsAdUpload.fields([{ name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req, res) => {
   try {
     const b = req.body || {};
-    const video = req.files?.video?.[0] ? await handleUpload(req.files.video[0]) : '';
+    const video = req.files?.video?.[0] ? await handleLargeVideoUpload(req.files.video[0]) : '';
     const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : '';
     const title = String(b.title || '').trim();
     const site = normalizedExternalUrl(b.site_url);
@@ -4445,7 +4474,7 @@ app.post('/api/admin/reals-ads', adminMiddleware, upload.fields([{ name: 'video'
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.put('/api/admin/reals-ads/:id', adminMiddleware, upload.fields([{ name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req, res) => {
+app.put('/api/admin/reals-ads/:id', adminMiddleware, realsAdUpload.fields([{ name: 'video', maxCount: 1 }, { name: 'cover', maxCount: 1 }]), async (req, res) => {
   try {
     const old = (await query('SELECT * FROM reals_ads WHERE id=$1', [req.params.id])).rows[0];
     if (!old) return res.status(404).json({ error: 'Reals reklamı bulunamadı.' });
@@ -4453,7 +4482,7 @@ app.put('/api/admin/reals-ads/:id', adminMiddleware, upload.fields([{ name: 'vid
     const title = String(b.title ?? old.title).trim();
     const site = normalizedExternalUrl(b.site_url ?? old.site_url);
     if (!title || !site) return res.status(400).json({ error: 'Başlık ve geçerli site linki zorunlu.' });
-    const video = req.files?.video?.[0] ? await handleUpload(req.files.video[0]) : old.video_url;
+    const video = req.files?.video?.[0] ? await handleLargeVideoUpload(req.files.video[0]) : old.video_url;
     const cover = req.files?.cover?.[0] ? await handleUpload(req.files.cover[0]) : old.cover_url;
     const frequency = normalizeRealsAdFrequency(b, old);
     const { rows } = await query(`UPDATE reals_ads SET title=$1,description=$2,site_url=$3,video_url=$4,cover_url=$5,
@@ -5001,7 +5030,7 @@ function makeSongSlug(title, id) {
 app.post('/api/artist/apply', authMiddleware, upload.single('sample_file'), async (req, res) => {
   const { genre, sample_song_url, note } = req.body;
   if (!genre) return res.status(400).json({ error: 'Tür gerekli' });
-  if (!sample_song_url && !req.file) return res.status(400).json({ error: 'Örnek şarkı gerekli' });
+  if (!sample_song_url && !req.file) return res.status(400).json({ error: 'Örnek müzik gerekli' });
   const { rows: existing } = await query('SELECT id, status FROM artist_applications WHERE user_id=$1 ORDER BY id DESC LIMIT 1', [req.user.id]);
   if (existing.length && existing[0].status === 'pending') return res.status(400).json({ error: 'Zaten bekleyen bir başvurunuz var' });
   let sampleFile = '';
@@ -5018,16 +5047,16 @@ app.get('/api/artist/my-application', authMiddleware, async (req, res) => {
   res.json(rows[0] || null);
 });
 
-// Şarkı yükleme (sadece artist)
+// Müzik yükleme (sadece artist)
 app.post('/api/songs', authMiddleware, upload.fields([
   { name: 'audio', maxCount: 1 },
   { name: 'cover', maxCount: 1 }
 ]), async (req, res) => {
   if (await denyIfRestricted(req, res, 'music')) return;
   const { song_type, title, artist_name, distributor, genre, lyrics, share_reason, rules_accepted } = req.body;
-  // Kendi şarkısı için artist rozeti zorunlu, başkasının şarkısı için değil
+  // Kendi müziği için artist rozeti zorunlu, başkasının müziği için değil
   if ((song_type === 'own' || !song_type) && !req.user.is_artist) {
-    return res.status(403).json({ error: 'Kendi şarkını yüklemek için artist rozeti gerekli' });
+    return res.status(403).json({ error: 'Kendi müziğini yüklemek için artist rozeti gerekli' });
   }
   if (!rules_accepted) return res.status(400).json({ error: 'Kuralları kabul etmelisiniz' });
   if (!title || !artist_name) return res.status(400).json({ error: 'Başlık ve sanatçı adı gerekli' });
@@ -5044,11 +5073,11 @@ app.post('/api/songs', authMiddleware, upload.fields([
   const slug = makeSongSlug(title, id);
   await query('UPDATE songs SET slug=$1 WHERE id=$2', [slug, id]);
   await logAction(req.user.username, 'upload_song', slug);
-  await notifyFollowersOfContent(req.user, 'new_song', 'Yeni şarkı', `@${req.user.username} yeni bir şarkı paylaştı: ${title}`, '/muzik/' + slug).catch(() => {});
+  await notifyFollowersOfContent(req.user, 'new_song', 'Yeni müzik', `@${req.user.username} yeni bir müzik paylaştı: ${title}`, '/muzik/' + slug).catch(() => {});
   res.json({ ok: true, slug });
 });
 
-// Tüm şarkılar (liste)
+// Tüm müzikler (liste)
 app.get('/api/songs', async (req, res) => {
   // Süresi dolan banları otomatik aktife al
   await query(`UPDATE songs SET status='active', ban_reason='', ban_until=NULL WHERE status='suspended' AND ban_until IS NOT NULL AND ban_until < NOW()`);
@@ -5073,7 +5102,7 @@ app.get('/api/songs', async (req, res) => {
   res.json(rows);
 });
 
-// Tek şarkı
+// Tek müzik
 app.get('/api/songs/:slug', async (req, res) => {
   const { rows } = await query(
     `SELECT s.*, u.username as uploader, u.avatar as uploader_avatar, u.is_artist,
@@ -5089,23 +5118,23 @@ app.get('/api/songs/:slug', async (req, res) => {
      WHERE s.slug=$1`,
     [req.params.slug]
   );
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   res.json(rows[0]);
 });
 
 // Dinlenme sayısı artır
 app.post('/api/songs/:slug/play', async (req, res) => {
   const { rows } = await query('SELECT id FROM songs WHERE slug=$1 AND status=\'active\'', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
   await recordContentView('song', rows[0].id, req);
   res.json({ ok: true });
 });
 
-// Yarı dinleme sayacı — şarkının %50'sine ulaşınca çağrılır
+// Yarı dinleme sayacı — müziğin %50'sine ulaşınca çağrılır
 app.post('/api/songs/:slug/play-half', async (req, res) => {
   const { rows } = await query('SELECT id FROM songs WHERE slug=$1 AND status=\'active\'', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
   await recordContentView('song', rows[0].id, req);
   res.json({ ok: true });
@@ -5114,8 +5143,8 @@ app.post('/api/songs/:slug/play-half', async (req, res) => {
 app.post('/api/songs/:id/remastered', authMiddleware, upload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Remastered ses dosyası gerekli.' });
   const { rows: songs } = await query('SELECT id,uploader_id FROM songs WHERE id=$1', [req.params.id]);
-  if (!songs.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
-  if (songs[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca şarkı sahibi ekleyebilir.' });
+  if (!songs.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
+  if (songs[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca müzik sahibi ekleyebilir.' });
   try {
     const audioUrl = await handleUpload(req.file);
     const { rows } = await query('UPDATE songs SET remastered_audio_url=$1 WHERE id=$2 RETURNING id,remastered_audio_url', [audioUrl, songs[0].id]);
@@ -5127,12 +5156,12 @@ app.post('/api/songs/:id/remastered', authMiddleware, upload.single('audio'), as
 
 app.post('/api/songs/:id/recommendations', authMiddleware, async (req, res) => {
   const targetId = Number.parseInt(req.body?.song_id, 10);
-  if (!Number.isSafeInteger(targetId) || targetId < 1) return res.status(400).json({ error: 'Geçerli bir öneri şarkısı seçin.' });
+  if (!Number.isSafeInteger(targetId) || targetId < 1) return res.status(400).json({ error: 'Geçerli bir öneri müziği seçin.' });
   const { rows: owner } = await query('SELECT id,uploader_id FROM songs WHERE id=$1', [req.params.id]);
   const { rows: target } = await query('SELECT id FROM songs WHERE id=$1 AND status=\'active\'', [targetId]);
-  if (!owner.length || !target.length) return res.status(404).json({ error: 'Şarkı bulunamadı.' });
-  if (owner[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca şarkı sahibi öneri ekleyebilir.' });
-  if (owner[0].id === targetId) return res.status(400).json({ error: 'Şarkı kendisini öneremez.' });
+  if (!owner.length || !target.length) return res.status(404).json({ error: 'Müzik bulunamadı.' });
+  if (owner[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca müzik sahibi öneri ekleyebilir.' });
+  if (owner[0].id === targetId) return res.status(400).json({ error: 'Müzik kendisini öneremez.' });
   await query(`INSERT INTO song_recommendations(song_id,recommended_song_id,position)
     VALUES($1,$2,(SELECT COALESCE(MAX(position),-1)+1 FROM song_recommendations WHERE song_id=$1))
     ON CONFLICT (song_id,recommended_song_id) DO NOTHING`, [owner[0].id, targetId]);
@@ -5141,13 +5170,13 @@ app.post('/api/songs/:id/recommendations', authMiddleware, async (req, res) => {
 
 app.delete('/api/songs/:id/recommendations/:recommendedId', authMiddleware, async (req, res) => {
   const { rows: owner } = await query('SELECT uploader_id FROM songs WHERE id=$1', [req.params.id]);
-  if (!owner.length) return res.status(404).json({ error: 'Şarkı bulunamadı.' });
-  if (owner[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca şarkı sahibi düzenleyebilir.' });
+  if (!owner.length) return res.status(404).json({ error: 'Müzik bulunamadı.' });
+  if (owner[0].uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yalnızca müzik sahibi düzenleyebilir.' });
   await query('DELETE FROM song_recommendations WHERE song_id=$1 AND recommended_song_id=$2', [req.params.id, req.params.recommendedId]);
   res.json({ ok: true });
 });
 
-// Admin: tüm şarkılar
+// Admin: tüm müzikler
 app.get('/api/admin/songs', adminMiddleware, async (req, res) => {
   const { rows } = await query(
     `SELECT s.*, u.username as uploader FROM songs s LEFT JOIN users u ON s.uploader_id=u.id ORDER BY s.created_at DESC`
@@ -5155,15 +5184,15 @@ app.get('/api/admin/songs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-// Kullanıcı: kendi şarkısını güncelle
+// Kullanıcı: kendi müziğini güncelle
 app.put('/api/songs/:id', authMiddleware, upload.fields([
   { name: 'audio', maxCount: 1 },
   { name: 'cover', maxCount: 1 }
 ]), async (req, res) => {
   const { rows } = await query('SELECT * FROM songs WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   const song = rows[0];
-  if (song.uploader_id !== req.user.id) return res.status(403).json({ error: 'Bu şarkıyı düzenleme yetkiniz yok' });
+  if (song.uploader_id !== req.user.id) return res.status(403).json({ error: 'Bu müziği düzenleme yetkiniz yok' });
   const { title, artist_name, genre, lyrics, share_reason, distributor } = req.body;
   let audio_url = song.audio_url, cover_url = song.cover_url;
   if (req.files?.audio?.[0]) { try { audio_url = await handleUpload(req.files.audio[0]); } catch {} }
@@ -5179,14 +5208,14 @@ app.put('/api/songs/:id', authMiddleware, upload.fields([
   res.json({ ok: true, slug: song.slug });
 });
 
-// Admin: şarkı güncelle
+// Admin: müzik güncelle
 app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
   { name: 'audio', maxCount: 1 },
   { name: 'cover', maxCount: 1 }
 ]), async (req, res) => {
   const { title, artist_name, distributor, genre, lyrics, play_count, status } = req.body;
   const song = (await query('SELECT * FROM songs WHERE id=$1', [req.params.id])).rows[0];
-  if (!song) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!song) return res.status(404).json({ error: 'Müzik bulunamadı' });
   let audio_url = song.audio_url, cover_url = song.cover_url;
   if (req.files?.audio?.[0]) { try { audio_url = await handleUpload(req.files.audio[0]); } catch {} }
   if (req.files?.cover?.[0]) { try { cover_url = await handleUpload(req.files.cover[0]); } catch {} }
@@ -5200,20 +5229,20 @@ app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
   res.json({ ok: true });
 });
 
-// Kullanıcı: kendi şarkısını sil
+// Kullanıcı: kendi müziğini sil
 app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
   try {
     const { rows } = await query('SELECT * FROM songs WHERE id=$1', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+    if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
     const song = rows[0];
-    if (song.uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu şarkıyı silme yetkiniz yok' });
+    if (song.uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu müziği silme yetkiniz yok' });
     await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
     await logAction(req.user.username, 'delete_song', song.slug);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'Silme hatası: ' + e.message }); }
 });
 
-// Admin: şarkı sil
+// Admin: müzik sil
 app.delete('/api/admin/songs/:id', adminMiddleware, async (req, res) => {
   await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
@@ -5285,7 +5314,7 @@ app.put('/api/admin/artists/:id', adminMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Artist'in şarkıları
+// Artist'in müzikleri
 app.get('/api/admin/artists/:id/songs', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT s.id, s.title, s.artist_name, s.genre, s.cover_url, s.audio_url,
@@ -5298,7 +5327,7 @@ app.get('/api/admin/artists/:id/songs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
-// Şarkıya ban uygula (süreli veya kalıcı)
+// Müziğe ban uygula (süreli veya kalıcı)
 app.post('/api/admin/songs/:id/ban', adminMiddleware, async (req, res) => {
   const { reason, duration_days } = req.body;
   // duration_days: sayı ise süreli, 0 veya yoksa kalıcı (null)
@@ -5306,7 +5335,7 @@ app.post('/api/admin/songs/:id/ban', adminMiddleware, async (req, res) => {
     ? new Date(Date.now() + parseInt(duration_days) * 86400000).toISOString()
     : null;
   const { rows } = await query('SELECT id, slug FROM songs WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query(
     'UPDATE songs SET status=$1, ban_reason=$2, ban_until=$3 WHERE id=$4',
     ['suspended', reason || '', banUntil, req.params.id]
@@ -5315,10 +5344,10 @@ app.post('/api/admin/songs/:id/ban', adminMiddleware, async (req, res) => {
   res.json({ ok: true, ban_until: banUntil });
 });
 
-// Şarkı banını kaldır
+// Müzik banını kaldır
 app.post('/api/admin/songs/:id/unban', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT id, slug FROM songs WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query(
     'UPDATE songs SET status=$1, ban_reason=$2, ban_until=$3 WHERE id=$4',
     ['active', '', null, req.params.id]
@@ -5328,13 +5357,13 @@ app.post('/api/admin/songs/:id/unban', adminMiddleware, async (req, res) => {
 });
 
 
-// Şarkı yükleme kuralları
+// Müzik yükleme kuralları
 app.get('/api/music-rules', async (req, res) => {
   const { rows: own } = await query("SELECT value FROM settings WHERE key='music_own_rules'");
   const { rows: other } = await query("SELECT value FROM settings WHERE key='music_other_rules'");
   res.json({
-    own_rules: own[0]?.value || 'Kendi şarkılarınızı yüklerken telif hakkına sahip olmanız gerekmektedir.',
-    other_rules: other[0]?.value || 'Başkasının şarkısını paylaşırken kaynak belirtmek zorunludur.'
+    own_rules: own[0]?.value || 'Kendi müziğinizi yüklerken telif hakkına sahip olmanız gerekmektedir.',
+    other_rules: other[0]?.value || 'Başkasının müziğini paylaşırken kaynak belirtmek zorunludur.'
   });
 });
 
@@ -5362,7 +5391,7 @@ app.get('/muzikler', async (req, res) => {
         </div>
       </article>`).join('')}</div>`
     : '<p class="seo-empty">Henüz yayınlanmış müzik bulunmuyor.</p>';
-  res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe şarkılar, artist müzikleri.', `${SITE_URL}/muzikler`, '', '', serverPageBody('CİGCİG MÜZİK', 'Müzikler', 'Topluluktan yeni şarkıları keşfet.', songBody)));
+  res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe müzikler, artist müzikleri.', `${SITE_URL}/muzikler`, '', '', serverPageBody('CİGCİG MÜZİK', 'Müzikler', 'Topluluktan yeni müzikleri keşfet.', songBody)));
 });
 app.get('/muzik/:slug', async (req, res) => {
   const { rows } = await query(`SELECT s.*, u.username
@@ -5387,18 +5416,18 @@ app.get('/muzik/:slug', async (req, res) => {
     `${SITE_URL}/muzik/${s.slug}`,
     s.cover_url,
      `<meta name="keywords" content="${escapeHtml(musicKw)}" />\n    <script type="application/ld+json">${musicLd}</script>`,
-     serverPageBody('CİGCİG MÜZİK', s.title, `${s.artist_name} tarafından seslendirilen şarkı.`, `<article class="seo-article">
+     serverPageBody('CİGCİG MÜZİK', s.title, `${s.artist_name} tarafından seslendirilen müzik.`, `<article class="seo-article">
        ${s.cover_url ? serverImage(s.cover_url, s.title, 'seo-hero-image') : ''}
        <h2>${escapeHtml(s.artist_name)}</h2>
        ${s.genre ? `<p class="seo-content-meta">Tür: ${escapeHtml(s.genre)}</p>` : ''}
-       ${s.lyrics ? `<div class="seo-lyrics"><h3>Şarkı sözleri</h3><div class="seo-article-text">${escapeHtml(s.lyrics)}</div></div>` : ''}
+       ${s.lyrics ? `<div class="seo-lyrics"><h3>Müzik sözleri</h3><div class="seo-article-text">${escapeHtml(s.lyrics)}</div></div>` : ''}
        <p class="seo-content-meta">Yükleyen: ${serverProfileLink(s.username)}</p>
      </article>`)
   ));
 });
 app.get('/artist-basvuru', (req, res) => res.send(injectMeta('Artist Başvurusu – CigCig Müzik', 'CigCig Müzik platformu artist rozetine başvur', `${SITE_URL}/artist-basvuru`, '')));
-app.get('/artist-panel', (req, res) => res.send(injectMeta('Artist Panel – CigCig Müzik', 'CigCig Müzik artist panelinde şarkı yükle ve yönet', `${SITE_URL}/artist-panel`, '')));
-app.get('/sarki-yukle', (req, res) => res.send(injectMeta('Şarkı Paylaş – CigCig Müzik', 'CigCig topluluğuyla müzik paylaş', `${SITE_URL}/sarki-yukle`, '')));
+app.get('/artist-panel', (req, res) => res.send(injectMeta('Artist Panel – CigCig Müzik', 'CigCig Müzik artist panelinde müzik yükle ve yönet', `${SITE_URL}/artist-panel`, '')));
+app.get('/sarki-yukle', (req, res) => res.send(injectMeta('Müzik Paylaş – CigCig Müzik', 'CigCig topluluğuyla müzik paylaş', `${SITE_URL}/sarki-yukle`, '')));
 app.get('/playlistlerim', (req, res) => res.send(injectMeta('Playlistlerim – CigCig Müzik', 'Kendi müzik playlistlerini oluştur ve yönet', `${SITE_URL}/playlistlerim`, '')));
 app.get('/playlist/:id', (req, res) => res.send(injectMeta('Playlist – CigCig Müzik', 'CigCig Müzik playlist', `${SITE_URL}/playlist/${req.params.id}`, '')));
 
@@ -5500,13 +5529,13 @@ app.post('/api/playlists/:id/songs', authMiddleware, async (req, res) => {
     const { rows: pl } = await query('SELECT id FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2 AND source_playlist_id IS NULL', [req.params.id, req.user.id]);
     if (!pl.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const { rows: song } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [song_id]);
-    if (!song.length) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+    if (!song.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
     const { rows: maxPos } = await query('SELECT COALESCE(MAX(position), -1) as mp FROM playlist_songs WHERE playlist_id=$1', [pl[0].id]);
     const pos = parseInt(maxPos[0].mp) + 1;
     try {
       await query('INSERT INTO playlist_songs (playlist_id, song_id, position) VALUES ($1, $2, $3)', [pl[0].id, song_id, pos]);
     } catch(e2) {
-      if (e2.code === '23505') return res.status(400).json({ error: 'Bu şarkı zaten playlistte' });
+      if (e2.code === '23505') return res.status(400).json({ error: 'Bu müzik zaten playlistte' });
       throw e2;
     }
     res.json({ ok: true });
@@ -6272,7 +6301,7 @@ app.get('/api/search', async (req, res) => {
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs
             WHERE cs.content_id=v.id AND cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END)
         ORDER BY vc.created_at DESC LIMIT $2`, [term, limit]),
-      // Müzikler: sözler de dahil olmak üzere şarkının aranabilir tüm metni
+      // Müzikler: sözler de dahil olmak üzere müziğin aranabilir tüm metni
       query(`SELECT s.id, s.slug, s.title, s.artist_name, s.genre, s.lyrics, s.created_at, u.username AS author
         FROM songs s JOIN users u ON u.id=s.uploader_id
         WHERE s.status='active'

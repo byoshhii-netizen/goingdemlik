@@ -1669,7 +1669,7 @@ async function renderHome(app) {
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(pl.name)}</div>
-              <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${pl.song_count} şarkı · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${pl.song_count} müzik · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
             </div>
           </div>
         </a>`).join('');
@@ -1710,7 +1710,6 @@ async function renderForumList(app, queryString) {
           <div class="page-title">Konular</div>
           ${activeTag ? `<div class="page-subtitle"><i class="fas fa-hashtag" style="color:var(--accent-red2)"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli &nbsp;<a href="/forum" data-link style="font-size:12px;color:var(--accent-red2)"><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
-        <div>${currentUser ? '<button class="btn btn-primary" id="forum-new-btn"><i class="fas fa-plus"></i> Yeni Konu Aç</button>' : ''}</div>
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="forum-search" placeholder="Konu veya #etiket ara..." /></div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -1737,10 +1736,6 @@ async function renderForumList(app, queryString) {
     renderForumListItems(filtered);
   });
 
-  $('#forum-new-btn')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewForumModal();
-  });
 }
 
 function renderForumListItems(forums) {
@@ -4099,7 +4094,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
       <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
     </div>
-    <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
+    <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Müzik veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
     <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label></div>
@@ -4719,7 +4714,7 @@ async function renderProfile(app, username) {
           <div class="song-card-subtitle">${escHtml(s.artist_name || s.uploader_name || s.username || '')}</div>
           <div class="song-card-meta">${s.play_count || 0} dinlenme</div>
         </div>
-      </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok</p></div>';
+      </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok</p></div>';
   document.title = user.username + ' - ' + siteName;
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
@@ -5258,7 +5253,7 @@ async function renderSettingsSection(section) {
       ['konular', 'Konular', 'Topluluğun son tartışmaları', 'fas fa-comments'],
       ['kitaplar', 'Kitaplar', 'Yeni ve öne çıkan kitaplar', 'fas fa-book'],
       ['gruplar', 'Gruplar', 'Katıldığın ve keşfedebileceğin gruplar', 'fas fa-users'],
-      ['muzikler', 'Müzikler', 'Son eklenen şarkılar', 'fas fa-music'],
+      ['muzikler', 'Müzikler', 'Son eklenen müzikler', 'fas fa-music'],
       ['fotograflar', 'Medya ve Hikayeler', 'Medya akışı ve hikaye çubuğu', 'fas fa-images'],
       ['magaza', 'Mağaza', 'Mağazadaki ürünler', 'fas fa-store'],
       ['playlistler', 'Playlistler', 'Kişisel müzik listelerin', 'fas fa-list-music']
@@ -7578,14 +7573,14 @@ async function renderMusicList(app) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${currentUser ? `<a href="/playlistlerim" data-link class="btn btn-outline btn-sm"><i class="fas fa-list"></i> Playlistlerim</a>` : ''}
         ${currentUser && !currentUser.is_artist ? `<a href="/artist-basvuru" data-link class="btn btn-outline btn-sm"><i class="fas fa-microphone"></i> Artist Başvurusu</a>` : ''}
-        ${currentUser?.is_artist ? `<a href="/artist-panel" data-link class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Şarkı Yükle</a>` : ''}
-        ${currentUser && !currentUser.is_artist ? `<a href="/sarki-yukle" data-link class="btn btn-outline btn-sm"><i class="fas fa-share"></i> Şarkı Paylaş</a>` : ''}
+        ${currentUser?.is_artist ? `<a href="/artist-panel" data-link class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Müzik Yükle</a>` : ''}
+        ${currentUser && !currentUser.is_artist ? `<a href="/sarki-yukle" data-link class="btn btn-outline btn-sm"><i class="fas fa-share"></i> Müzik Paylaş</a>` : ''}
       </div>
     </div>
     <div class="music-search-bar" style="margin-bottom:20px">
       <div class="search-bar" style="margin:0">
         <i class="fas fa-search"></i>
-        <input type="text" id="music-search" placeholder="Şarkı adı, sanatçı, tür, dağıtıcı, şarkı sözü ara..." style="width:100%" />
+        <input type="text" id="music-search" placeholder="Müzik adı, sanatçı, tür, dağıtıcı, müzik sözü ara..." style="width:100%" />
       </div>
     </div>
     <div id="music-list"></div>
@@ -7632,7 +7627,7 @@ async function renderMusicList(app) {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
       songs = await api(url);
       songs.sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
-      if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok.</p></div>'; return; }
+      if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; return; }
       el.innerHTML = `<div class="music-table">
         <div class="music-table-header">
           <div style="width:40px">#</div>
@@ -7769,7 +7764,7 @@ function buildShuffledOrder(len, startIdx) {
 }
 
 function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio = null) {
-  // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
+  // Zorunlu reklam önce kontrol edilir; yenileme veya müzik değiştirme reklamı atlatmaz.
   if (currentUser && !musicAdBypass && !song?.is_music_ad) {
     // Reklam kontrolü ağ isteği olduğu için kullanıcı tıklamasının oynatma
     // iznini kaybetmemesi adına aynı ses elementini şimdiden sessizce başlat.
@@ -7855,7 +7850,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
         <button class="gplayer-btn" id="gp-prev" title="Önceki"><i class="fas fa-step-backward"></i></button>
         <button class="gplayer-btn gplayer-play" id="gp-play"><i class="fas fa-pause"></i></button>
         <button class="gplayer-btn" id="gp-next" title="Sonraki"><i class="fas fa-step-forward"></i></button>
-        <button class="${repeatActive}" id="gp-repeat" title="Tekrarla (bu şarkı)"><i class="fas fa-redo-alt"></i></button>
+        <button class="${repeatActive}" id="gp-repeat" title="Tekrarla (bu müzik)"><i class="fas fa-redo-alt"></i></button>
       </div>
       <div class="gplayer-progress-wrap">
         <span class="gplayer-time" id="gp-cur">0:00</span>
@@ -7886,7 +7881,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
     const cur = document.getElementById('gp-cur'); if(cur) cur.textContent = fmtTime(audio.currentTime);
   });
 
-  // Şarkı bitince: repeat one, sıradaki çal veya dur
+  // Müzik bitince: repeat one, sıradaki çal veya dur
   audio.addEventListener('ended', async () => {
     const continueQueue = () => {
       if (playerRepeatOne) { audio.currentTime = 0; audio.play().catch(()=>{}); return; }
@@ -8006,7 +8001,7 @@ async function renderMusicDetail(app, slug) {
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let song;
   try { song = await api('/songs/' + slug); } catch {
-    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Şarkı bulunamadı.</p></div></div>'; return;
+    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Müzik bulunamadı.</p></div></div>'; return;
   }
   document.title = `${song.title} – ${song.artist_name} | ${siteName}`;
   const isOwn = song.song_type === 'own';
@@ -8022,7 +8017,7 @@ async function renderMusicDetail(app, slug) {
             : `<div class="song-detail-cover song-detail-cover-ph"><i class="fas fa-music"></i></div>`}
         </div>
         <div class="song-detail-meta-col">
-          <div class="song-detail-type">${isOwn ? '<i class="fas fa-microphone-alt"></i> Sanatçı Şarkısı' : '<i class="fas fa-share-alt"></i> Paylaşılan Şarkı'}</div>
+          <div class="song-detail-type">${isOwn ? '<i class="fas fa-microphone-alt"></i> Sanatçı Müziği' : '<i class="fas fa-share-alt"></i> Paylaşılan Müzik'}</div>
           <div class="song-detail-title">${escHtml(song.title)}</div>
           <div class="song-detail-artist">${escHtml(song.artist_name)}</div>
           <div class="song-detail-info-row">
@@ -8088,7 +8083,7 @@ async function renderMusicDetail(app, slug) {
 
       ${hasLyrics ? `
         <div class="song-lyrics-section">
-          <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
+          <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Müzik Sözleri</div>
           <div class="song-lyrics-text">${escHtml(song.lyrics)}</div>
         </div>
       ` : ''}
@@ -8186,10 +8181,10 @@ async function renderMusicDetail(app, slug) {
   const deleteBtn = document.getElementById('song-delete-btn');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
+      if (!confirm('Bu müziği silmek istediğinden emin misin?')) return;
       try {
         await api('/songs/' + song.id, { method: 'DELETE' });
-        toast('Şarkı silindi');
+        toast('Müzik silindi');
         navigate('/muzikler');
       } catch(e) { toast(e.message, 'error'); }
     });
@@ -8199,8 +8194,8 @@ async function renderMusicDetail(app, slug) {
   const editBtn = document.getElementById('song-edit-btn');
   if (editBtn) {
     editBtn.addEventListener('click', () => {
-      showModal(`✏️ Şarkıyı Düzenle — ${escHtml(song.title)}`, `
-        <div class="form-group"><label>Şarkı Adı</label><input id="ue-title" value="${escHtml(song.title)}" /></div>
+      showModal(`✏️ Müziği Düzenle — ${escHtml(song.title)}`, `
+        <div class="form-group"><label>Müzik Adı</label><input id="ue-title" value="${escHtml(song.title)}" /></div>
         ${song.song_type === 'own' ? `
         <div class="form-row">
           <div class="form-group"><label>Sanatçı Adı</label><input id="ue-artist" value="${escHtml(song.artist_name)}" /></div>
@@ -8208,7 +8203,7 @@ async function renderMusicDetail(app, slug) {
         </div>` : `
         <div class="form-group"><label>Sanatçı Adı</label><input id="ue-artist" value="${escHtml(song.artist_name)}" /></div>`}
         <div class="form-group"><label>Müzik Türü</label><input id="ue-genre" value="${escHtml(song.genre||'')}" /></div>
-        <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
+        <div class="form-group"><label>Müzik Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
         ${song.song_type === 'other' ? `<div class="form-group"><label>Paylaşma Sebebi</label><textarea id="ue-reason" rows="2">${escHtml(song.share_reason||'')}</textarea></div>` : ''}
         <div class="form-group"><label>Yeni Kapak Fotoğrafı (1:1 kare) <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
           <input type="file" id="ue-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
@@ -8235,7 +8230,7 @@ async function renderMusicDetail(app, slug) {
         try {
           await apiForm('/songs/' + song.id, fd, 'PUT');
           hideModal();
-          toast('Şarkı güncellendi!');
+          toast('Müzik güncellendi!');
           navigate('/muzik/' + slug);
         } catch(e) {
           msg.textContent = e.message;
@@ -8248,7 +8243,7 @@ async function renderMusicDetail(app, slug) {
   const remasteredBtn = document.getElementById('song-remastered-btn');
   remasteredBtn?.addEventListener('click', () => {
     showModal('Remastered versiyon ekle', `
-      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının remastered ses dosyasını sonradan yükleyebilirsin. Mevcut remastered dosyası varsa yenisiyle değiştirilir.</p>
+      <p style="color:var(--text-secondary);font-size:13px">Bu müziğin remastered ses dosyasını sonradan yükleyebilirsin. Mevcut remastered dosyası varsa yenisiyle değiştirilir.</p>
       <div class="form-group"><label>Ses dosyası *</label><input type="file" id="remastered-audio" accept="audio/*" required /></div>
       <button class="btn btn-primary" id="remastered-save" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Yükle</button>
       <div id="remastered-msg" class="form-error mt-4"></div>
@@ -8277,8 +8272,8 @@ async function renderMusicDetail(app, slug) {
     const options = songs.filter(item => String(item.id) !== String(song.id) && !existing.has(String(item.id)))
       .map(item => `<option value="${item.id}">${escHtml(item.title)} — ${escHtml(item.artist_name)}</option>`).join('');
     showModal('Dinleme önerisi ekle', `
-      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının detayında “Şunu da dinleyebilirsiniz” bölümünde görünecek.</p>
-      <div class="form-group"><label>Şarkı seç *</label><select id="recommend-song">${options || '<option value="">Eklenebilecek şarkı yok</option>'}</select></div>
+      <p style="color:var(--text-secondary);font-size:13px">Bu müziğin detayında “Şunu da dinleyebilirsiniz” bölümünde görünecek.</p>
+      <div class="form-group"><label>Müzik seç *</label><select id="recommend-song">${options || '<option value="">Eklenebilecek müzik yok</option>'}</select></div>
       <button class="btn btn-primary" id="recommend-save" style="width:100%;justify-content:center" ${options ? '' : 'disabled'}><i class="fas fa-plus"></i> Öneriyi ekle</button>
       <div id="recommend-msg" class="form-error mt-4"></div>
     `);
@@ -8307,7 +8302,7 @@ async function renderArtistApply(app) {
       <div style="text-align:center;padding:60px 20px">
         <div style="font-size:48px;margin-bottom:16px">🎤</div>
         <div style="font-size:22px;font-weight:700;margin-bottom:8px">Artist Rozetiniz Var!</div>
-        <p style="color:var(--text-secondary);margin-bottom:24px">Şarkı yüklemek için artist paneline gidin.</p>
+        <p style="color:var(--text-secondary);margin-bottom:24px">Müzik yüklemek için artist paneline gidin.</p>
         <a href="/artist-panel" data-link class="btn btn-primary"><i class="fas fa-music"></i> Artist Paneli</a>
       </div>
     </div>`;
@@ -8335,15 +8330,15 @@ async function renderArtistApply(app) {
     <div class="card">
       <div class="card-body">
         <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">
-          Artist rozeti alarak kendi şarkılarınızı CigCig'te yayınlayabilirsiniz.
+          Artist rozeti alarak kendi müziklerinizi CigCig'te yayınlayabilirsiniz.
         </p>
         <div class="form-group"><label>Müzik Türünüz *</label>
           <input id="apply-genre" placeholder="Pop, Rock, Hip-Hop, Elektronik..." />
         </div>
-        <div class="form-group"><label>Örnek Şarkı URL (SoundCloud, YouTube vb.)</label>
+        <div class="form-group"><label>Örnek Müzik URL (SoundCloud, YouTube vb.)</label>
           <input id="apply-url" placeholder="https://soundcloud.com/..." />
         </div>
-        <div class="form-group"><label>veya Örnek Şarkı Dosyası Yükle</label>
+        <div class="form-group"><label>veya Örnek Müzik Dosyası Yükle</label>
           <input type="file" id="apply-file" accept="audio/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" />
         </div>
         <div class="form-group"><label>Notunuz (isteğe bağlı)</label>
@@ -8399,37 +8394,37 @@ async function renderArtistPanel(app) {
     <div class="card">
       <div class="card-body">
         <div class="form-group">
-          <label>Şarkı Türü *</label>
+          <label>Müzik Türü *</label>
           <div style="display:flex;gap:10px">
             <label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
-              <input type="radio" name="song-type" id="st-own" value="own" checked style="width:auto" /> Kendi Şarkım
+              <input type="radio" name="song-type" id="st-own" value="own" checked style="width:auto" /> Benim Müziğim
             </label>
             ${window.otherSongsEnabled !== false ? `<label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
-              <input type="radio" name="song-type" id="st-other" value="other" style="width:auto" /> Başkasının Şarkısı
+              <input type="radio" name="song-type" id="st-other" value="other" style="width:auto" /> Başkasının Müziği
             </label>` : ''}
           </div>
         </div>
         <div id="own-fields">
           <div class="form-group"><label>Yayımlayıcı / Dağıtıcı İsmi</label><input id="s-distributor" placeholder="Kendi adın ya da şirket adı" /></div>
-          <div class="form-group"><label>Şarkı Adı *</label><input id="s-title" /></div>
-          <div class="form-group"><label>Şarkı Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
-          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Müzik Adı *</label><input id="s-title" /></div>
+          <div class="form-group"><label>Müzik Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
+          <div class="form-group"><label>Müzik Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
+          <div class="form-group"><label>Müzik Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Müzik sözlerini buraya yapıştırın..."></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.own_rules)}</div>
-          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Şarkı yayınlama kurallarını okudum ve kabul ediyorum</label>
+          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Müzik yayınlama kurallarını okudum ve kabul ediyorum</label>
         </div>
         <div id="other-fields" style="display:none">
-          <div class="form-group"><label>Şarkı Adı *</label><input id="s-title-o" /></div>
-          <div class="form-group"><label>Şarkı Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
+          <div class="form-group"><label>Müzik Adı *</label><input id="s-title-o" /></div>
+          <div class="form-group"><label>Müzik Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover-o" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
-          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
-          <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
+          <div class="form-group"><label>Müzik Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Müzik sözlerini buraya yapıştırın..."></textarea></div>
+          <div class="form-group"><label>Müzik Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu müziği neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.other_rules)}</div>
-          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-other" style="width:auto" /> Başkasının şarkısını paylaşma kurallarını okudum ve kabul ediyorum</label>
+          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-other" style="width:auto" /> Başkasının müziğini paylaşma kurallarını okudum ve kabul ediyorum</label>
         </div>
-        <button class="btn btn-primary" id="song-upload-btn" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Şarkıyı Yayınla</button>
+        <button class="btn btn-primary" id="song-upload-btn" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Müziği Yayınla</button>
         <div id="song-msg" style="margin-top:8px;font-size:12px"></div>
       </div>
     </div>
@@ -8452,7 +8447,7 @@ async function renderArtistPanel(app) {
     fd.append('rules_accepted', '1');
     if (isOwn) {
       const title = document.getElementById('s-title')?.value.trim();
-      if (!title) { msg.style.color='var(--accent-red2)'; msg.textContent='Şarkı adı gerekli'; return; }
+      if (!title) { msg.style.color='var(--accent-red2)'; msg.textContent='Müzik adı gerekli'; return; }
       const audio = document.getElementById('s-audio')?.files[0];
       if (!audio) { msg.style.color='var(--accent-red2)'; msg.textContent='Ses dosyası gerekli'; return; }
       fd.append('title', title);
@@ -8478,29 +8473,29 @@ async function renderArtistPanel(app) {
     try {
       const data = await apiForm('/songs', fd);
       navigate('/muzik/' + data.slug);
-    } catch(e) { msg.style.color='var(--accent-red2)'; msg.textContent=e.message; btn.disabled=false; btn.innerHTML='<i class="fas fa-upload"></i> Şarkıyı Yayınla'; }
+    } catch(e) { msg.style.color='var(--accent-red2)'; msg.textContent=e.message; btn.disabled=false; btn.innerHTML='<i class="fas fa-upload"></i> Müziği Yayınla'; }
   });
 }
 
-// ===== BAŞKASININ ŞARKISINI PAYLAŞ (artist rozeti gerekmez) =====
+// ===== BAŞKASININ MÜZİĞİNİ PAYLAŞ (artist rozeti gerekmez) =====
 async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  if (window.otherSongsEnabled === false) { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-ban"></i><p>Başkasının şarkısı paylaşma özelliği şu an kapalı.</p></div></div>'; return; }
+  if (window.otherSongsEnabled === false) { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-ban"></i><p>Başkasının müziği paylaşma özelliği şu an kapalı.</p></div></div>'; return; }
   // Artist olanlar kendi panelini kullansın
   if (currentUser.is_artist) { navigate('/artist-panel'); return; }
-  document.title = 'Şarkı Paylaş – ' + siteName;
+  document.title = 'Müzik Paylaş – ' + siteName;
 
   let rules = { other_rules: '' };
   try { rules = await api('/music-rules'); } catch {}
 
   app.innerHTML = `<div class="container page" style="max-width:680px;margin:0 auto">
-    <div class="page-title"><i class="fas fa-share-alt" style="color:var(--accent-red2);margin-right:8px"></i>Şarkı Paylaş</div>
+    <div class="page-title"><i class="fas fa-share-alt" style="color:var(--accent-red2);margin-right:8px"></i>Müzik Paylaş</div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-body" style="font-size:13px;color:var(--text-secondary);display:flex;align-items:flex-start;gap:10px">
         <i class="fas fa-info-circle" style="color:var(--accent-red2);margin-top:2px;flex-shrink:0"></i>
         <div>
-          Bu sayfa <strong>başkasına ait şarkıları</strong> topluluğa paylaşmak içindir.
-          Kendi şarkını yüklemek istiyorsan önce
+          Bu sayfa <strong>başkasına ait müzikleri</strong> topluluğa paylaşmak içindir.
+          Kendi müziğini yüklemek istiyorsan önce
           <a href="/artist-basvuru" data-link style="color:var(--accent-red2)">artist başvurusu</a> yapman gerekir.
         </div>
       </div>
@@ -8508,11 +8503,11 @@ async function renderShareSong(app) {
     <div class="card">
       <div class="card-body">
         <div class="form-group">
-          <label>Şarkı Adı *</label>
-          <input id="ss-title" placeholder="Şarkının adı" />
+          <label>Müzik Adı *</label>
+          <input id="ss-title" placeholder="Müziğin adı" />
         </div>
         <div class="form-group">
-          <label>Sanatçı (Şarkı Sahibi) *</label>
+          <label>Sanatçı (Müzik Sahibi) *</label>
           <input id="ss-artist" placeholder="Sanatçının adı" />
         </div>
         <div class="form-group">
@@ -8520,7 +8515,7 @@ async function renderShareSong(app) {
           <input id="ss-genre" placeholder="Pop, Rock, Hip-Hop..." />
         </div>
         <div class="form-group">
-          <label>Şarkı Dosyası * (MP3/WAV, max 50MB)</label>
+          <label>Müzik Dosyası * (MP3/WAV, max 50MB)</label>
           <input type="file" id="ss-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group">
@@ -8528,12 +8523,12 @@ async function renderShareSong(app) {
           <input type="file" id="ss-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group">
-          <label>Şarkı Sözleri (isteğe bağlı)</label>
-          <textarea id="ss-lyrics" rows="5" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea>
+          <label>Müzik Sözleri (isteğe bağlı)</label>
+          <textarea id="ss-lyrics" rows="5" placeholder="Müzik sözlerini buraya yapıştırın..."></textarea>
         </div>
         <div class="form-group">
           <label>Neden paylaşıyorsunuz? *</label>
-          <textarea id="ss-reason" rows="2" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea>
+          <textarea id="ss-reason" rows="2" placeholder="Bu müziği neden topluluğumuzla paylaşmak istediniz?"></textarea>
         </div>
         ${rules.other_rules ? `
         <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">
@@ -8541,7 +8536,7 @@ async function renderShareSong(app) {
         </div>` : ''}
         <label class="checkbox-label" style="margin-bottom:16px">
           <input type="checkbox" id="ss-rules" style="width:auto" />
-          <span>Başkasının şarkısını paylaşma kurallarını okudum ve kabul ediyorum</span>
+          <span>Başkasının müziğini paylaşma kurallarını okudum ve kabul ediyorum</span>
         </label>
         <button class="btn btn-primary" id="ss-submit" style="width:100%;justify-content:center">
           <i class="fas fa-share"></i> Paylaş
@@ -8563,7 +8558,7 @@ async function renderShareSong(app) {
     const reason = document.getElementById('ss-reason').value.trim();
     const rules_ok = document.getElementById('ss-rules').checked;
 
-    if (!title)    { msg.style.color='var(--accent-red2)'; msg.textContent='Şarkı adı zorunlu'; return; }
+    if (!title)    { msg.style.color='var(--accent-red2)'; msg.textContent='Müzik adı zorunlu'; return; }
     if (!artist)   { msg.style.color='var(--accent-red2)'; msg.textContent='Sanatçı adı zorunlu'; return; }
     if (!audio)    { msg.style.color='var(--accent-red2)'; msg.textContent='Ses dosyası zorunlu'; return; }
     if (!reason)   { msg.style.color='var(--accent-red2)'; msg.textContent='Paylaşma sebebi zorunlu'; return; }
@@ -8733,7 +8728,7 @@ function showStoryUploadModal() {
   const pendingStoryFile = window.__pendingStoryFile || null;
   delete window.__storyUploadDraft;
   delete window.__pendingStoryFile;
-  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda filtre uygulanarak kaydedilir; videolarda izleme ekranına uygulanır.</small></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
+  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda filtre uygulanarak kaydedilir; videolarda izleme ekranına uygulanır.</small></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Müzik veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
   let songs = [], selectedSong = null, selectedStoryFile = pendingStoryFile;
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   const renderMediaPreview = file => {
@@ -9201,7 +9196,7 @@ function showPhotoUploadModal() {
     <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" /></div>
     <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3"></textarea></div>
     <div class="form-group"><label>Konum</label><input id="photo-location" /></div>
-    <div class="form-group"><label>Müzik seç</label><input id="photo-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
+    <div class="form-group"><label>Müzik seç</label><input id="photo-song-search" placeholder="Müzik veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
     <div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div>
     <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
     <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
@@ -9371,7 +9366,7 @@ async function renderMyPlaylists(app) {
     try {
       const playlists = await api('/playlists');
       if (!playlists.length) {
-        el.innerHTML = `<div class="empty-state"><i class="fas fa-list"></i><p>Henüz playlist yok.</p><p style="font-size:13px;color:var(--text-muted)">Yeni bir playlist oluşturun ve şarkılar ekleyin.</p></div>`;
+        el.innerHTML = `<div class="empty-state"><i class="fas fa-list"></i><p>Henüz playlist yok.</p><p style="font-size:13px;color:var(--text-muted)">Yeni bir playlist oluşturun ve müzikler ekleyin.</p></div>`;
         return;
       }
       el.innerHTML = `<div class="pl-grid">
@@ -9384,7 +9379,7 @@ async function renderMyPlaylists(app) {
             </div>
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>
-              <div class="pl-card-meta"><span>${pl.song_count} şarkı</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
+              <div class="pl-card-meta"><span>${pl.song_count} müzik</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
               ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
               <div class="pl-card-owner"><i class="fas fa-user"></i> ${escHtml(pl.owner_username || currentUser.username || 'Bilinmiyor')}</div>
             </div>
@@ -9567,7 +9562,7 @@ async function renderPlaylistDetail(app, plId) {
           <div class="pl-detail-kicker"><span>PLAYLIST</span><span class="pl-detail-dot"></span><span>${playlist.is_public ? 'HERKESE AÇIK' : 'GİZLİ'}</span></div>
           <h1>${escHtml(playlist.name)}</h1>
           ${playlist.description ? `<p>${escHtml(playlist.description)}</p>` : ''}
-          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> ${escHtml(playlist.owner_username)}</span>` : ''}</div>
+          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} müzik</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> ${escHtml(playlist.owner_username)}</span>` : ''}</div>
         </div>
       </div>
       <div class="pl-detail-toolbar">
@@ -9575,7 +9570,7 @@ async function renderPlaylistDetail(app, plId) {
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
             <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
-          ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
+          ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Müzik Ekle</button>` : ''}
           ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
           ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kendi playlistlerine ekle"><i class="fas fa-bookmark"></i> Kütüphaneme ekle</button>` : ''}
         </div>
@@ -9600,7 +9595,7 @@ async function renderPlaylistDetail(app, plId) {
             </div>
             ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>` : ''}
           </div>`).join('')}
-      </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Şarkı eklemek için "Şarkı Ekle" butonuna tıklayın.</p></div>`}
+      </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Müzik eklemek için "Müzik Ekle" butonuna tıklayın.</p></div>`}
     </div>`;
 
     // Sırayla çal
@@ -9643,13 +9638,13 @@ async function renderPlaylistDetail(app, plId) {
       });
     });
 
-    // Şarkı kaldır
+    // Müzik kaldır
     app.querySelectorAll('.pl-remove-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
+        if (!confirm('Bu müziği playlistten çıkarmak istediğinize emin misiniz?')) return;
         try {
           await api('/playlists/' + plId + '/songs/' + btn.dataset.id, { method: 'DELETE' });
-          toast('Şarkı listeden çıkarıldı');
+          toast('Müzik listeden çıkarıldı');
           songs = songs.filter(s => String(s.id) !== String(btn.dataset.id));
           render();
         } catch(err) { toast(err.message, 'error'); }
@@ -9663,7 +9658,7 @@ async function renderPlaylistDetail(app, plId) {
       }, playlist.cover_url || '');
     });
 
-    // Şarkı ekle butonu – müzik listesinden seçme modalı
+    // Müzik ekle butonu – müzik listesinden seçme modalı
     document.getElementById('pl-add-songs-btn')?.addEventListener('click', () => showAddSongsModal(plId, songs, (newSongs) => {
       songs = newSongs;
       render();
@@ -9690,10 +9685,10 @@ async function renderPlaylistDetail(app, plId) {
 }
 
 function showAddSongsModal(plId, existingSongs, onAdded) {
-  showModal('🎵 Şarkı Ekle', `
+  showModal('🎵 Müzik Ekle', `
     <div class="search-bar" style="margin:0 0 12px 0">
       <i class="fas fa-search"></i>
-      <input type="text" id="plsearch" placeholder="Şarkı ara..." style="width:100%" />
+      <input type="text" id="plsearch" placeholder="Müzik ara..." style="width:100%" />
     </div>
     <div id="plsearch-list" style="max-height:320px;overflow-y:auto"></div>
   `);
@@ -9707,7 +9702,7 @@ function showAddSongsModal(plId, existingSongs, onAdded) {
     try {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
       const allSongs = await api(url);
-      if (!allSongs.length) { el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Şarkı bulunamadı</div>'; return; }
+      if (!allSongs.length) { el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Müzik bulunamadı</div>'; return; }
       el.innerHTML = allSongs.map(s => `
         <div class="pl-search-row ${existingIds.has(String(s.id)) ? 'pl-search-row-added' : ''}" data-id="${s.id}">
           <div style="display:flex;align-items:center;gap:10px;flex:1">

@@ -1614,7 +1614,7 @@ async function renderArtists(main) {
       <td>${a.banned ? '<span class="badge badge-red"><i class="fas fa-ban"></i> Banlı</span>' : '<span class="badge badge-green"><i class="fas fa-check"></i> Aktif</span>'}</td>
       <td>
         <div style="display:flex;gap:4px;flex-wrap:wrap">
-          <button class="btn btn-blue btn-xs view-artist-songs-btn" data-id="${a.id}" data-name="${escHtml(a.username)}" title="Şarkılarını Gör"><i class="fas fa-music"></i> Şarkılar</button>
+          <button class="btn btn-blue btn-xs view-artist-songs-btn" data-id="${a.id}" data-name="${escHtml(a.username)}" title="Müziklerini Gör"><i class="fas fa-music"></i> Müzikler</button>
           <button class="btn btn-outline btn-xs edit-artist-btn" data-id="${a.id}" title="Bilgileri Düzenle"><i class="fas fa-edit"></i></button>
           <button class="btn btn-danger btn-xs revoke-artist-btn" data-id="${a.id}" data-name="${escHtml(a.username)}" title="Artist Rozetini Kaldır"><i class="fas fa-microphone-slash"></i></button>
         </div>
@@ -1655,7 +1655,7 @@ async function renderArtists(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Artist</th><th>Tür</th><th>Şarkılar</th><th>Artist'ten beri</th><th>Durum</th><th>İşlem</th></tr></thead>
+      <thead><tr><th>Artist</th><th>Tür</th><th>Müzikler</th><th>Artist'ten beri</th><th>Durum</th><th>İşlem</th></tr></thead>
           <tbody id="artists-tbody"></tbody>
         </table>
       </div>
@@ -1673,7 +1673,7 @@ async function renderArtists(main) {
 }
 
 async function showArtistSongsModal(artistId, artistName) {
-  showModal(`🎵 ${artistName} — Şarkılar`, `<div class="loading-center" style="padding:40px"><div class="spinner"></div></div>`);
+  showModal(`🎵 ${artistName} — Müzikler`, `<div class="loading-center" style="padding:40px"><div class="spinner"></div></div>`);
   let songs = [];
   try { songs = await adminApi('/artists/'+artistId+'/songs'); } catch(e) {
     $('#modal-body').innerHTML = `<div style="color:var(--red2);padding:20px">${escHtml(e.message)}</div>`; return;
@@ -1682,7 +1682,7 @@ async function showArtistSongsModal(artistId, artistName) {
   const renderSongs = (list) => {
     const wrap = $('#artist-songs-wrap'); if (!wrap) return;
     if (!list.length) {
-      wrap.innerHTML = '<div style="text-align:center;color:var(--text3);padding:32px"><i class="fas fa-music" style="font-size:28px;margin-bottom:8px;display:block"></i>Şarkı yok</div>';
+      wrap.innerHTML = '<div style="text-align:center;color:var(--text3);padding:32px"><i class="fas fa-music" style="font-size:28px;margin-bottom:8px;display:block"></i>Müzik yok</div>';
       return;
     }
     wrap.innerHTML = list.map(s => {
@@ -1732,7 +1732,7 @@ async function showArtistSongsModal(artistId, artistName) {
 
   $('#modal-body').innerHTML = `
     <div style="margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
-      <span style="font-size:12px;color:var(--text2)">${songs.length} şarkı</span>
+      <span style="font-size:12px;color:var(--text2)">${songs.length} müzik</span>
       <div class="adm-search" style="max-width:200px"><i class="fas fa-search"></i><input id="asong-search" type="text" placeholder="Ara..." style="min-width:0" /></div>
     </div>
     <div id="artist-songs-wrap"></div>`;
@@ -1745,10 +1745,10 @@ async function showArtistSongsModal(artistId, artistName) {
 }
 
 function showSongBanModal(songId, songTitle, songs, renderSongs) {
-  showModal(`🚫 Şarkı Banla — ${songTitle}`, `
+  showModal(`🚫 Müzik Banla — ${songTitle}`, `
     <div style="background:rgba(220,38,38,0.07);border:1px solid var(--border-red);border-radius:10px;padding:14px;margin-bottom:16px;font-size:12px;color:var(--text2)">
       <i class="fas fa-info-circle" style="color:var(--red2);margin-right:6px"></i>
-      Ban uygulanan şarkı dinleyicilere gösterilmez. Süreli ban bitince otomatik aktife döner.
+      Ban uygulanan müzik dinleyicilere gösterilmez. Süreli ban bitince otomatik aktife döner.
     </div>
     <div class="form-group">
       <label>Ban Sebebi</label>
@@ -1808,7 +1808,7 @@ function showSongBanModal(songId, songTitle, songs, renderSongs) {
     btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div>';
     try {
       await adminApi('/songs/'+songId+'/ban', { method:'POST', body:JSON.stringify({ reason, duration_days: days }) });
-      toast('Şarkıya ban uygulandı');
+      toast('Müziğe ban uygulandı');
       hideModal();
       const s = songs.find(x => x.id == songId);
       if (s) { s.status='suspended'; s.ban_reason=reason; s.ban_until=days>0?new Date(Date.now()+days*86400000).toISOString():null; }
@@ -1851,7 +1851,7 @@ function showEditArtistModal(artist, list, renderTable) {
         <input type="checkbox" id="ea-is-artist" ${artist.is_artist ? 'checked' : ''} />
         <span><i class="fas fa-microphone-alt" style="color:var(--red2);margin-right:6px"></i> Artist rozeti aktif</span>
       </label>
-      <div style="font-size:11px;color:var(--text3);margin-top:6px;margin-left:26px">Rozeti kaldırırsan kullanıcı yeni şarkı yükleyemez. Mevcut şarkılar silinmez.</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:6px;margin-left:26px">Rozeti kaldırırsan kullanıcı yeni müzik yükleyemez. Mevcut müzikler silinmez.</div>
     </div>
     <button class="btn btn-primary" id="ea-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
     <div id="ea-err" class="form-error mt-4"></div>
@@ -2430,7 +2430,7 @@ async function renderAdminSongs(main) {
   main.innerHTML = `
     <div class="adm-section-header">
       <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-music"></i></div> Müzikler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${songs.length})</span></div>
-      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="song-search" placeholder="Şarkı, sanatçı, dağıtıcı ara..." style="min-width:220px" /></div>
+      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="song-search" placeholder="Müzik, sanatçı, dağıtıcı ara..." style="min-width:220px" /></div>
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -2442,7 +2442,7 @@ async function renderAdminSongs(main) {
     </div>`;
   const render = (list) => {
     const t = document.getElementById('songs-tbody'); if (!t) return;
-    if (!list.length) { t.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px">Şarkı yok</td></tr>'; return; }
+    if (!list.length) { t.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px">Müzik yok</td></tr>'; return; }
     t.innerHTML = list.map(s => `<tr>
       <td>${s.cover_url ? `<img src="${escHtml(s.cover_url)}" style="width:40px;height:40px;border-radius:6px;object-fit:cover" />` : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg4);display:flex;align-items:center;justify-content:center;color:var(--text3)"><i class="fas fa-music"></i></div>`}</td>
       <td>
@@ -2473,13 +2473,13 @@ async function renderAdminSongs(main) {
       const ds = e.target.closest('.ds-btn');
       if (es) { const s = list.find(x => x.id == es.dataset.id); if (s) showSongEditModal(s); }
       if (sus) {
-        if (!confirm('Şarkı askıya alınsın mı?')) return;
+        if (!confirm('Müzik askıya alınsın mı?')) return;
         try { await adminApi('/songs/'+sus.dataset.id, {method:'PUT', body:JSON.stringify({status:'suspended'})}); toast('Askıya alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
       if (unsus) {
         try { await adminApi('/songs/'+unsus.dataset.id, {method:'PUT', body:JSON.stringify({status:'active'})}); toast('Aktife alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
-      if (ds) { if (!confirm('Şarkı kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
+      if (ds) { if (!confirm('Müzik kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
     });
   };
   render(songs);
@@ -2490,9 +2490,9 @@ async function renderAdminSongs(main) {
 }
 
 function showSongEditModal(song) {
-  showModal(`Şarkı Düzenle — ${escHtml(song.title)}`, `
+  showModal(`Müziği Düzenle — ${escHtml(song.title)}`, `
     <div class="form-row">
-      <div class="form-group"><label>Şarkı Adı</label><input id="se-title" value="${escHtml(song.title)}" /></div>
+      <div class="form-group"><label>Müzik Adı</label><input id="se-title" value="${escHtml(song.title)}" /></div>
       <div class="form-group"><label>Sanatçı Adı</label><input id="se-artist" value="${escHtml(song.artist_name)}" /></div>
     </div>
     <div class="form-row">
@@ -2509,7 +2509,7 @@ function showSongEditModal(song) {
         </select>
       </div>
     </div>
-    <div class="form-group"><label>Şarkı Sözleri</label><textarea id="se-lyrics" rows="6">${escHtml(song.lyrics||'')}</textarea></div>
+    <div class="form-group"><label>Müzik Sözleri</label><textarea id="se-lyrics" rows="6">${escHtml(song.lyrics||'')}</textarea></div>
     <div class="form-group"><label>Yeni Ses Dosyası (boş bırak = değişme)</label>
       <input type="file" id="se-audio" accept="audio/*" style="background:var(--bg3);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
     </div>
@@ -2536,7 +2536,7 @@ function showSongEditModal(song) {
       const res = await fetch('/api/admin/songs/'+song.id, { method:'PUT', headers:{'X-Admin-Token':adminToken}, body:fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error||'Hata');
-      toast('Şarkı güncellendi'); hideModal(); loadSection('songs');
+      toast('Müzik güncellendi'); hideModal(); loadSection('songs');
     } catch(e) { document.getElementById('se-msg').textContent=e.message; btn.disabled=false; btn.innerHTML='<i class="fas fa-save"></i> Kaydet'; }
   });
 }
@@ -2669,7 +2669,7 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Fotoğraf Müzik Süresi</span></div>
         <div class="card-body">
-          <div class="form-group"><label>Fotoğraflarda şarkı kaç saniye çalsın?</label><input id="s-photo-song-clip" type="number" min="1" max="300" step="1" value="${escHtml(settings['photo_song_clip_seconds'] || '30')}" /></div>
+          <div class="form-group"><label>Fotoğraflarda müzik kaç saniye çalsın?</label><input id="s-photo-song-clip" type="number" min="1" max="300" step="1" value="${escHtml(settings['photo_song_clip_seconds'] || '30')}" /></div>
           <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Fotoğraf akışındaki müzikler, seçilen başlangıç noktasından itibaren bu süre boyunca çalar. Sınır: 1-300 saniye.</small>
           <button class="btn btn-primary" id="s-photo-song-clip-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Süreyi kaydet</button>
           <div id="s-photo-song-clip-msg" class="form-error mt-4"></div>
@@ -2810,16 +2810,16 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Şarkı Yayınlama Kuralları</span></div>
+        <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Müzik Yayınlama Kuralları</span></div>
         <div class="card-body">
-          <div class="form-group"><label>Kendi Şarkım – Kurallar</label><textarea id="s-music-own" rows="4">${escHtml(settings['music_own_rules']||'')}</textarea></div>
+          <div class="form-group"><label>Benim Müziğim – Kurallar</label><textarea id="s-music-own" rows="4">${escHtml(settings['music_own_rules']||'')}</textarea></div>
           <button class="btn btn-primary btn-sm" id="s-music-own-save" style="width:100%;justify-content:center;margin-bottom:16px"><i class="fas fa-save"></i> Kaydet</button>
           <label class="checkbox-label" style="margin-bottom:12px">
             <input type="checkbox" id="s-other-songs-enabled" ${settings['other_songs_enabled']!=='0'?'checked':''} />
-            "Başkasının Şarkısı" özelliğini etkinleştir
+            "Başkasının Müziği" özelliğini etkinleştir
           </label>
           <button class="btn btn-primary btn-sm" id="s-other-toggle-save" style="width:100%;justify-content:center;margin-bottom:16px"><i class="fas fa-save"></i> Kaydet</button>
-          <div class="form-group"><label>Başkasının Şarkısı – Kurallar</label><textarea id="s-music-other" rows="4">${escHtml(settings['music_other_rules']||'')}</textarea></div>
+          <div class="form-group"><label>Başkasının Müziği – Kurallar</label><textarea id="s-music-other" rows="4">${escHtml(settings['music_other_rules']||'')}</textarea></div>
           <button class="btn btn-primary btn-sm" id="s-music-other-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-music-msg" class="form-error mt-4"></div>
         </div>

@@ -366,6 +366,24 @@ input, textarea, select {
 }
 input:focus, textarea:focus, select:focus { border-color: var(--accent-red); }
 textarea { resize: vertical; min-height: 100px; }
+/* Müzik sözleri uzun metin olduğu için mobilde de rahat yazılabilir olsun. */
+textarea#s-lyrics,
+textarea#s-lyrics-o,
+textarea#ss-lyrics,
+textarea#ue-lyrics,
+textarea#se-lyrics {
+  min-height: 210px;
+  line-height: 1.55;
+}
+@media (max-width: 600px) {
+  textarea#s-lyrics,
+  textarea#s-lyrics-o,
+  textarea#ss-lyrics,
+  textarea#ue-lyrics,
+  textarea#se-lyrics {
+    min-height: 185px;
+  }
+}
 label { display: block; font-size: 13px; font-weight: 500; color: var(--text-secondary); margin-bottom: 6px; }
 
 /* ===== NAVBAR ===== */
@@ -2260,12 +2278,13 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     z-index: 90;
-    padding: 6px 0 max(6px, env(safe-area-inset-bottom));
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
   }
   .mobile-bottom-bar a {
     flex: 1;
     min-width: 0;
     width: 0;
+    min-height: 52px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2273,19 +2292,19 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
     gap: 3px;
     color: var(--text-muted);
     font-size: 0;
-    padding: 4px 0;
+    padding: 6px 0;
     transition: color 0.15s;
   }
   .mobile-bottom-bar a.active { color: var(--accent-red) !important; background: transparent; }
   .mobile-bottom-bar a:hover { color: var(--text-muted); background: transparent; }
-  .mobile-bottom-bar i { font-size: 18px; }
-  body { padding-bottom: 60px; }
-  #toast-container { bottom: 72px; }
+  .mobile-bottom-bar i { font-size: 22px; }
+  body { padding-bottom: 72px; }
+  #toast-container { bottom: 84px; }
 }
 @media (min-width: 769px) {
   .mobile-bottom-bar { display: none; }
 }
-.mobile-bottom-avatar { display: none; width: 26px !important; height: 26px !important; min-width: 26px; max-width: 26px; aspect-ratio: 1 / 1; border-radius: 50%; object-fit: cover !important; object-position: center; border: 1px solid var(--border); flex: 0 0 26px; }
+.mobile-bottom-avatar { display: none; width: 30px !important; height: 30px !important; min-width: 30px; max-width: 30px; aspect-ratio: 1 / 1; border-radius: 50%; object-fit: cover !important; object-position: center; border: 1px solid var(--border); flex: 0 0 30px; }
 .mobile-bottom-avatar.avatar-fallback-logo { object-fit: contain !important; border-radius: 0; border: 0; }
 #mobile-notif-badge { display: none; position: absolute; top: 3px; right: 2px; min-width: 14px; padding: 1px 4px; border-radius: 8px; background: var(--accent-red); color: var(--accent-contrast); font-size: 9px; line-height: 1.2; }
 .message-count-badge { display: none; position: absolute; top: 1px; right: calc(50% - 17px); min-width: 16px; padding: 1px 4px; border-radius: 10px; background: #e11d48; color: #fff; font-size: 10px; line-height: 1.2; font-weight: 800; text-align: center; }
@@ -3010,7 +3029,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   /* Footer mobil */
   #site-footer { margin-bottom: 60px; }
 
-  /* Şarkı kartı grid */
+  /* Müzik kartı grid */
   .grid-2 { grid-template-columns: repeat(2, 1fr) !important; gap: 10px !important; }
 }
 
