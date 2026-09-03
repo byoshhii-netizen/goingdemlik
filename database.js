@@ -1345,6 +1345,11 @@ async function initDb() {
 
     ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS moderators_can_manage INTEGER DEFAULT 0;
     ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS moderators_can_write INTEGER DEFAULT 0;
+    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+    INSERT INTO group_channels (group_id, name, icon, is_default, created_by)
+      SELECT g.id, 'kanal', 'fas fa-hashtag', 1, g.owner_id
+      FROM groups g
+      WHERE NOT EXISTS (SELECT 1 FROM group_channels gc WHERE gc.group_id = g.id);
   `);
 
   // Seed default levels

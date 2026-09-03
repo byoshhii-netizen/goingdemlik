@@ -2870,6 +2870,8 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
   if (req.user) {
     const { rows: m } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
     if (m.length) { isMember = true; role = m[0].role; }
+    const { rows: approvalRows } = await query('SELECT status FROM group_approval_requests WHERE group_id=$1 AND user_id=$2 ORDER BY requested_at DESC LIMIT 1', [group.id, req.user.id]);
+    if (approvalRows.length && approvalRows[0].status === 'pending') joinRequestStatus = { status: 'pending', approval: true };
     // Check if user has pending join request for private group
     if (!isMember && (group.type === 'private' || group.invite_only)) {
       const { rows: jr } = await query('SELECT status, rejection_reason FROM group_join_requests WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
@@ -2893,6 +2895,7 @@ app.post('/api/groups', authMiddleware, async (req, res) => {
     const realSlug = makeSlug(name, id);
     await query('UPDATE groups SET slug=$1 WHERE id=$2', [realSlug, id]);
     await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [id, req.user.id, 'owner']);
+    await query(`INSERT INTO group_channels (group_id, name, icon, is_default, created_by) VALUES ($1, 'kanal', 'fas fa-hashtag', 1, $2) ON CONFLICT (group_id, name) DO NOTHING`, [id, req.user.id]);
     if (groupVisibility !== 'public') {
       await query('INSERT INTO group_invites (group_id,invite_code,created_by) VALUES ($1,$2,$3)', [id, randomUUID().substring(0, 8).toUpperCase(), req.user.id]);
     }
@@ -2944,6 +2947,11 @@ app.post('/api/group/:slug/join', authMiddleware, async (req, res) => {
   if ((group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public')) !== 'public') return res.status(403).json({ error: 'Bu grup sadece davet kodu ile katılabilir' });
   const { rows: ex } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (ex.length) return res.status(400).json({ error: 'Zaten üyesiniz' });
+  const { rows: approvalRows } = await query('SELECT is_enabled FROM group_approval_systems WHERE group_id=$1', [group.id]);
+  if (approvalRows[0]?.is_enabled) {
+    await query(`INSERT INTO group_approval_requests (group_id, user_id, status) VALUES ($1, $2, 'pending') ON CONFLICT (group_id, user_id) DO UPDATE SET status='pending', requested_at=NOW(), rejection_reason=''`, [group.id, req.user.id]);
+    return res.json({ ok: true, approval_required: true });
+  }
   await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [group.id, req.user.id, 'member']);
   await query('UPDATE groups SET member_count=member_count+1 WHERE id=$1', [group.id]);
   res.json({ ok: true });
@@ -7734,13 +7742,37 @@ initDb().then(() => {
   }).then(() => {
     // ===== KANAL SİSTEMİ API'LAR =====
 
+    const authorizeChannel = async (req, res, slug, channelId, permission = 'read') => {
+      const { rows } = await query(`
+        SELECT gc.*, g.id AS group_id, g.owner_id, g.allow_chat, g.status, g.suspended, g.banned
+        FROM group_channels gc JOIN groups g ON gc.group_id=g.id
+        WHERE gc.id=$1 AND g.slug=$2
+      `, [channelId, slug]);
+      if (!rows.length) { res.status(404).json({ error: 'Kanal bulunamadı' }); return null; }
+      const channel = rows[0];
+      if (await denyIfGroupUnavailable(req, res, channel)) return null;
+      if (!req.user) { res.status(401).json({ error: 'Giriş yapmalısınız' }); return null; }
+      const { rows: memberRows } = await query('SELECT * FROM group_members WHERE group_id=$1 AND user_id=$2', [channel.group_id, req.user.id]);
+      const member = memberRows[0];
+      const isOwner = Number(channel.owner_id) === Number(req.user.id);
+      const isMod = member?.role === 'moderator';
+      const { rows: approvalRows } = await query('SELECT status FROM group_approval_requests WHERE group_id=$1 AND user_id=$2', [channel.group_id, req.user.id]);
+      const isPending = !member && approvalRows[0]?.status === 'pending';
+      const canSee = isOwner || (member && channel.visibility !== 'approval_only') || (isPending && channel.visibility === 'approval_only');
+      if (!canSee) { res.status(403).json({ error: 'Bu kanalı görüntüleme yetkiniz yok' }); return null; }
+      if (permission === 'manage' && !isOwner && !(isMod && Number(channel.moderators_can_manage) === 1)) { res.status(403).json({ error: 'Kanal yönetimi için yetkiniz yok' }); return null; }
+      if (permission === 'write' && !isOwner && !(isPending && channel.visibility === 'approval_only') && !(member && Number(channel.can_write) === 1) && !(isMod && Number(channel.moderators_can_write) === 1)) { res.status(403).json({ error: 'Bu kanala yazamıyorsunuz' }); return null; }
+      if (permission === 'write' && !channel.allow_chat) { res.status(403).json({ error: 'Grup sohbeti kapatılmış' }); return null; }
+      return { channel, member, isOwner, isMod, isPending };
+    };
+
     // Gruba kanal listesi getir
     app.get('/api/group/:slug/channels', optionalAuth, async (req, res) => {
       try {
         const { slug } = req.params;
         const result = await query(`
           SELECT gc.id, gc.name, gc.icon, gc.description, gc.is_default, 
-                 gc.can_view_history, gc.can_write, gc.visibility, gc.created_by,
+                 gc.can_view_history, gc.can_write, gc.visibility, gc.moderators_can_manage, gc.moderators_can_write, gc.created_by,
                  u.username as created_by_username, 
                  COUNT(gcm.id) as message_count
           FROM group_channels gc
@@ -7750,7 +7782,14 @@ initDb().then(() => {
           GROUP BY gc.id, u.id
           ORDER BY gc.is_default DESC, gc.created_at ASC
         `, [slug]);
-        res.json(result.rows);
+        if (!req.user) return res.status(401).json({ error: 'Giriş yapmalısınız' });
+        const { rows: groupRows } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [slug]);
+        if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        const { rows: memberRows } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [groupRows[0].id, req.user.id]);
+        const { rows: approvalRows } = await query('SELECT status FROM group_approval_requests WHERE group_id=$1 AND user_id=$2', [groupRows[0].id, req.user.id]);
+        const isPrivileged = Number(groupRows[0].owner_id) === Number(req.user.id) || memberRows[0]?.role === 'moderator';
+        const isPending = !memberRows.length && approvalRows[0]?.status === 'pending';
+        res.json(result.rows.filter(channel => isPrivileged || (isPending ? channel.visibility === 'approval_only' : channel.visibility !== 'approval_only')));
       } catch (e) {
         console.error('Kanal listesi hatası:', e.message);
         res.status(500).json({ error: 'Kanal listesi alınamadı' });
@@ -7774,7 +7813,7 @@ initDb().then(() => {
           'SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2',
           [groupId, req.user.id]
         );
-        if (!memberRes.rows.length || (memberRes.rows[0].role !== 'owner' && memberRes.rows[0].role !== 'moderator')) {
+        if (!memberRes.rows.length || memberRes.rows[0].role !== 'owner') {
           return res.status(403).json({ error: 'Kanal oluşturmak için yetkiniz yok' });
         }
 
@@ -7795,7 +7834,7 @@ initDb().then(() => {
     app.put('/api/group/:slug/channel/:channelId', authMiddleware, async (req, res) => {
       try {
         const { slug, channelId } = req.params;
-        const { name, icon, description, can_write, can_view_history, visibility } = req.body;
+        const { name, icon, description, can_write, can_view_history, visibility, moderators_can_manage, moderators_can_write } = req.body;
 
         const channelRes = await query(
           `SELECT gc.* FROM group_channels gc
@@ -7810,9 +7849,8 @@ initDb().then(() => {
           'SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2',
           [groupId, req.user.id]
         );
-        if (!memberRes.rows.length || (memberRes.rows[0].role !== 'owner' && memberRes.rows[0].role !== 'moderator')) {
-          return res.status(403).json({ error: 'Kanal güncellemek için yetkiniz yok' });
-        }
+        const access = await authorizeChannel(req, res, slug, channelId, 'manage');
+        if (!access) return;
 
         const updates = [];
         const values = [];
@@ -7823,6 +7861,8 @@ initDb().then(() => {
         if (can_write !== undefined) { updates.push(`can_write = $${paramNum++}`); values.push(can_write); }
         if (can_view_history !== undefined) { updates.push(`can_view_history = $${paramNum++}`); values.push(can_view_history); }
         if (visibility) { updates.push(`visibility = $${paramNum++}`); values.push(visibility); }
+        if (moderators_can_manage !== undefined) { updates.push(`moderators_can_manage = $${paramNum++}`); values.push(moderators_can_manage); }
+        if (moderators_can_write !== undefined) { updates.push(`moderators_can_write = $${paramNum++}`); values.push(moderators_can_write); }
         
         values.push(channelId);
         const result = await query(
@@ -7849,15 +7889,14 @@ initDb().then(() => {
         );
         if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
         if (channelRes.rows[0].is_default) return res.status(400).json({ error: 'Varsayılan kanal silinemez' });
+        const access = await authorizeChannel(req, res, slug, channelId, 'manage');
+        if (!access) return;
 
         const groupId = channelRes.rows[0].group_id;
         const memberRes = await query(
           'SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2',
           [groupId, req.user.id]
         );
-        if (!memberRes.rows.length || (memberRes.rows[0].role !== 'owner' && memberRes.rows[0].role !== 'moderator')) {
-          return res.status(403).json({ error: 'Kanal silmek için yetkiniz yok' });
-        }
 
         await query('DELETE FROM group_channels WHERE id = $1', [channelId]);
         res.json({ success: true });
@@ -7873,13 +7912,10 @@ initDb().then(() => {
         const { slug, channelId } = req.params;
         const { limit = 50, offset = 0 } = req.query;
 
-        const channelRes = await query(
-          `SELECT gc.* FROM group_channels gc
-           JOIN groups g ON gc.group_id = g.id
-           WHERE gc.id = $1 AND g.slug = $2`,
-          [channelId, slug]
-        );
-        if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
+        const access = await authorizeChannel(req, res, slug, channelId, 'read');
+        if (!access) return;
+        const channelRes = { rows: [access.channel] };
+        if (!Number(access.channel.can_view_history) && !access.isOwner) return res.json([]);
 
         const result = await query(
           `SELECT gcm.id, gcm.channel_id, gcm.user_id, u.username, u.avatar, 
@@ -7906,21 +7942,9 @@ initDb().then(() => {
         const { content, image_url = '' } = req.body;
         if (!content && !image_url) return res.status(400).json({ error: 'Mesaj içeriği gerekli' });
 
-        const channelRes = await query(
-          `SELECT gc.*, g.id as group_id FROM group_channels gc
-           JOIN groups g ON gc.group_id = g.id
-           WHERE gc.id = $1 AND g.slug = $2`,
-          [channelId, slug]
-        );
-        if (!channelRes.rows.length) return res.status(404).json({ error: 'Kanal bulunamadı' });
-        if (!channelRes.rows[0].can_write) return res.status(403).json({ error: 'Bu kanala yazamıyorsunuz' });
-
-        const groupId = channelRes.rows[0].group_id;
-        const memberRes = await query(
-          'SELECT * FROM group_members WHERE group_id = $1 AND user_id = $2',
-          [groupId, req.user.id]
-        );
-        if (!memberRes.rows.length) return res.status(403).json({ error: 'Grubun üyesi değilsiniz' });
+        const access = await authorizeChannel(req, res, slug, channelId, 'write');
+        if (!access) return;
+        const groupId = access.channel.group_id;
 
         const result = await query(
           `INSERT INTO group_channel_messages (channel_id, user_id, content, image_url)
@@ -7943,8 +7967,8 @@ initDb().then(() => {
         if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
         const groupId = groupRes.rows[0].id;
 
-        // Sadece sahibi etkinleştirebilir
-        if (groupRes.rows[0].owner_id !== req.user.id) {
+        const { rows: managerRows } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [groupId, req.user.id]);
+        if (groupRes.rows[0].owner_id !== req.user.id && managerRows[0]?.role !== 'moderator') {
           return res.status(403).json({ error: 'Onay sistemini değiştirmek için yetkiniz yok' });
         }
 
@@ -7971,7 +7995,7 @@ initDb().then(() => {
           if (!channelCheck.rows.length) {
             await query(
               `INSERT INTO group_channels (group_id, name, icon, is_default, can_write, visibility, created_by)
-               VALUES ($1, $2, $3, 1, 1, $4, $5)`,
+               VALUES ($1, $2, $3, 0, 1, $4, $5)`,
               [groupId, 'onay', 'fas fa-check-circle', 'approval_only', req.user.id]
             );
           }
@@ -8024,8 +8048,8 @@ initDb().then(() => {
         if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
         const groupId = groupRes.rows[0].id;
 
-        // Sadece sahibi görebilir
-        if (groupRes.rows[0].owner_id !== req.user.id) {
+        const { rows: managerRows } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [groupId, req.user.id]);
+        if (groupRes.rows[0].owner_id !== req.user.id && managerRows[0]?.role !== 'moderator') {
           return res.status(403).json({ error: 'Yetkili değilsiniz' });
         }
 
@@ -8055,12 +8079,14 @@ initDb().then(() => {
         if (!groupRes.rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
         const groupId = groupRes.rows[0].id;
 
-        if (groupRes.rows[0].owner_id !== req.user.id) {
+        const { rows: managerRows } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [groupId, req.user.id]);
+        if (groupRes.rows[0].owner_id !== req.user.id && managerRows[0]?.role !== 'moderator') {
           return res.status(403).json({ error: 'Yetkili değilsiniz' });
         }
 
         const requestRes = await query('SELECT * FROM group_approval_requests WHERE id = $1 AND group_id = $2', [requestId, groupId]);
         if (!requestRes.rows.length) return res.status(404).json({ error: 'Talep bulunamadı' });
+        if (requestRes.rows[0].status !== 'pending') return res.json({ success: true });
 
         const userId = requestRes.rows[0].user_id;
         if (approved) {
@@ -8071,6 +8097,7 @@ initDb().then(() => {
              ON CONFLICT (group_id, user_id) DO NOTHING`,
             [groupId, userId]
           );
+          await query('UPDATE groups SET member_count = member_count + 1 WHERE id=$1', [groupId]);
           await query(
             `UPDATE group_approval_requests SET status = 'approved', reviewed_by = $1, reviewed_at = NOW() WHERE id = $2`,
             [req.user.id, requestId]
