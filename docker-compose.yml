@@ -4,11 +4,9 @@ services:
     image: postgres:15-alpine
     container_name: demlik-db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: demlikforum
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER gerekli}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}
+      POSTGRES_DB: ${POSTGRES_DB:-demlikforum}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +22,9 @@ services:
       - "3001:8080"
     environment:
       PORT: 8080
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/demlikforum
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER gerekli}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD gerekli}@postgres:5432/${POSTGRES_DB:-demlikforum}
+      VMB_PANEL_USERNAME: ${VMB_PANEL_USERNAME:?VMB_PANEL_USERNAME gerekli}
+      VMB_PANEL_PASSWORD: ${VMB_PANEL_PASSWORD:?VMB_PANEL_PASSWORD gerekli}
     depends_on:
       postgres:
         condition: service_healthy

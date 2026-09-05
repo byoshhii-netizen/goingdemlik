@@ -544,7 +544,7 @@ async function openNotifDropdown() {
       });
     });
   } catch(e) {
-    dd.innerHTML = `<div style="padding:16px;color:var(--accent-red2);font-size:13px">${e.message}</div>`;
+    dd.innerHTML = `<div style="padding:16px;color:var(--accent-red2);font-size:13px">${escHtml(e.message)}</div>`;
   }
 }
 

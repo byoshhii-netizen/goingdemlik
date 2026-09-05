@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const { randomUUID } = require('crypto');
 const crypto = require('crypto');
+const dns = require('dns').promises;
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -30,8 +32,8 @@ const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || 'Cambaz');
-const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '123123');
+const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || '').trim();
+const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '');
 
 // Cloudinary config — Railway'de CLOUDINARY_URL env var olarak ekle
 // Format: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
@@ -153,7 +155,7 @@ function isContentCreationPath(requestPath) {
 // Genel API: dakikada 80 istek. İçerik üretim endpoint'leri bu sınıra dahil değildir.
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.API_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.API_RATE_LIMIT_MAX || 300),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla istek. Lütfen bekleyin.' },
@@ -163,7 +165,7 @@ const generalLimiter = rateLimit({
 // Auth: kullanıcıları gereksiz kilitlemeden brute-force denemelerini sınırla.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 10),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
@@ -172,7 +174,7 @@ const authLimiter = rateLimit({
 // Upload: dakikada 5 yükleme
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 20),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla yükleme. Lütfen bekleyin.' },
@@ -180,7 +182,7 @@ const uploadLimiter = rateLimit({
 
 const adminAuthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX || 10),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla admin giriş denemesi. 15 dakika bekleyin.' },
@@ -425,15 +427,48 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   return badges;
 }
 
+function isPrivateAddress(address) {
+  if (net.isIP(address) === 4) {
+    const parts = address.split('.').map(Number);
+    return parts[0] === 0 || parts[0] === 10 || parts[0] === 127 ||
+      (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) ||
+      (parts[0] === 169 && parts[1] === 254) ||
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+      (parts[0] === 192 && parts[1] === 0 && parts[2] === 0) ||
+      (parts[0] === 192 && parts[1] === 168) ||
+      (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19)) ||
+      (parts[0] === 198 && parts[1] === 51 && parts[2] === 100) ||
+      (parts[0] === 203 && parts[1] === 0 && parts[2] === 113) ||
+      parts[0] >= 224;
+  }
+  const normalized = address.toLowerCase();
+  return normalized === '::' || normalized === '::1' || normalized.startsWith('fc') ||
+    normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') || normalized.startsWith('feb') || normalized.startsWith('::ffff:');
+}
+
+async function assertSafePreviewUrl(value) {
+  const parsed = new URL(value);
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new Error('Geçersiz bağlantı');
+  }
+  const addresses = net.isIP(parsed.hostname) ? [{ address: parsed.hostname }] : await dns.lookup(parsed.hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some(({ address }) => isPrivateAddress(address))) throw new Error('Bu bağlantı önizlenemez');
+  return parsed;
+}
+
 app.get('/api/link-preview', async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '').trim();
-    const parsed = new URL(rawUrl);
-    if (!['http:', 'https:'].includes(parsed.protocol)) return res.status(400).json({ error: 'Geçersiz bağlantı' });
-    if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(parsed.hostname)) {
-      return res.status(400).json({ error: 'Bu bağlantı önizlenemez' });
+    let parsed = await assertSafePreviewUrl(rawUrl);
+    let response;
+    for (let redirectCount = 0; redirectCount <= 3; redirectCount += 1) {
+      response = await fetch(parsed.href, { headers: { 'user-agent': 'CigCig Link Preview/1.0' }, redirect: 'manual', signal: AbortSignal.timeout(5000) });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      const location = response.headers.get('location');
+      if (!location || redirectCount === 3) throw new Error('Çok fazla yönlendirme');
+      parsed = await assertSafePreviewUrl(new URL(location, parsed.href).href);
     }
-    const response = await fetch(parsed.href, { headers: { 'user-agent': 'CigCig Link Preview/1.0' }, redirect: 'follow', signal: AbortSignal.timeout(5000) });
     const type = response.headers.get('content-type') || '';
     if (type.startsWith('image/')) return res.json({ url: parsed.href, title: '', description: '', image: parsed.href, site: parsed.hostname, is_image: true });
     if (!type.includes('text/html')) return res.json({ url: parsed.href, title: parsed.hostname, description: '', image: '', site: parsed.hostname, is_image: false });
@@ -1026,6 +1061,9 @@ app.get(['/vmb-panel', '/vmb-panel.html'], (req, res) => {
 });
 
 app.post('/api/vmb-admin/auth/login', async (req, res) => {
+  if (!VMB_PANEL_USERNAME || !VMB_PANEL_PASSWORD) {
+    return res.status(503).json({ error: 'VMB panel kimlik bilgileri yapılandırılmamış' });
+  }
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
   if (username !== VMB_PANEL_USERNAME || password !== VMB_PANEL_PASSWORD) {
@@ -3318,6 +3356,8 @@ app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), asyn
   const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
   if (rows.length && await denyIfGroupUnavailable(req, res, rows[0])) return;
   if (!rows.length || !rows[0].allow_photos) return res.status(403).json({ error: 'Fotoğraf yükleme kapalı' });
+  const { rows: members } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
+  if (!members.length) return res.status(403).json({ error: 'Grup üyesi değilsiniz' });
   if (!req.file) return res.status(400).json({ error: 'Dosya bulunamadı' });
   try {
     const url = await handleUpload(req.file);
@@ -6867,6 +6907,9 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   const { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE id=$1', [msg.conversation_id]);
   if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
   const conv = convRows[0];
+  if (conv.user1_id != req.user.id && conv.user2_id != req.user.id) {
+    return res.status(403).json({ error: 'Bu mesajı silme yetkiniz yok' });
+  }
   const isOwn = msg.sender_id == req.user.id;
   if (mode === 'all' && !isOwn) return res.status(403).json({ error: 'Sadece kendi mesajınızı herkesten silebilirsiniz' });
   if (mode === 'all') {
@@ -6894,6 +6937,8 @@ app.post('/api/messages/delete-bulk', authMiddleware, async (req, res) => {
     const { rows } = await query('SELECT * FROM dm_messages WHERE id=$1', [id]);
     if (!rows.length) continue;
     const msg = rows[0];
+    const { rows: convRows } = await query('SELECT user1_id, user2_id FROM dm_conversations WHERE id=$1', [msg.conversation_id]);
+    if (!convRows.length || (convRows[0].user1_id != req.user.id && convRows[0].user2_id != req.user.id)) continue;
     const isOwn = msg.sender_id == req.user.id;
     if (mode === 'all' && !isOwn) continue; // sadece kendi mesajlarını herkesten sil
     if (mode === 'all') {
