@@ -52,6 +52,7 @@ CLOUDINARY_API_SECRET=<api secret>
 ```text
 DATABASE_URL=<Railway PostgreSQL connection string>
 PORT=8080
+SITE_URL=https://cigcig.xyz
 APP_SECRET=<en az 32 karakterlik rastgele uygulama sirri>
 RESEND_API_KEY=re_<Resend API anahtari>
 EMAIL_FROM=CigCig <noreply@alanadiniz.com>
