@@ -88,41 +88,54 @@ function applyDisplayTheme() {
 }
 applyDisplayTheme();
 
-function playNotificationTone() {
+function playNotificationTone(type = 'message') {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = window.__cigcigNotifyCtx || new AudioContextClass();
     window.__cigcigNotifyCtx = ctx;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const presets = {
+      message: { frequency: 760, duration: 0.2, gain: 0.035, wave: 'triangle' },
+      mention: { frequency: 920, duration: 0.24, gain: 0.04, wave: 'sine' },
+      voice_join: { frequency: 620, duration: 0.28, gain: 0.045, wave: 'sine' },
+      voice_leave: { frequency: 390, duration: 0.32, gain: 0.045, wave: 'sine' }
+    };
+    const preset = presets[type] || presets.message;
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
-    oscillator.type = 'triangle';
-    oscillator.frequency.value = 760;
-    gain.gain.value = 0.035;
+    oscillator.type = preset.wave;
+    oscillator.frequency.value = preset.frequency;
+    gain.gain.value = preset.gain;
     oscillator.connect(gain);
     gain.connect(ctx.destination);
     oscillator.start();
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(0.035, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-    oscillator.stop(now + 0.2);
+    gain.gain.setValueAtTime(preset.gain, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + preset.duration - 0.02);
+    oscillator.stop(now + preset.duration);
   } catch {}
 }
 
 async function playConfiguredNotificationSound(type = 'message') {
   try {
     const settings = await fetch('/api/settings/public').then(r => r.json()).catch(() => ({}));
-    const url = type === 'mention' ? settings.mention_notification_sound_url : settings.message_notification_sound_url;
+    const settingKeys = {
+      mention: 'mention_notification_sound_url',
+      voice_join: 'voice_join_sound_url',
+      voice_leave: 'voice_leave_sound_url'
+    };
+    const url = settings[settingKeys[type] || 'message_notification_sound_url'];
     if (!url) {
-      playNotificationTone();
+      playNotificationTone(type);
       return;
     }
     const audio = new Audio(url);
     audio.volume = 0.8;
-    audio.play().catch(() => playNotificationTone());
+    audio.play().catch(() => playNotificationTone(type));
   } catch {
-    playNotificationTone();
+    playNotificationTone(type);
   }
 }
 
@@ -3304,14 +3317,21 @@ async function openGroupVoiceRoom(slug, groupName) {
 async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManage = false) {
   if (activeGroupVoice) return toast('Zaten bir grup ses odasındasınız', 'error');
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return toast('Grup sesli sohbeti HTTPS üzerinde kullanılabilir', 'error');
+  // Web Audio bağlamını bu fonksiyonun ilk, kullanıcı tıklamasından gelen
+  // senkron bölümünde açıyoruz. Uzak WebRTC sesi daha sonra gelse bile
+  // tarayıcının autoplay kilidine takılmadan hoparlöre ulaşır.
+  const VoiceAudioContext = window.AudioContext || window.webkitAudioContext;
+  const voiceAudioContext = VoiceAudioContext ? new VoiceAudioContext() : null;
+  voiceAudioContext?.resume().catch(() => {});
+  if (voiceAudioContext) window.__cigcigNotifyCtx = voiceAudioContext;
   let room;
   try { room = await api(`/group/${encodeURIComponent(slug)}/voice-room`, { method: 'POST' }); }
-  catch (error) { return toast(error.message, 'error'); }
+  catch (error) { voiceAudioContext?.close().catch(() => {}); if (window.__cigcigNotifyCtx === voiceAudioContext) window.__cigcigNotifyCtx = null; return toast(error.message, 'error'); }
   let stream;
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
-  catch (error) { return toast('Mikrofon izni verilmedi', 'error'); }
+  catch (error) { voiceAudioContext?.close().catch(() => {}); if (window.__cigcigNotifyCtx === voiceAudioContext) window.__cigcigNotifyCtx = null; return toast('Mikrofon izni verilmedi', 'error'); }
 
-  const peers = new Map(), audioNodes = new Map();
+  const peers = new Map(), audioNodes = new Map(), pendingIce = new Map();
   let lastSignal = 0, localMuted = false, localDeafened = false;
   const manager = !!(room.can_manage_voice || canManage);
   const shell = document.createElement('div');
@@ -3361,7 +3381,15 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
   const track = () => stream.getAudioTracks()[0];
   const participant = id => (activeGroupVoice?.participants || []).find(p => Number(p.user_id) === Number(id));
   let hardwareForcedMute = false;
-  const volume = () => audioNodes.forEach(({ audio }, id) => { audio.volume = localDeafened || participant(currentUser.id)?.server_deafened || participant(id)?.server_deafened ? 0 : 1; });
+  const unlockVoiceAudio = () => {
+    voiceAudioContext?.resume().catch(() => {});
+    audioNodes.forEach(({ audio }) => { if (audio?.play) audio.play().catch(() => {}); });
+  };
+  const volume = () => audioNodes.forEach((node, id) => {
+    const muted = localDeafened || participant(currentUser.id)?.server_deafened || participant(id)?.server_deafened;
+    if (node.gain) node.gain.gain.value = muted ? 0 : 1;
+    if (node.audio) node.audio.volume = muted ? 0 : 1;
+  });
   const updateControls = () => {
     const forced = !!participant(currentUser.id)?.server_muted;
     const micOff = localMuted || forced;
@@ -3380,7 +3408,30 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
     countEl.textContent = `${list.length} kişi`;
     updateControls();
   };
-  const removePeer = id => { peers.get(id)?.close(); peers.delete(id); audioNodes.get(id)?.audio.remove(); audioNodes.delete(id); };
+  const removePeer = id => {
+    peers.get(id)?.close();
+    peers.delete(id);
+    pendingIce.delete(id);
+    const node = audioNodes.get(id);
+    node?.source?.disconnect();
+    node?.gain?.disconnect();
+    node?.audio?.remove();
+    audioNodes.delete(id);
+  };
+  const queueIce = (id, candidate) => {
+    const queue = pendingIce.get(id) || [];
+    queue.push(candidate);
+    pendingIce.set(id, queue);
+  };
+  const flushIce = async id => {
+    const peer = peers.get(id);
+    const queue = pendingIce.get(id) || [];
+    if (!peer?.remoteDescription || !queue.length) return;
+    pendingIce.delete(id);
+    for (const candidate of queue) {
+      try { await peer.addIceCandidate(candidate); } catch {}
+    }
+  };
   const signal = (type, payload, receiverId = null) => api(`/group-voice/${room.id}/signal`, { method: 'POST', body: JSON.stringify({ signal_type: type, payload, receiver_id: receiverId }) }).catch(() => {});
   const createPeer = async (p, initiate) => {
     const id = Number(p.user_id);
@@ -3390,24 +3441,39 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
     if (liveTrack?.readyState === 'live') peer.addTrack(liveTrack, stream);
     else peer.addTransceiver('audio', { direction: 'sendrecv' });
     peer.ontrack = e => {
-      let node = audioNodes.get(id);
+      const remoteStream = e.streams?.[0] || new MediaStream([e.track]);
+      const oldNode = audioNodes.get(id);
+      oldNode?.source?.disconnect();
+      oldNode?.gain?.disconnect();
+      oldNode?.audio?.remove();
+      let node = null;
+      try {
+        if (voiceAudioContext) {
+          const source = voiceAudioContext.createMediaStreamSource(remoteStream);
+          const gain = voiceAudioContext.createGain();
+          source.connect(gain);
+          gain.connect(voiceAudioContext.destination);
+          node = { source, gain };
+        }
+      } catch {}
+      // Web Audio desteklenmiyorsa normal audio elementine geri dön.
       if (!node) {
         const audio = document.createElement('audio');
         audio.autoplay = true;
         audio.playsInline = true;
         audio.setAttribute('playsinline', '');
         audio.setAttribute('aria-hidden', 'true');
-        audio.style.display = 'none';
+        audio.srcObject = remoteStream;
         document.body.appendChild(audio);
+        audio.play().catch(() => {});
         node = { audio };
-        audioNodes.set(id, node);
       }
-      node.audio.srcObject = e.streams?.[0] || new MediaStream([e.track]);
-      node.audio.volume = localDeafened || participant(currentUser.id)?.server_deafened || p.server_deafened ? 0 : 1;
-      node.audio.play().catch(() => {});
+      audioNodes.set(id, node);
+      unlockVoiceAudio();
+      volume();
     };
     peer.onicecandidate = e => e.candidate && signal('ice', e.candidate.toJSON ? e.candidate.toJSON() : e.candidate, id);
-    peer.onconnectionstatechange = () => { if (['failed', 'closed', 'disconnected'].includes(peer.connectionState)) removePeer(id); };
+    peer.onconnectionstatechange = () => { if (['failed', 'closed'].includes(peer.connectionState)) removePeer(id); };
     if (initiate) { await peer.setLocalDescription(await peer.createOffer()); await signal('offer', peer.localDescription, id); }
   };
   /*
@@ -3454,13 +3520,21 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
   };
   const leave = async (notify = true) => {
     const session = activeGroupVoice; if (!session) return; activeGroupVoice = null;
-    clearInterval(session.timer); clearInterval(session.durationTimer); session.peers.forEach(p => p.close()); session.audioNodes.forEach(n => n.audio.remove()); session.stream.getTracks().forEach(t => t.stop());
+    clearInterval(session.timer); clearInterval(session.durationTimer); document.removeEventListener('pointerdown', unlockVoiceAudio); session.peers.forEach(p => p.close()); session.audioNodes.forEach(n => { n.source?.disconnect(); n.gain?.disconnect(); n.audio?.remove(); }); session.stream.getTracks().forEach(t => t.stop()); voiceAudioContext?.close().catch(() => {});
+    if (window.__cigcigNotifyCtx === voiceAudioContext) window.__cigcigNotifyCtx = null;
     await api(`/group-voice/${session.id}/leave`, { method: 'POST' }).catch(() => {}); shell.remove(); if (notify) toast('Ses odasından çıktınız');
   };
   const poll = async () => {
     if (!activeGroupVoice) return;
     try {
-      const fresh = await api(`/group-voice/${room.id}?after=${lastSignal}`); activeGroupVoice.participants = fresh.participants; render(fresh.participants); await syncServerMute();
+      const fresh = await api(`/group-voice/${room.id}?after=${lastSignal}`);
+      const previousIds = new Set((activeGroupVoice.participants || []).map(p => Number(p.user_id)));
+      const currentIds = new Set(fresh.participants.map(p => Number(p.user_id)));
+      if (previousIds.size) {
+        if ([...currentIds].some(id => !previousIds.has(id))) void playConfiguredNotificationSound('voice_join');
+        if ([...previousIds].some(id => !currentIds.has(id))) void playConfiguredNotificationSound('voice_leave');
+      }
+      activeGroupVoice.participants = fresh.participants; render(fresh.participants); await syncServerMute();
       for (const p of fresh.participants) if (Number(p.user_id) !== Number(currentUser.id) && Number(currentUser.id) < Number(p.user_id)) await createPeer(p, true);
       for (const item of fresh.signals) { lastSignal = Math.max(lastSignal, Number(item.id)); const id = Number(item.sender_id);
         if (id === Number(currentUser.id)) continue;
@@ -3468,9 +3542,13 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
         else if (item.signal_type === 'leave') removePeer(id);
         else if (item.signal_type === 'state') { const p = participant(item.payload?.user_id || id); if (p) Object.assign(p, { muted: !!item.payload.muted, deafened: !!item.payload.deafened }); render(activeGroupVoice.participants); }
         else if (item.signal_type === 'moderation') { const p = participant(item.payload?.user_id); if (p && item.payload.action !== 'remove') p[item.payload.action === 'server-mute' ? 'server_muted' : 'server_deafened'] = item.payload.enabled !== false; if (Number(item.payload?.user_id) === Number(currentUser.id) && item.payload.action === 'remove') { await leave(false); return toast('Yönetici sizi sesli sohbetten çıkardı'); } render(activeGroupVoice.participants); await syncServerMute(); }
-        else if (item.signal_type === 'offer') { await createPeer({ user_id: id }, false); const peer = peers.get(id); if (peer) { await peer.setRemoteDescription(item.payload); await peer.setLocalDescription(await peer.createAnswer()); await signal('answer', peer.localDescription, id); } }
-        else if (item.signal_type === 'answer' && peers.get(id)) await peers.get(id).setRemoteDescription(item.payload);
-        else if (item.signal_type === 'ice' && peers.get(id)) { try { await peers.get(id).addIceCandidate(item.payload); } catch {} }
+        else if (item.signal_type === 'offer') { await createPeer({ user_id: id }, false); const peer = peers.get(id); if (peer) { await peer.setRemoteDescription(item.payload); await flushIce(id); await peer.setLocalDescription(await peer.createAnswer()); await signal('answer', peer.localDescription, id); } }
+        else if (item.signal_type === 'answer' && peers.get(id)) { await peers.get(id).setRemoteDescription(item.payload); await flushIce(id); }
+        else if (item.signal_type === 'ice') {
+          const peer = peers.get(id);
+          if (peer?.remoteDescription) { try { await peer.addIceCandidate(item.payload); } catch {} }
+          else queueIce(id, item.payload);
+        }
       }
       statusEl.textContent = `${fresh.participants.length} kişi bağlı`;
     } catch {}
@@ -3489,6 +3567,7 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
 
   activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, participants: room.participants || [], timer: null, durationTimer };
   render(activeGroupVoice.participants);
+  document.addEventListener('pointerdown', unlockVoiceAudio, { passive: true });
   shell.querySelector('#group-voice-minimize').onclick = () => shell.classList.add('is-minimized');
   shell.querySelector('#group-voice-mini-dock').onclick = () => shell.classList.remove('is-minimized');
   shell.querySelector('#group-voice-leave').onclick = () => leave(true);
@@ -3500,7 +3579,7 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
     catch { localMuted = true; await setHardwareMute(true).catch(() => {}); toast('Mikrofon yeniden açılamadı; tarayıcı iznini kontrol edin', 'error'); }
     await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {});
   };
-  shell.querySelector('#group-voice-deafen').onclick = async () => { if (participant(currentUser.id)?.server_deafened) return toast('Sesleri dinlemeniz grup yöneticisi tarafından kapatıldı', 'error'); localDeafened = !localDeafened; updateControls(); await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {}); };
+  shell.querySelector('#group-voice-deafen').onclick = async () => { unlockVoiceAudio(); if (participant(currentUser.id)?.server_deafened) return toast('Sesleri dinlemeniz grup yöneticisi tarafından kapatıldı', 'error'); localDeafened = !localDeafened; updateControls(); await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {}); };
   participantEl.addEventListener('click', async e => {
     const card = e.target.closest('[data-voice-user]'); if (!card || !manager) return;
     const p = participant(card.dataset.voiceUser); if (!p || Number(p.user_id) === Number(currentUser.id)) return;

@@ -4931,6 +4931,18 @@ app.post('/api/admin/upload-mention-sound', adminMiddleware, upload.single('soun
   catch (error) { res.status(400).json({ error: error.message || 'Etiket bildirimi sesi yüklenemedi' }); }
 });
 
+app.post('/api/admin/upload-voice-join-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Sesli sohbete giriş sesi gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Giriş sesi yüklenemedi' }); }
+});
+
+app.post('/api/admin/upload-voice-leave-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Sesli sohbetten çıkış sesi gerekli' });
+  try { res.json({ url: await handleUpload(req.file) }); }
+  catch (error) { res.status(400).json({ error: error.message || 'Çıkış sesi yüklenemedi' }); }
+});
+
 // Logo dosya yükleme (cihazdan)
 app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async (req, res) => {
   res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
@@ -5696,7 +5708,7 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url',
-    'photo_song_clip_seconds'
+    'voice_join_sound_url','voice_leave_sound_url','photo_song_clip_seconds'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};

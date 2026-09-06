@@ -2756,6 +2756,20 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-headset" style="color:var(--red2);margin-right:8px"></i>Grup Sesli Sohbet Olay Sesleri</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Biri odaya girince çalacak ses URL'si</label><input id="s-voice-join-sound-url" type="url" value="${escHtml(settings['voice_join_sound_url']||'')}" placeholder="Boşsa varsayılan giriş tonu kullanılır" /></div>
+          <div class="form-group"><label>Ses dosyası</label><input id="s-voice-join-sound-file" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" /></div>
+          <button class="btn btn-primary" id="s-voice-join-sound-save" style="width:100%;justify-content:center"><i class="fas fa-user-plus"></i> Giriş sesini kaydet</button>
+          <div id="s-voice-join-sound-msg" class="form-error mt-4"></div>
+          <hr style="border-color:rgba(255,255,255,.08);margin:18px 0">
+          <div class="form-group"><label>Biri odadan çıkınca çalacak ses URL'si</label><input id="s-voice-leave-sound-url" type="url" value="${escHtml(settings['voice_leave_sound_url']||'')}" placeholder="Boşsa varsayılan çıkış tonu kullanılır" /></div>
+          <div class="form-group"><label>Ses dosyası</label><input id="s-voice-leave-sound-file" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" /></div>
+          <button class="btn btn-primary" id="s-voice-leave-sound-save" style="width:100%;justify-content:center"><i class="fas fa-user-minus"></i> Çıkış sesini kaydet</button>
+          <div id="s-voice-leave-sound-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Güvenlik</span></div>
         <div class="card-body">
           <div class="form-group"><label>Ana Admin Kullanıcı Adı</label><input id="s-admin-username" value="${escHtml(settings['admin_username'] || 'Tarator')}" /></div>
@@ -3104,6 +3118,12 @@ async function renderSettings(main) {
   });
   document.getElementById('s-mention-sound-save')?.addEventListener('click', async () => {
     await saveNotificationSound('mention_notification_sound_url', 's-mention-sound-file', 's-mention-sound-url', '/api/admin/upload-mention-sound', 's-mention-sound-msg', 'Etiket bildirimi sesi kaydedildi');
+  });
+  document.getElementById('s-voice-join-sound-save')?.addEventListener('click', async () => {
+    await saveNotificationSound('voice_join_sound_url', 's-voice-join-sound-file', 's-voice-join-sound-url', '/api/admin/upload-voice-join-sound', 's-voice-join-sound-msg', 'Giriş sesi kaydedildi');
+  });
+  document.getElementById('s-voice-leave-sound-save')?.addEventListener('click', async () => {
+    await saveNotificationSound('voice_leave_sound_url', 's-voice-leave-sound-file', 's-voice-leave-sound-url', '/api/admin/upload-voice-leave-sound', 's-voice-leave-sound-msg', 'Çıkış sesi kaydedildi');
   });
   document.getElementById('s-pw-save').addEventListener('click', async () => {
     const msg = document.getElementById('s-pw-msg');
