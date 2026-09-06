@@ -15,8 +15,8 @@ try {
 }
 
 const files = [
-  { src: 'public/admin.js', out: 'public/admin.js' },
-  { src: 'public/app.js',   out: 'public/app.js' },
+  { src: 'public/admin.js', out: 'public/admin.min.js' },
+  { src: 'public/app.js', out: 'public/app.min.js' },
 ];
 
 const baseOpts = {
