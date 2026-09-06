@@ -3178,6 +3178,123 @@ function showNewGroupModal() {
 }
 
 let chatPollInterval = null;
+let activeGroupVoice = null;
+
+async function openGroupVoiceRoom(slug, groupName) {
+  if (activeGroupVoice) return toast('Zaten bir grup ses odasındasınız', 'error');
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    return toast('Grup sesli sohbeti HTTPS üzerinde kullanılabilir', 'error');
+  }
+  let room;
+  try { room = await api(`/group/${encodeURIComponent(slug)}/voice-room`, { method: 'POST' }); }
+  catch (error) { return toast(error.message, 'error'); }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (error) { return toast('Mikrofon izni verilmedi', 'error'); }
+
+  const peers = new Map();
+  const audioNodes = new Map();
+  let lastSignal = 0;
+  activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, timer: null };
+  showModal(`${escHtml(groupName)} · Sesli sohbet`, `
+    <div class="group-voice-panel">
+      <div class="group-voice-hero"><div class="group-voice-orb"><i class="fas fa-microphone"></i></div><div><strong>Grup ses odası</strong><span>Katılan herkes aynı kanalda konuşabilir.</span></div></div>
+      <div class="group-voice-participants" id="group-voice-participants"></div>
+      <div class="group-voice-actions">
+        <button class="btn btn-outline" id="group-voice-mute"><i class="fas fa-microphone"></i> Mikrofon açık</button>
+        <button class="btn btn-danger" id="group-voice-leave"><i class="fas fa-phone-slash"></i> Odadan çık</button>
+      </div>
+      <div class="group-voice-status" id="group-voice-status">Bağlanıyor…</div>
+    </div>
+  `);
+  const status = document.getElementById('group-voice-status');
+  const renderParticipants = participants => {
+    const el = document.getElementById('group-voice-participants');
+    if (!el) return;
+    el.innerHTML = participants.map(p => `<div class="group-voice-person${Number(p.user_id) === Number(currentUser.id) ? ' is-me' : ''}">
+      <span class="group-voice-avatar">${p.avatar && !p.avatar_removed ? `<img src="${escHtml(p.avatar)}" alt="">` : '<i class="fas fa-user"></i>'}</span>
+      <span>${escHtml(p.username)}${Number(p.user_id) === Number(currentUser.id) ? ' (sen)' : ''}</span>
+    </div>`).join('');
+  };
+  const sendSignal = (type, payload, receiverId = null) => api(`/group-voice/${room.id}/signal`, {
+    method: 'POST', body: JSON.stringify({ signal_type: type, payload, receiver_id: receiverId })
+  }).catch(() => {});
+  const createPeer = async (participant, initiate) => {
+    const peerId = Number(participant.user_id);
+    if (peerId === Number(currentUser.id) || peers.has(peerId)) return;
+    const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    peers.set(peerId, peer);
+    stream.getTracks().forEach(track => peer.addTrack(track, stream));
+    peer.ontrack = event => {
+      let audio = audioNodes.get(peerId);
+      if (!audio) { audio = document.createElement('audio'); audio.autoplay = true; audioNodes.set(peerId, audio); document.body.appendChild(audio); }
+      audio.srcObject = event.streams[0];
+    };
+    peer.onicecandidate = event => event.candidate && sendSignal('ice', event.candidate.toJSON ? event.candidate.toJSON() : event.candidate, peerId);
+    peer.onconnectionstatechange = () => {
+      if (['failed', 'closed', 'disconnected'].includes(peer.connectionState)) { peer.close(); peers.delete(peerId); audioNodes.get(peerId)?.remove(); audioNodes.delete(peerId); }
+    };
+    if (initiate) {
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      await sendSignal('offer', peer.localDescription, peerId);
+    }
+  };
+  const handleSignal = async signal => {
+    const senderId = Number(signal.sender_id);
+    if (senderId === Number(currentUser.id)) return;
+    if (signal.signal_type === 'join') {
+      const participant = (activeGroupVoice.participants || []).find(p => Number(p.user_id) === senderId) || { user_id: senderId };
+      return createPeer(participant, Number(currentUser.id) < senderId);
+    }
+    if (signal.signal_type === 'leave') {
+      peers.get(senderId)?.close(); peers.delete(senderId); audioNodes.get(senderId)?.remove(); audioNodes.delete(senderId); return;
+    }
+    if (signal.signal_type === 'offer') {
+      await createPeer({ user_id: senderId }, false);
+      const peer = peers.get(senderId); if (!peer) return;
+      await peer.setRemoteDescription(signal.payload);
+      const answer = await peer.createAnswer(); await peer.setLocalDescription(answer);
+      await sendSignal('answer', peer.localDescription, senderId); return;
+    }
+    const peer = peers.get(senderId); if (!peer) return;
+    if (signal.signal_type === 'answer') await peer.setRemoteDescription(signal.payload);
+    if (signal.signal_type === 'ice') { try { await peer.addIceCandidate(signal.payload); } catch {} }
+  };
+  const poll = async () => {
+    if (!activeGroupVoice) return;
+    try {
+      const fresh = await api(`/group-voice/${room.id}?after=${lastSignal}`);
+      activeGroupVoice.participants = fresh.participants;
+      renderParticipants(fresh.participants);
+      for (const participant of fresh.participants) {
+        if (Number(participant.user_id) !== Number(currentUser.id) && Number(currentUser.id) < Number(participant.user_id)) {
+          await createPeer(participant, true);
+        }
+      }
+      for (const signal of fresh.signals) { lastSignal = Math.max(lastSignal, Number(signal.id)); await handleSignal(signal); }
+      if (status) status.textContent = `${fresh.participants.length} kişi bağlı`;
+    } catch {}
+  };
+  activeGroupVoice.participants = room.participants || [];
+  renderParticipants(activeGroupVoice.participants);
+  await sendSignal('join', { username: currentUser.username });
+  await poll();
+  activeGroupVoice.timer = setInterval(poll, 1200);
+  document.getElementById('group-voice-mute')?.addEventListener('click', event => {
+    const track = stream.getAudioTracks()[0]; if (!track) return;
+    track.enabled = !track.enabled;
+    event.currentTarget.innerHTML = `<i class="fas fa-microphone${track.enabled ? '' : '-slash'}"></i> Mikrofon ${track.enabled ? 'açık' : 'kapalı'}`;
+  });
+  document.getElementById('group-voice-leave')?.addEventListener('click', async () => {
+    const session = activeGroupVoice;
+    activeGroupVoice = null;
+    clearInterval(session.timer); session.peers.forEach(peer => peer.close()); session.audioNodes.forEach(audio => audio.remove());
+    session.stream.getTracks().forEach(track => track.stop());
+    await api(`/group-voice/${session.id}/leave`, { method: 'POST' }).catch(() => {});
+    hideModal(); toast('Ses odasından çıktınız');
+  });
+}
 
 async function renderGroupDetail(app, slug) {
   if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
@@ -3297,6 +3414,7 @@ async function renderGroupDetail(app, slug) {
           ${group.description ? `<p class="group-hero-desc">${escHtml(group.description)}</p>` : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
         </div>
         <div class="group-hero-actions">
+          ${isMember && currentUser ? `<button class="btn btn-outline group-voice-btn" id="group-voice-btn"><i class="fas fa-microphone"></i> Sesli sohbet</button>` : ''}
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
@@ -3399,6 +3517,7 @@ async function renderGroupDetail(app, slug) {
       <button class="btn btn-outline btn-sm" id="chat-bulk-delete-me" type="button" disabled><i class="fas fa-eye-slash"></i> Benden sil</button>
     </div>
   `;
+  document.getElementById('group-voice-btn')?.addEventListener('click', () => openGroupVoiceRoom(slug, group.name));
   const chatContainer = document.querySelector('.chat-container');
   if (chatContainer && !document.getElementById('chat-selection-toolbar')) {
     chatContainer.insertBefore(toolbar, chatContainer.firstChild);
@@ -4764,7 +4883,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}
+          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:15px"></i>` : ''}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -6469,6 +6588,7 @@ async function renderDMChat(username) {
         </a>
       </div>
       <div class="dm-chat-header-right">
+        <button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Birebir sesli arama"><i class="fas fa-phone"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -6623,6 +6743,9 @@ async function renderDMChat(username) {
   });
 
   // Options
+  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
+    requestMicrophoneThenCall(other.username, other);
+  });
   document.getElementById('dm-options-btn')?.addEventListener('click', e => {
     e.stopPropagation();
     showDmOptionsMenu(username, conv.id);
@@ -6774,6 +6897,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
     ...(isOwn ? [{ label: '<i class="fas fa-trash-alt fa-fw"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
+    ...(!isOwn ? [{ label: '<i class="fas fa-flag fa-fw"></i> Mesajı Bildir', action: 'report', danger: true }] : []),
   ];
   items.forEach(item => {
     const el = document.createElement('div');
@@ -6804,6 +6928,18 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
       } else if (item.action === 'delete-all') {
         try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'all' }) }); renderDMChat(username); }
         catch (e) { toast(e.message, 'error'); }
+      } else if (item.action === 'report') {
+        showModal('Mesajı bildir', `
+          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Bu mesajı moderasyon ekibine göndereceğiz. Bildirilen içerik admin panelindeki <strong>Bildirilenler</strong> bölümünde incelenir.</p>
+          <textarea id="dm-report-reason" maxlength="500" placeholder="Neden bildiriyorsun? (opsiyonel)" style="width:100%;min-height:90px"></textarea>
+          <button class="btn btn-danger" id="dm-report-send" style="width:100%;margin-top:10px"><i class="fas fa-flag"></i> Bildir</button>
+        `);
+        document.getElementById('dm-report-send')?.addEventListener('click', async () => {
+          try {
+            await api(`/messages/${msgId}/report`, { method: 'POST', body: JSON.stringify({ reason: document.getElementById('dm-report-reason')?.value || '' }) });
+            hideModal(); toast('Mesaj adminlere bildirildi');
+          } catch (error) { toast(error.message, 'error'); }
+        });
       }
     });
     menu.appendChild(el);

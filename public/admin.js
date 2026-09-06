@@ -347,6 +347,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_view_store')) visible.add('shop');
   if (hasPermission('can_review_artists')) visible.add('artist-apps');
   if (hasPermission('can_assign_badges')) visible.add('badges');
+  if (hasPermission('can_view_users')) { visible.add('messages'); visible.add('message-reports'); }
   $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
 }
 
@@ -385,7 +386,7 @@ function loadSection(section) {
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
-    settings: renderSettings, messages: renderAdminMessages,
+    settings: renderSettings, messages: renderAdminMessages, 'message-reports': renderMessageReports,
     announcements: renderAnnouncements,
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
     'content-analytics': renderContentAnalytics,
@@ -2203,8 +2204,8 @@ async function renderAuthorityLogs(main) {
 
 // ===== MESSAGES =====
 async function renderAdminMessages(main) {
-  let users = [];
-  try { users = await adminApi('/users'); } catch (e) {
+  let users = [], conversations = [];
+  try { [users, conversations] = await Promise.all([adminApi('/users'), adminApi('/conversations')]); } catch (e) {
     main.innerHTML = `<p style="color:var(--red2);padding:20px">${e.message}</p>`; return;
   }
   main.innerHTML = `
@@ -2212,8 +2213,12 @@ async function renderAdminMessages(main) {
       <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-envelope"></i></div> Mesajlar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${users.length} kullanıcı)</span></div>
       <div class="adm-search"><i class="fas fa-search"></i><input id="admin-message-user-search" type="text" placeholder="Kullanıcı veya mesaj ara..." style="min-width:260px"></div>
     </div>
+    <div class="card admin-message-conversations-card">
+      <div class="card-header"><span><i class="fas fa-comments" style="color:var(--red2);margin-right:8px"></i>Tüm konuşmalar</span><span style="color:var(--text2);font-size:12px">${conversations.length} konuşma</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Konuşma</th><th>Son aktivite</th><th>Mesaj</th><th></th></tr></thead><tbody id="admin-conversations-body"></tbody></table></div>
+    </div>
     <div class="card admin-message-users-card">
-      <div style="padding:14px 16px;color:var(--text2);font-size:12px;border-bottom:1px solid var(--border)"><i class="fas fa-shield-halved" style="color:var(--green);margin-right:6px"></i>Mesaj içerikleri uçtan uca şifrelidir. Yönetim paneli yalnızca konuşma ve silme metadata'sını görebilir; plaintext araması ve okuma mümkün değildir.</div>
+      <div style="padding:14px 16px;color:var(--text2);font-size:12px;border-bottom:1px solid var(--border)"><i class="fas fa-shield-halved" style="color:var(--green);margin-right:6px"></i>Normal kullanıcılar için E2E görünümü korunur. Moderasyon amacıyla adminler tüm mesaj metinlerini ve silinmiş mesaj durumlarını bu panelde görebilir.</div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Kullanıcı</th><th>E-posta</th><th>İşlem</th></tr></thead><tbody id="admin-message-users-body"></tbody>
@@ -2228,8 +2233,18 @@ async function renderAdminMessages(main) {
   const showAudit = async (conversationId, title) => {
     const audit = await adminApi('/conversations/' + conversationId + '/messages');
     const events = [...audit.messages.map(message => ({ ...message, event_type: 'message', event_time: message.created_at })), ...audit.calls.map(call => ({ ...call, event_type: 'call', event_time: call.created_at }))].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
-    showModal(title, `<div class="admin-audit-list">${events.length ? events.map(event => event.event_type === 'call' ? `<div class="admin-call-event"><i class="fas fa-phone"></i><span><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong> ${event.status === 'connected' ? 'arama başlattı, cevaplandı ve sonlandı' : event.status === 'ended' ? 'arama sonlandı' : 'arama başlattı, cevap bekleniyor'}</span></div>` : `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div><i class="fas fa-lock" style="margin-right:6px;color:var(--green)"></i>Uçtan uca şifreli içerik</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj veya arama kaydı yok.</div>'}</div>`);
+    showModal(title, `<div class="admin-audit-list">${events.length ? events.map(event => event.event_type === 'call' ? `<div class="admin-call-event"><i class="fas fa-phone"></i><span><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong> ${event.status === 'connected' ? 'arama başlattı, cevaplandı ve sonlandı' : event.status === 'ended' ? 'arama sonlandı' : 'arama başlattı, cevap bekliyor'}</span></div>` : `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div class="admin-plaintext-message">${event.image_url ? '<i class="fas fa-image"></i> Medya eki · ' : ''}${escHtml(event.content || '[Boş mesaj]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj veya arama kaydı yok.</div>'}</div>`);
   };
+  const conversationsBody = $('#admin-conversations-body');
+  if (conversationsBody) {
+    conversationsBody.innerHTML = conversations.length ? conversations.map(conversation => `<tr>
+      <td><strong>${escHtml(conversation.user1)} ↔ ${escHtml(conversation.user2)}</strong></td>
+      <td style="font-size:11px;color:var(--text3)">${formatDate(conversation.last_message_at)}</td>
+      <td><span class="badge badge-gray">${conversation.message_count}</span></td>
+      <td><button class="btn btn-outline btn-xs admin-conversation-open" data-id="${conversation.id}" data-title="${escHtml(conversation.user1)} ↔ ${escHtml(conversation.user2)}"><i class="fas fa-eye"></i> Tümünü gör</button></td>
+    </tr>`).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:24px">Henüz konuşma yok</td></tr>';
+    conversationsBody.querySelectorAll('.admin-conversation-open').forEach(button => button.addEventListener('click', () => showAudit(button.dataset.id, button.dataset.title)));
+  }
   const renderUsers = list => {
     const body = $('#admin-message-users-body'); if (!body) return;
     body.innerHTML = list.length ? list.map(user => `<tr><td><strong>${escHtml(user.username)}</strong></td><td style="color:var(--text3)">${escHtml(user.email || '—')}</td><td><button class="btn btn-outline btn-xs admin-user-messages" data-id="${user.id}" data-username="${escHtml(user.username)}"><i class="fas fa-comments"></i> Mesajlarını gör</button></td></tr>`).join('') : '<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>';
@@ -2260,6 +2275,43 @@ async function renderAdminMessages(main) {
       } catch (error) { searchResults.style.display = ''; searchResults.innerHTML = `<div class="admin-audit-empty">${escHtml(error.message)}</div>`; }
     }, 250);
   });
+}
+
+async function renderMessageReports(main) {
+  let reports = [];
+  try { reports = await adminApi('/message-reports?status=open'); }
+  catch (error) { main.innerHTML = `<div class="card card-body" style="color:var(--red2)">${escHtml(error.message)}</div>`; return; }
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-flag"></i></div> Bildirilenler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${reports.length} açık bildirim)</span></div>
+      <button class="btn btn-outline btn-sm" id="reports-refresh"><i class="fas fa-rotate"></i> Yenile</button>
+    </div>
+    <div class="card">
+      <div class="admin-report-intro"><i class="fas fa-circle-info"></i> Aşağıda “şu kişi, şu mesajda bildirimde bulundu” şeklinde raporlanan DM içerikleri görünür. Admin incelemesi için plaintext gösterilir.</div>
+      <div class="admin-reports-list">${reports.length ? reports.map(report => `
+        <article class="admin-report-card">
+          <div class="admin-report-head"><span><i class="fas fa-user"></i> <strong>${escHtml(report.reporter_username)}</strong> bildirdi</span><time>${formatDate(report.created_at)}</time></div>
+          <div class="admin-report-context"><span>${escHtml(report.user1)} ↔ ${escHtml(report.user2)}</span><span>Mesaj sahibi: <strong>${escHtml(report.sender_username)}</strong></span></div>
+          <div class="admin-report-message">${report.image_url ? '<i class="fas fa-image"></i> Medya eki · ' : ''}${escHtml(report.content || '[Boş mesaj]')}</div>
+          <div class="admin-report-reason"><b>Bildirim nedeni:</b> ${escHtml(report.reason || 'Belirtilmedi')}</div>
+          <div class="admin-report-actions">
+            <button class="btn btn-outline btn-xs report-action" data-id="${report.id}" data-status="dismissed"><i class="fas fa-check"></i> Bildirimi kapat</button>
+            <button class="btn btn-danger btn-xs report-action" data-id="${report.id}" data-status="removed"><i class="fas fa-trash"></i> Mesajı kaldır</button>
+            <button class="btn btn-ghost btn-xs report-conversation" data-id="${report.conversation_id}" data-title="${escHtml(report.user1)} ↔ ${escHtml(report.user2)}"><i class="fas fa-comments"></i> Konuşmayı aç</button>
+          </div>
+        </article>`).join('') : '<div class="admin-audit-empty">Açık mesaj bildirimi yok.</div>'}</div>
+    </div>`;
+  $('#reports-refresh')?.addEventListener('click', () => loadSection('message-reports'));
+  document.querySelectorAll('.report-action').forEach(button => button.addEventListener('click', async () => {
+    try { await adminApi(`/message-reports/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ status: button.dataset.status }) }); toast(button.dataset.status === 'removed' ? 'Mesaj kaldırıldı' : 'Bildirim kapatıldı'); loadSection('message-reports'); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
+  document.querySelectorAll('.report-conversation').forEach(button => button.addEventListener('click', async () => {
+    try {
+      const audit = await adminApi(`/conversations/${button.dataset.id}/messages`);
+      showModal(button.dataset.title, `<div class="admin-audit-list">${audit.messages.map(message => `<div class="admin-audit-message"><span class="admin-audit-sender"><small>${formatDate(message.created_at)}</small>${escHtml(message.sender_username)}</span><div class="admin-plaintext-message">${escHtml(message.content || '[Boş mesaj]')}</div></div>`).join('')}</div>`);
+    } catch (error) { toast(error.message, 'error'); }
+  }));
 }
 
 // ===== DUYURULAR =====

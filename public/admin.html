@@ -79,6 +79,17 @@
       position: absolute; top: 0; left: 0; right: 0; height: 2px;
       background: linear-gradient(90deg, transparent, var(--red), var(--blue), transparent);
     }
+    .admin-report-intro { padding:14px 16px; color:var(--text2); font-size:12px; border-bottom:1px solid var(--border); background:rgba(189,162,117,.04); }
+    .admin-reports-list { display:grid; gap:12px; padding:16px; }
+    .admin-report-card { border:1px solid var(--border); border-left:3px solid var(--red); border-radius:12px; padding:15px; background:var(--bg3); }
+    .admin-report-head, .admin-report-context, .admin-report-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .admin-report-head { justify-content:space-between; font-size:13px; }
+    .admin-report-head time { color:var(--text3); font-size:11px; }
+    .admin-report-context { margin-top:8px; color:var(--text2); font-size:11px; }
+    .admin-report-message { margin-top:12px; padding:12px; border-radius:8px; background:var(--bg4); color:var(--text); line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .admin-report-reason { margin-top:9px; color:var(--text2); font-size:12px; }
+    .admin-report-actions { margin-top:12px; }
+    .admin-plaintext-message { margin-top:5px; padding:9px 11px; border-radius:7px; background:var(--bg4); color:var(--text); line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
     .login-hex {
       text-align: center; margin-bottom: 32px;
     }
@@ -661,6 +672,7 @@
       <div class="adm-nav-item" data-section="artist-apps"><div class="adm-nav-icon"><i class="fas fa-microphone"></i></div> Artist Başvuruları</div>
       <div class="adm-nav-item" data-section="homepage-sections"><div class="adm-nav-icon"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümleri</div>
       <div class="adm-nav-item" data-section="messages"><div class="adm-nav-icon"><i class="fas fa-envelope"></i></div> Mesajlar</div>
+      <div class="adm-nav-item" data-section="message-reports"><div class="adm-nav-icon"><i class="fas fa-flag"></i></div> Bildirilenler</div>
       <div class="adm-nav-item" data-section="shop"><div class="adm-nav-icon"><i class="fas fa-store"></i></div> Mağaza Ürünleri</div>
       <div class="adm-nav-item" data-section="shop-orders"><div class="adm-nav-icon"><i class="fas fa-receipt"></i></div> Siparişler</div>
       <div class="adm-nav-item" data-section="shop-settings"><div class="adm-nav-icon"><i class="fas fa-credit-card"></i></div> Ödeme Sistemi</div>

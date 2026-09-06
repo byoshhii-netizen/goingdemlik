@@ -2429,6 +2429,21 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-chat-header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .dm-call-btn { color: #55d89a; border: 1px solid rgba(85,216,154,.28); }
 .dm-call-btn:hover { color: #fff; background: rgba(85,216,154,.16); }
+.group-voice-panel { display:flex; flex-direction:column; gap:16px; min-width:min(430px, 78vw); }
+.group-voice-hero { display:flex; align-items:center; gap:12px; padding:14px; border:1px solid rgba(85,216,154,.2); border-radius:16px; background:linear-gradient(135deg,rgba(85,216,154,.12),rgba(88,101,242,.1)); }
+.group-voice-hero strong, .group-voice-hero span { display:block; }
+.group-voice-hero strong { font-size:15px; }
+.group-voice-hero span { margin-top:3px; color:var(--text-muted); font-size:12px; }
+.group-voice-orb { width:42px; height:42px; border-radius:14px; display:grid; place-items:center; background:#55d89a; color:#07140e; box-shadow:0 0 22px rgba(85,216,154,.28); }
+.group-voice-participants { display:grid; grid-template-columns:repeat(auto-fill,minmax(118px,1fr)); gap:8px; max-height:230px; overflow:auto; }
+.group-voice-person { display:flex; align-items:center; gap:7px; min-width:0; padding:9px; border:1px solid var(--border); border-radius:10px; color:var(--text-secondary); font-size:12px; }
+.group-voice-person.is-me { border-color:rgba(85,216,154,.45); color:var(--text-primary); }
+.group-voice-avatar { width:28px; height:28px; flex:0 0 28px; border-radius:50%; display:grid; place-items:center; overflow:hidden; background:var(--bg-card2); color:var(--text-muted); }
+.group-voice-avatar img { width:100%; height:100%; object-fit:cover; }
+.group-voice-person > span:last-child { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.group-voice-actions { display:flex; gap:8px; }
+.group-voice-actions .btn { flex:1; }
+.group-voice-status { color:#71e4aa; text-align:center; font-size:12px; }
 .voice-call-card {
   position: fixed; inset: 50% auto auto 50%; transform: translate(-50%, -50%); z-index: 9500;
   width: min(420px, calc(100vw - 28px)); padding: 28px 24px 24px; text-align: center;

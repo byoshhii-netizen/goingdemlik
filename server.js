@@ -96,8 +96,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Sesli arama geçici olarak kapalı; mikrofon erişimi açılmıyor.
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // WebRTC sesli aramalar için mikrofonu aynı origin'e aç; kamera kullanılmıyor.
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
@@ -6567,6 +6567,92 @@ app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ===== GRUP SES ODALARI =====
+async function getGroupVoiceRoomForUser(roomId, userId) {
+  const { rows } = await query(`
+    SELECT r.*, g.slug, g.name AS group_name
+    FROM group_voice_rooms r
+    JOIN groups g ON g.id=r.group_id
+    JOIN group_members gm ON gm.group_id=r.group_id AND gm.user_id=$2
+    JOIN group_voice_members vm ON vm.room_id=r.id AND vm.user_id=$2 AND vm.left_at IS NULL
+    WHERE r.id=$1 AND r.status='active'
+  `, [roomId, userId]);
+  return rows[0] || null;
+}
+
+app.post('/api/group/:slug/voice-room', authMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id,name,slug FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = groups[0];
+  const { rows: member } = await query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
+  if (!member.length) return res.status(403).json({ error: 'Ses odasına girmek için grup üyesi olmalısınız' });
+  const { rows: ownRoom } = await query(`
+    SELECT r.id FROM group_voice_rooms r
+    JOIN group_voice_members vm ON vm.room_id=r.id AND vm.user_id=$2 AND vm.left_at IS NULL
+    WHERE r.group_id=$1 AND r.status='active' LIMIT 1
+  `, [group.id, req.user.id]);
+  let roomId = ownRoom[0]?.id;
+  if (!roomId) {
+    const { rows: rooms } = await query('SELECT id FROM group_voice_rooms WHERE group_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 1', [group.id, 'active']);
+    roomId = rooms[0]?.id || randomUUID();
+    if (!rooms.length) await query('INSERT INTO group_voice_rooms (id,group_id,created_by) VALUES ($1,$2,$3)', [roomId, group.id, req.user.id]);
+    await query(`
+      INSERT INTO group_voice_members (room_id,user_id) VALUES ($1,$2)
+      ON CONFLICT (room_id,user_id) DO UPDATE SET left_at=NULL, joined_at=NOW()
+    `, [roomId, req.user.id]);
+  }
+  const { rows: participants } = await query(`
+    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color, vm.muted
+    FROM group_voice_members vm JOIN users u ON u.id=vm.user_id
+    WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
+  `, [roomId]);
+  res.json({ id: roomId, group: { name: group.name, slug: group.slug }, participants });
+});
+
+app.get('/api/group-voice/:id', authMiddleware, async (req, res) => {
+  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
+  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
+  const after = Math.max(Number.parseInt(req.query.after, 10) || 0, 0);
+  const { rows: participants } = await query(`
+    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color, vm.muted
+    FROM group_voice_members vm JOIN users u ON u.id=vm.user_id
+    WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
+  `, [room.id]);
+  const { rows: signals } = await query(`
+    SELECT id, sender_id, receiver_id, signal_type, payload, created_at
+    FROM group_voice_signals
+    WHERE room_id=$1 AND id>$2 AND (receiver_id IS NULL OR receiver_id=$3)
+    ORDER BY id ASC LIMIT 200
+  `, [room.id, after, req.user.id]);
+  res.json({ room, participants, signals });
+});
+
+app.post('/api/group-voice/:id/signal', authMiddleware, async (req, res) => {
+  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
+  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
+  const signalType = String(req.body?.signal_type || '').trim();
+  const payload = req.body?.payload;
+  if (!['join','leave','offer','answer','ice','mute'].includes(signalType) || !payload || typeof payload !== 'object') {
+    return res.status(400).json({ error: 'Geçersiz ses sinyali' });
+  }
+  const receiverId = req.body?.receiver_id ? Number(req.body.receiver_id) : null;
+  const { rows } = await query(`
+    INSERT INTO group_voice_signals (room_id,sender_id,receiver_id,signal_type,payload)
+    VALUES ($1,$2,$3,$4,$5) RETURNING id
+  `, [room.id, req.user.id, receiverId || null, signalType, JSON.stringify(payload)]);
+  res.json({ ok: true, id: rows[0].id });
+});
+
+app.post('/api/group-voice/:id/leave', authMiddleware, async (req, res) => {
+  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
+  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
+  await query('UPDATE group_voice_members SET left_at=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+  await query('INSERT INTO group_voice_signals (room_id,sender_id,signal_type,payload) VALUES ($1,$2,$3,$4)', [room.id, req.user.id, 'leave', JSON.stringify({})]);
+  const { rows: remaining } = await query('SELECT 1 FROM group_voice_members WHERE room_id=$1 AND left_at IS NULL LIMIT 1', [room.id]);
+  if (!remaining.length) await query("UPDATE group_voice_rooms SET status='ended', ended_at=NOW() WHERE id=$1", [room.id]);
+  res.json({ ok: true });
+});
+
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
@@ -6795,6 +6881,25 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   res.json(full[0]);
 });
 
+app.post('/api/messages/:id/report', authMiddleware, async (req, res) => {
+  const reason = String(req.body?.reason || 'Topluluk kurallarına aykırı içerik').trim().slice(0, 500);
+  const { rows } = await query('SELECT id, conversation_id FROM dm_messages WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
+  const { rows: access } = await query(
+    'SELECT 1 FROM dm_conversations WHERE id=$1 AND (user1_id=$2 OR user2_id=$2)',
+    [rows[0].conversation_id, req.user.id]
+  );
+  if (!access.length) return res.status(403).json({ error: 'Bu mesajı bildirme yetkiniz yok' });
+  const { rows: report } = await query(`
+    INSERT INTO message_reports (message_id, reporter_id, reason)
+    VALUES ($1,$2,$3)
+    ON CONFLICT (message_id, reporter_id) DO UPDATE SET reason=EXCLUDED.reason,
+      status='open', reviewed_by=NULL, reviewed_at=NULL
+    RETURNING id, message_id, reporter_id, reason, status, created_at
+  `, [rows[0].id, req.user.id, reason]);
+  res.json({ ok: true, report: report[0] });
+});
+
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
   const { password } = req.body;
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
@@ -6923,6 +7028,41 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
 });
 
 // ===== ADMIN: MESAJLARI OKU =====
+app.get('/api/admin/message-reports', adminMiddleware, async (req, res) => {
+  const status = ['open', 'reviewed', 'dismissed', 'removed'].includes(String(req.query.status || ''))
+    ? String(req.query.status) : 'open';
+  const { rows } = await query(`
+    SELECT r.id, r.message_id, r.reason, r.status, r.created_at, r.reviewed_at,
+      reporter.username AS reporter_username, reporter.avatar AS reporter_avatar,
+      sender.username AS sender_username, sender.avatar AS sender_avatar,
+      m.content, m.image_url, m.deleted_for_all, m.created_at AS message_created_at,
+      c.id AS conversation_id, u1.username AS user1, u2.username AS user2,
+      reviewer.username AS reviewer_username
+    FROM message_reports r
+    JOIN dm_messages m ON m.id=r.message_id
+    JOIN users reporter ON reporter.id=r.reporter_id
+    JOIN users sender ON sender.id=m.sender_id
+    JOIN dm_conversations c ON c.id=m.conversation_id
+    JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
+    LEFT JOIN users reviewer ON reviewer.id=r.reviewed_by
+    WHERE r.status=$1
+    ORDER BY r.created_at DESC LIMIT 300
+  `, [status]);
+  res.json(rows);
+});
+
+app.patch('/api/admin/message-reports/:id', adminMiddleware, async (req, res) => {
+  const nextStatus = ['open', 'reviewed', 'dismissed', 'removed'].includes(String(req.body?.status || ''))
+    ? String(req.body.status) : null;
+  if (!nextStatus) return res.status(400).json({ error: 'Geçersiz bildirim durumu' });
+  const { rows: report } = await query('SELECT id,message_id FROM message_reports WHERE id=$1', [req.params.id]);
+  if (!report.length) return res.status(404).json({ error: 'Bildirim bulunamadı' });
+  await query('UPDATE message_reports SET status=$1, reviewed_by=$2, reviewed_at=NOW() WHERE id=$3',
+    [nextStatus, req.adminUser?.id || null, report[0].id]);
+  if (nextStatus === 'removed') await query('UPDATE dm_messages SET deleted_for_all=1 WHERE id=$1', [report[0].message_id]);
+  res.json({ ok: true, status: nextStatus });
+});
+
 app.get('/api/admin/conversations', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT c.id, u1.username as user1, u2.username as user2, c.last_message_at,
