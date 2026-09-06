@@ -3567,6 +3567,7 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
 
   activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, participants: room.participants || [], timer: null, durationTimer };
   render(activeGroupVoice.participants);
+  void playConfiguredNotificationSound('voice_join');
   document.addEventListener('pointerdown', unlockVoiceAudio, { passive: true });
   shell.querySelector('#group-voice-minimize').onclick = () => shell.classList.add('is-minimized');
   shell.querySelector('#group-voice-mini-dock').onclick = () => shell.classList.remove('is-minimized');
