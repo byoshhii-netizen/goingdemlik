@@ -6627,6 +6627,7 @@ app.post('/api/group/:slug/voice-room', authMiddleware, async (req, res) => {
       ON CONFLICT (room_id,user_id) DO UPDATE SET left_at=NULL, joined_at=NOW()
     `, [roomId, req.user.id]);
   }
+  const { rows: roomMeta } = await query('SELECT created_at FROM group_voice_rooms WHERE id=$1', [roomId]);
   const { rows: participants } = await query(`
     SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color,
       vm.muted, vm.deafened, vm.server_muted, vm.server_deafened
@@ -6634,7 +6635,13 @@ app.post('/api/group/:slug/voice-room', authMiddleware, async (req, res) => {
     WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
   `, [roomId]);
   const manager = await getGroupVoiceManager(group.id, req.user.id);
-  res.json({ id: roomId, group: { name: group.name, slug: group.slug }, participants, can_manage_voice: !!manager?.can_manage });
+  res.json({
+    id: roomId,
+    group: { name: group.name, slug: group.slug },
+    room_started_at: roomMeta[0]?.created_at || null,
+    participants,
+    can_manage_voice: !!manager?.can_manage
+  });
 });
 
 app.get('/api/group-voice/:id', authMiddleware, async (req, res) => {

@@ -3311,8 +3311,8 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
   catch (error) { return toast('Mikrofon izni verilmedi', 'error'); }
 
-  const peers = new Map(), audioNodes = new Map(), analysers = new Map();
-  let lastSignal = 0, localMuted = false, localDeafened = false, audioContext = null, raf = null;
+  const peers = new Map(), audioNodes = new Map();
+  let lastSignal = 0, localMuted = false, localDeafened = false;
   const manager = !!(room.can_manage_voice || canManage);
   const shell = document.createElement('div');
   shell.id = 'group-voice-shell';
@@ -3325,8 +3325,8 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
       </header>
       <div class="group-voice-layout">
         <main class="group-voice-main">
-          <div class="group-voice-stage"><div class="group-voice-stage-copy"><span class="group-voice-eyebrow"><i class="fas fa-microphone-lines"></i> SESLİ ODA</span><h2>Kim konuşuyor?</h2><p id="group-voice-status">Bağlanıyor…</p></div><div class="group-voice-stage-orb"><span></span><i class="fas fa-microphone"></i></div></div>
-          <div class="group-voice-list-heading"><div><strong>Katılımcılar</strong><span id="group-voice-count">0 kişi</span></div><span class="group-voice-hint"><i class="fas fa-volume-high"></i> Konuşanın adı parlar</span></div>
+          <div class="group-voice-stage"><div class="group-voice-stage-copy"><span class="group-voice-eyebrow"><i class="fas fa-clock"></i> SOHBET SÜRESİ</span><h2 id="group-voice-duration">00:00:00</h2><p id="group-voice-status">Bağlanıyor…</p></div><div class="group-voice-stage-orb"><span></span><i class="fas fa-clock"></i></div></div>
+          <div class="group-voice-list-heading"><div><strong>Katılımcılar</strong><span id="group-voice-count">0 kişi</span></div></div>
           <div class="group-voice-participants" id="group-voice-participants"></div>
         </main>
         <aside class="group-voice-sidebar">
@@ -3344,6 +3344,20 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
   const participantEl = shell.querySelector('#group-voice-participants');
   const statusEl = shell.querySelector('#group-voice-status');
   const countEl = shell.querySelector('#group-voice-count');
+  const durationEl = shell.querySelector('#group-voice-duration');
+  const startedAt = Date.parse(room.room_started_at || room.created_at || '') || Date.now();
+  const formatDuration = seconds => {
+    const total = Math.max(0, Math.floor(seconds));
+    const hours = String(Math.floor(total / 3600)).padStart(2, '0');
+    const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+    const secs = String(total % 60).padStart(2, '0');
+    return `${hours}:${minutes}:${secs}`;
+  };
+  const updateDuration = () => {
+    if (durationEl) durationEl.textContent = formatDuration((Date.now() - startedAt) / 1000);
+  };
+  updateDuration();
+  const durationTimer = setInterval(updateDuration, 1000);
   const track = () => stream.getAudioTracks()[0];
   const participant = id => (activeGroupVoice?.participants || []).find(p => Number(p.user_id) === Number(id));
   let hardwareForcedMute = false;
@@ -3366,24 +3380,7 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
     countEl.textContent = `${list.length} kişi`;
     updateControls();
   };
-  const context = () => {
-    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
-    return audioContext;
-  };
-  const watch = (id, mediaStream, audio) => {
-    try {
-      const analyser = context().createAnalyser(); analyser.fftSize = 128; analyser.smoothingTimeConstant = .72;
-      const source = audio ? context().createMediaElementSource(audio) : context().createMediaStreamSource(mediaStream);
-      source.connect(analyser); analysers.set(Number(id), { analyser, data: new Uint8Array(analyser.frequencyBinCount) });
-    } catch {}
-  };
-  const animate = () => {
-    if (!activeGroupVoice) return;
-    analysers.forEach(({ analyser, data }, id) => { analyser.getByteFrequencyData(data); const avg = data.reduce((a, b) => a + b, 0) / Math.max(1, data.length); shell.querySelector(`[data-voice-user="${id}"]`)?.classList.toggle('is-speaking', avg > 13); });
-    raf = requestAnimationFrame(animate);
-  };
-  const removePeer = id => { peers.get(id)?.close(); peers.delete(id); audioNodes.get(id)?.audio.remove(); audioNodes.delete(id); analysers.delete(id); };
+  const removePeer = id => { peers.get(id)?.close(); peers.delete(id); audioNodes.get(id)?.audio.remove(); audioNodes.delete(id); };
   const signal = (type, payload, receiverId = null) => api(`/group-voice/${room.id}/signal`, { method: 'POST', body: JSON.stringify({ signal_type: type, payload, receiver_id: receiverId }) }).catch(() => {});
   const createPeer = async (p, initiate) => {
     const id = Number(p.user_id);
@@ -3392,7 +3389,23 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
     const liveTrack = track();
     if (liveTrack?.readyState === 'live') peer.addTrack(liveTrack, stream);
     else peer.addTransceiver('audio', { direction: 'sendrecv' });
-    peer.ontrack = e => { let node = audioNodes.get(id); if (!node) { const audio = document.createElement('audio'); audio.autoplay = true; audio.style.display = 'none'; document.body.appendChild(audio); node = { audio }; audioNodes.set(id, node); watch(id, e.streams[0], audio); } node.audio.srcObject = e.streams[0]; node.audio.volume = localDeafened || p.server_deafened ? 0 : 1; };
+    peer.ontrack = e => {
+      let node = audioNodes.get(id);
+      if (!node) {
+        const audio = document.createElement('audio');
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.setAttribute('playsinline', '');
+        audio.setAttribute('aria-hidden', 'true');
+        audio.style.display = 'none';
+        document.body.appendChild(audio);
+        node = { audio };
+        audioNodes.set(id, node);
+      }
+      node.audio.srcObject = e.streams?.[0] || new MediaStream([e.track]);
+      node.audio.volume = localDeafened || participant(currentUser.id)?.server_deafened || p.server_deafened ? 0 : 1;
+      node.audio.play().catch(() => {});
+    };
     peer.onicecandidate = e => e.candidate && signal('ice', e.candidate.toJSON ? e.candidate.toJSON() : e.candidate, id);
     peer.onconnectionstatechange = () => { if (['failed', 'closed', 'disconnected'].includes(peer.connectionState)) removePeer(id); };
     if (initiate) { await peer.setLocalDescription(await peer.createOffer()); await signal('offer', peer.localDescription, id); }
@@ -3420,7 +3433,6 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
       stream = freshStream;
       if (activeGroupVoice) activeGroupVoice.stream = freshStream;
       current = track();
-      watch(currentUser.id, freshStream);
       for (const peer of peers.values()) {
         const sender = peer.getSenders().find(item => item.track?.kind === 'audio')
           || peer.getTransceivers().find(item => item.receiver?.track?.kind === 'audio')?.sender;
@@ -3442,7 +3454,7 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
   };
   const leave = async (notify = true) => {
     const session = activeGroupVoice; if (!session) return; activeGroupVoice = null;
-    clearInterval(session.timer); cancelAnimationFrame(raf); session.peers.forEach(p => p.close()); session.audioNodes.forEach(n => n.audio.remove()); session.stream.getTracks().forEach(t => t.stop()); analysers.clear(); audioContext?.close().catch(() => {});
+    clearInterval(session.timer); clearInterval(session.durationTimer); session.peers.forEach(p => p.close()); session.audioNodes.forEach(n => n.audio.remove()); session.stream.getTracks().forEach(t => t.stop());
     await api(`/group-voice/${session.id}/leave`, { method: 'POST' }).catch(() => {}); shell.remove(); if (notify) toast('Ses odasından çıktınız');
   };
   const poll = async () => {
@@ -3460,7 +3472,7 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
         else if (item.signal_type === 'answer' && peers.get(id)) await peers.get(id).setRemoteDescription(item.payload);
         else if (item.signal_type === 'ice' && peers.get(id)) { try { await peers.get(id).addIceCandidate(item.payload); } catch {} }
       }
-      statusEl.textContent = `${fresh.participants.length} kişi bağlı · Ses kalitesi iyi`;
+      statusEl.textContent = `${fresh.participants.length} kişi bağlı`;
     } catch {}
   };
   const banPanel = async () => {
@@ -3475,8 +3487,8 @@ async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManag
     } catch (error) { toast(error.message, 'error'); }
   };
 
-  activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, participants: room.participants || [], timer: null };
-  render(activeGroupVoice.participants); watch(currentUser.id, stream); animate();
+  activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, participants: room.participants || [], timer: null, durationTimer };
+  render(activeGroupVoice.participants);
   shell.querySelector('#group-voice-minimize').onclick = () => shell.classList.add('is-minimized');
   shell.querySelector('#group-voice-mini-dock').onclick = () => shell.classList.remove('is-minimized');
   shell.querySelector('#group-voice-leave').onclick = () => leave(true);

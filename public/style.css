@@ -2921,6 +2921,46 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .group-voice-ban-add { grid-template-columns:1fr; }
 }
 
+/* Sesli sohbeti uygulamanın aktif temasına bağla. Yeşil sabit renkler yerine
+   mevcut CigCig tema değişkenleri kullanılır; konuşan katılımcı parlaması yoktur. */
+.group-voice-shell {
+  --voice-accent: var(--accent-red);
+  --voice-accent-strong: var(--accent-red2);
+  --voice-border: var(--border);
+  background:rgba(0,0,0,.72);
+}
+.group-voice-window {
+  color:var(--text-primary);
+  background:linear-gradient(145deg,var(--bg-card) 0%,var(--bg-secondary) 72%,var(--bg-tertiary) 100%);
+  border-color:var(--voice-border);
+}
+.group-voice-brand-icon { color:var(--accent-contrast); background:var(--voice-accent); box-shadow:0 0 28px color-mix(in srgb,var(--voice-accent) 28%,transparent); }
+.group-voice-stage-orb { color:var(--bg-secondary); background:var(--voice-accent); box-shadow:0 0 28px color-mix(in srgb,var(--voice-accent) 28%,transparent); }
+.group-voice-overline,.group-voice-sidebar-kicker,.group-voice-eyebrow,
+.group-voice-hint i { color:var(--voice-accent-strong); }
+.group-voice-live-pill { color:var(--voice-accent-strong); border-color:var(--voice-border); background:var(--bg-active); }
+.group-voice-live-pill i,.group-voice-stage:after { background:var(--voice-accent); }
+.group-voice-stage { border-color:var(--voice-border); background:linear-gradient(130deg,var(--bg-active),var(--bg-hover)); }
+.group-voice-stage h2 { color:var(--text-primary); font-variant-numeric:tabular-nums; letter-spacing:.04em; }
+.group-voice-stage p,.group-voice-list-heading span { color:var(--text-secondary); }
+.group-voice-person { color:var(--text-primary); border-color:var(--border); background:var(--bg-hover); }
+.group-voice-person:not(:disabled):hover,.group-voice-person.is-me { border-color:var(--border-hover); background:var(--bg-active); }
+.group-voice-person-ring .group-voice-avatar { background:var(--bg-card2); }
+.group-voice-speaking-dot { border-color:var(--bg-card); background:var(--text-muted); }
+.group-voice-person-icons { color:var(--text-muted); }
+.group-voice-empty { color:var(--text-secondary); border-color:var(--border); }
+.group-voice-empty i,.group-voice-control i,.group-voice-manager-link i { color:var(--voice-accent-strong); }
+.group-voice-sidebar { background:color-mix(in srgb,var(--bg-secondary) 72%,transparent); border-color:var(--border); }
+.group-voice-sidebar-card { border-color:var(--border); background:var(--bg-hover); }
+.group-voice-control { color:var(--text-primary); border-color:var(--border); background:var(--bg-hover); }
+.group-voice-control.is-off { border-color:rgba(220,90,100,.5); background:rgba(220,90,100,.1); }
+.group-voice-manager-link { color:var(--text-primary); border-color:var(--border); background:var(--bg-active); }
+.group-voice-tip { border-color:var(--border); }
+.group-voice-tip>i { color:var(--accent-red2); }
+.group-voice-leave { color:#ff9aa5; border-color:rgba(220,90,100,.45); background:rgba(220,90,100,.1); }
+.group-voice-mini-dock { color:var(--accent-contrast); background:var(--voice-accent); }
+.group-voice-mini-dock b { color:var(--accent-contrast); }
+
 /* ===== DUYURU BANNER ===== */
 #announcements-container {
   width: 100%;
