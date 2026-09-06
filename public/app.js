@@ -3296,6 +3296,211 @@ async function openGroupVoiceRoom(slug, groupName) {
   });
 }
 
+/*
+ * Group voice room v2: a persistent, non-dismissable voice dock.  It is
+ * intentionally separate from the generic modal so a stray click, a route
+ * change, or a browser tab change cannot tear down the WebRTC session.
+ */
+async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManage = false) {
+  if (activeGroupVoice) return toast('Zaten bir grup ses odasındasınız', 'error');
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return toast('Grup sesli sohbeti HTTPS üzerinde kullanılabilir', 'error');
+  let room;
+  try { room = await api(`/group/${encodeURIComponent(slug)}/voice-room`, { method: 'POST' }); }
+  catch (error) { return toast(error.message, 'error'); }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  catch (error) { return toast('Mikrofon izni verilmedi', 'error'); }
+
+  const peers = new Map(), audioNodes = new Map(), analysers = new Map();
+  let lastSignal = 0, localMuted = false, localDeafened = false, audioContext = null, raf = null;
+  const manager = !!(room.can_manage_voice || canManage);
+  const shell = document.createElement('div');
+  shell.id = 'group-voice-shell';
+  shell.className = 'group-voice-shell';
+  shell.innerHTML = `
+    <div class="group-voice-window" role="dialog" aria-label="${escHtml(groupName)} sesli sohbet">
+      <header class="group-voice-topbar">
+        <div class="group-voice-brand"><span class="group-voice-brand-icon"><i class="fas fa-waveform-lines"></i></span><div><span class="group-voice-overline">CANLI SESLİ SOHBET</span><strong>${escHtml(groupName)}</strong></div></div>
+        <div class="group-voice-top-actions"><span class="group-voice-live-pill"><i></i> Canlı</span><button class="group-voice-icon-btn" id="group-voice-minimize" title="Küçült"><i class="fas fa-minus"></i></button></div>
+      </header>
+      <div class="group-voice-layout">
+        <main class="group-voice-main">
+          <div class="group-voice-stage"><div class="group-voice-stage-copy"><span class="group-voice-eyebrow"><i class="fas fa-microphone-lines"></i> SESLİ ODA</span><h2>Kim konuşuyor?</h2><p id="group-voice-status">Bağlanıyor…</p></div><div class="group-voice-stage-orb"><span></span><i class="fas fa-microphone"></i></div></div>
+          <div class="group-voice-list-heading"><div><strong>Katılımcılar</strong><span id="group-voice-count">0 kişi</span></div><span class="group-voice-hint"><i class="fas fa-volume-high"></i> Konuşanın adı parlar</span></div>
+          <div class="group-voice-participants" id="group-voice-participants"></div>
+        </main>
+        <aside class="group-voice-sidebar">
+          <div class="group-voice-sidebar-card"><span class="group-voice-sidebar-kicker">KONTROLLER</span><button class="group-voice-control is-primary" id="group-voice-mute"><i class="fas fa-microphone"></i><span>Mikrofon açık</span><em>Sen</em></button><button class="group-voice-control" id="group-voice-deafen"><i class="fas fa-headphones"></i><span>Sesleri açık</span><em>Dinleme</em></button></div>
+          ${manager ? `<div class="group-voice-sidebar-card group-voice-manager-card"><span class="group-voice-sidebar-kicker">GRUP YÖNETİCİSİ</span><p>Katılımcıya tıklayarak mikrofonunu kapatabilir, duymasını durdurabilir veya odadan çıkarabilirsin.</p><button class="group-voice-manager-link" id="group-voice-bans"><i class="fas fa-shield-halved"></i> Sesliye girişi yasaklılar</button></div>` : ''}
+          <div class="group-voice-sidebar-card group-voice-tip"><i class="fas fa-sparkles"></i><p>Bu pencereyi küçültsen bile sesli sohbet devam eder. Dışarı tıklamak veya sekme değiştirmek odayı kapatmaz.</p></div>
+          <button class="group-voice-leave" id="group-voice-leave"><i class="fas fa-phone-slash"></i> Sesli sohbetten ayrıl</button>
+        </aside>
+      </div>
+      <div class="group-voice-ban-panel" id="group-voice-ban-panel" hidden></div>
+    </div>
+    <button class="group-voice-mini-dock" id="group-voice-mini-dock"><i class="fas fa-microphone"></i><span>Sesli sohbet</span><b>●</b></button>`;
+  document.body.appendChild(shell);
+
+  const participantEl = shell.querySelector('#group-voice-participants');
+  const statusEl = shell.querySelector('#group-voice-status');
+  const countEl = shell.querySelector('#group-voice-count');
+  const track = () => stream.getAudioTracks()[0];
+  const participant = id => (activeGroupVoice?.participants || []).find(p => Number(p.user_id) === Number(id));
+  let hardwareForcedMute = false;
+  const volume = () => audioNodes.forEach(({ audio }, id) => { audio.volume = localDeafened || participant(currentUser.id)?.server_deafened || participant(id)?.server_deafened ? 0 : 1; });
+  const updateControls = () => {
+    const forced = !!participant(currentUser.id)?.server_muted;
+    const micOff = localMuted || forced;
+    const mute = shell.querySelector('#group-voice-mute'), deafen = shell.querySelector('#group-voice-deafen');
+    if (mute) { mute.classList.toggle('is-off', micOff); mute.innerHTML = `<i class="fas fa-microphone${micOff ? '-slash' : ''}"></i><span>Mikrofon ${micOff ? 'kapalı' : 'açık'}</span><em>${forced ? 'Yönetici kapattı' : 'Sen'}</em>`; }
+    const forcedDeaf = !!participant(currentUser.id)?.server_deafened;
+    if (deafen) { deafen.classList.toggle('is-off', localDeafened || forcedDeaf); deafen.innerHTML = `<i class="fas fa-${localDeafened || forcedDeaf ? 'volume-xmark' : 'headphones'}"></i><span>Sesleri ${localDeafened || forcedDeaf ? 'kapalı' : 'açık'}</span><em>${forcedDeaf ? 'Yönetici kapattı' : 'Dinleme'}</em>`; }
+    if (track()?.readyState === 'live') track().enabled = !micOff;
+    volume();
+  };
+  const render = list => {
+    participantEl.innerHTML = list.length ? list.map(p => {
+      const id = Number(p.user_id), me = id === Number(currentUser.id), muted = !!(p.muted || p.server_muted), deaf = !!(p.deafened || p.server_deafened);
+      return `<button class="group-voice-person${me ? ' is-me' : ''}${muted ? ' is-muted' : ''}${deaf ? ' is-deafened' : ''}" data-voice-user="${id}" ${manager && !me ? '' : 'disabled'}><span class="group-voice-person-ring"><span class="group-voice-avatar">${p.avatar && !p.avatar_removed ? `<img src="${escHtml(p.avatar)}" alt="">` : '<i class="fas fa-user"></i>'}</span><i class="group-voice-speaking-dot"></i></span><span class="group-voice-person-copy"><strong style="${p.name_color ? `color:${escHtml(p.name_color)}` : ''}">${escHtml(p.username || 'Kullanıcı')}</strong><small>${me ? 'Sen' : p.server_muted ? 'Yönetici mikrofonu kapattı' : p.server_deafened ? 'Duyması kapalı' : 'Bağlı'}</small></span><span class="group-voice-person-icons">${muted ? '<i class="fas fa-microphone-slash"></i>' : '<i class="fas fa-microphone"></i>'}${deaf ? '<i class="fas fa-volume-xmark"></i>' : ''}</span></button>`;
+    }).join('') : '<div class="group-voice-empty"><i class="fas fa-user-group"></i><span>Henüz başka kimse yok</span></div>';
+    countEl.textContent = `${list.length} kişi`;
+    updateControls();
+  };
+  const context = () => {
+    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
+    return audioContext;
+  };
+  const watch = (id, mediaStream, audio) => {
+    try {
+      const analyser = context().createAnalyser(); analyser.fftSize = 128; analyser.smoothingTimeConstant = .72;
+      const source = audio ? context().createMediaElementSource(audio) : context().createMediaStreamSource(mediaStream);
+      source.connect(analyser); analysers.set(Number(id), { analyser, data: new Uint8Array(analyser.frequencyBinCount) });
+    } catch {}
+  };
+  const animate = () => {
+    if (!activeGroupVoice) return;
+    analysers.forEach(({ analyser, data }, id) => { analyser.getByteFrequencyData(data); const avg = data.reduce((a, b) => a + b, 0) / Math.max(1, data.length); shell.querySelector(`[data-voice-user="${id}"]`)?.classList.toggle('is-speaking', avg > 13); });
+    raf = requestAnimationFrame(animate);
+  };
+  const removePeer = id => { peers.get(id)?.close(); peers.delete(id); audioNodes.get(id)?.audio.remove(); audioNodes.delete(id); analysers.delete(id); };
+  const signal = (type, payload, receiverId = null) => api(`/group-voice/${room.id}/signal`, { method: 'POST', body: JSON.stringify({ signal_type: type, payload, receiver_id: receiverId }) }).catch(() => {});
+  const createPeer = async (p, initiate) => {
+    const id = Number(p.user_id);
+    if (id === Number(currentUser.id) || peers.has(id)) return;
+    const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); peers.set(id, peer);
+    const liveTrack = track();
+    if (liveTrack?.readyState === 'live') peer.addTrack(liveTrack, stream);
+    else peer.addTransceiver('audio', { direction: 'sendrecv' });
+    peer.ontrack = e => { let node = audioNodes.get(id); if (!node) { const audio = document.createElement('audio'); audio.autoplay = true; audio.style.display = 'none'; document.body.appendChild(audio); node = { audio }; audioNodes.set(id, node); watch(id, e.streams[0], audio); } node.audio.srcObject = e.streams[0]; node.audio.volume = localDeafened || p.server_deafened ? 0 : 1; };
+    peer.onicecandidate = e => e.candidate && signal('ice', e.candidate.toJSON ? e.candidate.toJSON() : e.candidate, id);
+    peer.onconnectionstatechange = () => { if (['failed', 'closed', 'disconnected'].includes(peer.connectionState)) removePeer(id); };
+    if (initiate) { await peer.setLocalDescription(await peer.createOffer()); await signal('offer', peer.localDescription, id); }
+  };
+  /*
+   * enabled=false only sends silence while getUserMedia remains active.
+   * Stop the track to release the browser/OS microphone indicator, then
+   * replace the sender track when the user turns the mic back on.
+   */
+  const setHardwareMute = async muted => {
+    if (muted) {
+      for (const peer of peers.values()) {
+        const sender = peer.getSenders().find(item => item.track?.kind === 'audio')
+          || peer.getTransceivers().find(item => item.receiver?.track?.kind === 'audio')?.sender;
+        if (sender) await sender.replaceTrack(null).catch(() => {});
+      }
+      const current = track();
+      if (current && current.readyState !== 'ended') { current.enabled = false; current.stop(); }
+      updateControls();
+      return;
+    }
+    let current = track();
+    if (!current || current.readyState === 'ended') {
+      const freshStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      stream = freshStream;
+      if (activeGroupVoice) activeGroupVoice.stream = freshStream;
+      current = track();
+      watch(currentUser.id, freshStream);
+      for (const peer of peers.values()) {
+        const sender = peer.getSenders().find(item => item.track?.kind === 'audio')
+          || peer.getTransceivers().find(item => item.receiver?.track?.kind === 'audio')?.sender;
+        if (sender && current) await sender.replaceTrack(current).catch(() => {});
+      }
+    }
+    if (current) current.enabled = true;
+    updateControls();
+  };
+  const syncServerMute = async () => {
+    const forced = !!participant(currentUser.id)?.server_muted;
+    if (forced && !hardwareForcedMute) {
+      hardwareForcedMute = true;
+      await setHardwareMute(true).catch(() => {});
+    } else if (!forced && hardwareForcedMute) {
+      hardwareForcedMute = false;
+      if (!localMuted) await setHardwareMute(false).catch(() => {});
+    }
+  };
+  const leave = async (notify = true) => {
+    const session = activeGroupVoice; if (!session) return; activeGroupVoice = null;
+    clearInterval(session.timer); cancelAnimationFrame(raf); session.peers.forEach(p => p.close()); session.audioNodes.forEach(n => n.audio.remove()); session.stream.getTracks().forEach(t => t.stop()); analysers.clear(); audioContext?.close().catch(() => {});
+    await api(`/group-voice/${session.id}/leave`, { method: 'POST' }).catch(() => {}); shell.remove(); if (notify) toast('Ses odasından çıktınız');
+  };
+  const poll = async () => {
+    if (!activeGroupVoice) return;
+    try {
+      const fresh = await api(`/group-voice/${room.id}?after=${lastSignal}`); activeGroupVoice.participants = fresh.participants; render(fresh.participants); await syncServerMute();
+      for (const p of fresh.participants) if (Number(p.user_id) !== Number(currentUser.id) && Number(currentUser.id) < Number(p.user_id)) await createPeer(p, true);
+      for (const item of fresh.signals) { lastSignal = Math.max(lastSignal, Number(item.id)); const id = Number(item.sender_id);
+        if (id === Number(currentUser.id)) continue;
+        if (item.signal_type === 'join') await createPeer(participant(id) || { user_id: id }, Number(currentUser.id) < id);
+        else if (item.signal_type === 'leave') removePeer(id);
+        else if (item.signal_type === 'state') { const p = participant(item.payload?.user_id || id); if (p) Object.assign(p, { muted: !!item.payload.muted, deafened: !!item.payload.deafened }); render(activeGroupVoice.participants); }
+        else if (item.signal_type === 'moderation') { const p = participant(item.payload?.user_id); if (p && item.payload.action !== 'remove') p[item.payload.action === 'server-mute' ? 'server_muted' : 'server_deafened'] = item.payload.enabled !== false; if (Number(item.payload?.user_id) === Number(currentUser.id) && item.payload.action === 'remove') { await leave(false); return toast('Yönetici sizi sesli sohbetten çıkardı'); } render(activeGroupVoice.participants); await syncServerMute(); }
+        else if (item.signal_type === 'offer') { await createPeer({ user_id: id }, false); const peer = peers.get(id); if (peer) { await peer.setRemoteDescription(item.payload); await peer.setLocalDescription(await peer.createAnswer()); await signal('answer', peer.localDescription, id); } }
+        else if (item.signal_type === 'answer' && peers.get(id)) await peers.get(id).setRemoteDescription(item.payload);
+        else if (item.signal_type === 'ice' && peers.get(id)) { try { await peers.get(id).addIceCandidate(item.payload); } catch {} }
+      }
+      statusEl.textContent = `${fresh.participants.length} kişi bağlı · Ses kalitesi iyi`;
+    } catch {}
+  };
+  const banPanel = async () => {
+    const panel = shell.querySelector('#group-voice-ban-panel'); if (!panel) return;
+    try {
+      const bans = await api(`/group/${encodeURIComponent(slug)}/voice-bans`), banned = new Set(bans.map(b => Number(b.user_id)));
+      const choices = groupMembers.filter(m => Number(m.user_id) !== Number(currentUser.id) && m.role !== 'owner' && !banned.has(Number(m.user_id)));
+      panel.hidden = false; panel.innerHTML = `<div class="group-voice-ban-head"><div><span class="group-voice-sidebar-kicker">ERİŞİM KONTROLÜ</span><strong>Sesliye girişi yasaklılar</strong></div><button class="group-voice-icon-btn" id="group-voice-ban-close"><i class="fas fa-xmark"></i></button></div><div class="group-voice-ban-add"><select id="group-voice-ban-user"><option value="">Üye seç</option>${choices.map(m => `<option value="${m.user_id}">${escHtml(m.username)}</option>`).join('')}</select><input id="group-voice-ban-reason" placeholder="Neden (isteğe bağlı)" maxlength="240"><button class="btn btn-primary" id="group-voice-ban-add"><i class="fas fa-ban"></i> Yasakla</button></div><div class="group-voice-ban-list">${bans.length ? bans.map(b => `<div class="group-voice-ban-row"><span class="group-voice-avatar">${b.avatar && !b.avatar_removed ? `<img src="${escHtml(b.avatar)}" alt="">` : '<i class="fas fa-user"></i>'}</span><div><strong>${escHtml(b.username)}</strong><small>${escHtml(b.reason || 'Neden belirtilmedi')}</small></div><button class="group-voice-unban" data-id="${b.user_id}">Kaldır</button></div>`).join('') : '<div class="group-voice-empty">Sesli sohbetten yasaklı kimse yok.</div>'}</div>`;
+      panel.querySelector('#group-voice-ban-close').onclick = () => { panel.hidden = true; };
+      panel.querySelector('#group-voice-ban-add').onclick = async () => { const id = panel.querySelector('#group-voice-ban-user').value; if (!id) return toast('Önce bir üye seçin', 'error'); await api(`/group/${encodeURIComponent(slug)}/voice-ban/${id}`, { method: 'POST', body: JSON.stringify({ reason: panel.querySelector('#group-voice-ban-reason').value.trim() }) }); toast('Sesli sohbet yasağı eklendi'); banPanel(); };
+      panel.querySelectorAll('.group-voice-unban').forEach(b => b.onclick = async () => { await api(`/group/${encodeURIComponent(slug)}/voice-ban/${b.dataset.id}/revoke`, { method: 'POST' }); toast('Sesli sohbet yasağı kaldırıldı'); banPanel(); });
+    } catch (error) { toast(error.message, 'error'); }
+  };
+
+  activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, participants: room.participants || [], timer: null };
+  render(activeGroupVoice.participants); watch(currentUser.id, stream); animate();
+  shell.querySelector('#group-voice-minimize').onclick = () => shell.classList.add('is-minimized');
+  shell.querySelector('#group-voice-mini-dock').onclick = () => shell.classList.remove('is-minimized');
+  shell.querySelector('#group-voice-leave').onclick = () => leave(true);
+  shell.querySelector('#group-voice-bans')?.addEventListener('click', banPanel);
+  shell.querySelector('#group-voice-mute').onclick = async () => {
+    if (participant(currentUser.id)?.server_muted) return toast('Mikrofonunuz grup yöneticisi tarafından kapatıldı', 'error');
+    localMuted = !localMuted;
+    try { await setHardwareMute(localMuted); }
+    catch { localMuted = true; await setHardwareMute(true).catch(() => {}); toast('Mikrofon yeniden açılamadı; tarayıcı iznini kontrol edin', 'error'); }
+    await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {});
+  };
+  shell.querySelector('#group-voice-deafen').onclick = async () => { if (participant(currentUser.id)?.server_deafened) return toast('Sesleri dinlemeniz grup yöneticisi tarafından kapatıldı', 'error'); localDeafened = !localDeafened; updateControls(); await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {}); };
+  participantEl.addEventListener('click', async e => {
+    const card = e.target.closest('[data-voice-user]'); if (!card || !manager) return;
+    const p = participant(card.dataset.voiceUser); if (!p || Number(p.user_id) === Number(currentUser.id)) return;
+    const choice = prompt(`${p.username} için işlem: mikrofon, duyma, çıkar`, p.server_muted ? 'mikrofon aç' : 'mikrofon'); if (!choice) return;
+    const text = choice.toLocaleLowerCase('tr-TR'), action = text.includes('çıkar') || text.includes('cikar') ? 'remove' : text.includes('duy') ? 'server-deafen' : 'server-mute';
+    const enabled = action === 'remove' ? true : !(action === 'server-mute' ? p.server_muted : p.server_deafened);
+    if (action === 'remove' && !confirm(`${p.username} sesli sohbetten çıkarılsın mı?`)) return;
+    try { await api(`/group-voice/${room.id}/member/${p.user_id}`, { method: 'POST', body: JSON.stringify({ action, enabled }) }); await poll(); toast('Ses odası ayarı güncellendi'); } catch (error) { toast(error.message, 'error'); }
+  });
+  await signal('join', { username: currentUser.username }); await poll(); activeGroupVoice.timer = setInterval(poll, 1200);
+}
+
 async function renderGroupDetail(app, slug) {
   if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
@@ -3517,7 +3722,7 @@ async function renderGroupDetail(app, slug) {
       <button class="btn btn-outline btn-sm" id="chat-bulk-delete-me" type="button" disabled><i class="fas fa-eye-slash"></i> Benden sil</button>
     </div>
   `;
-  document.getElementById('group-voice-btn')?.addEventListener('click', () => openGroupVoiceRoom(slug, group.name));
+  document.getElementById('group-voice-btn')?.addEventListener('click', () => openGroupVoiceRoomV2(slug, group.name, members, isOwner || isMod));
   const chatContainer = document.querySelector('.chat-container');
   if (chatContainer && !document.getElementById('chat-selection-toolbar')) {
     chatContainer.insertBefore(toolbar, chatContainer.firstChild);

@@ -6568,6 +6568,24 @@ app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
 });
 
 // ===== GRUP SES ODALARI =====
+async function getGroupVoiceManager(groupId, userId) {
+  const { rows } = await query(`
+    SELECT gm.role, g.owner_id,
+      CASE WHEN g.owner_id=$2 OR gm.role IN ('owner','moderator') THEN 1 ELSE 0 END AS can_manage
+    FROM groups g
+    JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2
+    WHERE g.id=$1
+  `, [groupId, userId]);
+  return rows[0] || null;
+}
+
+async function broadcastGroupVoiceSignal(roomId, senderId, signalType, payload) {
+  await query(
+    'INSERT INTO group_voice_signals (room_id,sender_id,signal_type,payload) VALUES ($1,$2,$3,$4)',
+    [roomId, senderId, signalType, JSON.stringify(payload || {})]
+  );
+}
+
 async function getGroupVoiceRoomForUser(roomId, userId) {
   const { rows } = await query(`
     SELECT r.*, g.slug, g.name AS group_name
@@ -6586,6 +6604,14 @@ app.post('/api/group/:slug/voice-room', authMiddleware, async (req, res) => {
   const group = groups[0];
   const { rows: member } = await query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!member.length) return res.status(403).json({ error: 'Ses odasına girmek için grup üyesi olmalısınız' });
+  const { rows: voiceBan } = await query(`
+    SELECT reason FROM group_voice_bans
+    WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL
+  `, [group.id, req.user.id]);
+  if (voiceBan.length) return res.status(403).json({
+    error: voiceBan[0].reason ? `Bu sesli sohbete girişiniz yasaklandı: ${voiceBan[0].reason}` : 'Bu sesli sohbete girişiniz yasaklandı',
+    voice_banned: true
+  });
   const { rows: ownRoom } = await query(`
     SELECT r.id FROM group_voice_rooms r
     JOIN group_voice_members vm ON vm.room_id=r.id AND vm.user_id=$2 AND vm.left_at IS NULL
@@ -6602,11 +6628,13 @@ app.post('/api/group/:slug/voice-room', authMiddleware, async (req, res) => {
     `, [roomId, req.user.id]);
   }
   const { rows: participants } = await query(`
-    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color, vm.muted
+    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color,
+      vm.muted, vm.deafened, vm.server_muted, vm.server_deafened
     FROM group_voice_members vm JOIN users u ON u.id=vm.user_id
     WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
   `, [roomId]);
-  res.json({ id: roomId, group: { name: group.name, slug: group.slug }, participants });
+  const manager = await getGroupVoiceManager(group.id, req.user.id);
+  res.json({ id: roomId, group: { name: group.name, slug: group.slug }, participants, can_manage_voice: !!manager?.can_manage });
 });
 
 app.get('/api/group-voice/:id', authMiddleware, async (req, res) => {
@@ -6614,7 +6642,8 @@ app.get('/api/group-voice/:id', authMiddleware, async (req, res) => {
   if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
   const after = Math.max(Number.parseInt(req.query.after, 10) || 0, 0);
   const { rows: participants } = await query(`
-    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color, vm.muted
+    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color,
+      vm.muted, vm.deafened, vm.server_muted, vm.server_deafened
     FROM group_voice_members vm JOIN users u ON u.id=vm.user_id
     WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
   `, [room.id]);
@@ -6632,15 +6661,119 @@ app.post('/api/group-voice/:id/signal', authMiddleware, async (req, res) => {
   if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
   const signalType = String(req.body?.signal_type || '').trim();
   const payload = req.body?.payload;
-  if (!['join','leave','offer','answer','ice','mute'].includes(signalType) || !payload || typeof payload !== 'object') {
+  if (!['join','leave','offer','answer','ice','mute','deafen'].includes(signalType) || !payload || typeof payload !== 'object') {
     return res.status(400).json({ error: 'Geçersiz ses sinyali' });
   }
   const receiverId = req.body?.receiver_id ? Number(req.body.receiver_id) : null;
+  if (signalType === 'mute' || signalType === 'deafen') {
+    const field = signalType === 'mute' ? 'muted' : 'deafened';
+    await query(`UPDATE group_voice_members SET ${field}=$1 WHERE room_id=$2 AND user_id=$3 AND left_at IS NULL`, [
+      payload.enabled === false ? 1 : 0, room.id, req.user.id
+    ]);
+  }
   const { rows } = await query(`
     INSERT INTO group_voice_signals (room_id,sender_id,receiver_id,signal_type,payload)
     VALUES ($1,$2,$3,$4,$5) RETURNING id
   `, [room.id, req.user.id, receiverId || null, signalType, JSON.stringify(payload)]);
   res.json({ ok: true, id: rows[0].id });
+});
+
+app.post('/api/group-voice/:id/state', authMiddleware, async (req, res) => {
+  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
+  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
+  const muted = req.body?.muted === true || req.body?.muted === 1;
+  const deafened = req.body?.deafened === true || req.body?.deafened === 1;
+  const { rows: current } = await query(
+    'SELECT server_muted, server_deafened FROM group_voice_members WHERE room_id=$1 AND user_id=$2 AND left_at IS NULL',
+    [room.id, req.user.id]
+  );
+  if (!current.length) return res.status(404).json({ error: 'Ses odası üyeliği bulunamadı' });
+  await query(`
+    UPDATE group_voice_members
+    SET muted=$1, deafened=$2
+    WHERE room_id=$3 AND user_id=$4 AND left_at IS NULL
+  `, [current[0].server_muted ? 1 : (muted ? 1 : 0), current[0].server_deafened ? 1 : (deafened ? 1 : 0), room.id, req.user.id]);
+  await broadcastGroupVoiceSignal(room.id, req.user.id, 'state', {
+    user_id: req.user.id,
+    muted: !!(current[0].server_muted || muted),
+    deafened: !!(current[0].server_deafened || deafened)
+  });
+  res.json({ ok: true, muted: !!(current[0].server_muted || muted), deafened: !!(current[0].server_deafened || deafened) });
+});
+
+app.post('/api/group-voice/:id/member/:userId', authMiddleware, async (req, res) => {
+  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
+  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
+  const manager = await getGroupVoiceManager(room.group_id, req.user.id);
+  if (!manager?.can_manage) return res.status(403).json({ error: 'Ses odası yönetme yetkiniz yok' });
+  const targetId = Number.parseInt(req.params.userId, 10);
+  if (!Number.isInteger(targetId) || targetId === req.user.id) return res.status(400).json({ error: 'Geçersiz hedef kullanıcı' });
+  const action = String(req.body?.action || '');
+  if (!['server-mute', 'server-deafen', 'remove'].includes(action)) return res.status(400).json({ error: 'Geçersiz ses odası işlemi' });
+  const { rows: target } = await query(`
+    SELECT user_id FROM group_voice_members WHERE room_id=$1 AND user_id=$2 AND left_at IS NULL
+  `, [room.id, targetId]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı ses odasında değil' });
+  if (action === 'remove') {
+    await query('UPDATE group_voice_members SET left_at=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, targetId]);
+    await broadcastGroupVoiceSignal(room.id, req.user.id, 'moderation', { action, user_id: targetId });
+  } else {
+    const field = action === 'server-mute' ? 'server_muted' : 'server_deafened';
+    const enabled = req.body?.enabled !== false;
+    await query(`UPDATE group_voice_members SET ${field}=$1 WHERE room_id=$2 AND user_id=$3`, [enabled ? 1 : 0, room.id, targetId]);
+    await broadcastGroupVoiceSignal(room.id, req.user.id, 'moderation', { action, enabled, user_id: targetId });
+  }
+  res.json({ ok: true });
+});
+
+app.get('/api/group/:slug/voice-bans', authMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const manager = await getGroupVoiceManager(groups[0].id, req.user.id);
+  if (!manager?.can_manage) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows } = await query(`
+    SELECT b.id, b.user_id, b.reason, b.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    FROM group_voice_bans b JOIN users u ON u.id=b.user_id
+    WHERE b.group_id=$1 AND b.revoked_at IS NULL ORDER BY b.created_at DESC
+  `, [groups[0].id]);
+  res.json(rows);
+});
+
+app.post('/api/group/:slug/voice-ban/:userId', authMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const group = groups[0];
+  const manager = await getGroupVoiceManager(group.id, req.user.id);
+  if (!manager?.can_manage) return res.status(403).json({ error: 'Yetki yok' });
+  const targetId = Number.parseInt(req.params.userId, 10);
+  if (!Number.isInteger(targetId) || targetId === req.user.id || targetId === group.owner_id) return res.status(400).json({ error: 'Bu kullanıcı sesli sohbetten yasaklanamaz' });
+  const reason = String(req.body?.reason || '').trim().slice(0, 240);
+  const { rows: member } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, targetId]);
+  if (!member.length) return res.status(404).json({ error: 'Kullanıcı grup üyesi değil' });
+  await query(`
+    INSERT INTO group_voice_bans (group_id,user_id,created_by,reason)
+    VALUES ($1,$2,$3,$4)
+    ON CONFLICT (group_id,user_id) DO UPDATE SET created_by=EXCLUDED.created_by, reason=EXCLUDED.reason, created_at=NOW(), revoked_at=NULL
+  `, [group.id, targetId, req.user.id, reason]);
+  const { rows: activeRooms } = await query('SELECT id FROM group_voice_rooms WHERE group_id=$1 AND status=$2', [group.id, 'active']);
+  for (const activeRoom of activeRooms) {
+    await query('UPDATE group_voice_members SET left_at=NOW() WHERE room_id=$1 AND user_id=$2 AND left_at IS NULL', [activeRoom.id, targetId]);
+    await broadcastGroupVoiceSignal(activeRoom.id, req.user.id, 'moderation', { action: 'remove', user_id: targetId, reason: 'voice-ban' });
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/group/:slug/voice-ban/:userId/revoke', authMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const manager = await getGroupVoiceManager(groups[0].id, req.user.id);
+  if (!manager?.can_manage) return res.status(403).json({ error: 'Yetki yok' });
+  const result = await query(
+    'UPDATE group_voice_bans SET revoked_at=NOW() WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL',
+    [groups[0].id, Number.parseInt(req.params.userId, 10)]
+  );
+  if (!result.rowCount) return res.status(404).json({ error: 'Aktif sesli sohbet yasağı bulunamadı' });
+  res.json({ ok: true });
 });
 
 app.post('/api/group-voice/:id/leave', authMiddleware, async (req, res) => {

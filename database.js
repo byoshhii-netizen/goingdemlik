@@ -849,8 +849,14 @@ async function initDb() {
       joined_at TIMESTAMP DEFAULT NOW(),
       left_at TIMESTAMP,
       muted INTEGER NOT NULL DEFAULT 0,
+      deafened INTEGER NOT NULL DEFAULT 0,
+      server_muted INTEGER NOT NULL DEFAULT 0,
+      server_deafened INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY(room_id, user_id)
     );
+    ALTER TABLE group_voice_members ADD COLUMN IF NOT EXISTS deafened INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE group_voice_members ADD COLUMN IF NOT EXISTS server_muted INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE group_voice_members ADD COLUMN IF NOT EXISTS server_deafened INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE IF NOT EXISTS group_voice_signals (
       id BIGSERIAL PRIMARY KEY,
       room_id UUID NOT NULL REFERENCES group_voice_rooms(id) ON DELETE CASCADE,
@@ -862,6 +868,17 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_group_voice_members_room ON group_voice_members(room_id, left_at);
     CREATE INDEX IF NOT EXISTS idx_group_voice_signals_poll ON group_voice_signals(room_id, receiver_id, id);
+    CREATE TABLE IF NOT EXISTS group_voice_bans (
+      id BIGSERIAL PRIMARY KEY,
+      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMP DEFAULT NOW(),
+      revoked_at TIMESTAMP,
+      UNIQUE(group_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_voice_bans_group ON group_voice_bans(group_id, revoked_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
