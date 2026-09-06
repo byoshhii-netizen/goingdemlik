@@ -3140,7 +3140,9 @@ app.get('/api/group/:slug/members', async (req, res) => {
   const { rows: gRows } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
   if (!gRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
   if (await denyIfGroupUnavailable(req, res, gRows[0])) return;
-  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.level_id FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
+  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.level_id,
+      (SELECT public_key FROM e2ee_identities WHERE user_id=u.id) AS e2ee_public_key FROM group_members gm LEFT JOIN users u ON gm.user_id=u.id WHERE gm.group_id=$1 ORDER BY gm.joined_at ASC`, [gRows[0].id]);
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, (SELECT public_key FROM e2ee_identities WHERE user_id=u.id) AS e2ee_public_key, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1 AND gm.id < $2`;
   res.json(rows);
 });
 
@@ -3159,11 +3161,11 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, (SELECT public_key FROM e2ee_identities WHERE user_id=u.id) AS e2ee_public_key, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     sql = sql.replace(' ORDER BY gm.created_at DESC LIMIT $3', '');
     params = [group.id, before_id];
   } else {
-    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, (SELECT public_key FROM e2ee_identities WHERE user_id=u.id) AS e2ee_public_key, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.group_id=$1`;
     params = [group.id];
   }
   sql += ` ORDER BY gm.created_at DESC LIMIT $${params.length + 1}`;
@@ -3185,8 +3187,8 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60000));
     return res.status(403).json({ error: `SUSTURULDUN. Kalan süre: ${remainingMinutes} dakika`, muted: true, remaining_minutes: remainingMinutes });
   }
-  const { content, image_url, reply_to_id } = req.body;
-  if (!content?.trim() && !image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  const { content, e2ee_payload, image_url, reply_to_id } = req.body;
+  if (!e2ee_payload) return res.status(400).json({ error: 'Şifreli mesaj zarfı gerekli' });
   let replyId = null;
   if (reply_to_id !== undefined && reply_to_id !== null && String(reply_to_id).trim() !== '') {
     replyId = Number.parseInt(reply_to_id, 10);
@@ -3194,10 +3196,9 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     const { rows: replyRows } = await query('SELECT id FROM group_messages WHERE id=$1 AND group_id=$2', [replyId, group.id]);
     if (!replyRows.length) return res.status(400).json({ error: 'Yanıtlanacak mesaj bulunamadı' });
   }
-  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url,reply_to_id) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-    [group.id, req.user.id, content||'', image_url||'', replyId]);
-  await notifyGroupMentions(group, req.user, content || '').catch(() => {});
-  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,e2ee_payload,image_url,reply_to_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [group.id, req.user.id, '', e2ee_payload, image_url||'', replyId]);
+  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, (SELECT public_key FROM e2ee_identities WHERE user_id=u.id) AS e2ee_public_key, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.id=$1`, [rows[0].id]);
   res.json(msg[0]);
 });
 
@@ -3213,9 +3214,10 @@ app.put('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => {
   if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
   const canEdit = msg.user_id == req.user.id;
   if (!canEdit) return res.status(403).json({ error: 'Bu mesajı düzenleme yetkiniz yok' });
-  const content = String(req.body.content || '').trim();
-  if (!content && !msg.image_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
-  const { rows } = await query('UPDATE group_messages SET content=$1,edited_at=NOW() WHERE id=$2 RETURNING *', [content, msg.id]);
+  if (msg.user_id != req.user.id || Date.now() - new Date(msg.created_at).getTime() > 3600000) return res.status(403).json({ error: 'Mesaj yalnızca göndereni tarafından ilk 1 saat içinde düzenlenebilir' });
+  const e2eePayload = String(req.body.e2ee_payload || '');
+  if (!e2eePayload) return res.status(400).json({ error: 'Şifreli mesaj zarfı gerekli' });
+  const { rows } = await query('UPDATE group_messages SET content=$1,e2ee_payload=$2,edited_at=NOW() WHERE id=$3 RETURNING *', ['', e2eePayload, msg.id]);
   const { rows: full } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.id=$1`, [msg.id]);
   res.json(full[0] || rows[0]);
 });
@@ -4797,7 +4799,7 @@ app.get('/api/admin/groups', adminMiddleware, async (req, res) => {
 app.get('/api/admin/group/:id/messages', adminMiddleware, async (req, res) => {
   const { rows: groups } = await query('SELECT id, name, slug FROM groups WHERE id=$1', [req.params.id]);
   if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const { rows } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed
+  const { rows } = await query(`SELECT gm.id, gm.group_id, gm.user_id, gm.e2ee_payload, gm.image_url, gm.reply_to_id, gm.edited_at, gm.created_at, u.username, u.avatar, u.avatar_removed
     FROM group_messages gm LEFT JOIN users u ON u.id=gm.user_id
     WHERE gm.group_id=$1 ORDER BY gm.created_at ASC LIMIT 500`, [groups[0].id]);
   res.json({ group: groups[0], messages: rows });
@@ -6616,7 +6618,8 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
+      CASE WHEN c.user1_id=$1 THEN c.muted_until_user1 ELSE c.muted_until_user2 END as muted_until,
+      (SELECT CASE WHEN m.e2ee_payload <> '' THEN '[Uçtan uca şifreli mesaj]' ELSE '[Eski mesaj]' END FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
         AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
         ORDER BY m.created_at DESC LIMIT 1) as last_message,
       (SELECT COUNT(*) FROM dm_messages WHERE conversation_id=c.id AND sender_id!=$1 AND 
@@ -6642,7 +6645,7 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
+      (SELECT CASE WHEN m.e2ee_payload <> '' THEN '[Uçtan uca şifreli mesaj]' ELSE '[Eski mesaj]' END FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
         AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
         ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c
@@ -6664,7 +6667,7 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
+      (SELECT CASE WHEN e2ee_payload <> '' THEN '[Uçtan uca şifreli mesaj]' ELSE '[Eski mesaj]' END FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
     WHERE ((c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1))
       AND (CASE WHEN c.user1_id=$1 THEN c.hidden_pass_user1 ELSE c.hidden_pass_user2 END) = $2
@@ -6689,7 +6692,8 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
-  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows: target } = await query(`SELECT id,username,avatar,avatar_removed,name_color,is_private,
+    (SELECT public_key FROM e2ee_identities WHERE user_id=users.id) AS e2ee_public_key FROM users WHERE username=$1`, [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
   if (other.is_private && other.id !== uid) {
@@ -6711,14 +6715,15 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const { rows: msgs } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.e2ee_payload, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.edited_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
+      (SELECT public_key FROM e2ee_identities WHERE user_id=m.sender_id) AS sender_e2ee_public_key,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
-      r.content as reply_content, ru.username as reply_username
+      r.content as reply_content, r.e2ee_payload as reply_e2ee_payload, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -6768,6 +6773,16 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true });
 });
 
+app.put('/api/e2ee/identity', authMiddleware, async (req, res) => {
+  const publicKey = req.body?.public_key;
+  if (!publicKey || publicKey.kty !== 'EC' || publicKey.crv !== 'P-256' || !publicKey.x || !publicKey.y) {
+    return res.status(400).json({ error: 'Geçersiz cihaz public key' });
+  }
+  await query(`INSERT INTO e2ee_identities (user_id, public_key) VALUES ($1, $2::jsonb)
+    ON CONFLICT (user_id) DO UPDATE SET public_key=EXCLUDED.public_key, updated_at=NOW()`, [req.user.id, JSON.stringify(publicKey)]);
+  res.json({ ok: true });
+});
+
 app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
   if (await denyIfRestricted(req, res, 'message')) return;
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
@@ -6793,7 +6808,10 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  let { content, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id } = req.body;
+  let { content, e2ee_payload, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id } = req.body;
+  if (!e2ee_payload) return res.status(400).json({ error: 'Şifreli mesaj zarfı gerekli' });
+  try { JSON.parse(e2ee_payload); } catch { return res.status(400).json({ error: 'Geçersiz şifreli mesaj zarfı' }); }
+  content = '';
   let image_url = '';
   if (req.file) {
     try { image_url = await handleUpload(req.file); } catch (e) {}
@@ -6801,8 +6819,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   if (shared_photo_id && !content) content = ' ';
   if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, e2ee_payload, image_url, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+    [conv.id, uid, '', e2ee_payload, image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   // Forum paylaşım sayısını artır
@@ -6810,18 +6828,16 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await query('UPDATE forums SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_forum_id]);
   }
   // DM @mention bildirimleri
-  if (content?.trim()) {
-    await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
-  }
+  // Mentions are intentionally not parsed server-side; plaintext never reaches the server.
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.e2ee_payload, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.edited_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
-      r.content as reply_content, ru.username as reply_username
+      r.content as reply_content, r.e2ee_payload as reply_e2ee_payload, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
     LEFT JOIN videos v ON m.shared_video_id=v.id
@@ -6833,6 +6849,16 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     WHERE m.id=$1
   `, [msgRows[0].id]);
   res.json(full[0]);
+});
+
+app.put('/api/messages/:id', authMiddleware, async (req, res) => {
+  const payload = String(req.body?.e2ee_payload || '');
+  if (!payload) return res.status(400).json({ error: 'Şifreli mesaj zarfı gerekli' });
+  const { rows } = await query('SELECT * FROM dm_messages WHERE id=$1', [req.params.id]);
+  if (!rows.length || rows[0].sender_id != req.user.id) return res.status(403).json({ error: 'Mesajı düzenleme yetkiniz yok' });
+  if (Date.now() - new Date(rows[0].created_at).getTime() > 3600000) return res.status(403).json({ error: 'Mesaj yalnızca ilk 1 saat içinde düzenlenebilir' });
+  const { rows: updated } = await query('UPDATE dm_messages SET content=$1,e2ee_payload=$2,edited_at=NOW() WHERE id=$3 RETURNING id,e2ee_payload,edited_at,created_at', ['', payload, rows[0].id]);
+  res.json(updated[0]);
 });
 
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
@@ -6899,6 +6925,20 @@ app.post('/api/conversation/:username/set-password', authMiddleware, async (req,
   res.json({ ok: true });
 });
 
+app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) => {
+  const hours = Number(req.body?.hours);
+  if (![0, 2, 5, 12].includes(hours) && hours !== -1) return res.status(400).json({ error: 'Geçersiz sessize alma süresi' });
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const uid = req.user.id, other = target[0].id;
+  const { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [Math.min(uid, other), Math.max(uid, other)]);
+  if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
+  const conv = convRows[0], column = conv.user1_id == uid ? 'muted_until_user1' : 'muted_until_user2';
+  const value = hours === 0 ? null : hours === -1 ? '2099-12-31T23:59:59.000Z' : new Date(Date.now() + hours * 3600000).toISOString();
+  await query(`UPDATE dm_conversations SET ${column}=$1 WHERE id=$2`, [value, conv.id]);
+  res.json({ ok: true, muted_until: value });
+});
+
 app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   const { mode } = req.body; // 'me' | 'all'
   const { rows } = await query('SELECT * FROM dm_messages WHERE id=$1', [req.params.id]);
@@ -6961,10 +7001,10 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
   if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
-  // Sadece kendi tarafından gizle (soft delete)
-  if (isUser1) await query('UPDATE dm_conversations SET hidden_by_user1=2 WHERE id=$1', [conv.id]);
-  else await query('UPDATE dm_conversations SET hidden_by_user2=2 WHERE id=$1', [conv.id]);
-  res.json({ ok: true });
+  await query('DELETE FROM dm_messages WHERE conversation_id=$1', [conv.id]);
+  if (isUser1) await query('UPDATE dm_conversations SET hidden_by_user1=0, last_message_at=NULL WHERE id=$1', [conv.id]);
+  else await query('UPDATE dm_conversations SET hidden_by_user2=0, last_message_at=NULL WHERE id=$1', [conv.id]);
+  res.json({ ok: true, conversation_kept: true });
 });
 
 // ===== ADMIN: MESAJLARI OKU =====
@@ -6991,20 +7031,7 @@ app.get('/api/admin/users/:id/conversations', adminMiddleware, async (req, res) 
 });
 
 app.get('/api/admin/messages/search', adminMiddleware, async (req, res) => {
-  const search = String(req.query.q || '').trim();
-  if (search.length < 2) return res.json([]);
-  const { rows } = await query(`
-    SELECT m.id, m.conversation_id, m.content, m.created_at, m.deleted_for_all,
-      m.deleted_by_sender, m.deleted_by_receiver, sender.username AS sender_username,
-      u1.username AS user1, u2.username AS user2
-    FROM dm_messages m
-    JOIN users sender ON sender.id=m.sender_id
-    JOIN dm_conversations c ON c.id=m.conversation_id
-    JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
-    WHERE m.content ILIKE $1
-    ORDER BY m.created_at DESC LIMIT 100
-  `, [`%${search}%`]);
-  res.json(rows.map(row => ({ ...row, audit_status: row.deleted_for_all ? 'deleted_for_all' : (row.deleted_by_sender || row.deleted_by_receiver ? 'deleted_for_user' : 'visible') })));
+  res.status(403).json({ error: 'Uçtan uca şifreli mesajlarda sunucu tarafı içerik araması yapılamaz.' });
 });
 
 app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, res) => {
@@ -7964,9 +7991,10 @@ initDb().then(() => {
 
         const result = await query(
           `SELECT gcm.id, gcm.channel_id, gcm.user_id, u.username, u.avatar, 
-                  gcm.content, gcm.image_url, gcm.edited_at, gcm.created_at
+                  gcm.content, gcm.e2ee_payload, ei.public_key AS e2ee_public_key, gcm.image_url, gcm.edited_at, gcm.created_at
            FROM group_channel_messages gcm
            LEFT JOIN users u ON gcm.user_id = u.id
+           LEFT JOIN e2ee_identities ei ON ei.user_id = gcm.user_id
            WHERE gcm.channel_id = $1
            ORDER BY gcm.created_at DESC
            LIMIT $2 OFFSET $3`,
@@ -7984,17 +8012,17 @@ initDb().then(() => {
     app.post('/api/group/:slug/channel/:channelId/messages', authMiddleware, async (req, res) => {
       try {
         const { slug, channelId } = req.params;
-        const { content, image_url = '' } = req.body;
-        if (!content && !image_url) return res.status(400).json({ error: 'Mesaj içeriği gerekli' });
+        const { e2ee_payload, image_url = '' } = req.body;
+        if (!e2ee_payload) return res.status(400).json({ error: 'Şifreli mesaj zarfı gerekli' });
 
         const access = await authorizeChannel(req, res, slug, channelId, 'write');
         if (!access) return;
         const groupId = access.channel.group_id;
 
         const result = await query(
-          `INSERT INTO group_channel_messages (channel_id, user_id, content, image_url)
-           VALUES ($1, $2, $3, $4) RETURNING *`,
-          [channelId, req.user.id, content, image_url]
+          `INSERT INTO group_channel_messages (channel_id, user_id, content, e2ee_payload, image_url)
+           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+          [channelId, req.user.id, '', e2ee_payload, image_url]
         );
 
         res.json(result.rows[0]);

@@ -516,14 +516,17 @@ async function initDb() {
       group_id BIGINT,
       user_id BIGINT,
       content TEXT,
+      e2ee_payload TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
       reply_to_id BIGINT,
+      edited_at TIMESTAMP,
       edited_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(group_id) REFERENCES groups(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
       FOREIGN KEY(reply_to_id) REFERENCES group_messages(id) ON DELETE SET NULL
     );
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS e2ee_payload TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS group_message_deletions (
       id BIGSERIAL PRIMARY KEY,
@@ -777,6 +780,7 @@ async function initDb() {
       conversation_id BIGINT NOT NULL,
       sender_id BIGINT NOT NULL,
       content TEXT DEFAULT '',
+      e2ee_payload TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
       shared_forum_id BIGINT,
       shared_video_id BIGINT,
@@ -793,11 +797,20 @@ async function initDb() {
       FOREIGN KEY(reply_to_id) REFERENCES dm_messages(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS e2ee_identities (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      public_key JSONB NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS e2ee_payload TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
@@ -807,6 +820,8 @@ async function initDb() {
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS public_id TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user1 TIMESTAMP;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user2 TIMESTAMP;
     CREATE TABLE IF NOT EXISTS voice_calls (
       id UUID PRIMARY KEY,
       caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1313,10 +1328,12 @@ async function initDb() {
       channel_id BIGINT NOT NULL REFERENCES group_channels(id) ON DELETE CASCADE,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
       content TEXT NOT NULL,
+      e2ee_payload TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
       edited_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE group_channel_messages ADD COLUMN IF NOT EXISTS e2ee_payload TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_group_channel_messages_channel ON group_channel_messages(channel_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS group_approval_systems (

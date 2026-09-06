@@ -702,7 +702,6 @@ async function renderHome(app) {
       try { const items = await api('/shop/items'); const el = $('#home-shop'); if (!items.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-store"></i><p>Mağaza boş.</p></div>'; else el.innerHTML = items.slice(0,6).map(i=>shopCardHTML(i)).join(''); } catch {}
     }
   }
-}
 
 async function renderForumList(app, queryString) {
   document.title = 'Konular – ' + siteName;

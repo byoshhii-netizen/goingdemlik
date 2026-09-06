@@ -740,7 +740,6 @@ async function renderHome(app) {
     }
   }
 }
-}
 
 async function renderForumList(app, queryString) {
   document.title = 'Konular – ' + siteName;
