@@ -96,8 +96,8 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // WebRTC sesli aramalar için mikrofonu aynı origin'e aç; kamera kullanılmıyor.
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
+  // Sesli arama geçici olarak kapalı; mikrofon erişimi açılmıyor.
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
@@ -4931,18 +4931,6 @@ app.post('/api/admin/upload-mention-sound', adminMiddleware, upload.single('soun
   catch (error) { res.status(400).json({ error: error.message || 'Etiket bildirimi sesi yüklenemedi' }); }
 });
 
-app.post('/api/admin/upload-voice-join-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Sesli sohbete giriş sesi gerekli' });
-  try { res.json({ url: await handleUpload(req.file) }); }
-  catch (error) { res.status(400).json({ error: error.message || 'Giriş sesi yüklenemedi' }); }
-});
-
-app.post('/api/admin/upload-voice-leave-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Sesli sohbetten çıkış sesi gerekli' });
-  try { res.json({ url: await handleUpload(req.file) }); }
-  catch (error) { res.status(400).json({ error: error.message || 'Çıkış sesi yüklenemedi' }); }
-});
-
 // Logo dosya yükleme (cihazdan)
 app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async (req, res) => {
   res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
@@ -5708,7 +5696,7 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url',
-    'voice_join_sound_url','voice_leave_sound_url','photo_song_clip_seconds'
+    'photo_song_clip_seconds'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
@@ -6579,232 +6567,6 @@ app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
-// ===== GRUP SES ODALARI =====
-async function getGroupVoiceManager(groupId, userId) {
-  const { rows } = await query(`
-    SELECT gm.role, g.owner_id,
-      CASE WHEN g.owner_id=$2 OR gm.role IN ('owner','moderator') THEN 1 ELSE 0 END AS can_manage
-    FROM groups g
-    JOIN group_members gm ON gm.group_id=g.id AND gm.user_id=$2
-    WHERE g.id=$1
-  `, [groupId, userId]);
-  return rows[0] || null;
-}
-
-async function broadcastGroupVoiceSignal(roomId, senderId, signalType, payload) {
-  await query(
-    'INSERT INTO group_voice_signals (room_id,sender_id,signal_type,payload) VALUES ($1,$2,$3,$4)',
-    [roomId, senderId, signalType, JSON.stringify(payload || {})]
-  );
-}
-
-async function getGroupVoiceRoomForUser(roomId, userId) {
-  const { rows } = await query(`
-    SELECT r.*, g.slug, g.name AS group_name
-    FROM group_voice_rooms r
-    JOIN groups g ON g.id=r.group_id
-    JOIN group_members gm ON gm.group_id=r.group_id AND gm.user_id=$2
-    JOIN group_voice_members vm ON vm.room_id=r.id AND vm.user_id=$2 AND vm.left_at IS NULL
-    WHERE r.id=$1 AND r.status='active'
-  `, [roomId, userId]);
-  return rows[0] || null;
-}
-
-app.post('/api/group/:slug/voice-room', authMiddleware, async (req, res) => {
-  const { rows: groups } = await query('SELECT id,name,slug FROM groups WHERE slug=$1', [req.params.slug]);
-  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const group = groups[0];
-  const { rows: member } = await query('SELECT 1 FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
-  if (!member.length) return res.status(403).json({ error: 'Ses odasına girmek için grup üyesi olmalısınız' });
-  const { rows: voiceBan } = await query(`
-    SELECT reason FROM group_voice_bans
-    WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL
-  `, [group.id, req.user.id]);
-  if (voiceBan.length) return res.status(403).json({
-    error: voiceBan[0].reason ? `Bu sesli sohbete girişiniz yasaklandı: ${voiceBan[0].reason}` : 'Bu sesli sohbete girişiniz yasaklandı',
-    voice_banned: true
-  });
-  const { rows: ownRoom } = await query(`
-    SELECT r.id FROM group_voice_rooms r
-    JOIN group_voice_members vm ON vm.room_id=r.id AND vm.user_id=$2 AND vm.left_at IS NULL
-    WHERE r.group_id=$1 AND r.status='active' LIMIT 1
-  `, [group.id, req.user.id]);
-  let roomId = ownRoom[0]?.id;
-  if (!roomId) {
-    const { rows: rooms } = await query('SELECT id FROM group_voice_rooms WHERE group_id=$1 AND status=$2 ORDER BY created_at DESC LIMIT 1', [group.id, 'active']);
-    roomId = rooms[0]?.id || randomUUID();
-    if (!rooms.length) await query('INSERT INTO group_voice_rooms (id,group_id,created_by) VALUES ($1,$2,$3)', [roomId, group.id, req.user.id]);
-    await query(`
-      INSERT INTO group_voice_members (room_id,user_id) VALUES ($1,$2)
-      ON CONFLICT (room_id,user_id) DO UPDATE SET left_at=NULL, joined_at=NOW()
-    `, [roomId, req.user.id]);
-  }
-  const { rows: roomMeta } = await query('SELECT created_at FROM group_voice_rooms WHERE id=$1', [roomId]);
-  const { rows: participants } = await query(`
-    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color,
-      vm.muted, vm.deafened, vm.server_muted, vm.server_deafened
-    FROM group_voice_members vm JOIN users u ON u.id=vm.user_id
-    WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
-  `, [roomId]);
-  const manager = await getGroupVoiceManager(group.id, req.user.id);
-  res.json({
-    id: roomId,
-    group: { name: group.name, slug: group.slug },
-    room_started_at: roomMeta[0]?.created_at || null,
-    participants,
-    can_manage_voice: !!manager?.can_manage
-  });
-});
-
-app.get('/api/group-voice/:id', authMiddleware, async (req, res) => {
-  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
-  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
-  const after = Math.max(Number.parseInt(req.query.after, 10) || 0, 0);
-  const { rows: participants } = await query(`
-    SELECT vm.user_id, u.username, u.avatar, u.avatar_removed, u.name_color,
-      vm.muted, vm.deafened, vm.server_muted, vm.server_deafened
-    FROM group_voice_members vm JOIN users u ON u.id=vm.user_id
-    WHERE vm.room_id=$1 AND vm.left_at IS NULL ORDER BY vm.joined_at ASC
-  `, [room.id]);
-  const { rows: signals } = await query(`
-    SELECT id, sender_id, receiver_id, signal_type, payload, created_at
-    FROM group_voice_signals
-    WHERE room_id=$1 AND id>$2 AND (receiver_id IS NULL OR receiver_id=$3)
-    ORDER BY id ASC LIMIT 200
-  `, [room.id, after, req.user.id]);
-  res.json({ room, participants, signals });
-});
-
-app.post('/api/group-voice/:id/signal', authMiddleware, async (req, res) => {
-  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
-  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
-  const signalType = String(req.body?.signal_type || '').trim();
-  const payload = req.body?.payload;
-  if (!['join','leave','offer','answer','ice','mute','deafen'].includes(signalType) || !payload || typeof payload !== 'object') {
-    return res.status(400).json({ error: 'Geçersiz ses sinyali' });
-  }
-  const receiverId = req.body?.receiver_id ? Number(req.body.receiver_id) : null;
-  if (signalType === 'mute' || signalType === 'deafen') {
-    const field = signalType === 'mute' ? 'muted' : 'deafened';
-    await query(`UPDATE group_voice_members SET ${field}=$1 WHERE room_id=$2 AND user_id=$3 AND left_at IS NULL`, [
-      payload.enabled === false ? 1 : 0, room.id, req.user.id
-    ]);
-  }
-  const { rows } = await query(`
-    INSERT INTO group_voice_signals (room_id,sender_id,receiver_id,signal_type,payload)
-    VALUES ($1,$2,$3,$4,$5) RETURNING id
-  `, [room.id, req.user.id, receiverId || null, signalType, JSON.stringify(payload)]);
-  res.json({ ok: true, id: rows[0].id });
-});
-
-app.post('/api/group-voice/:id/state', authMiddleware, async (req, res) => {
-  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
-  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
-  const muted = req.body?.muted === true || req.body?.muted === 1;
-  const deafened = req.body?.deafened === true || req.body?.deafened === 1;
-  const { rows: current } = await query(
-    'SELECT server_muted, server_deafened FROM group_voice_members WHERE room_id=$1 AND user_id=$2 AND left_at IS NULL',
-    [room.id, req.user.id]
-  );
-  if (!current.length) return res.status(404).json({ error: 'Ses odası üyeliği bulunamadı' });
-  await query(`
-    UPDATE group_voice_members
-    SET muted=$1, deafened=$2
-    WHERE room_id=$3 AND user_id=$4 AND left_at IS NULL
-  `, [current[0].server_muted ? 1 : (muted ? 1 : 0), current[0].server_deafened ? 1 : (deafened ? 1 : 0), room.id, req.user.id]);
-  await broadcastGroupVoiceSignal(room.id, req.user.id, 'state', {
-    user_id: req.user.id,
-    muted: !!(current[0].server_muted || muted),
-    deafened: !!(current[0].server_deafened || deafened)
-  });
-  res.json({ ok: true, muted: !!(current[0].server_muted || muted), deafened: !!(current[0].server_deafened || deafened) });
-});
-
-app.post('/api/group-voice/:id/member/:userId', authMiddleware, async (req, res) => {
-  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
-  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
-  const manager = await getGroupVoiceManager(room.group_id, req.user.id);
-  if (!manager?.can_manage) return res.status(403).json({ error: 'Ses odası yönetme yetkiniz yok' });
-  const targetId = Number.parseInt(req.params.userId, 10);
-  if (!Number.isInteger(targetId) || targetId === req.user.id) return res.status(400).json({ error: 'Geçersiz hedef kullanıcı' });
-  const action = String(req.body?.action || '');
-  if (!['server-mute', 'server-deafen', 'remove'].includes(action)) return res.status(400).json({ error: 'Geçersiz ses odası işlemi' });
-  const { rows: target } = await query(`
-    SELECT user_id FROM group_voice_members WHERE room_id=$1 AND user_id=$2 AND left_at IS NULL
-  `, [room.id, targetId]);
-  if (!target.length) return res.status(404).json({ error: 'Kullanıcı ses odasında değil' });
-  if (action === 'remove') {
-    await query('UPDATE group_voice_members SET left_at=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, targetId]);
-    await broadcastGroupVoiceSignal(room.id, req.user.id, 'moderation', { action, user_id: targetId });
-  } else {
-    const field = action === 'server-mute' ? 'server_muted' : 'server_deafened';
-    const enabled = req.body?.enabled !== false;
-    await query(`UPDATE group_voice_members SET ${field}=$1 WHERE room_id=$2 AND user_id=$3`, [enabled ? 1 : 0, room.id, targetId]);
-    await broadcastGroupVoiceSignal(room.id, req.user.id, 'moderation', { action, enabled, user_id: targetId });
-  }
-  res.json({ ok: true });
-});
-
-app.get('/api/group/:slug/voice-bans', authMiddleware, async (req, res) => {
-  const { rows: groups } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
-  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const manager = await getGroupVoiceManager(groups[0].id, req.user.id);
-  if (!manager?.can_manage) return res.status(403).json({ error: 'Yetki yok' });
-  const { rows } = await query(`
-    SELECT b.id, b.user_id, b.reason, b.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
-    FROM group_voice_bans b JOIN users u ON u.id=b.user_id
-    WHERE b.group_id=$1 AND b.revoked_at IS NULL ORDER BY b.created_at DESC
-  `, [groups[0].id]);
-  res.json(rows);
-});
-
-app.post('/api/group/:slug/voice-ban/:userId', authMiddleware, async (req, res) => {
-  const { rows: groups } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [req.params.slug]);
-  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const group = groups[0];
-  const manager = await getGroupVoiceManager(group.id, req.user.id);
-  if (!manager?.can_manage) return res.status(403).json({ error: 'Yetki yok' });
-  const targetId = Number.parseInt(req.params.userId, 10);
-  if (!Number.isInteger(targetId) || targetId === req.user.id || targetId === group.owner_id) return res.status(400).json({ error: 'Bu kullanıcı sesli sohbetten yasaklanamaz' });
-  const reason = String(req.body?.reason || '').trim().slice(0, 240);
-  const { rows: member } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, targetId]);
-  if (!member.length) return res.status(404).json({ error: 'Kullanıcı grup üyesi değil' });
-  await query(`
-    INSERT INTO group_voice_bans (group_id,user_id,created_by,reason)
-    VALUES ($1,$2,$3,$4)
-    ON CONFLICT (group_id,user_id) DO UPDATE SET created_by=EXCLUDED.created_by, reason=EXCLUDED.reason, created_at=NOW(), revoked_at=NULL
-  `, [group.id, targetId, req.user.id, reason]);
-  const { rows: activeRooms } = await query('SELECT id FROM group_voice_rooms WHERE group_id=$1 AND status=$2', [group.id, 'active']);
-  for (const activeRoom of activeRooms) {
-    await query('UPDATE group_voice_members SET left_at=NOW() WHERE room_id=$1 AND user_id=$2 AND left_at IS NULL', [activeRoom.id, targetId]);
-    await broadcastGroupVoiceSignal(activeRoom.id, req.user.id, 'moderation', { action: 'remove', user_id: targetId, reason: 'voice-ban' });
-  }
-  res.json({ ok: true });
-});
-
-app.post('/api/group/:slug/voice-ban/:userId/revoke', authMiddleware, async (req, res) => {
-  const { rows: groups } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
-  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const manager = await getGroupVoiceManager(groups[0].id, req.user.id);
-  if (!manager?.can_manage) return res.status(403).json({ error: 'Yetki yok' });
-  const result = await query(
-    'UPDATE group_voice_bans SET revoked_at=NOW() WHERE group_id=$1 AND user_id=$2 AND revoked_at IS NULL',
-    [groups[0].id, Number.parseInt(req.params.userId, 10)]
-  );
-  if (!result.rowCount) return res.status(404).json({ error: 'Aktif sesli sohbet yasağı bulunamadı' });
-  res.json({ ok: true });
-});
-
-app.post('/api/group-voice/:id/leave', authMiddleware, async (req, res) => {
-  const room = await getGroupVoiceRoomForUser(req.params.id, req.user.id);
-  if (!room) return res.status(404).json({ error: 'Ses odası bulunamadı' });
-  await query('UPDATE group_voice_members SET left_at=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
-  await query('INSERT INTO group_voice_signals (room_id,sender_id,signal_type,payload) VALUES ($1,$2,$3,$4)', [room.id, req.user.id, 'leave', JSON.stringify({})]);
-  const { rows: remaining } = await query('SELECT 1 FROM group_voice_members WHERE room_id=$1 AND left_at IS NULL LIMIT 1', [room.id]);
-  if (!remaining.length) await query("UPDATE group_voice_rooms SET status='ended', ended_at=NOW() WHERE id=$1", [room.id]);
-  res.json({ ok: true });
-});
-
 app.get('/api/conversations', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
@@ -7033,25 +6795,6 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   res.json(full[0]);
 });
 
-app.post('/api/messages/:id/report', authMiddleware, async (req, res) => {
-  const reason = String(req.body?.reason || 'Topluluk kurallarına aykırı içerik').trim().slice(0, 500);
-  const { rows } = await query('SELECT id, conversation_id FROM dm_messages WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
-  const { rows: access } = await query(
-    'SELECT 1 FROM dm_conversations WHERE id=$1 AND (user1_id=$2 OR user2_id=$2)',
-    [rows[0].conversation_id, req.user.id]
-  );
-  if (!access.length) return res.status(403).json({ error: 'Bu mesajı bildirme yetkiniz yok' });
-  const { rows: report } = await query(`
-    INSERT INTO message_reports (message_id, reporter_id, reason)
-    VALUES ($1,$2,$3)
-    ON CONFLICT (message_id, reporter_id) DO UPDATE SET reason=EXCLUDED.reason,
-      status='open', reviewed_by=NULL, reviewed_at=NULL
-    RETURNING id, message_id, reporter_id, reason, status, created_at
-  `, [rows[0].id, req.user.id, reason]);
-  res.json({ ok: true, report: report[0] });
-});
-
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
   const { password } = req.body;
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
@@ -7180,41 +6923,6 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
 });
 
 // ===== ADMIN: MESAJLARI OKU =====
-app.get('/api/admin/message-reports', adminMiddleware, async (req, res) => {
-  const status = ['open', 'reviewed', 'dismissed', 'removed'].includes(String(req.query.status || ''))
-    ? String(req.query.status) : 'open';
-  const { rows } = await query(`
-    SELECT r.id, r.message_id, r.reason, r.status, r.created_at, r.reviewed_at,
-      reporter.username AS reporter_username, reporter.avatar AS reporter_avatar,
-      sender.username AS sender_username, sender.avatar AS sender_avatar,
-      m.content, m.image_url, m.deleted_for_all, m.created_at AS message_created_at,
-      c.id AS conversation_id, u1.username AS user1, u2.username AS user2,
-      reviewer.username AS reviewer_username
-    FROM message_reports r
-    JOIN dm_messages m ON m.id=r.message_id
-    JOIN users reporter ON reporter.id=r.reporter_id
-    JOIN users sender ON sender.id=m.sender_id
-    JOIN dm_conversations c ON c.id=m.conversation_id
-    JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
-    LEFT JOIN users reviewer ON reviewer.id=r.reviewed_by
-    WHERE r.status=$1
-    ORDER BY r.created_at DESC LIMIT 300
-  `, [status]);
-  res.json(rows);
-});
-
-app.patch('/api/admin/message-reports/:id', adminMiddleware, async (req, res) => {
-  const nextStatus = ['open', 'reviewed', 'dismissed', 'removed'].includes(String(req.body?.status || ''))
-    ? String(req.body.status) : null;
-  if (!nextStatus) return res.status(400).json({ error: 'Geçersiz bildirim durumu' });
-  const { rows: report } = await query('SELECT id,message_id FROM message_reports WHERE id=$1', [req.params.id]);
-  if (!report.length) return res.status(404).json({ error: 'Bildirim bulunamadı' });
-  await query('UPDATE message_reports SET status=$1, reviewed_by=$2, reviewed_at=NOW() WHERE id=$3',
-    [nextStatus, req.adminUser?.id || null, report[0].id]);
-  if (nextStatus === 'removed') await query('UPDATE dm_messages SET deleted_for_all=1 WHERE id=$1', [report[0].message_id]);
-  res.json({ ok: true, status: nextStatus });
-});
-
 app.get('/api/admin/conversations', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT c.id, u1.username as user1, u2.username as user2, c.last_message_at,

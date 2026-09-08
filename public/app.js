@@ -13,6 +13,8 @@ window.fetch = (input, options = {}) => {
 let activeStoryAudio = null;
 let activeRealsAudio = null;
 let storyComposerAudio = null;
+let activePhotoAudio = null;
+let photoAudioObserver = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
 let siteAuthRequired = false;
@@ -81,61 +83,46 @@ function limitMediaAudioClip(audio, startSeconds, onClipEnd, clipSeconds = MEDIA
   return audio;
 }
 
-// Tema bootstrap'i theme.js tarafından başlatılır; burada yalnızca ayarlar
-// geldikten sonra paleti güncelliyoruz.
-function applyDisplayTheme() {
-  window.CigCigTheme?.apply(window.CigCigTheme.getPreference());
-}
+localStorage.removeItem('cigcig_theme');
+document.documentElement.style.colorScheme = 'dark';
+function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
 applyDisplayTheme();
 
-function playNotificationTone(type = 'message') {
+function playNotificationTone() {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
     const ctx = window.__cigcigNotifyCtx || new AudioContextClass();
     window.__cigcigNotifyCtx = ctx;
-    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
-    const presets = {
-      message: { frequency: 760, duration: 0.2, gain: 0.035, wave: 'triangle' },
-      mention: { frequency: 920, duration: 0.24, gain: 0.04, wave: 'sine' },
-      voice_join: { frequency: 620, duration: 0.28, gain: 0.045, wave: 'sine' },
-      voice_leave: { frequency: 390, duration: 0.32, gain: 0.045, wave: 'sine' }
-    };
-    const preset = presets[type] || presets.message;
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
-    oscillator.type = preset.wave;
-    oscillator.frequency.value = preset.frequency;
-    gain.gain.value = preset.gain;
+    oscillator.type = 'triangle';
+    oscillator.frequency.value = 760;
+    gain.gain.value = 0.035;
     oscillator.connect(gain);
     gain.connect(ctx.destination);
     oscillator.start();
     const now = ctx.currentTime;
     gain.gain.cancelScheduledValues(now);
-    gain.gain.setValueAtTime(preset.gain, now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + preset.duration - 0.02);
-    oscillator.stop(now + preset.duration);
+    gain.gain.setValueAtTime(0.035, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+    oscillator.stop(now + 0.2);
   } catch {}
 }
 
 async function playConfiguredNotificationSound(type = 'message') {
   try {
     const settings = await fetch('/api/settings/public').then(r => r.json()).catch(() => ({}));
-    const settingKeys = {
-      mention: 'mention_notification_sound_url',
-      voice_join: 'voice_join_sound_url',
-      voice_leave: 'voice_leave_sound_url'
-    };
-    const url = settings[settingKeys[type] || 'message_notification_sound_url'];
+    const url = type === 'mention' ? settings.mention_notification_sound_url : settings.message_notification_sound_url;
     if (!url) {
-      playNotificationTone(type);
+      playNotificationTone();
       return;
     }
     const audio = new Audio(url);
     audio.volume = 0.8;
-    audio.play().catch(() => playNotificationTone(type));
+    audio.play().catch(() => playNotificationTone());
   } catch {
-    playNotificationTone(type);
+    playNotificationTone();
   }
 }
 
@@ -1077,7 +1064,7 @@ async function renderRealsFeed(app) {
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
-          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username ? (r.is_private ? `<button type="button" class="reals-friend-btn" data-username="${escHtml(r.username)}" ${followStates.get(r.username)?.friendship_status ? 'disabled' : ''}>${followStates.get(r.username)?.friendship_status === 'accepted' ? 'Arkadaşsınız' : followStates.get(r.username)?.friendship_status === 'pending' ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>` : `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}</div>
+          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r)} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private ? `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takiptesin' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>
           <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
@@ -1179,19 +1166,6 @@ async function renderRealsFeed(app) {
         btn.textContent = result.following ? 'Takiptesin' : result.pending ? 'İstek gönderildi' : 'Takip et';
       } catch (error) { toast(error.message, 'error'); }
       finally { btn.disabled = false; btn.classList.remove('is-loading'); }
-    }));
-    listEl.querySelectorAll('.reals-friend-btn').forEach(btn => btn.addEventListener('click', async e => {
-      e.stopPropagation();
-      if (btn.disabled) return;
-      btn.disabled = true;
-      try {
-        await api('/friends/request/' + encodeURIComponent(btn.dataset.username), { method: 'POST' });
-        btn.textContent = 'İstek gönderildi';
-        toast('Arkadaşlık isteği gönderildi');
-      } catch (error) {
-        btn.disabled = false;
-        toast(error.message, 'error');
-      }
     }));
     listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -1682,7 +1656,7 @@ async function renderHome(app) {
             </div>
             <div style="flex:1;min-width:0">
               <div style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(pl.name)}</div>
-              <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${pl.song_count} müzik · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:6px">${pl.song_count} şarkı · ${pl.is_public ? 'Herkese açık' : 'Gizli'}</div>
             </div>
           </div>
         </a>`).join('');
@@ -1723,6 +1697,7 @@ async function renderForumList(app, queryString) {
           <div class="page-title">Konular</div>
           ${activeTag ? `<div class="page-subtitle"><i class="fas fa-hashtag" style="color:var(--accent-red2)"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli &nbsp;<a href="/forum" data-link style="font-size:12px;color:var(--accent-red2)"><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
+        <div>${currentUser ? '<button class="btn btn-primary" id="forum-new-btn"><i class="fas fa-plus"></i> Yeni Konu Aç</button>' : ''}</div>
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="forum-search" placeholder="Konu veya #etiket ara..." /></div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -1749,6 +1724,10 @@ async function renderForumList(app, queryString) {
     renderForumListItems(filtered);
   });
 
+  $('#forum-new-btn')?.addEventListener('click', () => {
+    if (!currentUser) return navigate('/giris');
+    showNewForumModal();
+  });
 }
 
 function renderForumListItems(forums) {
@@ -2088,7 +2067,6 @@ async function renderForumDetail(app, slug) {
         <button class="btn btn-danger btn-sm" id="del-forum-btn"><i class="fas fa-trash"></i> Sil</button>
       </div>` : ''}
       <div class="forum-detail-header">
-        <div class="forum-detail-title">${escHtml(forum.title)}</div>
         <div class="forum-detail-meta">
           <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${avatarImg(forum, 'avatar-sm')}
@@ -2099,6 +2077,7 @@ async function renderForumDetail(app, slug) {
           <span><i class="fas fa-eye" style="color:var(--accent-red)"></i> ${forum.views || 0} görüntülenme</span>
           ${forum.share_count ? `<span><i class="fas fa-share-alt" style="color:var(--accent-red)"></i> ${forum.share_count} iletildi</span>` : ''}
         </div>
+        <div class="forum-detail-title" data-title-position="after-author">${escHtml(forum.title)}</div>
       ${forum.banner_image ? `<div class="forum-banner-wrap" style="margin-top:16px;margin-bottom:4px;${forum.banner_fit === 'original' ? 'text-align:center' : ''}">
         <img src="${escHtml(forum.banner_image)}" class="forum-detail-banner" alt=""
           style="object-fit:${forum.banner_fit === 'contain' ? 'contain' : forum.banner_fit === 'original' ? 'none;height:auto;aspect-ratio:unset;max-width:100%' : 'cover'}" />
@@ -3191,417 +3170,17 @@ function showNewGroupModal() {
 }
 
 let chatPollInterval = null;
-let activeGroupVoice = null;
-
-async function openGroupVoiceRoom(slug, groupName) {
-  if (activeGroupVoice) return toast('Zaten bir grup ses odasındasınız', 'error');
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    return toast('Grup sesli sohbeti HTTPS üzerinde kullanılabilir', 'error');
-  }
-  let room;
-  try { room = await api(`/group/${encodeURIComponent(slug)}/voice-room`, { method: 'POST' }); }
-  catch (error) { return toast(error.message, 'error'); }
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (error) { return toast('Mikrofon izni verilmedi', 'error'); }
-
-  const peers = new Map();
-  const audioNodes = new Map();
-  let lastSignal = 0;
-  activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, timer: null };
-  showModal(`${escHtml(groupName)} · Sesli sohbet`, `
-    <div class="group-voice-panel">
-      <div class="group-voice-hero"><div class="group-voice-orb"><i class="fas fa-microphone"></i></div><div><strong>Grup ses odası</strong><span>Katılan herkes aynı kanalda konuşabilir.</span></div></div>
-      <div class="group-voice-participants" id="group-voice-participants"></div>
-      <div class="group-voice-actions">
-        <button class="btn btn-outline" id="group-voice-mute"><i class="fas fa-microphone"></i> Mikrofon açık</button>
-        <button class="btn btn-danger" id="group-voice-leave"><i class="fas fa-phone-slash"></i> Odadan çık</button>
-      </div>
-      <div class="group-voice-status" id="group-voice-status">Bağlanıyor…</div>
-    </div>
-  `);
-  const status = document.getElementById('group-voice-status');
-  const renderParticipants = participants => {
-    const el = document.getElementById('group-voice-participants');
-    if (!el) return;
-    el.innerHTML = participants.map(p => `<div class="group-voice-person${Number(p.user_id) === Number(currentUser.id) ? ' is-me' : ''}">
-      <span class="group-voice-avatar">${p.avatar && !p.avatar_removed ? `<img src="${escHtml(p.avatar)}" alt="">` : '<i class="fas fa-user"></i>'}</span>
-      <span>${escHtml(p.username)}${Number(p.user_id) === Number(currentUser.id) ? ' (sen)' : ''}</span>
-    </div>`).join('');
-  };
-  const sendSignal = (type, payload, receiverId = null) => api(`/group-voice/${room.id}/signal`, {
-    method: 'POST', body: JSON.stringify({ signal_type: type, payload, receiver_id: receiverId })
-  }).catch(() => {});
-  const createPeer = async (participant, initiate) => {
-    const peerId = Number(participant.user_id);
-    if (peerId === Number(currentUser.id) || peers.has(peerId)) return;
-    const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    peers.set(peerId, peer);
-    stream.getTracks().forEach(track => peer.addTrack(track, stream));
-    peer.ontrack = event => {
-      let audio = audioNodes.get(peerId);
-      if (!audio) { audio = document.createElement('audio'); audio.autoplay = true; audioNodes.set(peerId, audio); document.body.appendChild(audio); }
-      audio.srcObject = event.streams[0];
-    };
-    peer.onicecandidate = event => event.candidate && sendSignal('ice', event.candidate.toJSON ? event.candidate.toJSON() : event.candidate, peerId);
-    peer.onconnectionstatechange = () => {
-      if (['failed', 'closed', 'disconnected'].includes(peer.connectionState)) { peer.close(); peers.delete(peerId); audioNodes.get(peerId)?.remove(); audioNodes.delete(peerId); }
-    };
-    if (initiate) {
-      const offer = await peer.createOffer();
-      await peer.setLocalDescription(offer);
-      await sendSignal('offer', peer.localDescription, peerId);
-    }
-  };
-  const handleSignal = async signal => {
-    const senderId = Number(signal.sender_id);
-    if (senderId === Number(currentUser.id)) return;
-    if (signal.signal_type === 'join') {
-      const participant = (activeGroupVoice.participants || []).find(p => Number(p.user_id) === senderId) || { user_id: senderId };
-      return createPeer(participant, Number(currentUser.id) < senderId);
-    }
-    if (signal.signal_type === 'leave') {
-      peers.get(senderId)?.close(); peers.delete(senderId); audioNodes.get(senderId)?.remove(); audioNodes.delete(senderId); return;
-    }
-    if (signal.signal_type === 'offer') {
-      await createPeer({ user_id: senderId }, false);
-      const peer = peers.get(senderId); if (!peer) return;
-      await peer.setRemoteDescription(signal.payload);
-      const answer = await peer.createAnswer(); await peer.setLocalDescription(answer);
-      await sendSignal('answer', peer.localDescription, senderId); return;
-    }
-    const peer = peers.get(senderId); if (!peer) return;
-    if (signal.signal_type === 'answer') await peer.setRemoteDescription(signal.payload);
-    if (signal.signal_type === 'ice') { try { await peer.addIceCandidate(signal.payload); } catch {} }
-  };
-  const poll = async () => {
-    if (!activeGroupVoice) return;
-    try {
-      const fresh = await api(`/group-voice/${room.id}?after=${lastSignal}`);
-      activeGroupVoice.participants = fresh.participants;
-      renderParticipants(fresh.participants);
-      for (const participant of fresh.participants) {
-        if (Number(participant.user_id) !== Number(currentUser.id) && Number(currentUser.id) < Number(participant.user_id)) {
-          await createPeer(participant, true);
-        }
-      }
-      for (const signal of fresh.signals) { lastSignal = Math.max(lastSignal, Number(signal.id)); await handleSignal(signal); }
-      if (status) status.textContent = `${fresh.participants.length} kişi bağlı`;
-    } catch {}
-  };
-  activeGroupVoice.participants = room.participants || [];
-  renderParticipants(activeGroupVoice.participants);
-  await sendSignal('join', { username: currentUser.username });
-  await poll();
-  activeGroupVoice.timer = setInterval(poll, 1200);
-  document.getElementById('group-voice-mute')?.addEventListener('click', event => {
-    const track = stream.getAudioTracks()[0]; if (!track) return;
-    track.enabled = !track.enabled;
-    event.currentTarget.innerHTML = `<i class="fas fa-microphone${track.enabled ? '' : '-slash'}"></i> Mikrofon ${track.enabled ? 'açık' : 'kapalı'}`;
-  });
-  document.getElementById('group-voice-leave')?.addEventListener('click', async () => {
-    const session = activeGroupVoice;
-    activeGroupVoice = null;
-    clearInterval(session.timer); session.peers.forEach(peer => peer.close()); session.audioNodes.forEach(audio => audio.remove());
-    session.stream.getTracks().forEach(track => track.stop());
-    await api(`/group-voice/${session.id}/leave`, { method: 'POST' }).catch(() => {});
-    hideModal(); toast('Ses odasından çıktınız');
-  });
-}
-
-/*
- * Group voice room v2: a persistent, non-dismissable voice dock.  It is
- * intentionally separate from the generic modal so a stray click, a route
- * change, or a browser tab change cannot tear down the WebRTC session.
- */
-async function openGroupVoiceRoomV2(slug, groupName, groupMembers = [], canManage = false) {
-  if (activeGroupVoice) return toast('Zaten bir grup ses odasındasınız', 'error');
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) return toast('Grup sesli sohbeti HTTPS üzerinde kullanılabilir', 'error');
-  // Web Audio bağlamını bu fonksiyonun ilk, kullanıcı tıklamasından gelen
-  // senkron bölümünde açıyoruz. Uzak WebRTC sesi daha sonra gelse bile
-  // tarayıcının autoplay kilidine takılmadan hoparlöre ulaşır.
-  const VoiceAudioContext = window.AudioContext || window.webkitAudioContext;
-  const voiceAudioContext = VoiceAudioContext ? new VoiceAudioContext() : null;
-  voiceAudioContext?.resume().catch(() => {});
-  if (voiceAudioContext) window.__cigcigNotifyCtx = voiceAudioContext;
-  let room;
-  try { room = await api(`/group/${encodeURIComponent(slug)}/voice-room`, { method: 'POST' }); }
-  catch (error) { voiceAudioContext?.close().catch(() => {}); if (window.__cigcigNotifyCtx === voiceAudioContext) window.__cigcigNotifyCtx = null; return toast(error.message, 'error'); }
-  let stream;
-  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
-  catch (error) { voiceAudioContext?.close().catch(() => {}); if (window.__cigcigNotifyCtx === voiceAudioContext) window.__cigcigNotifyCtx = null; return toast('Mikrofon izni verilmedi', 'error'); }
-
-  const peers = new Map(), audioNodes = new Map(), pendingIce = new Map();
-  let lastSignal = 0, localMuted = false, localDeafened = false;
-  const manager = !!(room.can_manage_voice || canManage);
-  const shell = document.createElement('div');
-  shell.id = 'group-voice-shell';
-  shell.className = 'group-voice-shell';
-  shell.innerHTML = `
-    <div class="group-voice-window" role="dialog" aria-label="${escHtml(groupName)} sesli sohbet">
-      <header class="group-voice-topbar">
-        <div class="group-voice-brand"><span class="group-voice-brand-icon"><i class="fas fa-waveform-lines"></i></span><div><span class="group-voice-overline">CANLI SESLİ SOHBET</span><strong>${escHtml(groupName)}</strong></div></div>
-        <div class="group-voice-top-actions"><span class="group-voice-live-pill"><i></i> Canlı</span><button class="group-voice-icon-btn" id="group-voice-minimize" title="Küçült"><i class="fas fa-minus"></i></button></div>
-      </header>
-      <div class="group-voice-layout">
-        <main class="group-voice-main">
-          <div class="group-voice-stage"><div class="group-voice-stage-copy"><span class="group-voice-eyebrow"><i class="fas fa-clock"></i> SOHBET SÜRESİ</span><h2 id="group-voice-duration">00:00:00</h2><p id="group-voice-status">Bağlanıyor…</p></div><div class="group-voice-stage-orb"><span></span><i class="fas fa-clock"></i></div></div>
-          <div class="group-voice-list-heading"><div><strong>Katılımcılar</strong><span id="group-voice-count">0 kişi</span></div></div>
-          <div class="group-voice-participants" id="group-voice-participants"></div>
-        </main>
-        <aside class="group-voice-sidebar">
-          <div class="group-voice-sidebar-card"><span class="group-voice-sidebar-kicker">KONTROLLER</span><button class="group-voice-control is-primary" id="group-voice-mute"><i class="fas fa-microphone"></i><span>Mikrofon açık</span><em>Sen</em></button><button class="group-voice-control" id="group-voice-deafen"><i class="fas fa-headphones"></i><span>Sesleri açık</span><em>Dinleme</em></button></div>
-          ${manager ? `<div class="group-voice-sidebar-card group-voice-manager-card"><span class="group-voice-sidebar-kicker">GRUP YÖNETİCİSİ</span><p>Katılımcıya tıklayarak mikrofonunu kapatabilir, duymasını durdurabilir veya odadan çıkarabilirsin.</p><button class="group-voice-manager-link" id="group-voice-bans"><i class="fas fa-shield-halved"></i> Sesliye girişi yasaklılar</button></div>` : ''}
-          <div class="group-voice-sidebar-card group-voice-tip"><i class="fas fa-sparkles"></i><p>Bu pencereyi küçültsen bile sesli sohbet devam eder. Dışarı tıklamak veya sekme değiştirmek odayı kapatmaz.</p></div>
-          <button class="group-voice-leave" id="group-voice-leave"><i class="fas fa-phone-slash"></i> Sesli sohbetten ayrıl</button>
-        </aside>
-      </div>
-      <div class="group-voice-ban-panel" id="group-voice-ban-panel" hidden></div>
-    </div>
-    <button class="group-voice-mini-dock" id="group-voice-mini-dock"><i class="fas fa-microphone"></i><span>Sesli sohbet</span><b>●</b></button>`;
-  document.body.appendChild(shell);
-
-  const participantEl = shell.querySelector('#group-voice-participants');
-  const statusEl = shell.querySelector('#group-voice-status');
-  const countEl = shell.querySelector('#group-voice-count');
-  const durationEl = shell.querySelector('#group-voice-duration');
-  const startedAt = Date.parse(room.room_started_at || room.created_at || '') || Date.now();
-  const formatDuration = seconds => {
-    const total = Math.max(0, Math.floor(seconds));
-    const hours = String(Math.floor(total / 3600)).padStart(2, '0');
-    const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
-    const secs = String(total % 60).padStart(2, '0');
-    return `${hours}:${minutes}:${secs}`;
-  };
-  const updateDuration = () => {
-    if (durationEl) durationEl.textContent = formatDuration((Date.now() - startedAt) / 1000);
-  };
-  updateDuration();
-  const durationTimer = setInterval(updateDuration, 1000);
-  const track = () => stream.getAudioTracks()[0];
-  const participant = id => (activeGroupVoice?.participants || []).find(p => Number(p.user_id) === Number(id));
-  let hardwareForcedMute = false;
-  const unlockVoiceAudio = () => {
-    voiceAudioContext?.resume().catch(() => {});
-    audioNodes.forEach(({ audio }) => { if (audio?.play) audio.play().catch(() => {}); });
-  };
-  const volume = () => audioNodes.forEach((node, id) => {
-    const muted = localDeafened || participant(currentUser.id)?.server_deafened || participant(id)?.server_deafened;
-    if (node.gain) node.gain.gain.value = muted ? 0 : 1;
-    if (node.audio) node.audio.volume = muted ? 0 : 1;
-  });
-  const updateControls = () => {
-    const forced = !!participant(currentUser.id)?.server_muted;
-    const micOff = localMuted || forced;
-    const mute = shell.querySelector('#group-voice-mute'), deafen = shell.querySelector('#group-voice-deafen');
-    if (mute) { mute.classList.toggle('is-off', micOff); mute.innerHTML = `<i class="fas fa-microphone${micOff ? '-slash' : ''}"></i><span>Mikrofon ${micOff ? 'kapalı' : 'açık'}</span><em>${forced ? 'Yönetici kapattı' : 'Sen'}</em>`; }
-    const forcedDeaf = !!participant(currentUser.id)?.server_deafened;
-    if (deafen) { deafen.classList.toggle('is-off', localDeafened || forcedDeaf); deafen.innerHTML = `<i class="fas fa-${localDeafened || forcedDeaf ? 'volume-xmark' : 'headphones'}"></i><span>Sesleri ${localDeafened || forcedDeaf ? 'kapalı' : 'açık'}</span><em>${forcedDeaf ? 'Yönetici kapattı' : 'Dinleme'}</em>`; }
-    if (track()?.readyState === 'live') track().enabled = !micOff;
-    volume();
-  };
-  const render = list => {
-    participantEl.innerHTML = list.length ? list.map(p => {
-      const id = Number(p.user_id), me = id === Number(currentUser.id), muted = !!(p.muted || p.server_muted), deaf = !!(p.deafened || p.server_deafened);
-      return `<button class="group-voice-person${me ? ' is-me' : ''}${muted ? ' is-muted' : ''}${deaf ? ' is-deafened' : ''}" data-voice-user="${id}" ${manager && !me ? '' : 'disabled'}><span class="group-voice-person-ring"><span class="group-voice-avatar">${p.avatar && !p.avatar_removed ? `<img src="${escHtml(p.avatar)}" alt="">` : '<i class="fas fa-user"></i>'}</span><i class="group-voice-speaking-dot"></i></span><span class="group-voice-person-copy"><strong style="${p.name_color ? `color:${escHtml(p.name_color)}` : ''}">${escHtml(p.username || 'Kullanıcı')}</strong><small>${me ? 'Sen' : p.server_muted ? 'Yönetici mikrofonu kapattı' : p.server_deafened ? 'Duyması kapalı' : 'Bağlı'}</small></span><span class="group-voice-person-icons">${muted ? '<i class="fas fa-microphone-slash"></i>' : '<i class="fas fa-microphone"></i>'}${deaf ? '<i class="fas fa-volume-xmark"></i>' : ''}</span></button>`;
-    }).join('') : '<div class="group-voice-empty"><i class="fas fa-user-group"></i><span>Henüz başka kimse yok</span></div>';
-    countEl.textContent = `${list.length} kişi`;
-    updateControls();
-  };
-  const removePeer = id => {
-    peers.get(id)?.close();
-    peers.delete(id);
-    pendingIce.delete(id);
-    const node = audioNodes.get(id);
-    node?.source?.disconnect();
-    node?.gain?.disconnect();
-    node?.audio?.remove();
-    audioNodes.delete(id);
-  };
-  const queueIce = (id, candidate) => {
-    const queue = pendingIce.get(id) || [];
-    queue.push(candidate);
-    pendingIce.set(id, queue);
-  };
-  const flushIce = async id => {
-    const peer = peers.get(id);
-    const queue = pendingIce.get(id) || [];
-    if (!peer?.remoteDescription || !queue.length) return;
-    pendingIce.delete(id);
-    for (const candidate of queue) {
-      try { await peer.addIceCandidate(candidate); } catch {}
-    }
-  };
-  const signal = (type, payload, receiverId = null) => api(`/group-voice/${room.id}/signal`, { method: 'POST', body: JSON.stringify({ signal_type: type, payload, receiver_id: receiverId }) }).catch(() => {});
-  const createPeer = async (p, initiate) => {
-    const id = Number(p.user_id);
-    if (id === Number(currentUser.id) || peers.has(id)) return;
-    const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); peers.set(id, peer);
-    const liveTrack = track();
-    if (liveTrack?.readyState === 'live') peer.addTrack(liveTrack, stream);
-    else peer.addTransceiver('audio', { direction: 'sendrecv' });
-    peer.ontrack = e => {
-      const remoteStream = e.streams?.[0] || new MediaStream([e.track]);
-      const oldNode = audioNodes.get(id);
-      oldNode?.source?.disconnect();
-      oldNode?.gain?.disconnect();
-      oldNode?.audio?.remove();
-      let node = null;
-      try {
-        if (voiceAudioContext) {
-          const source = voiceAudioContext.createMediaStreamSource(remoteStream);
-          const gain = voiceAudioContext.createGain();
-          source.connect(gain);
-          gain.connect(voiceAudioContext.destination);
-          node = { source, gain };
-        }
-      } catch {}
-      // Web Audio desteklenmiyorsa normal audio elementine geri dön.
-      if (!node) {
-        const audio = document.createElement('audio');
-        audio.autoplay = true;
-        audio.playsInline = true;
-        audio.setAttribute('playsinline', '');
-        audio.setAttribute('aria-hidden', 'true');
-        audio.srcObject = remoteStream;
-        document.body.appendChild(audio);
-        audio.play().catch(() => {});
-        node = { audio };
-      }
-      audioNodes.set(id, node);
-      unlockVoiceAudio();
-      volume();
-    };
-    peer.onicecandidate = e => e.candidate && signal('ice', e.candidate.toJSON ? e.candidate.toJSON() : e.candidate, id);
-    peer.onconnectionstatechange = () => { if (['failed', 'closed'].includes(peer.connectionState)) removePeer(id); };
-    if (initiate) { await peer.setLocalDescription(await peer.createOffer()); await signal('offer', peer.localDescription, id); }
-  };
-  /*
-   * enabled=false only sends silence while getUserMedia remains active.
-   * Stop the track to release the browser/OS microphone indicator, then
-   * replace the sender track when the user turns the mic back on.
-   */
-  const setHardwareMute = async muted => {
-    if (muted) {
-      for (const peer of peers.values()) {
-        const sender = peer.getSenders().find(item => item.track?.kind === 'audio')
-          || peer.getTransceivers().find(item => item.receiver?.track?.kind === 'audio')?.sender;
-        if (sender) await sender.replaceTrack(null).catch(() => {});
-      }
-      const current = track();
-      if (current && current.readyState !== 'ended') { current.enabled = false; current.stop(); }
-      updateControls();
-      return;
-    }
-    let current = track();
-    if (!current || current.readyState === 'ended') {
-      const freshStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      stream = freshStream;
-      if (activeGroupVoice) activeGroupVoice.stream = freshStream;
-      current = track();
-      for (const peer of peers.values()) {
-        const sender = peer.getSenders().find(item => item.track?.kind === 'audio')
-          || peer.getTransceivers().find(item => item.receiver?.track?.kind === 'audio')?.sender;
-        if (sender && current) await sender.replaceTrack(current).catch(() => {});
-      }
-    }
-    if (current) current.enabled = true;
-    updateControls();
-  };
-  const syncServerMute = async () => {
-    const forced = !!participant(currentUser.id)?.server_muted;
-    if (forced && !hardwareForcedMute) {
-      hardwareForcedMute = true;
-      await setHardwareMute(true).catch(() => {});
-    } else if (!forced && hardwareForcedMute) {
-      hardwareForcedMute = false;
-      if (!localMuted) await setHardwareMute(false).catch(() => {});
-    }
-  };
-  const leave = async (notify = true) => {
-    const session = activeGroupVoice; if (!session) return; activeGroupVoice = null;
-    clearInterval(session.timer); clearInterval(session.durationTimer); document.removeEventListener('pointerdown', unlockVoiceAudio); session.peers.forEach(p => p.close()); session.audioNodes.forEach(n => { n.source?.disconnect(); n.gain?.disconnect(); n.audio?.remove(); }); session.stream.getTracks().forEach(t => t.stop()); voiceAudioContext?.close().catch(() => {});
-    if (window.__cigcigNotifyCtx === voiceAudioContext) window.__cigcigNotifyCtx = null;
-    await api(`/group-voice/${session.id}/leave`, { method: 'POST' }).catch(() => {}); shell.remove(); if (notify) toast('Ses odasından çıktınız');
-  };
-  const poll = async () => {
-    if (!activeGroupVoice) return;
-    try {
-      const fresh = await api(`/group-voice/${room.id}?after=${lastSignal}`);
-      const previousIds = new Set((activeGroupVoice.participants || []).map(p => Number(p.user_id)));
-      const currentIds = new Set(fresh.participants.map(p => Number(p.user_id)));
-      if (previousIds.size) {
-        if ([...currentIds].some(id => !previousIds.has(id))) void playConfiguredNotificationSound('voice_join');
-        if ([...previousIds].some(id => !currentIds.has(id))) void playConfiguredNotificationSound('voice_leave');
-      }
-      activeGroupVoice.participants = fresh.participants; render(fresh.participants); await syncServerMute();
-      for (const p of fresh.participants) if (Number(p.user_id) !== Number(currentUser.id) && Number(currentUser.id) < Number(p.user_id)) await createPeer(p, true);
-      for (const item of fresh.signals) { lastSignal = Math.max(lastSignal, Number(item.id)); const id = Number(item.sender_id);
-        if (id === Number(currentUser.id)) continue;
-        if (item.signal_type === 'join') await createPeer(participant(id) || { user_id: id }, Number(currentUser.id) < id);
-        else if (item.signal_type === 'leave') removePeer(id);
-        else if (item.signal_type === 'state') { const p = participant(item.payload?.user_id || id); if (p) Object.assign(p, { muted: !!item.payload.muted, deafened: !!item.payload.deafened }); render(activeGroupVoice.participants); }
-        else if (item.signal_type === 'moderation') { const p = participant(item.payload?.user_id); if (p && item.payload.action !== 'remove') p[item.payload.action === 'server-mute' ? 'server_muted' : 'server_deafened'] = item.payload.enabled !== false; if (Number(item.payload?.user_id) === Number(currentUser.id) && item.payload.action === 'remove') { await leave(false); return toast('Yönetici sizi sesli sohbetten çıkardı'); } render(activeGroupVoice.participants); await syncServerMute(); }
-        else if (item.signal_type === 'offer') { await createPeer({ user_id: id }, false); const peer = peers.get(id); if (peer) { await peer.setRemoteDescription(item.payload); await flushIce(id); await peer.setLocalDescription(await peer.createAnswer()); await signal('answer', peer.localDescription, id); } }
-        else if (item.signal_type === 'answer' && peers.get(id)) { await peers.get(id).setRemoteDescription(item.payload); await flushIce(id); }
-        else if (item.signal_type === 'ice') {
-          const peer = peers.get(id);
-          if (peer?.remoteDescription) { try { await peer.addIceCandidate(item.payload); } catch {} }
-          else queueIce(id, item.payload);
-        }
-      }
-      statusEl.textContent = `${fresh.participants.length} kişi bağlı`;
-    } catch {}
-  };
-  const banPanel = async () => {
-    const panel = shell.querySelector('#group-voice-ban-panel'); if (!panel) return;
-    try {
-      const bans = await api(`/group/${encodeURIComponent(slug)}/voice-bans`), banned = new Set(bans.map(b => Number(b.user_id)));
-      const choices = groupMembers.filter(m => Number(m.user_id) !== Number(currentUser.id) && m.role !== 'owner' && !banned.has(Number(m.user_id)));
-      panel.hidden = false; panel.innerHTML = `<div class="group-voice-ban-head"><div><span class="group-voice-sidebar-kicker">ERİŞİM KONTROLÜ</span><strong>Sesliye girişi yasaklılar</strong></div><button class="group-voice-icon-btn" id="group-voice-ban-close"><i class="fas fa-xmark"></i></button></div><div class="group-voice-ban-add"><select id="group-voice-ban-user"><option value="">Üye seç</option>${choices.map(m => `<option value="${m.user_id}">${escHtml(m.username)}</option>`).join('')}</select><input id="group-voice-ban-reason" placeholder="Neden (isteğe bağlı)" maxlength="240"><button class="btn btn-primary" id="group-voice-ban-add"><i class="fas fa-ban"></i> Yasakla</button></div><div class="group-voice-ban-list">${bans.length ? bans.map(b => `<div class="group-voice-ban-row"><span class="group-voice-avatar">${b.avatar && !b.avatar_removed ? `<img src="${escHtml(b.avatar)}" alt="">` : '<i class="fas fa-user"></i>'}</span><div><strong>${escHtml(b.username)}</strong><small>${escHtml(b.reason || 'Neden belirtilmedi')}</small></div><button class="group-voice-unban" data-id="${b.user_id}">Kaldır</button></div>`).join('') : '<div class="group-voice-empty">Sesli sohbetten yasaklı kimse yok.</div>'}</div>`;
-      panel.querySelector('#group-voice-ban-close').onclick = () => { panel.hidden = true; };
-      panel.querySelector('#group-voice-ban-add').onclick = async () => { const id = panel.querySelector('#group-voice-ban-user').value; if (!id) return toast('Önce bir üye seçin', 'error'); await api(`/group/${encodeURIComponent(slug)}/voice-ban/${id}`, { method: 'POST', body: JSON.stringify({ reason: panel.querySelector('#group-voice-ban-reason').value.trim() }) }); toast('Sesli sohbet yasağı eklendi'); banPanel(); };
-      panel.querySelectorAll('.group-voice-unban').forEach(b => b.onclick = async () => { await api(`/group/${encodeURIComponent(slug)}/voice-ban/${b.dataset.id}/revoke`, { method: 'POST' }); toast('Sesli sohbet yasağı kaldırıldı'); banPanel(); });
-    } catch (error) { toast(error.message, 'error'); }
-  };
-
-  activeGroupVoice = { id: room.id, slug, stream, peers, audioNodes, participants: room.participants || [], timer: null, durationTimer };
-  render(activeGroupVoice.participants);
-  void playConfiguredNotificationSound('voice_join');
-  document.addEventListener('pointerdown', unlockVoiceAudio, { passive: true });
-  shell.querySelector('#group-voice-minimize').onclick = () => shell.classList.add('is-minimized');
-  shell.querySelector('#group-voice-mini-dock').onclick = () => shell.classList.remove('is-minimized');
-  shell.querySelector('#group-voice-leave').onclick = () => leave(true);
-  shell.querySelector('#group-voice-bans')?.addEventListener('click', banPanel);
-  shell.querySelector('#group-voice-mute').onclick = async () => {
-    if (participant(currentUser.id)?.server_muted) return toast('Mikrofonunuz grup yöneticisi tarafından kapatıldı', 'error');
-    localMuted = !localMuted;
-    try { await setHardwareMute(localMuted); }
-    catch { localMuted = true; await setHardwareMute(true).catch(() => {}); toast('Mikrofon yeniden açılamadı; tarayıcı iznini kontrol edin', 'error'); }
-    await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {});
-  };
-  shell.querySelector('#group-voice-deafen').onclick = async () => { unlockVoiceAudio(); if (participant(currentUser.id)?.server_deafened) return toast('Sesleri dinlemeniz grup yöneticisi tarafından kapatıldı', 'error'); localDeafened = !localDeafened; updateControls(); await api(`/group-voice/${room.id}/state`, { method: 'POST', body: JSON.stringify({ muted: localMuted, deafened: localDeafened }) }).catch(() => {}); };
-  participantEl.addEventListener('click', async e => {
-    const card = e.target.closest('[data-voice-user]'); if (!card || !manager) return;
-    const p = participant(card.dataset.voiceUser); if (!p || Number(p.user_id) === Number(currentUser.id)) return;
-    const choice = prompt(`${p.username} için işlem: mikrofon, duyma, çıkar`, p.server_muted ? 'mikrofon aç' : 'mikrofon'); if (!choice) return;
-    const text = choice.toLocaleLowerCase('tr-TR'), action = text.includes('çıkar') || text.includes('cikar') ? 'remove' : text.includes('duy') ? 'server-deafen' : 'server-mute';
-    const enabled = action === 'remove' ? true : !(action === 'server-mute' ? p.server_muted : p.server_deafened);
-    if (action === 'remove' && !confirm(`${p.username} sesli sohbetten çıkarılsın mı?`)) return;
-    try { await api(`/group-voice/${room.id}/member/${p.user_id}`, { method: 'POST', body: JSON.stringify({ action, enabled }) }); await poll(); toast('Ses odası ayarı güncellendi'); } catch (error) { toast(error.message, 'error'); }
-  });
-  await signal('join', { username: currentUser.username }); await poll(); activeGroupVoice.timer = setInterval(poll, 1200);
-}
 
 async function renderGroupDetail(app, slug) {
   if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
 
-  let groupData, members = [], messages = [];
+  let groupData, members = [], messages = [], channels = [];
   try {
     groupData = await api('/group/' + slug);
     members = await api('/group/' + slug + '/members');
     try { messages = await api('/group/' + slug + '/messages'); } catch {}
+    try { channels = await api('/group/' + slug + '/channels'); } catch {}
   } catch (error) {
     const status = error.data?.group_status;
     if (status === 'suspended' || status === 'banned' || status === 'member_banned') {
@@ -3622,6 +3201,7 @@ async function renderGroupDetail(app, slug) {
   }
 
   const { group, isMember, role, joinRequestStatus } = groupData;
+  const approvalPending = !isMember && joinRequestStatus?.approval && joinRequestStatus.status === 'pending';
   document.title = group.name + ' - ' + siteName;
   const isOwner = currentUser && currentUser.id === group.owner_id;
   const isMod = role === 'moderator';
@@ -3635,9 +3215,10 @@ async function renderGroupDetail(app, slug) {
   let groupReplyToId = null;
   const heroBanner = group.banner_image || group.cover_image || '';
   const previewCover = group.cover_image || group.banner_image || '';
+  const canManageChannels = !!currentUser && (isOwner || isMod);
 
   // Üye olmayan kullanıcılar için önizleme sayfası göster
-  if (!isMember && !isOwner) {
+  if (!isMember && !isOwner && !approvalPending) {
     const hasPending = joinRequestStatus && joinRequestStatus.status === 'pending';
     app.innerHTML = `<div class="container page">
       <div style="max-width:540px;margin:40px auto;text-align:center">
@@ -3666,8 +3247,8 @@ async function renderGroupDetail(app, slug) {
       const btn = $('#join-preview-btn');
       btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px;display:inline-block"></div>';
       try {
-        await api('/group/' + slug + '/join', { method: 'POST' });
-        toast('Gruba katıldınız!');
+        const result = await api('/group/' + slug + '/join', { method: 'POST' });
+        toast(result.approval_required ? 'Katılım isteğiniz onaya gönderildi.' : 'Gruba katıldınız!');
         renderRoute(location.pathname);
       } catch (e) {
         btn.disabled = false; btn.innerHTML = '<i class="fas fa-plus"></i> Katıl';
@@ -3711,7 +3292,6 @@ async function renderGroupDetail(app, slug) {
           ${group.description ? `<p class="group-hero-desc">${escHtml(group.description)}</p>` : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
         </div>
         <div class="group-hero-actions">
-          ${isMember && currentUser ? `<button class="btn btn-outline group-voice-btn" id="group-voice-btn"><i class="fas fa-microphone"></i> Sesli sohbet</button>` : ''}
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
           ${isMember && !isOwner ? `<button class="btn btn-outline" id="leave-btn"><i class="fas fa-sign-out-alt"></i> Ayrıl</button>` : ''}
           ${isOwner ? `<button class="btn btn-outline btn-sm" id="group-settings-btn"><i class="fas fa-cog"></i> Ayarlar</button>
@@ -3724,7 +3304,22 @@ async function renderGroupDetail(app, slug) {
     <div class="group-detail-layout">
       <div>
         ${group.allow_chat ? `
-          <div class="chat-container">
+          <div class="group-channel-workspace" id="group-channel-workspace">
+            <aside class="group-channel-sidebar">
+              <div class="group-channel-sidebar-header">
+                <span><i class="fas fa-hashtag"></i> Kanallar</span>
+                ${canManageChannels ? '<button type="button" class="channel-icon-btn" id="channel-create-btn" title="Kanal oluştur"><i class="fas fa-plus"></i></button>' : ''}
+              </div>
+              <div class="group-channel-list" id="group-channel-list"></div>
+              ${canManageChannels ? '<button type="button" class="channel-approval-btn" id="channel-approval-btn"><i class="fas fa-user-check"></i><span>Onay sistemi</span></button>' : ''}
+            </aside>
+            <section class="group-channel-main">
+              <header class="group-channel-header"><div><i class="fas fa-hashtag" id="active-channel-icon"></i><strong id="active-channel-name">Kanal</strong><small id="active-channel-description"></small></div><button type="button" class="channel-mobile-btn" id="channel-mobile-btn"><i class="fas fa-list"></i></button></header>
+              <div class="group-channel-messages" id="group-channel-messages"><div class="loading-center"><div class="spinner"></div></div></div>
+              <div class="group-channel-composer" id="group-channel-composer"><input id="group-channel-input" type="text" placeholder="Mesaj yaz..." /><button type="button" class="btn btn-primary btn-sm" id="group-channel-send"><i class="fas fa-paper-plane"></i></button></div>
+            </section>
+          </div>
+          <div class="chat-container legacy-group-chat">
             <div id="load-more-msgs-wrap" style="text-align:center;padding:8px;display:${messages.length >= 60 ? 'block' : 'none'}">
               <button class="btn btn-outline btn-sm" id="load-more-msgs"><i class="fas fa-history"></i> Önceki Mesajlar</button>
             </div>
@@ -3761,6 +3356,77 @@ async function renderGroupDetail(app, slug) {
     </div>
   </div>`;
   enhanceLinkPreviews(app);
+
+  const channelWorkspace = $('#group-channel-workspace');
+  const channelList = $('#group-channel-list');
+  const channelMessages = $('#group-channel-messages');
+  let activeChannel = channels.find(channel => Number(channel.is_default) === 1) || channels[0] || null;
+  const visibleChannels = () => channels.filter(channel => isOwner || isMod ? true : approvalPending ? channel.visibility === 'approval_only' : channel.visibility !== 'approval_only');
+  const channelMessageHTML = message => `<article class="channel-message">
+    ${message.username ? `<a href="${profileRoute(message.username)}" data-link><img class="channel-message-avatar" src="${escHtml(message.avatar || '/icons/cigcig-192.png')}" alt="${escHtml(message.username)}" /></a>` : '<div class="channel-message-avatar"></div>'}
+    <div><div class="channel-message-meta"><strong>${escHtml(message.username || 'Silinmiş kullanıcı')}</strong><time>${timeAgo(message.created_at)}</time></div><div class="channel-message-content">${renderContent(message.content || '')}</div></div>
+  </article>`;
+  const loadChannelMessages = async channel => {
+    if (!channel) { channelMessages.innerHTML = '<div class="empty-state"><i class="fas fa-hashtag"></i><p>Henüz kanal yok.</p></div>'; return; }
+    $('#active-channel-name').textContent = channel.name;
+    $('#active-channel-description').textContent = channel.description || '';
+    $('#active-channel-icon').className = channel.icon || 'fas fa-hashtag';
+    const canWrite = !!currentUser && (isOwner || isMod && Number(channel.moderators_can_write) === 1 || Number(channel.can_write) === 1);
+    $('#group-channel-composer').style.display = canWrite ? 'flex' : 'none';
+    channelMessages.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+    try {
+      const channelMessagesData = await api(`/group/${slug}/channel/${channel.id}/messages`);
+      channelMessages.innerHTML = channelMessagesData.length ? channelMessagesData.map(channelMessageHTML).join('') : '<div class="empty-state"><i class="fas fa-comments"></i><p>Bu kanalda henüz mesaj yok.</p></div>';
+      enhanceLinkPreviews(channelMessages);
+      channelMessages.scrollTop = channelMessages.scrollHeight;
+    } catch (error) { channelMessages.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>${escHtml(error.message)}</p></div>`; }
+  };
+  const renderChannels = () => {
+    const allowed = visibleChannels();
+    if (!activeChannel || !allowed.some(channel => Number(channel.id) === Number(activeChannel.id))) activeChannel = allowed[0] || null;
+    channelList.innerHTML = allowed.length ? allowed.map(channel => `<div class="group-channel-item${activeChannel && Number(activeChannel.id) === Number(channel.id) ? ' active' : ''}" data-channel-id="${channel.id}">
+      <i class="${escHtml(channel.icon || 'fas fa-hashtag')}"></i><span>${escHtml(channel.name)}</span>${canManageChannels && !Number(channel.is_default) ? `<button type="button" class="channel-manage-btn" data-channel-manage="${channel.id}" title="Kanal ayarları"><i class="fas fa-ellipsis"></i></button>` : ''}
+    </div>`).join('') : '<div class="empty-state" style="padding:18px 8px"><i class="fas fa-hashtag"></i><p>Kanal yok.</p></div>';
+    loadChannelMessages(activeChannel);
+  };
+  const showChannelModal = (channel = null) => {
+    const editing = !!channel;
+    showModal(editing ? 'Kanalı düzenle' : 'Yeni kanal oluştur', `<div class="form-group"><label>Kanal adı</label><input id="channel-name-input" maxlength="60" value="${escHtml(channel?.name || '')}" placeholder="genel" /></div><div class="form-group"><label>Açıklama</label><input id="channel-description-input" maxlength="180" value="${escHtml(channel?.description || '')}" placeholder="Bu kanalın amacı" /></div><div class="form-group"><label>Görünürlük</label><select id="channel-visibility-input"><option value="all" ${channel?.visibility === 'all' ? 'selected' : ''}>Üyeler görebilir</option><option value="members" ${channel?.visibility === 'members' ? 'selected' : ''}>Sadece üyeler</option><option value="approval_only" ${channel?.visibility === 'approval_only' ? 'selected' : ''}>Onaylananlar</option></select></div><label class="checkbox-label"><input id="channel-history-input" type="checkbox" ${channel?.can_view_history !== 0 ? 'checked' : ''}> Üyeler geçmiş mesajları okuyabilsin</label><label class="checkbox-label"><input id="channel-write-input" type="checkbox" ${channel?.can_write !== 0 ? 'checked' : ''}> Üyeler bu kanala yazabilsin</label><label class="checkbox-label"><input id="channel-mod-manage-input" type="checkbox" ${channel?.moderators_can_manage === 1 ? 'checked' : ''}> Moderatörler kanal ayarlarını yönetebilsin</label><label class="checkbox-label"><input id="channel-mod-write-input" type="checkbox" ${channel?.moderators_can_write === 1 ? 'checked' : ''}> Moderatörler yazabilsin</label><div style="display:flex;gap:8px;margin-top:16px"><button type="button" class="btn btn-primary" id="channel-save-btn"><i class="fas fa-check"></i> Kaydet</button>${editing ? '<button type="button" class="btn btn-danger" id="channel-delete-btn"><i class="fas fa-trash"></i> Sil</button>' : ''}</div><div id="channel-form-error" class="form-error mt-4"></div>`);
+    $('#channel-save-btn').onclick = async () => {
+      const name = $('#channel-name-input').value.trim();
+      if (!name) return $('#channel-form-error').textContent = 'Kanal adı gerekli.';
+      const payload = { name, description: $('#channel-description-input').value.trim(), visibility: $('#channel-visibility-input').value, can_view_history: $('#channel-history-input').checked, can_write: $('#channel-write-input').checked, moderators_can_manage: $('#channel-mod-manage-input').checked, moderators_can_write: $('#channel-mod-write-input').checked };
+      try { const saved = await api(editing ? `/group/${slug}/channel/${channel.id}` : `/group/${slug}/channels`, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) }); if (editing) channels = channels.map(item => Number(item.id) === Number(saved.id) ? { ...item, ...saved } : item); else channels.push(saved); activeChannel = saved; hideModal(); renderChannels(); toast(editing ? 'Kanal güncellendi.' : 'Kanal oluşturuldu.'); } catch (error) { $('#channel-form-error').textContent = error.message; }
+    };
+    $('#channel-delete-btn')?.addEventListener('click', async () => { if (!confirm('Bu kanal ve mesajları silinsin mi?')) return; try { await api(`/group/${slug}/channel/${channel.id}`, { method: 'DELETE' }); channels = channels.filter(item => Number(item.id) !== Number(channel.id)); activeChannel = channels[0] || null; hideModal(); renderChannels(); toast('Kanal silindi.'); } catch (error) { $('#channel-form-error').textContent = error.message; } });
+  };
+  channelList?.addEventListener('click', event => { const manage = event.target.closest('[data-channel-manage]'); const item = event.target.closest('.group-channel-item'); if (manage) { event.stopPropagation(); showChannelModal(channels.find(channel => Number(channel.id) === Number(manage.dataset.channelManage))); return; } if (item) { activeChannel = channels.find(channel => Number(channel.id) === Number(item.dataset.channelId)) || activeChannel; channelWorkspace.classList.remove('channels-open'); renderChannels(); } });
+  $('#channel-mobile-btn')?.addEventListener('click', () => channelWorkspace.classList.toggle('channels-open'));
+  $('#channel-create-btn')?.addEventListener('click', () => showChannelModal());
+  $('#group-channel-send')?.addEventListener('click', async () => { const input = $('#group-channel-input'); const content = input.value.trim(); if (!content || !activeChannel) return; try { const message = await api(`/group/${slug}/channel/${activeChannel.id}/messages`, { method: 'POST', body: JSON.stringify({ content }) }); if (channelMessages.querySelector('.empty-state')) channelMessages.innerHTML = ''; channelMessages.insertAdjacentHTML('beforeend', channelMessageHTML({ ...message, username: currentUser.username, avatar: currentUser.avatar })); input.value = ''; channelMessages.scrollTop = channelMessages.scrollHeight; } catch (error) { toast(error.message, 'error'); } });
+  $('#group-channel-input')?.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#group-channel-send').click(); } });
+  $('#channel-approval-btn')?.addEventListener('click', async () => {
+    try {
+      const result = await api(`/group/${slug}/approval/toggle`, { method: 'POST' });
+      toast(Number(result.is_enabled) ? 'Onay sistemi aktif edildi.' : 'Onay sistemi kapatıldı.');
+      channels = await api(`/group/${slug}/channels`);
+      renderChannels();
+      if (!Number(result.is_enabled)) return;
+      const requests = await api(`/group/${slug}/approval/requests`);
+      showModal('Onay bekleyenler', `<div id="approval-request-list">${requests.length ? requests.map(request => `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)"><img src="${escHtml(request.avatar || '/icons/cigcig-192.png')}" style="width:34px;height:34px;border-radius:50%;object-fit:cover" alt="" /><strong style="flex:1">${escHtml(request.username || 'Kullanıcı')}</strong><button type="button" class="btn btn-primary btn-sm" data-approval-action="approve" data-request-id="${request.id}" title="Onayla"><i class="fas fa-check"></i></button><button type="button" class="btn btn-danger btn-sm" data-approval-action="reject" data-request-id="${request.id}" title="Reddet"><i class="fas fa-xmark"></i></button></div>`).join('') : '<div class="empty-state" style="padding:20px 8px"><i class="fas fa-user-check"></i><p>Bekleyen onay yok.</p></div>'}<div id="approval-form-error" class="form-error mt-4"></div>`);
+      $('#approval-request-list')?.addEventListener('click', async event => {
+        const button = event.target.closest('[data-approval-action]');
+        if (!button) return;
+        button.disabled = true;
+        try {
+          await api(`/group/${slug}/approval/respond/${button.dataset.requestId}`, { method: 'POST', body: JSON.stringify({ approved: button.dataset.approvalAction === 'approve' }) });
+          button.closest('div[style*="border-bottom"]')?.remove();
+          toast(button.dataset.approvalAction === 'approve' ? 'Üye onaylandı.' : 'Talep reddedildi.');
+        } catch (error) { button.disabled = false; $('#approval-form-error').textContent = error.message; }
+      });
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  renderChannels();
 
   const chatEl = $('#chat-messages');
   const clearGroupReply = () => {
@@ -3814,7 +3480,6 @@ async function renderGroupDetail(app, slug) {
       <button class="btn btn-outline btn-sm" id="chat-bulk-delete-me" type="button" disabled><i class="fas fa-eye-slash"></i> Benden sil</button>
     </div>
   `;
-  document.getElementById('group-voice-btn')?.addEventListener('click', () => openGroupVoiceRoomV2(slug, group.name, members, isOwner || isMod));
   const chatContainer = document.querySelector('.chat-container');
   if (chatContainer && !document.getElementById('chat-selection-toolbar')) {
     chatContainer.insertBefore(toolbar, chatContainer.firstChild);
@@ -4419,7 +4084,7 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
       <div class="chat-msg-meta">
-        ${!isOwn ? (m.username ? `<a href="${profileLink}" data-link class="chat-msg-name" style="${m.name_color ? `color:${escHtml(m.name_color)}` : ''}">${escHtml(displayName)}</a>` : `<span class="chat-msg-name" style="opacity:.65">${escHtml(displayName)}</span>`) : ''}
+        ${m.username ? `<a href="${profileLink}" data-link class="chat-msg-name" style="${m.name_color ? `color:${escHtml(m.name_color)}` : ''}">${escHtml(displayName)}</a>` : `<span class="chat-msg-name" style="opacity:.65">${escHtml(displayName)}</span>`}
         <span class="chat-msg-time">${timeAgo(m.created_at)}</span>
         ${canReply && currentUser && m.username ? `<button class="btn btn-ghost group-reply-btn" data-id="${m.id}" title="Yanıtla" aria-label="Yanıtla" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-reply"></i><span class="group-reply-label">Yanıtla</span></button>` : ''}
         ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
@@ -4510,7 +4175,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
       <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
     </div>
-    <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Müzik veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
+    <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
     <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
     <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label></div>
@@ -4720,13 +4385,8 @@ async function renderVideoDetail(app, slug) {
   updatePageMeta(video.title + ' – ' + siteName, video.description || 'CigCig videoları', video.banner_image || '');
   const isOwner = currentUser && currentUser.id === video.user_id;
   let followState = false;
-  let videoFriendState = null;
   if (currentUser && currentUser.username !== video.username) {
-    try {
-      const res = await api('/users/' + encodeURIComponent(video.username) + '/follow-status');
-      followState = !!res.following;
-      videoFriendState = res;
-    } catch {}
+    try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
   }
   const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
   const formattedDescription = descriptionText.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
@@ -4752,11 +4412,7 @@ async function renderVideoDetail(app, slug) {
           <div class="video-title">${escHtml(video.title)}</div>
           <div class="video-author-row">
             <a href="${profileRoute(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-            ${currentUser && currentUser.username !== video.username
-              ? (video.is_private
-                ? `<button class="btn btn-outline btn-sm" id="video-friend-btn" ${videoFriendState?.friendship_status ? 'disabled' : ''}>${videoFriendState?.friendship_status === 'accepted' ? 'Arkadaşsınız' : videoFriendState?.friendship_status === 'pending' ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>`
-                : `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takiptesin' : 'Takip et'}</button>`)
-              : ''}
+            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takiptesin' : 'Takip et'}</button>` : ''}
           </div>
           <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
           <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-heart"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
@@ -4801,19 +4457,6 @@ async function renderVideoDetail(app, slug) {
       followState = r.following;
       $('#follow-btn').textContent = followState ? 'Takiptesin' : 'Takip et';
     } catch {}
-  });
-  $('#video-friend-btn')?.addEventListener('click', async () => {
-    if (!currentUser) { navigate('/giris'); return; }
-    const button = $('#video-friend-btn');
-    button.disabled = true;
-    try {
-      await api('/friends/request/' + encodeURIComponent(video.username), { method: 'POST' });
-      button.textContent = 'İstek gönderildi';
-      toast('Arkadaşlık isteği gönderildi');
-    } catch (e) {
-      button.disabled = false;
-      toast(e.message, 'error');
-    }
   });
 
   $('#video-share-btn')?.addEventListener('click', async () => {
@@ -5073,38 +4716,6 @@ async function renderProfile(app, username) {
       } catch (e) { toast(e.message, 'error'); button.disabled = false; }
     });
   };
-  const friendButtonLabel = () => {
-    if (followState.friendship_status === 'accepted') return 'Arkadaşsınız';
-    if (followState.friendship_status === 'pending') {
-      return followState.friend_request_incoming ? 'Arkadaşlık isteğini kabul et' : 'İstek gönderildi';
-    }
-    return 'Arkadaş ekle';
-  };
-  const bindFriendButton = () => {
-    const button = document.getElementById('profile-friend-btn');
-    if (!button) return;
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      try {
-        if (followState.friendship_status === 'pending' && followState.friend_request_incoming && followState.friendship_id) {
-          await api('/friends/respond/' + followState.friendship_id, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
-          toast('Arkadaşlık isteği kabul edildi');
-          renderProfile(app, username);
-          return;
-        }
-        if (followState.friendship_status === 'accepted' || followState.friendship_status === 'pending') return;
-        await api('/friends/request/' + encodeURIComponent(username), { method: 'POST' });
-        followState.friendship_status = 'pending';
-        followState.friend_request_incoming = false;
-        button.textContent = friendButtonLabel();
-        button.classList.remove('btn-primary');
-        button.classList.add('btn-outline');
-      } catch (e) {
-        toast(e.message, 'error');
-        button.disabled = false;
-      }
-    });
-  };
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
@@ -5112,8 +4723,8 @@ async function renderProfile(app, username) {
        ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-friend-btn" class="btn ${followState.friendship_status ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px" ${followState.friendship_status === 'accepted' || (followState.friendship_status === 'pending' && !followState.friend_request_incoming) ? 'disabled' : ''}>${friendButtonLabel()}</button>` : ''}</div></div></div>`;
-    bindFriendButton();
+      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
+    bindFollowButton();
     return;
   }
   let savedVideos = [];
@@ -5130,7 +4741,7 @@ async function renderProfile(app, username) {
           <div class="song-card-subtitle">${escHtml(s.artist_name || s.uploader_name || s.username || '')}</div>
           <div class="song-card-meta">${s.play_count || 0} dinlenme</div>
         </div>
-      </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok</p></div>';
+      </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok</p></div>';
   document.title = user.username + ' - ' + siteName;
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
@@ -5180,7 +4791,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}${user.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(user.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:15px"></i>` : ''}
+          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -5203,9 +4814,7 @@ async function renderProfile(app, username) {
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
-          ${user.is_private
-            ? `<button id="profile-friend-btn" class="btn ${followState.friendship_status ? 'btn-outline' : 'btn-primary'} btn-sm" ${followState.friendship_status === 'accepted' || (followState.friendship_status === 'pending' && !followState.friend_request_incoming) ? 'disabled' : ''}>${friendButtonLabel()}</button>`
-            : `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.following ? 'Takiptesin' : 'Takip et'}</button>`}
+          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:240px;max-width:280px;overflow-y:auto;max-height:320px"></div>
@@ -5255,7 +4864,6 @@ async function renderProfile(app, username) {
   profileTabOrder.forEach(tab => document.getElementById('tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
   bindFollowButton();
-  bindFriendButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
       const list = await api('/users/' + encodeURIComponent(username) + '/' + button.dataset.followList);
@@ -5342,6 +4950,11 @@ async function renderProfile(app, username) {
       }
 
       getBlockStatus().then(renderMenu).catch(() => renderMenu({}));
+
+      document.getElementById('profile-friend-btn')?.addEventListener('click', e => {
+        e.stopPropagation();
+        moreMenu.style.display = moreMenu.style.display === 'none' ? 'block' : 'none';
+      });
 
       moreBtn.addEventListener('click', e => {
         e.stopPropagation();
@@ -5610,26 +5223,10 @@ async function renderSettingsSection(section) {
     });
 
   } else if (section === 'appearance') {
-    const themeSettings = window.CigCigTheme?.getSettings() || window.CigCigPublicSettings || {};
-    const showThemePicker = themeSettings.theme_picker_enabled !== '0';
-    const autoAllowed = window.CigCigTheme?.isAutoAllowed?.() !== false;
-    const selectedTheme = window.CigCigTheme?.getPreference?.() || 'auto';
-    const themeOptions = [
-      ...(autoAllowed ? [['auto', 'Otomatik', 'fas fa-circle-half-stroke']] : []),
-      ['dark', 'Koyu', 'fas fa-moon'],
-      ['light', 'Açık', 'fas fa-sun']
-    ];
     el.innerHTML = `
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
-          ${showThemePicker ? `<div class="form-group theme-picker settings-theme-picker">
-            <div class="theme-picker-label"><i class="fas fa-adjust"></i><span>Renk teması</span></div>
-            <div class="theme-picker-options settings-theme-options" role="group" aria-label="Renk teması">
-              ${themeOptions.map(([value, label, icon]) => `<button type="button" class="theme-option ${selectedTheme === value ? 'active' : ''}" data-theme-choice="${value}" aria-pressed="${selectedTheme === value}"><i class="${icon}"></i><span>${label}</span></button>`).join('')}
-            </div>
-            <div class="theme-picker-hint">Otomatik mod, cihazının açık/koyu tercihine anında uyum sağlar.</div>
-          </div>` : ''}
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
@@ -5638,17 +5235,6 @@ async function renderSettingsSection(section) {
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
-    el.querySelectorAll('[data-theme-choice]').forEach(button => {
-      button.addEventListener('click', () => {
-        const next = button.dataset.themeChoice;
-        window.CigCigTheme?.setPreference(next);
-        el.querySelectorAll('[data-theme-choice]').forEach(option => {
-          const active = option.dataset.themeChoice === next;
-          option.classList.toggle('active', active);
-          option.setAttribute('aria-pressed', String(active));
-        });
-      });
-    });
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_progress: $('#s-show-progress').checked,
@@ -5669,7 +5255,7 @@ async function renderSettingsSection(section) {
       ['konular', 'Konular', 'Topluluğun son tartışmaları', 'fas fa-comments'],
       ['kitaplar', 'Kitaplar', 'Yeni ve öne çıkan kitaplar', 'fas fa-book'],
       ['gruplar', 'Gruplar', 'Katıldığın ve keşfedebileceğin gruplar', 'fas fa-users'],
-      ['muzikler', 'Müzikler', 'Son eklenen müzikler', 'fas fa-music'],
+      ['muzikler', 'Müzikler', 'Son eklenen şarkılar', 'fas fa-music'],
       ['fotograflar', 'Medya ve Hikayeler', 'Medya akışı ve hikaye çubuğu', 'fas fa-images'],
       ['magaza', 'Mağaza', 'Mağazadaki ürünler', 'fas fa-store'],
       ['playlistler', 'Playlistler', 'Kişisel müzik listelerin', 'fas fa-list-music']
@@ -6498,7 +6084,6 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
-    window.CigCigTheme?.configure(ps);
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
     siteAuthRequired = ps.auth_required === '1';
@@ -6885,7 +6470,6 @@ async function renderDMChat(username) {
         </a>
       </div>
       <div class="dm-chat-header-right">
-        <button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Birebir sesli arama"><i class="fas fa-phone"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -7040,9 +6624,6 @@ async function renderDMChat(username) {
   });
 
   // Options
-  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
-    requestMicrophoneThenCall(other.username, other);
-  });
   document.getElementById('dm-options-btn')?.addEventListener('click', e => {
     e.stopPropagation();
     showDmOptionsMenu(username, conv.id);
@@ -7122,7 +6703,7 @@ function dmMessageHTML(m, myId, selMode) {
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}</a>`
       : ''}
     <div class="dm-msg-content">
-      ${!isOwn ? (m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`) : ''}
+      ${m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`}
       ${m.reply_to_id && m.reply_content
         ? `<div class="dm-reply-preview">
              <span style="color:var(--text-muted);font-size:11px;font-weight:600">${escHtml(m.reply_username || '')}</span>
@@ -7194,7 +6775,6 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
     ...(isOwn ? [{ label: '<i class="fas fa-trash-alt fa-fw"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
-    ...(!isOwn ? [{ label: '<i class="fas fa-flag fa-fw"></i> Mesajı Bildir', action: 'report', danger: true }] : []),
   ];
   items.forEach(item => {
     const el = document.createElement('div');
@@ -7225,18 +6805,6 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
       } else if (item.action === 'delete-all') {
         try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'all' }) }); renderDMChat(username); }
         catch (e) { toast(e.message, 'error'); }
-      } else if (item.action === 'report') {
-        showModal('Mesajı bildir', `
-          <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Bu mesajı moderasyon ekibine göndereceğiz. Bildirilen içerik admin panelindeki <strong>Bildirilenler</strong> bölümünde incelenir.</p>
-          <textarea id="dm-report-reason" maxlength="500" placeholder="Neden bildiriyorsun? (opsiyonel)" style="width:100%;min-height:90px"></textarea>
-          <button class="btn btn-danger" id="dm-report-send" style="width:100%;margin-top:10px"><i class="fas fa-flag"></i> Bildir</button>
-        `);
-        document.getElementById('dm-report-send')?.addEventListener('click', async () => {
-          try {
-            await api(`/messages/${msgId}/report`, { method: 'POST', body: JSON.stringify({ reason: document.getElementById('dm-report-reason')?.value || '' }) });
-            hideModal(); toast('Mesaj adminlere bildirildi');
-          } catch (error) { toast(error.message, 'error'); }
-        });
       }
     });
     menu.appendChild(el);
@@ -7740,7 +7308,6 @@ async function renderFriends(app) {
         <div id="friends-content">
           <div id="tab-content-friends">
             <div class="friends-panel">
-              <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-user-friends"></i></span><span><b>Arkadaşlarım</b><small>Takip ettiğin kullanıcıları buradan yönetebilirsin.</small></span></div>
               ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
                 : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
             </div>
@@ -8006,14 +7573,14 @@ async function renderMusicList(app) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${currentUser ? `<a href="/playlistlerim" data-link class="btn btn-outline btn-sm"><i class="fas fa-list"></i> Playlistlerim</a>` : ''}
         ${currentUser && !currentUser.is_artist ? `<a href="/artist-basvuru" data-link class="btn btn-outline btn-sm"><i class="fas fa-microphone"></i> Artist Başvurusu</a>` : ''}
-        ${currentUser?.is_artist ? `<a href="/artist-panel" data-link class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Müzik Yükle</a>` : ''}
-        ${currentUser && !currentUser.is_artist ? `<a href="/sarki-yukle" data-link class="btn btn-outline btn-sm"><i class="fas fa-share"></i> Müzik Paylaş</a>` : ''}
+        ${currentUser?.is_artist ? `<a href="/artist-panel" data-link class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Şarkı Yükle</a>` : ''}
+        ${currentUser && !currentUser.is_artist ? `<a href="/sarki-yukle" data-link class="btn btn-outline btn-sm"><i class="fas fa-share"></i> Şarkı Paylaş</a>` : ''}
       </div>
     </div>
     <div class="music-search-bar" style="margin-bottom:20px">
       <div class="search-bar" style="margin:0">
         <i class="fas fa-search"></i>
-        <input type="text" id="music-search" placeholder="Müzik adı, sanatçı, tür, dağıtıcı, müzik sözü ara..." style="width:100%" />
+        <input type="text" id="music-search" placeholder="Şarkı adı, sanatçı, tür, dağıtıcı, şarkı sözü ara..." style="width:100%" />
       </div>
     </div>
     <div id="music-list"></div>
@@ -8060,7 +7627,7 @@ async function renderMusicList(app) {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
       songs = await api(url);
       songs.sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
-      if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; return; }
+      if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok.</p></div>'; return; }
       el.innerHTML = `<div class="music-table">
         <div class="music-table-header">
           <div style="width:40px">#</div>
@@ -8139,10 +7706,7 @@ async function playGuestMusicAdIfDue(onComplete) {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    window.__resumePhotoAudio?.();
-    return;
-  }
+  if (!document.hidden) return;
   activePhotoAudio?.pause();
   activeStoryAudio?.pause();
   storyComposerAudio?.pause();
@@ -8196,44 +7760,13 @@ function buildShuffledOrder(len, startIdx) {
   return arr;
 }
 
-function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio = null) {
-  // Zorunlu reklam önce kontrol edilir; yenileme veya müzik değiştirme reklamı atlatmaz.
+function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
+  // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
   if (currentUser && !musicAdBypass && !song?.is_music_ad) {
-    // Reklam kontrolü ağ isteği olduğu için kullanıcı tıklamasının oynatma
-    // iznini kaybetmemesi adına aynı ses elementini şimdiden sessizce başlat.
-    // Reklam yoksa element ses açılarak doğrudan kullanılmaya devam eder.
-    const gestureAudio = new Audio(audioUrl);
-    gestureAudio.preload = 'auto';
-    gestureAudio.muted = true;
-    gestureAudio.volume = 0;
-    const gesturePlay = gestureAudio.play().catch(() => null);
     api('/music-ads/pending').then(result => {
-      if (result?.ad) {
-        gestureAudio.pause();
-        return playMusicAd(result.ad, () => {
-          gestureAudio.muted = false;
-          gestureAudio.volume = getMediaVolume();
-          musicAdBypass = true;
-          openMiniPlayer(audioUrl, slug, song, queue, queueIndex, gestureAudio);
-          musicAdBypass = false;
-        });
-      }
-      gesturePlay.finally(() => {
-        gestureAudio.muted = false;
-        gestureAudio.volume = getMediaVolume();
-        musicAdBypass = true;
-        openMiniPlayer(audioUrl, slug, song, queue, queueIndex, gestureAudio);
-        musicAdBypass = false;
-      });
-    }).catch(() => {
-      gesturePlay.finally(() => {
-        gestureAudio.muted = false;
-        gestureAudio.volume = getMediaVolume();
-        musicAdBypass = true;
-        openMiniPlayer(audioUrl, slug, song, queue, queueIndex, gestureAudio);
-        musicAdBypass = false;
-      });
-    });
+      if (result?.ad) return playMusicAd(result.ad, () => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
+      musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false;
+    }).catch(() => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
     return;
   }
   // If queue provided, update global queue state
@@ -8257,10 +7790,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
   player.classList.remove('music-ad-player');
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
-  const audio = trackMediaAudio(preparedAudio || new Audio(audioUrl));
-  audio.preload = 'auto';
-  audio.muted = false;
-  audio.volume = getMediaVolume();
+  const audio = trackMediaAudio(new Audio(audioUrl));
   currentAudio = audio; currentSlug = slug;
   fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
 
@@ -8283,7 +7813,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
         <button class="gplayer-btn" id="gp-prev" title="Önceki"><i class="fas fa-step-backward"></i></button>
         <button class="gplayer-btn gplayer-play" id="gp-play"><i class="fas fa-pause"></i></button>
         <button class="gplayer-btn" id="gp-next" title="Sonraki"><i class="fas fa-step-forward"></i></button>
-        <button class="${repeatActive}" id="gp-repeat" title="Tekrarla (bu müzik)"><i class="fas fa-redo-alt"></i></button>
+        <button class="${repeatActive}" id="gp-repeat" title="Tekrarla (bu şarkı)"><i class="fas fa-redo-alt"></i></button>
       </div>
       <div class="gplayer-progress-wrap">
         <span class="gplayer-time" id="gp-cur">0:00</span>
@@ -8314,7 +7844,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
     const cur = document.getElementById('gp-cur'); if(cur) cur.textContent = fmtTime(audio.currentTime);
   });
 
-  // Müzik bitince: repeat one, sıradaki çal veya dur
+  // Şarkı bitince: repeat one, sıradaki çal veya dur
   audio.addEventListener('ended', async () => {
     const continueQueue = () => {
       if (playerRepeatOne) { audio.currentTime = 0; audio.play().catch(()=>{}); return; }
@@ -8346,9 +7876,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
   });
 
   document.getElementById('gp-play').addEventListener('click', () => {
-    if (audio.paused) {
-      audio.play().then(() => { document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>'; }).catch(() => toast('Müziği başlatmak için oynat düğmesine tekrar dokunun.', 'error'));
-    }
+    if (audio.paused) { audio.play(); document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>'; }
     else { audio.pause(); document.getElementById('gp-play').innerHTML='<i class="fas fa-play"></i>'; }
   });
   document.getElementById('gp-seek').addEventListener('input', e => {
@@ -8412,7 +7940,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, preparedAudio =
   const detailPlay = document.getElementById('detail-play-btn');
   if (detailPlay) detailPlay.innerHTML = '<i class="fas fa-pause"></i> Durdur';
 
-  audio.play().catch(() => toast('Müzik yüklenemedi. Oynat düğmesine tekrar dokunun.', 'error'));
+  audio.play().catch(() => {});
 }
 
 // Kuyrukta önceki/sonraki indeksi hesapla
@@ -8434,7 +7962,7 @@ async function renderMusicDetail(app, slug) {
   app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
   let song;
   try { song = await api('/songs/' + slug); } catch {
-    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Müzik bulunamadı.</p></div></div>'; return;
+    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Şarkı bulunamadı.</p></div></div>'; return;
   }
   document.title = `${song.title} – ${song.artist_name} | ${siteName}`;
   const isOwn = song.song_type === 'own';
@@ -8450,7 +7978,7 @@ async function renderMusicDetail(app, slug) {
             : `<div class="song-detail-cover song-detail-cover-ph"><i class="fas fa-music"></i></div>`}
         </div>
         <div class="song-detail-meta-col">
-          <div class="song-detail-type">${isOwn ? '<i class="fas fa-microphone-alt"></i> Sanatçı Müziği' : '<i class="fas fa-share-alt"></i> Paylaşılan Müzik'}</div>
+          <div class="song-detail-type">${isOwn ? '<i class="fas fa-microphone-alt"></i> Sanatçı Şarkısı' : '<i class="fas fa-share-alt"></i> Paylaşılan Şarkı'}</div>
           <div class="song-detail-title">${escHtml(song.title)}</div>
           <div class="song-detail-artist">${escHtml(song.artist_name)}</div>
           <div class="song-detail-info-row">
@@ -8516,7 +8044,7 @@ async function renderMusicDetail(app, slug) {
 
       ${hasLyrics ? `
         <div class="song-lyrics-section">
-          <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Müzik Sözleri</div>
+          <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
           <div class="song-lyrics-text">${escHtml(song.lyrics)}</div>
         </div>
       ` : ''}
@@ -8614,10 +8142,10 @@ async function renderMusicDetail(app, slug) {
   const deleteBtn = document.getElementById('song-delete-btn');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Bu müziği silmek istediğinden emin misin?')) return;
+      if (!confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
       try {
         await api('/songs/' + song.id, { method: 'DELETE' });
-        toast('Müzik silindi');
+        toast('Şarkı silindi');
         navigate('/muzikler');
       } catch(e) { toast(e.message, 'error'); }
     });
@@ -8627,8 +8155,8 @@ async function renderMusicDetail(app, slug) {
   const editBtn = document.getElementById('song-edit-btn');
   if (editBtn) {
     editBtn.addEventListener('click', () => {
-      showModal(`✏️ Müziği Düzenle — ${escHtml(song.title)}`, `
-        <div class="form-group"><label>Müzik Adı</label><input id="ue-title" value="${escHtml(song.title)}" /></div>
+      showModal(`✏️ Şarkıyı Düzenle — ${escHtml(song.title)}`, `
+        <div class="form-group"><label>Şarkı Adı</label><input id="ue-title" value="${escHtml(song.title)}" /></div>
         ${song.song_type === 'own' ? `
         <div class="form-row">
           <div class="form-group"><label>Sanatçı Adı</label><input id="ue-artist" value="${escHtml(song.artist_name)}" /></div>
@@ -8636,7 +8164,7 @@ async function renderMusicDetail(app, slug) {
         </div>` : `
         <div class="form-group"><label>Sanatçı Adı</label><input id="ue-artist" value="${escHtml(song.artist_name)}" /></div>`}
         <div class="form-group"><label>Müzik Türü</label><input id="ue-genre" value="${escHtml(song.genre||'')}" /></div>
-        <div class="form-group"><label>Müzik Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
+        <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
         ${song.song_type === 'other' ? `<div class="form-group"><label>Paylaşma Sebebi</label><textarea id="ue-reason" rows="2">${escHtml(song.share_reason||'')}</textarea></div>` : ''}
         <div class="form-group"><label>Yeni Kapak Fotoğrafı (1:1 kare) <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
           <input type="file" id="ue-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
@@ -8663,7 +8191,7 @@ async function renderMusicDetail(app, slug) {
         try {
           await apiForm('/songs/' + song.id, fd, 'PUT');
           hideModal();
-          toast('Müzik güncellendi!');
+          toast('Şarkı güncellendi!');
           navigate('/muzik/' + slug);
         } catch(e) {
           msg.textContent = e.message;
@@ -8676,7 +8204,7 @@ async function renderMusicDetail(app, slug) {
   const remasteredBtn = document.getElementById('song-remastered-btn');
   remasteredBtn?.addEventListener('click', () => {
     showModal('Remastered versiyon ekle', `
-      <p style="color:var(--text-secondary);font-size:13px">Bu müziğin remastered ses dosyasını sonradan yükleyebilirsin. Mevcut remastered dosyası varsa yenisiyle değiştirilir.</p>
+      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının remastered ses dosyasını sonradan yükleyebilirsin. Mevcut remastered dosyası varsa yenisiyle değiştirilir.</p>
       <div class="form-group"><label>Ses dosyası *</label><input type="file" id="remastered-audio" accept="audio/*" required /></div>
       <button class="btn btn-primary" id="remastered-save" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Yükle</button>
       <div id="remastered-msg" class="form-error mt-4"></div>
@@ -8705,8 +8233,8 @@ async function renderMusicDetail(app, slug) {
     const options = songs.filter(item => String(item.id) !== String(song.id) && !existing.has(String(item.id)))
       .map(item => `<option value="${item.id}">${escHtml(item.title)} — ${escHtml(item.artist_name)}</option>`).join('');
     showModal('Dinleme önerisi ekle', `
-      <p style="color:var(--text-secondary);font-size:13px">Bu müziğin detayında “Şunu da dinleyebilirsiniz” bölümünde görünecek.</p>
-      <div class="form-group"><label>Müzik seç *</label><select id="recommend-song">${options || '<option value="">Eklenebilecek müzik yok</option>'}</select></div>
+      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının detayında “Şunu da dinleyebilirsiniz” bölümünde görünecek.</p>
+      <div class="form-group"><label>Şarkı seç *</label><select id="recommend-song">${options || '<option value="">Eklenebilecek şarkı yok</option>'}</select></div>
       <button class="btn btn-primary" id="recommend-save" style="width:100%;justify-content:center" ${options ? '' : 'disabled'}><i class="fas fa-plus"></i> Öneriyi ekle</button>
       <div id="recommend-msg" class="form-error mt-4"></div>
     `);
@@ -8735,7 +8263,7 @@ async function renderArtistApply(app) {
       <div style="text-align:center;padding:60px 20px">
         <div style="font-size:48px;margin-bottom:16px">🎤</div>
         <div style="font-size:22px;font-weight:700;margin-bottom:8px">Artist Rozetiniz Var!</div>
-        <p style="color:var(--text-secondary);margin-bottom:24px">Müzik yüklemek için artist paneline gidin.</p>
+        <p style="color:var(--text-secondary);margin-bottom:24px">Şarkı yüklemek için artist paneline gidin.</p>
         <a href="/artist-panel" data-link class="btn btn-primary"><i class="fas fa-music"></i> Artist Paneli</a>
       </div>
     </div>`;
@@ -8763,15 +8291,15 @@ async function renderArtistApply(app) {
     <div class="card">
       <div class="card-body">
         <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">
-          Artist rozeti alarak kendi müziklerinizi CigCig'te yayınlayabilirsiniz.
+          Artist rozeti alarak kendi şarkılarınızı CigCig'te yayınlayabilirsiniz.
         </p>
         <div class="form-group"><label>Müzik Türünüz *</label>
           <input id="apply-genre" placeholder="Pop, Rock, Hip-Hop, Elektronik..." />
         </div>
-        <div class="form-group"><label>Örnek Müzik URL (SoundCloud, YouTube vb.)</label>
+        <div class="form-group"><label>Örnek Şarkı URL (SoundCloud, YouTube vb.)</label>
           <input id="apply-url" placeholder="https://soundcloud.com/..." />
         </div>
-        <div class="form-group"><label>veya Örnek Müzik Dosyası Yükle</label>
+        <div class="form-group"><label>veya Örnek Şarkı Dosyası Yükle</label>
           <input type="file" id="apply-file" accept="audio/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" />
         </div>
         <div class="form-group"><label>Notunuz (isteğe bağlı)</label>
@@ -8827,37 +8355,37 @@ async function renderArtistPanel(app) {
     <div class="card">
       <div class="card-body">
         <div class="form-group">
-          <label>Müzik Türü *</label>
+          <label>Şarkı Türü *</label>
           <div style="display:flex;gap:10px">
             <label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
-              <input type="radio" name="song-type" id="st-own" value="own" checked style="width:auto" /> Benim Müziğim
+              <input type="radio" name="song-type" id="st-own" value="own" checked style="width:auto" /> Kendi Şarkım
             </label>
             ${window.otherSongsEnabled !== false ? `<label class="checkbox-label" style="flex:1;padding:12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;cursor:pointer">
-              <input type="radio" name="song-type" id="st-other" value="other" style="width:auto" /> Başkasının Müziği
+              <input type="radio" name="song-type" id="st-other" value="other" style="width:auto" /> Başkasının Şarkısı
             </label>` : ''}
           </div>
         </div>
         <div id="own-fields">
           <div class="form-group"><label>Yayımlayıcı / Dağıtıcı İsmi</label><input id="s-distributor" placeholder="Kendi adın ya da şirket adı" /></div>
-          <div class="form-group"><label>Müzik Adı *</label><input id="s-title" /></div>
-          <div class="form-group"><label>Müzik Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
-          <div class="form-group"><label>Müzik Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Şarkı Adı *</label><input id="s-title" /></div>
+          <div class="form-group"><label>Şarkı Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
+          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Müzik Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Müzik sözlerini buraya yapıştırın..."></textarea></div>
+          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.own_rules)}</div>
-          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Müzik yayınlama kurallarını okudum ve kabul ediyorum</label>
+          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Şarkı yayınlama kurallarını okudum ve kabul ediyorum</label>
         </div>
         <div id="other-fields" style="display:none">
-          <div class="form-group"><label>Müzik Adı *</label><input id="s-title-o" /></div>
-          <div class="form-group"><label>Müzik Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
+          <div class="form-group"><label>Şarkı Adı *</label><input id="s-title-o" /></div>
+          <div class="form-group"><label>Şarkı Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover-o" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Müzik Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Müzik sözlerini buraya yapıştırın..."></textarea></div>
-          <div class="form-group"><label>Müzik Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
-          <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu müziği neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
+          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
+          <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
+          <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.other_rules)}</div>
-          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-other" style="width:auto" /> Başkasının müziğini paylaşma kurallarını okudum ve kabul ediyorum</label>
+          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-other" style="width:auto" /> Başkasının şarkısını paylaşma kurallarını okudum ve kabul ediyorum</label>
         </div>
-        <button class="btn btn-primary" id="song-upload-btn" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Müziği Yayınla</button>
+        <button class="btn btn-primary" id="song-upload-btn" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Şarkıyı Yayınla</button>
         <div id="song-msg" style="margin-top:8px;font-size:12px"></div>
       </div>
     </div>
@@ -8880,7 +8408,7 @@ async function renderArtistPanel(app) {
     fd.append('rules_accepted', '1');
     if (isOwn) {
       const title = document.getElementById('s-title')?.value.trim();
-      if (!title) { msg.style.color='var(--accent-red2)'; msg.textContent='Müzik adı gerekli'; return; }
+      if (!title) { msg.style.color='var(--accent-red2)'; msg.textContent='Şarkı adı gerekli'; return; }
       const audio = document.getElementById('s-audio')?.files[0];
       if (!audio) { msg.style.color='var(--accent-red2)'; msg.textContent='Ses dosyası gerekli'; return; }
       fd.append('title', title);
@@ -8906,29 +8434,29 @@ async function renderArtistPanel(app) {
     try {
       const data = await apiForm('/songs', fd);
       navigate('/muzik/' + data.slug);
-    } catch(e) { msg.style.color='var(--accent-red2)'; msg.textContent=e.message; btn.disabled=false; btn.innerHTML='<i class="fas fa-upload"></i> Müziği Yayınla'; }
+    } catch(e) { msg.style.color='var(--accent-red2)'; msg.textContent=e.message; btn.disabled=false; btn.innerHTML='<i class="fas fa-upload"></i> Şarkıyı Yayınla'; }
   });
 }
 
-// ===== BAŞKASININ MÜZİĞİNİ PAYLAŞ (artist rozeti gerekmez) =====
+// ===== BAŞKASININ ŞARKISINI PAYLAŞ (artist rozeti gerekmez) =====
 async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  if (window.otherSongsEnabled === false) { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-ban"></i><p>Başkasının müziği paylaşma özelliği şu an kapalı.</p></div></div>'; return; }
+  if (window.otherSongsEnabled === false) { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-ban"></i><p>Başkasının şarkısı paylaşma özelliği şu an kapalı.</p></div></div>'; return; }
   // Artist olanlar kendi panelini kullansın
   if (currentUser.is_artist) { navigate('/artist-panel'); return; }
-  document.title = 'Müzik Paylaş – ' + siteName;
+  document.title = 'Şarkı Paylaş – ' + siteName;
 
   let rules = { other_rules: '' };
   try { rules = await api('/music-rules'); } catch {}
 
   app.innerHTML = `<div class="container page" style="max-width:680px;margin:0 auto">
-    <div class="page-title"><i class="fas fa-share-alt" style="color:var(--accent-red2);margin-right:8px"></i>Müzik Paylaş</div>
+    <div class="page-title"><i class="fas fa-share-alt" style="color:var(--accent-red2);margin-right:8px"></i>Şarkı Paylaş</div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-body" style="font-size:13px;color:var(--text-secondary);display:flex;align-items:flex-start;gap:10px">
         <i class="fas fa-info-circle" style="color:var(--accent-red2);margin-top:2px;flex-shrink:0"></i>
         <div>
-          Bu sayfa <strong>başkasına ait müzikleri</strong> topluluğa paylaşmak içindir.
-          Kendi müziğini yüklemek istiyorsan önce
+          Bu sayfa <strong>başkasına ait şarkıları</strong> topluluğa paylaşmak içindir.
+          Kendi şarkını yüklemek istiyorsan önce
           <a href="/artist-basvuru" data-link style="color:var(--accent-red2)">artist başvurusu</a> yapman gerekir.
         </div>
       </div>
@@ -8936,11 +8464,11 @@ async function renderShareSong(app) {
     <div class="card">
       <div class="card-body">
         <div class="form-group">
-          <label>Müzik Adı *</label>
-          <input id="ss-title" placeholder="Müziğin adı" />
+          <label>Şarkı Adı *</label>
+          <input id="ss-title" placeholder="Şarkının adı" />
         </div>
         <div class="form-group">
-          <label>Sanatçı (Müzik Sahibi) *</label>
+          <label>Sanatçı (Şarkı Sahibi) *</label>
           <input id="ss-artist" placeholder="Sanatçının adı" />
         </div>
         <div class="form-group">
@@ -8948,7 +8476,7 @@ async function renderShareSong(app) {
           <input id="ss-genre" placeholder="Pop, Rock, Hip-Hop..." />
         </div>
         <div class="form-group">
-          <label>Müzik Dosyası * (MP3/WAV, max 50MB)</label>
+          <label>Şarkı Dosyası * (MP3/WAV, max 50MB)</label>
           <input type="file" id="ss-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group">
@@ -8956,12 +8484,12 @@ async function renderShareSong(app) {
           <input type="file" id="ss-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer;border-radius:8px" />
         </div>
         <div class="form-group">
-          <label>Müzik Sözleri (isteğe bağlı)</label>
-          <textarea id="ss-lyrics" rows="5" placeholder="Müzik sözlerini buraya yapıştırın..."></textarea>
+          <label>Şarkı Sözleri (isteğe bağlı)</label>
+          <textarea id="ss-lyrics" rows="5" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea>
         </div>
         <div class="form-group">
           <label>Neden paylaşıyorsunuz? *</label>
-          <textarea id="ss-reason" rows="2" placeholder="Bu müziği neden topluluğumuzla paylaşmak istediniz?"></textarea>
+          <textarea id="ss-reason" rows="2" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea>
         </div>
         ${rules.other_rules ? `
         <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">
@@ -8969,7 +8497,7 @@ async function renderShareSong(app) {
         </div>` : ''}
         <label class="checkbox-label" style="margin-bottom:16px">
           <input type="checkbox" id="ss-rules" style="width:auto" />
-          <span>Başkasının müziğini paylaşma kurallarını okudum ve kabul ediyorum</span>
+          <span>Başkasının şarkısını paylaşma kurallarını okudum ve kabul ediyorum</span>
         </label>
         <button class="btn btn-primary" id="ss-submit" style="width:100%;justify-content:center">
           <i class="fas fa-share"></i> Paylaş
@@ -8991,7 +8519,7 @@ async function renderShareSong(app) {
     const reason = document.getElementById('ss-reason').value.trim();
     const rules_ok = document.getElementById('ss-rules').checked;
 
-    if (!title)    { msg.style.color='var(--accent-red2)'; msg.textContent='Müzik adı zorunlu'; return; }
+    if (!title)    { msg.style.color='var(--accent-red2)'; msg.textContent='Şarkı adı zorunlu'; return; }
     if (!artist)   { msg.style.color='var(--accent-red2)'; msg.textContent='Sanatçı adı zorunlu'; return; }
     if (!audio)    { msg.style.color='var(--accent-red2)'; msg.textContent='Ses dosyası zorunlu'; return; }
     if (!reason)   { msg.style.color='var(--accent-red2)'; msg.textContent='Paylaşma sebebi zorunlu'; return; }
@@ -9161,7 +8689,7 @@ function showStoryUploadModal() {
   const pendingStoryFile = window.__pendingStoryFile || null;
   delete window.__storyUploadDraft;
   delete window.__pendingStoryFile;
-  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda filtre uygulanarak kaydedilir; videolarda izleme ekranına uygulanır.</small></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Müzik veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
+  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda filtre uygulanarak kaydedilir; videolarda izleme ekranına uygulanır.</small></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
   let songs = [], selectedSong = null, selectedStoryFile = pendingStoryFile;
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   const renderMediaPreview = file => {
@@ -9312,7 +8840,7 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${p.song_artist}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${p.song_artist}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
@@ -9476,28 +9004,19 @@ async function renderPhotoDetail(app, photoId) {
   }
 }
 
-let activePhotoAudio=null, photoAudioObserver=null;
 function setupPhotoAudio(feed) {
-  // Instagram benzeri davranış: fotoğraf sesleri kapalı başlar; kullanıcı
-  // açtığında yalnızca ekranda görünen fotoğrafın sesi çalar.
+  // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
+  // tıklamasıyla açılır; seçilen yerden itibaren en fazla 30 saniye çalar.
   photoAudioObserver?.disconnect();
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
   document.getElementById('photo-audio-control')?.remove();
 
-  let photoAudioEnabled = false;
-  const visibleRatios = new Map();
-  const getVisibleCard = () => {
-    const cards = [...feed.querySelectorAll('[data-photo-id]')].filter(card => card.querySelector('.photo-song[data-audio]'));
-    return cards
-      .filter(card => (visibleRatios.get(card) || 0) >= 0.55)
-      .sort((a, b) => (visibleRatios.get(b) || 0) - (visibleRatios.get(a) || 0))[0] || null;
-  };
   const syncButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{
-    const isPlaying=!!activePhotoAudio && !activePhotoAudio.paused && activePhotoAudio?._photoId===button.closest('[data-photo-id]')?.dataset.photoId;
+    const isPlaying=activePhotoAudio?._photoId===button.closest('[data-photo-id]')?.dataset.photoId;
     button.classList.toggle('is-playing', isPlaying);
-    button.title=isPlaying?'Müziği kapat':'Fotoğraf sesini aç';
+    button.title=isPlaying?'Müziği durdur':'Müziği aç';
     button.setAttribute('aria-label', button.title);
     const icon=button.querySelector('i');
     if (icon) icon.className='fas '+(isPlaying?'fa-volume-high':'fa-volume-off');
@@ -9511,11 +9030,14 @@ function setupPhotoAudio(feed) {
   const play=(card)=>{
     const songButton=card.querySelector('.photo-song');
     if (!songButton?.dataset.audio) return;
+    if (activePhotoAudio?._photoId===card.dataset.photoId) {
+      stop();
+      return;
+    }
     stop();
     const audio=trackMediaAudio(new Audio(songButton.dataset.audio));
     audio.preload='auto';
     audio.muted=false;
-    audio.volume=getMediaVolume();
     audio.load();
     audio._photoId=card.dataset.photoId;
     limitMediaAudioClip(audio, Number(songButton.dataset.start)||0, ()=>{
@@ -9535,34 +9057,22 @@ function setupPhotoAudio(feed) {
       }
     });
   };
-  const playVisible=()=>{
-    if (!photoAudioEnabled || document.hidden) return;
-    const card=getVisibleCard();
-    if (!card) { stop(); return; }
-    if (activePhotoAudio?._photoId===card.dataset.photoId && !activePhotoAudio.paused) return;
-    play(card);
-  };
 
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{
     event.preventDefault();
     event.stopPropagation();
     const card=button.closest('[data-photo-id]');
-    if (!card) return;
-    if (photoAudioEnabled && activePhotoAudio?._photoId===card.dataset.photoId) {
-      photoAudioEnabled=false;
-      stop();
-      syncButtons();
-      return;
-    }
-    photoAudioEnabled=true;
-    play(card);
+    if (card) play(card);
   }));
-  photoAudioObserver=new IntersectionObserver(entries=>{
-    entries.forEach(entry=>visibleRatios.set(entry.target, entry.isIntersecting ? entry.intersectionRatio : 0));
-    playVisible();
-  }, { threshold:[0, .55, .8, 1] });
-  feed.querySelectorAll('[data-photo-id]').forEach(card=>photoAudioObserver.observe(card));
-  window.__resumePhotoAudio=playVisible;
+  feed.querySelectorAll('.photo-volume').forEach(slider => {
+    slider.addEventListener('input', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setMediaVolume(Number(event.target.value) / 100);
+    });
+    slider.addEventListener('click', event => event.stopPropagation());
+    slider.addEventListener('pointerdown', event => event.stopPropagation());
+  });
   syncButtons();
 }
 
@@ -9629,7 +9139,7 @@ function showPhotoUploadModal() {
     <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" /></div>
     <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3"></textarea></div>
     <div class="form-group"><label>Konum</label><input id="photo-location" /></div>
-    <div class="form-group"><label>Müzik seç</label><input id="photo-song-search" placeholder="Müzik veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
+    <div class="form-group"><label>Müzik seç</label><input id="photo-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
     <div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div>
     <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
     <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
@@ -9799,7 +9309,7 @@ async function renderMyPlaylists(app) {
     try {
       const playlists = await api('/playlists');
       if (!playlists.length) {
-        el.innerHTML = `<div class="empty-state"><i class="fas fa-list"></i><p>Henüz playlist yok.</p><p style="font-size:13px;color:var(--text-muted)">Yeni bir playlist oluşturun ve müzikler ekleyin.</p></div>`;
+        el.innerHTML = `<div class="empty-state"><i class="fas fa-list"></i><p>Henüz playlist yok.</p><p style="font-size:13px;color:var(--text-muted)">Yeni bir playlist oluşturun ve şarkılar ekleyin.</p></div>`;
         return;
       }
       el.innerHTML = `<div class="pl-grid">
@@ -9812,7 +9322,7 @@ async function renderMyPlaylists(app) {
             </div>
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>
-              <div class="pl-card-meta"><span>${pl.song_count} müzik</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
+              <div class="pl-card-meta"><span>${pl.song_count} şarkı</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
               ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
               <div class="pl-card-owner"><i class="fas fa-user"></i> ${escHtml(pl.owner_username || currentUser.username || 'Bilinmiyor')}</div>
             </div>
@@ -9995,7 +9505,7 @@ async function renderPlaylistDetail(app, plId) {
           <div class="pl-detail-kicker"><span>PLAYLIST</span><span class="pl-detail-dot"></span><span>${playlist.is_public ? 'HERKESE AÇIK' : 'GİZLİ'}</span></div>
           <h1>${escHtml(playlist.name)}</h1>
           ${playlist.description ? `<p>${escHtml(playlist.description)}</p>` : ''}
-          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} müzik</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> ${escHtml(playlist.owner_username)}</span>` : ''}</div>
+          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> ${escHtml(playlist.owner_username)}</span>` : ''}</div>
         </div>
       </div>
       <div class="pl-detail-toolbar">
@@ -10003,7 +9513,7 @@ async function renderPlaylistDetail(app, plId) {
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
             <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
-          ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Müzik Ekle</button>` : ''}
+          ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
           ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
           ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kendi playlistlerine ekle"><i class="fas fa-bookmark"></i> Kütüphaneme ekle</button>` : ''}
         </div>
@@ -10028,7 +9538,7 @@ async function renderPlaylistDetail(app, plId) {
             </div>
             ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm pl-remove-btn" data-id="${s.id}" title="Listeden çıkar" style="color:var(--accent-red2);margin-left:auto"><i class="fas fa-times"></i></button>` : ''}
           </div>`).join('')}
-      </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Müzik eklemek için "Müzik Ekle" butonuna tıklayın.</p></div>`}
+      </div>` : `<div class="empty-state"><i class="fas fa-music"></i><p>Playlist boş.</p><p style="font-size:13px;color:var(--text-muted)">Şarkı eklemek için "Şarkı Ekle" butonuna tıklayın.</p></div>`}
     </div>`;
 
     // Sırayla çal
@@ -10071,13 +9581,13 @@ async function renderPlaylistDetail(app, plId) {
       });
     });
 
-    // Müzik kaldır
+    // Şarkı kaldır
     app.querySelectorAll('.pl-remove-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu müziği playlistten çıkarmak istediğinize emin misiniz?')) return;
+        if (!confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
         try {
           await api('/playlists/' + plId + '/songs/' + btn.dataset.id, { method: 'DELETE' });
-          toast('Müzik listeden çıkarıldı');
+          toast('Şarkı listeden çıkarıldı');
           songs = songs.filter(s => String(s.id) !== String(btn.dataset.id));
           render();
         } catch(err) { toast(err.message, 'error'); }
@@ -10091,7 +9601,7 @@ async function renderPlaylistDetail(app, plId) {
       }, playlist.cover_url || '');
     });
 
-    // Müzik ekle butonu – müzik listesinden seçme modalı
+    // Şarkı ekle butonu – müzik listesinden seçme modalı
     document.getElementById('pl-add-songs-btn')?.addEventListener('click', () => showAddSongsModal(plId, songs, (newSongs) => {
       songs = newSongs;
       render();
@@ -10118,10 +9628,10 @@ async function renderPlaylistDetail(app, plId) {
 }
 
 function showAddSongsModal(plId, existingSongs, onAdded) {
-  showModal('🎵 Müzik Ekle', `
+  showModal('🎵 Şarkı Ekle', `
     <div class="search-bar" style="margin:0 0 12px 0">
       <i class="fas fa-search"></i>
-      <input type="text" id="plsearch" placeholder="Müzik ara..." style="width:100%" />
+      <input type="text" id="plsearch" placeholder="Şarkı ara..." style="width:100%" />
     </div>
     <div id="plsearch-list" style="max-height:320px;overflow-y:auto"></div>
   `);
@@ -10135,7 +9645,7 @@ function showAddSongsModal(plId, existingSongs, onAdded) {
     try {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
       const allSongs = await api(url);
-      if (!allSongs.length) { el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Müzik bulunamadı</div>'; return; }
+      if (!allSongs.length) { el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted)">Şarkı bulunamadı</div>'; return; }
       el.innerHTML = allSongs.map(s => `
         <div class="pl-search-row ${existingIds.has(String(s.id)) ? 'pl-search-row-added' : ''}" data-id="${s.id}">
           <div style="display:flex;align-items:center;gap:10px;flex:1">
