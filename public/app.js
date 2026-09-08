@@ -3361,12 +3361,14 @@ async function renderGroupDetail(app, slug) {
   const channelList = $('#group-channel-list');
   const channelMessages = $('#group-channel-messages');
   let activeChannel = channels.find(channel => Number(channel.is_default) === 1) || channels[0] || null;
+  let channelLoadVersion = 0;
   const visibleChannels = () => channels.filter(channel => isOwner || isMod ? true : approvalPending ? channel.visibility === 'approval_only' : channel.visibility !== 'approval_only');
   const channelMessageHTML = message => `<article class="channel-message">
     ${message.username ? `<a href="${profileRoute(message.username)}" data-link><img class="channel-message-avatar" src="${escHtml(message.avatar || '/icons/cigcig-192.png')}" alt="${escHtml(message.username)}" /></a>` : '<div class="channel-message-avatar"></div>'}
     <div><div class="channel-message-meta"><strong>${escHtml(message.username || 'Silinmiş kullanıcı')}</strong><time>${timeAgo(message.created_at)}</time></div><div class="channel-message-content">${renderContent(message.content || '')}</div></div>
   </article>`;
   const loadChannelMessages = async channel => {
+    const loadVersion = ++channelLoadVersion;
     if (!channel) { channelMessages.innerHTML = '<div class="empty-state"><i class="fas fa-hashtag"></i><p>Henüz kanal yok.</p></div>'; return; }
     $('#active-channel-name').textContent = channel.name;
     $('#active-channel-description').textContent = channel.description || '';
@@ -3376,6 +3378,7 @@ async function renderGroupDetail(app, slug) {
     channelMessages.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
     try {
       const channelMessagesData = await api(`/group/${slug}/channel/${channel.id}/messages`);
+      if (loadVersion !== channelLoadVersion) return;
       channelMessages.innerHTML = channelMessagesData.length ? channelMessagesData.map(channelMessageHTML).join('') : '<div class="empty-state"><i class="fas fa-comments"></i><p>Bu kanalda henüz mesaj yok.</p></div>';
       enhanceLinkPreviews(channelMessages);
       channelMessages.scrollTop = channelMessages.scrollHeight;
@@ -3403,7 +3406,23 @@ async function renderGroupDetail(app, slug) {
   channelList?.addEventListener('click', event => { const manage = event.target.closest('[data-channel-manage]'); const item = event.target.closest('.group-channel-item'); if (manage) { event.stopPropagation(); showChannelModal(channels.find(channel => Number(channel.id) === Number(manage.dataset.channelManage))); return; } if (item) { activeChannel = channels.find(channel => Number(channel.id) === Number(item.dataset.channelId)) || activeChannel; channelWorkspace.classList.remove('channels-open'); renderChannels(); } });
   $('#channel-mobile-btn')?.addEventListener('click', () => channelWorkspace.classList.toggle('channels-open'));
   $('#channel-create-btn')?.addEventListener('click', () => showChannelModal());
-  $('#group-channel-send')?.addEventListener('click', async () => { const input = $('#group-channel-input'); const content = input.value.trim(); if (!content || !activeChannel) return; try { const message = await api(`/group/${slug}/channel/${activeChannel.id}/messages`, { method: 'POST', body: JSON.stringify({ content }) }); if (channelMessages.querySelector('.empty-state')) channelMessages.innerHTML = ''; channelMessages.insertAdjacentHTML('beforeend', channelMessageHTML({ ...message, username: currentUser.username, avatar: currentUser.avatar })); input.value = ''; channelMessages.scrollTop = channelMessages.scrollHeight; } catch (error) { toast(error.message, 'error'); } });
+  $('#group-channel-send')?.addEventListener('click', async () => {
+    const input = $('#group-channel-input');
+    const sendButton = $('#group-channel-send');
+    const channelId = activeChannel?.id;
+    const content = input.value.trim();
+    if (!content || !channelId || sendButton.disabled) return;
+    sendButton.disabled = true;
+    try {
+      const message = await api(`/group/${slug}/channel/${channelId}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
+      if (Number(activeChannel?.id) !== Number(channelId)) return;
+      if (channelMessages.querySelector('.empty-state')) channelMessages.innerHTML = '';
+      channelMessages.insertAdjacentHTML('beforeend', channelMessageHTML({ ...message, username: currentUser.username, avatar: currentUser.avatar }));
+      input.value = '';
+      channelMessages.scrollTop = channelMessages.scrollHeight;
+    } catch (error) { toast(error.message, 'error'); }
+    finally { sendButton.disabled = false; }
+  });
   $('#group-channel-input')?.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#group-channel-send').click(); } });
   $('#channel-approval-btn')?.addEventListener('click', async () => {
     try {
