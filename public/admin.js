@@ -500,6 +500,7 @@ async function renderHomepageSections(main) {
     { id: 'playlistler', label: 'Playlistler' },
     { id: 'magaza', label: 'Mağaza' },
     { id: 'reals', label: 'Reals' },
+    { id: 'videolar', label: 'Videolar' },
     { id: 'fotograflar', label: 'Medya' }
   ];
 
@@ -3054,7 +3055,7 @@ async function renderSettings(main) {
   const profileTabOptions = [
     ['forums', 'Forumlar', 'fas fa-comments'], ['books', 'Kitaplar', 'fas fa-book'],
     ['photos', 'Medya', 'fas fa-images'], ['groups', 'Gruplar', 'fas fa-users'],
-    ['reals', 'Reals', 'fas fa-circle-play'], ['saved', 'Kaydedilenler', 'fas fa-bookmark'], ['songs', 'Müzikler', 'fas fa-music']
+    ['reals', 'Reals', 'fas fa-circle-play'], ['videos', 'Videolar', 'fas fa-video'], ['saved', 'Kaydedilenler', 'fas fa-bookmark'], ['songs', 'Müzikler', 'fas fa-music']
   ];
   const profileTabsOrder = document.getElementById('profile-tabs-order');
   if (profileTabsOrder) {

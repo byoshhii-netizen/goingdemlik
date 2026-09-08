@@ -7493,9 +7493,8 @@ app.post('/api/music-ads/:id/click', async (req,res) => {
 
 // ===== VIDEOS / REALS =====
 function makeVideoSlug(title, id) {
-  const base = slugify(title || 'reals', { lower: true, strict: false, locale: 'tr', replacement: '-' })
-    .replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'reals';
-  return `${base}-${id}`;
+  const seed = String(id || randomUUID()).replace(/[^a-z0-9]/gi, '').toLowerCase();
+  return seed.slice(-10) || randomUUID().replace(/-/g, '').slice(0, 10);
 }
 
 const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed, u.is_private,
@@ -7507,7 +7506,17 @@ const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.
   WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
 
 app.get('/api/videos', optionalAuth, async (req, res) => {
-  const { rows } = await query(`${videoSelect} ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
+  const search = String(req.query.q || '').trim();
+  const params = [req.user?.id || 0];
+  const searchClause = search ? ` AND (v.title ILIKE $2 OR v.description ILIKE $2 OR u.username ILIKE $2)` : '';
+  if (search) params.push(`%${search}%`);
+  const order = search
+    ? 'ORDER BY v.created_at DESC'
+    : `ORDER BY ((COALESCE(v.views,0) * 0.45) +
+        ((SELECT COUNT(*) FROM video_likes vl3 WHERE vl3.video_id=v.id) * 8) +
+        ((SELECT COUNT(*) FROM video_comments vc3 WHERE vc3.video_id=v.id) * 3) +
+        (EXTRACT(EPOCH FROM (NOW() - v.created_at)) / -86400.0)) DESC`;
+  const { rows } = await query(`${videoSelect}${searchClause} AND v.is_reals=0 ${order} LIMIT 100`, params);
   res.json(rows);
 });
 
@@ -7533,7 +7542,7 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
 app.post('/api/videos', authMiddleware, async (req, res) => {
   const { title, description, video_url, banner_image, location, sound_name, song_id, song_start_seconds, media_filter, allow_comments, show_likes, is_reals } = req.body;
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
-    const provisionalSlug = makeVideoSlug(title, randomUUID().slice(0, 8));
+  const provisionalSlug = makeVideoSlug(title, randomUUID());
   const safeSongId = song_id ? Number(song_id) : null;
   const safeStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
   const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,song_id,song_start_seconds,media_filter,allow_comments,show_likes,is_reals,slug)
@@ -7544,7 +7553,7 @@ app.post('/api/videos', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/video/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM videos WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query('SELECT * FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu videoyu düzenleme yetkiniz yok' });
   const b = req.body;
@@ -7564,10 +7573,13 @@ app.post('/api/video/:id/view', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/video/:id/like', authMiddleware, async (req, res) => {
-  const { rows: existing } = await query('SELECT id FROM video_likes WHERE video_id=$1 AND user_id=$2', [req.params.id, req.user.id]);
+  const { rows: video } = await query('SELECT id FROM videos WHERE slug=$1 OR id::text=$1', [req.params.id]);
+  if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  const videoId = video[0].id;
+  const { rows: existing } = await query('SELECT id FROM video_likes WHERE video_id=$1 AND user_id=$2', [videoId, req.user.id]);
   if (existing.length) await query('DELETE FROM video_likes WHERE id=$1', [existing[0].id]);
-  else await query('INSERT INTO video_likes (video_id,user_id) VALUES ($1,$2)', [req.params.id, req.user.id]);
-  const { rows } = await query('SELECT COUNT(*)::int AS count FROM video_likes WHERE video_id=$1', [req.params.id]);
+  else await query('INSERT INTO video_likes (video_id,user_id) VALUES ($1,$2)', [videoId, req.user.id]);
+  const { rows } = await query('SELECT COUNT(*)::int AS count FROM video_likes WHERE video_id=$1', [videoId]);
   res.json({ liked: !existing.length, like_count: rows[0].count });
 });
 
@@ -7636,7 +7648,7 @@ app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, r
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT id,user_id FROM videos WHERE slug=$1', [req.params.slug]);
+  const { rows } = await query('SELECT id,user_id FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yetkiniz yok' });
   await query('DELETE FROM videos WHERE id=$1', [rows[0].id]);
