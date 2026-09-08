@@ -4382,13 +4382,11 @@ async function renderVideoList(app) {
     app.innerHTML = `<div class="container page">
       <div class="video-home-header">
         <div><div class="page-title"><i class="fas fa-video"></i> Video</div><div class="page-subtitle">İzleme alışkanlığına göre sıralanan videolar</div></div>
-        ${currentUser ? `<button class="btn btn-primary" id="new-video-btn"><i class="fas fa-plus"></i> Video Yükle</button>` : ''}
       </div>
       <div class="video-search-bar"><i class="fas fa-search"></i><input id="video-search-input" type="search" placeholder="Videolarda ara..." autocomplete="off" /></div>
       <div class="video-feed-label"><span><i class="fas fa-wand-magic-sparkles"></i> Sana özel akış</span><small>${videos.length} video</small></div>
       <div id="video-home-grid" class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
     </div>`;
-    $('#new-video-btn')?.addEventListener('click', () => showNewVideoModal());
     $('#video-search-input')?.addEventListener('input', async event => {
       const query = event.target.value.trim();
       const grid = $('#video-home-grid');

@@ -822,63 +822,6 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_voice_calls_callee ON voice_calls(callee_id, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_voice_calls_caller ON voice_calls(caller_id, status, created_at DESC);
-    CREATE TABLE IF NOT EXISTS message_reports (
-      id BIGSERIAL PRIMARY KEY,
-      message_id BIGINT NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
-      reporter_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      reason TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'open',
-      reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      reviewed_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(message_id, reporter_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_message_reports_status ON message_reports(status, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_message_reports_message ON message_reports(message_id);
-    CREATE TABLE IF NOT EXISTS group_voice_rooms (
-      id UUID PRIMARY KEY,
-      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-      created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at TIMESTAMP DEFAULT NOW(),
-      ended_at TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS group_voice_members (
-      room_id UUID NOT NULL REFERENCES group_voice_rooms(id) ON DELETE CASCADE,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      joined_at TIMESTAMP DEFAULT NOW(),
-      left_at TIMESTAMP,
-      muted INTEGER NOT NULL DEFAULT 0,
-      deafened INTEGER NOT NULL DEFAULT 0,
-      server_muted INTEGER NOT NULL DEFAULT 0,
-      server_deafened INTEGER NOT NULL DEFAULT 0,
-      PRIMARY KEY(room_id, user_id)
-    );
-    ALTER TABLE group_voice_members ADD COLUMN IF NOT EXISTS deafened INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE group_voice_members ADD COLUMN IF NOT EXISTS server_muted INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE group_voice_members ADD COLUMN IF NOT EXISTS server_deafened INTEGER NOT NULL DEFAULT 0;
-    CREATE TABLE IF NOT EXISTS group_voice_signals (
-      id BIGSERIAL PRIMARY KEY,
-      room_id UUID NOT NULL REFERENCES group_voice_rooms(id) ON DELETE CASCADE,
-      sender_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      receiver_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
-      signal_type TEXT NOT NULL,
-      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_group_voice_members_room ON group_voice_members(room_id, left_at);
-    CREATE INDEX IF NOT EXISTS idx_group_voice_signals_poll ON group_voice_signals(room_id, receiver_id, id);
-    CREATE TABLE IF NOT EXISTS group_voice_bans (
-      id BIGSERIAL PRIMARY KEY,
-      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      reason TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMP DEFAULT NOW(),
-      revoked_at TIMESTAMP,
-      UNIQUE(group_id, user_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_group_voice_bans_group ON group_voice_bans(group_id, revoked_at);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';

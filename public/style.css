@@ -1582,8 +1582,8 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .forum-action-btn.liked { color: var(--accent-red2); border-color: var(--accent-red); }
 
 /* ===== COMMENTS ===== */
-.comments-section { }
-.comments-title { font-size: 18px; font-weight: 700; margin-bottom: 20px; }
+.comments-section { margin-top: 28px; }
+.comments-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; margin-bottom: 18px; }
 .comment-node { margin-bottom: 14px; }
 .comment { display: flex; gap: 12px; margin-bottom: 0; }
 .comment-replies { margin: 10px 0 0 50px; padding-left: 14px; border-left: 2px solid rgba(189,162,117,.2); }
@@ -1608,13 +1608,14 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .comment-actions .del-comment { font-size: 12px; padding: 4px 8px; }
 .comment-actions .like-comment-btn { font-size: 12px; padding: 4px 10px; }
 .comments-empty { padding: 20px; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--text-muted); text-align: center; font-size: 13px; }
-.comment-form { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 24px; }
+.comment-form { display: flex; gap: 12px; align-items: flex-start; margin: 0 0 24px; padding: 14px; background: rgba(255,255,255,.025); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .comment-form textarea { flex: 1; min-height: 80px; padding: 12px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-card2); color: var(--text-primary); font-family: inherit; resize: vertical; transition: border-color .15s, background .15s; }
 .comment-form textarea:focus { border-color: var(--accent-red2); background: var(--bg-input); }
 .comment-form .btn { flex-shrink: 0; align-self: flex-end; }
 @media (max-width: 600px) {
   .comment-replies { margin-left: 28px; padding-left: 10px; }
-  .comment-form { gap: 8px; flex-direction: column; }
+  .comments-section { margin-top: 24px; }
+  .comment-form { gap: 10px; padding: 12px; }
   .comment-form .comment-avatar { width: 32px; height: 32px; }
   .comment-form textarea { min-height: 60px; }
   .comment-reply-area { flex-direction: row; padding: 10px 12px; }

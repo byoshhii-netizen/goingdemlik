@@ -1743,10 +1743,44 @@ async function purgeDeletedAccounts() {
       `SELECT id, username FROM users WHERE is_deleted=1 AND delete_requested_at < NOW() - INTERVAL '10 days'`
     );
     for (const user of rows) {
+      await purgeUserContent(user.id);
       await query('DELETE FROM users WHERE id=$1', [user.id]);
       await logAction('system', 'purge_deleted_account', user.username);
     }
   } catch(e) { console.error('purge error:', e.message); }
+}
+
+// Permanently remove every user-owned record only after the grace period ends.
+async function purgeUserContent(userId) {
+  const ownedRows = [
+    ['forum_comments', 'user_id'], ['forums', 'user_id'],
+    ['book_pages', 'user_id'], ['book_chapters', 'user_id'], ['books', 'user_id'],
+    ['video_comments', 'user_id'], ['video_likes', 'user_id'], ['video_saves', 'user_id'], ['videos', 'user_id'],
+    ['photo_comments', 'user_id'], ['photo_likes', 'user_id'], ['photos', 'user_id'],
+    ['story_replies', 'user_id'], ['story_likes', 'user_id'], ['story_views', 'viewer_id'], ['stories', 'user_id'],
+    ['songs', 'uploader_id'], ['playlists', 'user_id'], ['playlist_songs', 'user_id'],
+    ['group_messages', 'user_id'], ['group_members', 'user_id'], ['groups', 'owner_id'],
+    ['sessions', 'user_id'], ['notifications', 'user_id'], ['follows', 'follower_id'], ['follows', 'following_id'],
+    ['friendships', 'requester_id'], ['friendships', 'addressee_id'], ['blocks', 'blocker_id'], ['blocks', 'blocked_id']
+  ];
+  for (const [table, column] of ownedRows) {
+    try { await query(`DELETE FROM ${table} WHERE ${column}=$1`, [userId]); } catch (error) {
+      if (!/does not exist|undefined column/i.test(error.message)) throw error;
+    }
+  }
+  // Cover less common tables that reference users through an FK added later.
+  const { rows: refs } = await query(`
+    SELECT DISTINCT tc.table_name, kcu.column_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name AND kcu.table_schema=tc.table_schema
+    JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name=tc.constraint_name AND ccu.table_schema=tc.table_schema
+    WHERE tc.constraint_type='FOREIGN KEY' AND tc.table_schema='public'
+      AND ccu.table_name='users' AND ccu.column_name='id' AND tc.table_name <> 'users'`);
+  for (const ref of refs) {
+    try { await query(`DELETE FROM ${ref.table_name} WHERE ${ref.column_name}=$1`, [userId]); } catch (error) {
+      if (!/does not exist|undefined column/i.test(error.message)) throw error;
+    }
+  }
 }
 
 
@@ -2394,7 +2428,7 @@ app.get('/api/forums', async (req, res) => {
         SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
         FROM tags t INNER JOIN forum_tags ft ON ft.tag_id=t.id WHERE ft.forum_id=f.id
       ), '[]'::json) as system_tags
-    FROM forums f LEFT JOIN users u ON f.user_id=u.id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`;
+    FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`;
 
   if (tag) {
     // Sistem etiketi, custom tag veya içerik içindeki #tag ile filtrele — hepsi case-insensitive
@@ -2424,7 +2458,7 @@ app.get('/api/forum/:slug', optionalAuth, async (req, res) => {
         SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
         FROM tags t INNER JOIN forum_tags ft ON ft.tag_id=t.id WHERE ft.forum_id=f.id
       ), '[]'::json) as system_tags
-    FROM forums f LEFT JOIN users u ON f.user_id=u.id WHERE f.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
+    FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE f.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   res.json(rows[0]);
 });
@@ -2547,7 +2581,7 @@ app.get('/api/forum/:slug/comments', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) as like_count,
       EXISTS(SELECT 1 FROM forum_comment_likes fcl WHERE fcl.comment_id=fc.id AND fcl.user_id=$2) AS liked
     FROM forum_comments fc
-      LEFT JOIN users u ON fc.user_id=u.id
+      JOIN users u ON fc.user_id=u.id AND COALESCE(u.is_deleted,0)=0
       LEFT JOIN forum_comments parent_comment ON parent_comment.id=fc.parent_comment_id
       LEFT JOIN users parent ON parent.id=parent_comment.user_id
     WHERE fc.forum_id=$1 ORDER BY fc.created_at ASC`, [fRows[0].id, req.user?.id || 0]);
@@ -2657,7 +2691,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
   const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color,
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
-    FROM books b LEFT JOIN users u ON b.user_id=u.id
+    FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0
     WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
       AND (
         b.is_hidden = 0
@@ -2669,7 +2703,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
-  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b LEFT JOIN users u ON b.user_id=u.id WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
+  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const isOwner = req.user?.id == book.user_id;
@@ -3738,7 +3772,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
-    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
+    FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
   const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))`;
   const queryText = username
     ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
@@ -3757,7 +3791,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
-    FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
+    FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id
     WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
     [req.params.id, userId]
   );
@@ -3837,7 +3871,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM story_replies src WHERE src.story_id=s.id) AS reply_count,
       (SELECT COUNT(*) FROM content_view_events cve WHERE cve.content_type='story' AND cve.content_id=s.id) AS total_views,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
-    FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
+    FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
     WHERE s.expires_at > NOW() AND (s.is_suspended=0 OR s.user_id=$1) AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
@@ -3853,7 +3887,7 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
       (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
       CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
-    FROM stories s JOIN users u ON u.id=s.user_id LEFT JOIN songs song ON song.id=s.song_id
+    FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
     WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = rows[0];
@@ -4101,7 +4135,7 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
     const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
       (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
       EXISTS(SELECT 1 FROM photo_comment_likes pcl2 WHERE pcl2.comment_id=pc.id AND pcl2.user_id=$2) AS liked
-      FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
+      FROM photo_comments pc JOIN users u ON u.id=pc.user_id AND COALESCE(u.is_deleted,0)=0 WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
     res.json(rows);
   } catch (error) {
     console.error('Photo comments read failed:', error);
@@ -4124,7 +4158,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
     if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
       await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
     }
-    const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
+    const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc JOIN users u ON u.id=pc.user_id AND COALESCE(u.is_deleted,0)=0 WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
     res.json(c.rows[c.rows.length - 1]);
   } catch (error) {
     console.error('Photo comment failed:', error);
@@ -5103,7 +5137,7 @@ app.get('/api/songs', async (req, res) => {
     `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url,
             s.remastered_audio_url, s.play_count, s.slug, s.song_type, s.published_at, s.share_reason,
             u.username as uploader, u.avatar as uploader_avatar
-     FROM songs s LEFT JOIN users u ON s.uploader_id=u.id
+    FROM songs s JOIN users u ON s.uploader_id=u.id AND COALESCE(u.is_deleted,0)=0
      ${where} ORDER BY s.published_at DESC LIMIT 100`,
     params
   );
@@ -7502,7 +7536,7 @@ const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
   (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
-  FROM videos v LEFT JOIN users u ON u.id=v.user_id LEFT JOIN songs s ON s.id=v.song_id
+  FROM videos v JOIN users u ON u.id=v.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=v.song_id
   WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
 
 app.get('/api/videos', optionalAuth, async (req, res) => {
@@ -7606,7 +7640,7 @@ app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
   const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed,
     (SELECT COUNT(*) FROM video_comment_likes vcl WHERE vcl.comment_id=c.id) AS like_count,
     EXISTS(SELECT 1 FROM video_comment_likes vcl2 WHERE vcl2.comment_id=c.id AND vcl2.user_id=$2) AS liked
-    FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id
+    FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id AND COALESCE(u.is_deleted,0)=0
     WHERE (v.slug=$1 OR v.id::text=$1) AND (COALESCE((SELECT is_private FROM users WHERE id=v.user_id),0)=0 OR v.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY c.created_at ASC`, [req.params.slug, req.user?.id || 0]);
   res.json(rows);
 });
