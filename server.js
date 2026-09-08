@@ -29,6 +29,7 @@ function profileRouteKey(username) {
 const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü', 'cgiosu'), '[^a-z0-9]', '', 'g')";
 
 const app = express();
+app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || 'Cambaz');
 const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '123123');
@@ -81,7 +82,13 @@ if (!USE_CLOUDINARY) {
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
-if (!USE_CLOUDINARY) app.use('/uploads', express.static(UPLOAD_DIR));
+if (!USE_CLOUDINARY) {
+  app.use('/uploads', express.static(UPLOAD_DIR, {
+    maxAge: 24 * 60 * 60 * 1000,
+    redirect: false,
+    index: false
+  }));
+}
 
 // Cloudflare proxy arkasındaysa gerçek IP'yi al
 app.set('trust proxy', 1);
@@ -153,7 +160,7 @@ function isContentCreationPath(requestPath) {
 // Genel API: dakikada 80 istek. İçerik üretim endpoint'leri bu sınıra dahil değildir.
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.API_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.API_RATE_LIMIT_MAX || 3000),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla istek. Lütfen bekleyin.' },
@@ -163,7 +170,7 @@ const generalLimiter = rateLimit({
 // Auth: kullanıcıları gereksiz kilitlemeden brute-force denemelerini sınırla.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
@@ -172,7 +179,7 @@ const authLimiter = rateLimit({
 // Upload: dakikada 5 yükleme
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 15),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla yükleme. Lütfen bekleyin.' },
@@ -180,7 +187,7 @@ const uploadLimiter = rateLimit({
 
 const adminAuthLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX || 100000),
+  max: Number(process.env.ADMIN_AUTH_RATE_LIMIT_MAX || 20),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla admin giriş denemesi. 15 dakika bekleyin.' },
@@ -1136,7 +1143,11 @@ app.use(async (req, res, next) => {
   } catch { return next(); }
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  maxAge: 24 * 60 * 60 * 1000,
+  redirect: false,
+  index: false
+}));
 
 app.get('/api/admin/me', adminMiddleware, (req, res) => {
   res.json({ username: req.adminUser.username, is_super_admin: req.adminUser.isSuperAdmin, permissions: req.adminUser.permissions || null });
