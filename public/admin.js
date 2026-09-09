@@ -341,7 +341,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_suspend_content') || hasPermission('can_view_stories')) visible.add('stories');
   if (hasPermission('can_suspend_content') || hasPermission('can_view_reals')) visible.add('videos');
   if (hasPermission('can_view_stories') || hasPermission('can_view_reals')) visible.add('content-analytics');
-  if (hasPermission('can_suspend_content')) { visible.add('photos'); visible.add('forums'); visible.add('books'); }
+  if (hasPermission('can_suspend_content')) { visible.add('photos'); visible.add('forums'); visible.add('books'); visible.add('poems'); }
   if (hasPermission('can_view_groups')) visible.add('groups');
   if (hasPermission('can_view_levels')) visible.add('levels');
   if (hasPermission('can_view_store')) visible.add('shop');
