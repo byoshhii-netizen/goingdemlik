@@ -1552,7 +1552,18 @@ async function showMyGroupsModal() {
     $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
-$('#mobile-books-btn')?.addEventListener('click', () => navigate('/kitaplar'));
+$('#mobile-books-btn')?.addEventListener('click', e => {
+  e.stopPropagation();
+  $('#mobile-books-dropdown')?.classList.toggle('hidden');
+});
+$('#mob-books-nav')?.addEventListener('click', () => {
+  $('#mobile-books-dropdown')?.classList.add('hidden');
+  navigate('/kitaplar');
+});
+$('#mob-poems-nav')?.addEventListener('click', () => {
+  $('#mobile-books-dropdown')?.classList.add('hidden');
+  navigate('/siirler');
+});
 $('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler'));
 
 document.addEventListener('click', e => {
@@ -1561,6 +1572,9 @@ document.addEventListener('click', e => {
   }
   if (!$('#mobile-new-dropdown')?.contains(e.target) && !$('#mobile-new-toggle')?.contains(e.target)) {
     $('#mobile-new-dropdown')?.classList.add('hidden');
+  }
+  if (!$('#mobile-books-dropdown')?.contains(e.target) && !$('#mobile-books-btn')?.contains(e.target)) {
+    $('#mobile-books-dropdown')?.classList.add('hidden');
   }
 });
 

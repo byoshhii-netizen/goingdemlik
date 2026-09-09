@@ -5020,6 +5020,54 @@ app.delete('/api/admin/book/:id', adminMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/admin/poems', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT p.*, u.username,
+      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
+      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count
+    FROM poems p
+    LEFT JOIN users u ON p.user_id=u.id
+    ORDER BY p.created_at DESC`);
+  res.json(rows);
+});
+
+app.put('/api/admin/poem/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM poems WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
+  const poem = rows[0];
+  const title = String(req.body.title ?? poem.title).trim();
+  const content = String(req.body.content ?? poem.content).trim();
+  const isHidden = req.body.is_hidden !== undefined ? (req.body.is_hidden ? 1 : 0) : poem.is_hidden;
+  const views = req.body.views !== undefined ? Math.max(0, parseInt(req.body.views) || 0) : (poem.views || 0);
+
+  if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
+  if (!content) return res.status(400).json({ error: 'Şiir içeriği zorunlu' });
+
+  const newSlug = makeSlug(title, poem.id);
+  await query(
+    'UPDATE poems SET title=$1, content=$2, is_hidden=$3, views=$4, slug=$5, updated_at=NOW() WHERE id=$6',
+    [title.slice(0, 180), content.slice(0, 12000), isHidden, views, newSlug, poem.id]
+  );
+  await logAction('admin', 'edit_poem', newSlug);
+  const { rows: updated } = await query(`
+    SELECT p.*, u.username,
+      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
+      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count
+    FROM poems p
+    LEFT JOIN users u ON p.user_id=u.id
+    WHERE p.id=$1`, [poem.id]);
+  res.json(updated[0]);
+});
+
+app.delete('/api/admin/poem/:id', adminMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT * FROM poems WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
+  const poem = rows[0];
+  await query('DELETE FROM poems WHERE id=$1', [poem.id]);
+  await logAction('admin', 'delete_poem', poem.slug);
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/groups', adminMiddleware, async (req, res) => {
   const { rows } = await query(`SELECT g.*, u.username as owner_name FROM groups g LEFT JOIN users u ON g.owner_id=u.id ORDER BY g.created_at DESC`);
   res.json(rows);
