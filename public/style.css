@@ -608,6 +608,80 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .card-footer { padding: 12px 20px; border-top: 1px solid var(--border); }
 
+.poem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.poem-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.poem-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(189,162,117,0.25);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+.poem-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.poem-card-title {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.poem-card-author {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.poem-card-preview {
+  color: var(--text-secondary);
+  line-height: 1.7;
+  font-size: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.poem-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 16px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.poem-card-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .book-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
