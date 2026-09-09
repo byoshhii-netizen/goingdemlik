@@ -392,6 +392,66 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS poems (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      slug TEXT UNIQUE,
+      is_hidden INTEGER DEFAULT 0,
+      views INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+    ALTER TABLE poems ADD COLUMN IF NOT EXISTS is_hidden INTEGER DEFAULT 0;
+    ALTER TABLE poems ADD COLUMN IF NOT EXISTS views INTEGER DEFAULT 0;
+    ALTER TABLE poems ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+    CREATE TABLE IF NOT EXISTS poem_likes (
+      id BIGSERIAL PRIMARY KEY,
+      poem_id BIGINT,
+      user_id BIGINT,
+      UNIQUE(poem_id, user_id),
+      FOREIGN KEY(poem_id) REFERENCES poems(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poem_comments (
+      id BIGSERIAL PRIMARY KEY,
+      poem_id BIGINT,
+      user_id BIGINT,
+      parent_comment_id BIGINT,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(poem_id) REFERENCES poems(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY(parent_comment_id) REFERENCES poem_comments(id) ON DELETE CASCADE
+    );
+    ALTER TABLE poem_comments ADD COLUMN IF NOT EXISTS parent_comment_id BIGINT;
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='poem_comments_parent_comment_id_fkey'
+          AND conrelid='poem_comments'::regclass
+      ) THEN
+        ALTER TABLE poem_comments
+          ADD CONSTRAINT poem_comments_parent_comment_id_fkey
+          FOREIGN KEY(parent_comment_id) REFERENCES poem_comments(id) ON DELETE CASCADE;
+      END IF;
+    END $$;
+    CREATE INDEX IF NOT EXISTS idx_poem_comments_parent ON poem_comments(poem_id, parent_comment_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS poem_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT,
+      user_id BIGINT,
+      UNIQUE(comment_id, user_id),
+      FOREIGN KEY(comment_id) REFERENCES poem_comments(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS tags (
       id BIGSERIAL PRIMARY KEY,
       name TEXT UNIQUE NOT NULL,
