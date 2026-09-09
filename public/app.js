@@ -768,8 +768,9 @@ function renderRoute(fullPath) {
   if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
   if (activeRealsAudio) { activeRealsAudio.pause(); untrackMediaAudio(activeRealsAudio); activeRealsAudio.src = ''; activeRealsAudio = null; }
 
-  // Query string'i ayır
-  const [path, queryStr] = fullPath.split('?');
+  // Query string'i ayır ve trailing slash sorununu önle
+  const [rawPath, queryStr] = fullPath.split('?');
+  const path = rawPath === '/' ? '/' : rawPath.replace(/\/+$/, '') || '/';
   updateNavActive(path);
   // Mesajlar sayfasında footer gizle
   const siteFooter = document.getElementById('site-footer');
