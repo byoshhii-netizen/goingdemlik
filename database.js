@@ -1,6 +1,11 @@
 const { Pool } = require('pg');
 const { hashPassword } = require('./password');
 
+const isRailwayDatabase = Boolean(
+  process.env.DATABASE_URL &&
+  /(railway\.internal|proxy\.rlwy\.net|railway\.app)/i.test(process.env.DATABASE_URL)
+);
+
 const isRemoteDatabase = Boolean(
   process.env.DATABASE_URL &&
   !process.env.DATABASE_URL.includes('localhost') &&
@@ -12,7 +17,11 @@ const pool = new Pool({
   max: Number(process.env.PGPOOL_MAX || 10),
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
-  ssl: isRemoteDatabase ? { rejectUnauthorized: true } : false,
+  ssl: isRailwayDatabase
+    ? { rejectUnauthorized: false }
+    : isRemoteDatabase
+      ? { rejectUnauthorized: true }
+      : false,
 });
 
 async function query(text, params) {
