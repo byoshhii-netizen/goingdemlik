@@ -31,12 +31,8 @@ const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü
 const app = express();
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
-const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || '').trim();
-const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '').trim();
-const VMB_PANEL_AUTH_CONFIGURED = Boolean(VMB_PANEL_USERNAME && VMB_PANEL_PASSWORD);
-if (!VMB_PANEL_AUTH_CONFIGURED) {
-  console.warn('[SECURITY] VMB panel credentials are not configured. Set VMB_PANEL_USERNAME and VMB_PANEL_PASSWORD in environment variables.');
-}
+const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || 'Cambaz');
+const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '123123');
 
 // Cloudinary config — Railway'de CLOUDINARY_URL env var olarak ekle
 // Format: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
@@ -133,10 +129,7 @@ app.get('/ads.txt', (req, res) => {
 });
 
 const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
-const APP_SECRET = String(process.env.APP_SECRET || '').trim();
-if (!APP_SECRET) {
-  console.warn('[SECURITY] APP_SECRET is not configured. Email verification and challenge hashing will remain unavailable until APP_SECRET is set.');
-}
+const APP_SECRET = process.env.APP_SECRET || '';
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.EMAIL_FROM || '';
 if (!process.env.SITE_URL) {
@@ -259,10 +252,7 @@ function normalizeSecurityAnswer(value) {
 }
 
 function hashChallengeValue(value) {
-  if (!APP_SECRET) {
-    throw new Error('APP_SECRET is not configured. Set a strong APP_SECRET in the environment before using challenge-based auth.');
-  }
-  return crypto.createHmac('sha256', APP_SECRET).update(String(value)).digest('hex');
+  return crypto.createHmac('sha256', APP_SECRET || 'cigcig-challenge-secret-change-me').update(String(value)).digest('hex');
 }
 
 function createChallengeToken() {
@@ -1045,9 +1035,6 @@ app.get(['/vmb-panel', '/vmb-panel.html'], (req, res) => {
 app.post('/api/vmb-admin/auth/login', async (req, res) => {
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
-  if (!VMB_PANEL_AUTH_CONFIGURED) {
-    return res.status(503).json({ error: 'VMB panel kimlik bilgileri yapılandırılmamış' });
-  }
   if (username !== VMB_PANEL_USERNAME || password !== VMB_PANEL_PASSWORD) {
     return res.status(401).json({ error: 'VMB panel bilgileri doğrulanamadı' });
   }
@@ -2682,209 +2669,6 @@ app.get('/api/forum/:slug/comments/:id/liked', optionalAuth, async (req, res) =>
   res.json({ liked: !!rows.length });
 });
 
-// ===== POEMS =====
-app.get('/api/poems', optionalAuth, async (req, res) => {
-  const userId = Number(req.user?.id || 0);
-  const { rows } = await query(`
-    SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
-      u.title as user_title, u.location as user_location,
-      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
-      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count,
-      EXISTS(SELECT 1 FROM poem_likes WHERE poem_id=p.id AND user_id=$1) AS liked
-    FROM poems p
-    JOIN users u ON p.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-    WHERE p.is_hidden=0 OR p.user_id=$1
-    ORDER BY p.created_at DESC`, [userId]);
-  res.json(rows);
-});
-
-app.get('/api/poem/:slug', optionalAuth, async (req, res) => {
-  const userId = Number(req.user?.id || 0);
-  const { rows } = await query(`
-    SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
-      u.title as user_title, u.location as user_location,
-      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
-      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count,
-      EXISTS(SELECT 1 FROM poem_likes WHERE poem_id=p.id AND user_id=$1) AS liked
-    FROM poems p
-    JOIN users u ON p.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-    WHERE p.slug=$2`, [userId, req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = rows[0];
-  const isOwner = req.user && Number(req.user.id) === Number(poem.user_id);
-  if (poem.is_hidden && !isOwner && !req.user?.is_admin) {
-    return res.status(404).json({ error: 'Şiir bulunamadı' });
-  }
-  res.json(poem);
-});
-
-app.post('/api/poems', authMiddleware, async (req, res) => {
-  const { title, content, is_hidden } = req.body;
-  if (!title || !String(title).trim()) return res.status(400).json({ error: 'Başlık zorunlu' });
-  if (!content || !String(content).trim()) return res.status(400).json({ error: 'Şiir içeriği zorunlu' });
-  const cleanTitle = String(title).trim().slice(0, 180);
-  const cleanContent = String(content).trim().slice(0, 12000);
-  const { rows } = await query(
-    'INSERT INTO poems (user_id,title,content,slug,is_hidden) VALUES ($1,$2,$3,$4,$5) RETURNING id',
-    [req.user.id, cleanTitle, cleanContent, 'temp', is_hidden ? 1 : 0]
-  );
-  const poemId = rows[0].id;
-  const realSlug = makeSlug(cleanTitle, poemId);
-  await query('UPDATE poems SET slug=$1 WHERE id=$2', [realSlug, poemId]);
-  const { rows: poemRows } = await query(`
-    SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
-      u.title as user_title, u.location as user_location,
-      0 as like_count,
-      0 as comment_count,
-      false as liked
-    FROM poems p
-    JOIN users u ON p.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-    WHERE p.id=$1`, [poemId]);
-  res.json(poemRows[0]);
-});
-
-app.put('/api/poem/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = rows[0];
-  if (Number(poem.user_id) !== Number(req.user.id) && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Yetki yok' });
-  }
-  const title = String(req.body.title ?? poem.title).trim();
-  const content = String(req.body.content ?? poem.content).trim();
-  if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
-  if (!content) return res.status(400).json({ error: 'Şiir içeriği zorunlu' });
-  const isHidden = req.body.is_hidden !== undefined ? (req.body.is_hidden ? 1 : 0) : poem.is_hidden;
-  const newSlug = makeSlug(title, poem.id);
-  await query('UPDATE poems SET title=$1, content=$2, is_hidden=$3, slug=$4, updated_at=NOW() WHERE id=$5',
-    [title.slice(0, 180), content.slice(0, 12000), isHidden, newSlug, poem.id]);
-  const { rows: poemRows } = await query(`
-    SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
-      u.title as user_title, u.location as user_location,
-      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
-      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count,
-      EXISTS(SELECT 1 FROM poem_likes WHERE poem_id=p.id AND user_id=$1) AS liked
-    FROM poems p
-    JOIN users u ON p.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-    WHERE p.id=$2`, [req.user.id, poem.id]);
-  res.json(poemRows[0]);
-});
-
-app.delete('/api/poem/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = rows[0];
-  if (Number(poem.user_id) !== Number(req.user.id) && !req.user.is_admin) {
-    return res.status(403).json({ error: 'Yetki yok' });
-  }
-  await query('DELETE FROM poems WHERE id=$1', [poem.id]);
-  res.json({ ok: true });
-});
-
-app.post('/api/poem/:slug/view', async (req, res) => {
-  const { rows } = await query('SELECT id FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  await query('UPDATE poems SET views=views+1 WHERE id=$1', [rows[0].id]);
-  res.json({ ok: true });
-});
-
-app.post('/api/poem/:slug/like', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT id FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poemId = rows[0].id;
-  const { rows: ex } = await query('SELECT id FROM poem_likes WHERE poem_id=$1 AND user_id=$2', [poemId, req.user.id]);
-  if (ex.length) {
-    await query('DELETE FROM poem_likes WHERE id=$1', [ex[0].id]);
-    res.json({ liked: false });
-  } else {
-    await query('INSERT INTO poem_likes (poem_id,user_id) VALUES ($1,$2)', [poemId, req.user.id]);
-    res.json({ liked: true });
-  }
-});
-
-app.get('/api/poem/:slug/liked', optionalAuth, async (req, res) => {
-  if (!req.user) return res.json({ liked: false });
-  const { rows } = await query('SELECT id FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!rows.length) return res.json({ liked: false });
-  const { rows: likedRows } = await query('SELECT id FROM poem_likes WHERE poem_id=$1 AND user_id=$2', [rows[0].id, req.user.id]);
-  res.json({ liked: !!likedRows.length });
-});
-
-app.get('/api/poem/:slug/comments', optionalAuth, async (req, res) => {
-  const { rows: pRows } = await query('SELECT id, is_hidden FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!pRows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = pRows[0];
-  const isOwner = req.user && Number(req.user.id) === Number(poem.user_id);
-  if (poem.is_hidden && !isOwner && !req.user?.is_admin) {
-    return res.status(404).json({ error: 'Şiir bulunamadı' });
-  }
-  const { rows } = await query(`
-    SELECT pc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
-      parent.username AS parent_username,
-      (SELECT COUNT(*) FROM poem_comment_likes WHERE comment_id=pc.id) as like_count,
-      EXISTS(SELECT 1 FROM poem_comment_likes fcl WHERE fcl.comment_id=pc.id AND fcl.user_id=$2) AS liked
-    FROM poem_comments pc
-      JOIN users u ON pc.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-      LEFT JOIN poem_comments parent_comment ON parent_comment.id=pc.parent_comment_id
-      LEFT JOIN users parent ON parent.id=parent_comment.user_id
-    WHERE pc.poem_id=$1 ORDER BY pc.created_at ASC`, [poem.id, req.user?.id || 0]);
-  res.json(rows);
-});
-
-app.post('/api/poem/:slug/comments', authMiddleware, async (req, res) => {
-  const { rows: pRows } = await query('SELECT * FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!pRows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = pRows[0];
-  if (poem.is_hidden && Number(poem.user_id) !== Number(req.user.id) && !req.user.is_admin) {
-    return res.status(404).json({ error: 'Şiir bulunamadı' });
-  }
-  const { content } = req.body;
-  if (!content?.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-  let parentCommentId = req.body.parent_comment_id ? Number(req.body.parent_comment_id) : null;
-  if (parentCommentId !== null && (!Number.isSafeInteger(parentCommentId) || parentCommentId < 1)) {
-    return res.status(400).json({ error: 'Geçersiz yanıt hedefi' });
-  }
-  if (parentCommentId !== null) {
-    const { rows: parentRows } = await query('SELECT id FROM poem_comments WHERE id=$1 AND poem_id=$2', [parentCommentId, poem.id]);
-    if (!parentRows.length) return res.status(400).json({ error: 'Yanıtlanacak yorum bulunamadı' });
-  }
-  const { rows } = await query('INSERT INTO poem_comments (poem_id,user_id,parent_comment_id,content) VALUES ($1,$2,$3,$4) RETURNING id', [poem.id, req.user.id, parentCommentId, content.trim()]);
-  const { rows: cRows } = await query(`
-    SELECT pc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
-      parent.username AS parent_username,
-      (SELECT COUNT(*) FROM poem_comment_likes WHERE comment_id=pc.id) AS like_count,
-      false AS liked
-    FROM poem_comments pc
-      LEFT JOIN users u ON pc.user_id=u.id
-      LEFT JOIN poem_comments parent_comment ON parent_comment.id=pc.parent_comment_id
-      LEFT JOIN users parent ON parent.id=parent_comment.user_id
-    WHERE pc.id=$1`, [rows[0].id]);
-  res.json(cRows[0]);
-});
-
-app.delete('/api/poem/:slug/comments/:id', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM poem_comments WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
-  if (rows[0].user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  await query('DELETE FROM poem_comments WHERE id=$1', [rows[0].id]);
-  res.json({ ok: true });
-});
-
-app.post('/api/poem/:slug/comments/:id/like', authMiddleware, async (req, res) => {
-  const { rows: pRows } = await query('SELECT id FROM poems WHERE slug=$1', [req.params.slug]);
-  if (!pRows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const { rows: cRows } = await query('SELECT id FROM poem_comments WHERE id=$1 AND poem_id=$2', [req.params.id, pRows[0].id]);
-  if (!cRows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
-  const { rows: ex } = await query('SELECT id FROM poem_comment_likes WHERE comment_id=$1 AND user_id=$2', [cRows[0].id, req.user.id]);
-  if (ex.length) {
-    await query('DELETE FROM poem_comment_likes WHERE id=$1', [ex[0].id]);
-    res.json({ liked: false });
-  } else {
-    await query('INSERT INTO poem_comment_likes (comment_id,user_id) VALUES ($1,$2)', [cRows[0].id, req.user.id]);
-    res.json({ liked: true });
-  }
-});
-
 // ===== TAGS =====
 app.get('/api/tags', async (req, res) => {
   const { rows } = await query('SELECT * FROM tags WHERE is_system=1 ORDER BY name ASC');
@@ -3910,16 +3694,6 @@ app.post('/api/upload', authMiddleware, upload.single('file'), async (req, res) 
     res.json({ url });
   } catch (e) {
     res.status(500).json({ error: 'Yükleme hatası: ' + e.message });
-  }
-});
-
-app.post('/api/upload-image', authMiddleware, upload.single('image'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Fotoğraf bulunamadı' });
-  try {
-    const url = await handleUpload(req.file);
-    res.json({ url });
-  } catch (e) {
-    res.status(500).json({ error: 'Fotoğraf yükleme hatası: ' + e.message });
   }
 });
 
@@ -5017,54 +4791,6 @@ app.delete('/api/admin/book/:id', adminMiddleware, async (req, res) => {
   await query('DELETE FROM books WHERE id=$1', [book.id]);
   if (book.user_id) await query('UPDATE users SET book_count=GREATEST(0,book_count-1) WHERE id=$1', [book.user_id]);
   await logAction('admin', 'delete_book', book.slug);
-  res.json({ ok: true });
-});
-
-app.get('/api/admin/poems', adminMiddleware, async (req, res) => {
-  const { rows } = await query(`
-    SELECT p.*, u.username,
-      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
-      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count
-    FROM poems p
-    LEFT JOIN users u ON p.user_id=u.id
-    ORDER BY p.created_at DESC`);
-  res.json(rows);
-});
-
-app.put('/api/admin/poem/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM poems WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = rows[0];
-  const title = String(req.body.title ?? poem.title).trim();
-  const content = String(req.body.content ?? poem.content).trim();
-  const isHidden = req.body.is_hidden !== undefined ? (req.body.is_hidden ? 1 : 0) : poem.is_hidden;
-  const views = req.body.views !== undefined ? Math.max(0, parseInt(req.body.views) || 0) : (poem.views || 0);
-
-  if (!title) return res.status(400).json({ error: 'Başlık zorunlu' });
-  if (!content) return res.status(400).json({ error: 'Şiir içeriği zorunlu' });
-
-  const newSlug = makeSlug(title, poem.id);
-  await query(
-    'UPDATE poems SET title=$1, content=$2, is_hidden=$3, views=$4, slug=$5, updated_at=NOW() WHERE id=$6',
-    [title.slice(0, 180), content.slice(0, 12000), isHidden, views, newSlug, poem.id]
-  );
-  await logAction('admin', 'edit_poem', newSlug);
-  const { rows: updated } = await query(`
-    SELECT p.*, u.username,
-      (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
-      (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count
-    FROM poems p
-    LEFT JOIN users u ON p.user_id=u.id
-    WHERE p.id=$1`, [poem.id]);
-  res.json(updated[0]);
-});
-
-app.delete('/api/admin/poem/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM poems WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
-  const poem = rows[0];
-  await query('DELETE FROM poems WHERE id=$1', [poem.id]);
-  await logAction('admin', 'delete_poem', poem.slug);
   res.json({ ok: true });
 });
 

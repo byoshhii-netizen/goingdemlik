@@ -341,7 +341,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_suspend_content') || hasPermission('can_view_stories')) visible.add('stories');
   if (hasPermission('can_suspend_content') || hasPermission('can_view_reals')) visible.add('videos');
   if (hasPermission('can_view_stories') || hasPermission('can_view_reals')) visible.add('content-analytics');
-  if (hasPermission('can_suspend_content')) { visible.add('photos'); visible.add('forums'); visible.add('books'); visible.add('poems'); }
+  if (hasPermission('can_suspend_content')) { visible.add('photos'); visible.add('forums'); visible.add('books'); }
   if (hasPermission('can_view_groups')) visible.add('groups');
   if (hasPermission('can_view_levels')) visible.add('levels');
   if (hasPermission('can_view_store')) visible.add('shop');
@@ -384,7 +384,7 @@ function loadSection(section) {
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
     'account-deletions': renderAccountDeletions,
-    forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
+    forums: renderForums, books: renderBooks, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages, 'message-reports': renderMessageReports,
     announcements: renderAnnouncements,
@@ -1062,129 +1062,6 @@ async function renderForums(main) {
   $('#forum-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderTable(forums.filter(f => f.title.toLowerCase().includes(q) || (f.username||'').toLowerCase().includes(q)));
-  });
-}
-
-// ===== POEMS =====
-async function renderPoems(main) {
-  let poems = [];
-  try { poems = await adminApi('/poems'); } catch (e) {
-    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-pen-fancy"></i></div> Şiirler</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
-    return;
-  }
-
-  main.innerHTML = `
-    <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-pen-fancy"></i></div> Şiirler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${poems.length})</span></div>
-      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Başlık veya kullanıcı ara..." style="min-width:240px" /></div>
-    </div>
-    <div class="card">
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>ID</th><th>Başlık</th><th>Yazar</th><th>Durum</th><th>Gör.</th><th>Beğeni</th><th>Yorum</th><th>Tarih</th><th>İşlem</th></tr></thead>
-          <tbody id="poems-tbody"></tbody>
-        </table>
-      </div>
-    </div>`;
-
-  const renderTable = (list) => {
-    const tbody = $('#poems-tbody'); if (!tbody) return;
-    if (!list.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px">Şiir bulunamadı</td></tr>'; return; }
-
-    tbody.innerHTML = list.map(p => `
-      <tr>
-        <td style="color:var(--text3);font-size:12px">#${p.id}</td>
-        <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(p.title)}">${escHtml(p.title)}</td>
-        <td><span style="color:var(--blue2)">${escHtml(p.username || '—')}</span></td>
-        <td>${p.is_hidden ? '<span class="badge badge-red"><i class="fas fa-lock"></i> Gizli</span>' : '<span class="badge badge-green"><i class="fas fa-eye"></i> Açık</span>'}</td>
-        <td style="font-size:12px;color:var(--text2)">${p.views || 0}</td>
-        <td style="font-size:12px;color:var(--text2)">${p.like_count || 0}</td>
-        <td style="font-size:12px;color:var(--text2)">${p.comment_count || 0}</td>
-        <td style="color:var(--text3);font-size:12px">${timeAgo(p.created_at)}</td>
-        <td>
-          <div style="display:flex;gap:4px;flex-wrap:wrap">
-            <button class="btn btn-outline btn-xs edit-poem-btn" data-id="${p.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
-            <button class="btn btn-danger btn-xs del-poem-btn" data-id="${p.id}"><i class="fas fa-trash"></i> Sil</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
-
-    tbody.querySelectorAll('.edit-poem-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const poem = poems.find(x => x.id == btn.dataset.id);
-        if (!poem) return;
-        showModal(`Şiiri Düzenle — #${poem.id}`, `
-          <div class="form-group">
-            <label>Başlık</label>
-            <input id="adm-poem-title" type="text" value="${escHtml(poem.title)}" />
-          </div>
-          <div class="form-group">
-            <label>Şiir İçeriği</label>
-            <textarea id="adm-poem-content" rows="10">${escHtml(poem.content || '')}</textarea>
-          </div>
-          <div class="form-group">
-            <label>Görüntülenme</label>
-            <input id="adm-poem-views" type="number" min="0" value="${poem.views || 0}" />
-          </div>
-          <div class="form-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="adm-poem-hidden" ${poem.is_hidden ? 'checked' : ''} />
-              <span>Şiiri gizli tut</span>
-            </label>
-          </div>
-          <div id="adm-poem-error" class="form-error"></div>
-          <button class="btn btn-primary" id="adm-poem-save" style="width:100%;justify-content:center;margin-top:12px"><i class="fas fa-save"></i> Kaydet</button>
-        `);
-
-        $('#adm-poem-save').addEventListener('click', async () => {
-          const title = $('#adm-poem-title').value.trim();
-          const content = $('#adm-poem-content').value.trim();
-          const views = parseInt($('#adm-poem-views').value) || 0;
-          const isHidden = $('#adm-poem-hidden').checked;
-
-          if (!title || !content) {
-            $('#adm-poem-error').textContent = 'Başlık ve şiir içeriği zorunlu';
-            return;
-          }
-
-          try {
-            const updated = await adminApi('/poem/' + poem.id, {
-              method: 'PUT',
-              body: JSON.stringify({ title, content, is_hidden: isHidden, views })
-            });
-            const idx = poems.findIndex(x => x.id == poem.id);
-            if (idx >= 0) poems[idx] = { ...poems[idx], ...updated, is_hidden: updated.is_hidden, views: updated.views || 0 };
-            toast('Şiir güncellendi');
-            hideModal();
-            renderTable(poems);
-          } catch (e) {
-            $('#adm-poem-error').textContent = e.message;
-          }
-        });
-      });
-    });
-
-    tbody.querySelectorAll('.del-poem-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('Bu şiiri silmek istediğine emin misin?')) return;
-        try {
-          await adminApi('/poem/' + btn.dataset.id, { method: 'DELETE' });
-          toast('Şiir silindi');
-          poems = poems.filter(p => p.id != btn.dataset.id);
-          renderTable(poems);
-        } catch (e) {
-          toast(e.message, 'error');
-        }
-      });
-    });
-  };
-
-  renderTable(poems);
-
-  $('#poem-search').addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    renderTable(poems.filter(p => (p.title || '').toLowerCase().includes(q) || (p.username || '').toLowerCase().includes(q)));
   });
 }
 

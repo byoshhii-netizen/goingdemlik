@@ -349,9 +349,7 @@ async function api(path, options = {}) {
   const headers = { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
   const res = await fetch('/api' + path, { ...options, headers });
-  const text = await res.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
+  const data = await res.json();
   if (!res.ok) { const error = new Error(data.error || 'Hata'); error.data = data; throw error; }
   return data;
 }
@@ -562,9 +560,7 @@ async function apiForm(path, formData, method = 'POST') {
   const headers = {};
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
   const res = await fetch('/api' + path, { method, body: formData, headers });
-  const text = await res.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
+  const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Hata');
   return data;
 }
@@ -669,57 +665,6 @@ function avatarImg(u, cls = 'avatar-sm') {
 
 function hasUsableAvatar(u) {
   return Boolean(u && u.avatar && !u.avatar_removed && u.avatar !== '?' && u.avatar !== 'null' && u.avatar !== 'undefined');
-}
-
-function formatSpotifyTime(ms) {
-  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-async function getSpotifyNowPlaying(username) {
-  if (!username) return null;
-  try {
-    const data = await api('/spotify/now-playing/' + encodeURIComponent(username));
-    return data && data.playing ? data : null;
-  } catch {
-    return null;
-  }
-}
-
-function spotifyNowPlayingMarkup(data, compact = false) {
-  if (!data || !data.playing) return '';
-
-  const progressPct = data.duration_ms ? Math.min(100, Math.max(0, ((data.progress_ms || 0) / data.duration_ms) * 100)) : 0;
-  const cardWidth = compact ? '100%' : '460px';
-  const imageSize = compact ? 34 : 42;
-  const titleSize = compact ? '12px' : '14px';
-  const artistSize = compact ? '11px' : '12px';
-  const labelSize = compact ? '9px' : '10px';
-
-  return `
-    <div style="display:flex;align-items:center;gap:${compact ? '8px' : '10px'};margin-top:${compact ? '2px' : '10px'};padding:${compact ? '7px 9px' : '8px 10px'};border-radius:12px;background:rgba(30,215,96,0.08);border:1px solid rgba(30,215,96,0.32);max-width:${cardWidth};width:100%;box-sizing:border-box">
-      ${data.album_art
-        ? `<img src="${escHtml(data.album_art)}" alt="" style="width:${imageSize}px;height:${imageSize}px;object-fit:cover;border-radius:8px;flex-shrink:0" />`
-        : `<div style="width:${imageSize}px;height:${imageSize}px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(30,215,96,0.18);color:#1ED760;flex-shrink:0"><i class="fab fa-spotify" style="font-size:${compact ? '15px' : '18px'}"></i></div>`}
-      <div style="min-width:0;flex:1">
-        <div style="font-size:${labelSize};letter-spacing:.08em;text-transform:uppercase;color:#1ED760;font-weight:700;line-height:1.2">Şu an dinliyor</div>
-        <div style="font-size:${titleSize};font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3">${escHtml(data.title || 'Şarkı')}</div>
-        ${data.artist ? `<div style="font-size:${artistSize};color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3">${escHtml(data.artist)}</div>` : ''}
-        ${data.duration_ms ? `
-          <div style="margin-top:4px;display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-muted)">
-            <span>${formatSpotifyTime(data.progress_ms)}</span>
-            <div style="flex:1;height:4px;border-radius:999px;background:rgba(255,255,255,0.12);overflow:hidden">
-              <span style="display:block;height:100%;width:${progressPct}%;background:linear-gradient(90deg,#1ED760,#68f0a0)"></span>
-            </div>
-            <span>${formatSpotifyTime(data.duration_ms)}</span>
-          </div>
-        ` : ''}
-      </div>
-      ${data.url ? `<a href="${normalizeExternalUrl(data.url)}" target="_blank" rel="noopener noreferrer" style="color:#1ED760;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:rgba(30,215,96,0.12);flex-shrink:0"><i class="fab fa-spotify"></i></a>` : ''}
-    </div>
-  `;
 }
 
 function updateAppIcon(user) {
@@ -837,13 +782,11 @@ function renderRoute(fullPath) {
   // İçerik sayfaları herkese açık kalır; böylece paylaşılmış bağlantılar ve
   // arama motorları oturum açma ekranına yönlendirilmeden içeriği görebilir.
   const publicContentRoute = path === '/forum' || path.startsWith('/forum/')
-    || path === '/siirler' || path.startsWith('/siir/')
     || path === '/kitaplar' || path.startsWith('/kitap/')
     || path === '/gruplar' || path.startsWith('/grup/')
     || path === '/fotograflar' || path.startsWith('/foto/')
     || path === '/muzikler' || path.startsWith('/muzik/')
     || path === '/video' || path === '/videolar' || path.startsWith('/video/')
-    || path === '/reals' || path.startsWith('/reals/')
     || path.startsWith('/profil/');
   if (siteAuthRequired && !currentUser && !publicContentRoute && path !== '/giris' && path !== '/kayit' && !isForgotPasswordRoute(path)) {
     const returnTo = path + (queryStr ? '?' + queryStr : '');
@@ -863,14 +806,9 @@ function renderRoute(fullPath) {
     const qs = queryStr ? '?' + queryStr : '';
     return renderForumList(app, qs);
   }
-  if (path === '/siirler') return renderPoemList(app);
   if (path.startsWith('/forum/')) {
     const slug = segs.slice(1).join('/');
     return renderForumDetail(app, slug);
-  }
-  if (path.startsWith('/siir/')) {
-    const slug = segs.slice(1).join('/');
-    return renderPoemDetail(app, slug);
   }
   if (path === '/kitaplar') return renderBookList(app);
   if (path.startsWith('/kitap/') && segs.length === 2) return renderBookDetail(app, segs[1]);
@@ -884,7 +822,8 @@ function renderRoute(fullPath) {
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
   if (path === '/video' || path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
-  if (path === '/reals' || path.startsWith('/reals/')) return renderRealsFeed(app, path.startsWith('/reals/') ? segs[1] : null);
+  if (path === '/reals') return renderRealsFeed(app);
+  if (path.startsWith('/reals/')) return renderVideoDetail(app, segs[1]);
   if (path.startsWith('/foto/')) return renderPhotoDetail(app, segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/rozetler') return renderBadges(app);
@@ -963,7 +902,7 @@ function generateVideoPoster(file) {
   });
 }
 
-async function renderRealsFeed(app, initialId = null) {
+async function renderRealsFeed(app) {
   document.title = 'Reals – ' + siteName;
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
   app.innerHTML = `
@@ -1001,9 +940,6 @@ async function renderRealsFeed(app, initialId = null) {
       feedItems.push({ ...selected, isRealsAd: true, feedKey: `ad-${selected.id}-${count}` });
     }
   });
-  const initialIndex = initialId
-    ? feedItems.findIndex(item => !item.isRealsAd && String(item.id) === String(initialId))
-    : -1;
   listEl.addEventListener('selectstart', event => event.preventDefault());
   let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
   const followStates = new Map();
@@ -1265,11 +1201,6 @@ async function renderRealsFeed(app, initialId = null) {
     idx = i;
     activeRealsAudio?.pause();
     activeRealsAudio = null;
-    const activeItem = items[idx];
-    const activeRealId = activeItem && !activeItem.classList.contains('reals-ad-item') ? activeItem.dataset.id : null;
-    if (activeRealId && location.pathname !== '/reals/' + encodeURIComponent(activeRealId)) {
-      history.replaceState({}, '', '/reals/' + encodeURIComponent(activeRealId));
-    }
     if (shouldScroll) listEl.scrollTo({ top: i * listEl.clientHeight, behavior: 'smooth' });
     items.forEach((it, j) => {
       it.classList.toggle('is-active', j === idx);
@@ -1301,7 +1232,7 @@ async function renderRealsFeed(app, initialId = null) {
   }
 
   renderItems();
-  showIndex(initialIndex >= 0 ? initialIndex : 0, initialIndex >= 0);
+  showIndex(0);
   activeRealsAds.filter(ad => ad.frequency_mode === 'time').forEach(ad => {
     const amount = Math.max(1, Number(ad.frequency_value) || 1);
     const unitMs = ad.frequency_unit === 'hours' ? 3600000 : 60000;
@@ -1517,7 +1448,6 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); });
-$('#nav-new-poem')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); });
 $('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
@@ -1580,7 +1510,6 @@ document.addEventListener('click', e => {
 
 document.addEventListener('click', e => {
   const mobNewForum = e.target.closest('#mob-new-forum');
-  const mobNewPoem = e.target.closest('#mob-new-poem');
   const mobNewBook = e.target.closest('#mob-new-book');
   const mobNewGroup = e.target.closest('#mob-new-group');
   const mobNewPhoto = e.target.closest('#mob-new-photo');
@@ -1588,7 +1517,6 @@ document.addEventListener('click', e => {
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
   if (mobNewForum) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
-  if (mobNewPoem) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
   if (mobNewBook) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
   if (mobNewGroup) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
   if (mobNewPhoto) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
@@ -1876,292 +1804,10 @@ function forumCardHTML(f) {
   </div>`;
 }
 
-function poemCardHTML(poem) {
-  const preview = String(poem.content || '').replace(/\s+/g, ' ').trim();
-  const authorName = poem.username || 'Silinmiş Kullanıcı';
-  const authorClick = poem.username
-    ? `onclick="event.stopPropagation();navigate('${profileRoute(poem.username)}')" style="cursor:pointer"`
-    : `style="cursor:default;opacity:0.6"`;
-  const d = new Date(poem.created_at);
-  const dateStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
-  const timeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  return `<div class="poem-card" onclick="navigate('/siir/${escHtml(poem.slug)}')">
-    <div class="poem-card-topline">
-      <span class="poem-badge"><i class="fas fa-pen-fancy"></i> Şiir</span>
-      ${poem.is_hidden ? `<span class="poem-badge poem-badge-hidden"><i class="fas fa-lock"></i> Gizli</span>` : ''}
-    </div>
-    <div class="poem-card-title">${escHtml(poem.title)}</div>
-    <div class="poem-card-preview">${escHtml(preview.length > 220 ? preview.substring(0, 220) + '...' : preview)}</div>
-    <div class="poem-card-meta">
-      <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${escHtml(authorName)}</span>
-      <span class="forum-meta-item"><i class="fas fa-heart"></i>${poem.like_count || 0}</span>
-      <span class="forum-meta-item"><i class="fas fa-comment"></i>${poem.comment_count || 0}</span>
-      <span class="forum-meta-item" title="${dateStr} ${timeStr}"><i class="fas fa-clock"></i>${dateStr}</span>
-    </div>
-  </div>`;
-}
-
-function poemTextHTML(text) {
-  return escHtml(String(text || '')).replace(/\n/g, '<br>');
-}
-
 // Hashtag tıklanınca o etikete göre filtrele
 window.navigateTag = function(tag) {
   navigate('/forum?tag=' + encodeURIComponent(tag));
 };
-
-async function renderPoemList(app) {
-  document.title = 'Şiirler – ' + siteName;
-  updatePageMeta('Şiirler – ' + siteName, 'Paylaştığın şiirleri okuyup beğen, yorum yaz, gizli tut.', '');
-  app.innerHTML = `
-    <div class="container page">
-      <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Şiir ara..." /></div>
-      <div id="poems-list"><div class="loading-center"><div class="spinner"></div></div></div>
-    </div>`;
-
-  let poems = [];
-  try {
-    poems = await api('/poems');
-  } catch {}
-  renderPoemListItems(poems);
-
-  $('#poem-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase().trim();
-    const filtered = !q ? poems : poems.filter(p => {
-      const hay = ((p.title || '') + ' ' + (p.content || '') + ' ' + (p.username || '')).toLowerCase();
-      return hay.includes(q);
-    });
-    renderPoemListItems(filtered);
-  });
-
-}
-
-function renderPoemListItems(poems) {
-  const el = $('#poems-list');
-  if (!el) return;
-  if (!poems.length) {
-    el.innerHTML = '<div class="empty-state"><i class="fas fa-pen-fancy"></i><p>Henüz şiir yok.</p></div>';
-    return;
-  }
-  el.innerHTML = `<div class="poem-grid">${poems.map(poem => poemCardHTML(poem)).join('')}</div>`;
-}
-
-function showNewPoemModal(existing = null) {
-  showModal(existing ? 'Şiiri Düzenle' : 'Yeni Şiir', `
-    <div class="form-group">
-      <label>Başlık</label>
-      <input id="pm-title" type="text" placeholder="Şiirin başlığı" value="${existing ? escHtml(existing.title) : ''}" />
-    </div>
-    <div class="form-group">
-      <label>Şiir</label>
-      <textarea id="pm-content" rows="10" placeholder="Şiirini yaz...">${existing ? escHtml(existing.content) : ''}</textarea>
-    </div>
-    <div class="form-group">
-      <label class="checkbox-label"><input type="checkbox" id="pm-hidden" ${existing && existing.is_hidden ? 'checked' : ''} /> Sadece ben ve yönetim görebilsin (gizli paylaşım)</label>
-    </div>
-    <button class="btn btn-primary" id="pm-submit" style="width:100%">${existing ? 'Güncelle' : 'Yayınla'}</button>
-    <div id="pm-error" class="form-error mt-4"></div>
-  `);
-
-  $('#pm-submit').addEventListener('click', async () => {
-    const title = $('#pm-title').value.trim();
-    const content = $('#pm-content').value.trim();
-    if (!title || !content) {
-      $('#pm-error').textContent = 'Başlık ve şiir içeriği zorunlu';
-      return;
-    }
-
-    try {
-      const payload = { title, content, is_hidden: $('#pm-hidden').checked };
-      if (existing) {
-        await api('/poem/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
-        toast('Şiir güncellendi');
-      } else {
-        const poem = await api('/poems', { method: 'POST', body: JSON.stringify(payload) });
-        toast('Şiir yayınlandı');
-        hideModal();
-        navigate('/siir/' + poem.slug);
-        return;
-      }
-      hideModal();
-      renderRoute(location.pathname);
-    } catch (error) {
-      $('#pm-error').textContent = error.message;
-    }
-  });
-}
-
-async function renderPoemDetail(app, slug) {
-  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
-  let poem = null;
-  let liked = false;
-  let comments = [];
-
-  try {
-    poem = await api('/poem/' + slug);
-    await api('/poem/' + slug + '/view', { method: 'POST' }).catch(() => {});
-    if (currentUser) {
-      const likedRes = await api('/poem/' + slug + '/liked');
-      liked = !!likedRes.liked;
-    }
-    comments = await api('/poem/' + slug + '/comments');
-  } catch (error) {
-    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Şiir bulunamadı veya gizli.</p></div></div>';
-    return;
-  }
-
-  const isOwner = currentUser && currentUser.id === poem.user_id;
-  document.title = poem.title + ' – ' + siteName;
-  updatePageMeta(poem.title + ' – ' + siteName, poem.content.substring(0, 155).replace(/\n/g, ' '), '');
-
-  app.innerHTML = `<div class="container page">
-    <div class="poem-detail">
-      ${isOwner ? `<div style="display:flex;gap:8px;margin-bottom:16px">
-        <button class="btn btn-outline btn-sm" id="edit-poem-btn"><i class="fas fa-edit"></i> Düzenle</button>
-        <button class="btn btn-danger btn-sm" id="del-poem-btn"><i class="fas fa-trash"></i> Sil</button>
-      </div>` : ''}
-      <div class="poem-detail-header">
-        <div class="poem-detail-meta">
-          <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-            ${avatarImg(poem, 'avatar-sm')}
-            <a href="${profileRoute(poem.username)}" data-link style="color:inherit">${userDisplayName(poem)}</a>
-            ${poem.user_location ? `<span style="font-size:11px;color:var(--text-muted)"><i class="fas fa-map-marker-alt" style="font-size:10px"></i> ${escHtml(poem.user_location)}</span>` : ''}
-          </span>
-          <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDate(poem.created_at)}</span>
-          <span><i class="fas fa-eye" style="color:var(--accent-red)"></i> ${poem.views || 0} görüntülenme</span>
-        </div>
-        <div class="poem-detail-title">${escHtml(poem.title)}</div>
-        ${poem.is_hidden ? `<div class="poem-hidden-badge"><i class="fas fa-lock"></i> Gizli şiir • sadece siz ve yönetim görebilir</div>` : ''}
-      </div>
-      <div class="poem-detail-content">${poemTextHTML(poem.content)}</div>
-      <div class="poem-actions">
-        <button class="forum-action-btn ${liked ? 'liked' : ''}" id="poem-like-btn">
-          <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="poem-like-count">${poem.like_count || 0}</span> Beğeni
-        </button>
-        <button class="forum-action-btn" id="poem-share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
-      </div>
-      <hr class="divider" />
-      <div class="comments-section">
-        <div class="comments-title"><i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${comments.length})</div>
-        ${currentUser ? `
-          <div id="comment-reply-area" class="comment-reply-area">
-            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
-              <i class="fas fa-arrow-turn-down-right" style="color:var(--accent-red2);font-size:12px;flex-shrink:0"></i>
-              <span id="comment-reply-text" style="font-size:13px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
-            </div>
-            <button type="button" class="btn btn-ghost btn-sm" id="comment-reply-clear" style="padding:4px 8px;flex-shrink:0"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="comment-form">
-            ${avatarImg(currentUser, 'comment-avatar')}
-            <textarea id="comment-input" placeholder="Yorum yaz..."></textarea>
-            <button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i></button>
-          </div>` : `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>`}
-        <div id="comments-list">${commentTreeHTML(comments)}</div>
-      </div>
-    </div>
-  </div>`;
-
-  if (isOwner) {
-    $('#edit-poem-btn').addEventListener('click', () => showNewPoemModal(poem));
-    $('#del-poem-btn').addEventListener('click', async () => {
-      if (!confirm('Şiiri silmek istediğinize emin misiniz?')) return;
-      try {
-        await api('/poem/' + slug, { method: 'DELETE' });
-        toast('Şiir silindi');
-        navigate('/siirler');
-      } catch (e) {
-        toast(e.message, 'error');
-      }
-    });
-  }
-
-  $('#poem-like-btn')?.addEventListener('click', async () => {
-    if (!currentUser) { navigate('/giris'); return; }
-    try {
-      const result = await api('/poem/' + slug + '/like', { method: 'POST' });
-      liked = result.liked;
-      const btn = $('#poem-like-btn');
-      const count = $('#poem-like-count');
-      btn.classList.toggle('liked', liked);
-      const icon = btn.querySelector('i');
-      if (icon) icon.className = liked ? 'fas fa-heart' : 'far fa-heart';
-      count.textContent = String((parseInt(count.textContent) || 0) + (liked ? 1 : -1));
-    } catch (e) { toast(e.message, 'error'); }
-  });
-
-  $('#poem-share-btn')?.addEventListener('click', () => {
-    const url = location.href;
-    if (navigator.clipboard) { navigator.clipboard.writeText(url); toast('Link kopyalandı!'); }
-    else { window.prompt('Linki kopyalayın:', url); }
-  });
-
-  let commentReplyTarget = null;
-  const clearCommentReply = () => {
-    commentReplyTarget = null;
-    const area = $('#comment-reply-area');
-    if (area) area.classList.remove('active');
-    const text = $('#comment-reply-text');
-    if (text) text.textContent = '';
-  };
-
-  $('#comment-submit')?.addEventListener('click', async () => {
-    let content = $('#comment-input').value.trim();
-    if (!content) return;
-    if (commentReplyTarget && commentReplyTarget.username && !content.startsWith('@' + commentReplyTarget.username)) {
-      content = '@' + commentReplyTarget.username + ' ' + content;
-    }
-    try {
-      await api('/poem/' + slug + '/comments', {
-        method: 'POST',
-        body: JSON.stringify({ content, parent_comment_id: commentReplyTarget ? commentReplyTarget.id : null })
-      });
-      comments = await api('/poem/' + slug + '/comments');
-      $('#comments-list').innerHTML = commentTreeHTML(comments);
-      $('#comment-input').value = '';
-      clearCommentReply();
-    } catch (e) { toast(e.message, 'error'); }
-  });
-
-  $('#comment-reply-clear')?.addEventListener('click', clearCommentReply);
-
-  $('#comments-list').addEventListener('click', async e => {
-    const replyBtn = e.target.closest('.reply-comment-btn');
-    if (replyBtn) {
-      if (!currentUser) { navigate('/giris'); return; }
-      commentReplyTarget = { id: replyBtn.dataset.id, username: replyBtn.dataset.username };
-      const area = $('#comment-reply-area');
-      const text = $('#comment-reply-text');
-      if (area && text) {
-        area.classList.add('active');
-        text.textContent = `${replyBtn.dataset.username} adlı yoruma yanıt veriyorsunuz`;
-      }
-      $('#comment-input')?.focus();
-      return;
-    }
-
-    const del = e.target.closest('.del-comment');
-    if (del) {
-      if (!confirm('Yorum silinsin mi?')) return;
-      try {
-        await api('/poem/' + slug + '/comments/' + del.dataset.id, { method: 'DELETE' });
-        del.closest('.comment-node')?.remove();
-      } catch (e) { toast(e.message, 'error'); }
-    }
-
-    const likeBtn = e.target.closest('.like-comment-btn');
-    if (likeBtn) {
-      if (!currentUser) { navigate('/giris'); return; }
-      try {
-        const r = await api('/poem/' + slug + '/comments/' + likeBtn.dataset.id + '/like', { method: 'POST' });
-        const cnt = likeBtn.querySelector('.like-cnt');
-        cnt.textContent = parseInt(cnt.textContent) + (r.liked ? 1 : -1);
-        likeBtn.classList.toggle('liked', r.liked);
-        const icon = likeBtn.querySelector('i');
-        if (icon) icon.className = `${r.liked ? 'fas' : 'far'} fa-heart`;
-      } catch (e) { toast(e.message, 'error'); }
-    }
-  });
-}
 
 function showNewForumModal(existing = null) {
   showModal(existing ? 'Konuyu Düzenle' : 'Yeni Konu Aç', `
@@ -5097,11 +4743,9 @@ async function renderProfile(app, username) {
   }
 
   const { user, forums, books, groups, photos = [], videos = [], reals, songs, level, levels, book_page_count, badges = [], ad_panels = [] } = data;
-  const profileUsername = user?.username || username;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
-  const profileSpotify = await getSpotifyNowPlaying(user.username);
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges'];
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
@@ -5116,7 +4760,7 @@ async function renderProfile(app, username) {
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (!isOwn && currentUser) {
-    try { followState = await api('/users/' + encodeURIComponent(profileUsername) + '/follow-status'); } catch {}
+    try { followState = await api('/users/' + encodeURIComponent(username) + '/follow-status'); } catch {}
   }
   const bindFollowButton = () => {
     const button = document.getElementById('profile-follow-btn');
@@ -5125,7 +4769,7 @@ async function renderProfile(app, username) {
       button.disabled = true;
       try {
         if (user.is_private) {
-          await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
+          await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
           button.textContent = 'Takip isteği gönderildi';
           button.classList.remove('btn-primary');
           button.classList.add('btn-outline');
@@ -5133,8 +4777,8 @@ async function renderProfile(app, username) {
           return;
         }
         followState = followState.following || followState.pending
-          ? await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'DELETE' })
-          : await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
+          ? await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'DELETE' })
+          : await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
         button.textContent = user.is_private ? 'Takip isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takiptesin' : 'Takip et'));
         button.classList.toggle('btn-outline', followState.following || followState.pending);
         button.classList.toggle('btn-primary', !followState.following && !followState.pending);
@@ -5222,7 +4866,6 @@ async function renderProfile(app, username) {
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
         ${badgesHTML}
-        ${spotifyNowPlayingMarkup(profileSpotify, false)}
         ${progressHTML}
         ${user.bio ? `<div class="profile-bio" style="margin-top:10px">${escHtml(user.bio)}</div>` : ''}
         ${links.length ? `<div class="profile-links">${links.map(l => {
@@ -5243,8 +4886,8 @@ async function renderProfile(app, username) {
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
-          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative"><i class="fas fa-ellipsis-h"></i></button>
-          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;right:0;left:auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;width:min(240px, calc(100vw - 24px));max-width:calc(100vw - 24px);overflow-y:auto;max-height:320px"></div>
+          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
+          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:240px;max-width:280px;overflow-y:auto;max-height:320px"></div>
         </div>` : ''}
       </div>
     </div>
@@ -5296,7 +4939,7 @@ async function renderProfile(app, username) {
   bindFollowButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
-      const list = await api('/users/' + encodeURIComponent(profileUsername) + '/' + button.dataset.followList);
+      const list = await api('/users/' + encodeURIComponent(username) + '/' + button.dataset.followList);
       showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
     } catch (e) { toast(e.message, 'error'); }
   }));
@@ -5346,10 +4989,6 @@ async function renderProfile(app, username) {
       }
 
       function renderMenu(fs) {
-        moreMenu.style.width = 'min(240px, calc(100vw - 24px))';
-        moreMenu.style.maxWidth = 'calc(100vw - 24px)';
-        moreMenu.style.left = 'auto';
-        moreMenu.style.right = '0';
         const items = buildMenuItems(fs);
         moreMenu.innerHTML = items.map(item =>
           `<div class="profile-menu-item${item.danger ? ' danger' : ''}" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
@@ -6845,7 +6484,6 @@ async function renderDMChat(username) {
   }
 
   const { conv, other, messages, isHidden, hasPassword } = data;
-  const otherSpotify = await getSpotifyNowPlaying(other.username);
 
   // Kilitli konuşma
   if (isHidden) {
@@ -6900,12 +6538,9 @@ async function renderDMChat(username) {
             ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
             : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
         </a>
-        <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
-          <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
-            <strong>${escHtml(other.username)}</strong>
-          </a>
-          ${spotifyNowPlayingMarkup(otherSpotify, true)}
-        </div>
+        <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
+          <strong>${escHtml(other.username)}</strong>
+        </a>
       </div>
       <div class="dm-chat-header-right">
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
