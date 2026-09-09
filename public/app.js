@@ -1901,13 +1901,6 @@ async function renderPoemList(app) {
   updatePageMeta('Şiirler – ' + siteName, 'Paylaştığın şiirleri okuyup beğen, yorum yaz, gizli tut.', '');
   app.innerHTML = `
     <div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div>
-          <div class="page-title">Şiirler</div>
-          <div class="page-subtitle">Yazdığın kısa metinler burada görünür ve telefon ekranında rahat okunur.</div>
-        </div>
-        <div>${currentUser ? '<button class="btn btn-primary" id="poem-new-btn"><i class="fas fa-plus"></i> Yeni Şiir</button>' : ''}</div>
-      </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Şiir ara..." /></div>
       <div id="poems-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
@@ -1927,10 +1920,6 @@ async function renderPoemList(app) {
     renderPoemListItems(filtered);
   });
 
-  $('#poem-new-btn')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewPoemModal();
-  });
 }
 
 function renderPoemListItems(poems) {
