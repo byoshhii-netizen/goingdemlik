@@ -412,6 +412,51 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS poems (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      slug TEXT UNIQUE,
+      is_hidden INTEGER DEFAULT 0,
+      allow_comments INTEGER DEFAULT 1,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS poem_likes (
+      id BIGSERIAL PRIMARY KEY,
+      poem_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      UNIQUE(poem_id, user_id),
+      FOREIGN KEY(poem_id) REFERENCES poems(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poem_comments (
+      id BIGSERIAL PRIMARY KEY,
+      poem_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      FOREIGN KEY(poem_id) REFERENCES poems(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poem_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      UNIQUE(comment_id, user_id),
+      FOREIGN KEY(comment_id) REFERENCES poem_comments(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_poems_user_created ON poems(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_poem_likes_poem ON poem_likes(poem_id);
+    CREATE INDEX IF NOT EXISTS idx_poem_comments_poem ON poem_comments(poem_id, created_at DESC);
+
     ALTER TABLE books ADD COLUMN IF NOT EXISTS karakterler TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS kadro TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS is_hidden INTEGER DEFAULT 0;
