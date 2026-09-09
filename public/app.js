@@ -6336,11 +6336,11 @@ async function renderMessages(app, targetUsername) {
         </div>
         <div class="dm-sidebar-actions">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>
-          <button class="btn btn-primary dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-primary dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj"><i class="fas fa-edit"></i><span>Yeni Mesaj</span></button>
         </div>
       </div>
       <div class="dm-search-wrap">
-        <input id="dm-search" type="text" placeholder="Konuşma ara..." class="dm-search" />
+        <input id="dm-search" type="text" placeholder="Ara..." class="dm-search" />
       </div>
       <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
         <div class="dm-hidden-panel-content">

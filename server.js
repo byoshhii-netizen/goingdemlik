@@ -31,8 +31,12 @@ const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü
 const app = express();
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
-const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || 'Cambaz');
-const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '123123');
+const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || '').trim();
+const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '').trim();
+const VMB_PANEL_AUTH_CONFIGURED = Boolean(VMB_PANEL_USERNAME && VMB_PANEL_PASSWORD);
+if (!VMB_PANEL_AUTH_CONFIGURED) {
+  console.warn('[SECURITY] VMB panel credentials are not configured. Set VMB_PANEL_USERNAME and VMB_PANEL_PASSWORD in environment variables.');
+}
 
 // Cloudinary config — Railway'de CLOUDINARY_URL env var olarak ekle
 // Format: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
@@ -129,7 +133,10 @@ app.get('/ads.txt', (req, res) => {
 });
 
 const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
-const APP_SECRET = process.env.APP_SECRET || '';
+const APP_SECRET = String(process.env.APP_SECRET || '').trim();
+if (!APP_SECRET) {
+  console.warn('[SECURITY] APP_SECRET is not configured. Email verification and challenge hashing will remain unavailable until APP_SECRET is set.');
+}
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.EMAIL_FROM || '';
 if (!process.env.SITE_URL) {
@@ -252,7 +259,10 @@ function normalizeSecurityAnswer(value) {
 }
 
 function hashChallengeValue(value) {
-  return crypto.createHmac('sha256', APP_SECRET || 'cigcig-challenge-secret-change-me').update(String(value)).digest('hex');
+  if (!APP_SECRET) {
+    throw new Error('APP_SECRET is not configured. Set a strong APP_SECRET in the environment before using challenge-based auth.');
+  }
+  return crypto.createHmac('sha256', APP_SECRET).update(String(value)).digest('hex');
 }
 
 function createChallengeToken() {
@@ -1035,6 +1045,9 @@ app.get(['/vmb-panel', '/vmb-panel.html'], (req, res) => {
 app.post('/api/vmb-admin/auth/login', async (req, res) => {
   const username = String(req.body.username || '').trim();
   const password = String(req.body.password || '');
+  if (!VMB_PANEL_AUTH_CONFIGURED) {
+    return res.status(503).json({ error: 'VMB panel kimlik bilgileri yapılandırılmamış' });
+  }
   if (username !== VMB_PANEL_USERNAME || password !== VMB_PANEL_PASSWORD) {
     return res.status(401).json({ error: 'VMB panel bilgileri doğrulanamadı' });
   }
