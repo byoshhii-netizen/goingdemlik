@@ -667,6 +667,57 @@ function hasUsableAvatar(u) {
   return Boolean(u && u.avatar && !u.avatar_removed && u.avatar !== '?' && u.avatar !== 'null' && u.avatar !== 'undefined');
 }
 
+function formatSpotifyTime(ms) {
+  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+async function getSpotifyNowPlaying(username) {
+  if (!username) return null;
+  try {
+    const data = await api('/spotify/now-playing/' + encodeURIComponent(username));
+    return data && data.playing ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function spotifyNowPlayingMarkup(data, compact = false) {
+  if (!data || !data.playing) return '';
+
+  const progressPct = data.duration_ms ? Math.min(100, Math.max(0, ((data.progress_ms || 0) / data.duration_ms) * 100)) : 0;
+  const cardWidth = compact ? '100%' : '460px';
+  const imageSize = compact ? 34 : 42;
+  const titleSize = compact ? '12px' : '14px';
+  const artistSize = compact ? '11px' : '12px';
+  const labelSize = compact ? '9px' : '10px';
+
+  return `
+    <div style="display:flex;align-items:center;gap:${compact ? '8px' : '10px'};margin-top:${compact ? '2px' : '10px'};padding:${compact ? '7px 9px' : '8px 10px'};border-radius:12px;background:rgba(30,215,96,0.08);border:1px solid rgba(30,215,96,0.32);max-width:${cardWidth};width:100%;box-sizing:border-box">
+      ${data.album_art
+        ? `<img src="${escHtml(data.album_art)}" alt="" style="width:${imageSize}px;height:${imageSize}px;object-fit:cover;border-radius:8px;flex-shrink:0" />`
+        : `<div style="width:${imageSize}px;height:${imageSize}px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:rgba(30,215,96,0.18);color:#1ED760;flex-shrink:0"><i class="fab fa-spotify" style="font-size:${compact ? '15px' : '18px'}"></i></div>`}
+      <div style="min-width:0;flex:1">
+        <div style="font-size:${labelSize};letter-spacing:.08em;text-transform:uppercase;color:#1ED760;font-weight:700;line-height:1.2">Şu an dinliyor</div>
+        <div style="font-size:${titleSize};font-weight:700;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3">${escHtml(data.title || 'Şarkı')}</div>
+        ${data.artist ? `<div style="font-size:${artistSize};color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3">${escHtml(data.artist)}</div>` : ''}
+        ${data.duration_ms ? `
+          <div style="margin-top:4px;display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-muted)">
+            <span>${formatSpotifyTime(data.progress_ms)}</span>
+            <div style="flex:1;height:4px;border-radius:999px;background:rgba(255,255,255,0.12);overflow:hidden">
+              <span style="display:block;height:100%;width:${progressPct}%;background:linear-gradient(90deg,#1ED760,#68f0a0)"></span>
+            </div>
+            <span>${formatSpotifyTime(data.duration_ms)}</span>
+          </div>
+        ` : ''}
+      </div>
+      ${data.url ? `<a href="${normalizeExternalUrl(data.url)}" target="_blank" rel="noopener noreferrer" style="color:#1ED760;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:rgba(30,215,96,0.12);flex-shrink:0"><i class="fab fa-spotify"></i></a>` : ''}
+    </div>
+  `;
+}
+
 function updateAppIcon(user) {
   const favicon = document.querySelector('link[rel="icon"]');
   if (favicon) favicon.href = '/cigcig.png';
@@ -787,6 +838,7 @@ function renderRoute(fullPath) {
     || path === '/fotograflar' || path.startsWith('/foto/')
     || path === '/muzikler' || path.startsWith('/muzik/')
     || path === '/video' || path === '/videolar' || path.startsWith('/video/')
+    || path === '/reals' || path.startsWith('/reals/')
     || path.startsWith('/profil/');
   if (siteAuthRequired && !currentUser && !publicContentRoute && path !== '/giris' && path !== '/kayit' && !isForgotPasswordRoute(path)) {
     const returnTo = path + (queryStr ? '?' + queryStr : '');
@@ -822,8 +874,7 @@ function renderRoute(fullPath) {
   if (path.startsWith('/grup/')) return renderGroupDetail(app, segs[1]);
   if (path === '/video' || path === '/videolar') return renderVideoList(app);
   if (path.startsWith('/video/')) return renderVideoDetail(app, segs[1]);
-  if (path === '/reals') return renderRealsFeed(app);
-  if (path.startsWith('/reals/')) return renderVideoDetail(app, segs[1]);
+  if (path === '/reals' || path.startsWith('/reals/')) return renderRealsFeed(app, path.startsWith('/reals/') ? segs[1] : null);
   if (path.startsWith('/foto/')) return renderPhotoDetail(app, segs[1]);
   if (path.startsWith('/profil/')) return renderProfile(app, segs[1]);
   if (path === '/rozetler') return renderBadges(app);
@@ -902,7 +953,7 @@ function generateVideoPoster(file) {
   });
 }
 
-async function renderRealsFeed(app) {
+async function renderRealsFeed(app, initialId = null) {
   document.title = 'Reals – ' + siteName;
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
   app.innerHTML = `
@@ -940,6 +991,9 @@ async function renderRealsFeed(app) {
       feedItems.push({ ...selected, isRealsAd: true, feedKey: `ad-${selected.id}-${count}` });
     }
   });
+  const initialIndex = initialId
+    ? feedItems.findIndex(item => !item.isRealsAd && String(item.id) === String(initialId))
+    : -1;
   listEl.addEventListener('selectstart', event => event.preventDefault());
   let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
   const followStates = new Map();
@@ -1201,6 +1255,11 @@ async function renderRealsFeed(app) {
     idx = i;
     activeRealsAudio?.pause();
     activeRealsAudio = null;
+    const activeItem = items[idx];
+    const activeRealId = activeItem && !activeItem.classList.contains('reals-ad-item') ? activeItem.dataset.id : null;
+    if (activeRealId && location.pathname !== '/reals/' + encodeURIComponent(activeRealId)) {
+      history.replaceState({}, '', '/reals/' + encodeURIComponent(activeRealId));
+    }
     if (shouldScroll) listEl.scrollTo({ top: i * listEl.clientHeight, behavior: 'smooth' });
     items.forEach((it, j) => {
       it.classList.toggle('is-active', j === idx);
@@ -1232,7 +1291,7 @@ async function renderRealsFeed(app) {
   }
 
   renderItems();
-  showIndex(0);
+  showIndex(initialIndex >= 0 ? initialIndex : 0, initialIndex >= 0);
   activeRealsAds.filter(ad => ad.frequency_mode === 'time').forEach(ad => {
     const amount = Math.max(1, Number(ad.frequency_value) || 1);
     const unitMs = ad.frequency_unit === 'hours' ? 3600000 : 60000;
@@ -4729,9 +4788,11 @@ async function renderProfile(app, username) {
   }
 
   const { user, forums, books, groups, photos = [], videos = [], reals, songs, level, levels, book_page_count, badges = [], ad_panels = [] } = data;
+  const profileUsername = user?.username || username;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
+  const profileSpotify = await getSpotifyNowPlaying(user.username);
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges'];
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
@@ -4746,7 +4807,7 @@ async function renderProfile(app, username) {
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (!isOwn && currentUser) {
-    try { followState = await api('/users/' + encodeURIComponent(username) + '/follow-status'); } catch {}
+    try { followState = await api('/users/' + encodeURIComponent(profileUsername) + '/follow-status'); } catch {}
   }
   const bindFollowButton = () => {
     const button = document.getElementById('profile-follow-btn');
@@ -4755,7 +4816,7 @@ async function renderProfile(app, username) {
       button.disabled = true;
       try {
         if (user.is_private) {
-          await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
+          await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
           button.textContent = 'Takip isteği gönderildi';
           button.classList.remove('btn-primary');
           button.classList.add('btn-outline');
@@ -4763,8 +4824,8 @@ async function renderProfile(app, username) {
           return;
         }
         followState = followState.following || followState.pending
-          ? await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'DELETE' })
-          : await api('/users/' + encodeURIComponent(username) + '/follow', { method: 'POST' });
+          ? await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'DELETE' })
+          : await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
         button.textContent = user.is_private ? 'Takip isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takiptesin' : 'Takip et'));
         button.classList.toggle('btn-outline', followState.following || followState.pending);
         button.classList.toggle('btn-primary', !followState.following && !followState.pending);
@@ -4852,6 +4913,7 @@ async function renderProfile(app, username) {
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
         ${badgesHTML}
+        ${spotifyNowPlayingMarkup(profileSpotify, false)}
         ${progressHTML}
         ${user.bio ? `<div class="profile-bio" style="margin-top:10px">${escHtml(user.bio)}</div>` : ''}
         ${links.length ? `<div class="profile-links">${links.map(l => {
@@ -4872,8 +4934,8 @@ async function renderProfile(app, username) {
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${user.is_private ? (followState.pending ? 'Takip isteği gönderildi' : 'Takip et') : (followState.following ? 'Takiptesin' : 'Takip et')}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
-          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>
-          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;left:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;min-width:240px;max-width:280px;overflow-y:auto;max-height:320px"></div>
+          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative"><i class="fas fa-ellipsis-h"></i></button>
+          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;right:0;left:auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;width:min(240px, calc(100vw - 24px));max-width:calc(100vw - 24px);overflow-y:auto;max-height:320px"></div>
         </div>` : ''}
       </div>
     </div>
@@ -4925,7 +4987,7 @@ async function renderProfile(app, username) {
   bindFollowButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
-      const list = await api('/users/' + encodeURIComponent(username) + '/' + button.dataset.followList);
+      const list = await api('/users/' + encodeURIComponent(profileUsername) + '/' + button.dataset.followList);
       showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
     } catch (e) { toast(e.message, 'error'); }
   }));
@@ -4975,6 +5037,10 @@ async function renderProfile(app, username) {
       }
 
       function renderMenu(fs) {
+        moreMenu.style.width = 'min(240px, calc(100vw - 24px))';
+        moreMenu.style.maxWidth = 'calc(100vw - 24px)';
+        moreMenu.style.left = 'auto';
+        moreMenu.style.right = '0';
         const items = buildMenuItems(fs);
         moreMenu.innerHTML = items.map(item =>
           `<div class="profile-menu-item${item.danger ? ' danger' : ''}" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
@@ -6470,6 +6536,7 @@ async function renderDMChat(username) {
   }
 
   const { conv, other, messages, isHidden, hasPassword } = data;
+  const otherSpotify = await getSpotifyNowPlaying(other.username);
 
   // Kilitli konuşma
   if (isHidden) {
@@ -6524,9 +6591,12 @@ async function renderDMChat(username) {
             ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
             : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
         </a>
-        <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
-          <strong>${escHtml(other.username)}</strong>
-        </a>
+        <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
+          <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
+            <strong>${escHtml(other.username)}</strong>
+          </a>
+          ${spotifyNowPlayingMarkup(otherSpotify, true)}
+        </div>
       </div>
       <div class="dm-chat-header-right">
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
