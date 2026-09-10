@@ -1819,8 +1819,8 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .chat-msg-name { font-size: 13px; font-weight: 600; max-width: 100%; overflow-wrap: anywhere; }
 .chat-msg-time { font-size: 11px; color: var(--text-muted); }
 .chat-msg-text { font-size: 14px; line-height: 1.45; color: var(--text-primary); background: var(--bg-card2); padding: 8px 12px; border-radius: 0 10px 10px 10px; display: inline-block; max-width:100%; word-break: break-word; overflow-wrap:anywhere; white-space:pre-wrap; }
-.chat-msg-text a, .dm-msg-bubble a { color: var(--accent-red2); text-decoration: underline; text-underline-offset: 2px; }
-.chat-msg-text a:hover, .dm-msg-bubble a:hover { color: var(--accent-red); }
+.chat-msg-text a, .dm-msg-bubble a { color: #3b82f6; text-decoration: underline; text-underline-offset: 2px; }
+.chat-msg-text a:hover, .dm-msg-bubble a:hover { color: #2563eb; }
 .chat-msg-img { display:block; width:min(220px, 100%); max-width:220px; max-height:220px; object-fit:cover; border-radius:8px; margin-top:4px; cursor:pointer; }
 .chat-msg-text .inline-image-link { width:min(220px, 100%); max-width:220px; }
 .chat-msg-text .inline-image-link img { width:100%; max-width:220px; max-height:220px; object-fit:cover; }
@@ -1856,6 +1856,9 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .music-ad-player .gplayer-info { flex:0 1 560px; min-width:0; }
 .music-ad-player .gplayer-title, .music-ad-player .gplayer-artist { max-width:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 @media (max-width: 768px) {
+  .dm-new-message-btn {
+    min-width: 32px; width: 32px; height: 32px;
+  }
   .music-ad-player .gplayer-inner { padding:8px 10px; }
   .music-ad-player .gplayer-info { flex:1 1 auto !important; gap:8px; }
   .music-ad-player .gplayer-cover, .music-ad-player .gplayer-cover-ph { width:36px; height:36px; }
@@ -2517,7 +2520,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-friends-header-button { position:relative; }
 .dm-friends-header-button .friend-request-dot { position:absolute; top:3px; right:3px; margin:0; }
 .dm-new-message-btn {
-  min-width: 0; height: 36px; padding: 0 10px !important; display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  min-width: 36px; width: 36px; height: 36px; padding: 0 !important; display:inline-flex; align-items:center; justify-content:center;
   border-radius:11px; font-size: 12px; font-weight:700; white-space:nowrap;
 }
 .dm-new-message-btn i { font-size: 12px; }
