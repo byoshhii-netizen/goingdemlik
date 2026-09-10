@@ -1006,6 +1006,12 @@ async function renderRealsFeed(app, initialId = null) {
     : -1;
   listEl.addEventListener('selectstart', event => event.preventDefault());
   let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
+  function syncRealsMuteButtons() {
+    listEl.querySelectorAll('.mute-btn').forEach(btn => {
+      btn.innerHTML = '<i class="fas fa-volume-' + (realsMuted ? 'mute' : 'up') + '"></i>';
+      btn.title = realsMuted ? 'Sesi aç/kapat' : 'Sesi aç/kapat';
+    });
+  }
   const followStates = new Map();
   if (currentUser) await Promise.all(orderedReals.map(async real => {
     if (!real.username || real.username === currentUser.username) return;
@@ -1202,7 +1208,7 @@ async function renderRealsFeed(app, initialId = null) {
           activeRealsAudio.play().catch(() => {});
         }
       }
-      btn.innerHTML = '<i class="fas fa-volume-' + (vid.muted ? 'mute' : 'up') + '"></i>';
+      syncRealsMuteButtons();
     }));
     listEl.querySelectorAll('[data-ad-click]').forEach(link => link.addEventListener('click', event => {
       const ad = getFeedItem(link.closest('.reals-ad-item'));
@@ -1301,6 +1307,7 @@ async function renderRealsFeed(app, initialId = null) {
   }
 
   renderItems();
+  syncRealsMuteButtons();
   showIndex(initialIndex >= 0 ? initialIndex : 0, initialIndex >= 0);
   activeRealsAds.filter(ad => ad.frequency_mode === 'time').forEach(ad => {
     const amount = Math.max(1, Number(ad.frequency_value) || 1);
