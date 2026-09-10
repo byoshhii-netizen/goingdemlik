@@ -1972,6 +1972,13 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .book-unlock-field:focus-within { border-color:#c8a874; box-shadow:0 0 0 3px rgba(189,162,117,.12); }
 .book-unlock-field i { color:#c8a874; }
 .book-unlock-field input { flex:1; min-width:0; padding:13px 0; border:0; outline:0; background:transparent; color:var(--text-primary); }
+.password-toggle-btn {
+  border: none; background: transparent; color: var(--text-muted); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; margin-left: 4px; border-radius: 6px;
+}
+.password-toggle-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.03); }
+.password-toggle-btn i { color: inherit; font-size: 14px; }
 .book-unlock-panel .btn { width:100%; justify-content:center; min-height:44px; }
 @media (max-width:600px) { .book-unlock-panel { margin:28px 12px; padding:30px 20px; border-radius:16px; } }
 .group-moderation-notice { max-width:620px; margin:48px auto; padding:48px 24px; border:1px solid var(--border); border-radius:16px; background:var(--bg-card); }

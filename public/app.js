@@ -234,6 +234,23 @@ function hideModal() {
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
 }
 
+function attachPasswordToggle(inputEl, toggleBtnEl, iconEl) {
+  if (!inputEl || !toggleBtnEl || !iconEl) return;
+
+  const syncIcon = () => {
+    const isVisible = inputEl.type === 'text';
+    iconEl.className = isVisible ? 'fas fa-eye-slash' : 'fas fa-eye';
+    toggleBtnEl.setAttribute('aria-label', isVisible ? 'Şifreyi gizle' : 'Şifreyi göster');
+  };
+
+  toggleBtnEl.addEventListener('click', () => {
+    inputEl.type = inputEl.type === 'password' ? 'text' : 'password';
+    syncIcon();
+  });
+
+  syncIcon();
+}
+
 const MEDIA_FILTERS = [
   { value: 'none', label: 'Orijinal', css: 'none' },
   { value: 'vivid', label: 'Canlı', css: 'saturate(1.35) contrast(1.08)' },
@@ -1799,7 +1816,6 @@ async function renderForumList(app, queryString) {
           <div class="page-title">Konular</div>
           ${activeTag ? `<div class="page-subtitle"><i class="fas fa-hashtag" style="color:var(--accent-red2)"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli &nbsp;<a href="/forum" data-link style="font-size:12px;color:var(--accent-red2)"><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
-        <div>${currentUser ? '<button class="btn btn-primary" id="forum-new-btn"><i class="fas fa-plus"></i> Yeni Konu Aç</button>' : ''}</div>
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="forum-search" placeholder="Konu veya #etiket ara..." /></div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -2872,7 +2888,8 @@ async function renderBookDetail(app, slug) {
   let data;
   try { data = await api('/book/' + slug); } catch (error) {
     if (error.data?.password_required) {
-      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><div class="book-unlock-kicker">ÖZEL KİTAP</div><h2>Bu kitap şifreli</h2><p>Kitaba erişmek için sahibinin belirlediği şifreyi girin.</p><div class="book-unlock-field"><i class="fas fa-key"></i><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /></div><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-unlock"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><div class="book-unlock-kicker">ÖZEL KİTAP</div><h2>Bu kitap şifreli</h2><p>Kitaba erişmek için sahibinin belirlediği şifreyi girin.</p><div class="book-unlock-field"><i class="fas fa-key"></i><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" style="padding-right:40px" /><button type="button" id="book-unlock-password-toggle" tabindex="-1" class="password-toggle-btn" aria-label="Şifreyi göster"><i class="fas fa-eye" id="book-unlock-password-icon"></i></button></div><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-unlock"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+      attachPasswordToggle($('#book-unlock-password'), $('#book-unlock-password-toggle'), $('#book-unlock-password-icon'));
       $('#book-unlock-btn').addEventListener('click', async () => { try { await api('/book/' + slug + '/unlock', { method: 'POST', body: JSON.stringify({ password: $('#book-unlock-password').value }) }); renderBookDetail(app, slug); } catch (unlockError) { $('#book-unlock-error').textContent = unlockError.message; } });
       $('#book-unlock-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('#book-unlock-btn').click(); });
       return;
@@ -3261,7 +3278,8 @@ async function renderPageReader(app, bookSlug, pageSlug) {
   let data;
   try { data = await api(`/book/${bookSlug}/page/${pageSlug}`); } catch (error) {
     if (error.data?.password_required) {
-      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><div class="book-unlock-kicker">ÖZEL KİTAP</div><h2>Bu kitap şifreli</h2><p>Bu sayfaya devam etmek için kitap şifresini girin.</p><div class="book-unlock-field"><i class="fas fa-key"></i><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" /></div><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-unlock"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+      app.innerHTML = `<div class="container page"><div class="book-unlock-panel"><div class="book-unlock-icon"><i class="fas fa-lock"></i></div><div class="book-unlock-kicker">ÖZEL KİTAP</div><h2>Bu kitap şifreli</h2><p>Bu sayfaya devam etmek için kitap şifresini girin.</p><div class="book-unlock-field"><i class="fas fa-key"></i><input type="password" id="book-unlock-password" placeholder="Kitap şifresi" autocomplete="off" style="padding-right:40px" /><button type="button" id="book-unlock-password-toggle" tabindex="-1" class="password-toggle-btn" aria-label="Şifreyi göster"><i class="fas fa-eye" id="book-unlock-password-icon"></i></button></div><button class="btn btn-primary" id="book-unlock-btn"><i class="fas fa-unlock"></i> Kitabın kilidini aç</button><div id="book-unlock-error" class="form-error"></div></div></div>`;
+      attachPasswordToggle($('#book-unlock-password'), $('#book-unlock-password-toggle'), $('#book-unlock-password-icon'));
       $('#book-unlock-btn').addEventListener('click', async () => { try { await api('/book/' + bookSlug + '/unlock', { method: 'POST', body: JSON.stringify({ password: $('#book-unlock-password').value }) }); renderPageReader(app, bookSlug, pageSlug); } catch (unlockError) { $('#book-unlock-error').textContent = unlockError.message; } });
       $('#book-unlock-password').addEventListener('keydown', event => { if (event.key === 'Enter') $('#book-unlock-btn').click(); });
       return;
@@ -5572,13 +5590,34 @@ async function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span>Şifre Değiştir</span></div>
         <div class="card-body">
-          <div class="form-group"><label>Eski Şifre</label><input type="password" id="old-pw" /></div>
-          <div class="form-group"><label>Yeni Şifre</label><input type="password" id="new-pw" /></div>
-          <div class="form-group"><label>Yeni Şifre (Tekrar)</label><input type="password" id="new-pw2" /></div>
+          <div class="form-group">
+            <label>Eski Şifre</label>
+            <div style="position:relative">
+              <input type="password" id="old-pw" style="padding-right:40px" />
+              <button type="button" id="old-pw-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="old-pw-icon"></i></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Yeni Şifre</label>
+            <div style="position:relative">
+              <input type="password" id="new-pw" style="padding-right:40px" />
+              <button type="button" id="new-pw-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="new-pw-icon"></i></button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Yeni Şifre (Tekrar)</label>
+            <div style="position:relative">
+              <input type="password" id="new-pw2" style="padding-right:40px" />
+              <button type="button" id="new-pw2-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="new-pw2-icon"></i></button>
+            </div>
+          </div>
           <button class="btn btn-primary" id="save-pw-btn">Değiştir</button>
           <div id="pw-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    attachPasswordToggle($('#old-pw'), $('#old-pw-toggle'), $('#old-pw-icon'));
+    attachPasswordToggle($('#new-pw'), $('#new-pw-toggle'), $('#new-pw-icon'));
+    attachPasswordToggle($('#new-pw2'), $('#new-pw2-toggle'), $('#new-pw2-icon'));
     $('#save-pw-btn').addEventListener('click', async () => {
       const old_password = $('#old-pw').value;
       const new_password = $('#new-pw').value;
@@ -6865,8 +6904,11 @@ async function renderDMChat(username) {
         <i class="fas fa-lock" style="font-size:36px;opacity:0.3"></i>
         <p style="color:var(--text-muted);margin-top:10px">Bu konuşma kilitli</p>
         ${hasPassword
-          ? `<div style="margin-top:16px;display:flex;gap:8px;width:100%;max-width:280px">
-               <input id="dm-unlock-pass" type="password" placeholder="Şifre" style="flex:1;padding:9px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px" />
+          ? `<div style="margin-top:16px;display:flex;gap:8px;width:100%;max-width:280px;position:relative">
+               <input id="dm-unlock-pass" type="password" placeholder="Şifre" style="flex:1;padding:9px 40px 9px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px" />
+               <button type="button" id="dm-unlock-pass-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px">
+                 <i class="fas fa-eye" id="dm-unlock-pass-icon"></i>
+               </button>
                <button class="btn btn-primary" id="dm-unlock-btn" style="flex-shrink:0">Aç</button>
              </div>`
           : `<button class="btn btn-primary" style="margin-top:14px" id="dm-unlock-btn">Kilidi Aç</button>`}
@@ -6875,6 +6917,10 @@ async function renderDMChat(username) {
       </div>
     </div>`;
     document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
+    const dmUnlockPassInput = document.getElementById('dm-unlock-pass');
+    const dmUnlockPassToggle = document.getElementById('dm-unlock-pass-toggle');
+    const dmUnlockPassIcon = document.getElementById('dm-unlock-pass-icon');
+    attachPasswordToggle(dmUnlockPassInput, dmUnlockPassToggle, dmUnlockPassIcon);
     document.getElementById('dm-unlock-btn')?.addEventListener('click', async () => {
       const pass = document.getElementById('dm-unlock-pass')?.value || '';
       try {
@@ -6915,8 +6961,6 @@ async function renderDMChat(username) {
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
-    <div class="dm-chat-security-banner">Mesajlar uçtan uca şifrelenmez; bu mesajlar uçtan ortaya şifrelenir.</div>
-
     <div class="dm-sel-actions-bar" id="dm-sel-actions-bar">
       <span class="dm-selection-label">Mesaj seçildi</span>
       <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
@@ -6926,6 +6970,7 @@ async function renderDMChat(username) {
 
     <!-- Messages -->
     <div class="dm-messages" id="dm-messages">
+      <div class="dm-chat-security-banner"><i class="fas fa-lock"></i> Mesajlar uçtan uca şifrelenmez; bu mesajlar uçtan ortaya şifrelenir.</div>
       ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
     </div>
 
@@ -7271,12 +7316,19 @@ function showDmOptionsMenu(username, convId) {
     hideModal();
     showModal('Konuşmayı Gizle', `
       <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Şifre koyarsanız açmak için şifre gerekecek.</p>
-      <div class="form-group"><label>Şifre (opsiyonel)</label><input id="dm-hide-pass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" placeholder="Şifresiz bırakmak için boş bırakın" /></div>
+      <div class="form-group">
+        <label>Şifre (opsiyonel)</label>
+        <div style="position:relative">
+          <input id="dm-hide-pass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" placeholder="Şifresiz bırakmak için boş bırakın" style="padding-right:40px" />
+          <button type="button" id="dm-hide-pass-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="dm-hide-pass-icon"></i></button>
+        </div>
+      </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-primary" id="dm-hide-confirm" style="flex:1">Gizle</button>
         <button class="btn btn-outline" onclick="hideModal()" style="flex:1">İptal</button>
       </div>
     `);
+    attachPasswordToggle($('#dm-hide-pass'), $('#dm-hide-pass-toggle'), $('#dm-hide-pass-icon'));
     document.getElementById('dm-hide-confirm')?.addEventListener('click', async () => {
       const pass = document.getElementById('dm-hide-pass')?.value || '';
       try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); }
@@ -7286,9 +7338,16 @@ function showDmOptionsMenu(username, convId) {
   document.getElementById('dm-opt-setpass')?.addEventListener('click', () => {
     hideModal();
     showModal('Şifre Değiştir', `
-      <div class="form-group"><label>Yeni Şifre (boş = şifresiz)</label><input id="dm-newpass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" /></div>
+      <div class="form-group">
+        <label>Yeni Şifre (boş = şifresiz)</label>
+        <div style="position:relative">
+          <input id="dm-newpass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" style="padding-right:40px" />
+          <button type="button" id="dm-newpass-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="dm-newpass-icon"></i></button>
+        </div>
+      </div>
       <button class="btn btn-primary" style="width:100%" id="dm-setpass-confirm">Kaydet</button>
     `);
+    attachPasswordToggle($('#dm-newpass'), $('#dm-newpass-toggle'), $('#dm-newpass-icon'));
     document.getElementById('dm-setpass-confirm')?.addEventListener('click', async () => {
       const pass = document.getElementById('dm-newpass')?.value || '';
       try { await api(`/conversation/${encodeURIComponent(username)}/set-password`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); toast('Şifre güncellendi'); }
