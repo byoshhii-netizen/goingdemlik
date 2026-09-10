@@ -504,9 +504,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .mobile-new-wrap, .nav-mobile-new-toggle, .mobile-new-dropdown { display: none; }
 .mobile-new-dropdown { position: fixed; right: 12px; top: 62px; width: 240px; max-width: calc(100vw - 24px); padding: 8px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; z-index: 110; }
 .mobile-new-dropdown .btn { width: 100%; min-width: 0; justify-content: center; padding: 7px 5px; font-size: 12px; white-space: nowrap; }
-.mobile-books-dropdown { width: 220px; padding: 10px; background: rgba(20,20,20,0.96); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; box-shadow: 0 18px 32px rgba(0,0,0,0.4); }
-.mobile-books-dropdown .mobile-books-option { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 78px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.08); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); color: var(--text-primary); font-size: 13px; font-weight: 700; }
-.mobile-books-dropdown .mobile-books-option i { font-size: 18px; }
 @media (max-width: 768px) {
   .nav-container { width: 100%; max-width: 100%; }
   .nav-links { display: none; }
@@ -517,8 +514,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .nav-brand .site-wordmark { display: inline; }
   #nav-user { display: none !important; }
   .mobile-header-action { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; font-size: 17px; }
-  .mobile-books-wrap { order: 2; }
-  .mobile-new-wrap:not(.mobile-books-wrap) { order: 1; }
+  .mobile-new-wrap { order: 1; }
   .mobile-books-btn { order: 2; }
   .mobile-notif-btn { order: 3; margin-left: auto; }
   .nav-mobile-toggle { order: 4; }
@@ -607,80 +603,6 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .card-body { padding: 20px; }
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .card-footer { padding: 12px 20px; border-top: 1px solid var(--border); }
-
-.poem-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 18px;
-}
-
-.poem-card {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  cursor: pointer;
-  transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
-}
-
-.poem-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(189,162,117,0.25);
-  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-}
-
-.poem-card-header {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.poem-card-title {
-  font-size: 18px;
-  font-weight: 800;
-  line-height: 1.35;
-  color: var(--text-primary);
-}
-
-.poem-card-author {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.poem-card-preview {
-  color: var(--text-secondary);
-  line-height: 1.7;
-  font-size: 14px;
-  display: -webkit-box;
-  -webkit-line-clamp: 5;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  white-space: pre-wrap;
-}
-
-.poem-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 16px;
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.poem-card-footer span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 
 .book-card {
   background: var(--bg-card);
@@ -1127,6 +1049,87 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   border: 1px solid rgba(88,101,242,0.25);
 }
 
+/* ===== POEM CARD ===== */
+.poem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
+}
+.poem-card {
+  background: var(--bg-card);
+  border: 1px solid rgba(189,162,117,0.15);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.2s;
+  cursor: pointer;
+  min-height: 200px;
+}
+.poem-card:hover { border-color: var(--border-hover); box-shadow: var(--glow); transform: translateY(-2px); }
+.poem-card-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.poem-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: 999px;
+  background: rgba(189,162,117,0.12); color: var(--text-primary);
+  border: 1px solid rgba(189,162,117,0.2);
+  font-size: 11px; font-weight: 700;
+}
+.poem-badge-hidden {
+  background: rgba(168,85,247,0.12);
+  border-color: rgba(168,85,247,0.35);
+  color: #d8b4fe;
+}
+.poem-card-title { font-size: 18px; font-weight: 800; line-height: 1.3; color: var(--text-primary); }
+.poem-card-preview {
+  flex: 1;
+  font-size: 14px; line-height: 1.7; color: var(--text-secondary);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden;
+}
+.poem-card-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.poem-detail {
+  max-width: 860px; margin: 0 auto;
+  background: rgba(255,255,255,0.012);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: clamp(16px, 4vw, 28px);
+}
+.poem-detail-header { margin-bottom: 20px; }
+.poem-detail-meta {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text-secondary); margin-bottom: 10px;
+}
+.poem-detail-title {
+  font-size: clamp(24px, 5vw, 40px); font-weight: 800; line-height: 1.1;
+  letter-spacing: -0.02em; margin-bottom: 12px; word-break: break-word; overflow-wrap: anywhere;
+}
+.poem-hidden-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 999px;
+  border: 1px solid rgba(168,85,247,0.35);
+  background: rgba(168,85,247,0.12); color: #d8b4fe;
+  font-size: 12px; font-weight: 700;
+}
+.poem-detail-content {
+  font-size: clamp(15px, 2.4vw, 18px);
+  line-height: 1.9; color: var(--text-primary);
+  white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;
+  padding: 18px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+.poem-actions {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .poem-grid { grid-template-columns: 1fr; gap: 14px; }
+  .poem-card { padding: 14px; min-height: 0; }
+  .poem-detail-meta { gap: 10px; font-size: 12px; }
+  .poem-detail { padding: 16px; }
+  .poem-actions { gap: 8px; }
+}
+
 /* ===== BOOK CARD ===== */
 .book-card {
   background: var(--bg-card);
@@ -1494,7 +1497,7 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .profile-link:hover { border-color: var(--border-hover); color: var(--text-primary); }
 .profile-stats { display: flex; gap: 24px; flex-wrap: wrap; }
 .profile-stats { align-items: center; justify-content: center; }
-.profile-actions { max-width: 100%; flex-wrap: wrap; justify-content: center; }
+.profile-actions { max-width: 100%; flex-wrap: wrap; justify-content: center; position: relative; }
 .profile-actions .btn { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .profile-stat { text-align: center; }
 .profile-stat-num { font-size: 22px; font-weight: 700; color: var(--accent-red2); }
@@ -2568,6 +2571,16 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   min-height: 54px;
   gap: 8px;
 }
+.dm-chat-security-banner {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(189, 162, 117, 0.08);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
 .dm-chat-header-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; overflow: hidden; }
 .dm-chat-header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .dm-call-btn { color: #55d89a; border: 1px solid rgba(85,216,154,.28); }
@@ -2729,14 +2742,17 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   display: flex; align-items: flex-end; gap: 8px;
   padding: 0;
   transition: none;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 .dm-input-wrap:focus-within { border-color: transparent; box-shadow: none; }
 .dm-input-wrap textarea {
-  flex: 1; background: transparent; border: none; resize: none;
+  flex: 1 1 150px; background: transparent; border: none; resize: none;
   color: var(--text-primary); font-size: 14px; outline: none;
   padding: 9px 13px; line-height: 1.35; min-height: 0; height: 40px; max-height: 120px;
   border: 1px solid var(--border); border-radius: 20px; background: var(--bg-tertiary);
   overflow-y: auto; font-family: inherit;
+  min-width: 0;
 }
 .dm-input-wrap textarea:focus { border-color: var(--accent-red2); box-shadow: 0 0 0 1px var(--accent-red); }
 .dm-input-img-btn {
@@ -2760,8 +2776,12 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-input-bar > * { min-width: 0; }
 .dm-img-preview-wrap {
   display: none; position: relative; flex-shrink: 0; margin-bottom: 4px;
+  max-width: min(120px, 30vw);
 }
-.dm-img-preview-wrap img { height: 48px; border-radius: 6px; object-fit: cover; display: block; }
+.dm-img-preview-wrap img {
+  height: 48px; width: auto; max-width: min(120px, 30vw);
+  border-radius: 6px; object-fit: cover; display: block;
+}
 .dm-img-clear {
   position: absolute; top: -6px; right: -6px;
   background: var(--accent-red); color: #fff; border: none; border-radius: 50%;
@@ -2825,8 +2845,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-msg-content { max-width: 82%; }
   .dm-msg-bubble { font-size: 15px; padding: 10px 13px; line-height: 1.5; }
   .dm-input-bar { padding: 8px; gap: 6px; }
-  .dm-input-wrap { min-height: 40px; padding: 0; border-radius: 0; align-items: flex-end; gap:6px; }
-  .dm-input-wrap textarea { min-width: 0; width: 100%; min-height: 0; height: 40px; padding:9px 11px; font-size: 13px; line-height: 1.35; max-height: 80px; }
+  .dm-input-wrap { min-height: 40px; padding: 0; border-radius: 0; align-items: flex-end; gap:6px; flex-wrap: nowrap; }
+  .dm-input-wrap textarea { min-width: 0; width: auto; min-height: 0; height: 40px; padding:9px 11px; font-size: 13px; line-height: 1.35; max-height: 80px; }
   .dm-input-img-btn { width:40px; height:40px; font-size:13px; padding:0; }
   .dm-send-btn { width: 40px; height: 40px; }
   .dm-messages { padding: 12px 10px 8px; }

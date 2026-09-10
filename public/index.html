@@ -105,6 +105,7 @@
       <div class="nav-links">
         <a href="/" data-link class="nav-link">Ana Sayfa</a>
         <a href="/konular" data-link class="nav-link">Konular</a>
+        <a href="/siirler" data-link class="nav-link">Şiirler</a>
         <a href="/kitaplar" data-link class="nav-link">Kitaplar</a>
         <a href="/muzikler" data-link class="nav-link">Müzikler</a>
         <a href="/video" data-link class="nav-link">Videolar</a>
@@ -121,13 +122,13 @@
           <button class="btn btn-primary btn-sm" id="nav-new-btn"><i class="fas fa-plus"></i> Yeni</button>
           <div id="new-dropdown" class="dropdown-menu hidden" style="right:0;top:calc(100% + 8px);min-width:180px">
             <button class="dropdown-item" id="nav-new-forum"><i class="fas fa-comments"></i> Konu</button>
+            <button class="dropdown-item" id="nav-new-poem"><i class="fas fa-pen-fancy"></i> Şiir</button>
             <button class="dropdown-item" id="nav-new-photo"><i class="fas fa-camera"></i> Fotoğraf</button>
             <button class="dropdown-item" id="nav-new-story"><i class="fas fa-circle"></i> Hikaye</button>
             <button class="dropdown-item" id="nav-new-video"><i class="fas fa-video"></i> Video</button>
             <button class="dropdown-item" id="nav-new-reals"><i class="fas fa-circle-play"></i> Reals</button>
             <button class="dropdown-item" id="nav-new-music"><i class="fas fa-music"></i> Müzik</button>
             <button class="dropdown-item" id="nav-new-book"><i class="fas fa-book"></i> Kitap</button>
-            <button class="dropdown-item" id="nav-new-poem"><i class="fas fa-pen-fancy"></i> Şiir</button>
             <button class="dropdown-item" id="nav-new-group"><i class="fas fa-users"></i> Grup</button>
           </div>
         </div>
@@ -150,7 +151,6 @@
             <a href="/arkadaslar" data-link class="dropdown-item" id="dropdown-friends"><i class="fas fa-user-friends"></i> Arkadaşlar</a>
             <a href="/siparislerim" data-link class="dropdown-item"><i class="fas fa-receipt"></i> Siparişlerim</a>
             <a href="/ayarlar" data-link class="dropdown-item"><i class="fas fa-cog"></i> Ayarlar</a>
-            <a href="/siirler" data-link class="dropdown-item"><i class="fas fa-pen-fancy"></i> Şiirler</a>
           <a href="/rozetler" data-link id="dropdown-badges" class="dropdown-item"><i class="fas fa-award"></i> Rozetler</a>
             <a href="/vmb" data-link class="dropdown-item" id="dropdown-vmb"><i class="fas fa-shield-halved"></i> VMB</a>
             <a href="/video" data-link class="dropdown-item" id="dropdown-videos"><i class="fas fa-video"></i> Videolar</a>
@@ -159,18 +159,11 @@
           </div>
         </div>
       </div>
-      <div class="mobile-new-wrap mobile-books-wrap" style="position:relative">
-        <button class="mobile-header-action mobile-books-btn" id="mobile-books-btn" type="button" aria-label="Kitaplar" title="Kitaplar"><i class="fas fa-book"></i></button>
-        <div class="mobile-new-dropdown mobile-books-dropdown hidden" id="mobile-books-dropdown">
-          <button class="btn btn-outline btn-sm mobile-books-option" id="mob-books-nav"><i class="fas fa-book"></i> Kitaplar</button>
-          <button class="btn btn-outline btn-sm mobile-books-option" id="mob-poems-nav"><i class="fas fa-pen-fancy"></i> Şiirler</button>
-        </div>
-      </div>
-      <button class="mobile-header-action mobile-notif-btn" id="mobile-notif-btn" type="button" aria-label="Bildirimler" title="Bildirimler"><i class="fas fa-bell"></i><span id="mobile-notif-badge"></span></button>
       <div class="mobile-new-wrap">
         <button class="nav-mobile-new-toggle" id="mobile-new-toggle" type="button" aria-label="Yeni paylaşım" title="Yeni paylaşım"><i class="fas fa-plus"></i></button>
         <div class="mobile-new-dropdown hidden" id="mobile-new-dropdown">
           <button class="btn btn-outline btn-sm" id="mob-new-forum"><i class="fas fa-comments"></i> Konu</button>
+          <button class="btn btn-outline btn-sm" id="mob-new-poem"><i class="fas fa-pen-fancy"></i> Şiir</button>
           <button class="btn btn-outline btn-sm" id="mob-new-photo"><i class="fas fa-camera"></i> Fotoğraf</button>
           <button class="btn btn-outline btn-sm" id="mob-new-story"><i class="fas fa-circle"></i> Hikaye</button>
           <button class="btn btn-outline btn-sm" id="mob-new-video"><i class="fas fa-video"></i> Video</button>
@@ -178,6 +171,14 @@
           <button class="btn btn-outline btn-sm" id="mob-new-music"><i class="fas fa-music"></i> Müzik</button>
           <button class="btn btn-outline btn-sm" id="mob-new-book"><i class="fas fa-book"></i> Kitap</button>
           <button class="btn btn-outline btn-sm" id="mob-new-group"><i class="fas fa-users"></i> Grup</button>
+        </div>
+      </div>
+      <button class="mobile-header-action mobile-notif-btn" id="mobile-notif-btn" type="button" aria-label="Bildirimler" title="Bildirimler"><i class="fas fa-bell"></i><span id="mobile-notif-badge"></span></button>
+      <div class="mobile-new-wrap" style="position:relative">
+        <button class="mobile-header-action mobile-books-btn" id="mobile-books-btn" type="button" aria-label="Kütüphane" title="Kütüphane"><i class="fas fa-book"></i></button>
+        <div class="mobile-new-dropdown hidden" id="mobile-books-dropdown">
+          <button class="btn btn-outline btn-sm" id="mob-books-nav"><i class="fas fa-book"></i> Kitaplar</button>
+          <button class="btn btn-outline btn-sm" id="mob-poems-nav"><i class="fas fa-pen-fancy"></i> Şiirler</button>
         </div>
       </div>
       <button class="nav-mobile-toggle" id="mobile-toggle">
@@ -192,8 +193,8 @@
       </div>
       <a href="/" data-link class="mobile-nav-link"><i class="fas fa-home" style="width:18px"></i> Ana Sayfa</a>
       <a href="/konular" data-link class="mobile-nav-link"><i class="fas fa-comments" style="width:18px"></i> Konular</a>
-      <a href="/kitaplar" data-link class="mobile-nav-link"><i class="fas fa-book" style="width:18px"></i> Kitaplar</a>
       <a href="/siirler" data-link class="mobile-nav-link"><i class="fas fa-pen-fancy" style="width:18px"></i> Şiirler</a>
+      <a href="/kitaplar" data-link class="mobile-nav-link"><i class="fas fa-book" style="width:18px"></i> Kitaplar</a>
       <a href="/video" data-link class="mobile-nav-link"><i class="fas fa-video" style="width:18px"></i> Videolar</a>
       <a href="/magaza" data-link class="mobile-nav-link"><i class="fas fa-store" style="width:18px"></i> Mağaza</a>
       <a href="/siparislerim" data-link class="mobile-nav-link"><i class="fas fa-receipt" style="width:18px"></i> Siparişlerim</a>
