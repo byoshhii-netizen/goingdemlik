@@ -6970,7 +6970,6 @@ async function renderDMChat(username) {
 
     <!-- Messages -->
     <div class="dm-messages" id="dm-messages">
-      <div class="dm-chat-security-banner"><i class="fas fa-lock"></i> Mesajlar uçtan uca şifrelenmez; bu mesajlar uçtan ortaya şifrelenir.</div>
       ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
     </div>
 
