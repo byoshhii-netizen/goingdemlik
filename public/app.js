@@ -7797,7 +7797,7 @@ async function renderFriends(app) {
       if (!users.length) { res.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center">Sonuç bulunamadı</p>'; return; }
       res.innerHTML = users.map(u => { const relation = friends.find(friend => friend.other_username === u.username); const requestPending = relation?.status === 'pending' && String(relation.requester_id) === String(currentUser.id); const accepted = relation?.status === 'accepted'; return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <a href="${profileRoute(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
+        <a href="/mesajlar/${encodeURIComponent(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
         <button class="btn ${requestPending || accepted ? 'btn-outline' : 'btn-primary'} btn-sm send-friend-btn" data-username="${escHtml(u.username)}" ${requestPending || accepted ? 'disabled' : ''}><i class="fas fa-user-plus"></i> ${accepted ? 'Arkadaşsınız' : requestPending ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>
       </div>`; }).join('');
       $$('.send-friend-btn').forEach(btn => {
@@ -7865,7 +7865,7 @@ function friendItemHTML(f, type, myId) {
   return `<div class="card card-body friend-card" data-type="${type}" data-username="${escHtml(other_username)}" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
-      <a href="${profileRoute(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
+      <a href="/mesajlar/${encodeURIComponent(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
