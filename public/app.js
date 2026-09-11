@@ -1575,7 +1575,10 @@ async function showMyGroupsModal() {
 }
 $('#mobile-books-btn')?.addEventListener('click', e => {
   e.stopPropagation();
-  $('#mobile-books-dropdown')?.classList.toggle('hidden');
+  const booksDropdown = $('#mobile-books-dropdown');
+  if (!booksDropdown) return;
+  if (booksDropdown.parentElement !== document.body) document.body.appendChild(booksDropdown);
+  booksDropdown.classList.toggle('hidden');
 });
 $('#mob-books-nav')?.addEventListener('click', () => {
   $('#mobile-books-dropdown')?.classList.add('hidden');
