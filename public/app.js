@@ -6724,10 +6724,10 @@ async function renderMessages(app, targetUsername) {
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
     return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}">
-      <a href="${otherProfile}" data-link class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} profilini aç">${avatarHTML}</a>
+      <span class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
-          <a href="${otherProfile}" data-link class="dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}>${escHtml(c.other_username)}</a>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
+          <span class="dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}>${escHtml(c.other_username)}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
           ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
         </div>
         <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
