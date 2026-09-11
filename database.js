@@ -880,6 +880,10 @@ async function initDb() {
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS public_id TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user2 BIGINT DEFAULT 0;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user1 TIMESTAMP;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user2 TIMESTAMP;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user1 INTEGER DEFAULT 0;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user2 INTEGER DEFAULT 0;
     CREATE TABLE IF NOT EXISTS voice_calls (
       id UUID PRIMARY KEY,
       caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -2580,6 +2580,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-conv-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
 .dm-conv-name { font-size: 14px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dm-conv-last { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-conv-options-btn { flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.dm-conv-options-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .dm-unread-badge {
   background: var(--accent-red); color: #fff;
   font-size: 10px; padding: 1px 6px; border-radius: 10px; flex-shrink: 0;

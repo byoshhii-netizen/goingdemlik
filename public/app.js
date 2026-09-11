@@ -6723,7 +6723,7 @@ async function renderMessages(app, targetUsername) {
     const avatarHTML = hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed })
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
-    return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}">
+    return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}">
       <a href="${otherProfile}" data-link class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} profilini aç">${avatarHTML}</a>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
@@ -6732,11 +6732,16 @@ async function renderMessages(app, targetUsername) {
         </div>
         <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
       </div>
+      <button type="button" class="dm-conv-options-btn" title="Sohbet seçenekleri" aria-label="${escHtml(c.other_username)} sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
     </div>`;
   }
   const bindConversationItems = () => document.querySelectorAll('.dm-conv-item').forEach(item => {
     if (item.dataset.bound) return;
     item.dataset.bound = '1';
+    item.querySelector('.dm-conv-options-btn')?.addEventListener('click', event => {
+      event.stopPropagation();
+      showDmOptionsMenu(item.dataset.username, item.dataset.conversationId);
+    });
     item.addEventListener('click', event => {
       if (event?.target?.closest?.('a')) return;
       document.querySelectorAll('.dm-conv-item').forEach(other => other.classList.remove('active'));
@@ -6754,7 +6759,7 @@ async function renderMessages(app, targetUsername) {
         </div>
         <div class="dm-sidebar-actions">
           <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>
-          <button class="btn btn-primary dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj"><i class="fas fa-edit"></i></button>
+          <button class="btn btn-primary dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj"><i class="fas fa-plus"></i></button>
         </div>
       </div>
       <div class="dm-search-wrap">
@@ -7303,14 +7308,23 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
 function showDmOptionsMenu(username, convId) {
   showModal('Konuşma Seçenekleri', `
     <div style="display:flex;flex-direction:column;gap:8px">
-      <div class="call-mute-title"><i class="fas fa-bell-slash"></i> Aramaları sessize al</div>
-      <div class="call-mute-grid"><button class="btn btn-outline call-mute-option" data-hours="5">5 saat</button><button class="btn btn-outline call-mute-option" data-hours="10">10 saat</button><button class="btn btn-outline call-mute-option" data-hours="24">24 saat</button><button class="btn btn-outline call-mute-option" data-hours="0">Aç</button></div>
-      <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Gizle / Kilitle</button>
+      <div class="call-mute-title"><i class="fas fa-bell-slash"></i> Mesaj bildirimlerini sessize al</div>
+      <div class="call-mute-grid"><button class="btn btn-outline dm-mute-option" data-hours="2">2 saat</button><button class="btn btn-outline dm-mute-option" data-hours="5">5 saat</button><button class="btn btn-outline dm-mute-option" data-hours="10">10 saat</button><button class="btn btn-outline dm-mute-option" data-hours="24">24 saat</button><button class="btn btn-outline dm-mute-option" data-hours="forever">Kapatana kadar</button><button class="btn btn-outline dm-mute-option" data-hours="unmute">Sessizi aç</button></div>
+      <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Kilitle</button>
       <button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>
-      <button class="btn btn-danger" id="dm-opt-delete"><i class="fas fa-trash"></i> Konuşmayı Sil</button>
+      <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
+      <button class="btn btn-danger" id="dm-opt-clear-all"><i class="fas fa-trash-alt"></i> Herkesten temizle</button>
     </div>
   `);
-  document.querySelectorAll('.call-mute-option').forEach(button => button.addEventListener('click', () => { setVoiceCallMute(Number(button.dataset.hours)); hideModal(); toast(Number(button.dataset.hours) ? `Aramalar ${button.dataset.hours} saat sessizde` : 'Arama bildirimleri açıldı'); }));
+  document.querySelectorAll('.dm-mute-option').forEach(button => button.addEventListener('click', async () => {
+    const value = button.dataset.hours;
+    const hours = value === 'unmute' ? null : value;
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}/mute`, { method: 'POST', body: JSON.stringify({ hours }) });
+      hideModal();
+      toast(value === 'unmute' ? 'Mesaj bildirimleri açıldı' : value === 'forever' ? 'Mesaj bildirimleri kapatıldı' : `Mesaj bildirimleri ${value} saat sessizde`);
+    } catch (e) { toast(e.message, 'error'); }
+  }));
   document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
     showModal('Konuşmayı Gizle', `
@@ -7353,10 +7367,21 @@ function showDmOptionsMenu(username, convId) {
       catch (e) { toast(e.message, 'error'); }
     });
   });
-  document.getElementById('dm-opt-delete')?.addEventListener('click', async () => {
-    if (!confirm('Konuşma silinsin mi?')) return;
-    try { await api(`/conversation/${encodeURIComponent(username)}`, { method: 'DELETE' }); hideModal(); navigate('/mesajlar'); toast('Konuşma silindi'); }
-    catch (e) { toast(e.message, 'error'); }
+  const clearConversation = async mode => {
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}`, { method: 'DELETE', body: JSON.stringify({ mode }) });
+      hideModal();
+      navigate('/mesajlar/' + username);
+      toast(mode === 'all' ? 'Sohbet iki taraftan temizlendi' : 'Sohbet sadece sizden temizlendi');
+    } catch (e) { toast(e.message, 'error'); }
+  };
+  document.getElementById('dm-opt-clear-me')?.addEventListener('click', () => {
+    if (confirm('Sohbet yalnızca sizden temizlensin mi?')) clearConversation('me');
+  });
+  document.getElementById('dm-opt-clear-all')?.addEventListener('click', () => {
+    if (!confirm('Bu sohbet tüm mesajlarıyla iki taraftan da temizlensin mi?')) return;
+    if (!confirm('Son kez soruyorum: Karşı taraftaki mesajlar da kalıcı olarak silinsin mi?')) return;
+    clearConversation('all');
   });
 }
 

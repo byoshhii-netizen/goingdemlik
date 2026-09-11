@@ -6902,6 +6902,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
         CASE WHEN c.user1_id=$1 THEN deleted_by_receiver=0 ELSE deleted_by_sender=0 END
         AND deleted_for_all=0
         AND id > CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user1,0) ELSE COALESCE(c.read_until_user2,0) END
+        AND CASE WHEN c.user1_id=$1 THEN (COALESCE(c.mute_forever_user1,0)=0 AND (c.muted_until_user1 IS NULL OR c.muted_until_user1 <= NOW())) ELSE (COALESCE(c.mute_forever_user2,0)=0 AND (c.muted_until_user2 IS NULL OR c.muted_until_user2 <= NOW())) END
       ) as unread_count
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
@@ -6963,6 +6964,7 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
     AND CASE WHEN c.user1_id=$1 THEN m.deleted_by_receiver=0 ELSE m.deleted_by_sender=0 END
     AND m.deleted_for_all=0
     AND m.id > CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user1,0) ELSE COALESCE(c.read_until_user2,0) END
+    AND CASE WHEN c.user1_id=$1 THEN (COALESCE(c.mute_forever_user1,0)=0 AND (c.muted_until_user1 IS NULL OR c.muted_until_user1 <= NOW())) ELSE (COALESCE(c.mute_forever_user2,0)=0 AND (c.muted_until_user2 IS NULL OR c.muted_until_user2 <= NOW())) END
   `, [uid]);
   res.json({ count: parseInt(rows[0].c) });
 });
@@ -7134,6 +7136,31 @@ app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) =>
   res.json({ ok: true });
 });
 
+app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) => {
+  const { hours } = req.body || {};
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const other = target[0];
+  const uid = req.user.id;
+  const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
+  const { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
+  if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
+  const conv = convRows[0];
+  const isUser1 = conv.user1_id == uid;
+  const untilColumn = isUser1 ? 'muted_until_user1' : 'muted_until_user2';
+  const foreverColumn = isUser1 ? 'mute_forever_user1' : 'mute_forever_user2';
+  if (hours === null || hours === undefined || Number(hours) < 0) {
+    await query(`UPDATE dm_conversations SET ${untilColumn}=NULL, ${foreverColumn}=0 WHERE id=$1`, [conv.id]);
+  } else if (String(hours) === 'forever' || Number(hours) === 0) {
+    await query(`UPDATE dm_conversations SET ${untilColumn}=NULL, ${foreverColumn}=1 WHERE id=$1`, [conv.id]);
+  } else {
+    const duration = Number(hours);
+    if (![2, 5, 10, 24].includes(duration)) return res.status(400).json({ error: 'Geçersiz sessize alma süresi' });
+    await query(`UPDATE dm_conversations SET ${untilColumn}=NOW() + ($1 * INTERVAL '1 hour'), ${foreverColumn}=0 WHERE id=$2`, [duration, conv.id]);
+  }
+  res.json({ ok: true });
+});
+
 app.post('/api/conversation/:username/unhide', authMiddleware, async (req, res) => {
   const { password } = req.body;
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
@@ -7226,6 +7253,8 @@ app.post('/api/messages/delete-bulk', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
+  const mode = req.body?.mode || 'me';
+  if (!['me', 'all'].includes(mode)) return res.status(400).json({ error: 'Geçersiz temizleme türü' });
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
@@ -7235,9 +7264,14 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
   if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
-  // Sadece kendi tarafından gizle (soft delete)
-  if (isUser1) await query('UPDATE dm_conversations SET hidden_by_user1=2 WHERE id=$1', [conv.id]);
-  else await query('UPDATE dm_conversations SET hidden_by_user2=2 WHERE id=$1', [conv.id]);
+  if (mode === 'all') {
+    await query('UPDATE dm_messages SET deleted_for_all=1 WHERE conversation_id=$1', [conv.id]);
+  } else {
+    const deletedColumn = isUser1 ? 'deleted_by_sender' : 'deleted_by_receiver';
+    const ownDeletedColumn = isUser1 ? 'deleted_by_receiver' : 'deleted_by_sender';
+    await query(`UPDATE dm_messages SET ${deletedColumn}=1 WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, uid]);
+    await query(`UPDATE dm_messages SET ${ownDeletedColumn}=1 WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, other.id]);
+  }
   res.json({ ok: true });
 });
 
