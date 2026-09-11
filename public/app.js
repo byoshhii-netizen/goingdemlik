@@ -6743,7 +6743,10 @@ async function renderMessages(app, targetUsername) {
       showDmOptionsMenu(item.dataset.username, item.dataset.conversationId);
     });
     item.addEventListener('click', event => {
-      if (event?.target?.closest?.('a')) return;
+      if (event?.target?.closest?.('a')) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
       document.querySelectorAll('.dm-conv-item').forEach(other => other.classList.remove('active'));
       item.classList.add('active');
       navigate('/mesajlar/' + item.dataset.username);
