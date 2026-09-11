@@ -506,8 +506,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .mobile-new-dropdown .btn { width: 100%; min-width: 0; justify-content: center; padding: 7px 5px; font-size: 12px; white-space: nowrap; }
 .mobile-books-dropdown {
   position: fixed;
-  left: 50%;
-  top: 50%;
+  inset: 50% auto auto 50%;
   transform: translate(-50%, -50%);
   right: auto;
   width: min(320px, calc(100vw - 32px));
