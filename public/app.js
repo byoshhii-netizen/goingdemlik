@@ -7118,7 +7118,7 @@ async function renderDMChat(username) {
 
   document.getElementById('dm-send-btn')?.addEventListener('click', sendDmMessage);
   textareaEl?.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); sendDmMessage(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); }
   });
 
   // Msg menu button clicks
