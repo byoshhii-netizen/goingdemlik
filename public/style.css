@@ -896,6 +896,33 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 @media (max-width:600px) {
   .reals-ad-title-link { font-size:18px; }
   .ad-portal-hero { align-items:flex-start; padding:16px; }
+
+/* Kitap detayında kapak, dar kolon yerine sayfayı taşıyan banner olarak görünür. */
+.book-detail-header {
+  display: block;
+}
+.book-detail-cover {
+  position: relative;
+  width: 100% !important;
+  max-width: none !important;
+  height: clamp(280px, 52vh, 520px);
+  min-height: 280px;
+  aspect-ratio: auto;
+  margin-bottom: 24px;
+  border-radius: 18px;
+  background: var(--bg-card2);
+  box-shadow: 0 18px 45px rgba(0,0,0,.28);
+}
+.book-detail-cover img {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+  object-position: center;
+}
+.book-detail-info {
+  width: 100%;
+}
   .ad-portal-hero h2 { font-size:19px; }
   .ad-portal-stats { grid-template-columns:1fr 1fr 1fr; gap:6px; }
   .ad-portal-stats > div { padding:11px 8px; }
@@ -3004,6 +3031,34 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .page-title { font-size: 20px !important; }
   .forum-detail-title { font-size: 18px !important; }
   .btn { font-size: 13px !important; }
+}
+
+/* Final book detail layout: full-width cover banner on every viewport. */
+.book-detail-header {
+  display: block !important;
+}
+.book-detail-cover {
+  position: relative;
+  width: 100% !important;
+  max-width: none !important;
+  height: clamp(280px, 52vh, 520px) !important;
+  min-height: 280px !important;
+  aspect-ratio: auto !important;
+  margin-bottom: 24px;
+  align-self: stretch !important;
+  border-radius: 18px;
+  background: var(--bg-card2);
+  box-shadow: 0 18px 45px rgba(0,0,0,.28);
+}
+.book-detail-cover img {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  object-position: center;
+}
+.book-detail-info {
+  width: 100% !important;
 }
 
 /* ===== DUYURU BANNER ===== */
