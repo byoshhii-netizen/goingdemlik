@@ -645,9 +645,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
 }
 .book-card:hover { transform: translateY(-2px); border-color: rgba(189,162,117,0.25); box-shadow: 0 10px 30px rgba(0,0,0,0.25); }
-.book-cover { aspect-ratio: 2/3; overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); display: flex; align-items: center; justify-content: center; }
-.book-cover img { width: 100%; height: 100%; object-fit: cover; }
-.book-cover-placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 32px; }
+.book-cover { overflow: hidden; background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0)); display: flex; align-items: center; justify-content: center; width: 100%; min-height: 170px; }
+.book-cover img { display: block; width: 100%; height: auto; object-fit: contain; object-position: center; }
+.book-cover-placeholder { width: 100%; min-height: 170px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 32px; }
 .video-list-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
 .video-home-header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
 .video-search-bar { display:flex; align-items:center; gap:10px; max-width:680px; margin:0 auto 24px; padding:0 16px; border:1px solid var(--border); border-radius:999px; background:var(--bg-card); color:var(--text-muted); }
@@ -981,9 +981,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .book-author, .book-pages { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
 .book-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-top: 6px; }
 
-.book-detail-header { display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: flex-start; margin-bottom: 32px; }
-.book-detail-cover { width: 100%; min-height: 360px; border-radius: var(--radius); overflow: hidden; background: var(--bg-card2); display: flex; align-items: center; justify-content: center; }
-.book-detail-cover img { width: 100%; height: 100%; object-fit: cover; }
+.book-detail-header { display: grid; grid-template-columns: minmax(260px, 320px) minmax(420px, 1fr); gap: 24px; align-items: flex-start; margin-bottom: 32px; }
+.book-detail-cover { width: 100%; max-width: 320px; border-radius: var(--radius); overflow: hidden; background: var(--bg-card2); display: flex; align-items: center; justify-content: center; }
+.book-detail-cover img { display: block; width: 100%; height: auto; max-height: 560px; object-fit: contain; object-position: center; }
 
 /* Restore brown background for book detail cover to match original style */
 .book-detail-cover { background: var(--bg-card2); }
