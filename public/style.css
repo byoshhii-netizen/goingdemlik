@@ -3050,12 +3050,23 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   background: var(--bg-card2);
   box-shadow: 0 18px 45px rgba(0,0,0,.28);
 }
+.book-detail-cover::before {
+  content: '';
+  position: absolute;
+  inset: -24px;
+  background: var(--book-cover-image) center / cover no-repeat;
+  filter: blur(24px);
+  opacity: .42;
+  transform: scale(1.08);
+}
 .book-detail-cover img {
   display: block;
   width: 100% !important;
   height: 100% !important;
-  object-fit: cover !important;
+  object-fit: contain !important;
   object-position: center;
+  position: relative;
+  z-index: 1;
 }
 .book-detail-info {
   width: 100% !important;

@@ -2996,7 +2996,7 @@ async function renderBookDetail(app, slug) {
     </style>
     ${unnamedBannerHTML}
     <div class="book-detail-header">
-      <div class="book-detail-cover">
+      <div class="book-detail-cover"${book.cover_image ? ` style="--book-cover-image:url('${escHtml(book.cover_image)}')"` : ''}>
         ${book.cover_image ? `<img src="${escHtml(book.cover_image)}" alt="" />` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-card2)"><i class="fas fa-book" style="font-size:40px;color:var(--text-muted)"></i></div>`}
       </div>
       <div class="book-detail-info">
