@@ -718,7 +718,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   text-overflow: ellipsis;
   word-break: break-word;
   max-width: 100%;
-  white-space: normal;
+  white-space: pre-wrap;
 }
 
 /* Ensure flex children can shrink so titles don't force overflow */

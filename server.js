@@ -7075,12 +7075,13 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
   let { content, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id } = req.body;
+  content = content == null ? '' : String(content);
   let image_url = '';
   if (req.file) {
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
   if (shared_photo_id && !content) content = ' ';
-  if (!content?.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
     'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
     [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]

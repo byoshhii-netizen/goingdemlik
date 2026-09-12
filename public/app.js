@@ -7204,7 +7204,7 @@ function updateDmSelActions() {
 function dmMessageHTML(m, myId, selMode) {
   const isOwn = m.sender_id == myId;
   const deleted = m.deleted_for_all;
-  const messageText = String(m.content || '').replace(/\s+/g, ' ').trim();
+  const messageText = String(m.content || '');
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe && !deleted) return '';
   const senderName = m.sender_username || 'Silinmiş kullanıcı';
