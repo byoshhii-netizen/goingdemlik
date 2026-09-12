@@ -1573,11 +1573,25 @@ async function showMyGroupsModal() {
     $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
+function closeMobileBooksMenu() {
+  $('#mobile-books-dropdown')?.classList.add('hidden');
+  $('#mobile-books-backdrop')?.remove();
+}
 $('#mobile-books-btn')?.addEventListener('click', e => {
   e.stopPropagation();
   const booksDropdown = $('#mobile-books-dropdown');
   if (!booksDropdown) return;
+  const isOpen = !booksDropdown.classList.contains('hidden');
+  if (isOpen) {
+    closeMobileBooksMenu();
+    return;
+  }
   if (booksDropdown.parentElement !== document.body) document.body.appendChild(booksDropdown);
+  const backdrop = document.createElement('div');
+  backdrop.id = 'mobile-books-backdrop';
+  backdrop.className = 'mobile-books-backdrop';
+  backdrop.addEventListener('click', closeMobileBooksMenu);
+  document.body.appendChild(backdrop);
   booksDropdown.style.position = 'absolute';
   booksDropdown.style.left = '50%';
   booksDropdown.style.top = `${window.scrollY + window.innerHeight / 2}px`;
@@ -1586,11 +1600,11 @@ $('#mobile-books-btn')?.addEventListener('click', e => {
   booksDropdown.classList.toggle('hidden');
 });
 $('#mob-books-nav')?.addEventListener('click', () => {
-  $('#mobile-books-dropdown')?.classList.add('hidden');
+  closeMobileBooksMenu();
   navigate('/kitaplar');
 });
 $('#mob-poems-nav')?.addEventListener('click', () => {
-  $('#mobile-books-dropdown')?.classList.add('hidden');
+  closeMobileBooksMenu();
   navigate('/siirler');
 });
 $('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler'));
@@ -1603,7 +1617,7 @@ document.addEventListener('click', e => {
     $('#mobile-new-dropdown')?.classList.add('hidden');
   }
   if (!$('#mobile-books-dropdown')?.contains(e.target) && !$('#mobile-books-btn')?.contains(e.target)) {
-    $('#mobile-books-dropdown')?.classList.add('hidden');
+    closeMobileBooksMenu();
   }
 });
 
