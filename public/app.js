@@ -1578,6 +1578,11 @@ $('#mobile-books-btn')?.addEventListener('click', e => {
   const booksDropdown = $('#mobile-books-dropdown');
   if (!booksDropdown) return;
   if (booksDropdown.parentElement !== document.body) document.body.appendChild(booksDropdown);
+  booksDropdown.style.position = 'absolute';
+  booksDropdown.style.left = '50%';
+  booksDropdown.style.top = `${window.scrollY + window.innerHeight / 2}px`;
+  booksDropdown.style.right = 'auto';
+  booksDropdown.style.transform = 'translate(-50%, -50%)';
   booksDropdown.classList.toggle('hidden');
 });
 $('#mob-books-nav')?.addEventListener('click', () => {
