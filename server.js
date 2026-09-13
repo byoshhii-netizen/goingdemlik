@@ -2943,9 +2943,57 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   const { rows: likeCountRows } = await query('SELECT COUNT(*)::int AS c FROM book_likes WHERE book_id=$1', [book.id]);
   const likeCount = parseInt(likeCountRows[0]?.c || 0);
   const liked = req.user?.id ? Boolean((await query('SELECT 1 FROM book_likes WHERE book_id=$1 AND user_id=$2 LIMIT 1', [book.id, req.user.id])).rows.length) : false;
+  const { rows: commentRows } = await query(`
+    SELECT bc.id, bc.content, bc.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    FROM book_comments bc JOIN users u ON bc.user_id=u.id
+    WHERE bc.book_id=$1 ORDER BY bc.created_at ASC
+  `, [book.id]);
+
   book.like_count = likeCount;
   book.liked = liked;
-  res.json({ book: sanitizeBook(book), chapters, pages });
+  book.comment_count = commentRows.length || parseInt(book.comment_count || 0);
+  res.json({ book: sanitizeBook(book), chapters, pages, comments: commentRows });
+});
+
+app.get('/api/book/:slug/comments', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  const { rows } = await query(`
+    SELECT bc.id, bc.content, bc.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    FROM book_comments bc JOIN users u ON bc.user_id=u.id
+    WHERE bc.book_id=$1 ORDER BY bc.created_at ASC
+  `, [book.id]);
+  res.json(rows);
+});
+
+app.post('/api/book/:slug/comments', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  const content = String(req.body?.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
+  const { rows: inserted } = await query(`
+    INSERT INTO book_comments (book_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,book_id,user_id,content,created_at
+  `, [book.id, req.user.id, content]);
+  await query('UPDATE books SET comment_count=COALESCE(comment_count,0)+1 WHERE id=$1', [book.id]);
+  const { rows: full } = await query(`
+    SELECT bc.id, bc.content, bc.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    FROM book_comments bc JOIN users u ON bc.user_id=u.id WHERE bc.id=$1
+  `, [inserted[0].id]);
+  res.json(full[0]);
+});
+
+app.delete('/api/book/:slug/comments/:id', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  const { rows: commentRows } = await query('SELECT * FROM book_comments WHERE id=$1 AND book_id=$2', [req.params.id, book.id]);
+  if (!commentRows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  if (commentRows[0].user_id !== req.user.id && req.user.id !== book.user_id) return res.status(403).json({ error: 'Yetki yok' });
+  await query('DELETE FROM book_comments WHERE id=$1', [commentRows[0].id]);
+  await query('UPDATE books SET comment_count=GREATEST(0, COALESCE(comment_count,0)-1) WHERE id=$1', [book.id]);
+  res.json({ ok: true });
 });
 
 app.post('/api/book/:slug/like', authMiddleware, async (req, res) => {
@@ -3033,17 +3081,15 @@ app.post('/api/book/:slug/unlock', authMiddleware, async (req, res) => {
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
     const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
-    // İsimsiz seçildiyse başlık zorunlu değil, placeholder atanır
-    const finalTitle = is_unnamed ? ('İsimsiz Kitap #' + Date.now().toString().slice(-6)) : title;
-    if (!is_unnamed && !title) return res.status(400).json({ error: 'Başlık zorunlu' });
-    // İsimsiz kitap her zaman gizli olur
+    const finalTitle = is_unnamed ? ('İsimsiz Kitap #' + Date.now().toString().slice(-6)) : String(title || '').trim();
+    if (!is_unnamed && !finalTitle) return res.status(400).json({ error: 'Başlık zorunlu' });
     const finalHidden = is_unnamed ? 1 : (is_hidden ? 1 : 0);
-    const tempSlug = slugify(finalTitle, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
+    const tempSlug = slugify(finalTitle || 'isimsiz-kitap', { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     if (book_password && String(book_password).length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed,password_hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id',
+    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed,password_hash,comment_count,like_count,share_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,0,0) RETURNING id',
       [req.user.id, finalTitle, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0, book_password ? hashPassword(book_password) : '']);
     const id = rows[0].id;
-    const realSlug = makeSlug(title, id);
+    const realSlug = makeSlug(finalTitle, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
     await query('UPDATE users SET book_count=book_count+1 WHERE id=$1', [req.user.id]);
     await updateUserLevel(req.user.id);

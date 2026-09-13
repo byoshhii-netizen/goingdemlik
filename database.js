@@ -482,6 +482,7 @@ async function initDb() {
       password_hash TEXT DEFAULT '',
       like_count INTEGER DEFAULT 0,
       share_count INTEGER DEFAULT 0,
+      comment_count INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -496,6 +497,7 @@ async function initDb() {
     ALTER TABLE books ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS like_count INTEGER DEFAULT 0;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS comment_count INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS book_likes (
       id BIGSERIAL PRIMARY KEY,
@@ -503,6 +505,14 @@ async function initDb() {
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(book_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS book_comments (
+      id BIGSERIAL PRIMARY KEY,
+      book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
     );
 
     CREATE TABLE IF NOT EXISTS book_access (

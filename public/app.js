@@ -2919,7 +2919,7 @@ async function renderBookDetail(app, slug) {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Kitap bulunamadı veya gizli.</p></div></div>'; return;
   }
 
-  const { book, chapters, pages } = data;
+  const { book, chapters, pages, comments = [] } = data;
   document.title = book.title + ' – ' + siteName;
   updatePageMeta(book.title + ' – ' + siteName, book.preface ? book.preface.substring(0,155) : book.title + ' – CigCig\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
@@ -2961,6 +2961,22 @@ async function renderBookDetail(app, slug) {
     </div>`;
 
   const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug)).join('');
+
+  const bookCommentsHTML = currentUser ? `<div class="book-comments-section">
+    <div class="book-comments-title"><i class="fas fa-comment-dots"></i> Kitap Yorumları (${comments.length || 0})</div>
+    <div class="book-comment-form">
+      <textarea id="book-comment-input" rows="3" placeholder="Bu kitaba yorum yaz..."></textarea>
+      <button class="btn btn-primary btn-sm" id="book-comment-submit"><i class="fas fa-paper-plane"></i> Gönder</button>
+    </div>
+    ${comments.length ? `<div class="book-comments-list">${comments.map(c => `<div class="book-comment-item">
+      <div class="book-comment-head">
+        <span class="book-comment-author">${avatarImg(c, 'avatar-sm')} ${escHtml(c.username || 'Kullanıcı')}</span>
+        <span class="book-comment-date">${formatDate(c.created_at)}</span>
+        ${(currentUser && (currentUser.id === c.user_id || isOwner)) ? `<button class="book-comment-delete" data-id="${c.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}
+      </div>
+      <div class="book-comment-body">${escHtml(c.content)}</div>
+    </div>`).join('')}</div>` : `<div class="empty-state"><i class="fas fa-comment-dots"></i><p>Henüz yorum yok.</p></div>`}
+  </div>` : `<div class="book-comments-section"><div class="book-comments-title"><i class="fas fa-comment-dots"></i> Kitap Yorumları (${comments.length || 0})</div><div class="empty-state"><i class="fas fa-user-lock"></i><p>Yorum yapmak için giriş yapın.</p></div></div>`;
 
   // İsimsiz kitap hatırlatma banner'ı
   const unnamedBannerHTML = (isOwner && book.is_unnamed) ? `
@@ -3028,6 +3044,7 @@ async function renderBookDetail(app, slug) {
         </div>` : ''}
       </div>
     </div>
+    ${bookCommentsHTML}
     <div class="chapters-list">
       ${resumeHTML}
       ${!chapters.length && !pages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
@@ -3035,6 +3052,37 @@ async function renderBookDetail(app, slug) {
       ${chapListHTML}
     </div>
   </div>`;
+
+  $('#book-comment-submit')?.addEventListener('click', async () => {
+    const content = $('#book-comment-input')?.value.trim();
+    if (!content) { toast('Yorum boş olamaz', 'error'); return; }
+    try {
+      const comment = await api(`/book/${encodeURIComponent(slug)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+      const list = $('.book-comments-list');
+      if (list) {
+        list.insertAdjacentHTML('beforeend', `<div class="book-comment-item">
+          <div class="book-comment-head">
+            <span class="book-comment-author">${avatarImg(comment, 'avatar-sm')} ${escHtml(comment.username || 'Kullanıcı')}</span>
+            <span class="book-comment-date">${formatDate(comment.created_at)}</span>
+          </div>
+          <div class="book-comment-body">${escHtml(comment.content)}</div>
+        </div>`);
+      } else {
+        renderBookDetail(app, slug);
+      }
+      $('#book-comment-input').value = '';
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  $('.book-comment-delete')?.forEach(btn => btn.addEventListener('click', async event => {
+    event.preventDefault();
+    const id = btn.dataset.id;
+    try {
+      await api(`/book/${encodeURIComponent(slug)}/comments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      btn.closest('.book-comment-item')?.remove();
+      toast('Yorum silindi');
+    } catch (e) { toast(e.message, 'error'); }
+  }));
 
   $('#book-like-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
