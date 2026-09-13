@@ -480,6 +480,8 @@ async function initDb() {
       page_count INTEGER DEFAULT 0,
       is_hidden INTEGER DEFAULT 0,
       password_hash TEXT DEFAULT '',
+      like_count INTEGER DEFAULT 0,
+      share_count INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -492,6 +494,16 @@ async function initDb() {
     ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_pdf INTEGER DEFAULT 1;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS is_unnamed INTEGER DEFAULT 0;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS password_hash TEXT DEFAULT '';
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS like_count INTEGER DEFAULT 0;
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
+
+    CREATE TABLE IF NOT EXISTS book_likes (
+      id BIGSERIAL PRIMARY KEY,
+      book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(book_id, user_id)
+    );
 
     CREATE TABLE IF NOT EXISTS book_access (
       book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -853,6 +865,8 @@ async function initDb() {
       image_url TEXT DEFAULT '',
       shared_forum_id BIGINT,
       shared_video_id BIGINT,
+      shared_book_id BIGINT,
+      shared_photo_id BIGINT,
       shared_story_id BIGINT,
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
@@ -863,12 +877,14 @@ async function initDb() {
       FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(shared_forum_id) REFERENCES forums(id) ON DELETE SET NULL,
       FOREIGN KEY(shared_video_id) REFERENCES videos(id) ON DELETE SET NULL,
+      FOREIGN KEY(shared_book_id) REFERENCES books(id) ON DELETE SET NULL,
       FOREIGN KEY(reply_to_id) REFERENCES dm_messages(id) ON DELETE SET NULL
     );
 
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_video_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_book_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;

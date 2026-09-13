@@ -2953,6 +2953,13 @@ async function renderBookDetail(app, slug) {
       ${(chapPages[c.id] || []).map(p => pageItemHTML(p, slug)).join('')}
     </div>`).join('');
 
+  const bookActionButtons = `
+    <div class="book-detail-actions" style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" id="book-like-btn"><i class="${book.liked ? 'fas' : 'far'} fa-heart"></i> <span id="book-like-text">${book.liked ? 'Beğendin' : 'Beğen'}</span> <span id="book-like-count" class="badge-count">${book.like_count || 0}</span></button>
+      ${currentUser ? `<button class="btn btn-outline btn-sm" id="book-send-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
+      <button class="btn btn-outline btn-sm" id="book-share-btn"><i class="fas fa-share-nodes"></i> Paylaş</button>
+    </div>`;
+
   const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug)).join('');
 
   // İsimsiz kitap hatırlatma banner'ı
@@ -2996,7 +3003,7 @@ async function renderBookDetail(app, slug) {
     </style>
     ${unnamedBannerHTML}
     <div class="book-detail-header">
-      <div class="book-detail-cover"${book.cover_image ? ` style="--book-cover-image:url('${escHtml(book.cover_image)}')"` : ''}>
+      <div class="book-detail-cover">
         ${book.cover_image ? `<img src="${escHtml(book.cover_image)}" alt="" />` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:var(--bg-card2)"><i class="fas fa-book" style="font-size:40px;color:var(--text-muted)"></i></div>`}
       </div>
       <div class="book-detail-info">
@@ -3011,6 +3018,7 @@ async function renderBookDetail(app, slug) {
         ${book.preface ? `<div class="book-preface"><strong>Tanıtım / Önsöz</strong><p>${escHtml(book.preface)}</p></div>` : ''}
         ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
         ${book.kadro ? `<div class="book-preface"><strong>Kadro</strong><p>${escHtml(book.kadro)}</p></div>` : ''}
+        ${bookActionButtons}
         ${firstPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> Oku</a></div>` : ''}
         ${isOwner ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
@@ -3027,6 +3035,78 @@ async function renderBookDetail(app, slug) {
       ${chapListHTML}
     </div>
   </div>`;
+
+  $('#book-like-btn')?.addEventListener('click', async () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    try {
+      const result = await api(`/book/${encodeURIComponent(slug)}/like`, { method: 'POST' });
+      book.liked = result.liked;
+      book.like_count = Number(result.like_count || 0);
+      const btn = $('#book-like-btn');
+      const icon = btn?.querySelector('i');
+      const text = $('#book-like-text');
+      const count = $('#book-like-count');
+      if (btn && icon) icon.className = book.liked ? 'fas fa-heart' : 'far fa-heart';
+      if (text) text.textContent = book.liked ? 'Beğendin' : 'Beğen';
+      if (count) count.textContent = String(book.like_count);
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  $('#book-send-btn')?.addEventListener('click', () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    showModal('Kitabı İlet', `<div class="modal-compact">
+      <div class="form-group">
+        <label>Kullanıcı adı</label>
+        <input id="book-send-username" type="text" placeholder="Kullanıcı adı" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label>İletilecek metin</label>
+        <textarea id="book-send-content" rows="3" placeholder="Kısa not...">${escHtml(book.title)} kitabını paylaşmak istiyorum.</textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="book-send-cancel">İptal</button>
+        <button class="btn btn-primary" id="book-send-submit"><i class="fas fa-paper-plane"></i> Gönder</button>
+      </div>
+    </div>`);
+    $('#book-send-cancel')?.addEventListener('click', hideModal);
+    $('#book-send-submit')?.addEventListener('click', async () => {
+      const username = $('#book-send-username').value.trim();
+      const content = $('#book-send-content').value.trim();
+      if (!username) { toast('Kullanıcı adı gerekli', 'error'); return; }
+      try {
+        const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, { method: 'POST', body: JSON.stringify({ content, shared_book_id: book.id }) });
+        hideModal(); toast('Kitap iletildi'); navigate('/mesajlar/' + username);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
+
+  $('#book-share-btn')?.addEventListener('click', () => {
+    if (!currentUser) { navigate('/giris'); return; }
+    showModal('Kitabı Paylaş', `<div class="modal-compact">
+      <div class="form-group">
+        <label>Kullanıcı adı</label>
+        <input id="book-share-username" type="text" placeholder="Kullanıcı adı" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label>Not</label>
+        <textarea id="book-share-content" rows="3" placeholder="Kısa not...">${escHtml(book.title)} kitabını okumaya bak.</textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" id="book-share-cancel">İptal</button>
+        <button class="btn btn-primary" id="book-share-submit"><i class="fas fa-share-nodes"></i> Paylaş</button>
+      </div>
+    </div>`);
+    $('#book-share-cancel')?.addEventListener('click', hideModal);
+    $('#book-share-submit')?.addEventListener('click', async () => {
+      const username = $('#book-share-username').value.trim();
+      const content = $('#book-share-content').value.trim();
+      if (!username) { toast('Kullanıcı adı gerekli', 'error'); return; }
+      try {
+        await api(`/book/${encodeURIComponent(slug)}/share`, { method: 'POST', body: JSON.stringify({ username, content }) });
+        hideModal(); toast('Kitap paylaşıldı'); navigate('/mesajlar/' + username);
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  });
 
   if (isOwner) {
     $('#edit-book-btn').addEventListener('click', () => showNewBookModal(book));
@@ -7237,6 +7317,12 @@ function dmMessageHTML(m, myId, selMode) {
                ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
                     ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
                     <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title || '')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
+                  </div>`
+               : ''}
+             ${m.shared_book_id
+               ? `<div class="dm-shared-forum" onclick="navigate('/kitap/${escHtml(m.book_slug)}')">
+                    ${m.book_cover ? `<img src="${escHtml(m.book_cover)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
+                    <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.book_title || 'Kitap')}</div><div style="font-size:11px;color:var(--accent-red2)">Kitap →</div></div>
                   </div>`
                : ''}
              ${m.shared_photo_id

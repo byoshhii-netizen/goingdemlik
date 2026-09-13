@@ -2939,7 +2939,85 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   if (book.is_hidden && !isOwner && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap gizli' });
   const { rows: chapters } = await query('SELECT * FROM book_chapters WHERE book_id=$1 ORDER BY order_num ASC', [book.id]);
   const { rows: pages } = await query('SELECT id,title,page_num,slug,chapter_id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
+
+  const { rows: likeCountRows } = await query('SELECT COUNT(*)::int AS c FROM book_likes WHERE book_id=$1', [book.id]);
+  const likeCount = parseInt(likeCountRows[0]?.c || 0);
+  const liked = req.user?.id ? Boolean((await query('SELECT 1 FROM book_likes WHERE book_id=$1 AND user_id=$2 LIMIT 1', [book.id, req.user.id])).rows.length) : false;
+  book.like_count = likeCount;
+  book.liked = liked;
   res.json({ book: sanitizeBook(book), chapters, pages });
+});
+
+app.post('/api/book/:slug/like', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  const userId = req.user.id;
+  const { rows: existing } = await query('SELECT id FROM book_likes WHERE book_id=$1 AND user_id=$2', [book.id, userId]);
+  if (existing.length) {
+    await query('DELETE FROM book_likes WHERE id=$1', [existing[0].id]);
+  } else {
+    await query('INSERT INTO book_likes (book_id,user_id) VALUES ($1,$2) ON CONFLICT (book_id,user_id) DO NOTHING', [book.id, userId]);
+  }
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_likes WHERE book_id=$1', [book.id]);
+  const likeCount = parseInt(countRows[0]?.c || 0);
+  await query('UPDATE books SET like_count=$1 WHERE id=$2', [likeCount, book.id]);
+  const { rows: fresh } = await query('SELECT 1 FROM book_likes WHERE book_id=$1 AND user_id=$2 LIMIT 1', [book.id, userId]);
+  res.json({ liked: fresh.length > 0, like_count: likeCount });
+});
+
+app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  const username = String(req.body?.username || '').trim();
+  if (!username) return res.status(400).json({ error: 'Kitap iletilecek kullanıcı adı gerekli' });
+  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const other = target[0];
+  const uid = req.user.id;
+  const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
+  if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
+  if (other.is_private && other.id !== uid) {
+    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
+    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  }
+  const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
+  let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
+  if (!convRows.length) {
+    const { rows: nc } = await query('INSERT INTO dm_conversations (user1_id, user2_id) VALUES ($1,$2) RETURNING *', [u1, u2]);
+    convRows = nc;
+  }
+  const conv = convRows[0];
+  const content = String(req.body?.content || '').trim() || `Kitap paylaştım: ${book.title}`;
+  const { rows: msgRows } = await query(
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, shared_book_id) VALUES ($1,$2,$3,$4) RETURNING *',
+    [conv.id, uid, content, book.id]
+  );
+  await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [book.id]);
+  await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
+  const { rows: full } = await query(`
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
+      f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
+      v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
+      b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
+      p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
+      st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      r.content as reply_content, ru.username as reply_username
+    FROM dm_messages m JOIN users u ON m.sender_id=u.id
+    LEFT JOIN forums f ON m.shared_forum_id=f.id
+    LEFT JOIN videos v ON m.shared_video_id=v.id
+    LEFT JOIN books b ON m.shared_book_id=b.id
+    LEFT JOIN photos p ON m.shared_photo_id=p.id
+    LEFT JOIN stories st ON m.shared_story_id=st.id
+    LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN dm_messages r ON m.reply_to_id=r.id
+    LEFT JOIN users ru ON r.sender_id=ru.id
+    WHERE m.id=$1
+  `, [msgRows[0].id]);
+  res.json({ ok: true, message: full[0] });
 });
 
 app.post('/api/book/:slug/unlock', authMiddleware, async (req, res) => {
@@ -6992,11 +7070,12 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const { rows: msgs } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
+      b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       r.content as reply_content, ru.username as reply_username
@@ -7004,6 +7083,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
     LEFT JOIN videos v ON m.shared_video_id=v.id
+    LEFT JOIN books b ON m.shared_book_id=b.id
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
@@ -7019,7 +7099,6 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
 
   if (afterId) return res.json(msgs);
 
-  // Konuşma açılınca read_until güncelle (son mesaj ID'si)
   if (msgs.length) {
     const lastId = msgs[msgs.length - 1].id;
     if (isUser1) {
@@ -7054,7 +7133,6 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
-  // Engel kontrolü
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
   if (other.is_private && other.id !== uid) {
@@ -7068,45 +7146,47 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     convRows = nc;
   }
   const conv = convRows[0];
-  // Gizliliği aç (karşı taraftan mesaj geldi)
   if (conv.user1_id == other.id && conv.hidden_by_user1) {
     await query('UPDATE dm_conversations SET hidden_by_user1=0 WHERE id=$1', [conv.id]);
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  let { content, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id } = req.body;
+  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, reply_to_id, image_url: bodyImageUrl } = req.body;
   content = content == null ? '' : String(content);
-  let image_url = '';
+  let image_url = String(bodyImageUrl || '');
   if (req.file) {
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
   if (shared_photo_id && !content) content = ' ';
-  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
+    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
-  // Forum paylaşım sayısını artır
   if (shared_forum_id) {
     await query('UPDATE forums SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_forum_id]);
   }
-  // DM @mention bildirimleri
+  if (shared_book_id) {
+    await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_book_id]);
+  }
   if (content?.trim()) {
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_photo_id, m.shared_story_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
+      b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
     LEFT JOIN videos v ON m.shared_video_id=v.id
+    LEFT JOIN books b ON m.shared_book_id=b.id
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
