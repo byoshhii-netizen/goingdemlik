@@ -10190,7 +10190,7 @@ async function renderPlaylistDetail(app, plId) {
           <div class="pl-detail-kicker"><span>PLAYLIST</span><span class="pl-detail-dot"></span><span>${playlist.is_public ? 'HERKESE AÇIK' : 'GİZLİ'}</span></div>
           <h1>${escHtml(playlist.name)}</h1>
           ${playlist.description ? `<p>${escHtml(playlist.description)}</p>` : ''}
-          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> ${escHtml(playlist.owner_username)}</span>` : ''}</div>
+          <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> <a href="${profileRoute(playlist.owner_username)}" data-link class="pl-owner-link">@${escHtml(playlist.owner_username)}</a></span>` : ''}</div>
         </div>
       </div>
       <div class="pl-detail-toolbar">

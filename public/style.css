@@ -1093,6 +1093,16 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   background: rgba(239,68,68,0.10);
 }
 
+.pl-owner-link {
+  color: var(--accent-red2);
+  font-weight: 700;
+  text-decoration: none;
+}
+.pl-owner-link:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
 .ebook-layout { display: grid; grid-template-columns: 320px 1fr; gap: 24px; }
 .ebook-toc { background: var(--bg-card2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .ebook-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
