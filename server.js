@@ -445,6 +445,7 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
 app.get('/api/link-preview', async (req, res) => {
   try {
     const rawUrl = String(req.query.url || '').trim();
+    if (!rawUrl) return res.json({ url: '', title: '', description: '', image: '', site: '', is_image: false });
     const parsed = new URL(rawUrl);
     if (!['http:', 'https:'].includes(parsed.protocol)) return res.status(400).json({ error: 'Geçersiz bağlantı' });
     if (['localhost', '127.0.0.1', '::1'].includes(parsed.hostname) || /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(parsed.hostname)) {
@@ -465,8 +466,8 @@ app.get('/api/link-preview', async (req, res) => {
     const image = getMeta('og:image', 'twitter:image');
     const icon = getMeta('og:site_name', 'application-name') || parsed.hostname.replace(/^www\./, '');
     const absolute = value => { try { return value ? new URL(value, parsed.href).href : ''; } catch { return ''; } };
-    res.json({ url: parsed.href, title: title.slice(0, 180), description: description.slice(0, 300), image: absolute(image), site: icon.slice(0, 80) });
-  } catch (error) { res.json({ url: String(req.query.url || ''), title: '', description: '', image: '', site: '' }); }
+    res.json({ url: parsed.href, title: title.slice(0, 180), description: description.slice(0, 300), image: absolute(image), site: icon.slice(0, 80), is_image: false });
+  } catch (error) { res.json({ url: String(req.query.url || ''), title: '', description: '', image: '', site: '', is_image: false }); }
 });
 
 function makeSlug(title, id) {

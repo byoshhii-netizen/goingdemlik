@@ -775,20 +775,37 @@ async function enhanceLinkPreviews(root = document) {
   links.forEach(link => link.dataset.previewBound = '1');
   await Promise.all(links.map(async link => {
     try {
-      const preview = await api('/link-preview?url=' + encodeURIComponent(link.dataset.previewUrl));
-      if (!preview.title && !preview.image) return;
+      const rawUrl = String(link.dataset.previewUrl || link.href || '').trim();
+      if (!rawUrl) return;
+      const preview = await api('/link-preview?url=' + encodeURIComponent(rawUrl));
+      if (!preview || (!preview.title && !preview.image && !preview.site && !preview.url)) return;
       if (preview.is_image) {
         const imageLink = document.createElement('a');
-        imageLink.className = 'inline-image-link'; imageLink.href = preview.url || link.href; imageLink.target = '_blank'; imageLink.rel = 'noopener noreferrer';
-        imageLink.innerHTML = `<img src="${escHtml(preview.image)}" alt="Paylaşılan görsel" loading="lazy" />`;
+        imageLink.className = 'inline-image-link';
+        imageLink.href = preview.url || rawUrl;
+        imageLink.target = '_blank';
+        imageLink.rel = 'noopener noreferrer';
+        imageLink.innerHTML = `<img src="${escHtml(preview.image || preview.url || rawUrl)}" alt="Paylaşılan görsel" loading="lazy" />`;
         link.replaceWith(imageLink);
         return;
       }
       const card = document.createElement('a');
-      card.className = 'link-preview-card'; card.href = preview.url || link.href; card.target = '_blank'; card.rel = 'noopener noreferrer';
-      card.innerHTML = `${preview.image ? `<img src="${escHtml(preview.image)}" alt="" loading="lazy" />` : '<span class="link-preview-icon"><i class="fas fa-globe"></i></span>'}<span class="link-preview-copy"><strong>${escHtml(preview.title || preview.site || 'Bağlantı')}</strong>${preview.description ? `<small>${escHtml(preview.description)}</small>` : ''}<em>${escHtml(preview.site || '')}</em></span>`;
+      card.className = 'link-preview-card';
+      card.href = preview.url || rawUrl;
+      card.target = '_blank';
+      card.rel = 'noopener noreferrer';
+      card.dataset.previewUrl = rawUrl;
+      const imageMarkup = preview.image
+        ? `<img src="${escHtml(preview.image)}" alt="" loading="lazy" class="link-preview-image" />`
+        : `<span class="link-preview-icon"><i class="fas fa-globe"></i></span>`;
+      const title = preview.title || preview.site || 'Bağlantı';
+      const desc = preview.description || '';
+      const site = preview.site || '';
+      card.innerHTML = `${imageMarkup}<span class="link-preview-copy"><strong>${escHtml(title)}</strong>${desc ? `<small>${escHtml(desc)}</small>` : ''}<em>${escHtml(site)}</em></span>`;
       link.replaceWith(card);
-    } catch {}
+    } catch (e) {
+      // Aynı içerik hattında başarısız önizlemeler, bağlantıyı kırpmadan metin olarak kalır.
+    }
   }));
 }
 
