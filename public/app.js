@@ -8828,6 +8828,7 @@ async function renderMusicDetail(app, slug) {
                 <button id="detail-vol-btn" class="sdp-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
                 <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" />
               </div>
+              ${currentUser ? '<button class="sdp-together-btn" id="detail-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
             </div>
             ${song.remastered_audio_url ? `<button class="btn btn-outline btn-sm song-remastered-toggle" id="song-remastered-toggle"><i class="fas fa-wand-magic-sparkles"></i> Remastered versiyonu dinle</button>` : ''}
           </div>
@@ -8881,6 +8882,7 @@ async function renderMusicDetail(app, slug) {
   const seek = document.getElementById('dp-seek');
   const curEl = document.getElementById('dp-cur');
   const durEl = document.getElementById('dp-dur');
+  document.getElementById('detail-listen-together')?.addEventListener('click', () => createListeningRoomFromSong(song));
   let activeVariant = 'original';
 
   function fmt(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
@@ -8914,6 +8916,16 @@ async function renderMusicDetail(app, slug) {
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
   });
   playBtn.addEventListener('click', async () => {
+    if (listeningRoom) {
+      if (String(currentListeningTrack()?.song_id) !== String(song.id)) {
+        if (listeningRoom.isOwner) {
+          await api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: song.id }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
+        } else {
+          await api(`/listening-rooms/${listeningRoom.public_id}/requests`, { method: 'POST', body: JSON.stringify({ song_id: song.id }) }).then(result => toast(result.message || 'Açma isteğiniz gönderildi')).catch(error => toast(error.message, 'error'));
+        }
+      } else toast('Bu şarkı ortak dinleyişte çalıyor.');
+      return;
+    }
     if (audio.paused) {
       if (currentUser) {
         const pending = await api('/music-ads/pending').catch(() => null);
