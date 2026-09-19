@@ -1524,6 +1524,58 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
     CREATE INDEX IF NOT EXISTS idx_playlists_source_playlist_id ON playlists(source_playlist_id);
   `);
 
+  await query(`
+    CREATE TABLE IF NOT EXISTS listening_rooms (
+      id BIGSERIAL PRIMARY KEY,
+      public_id TEXT UNIQUE NOT NULL,
+      owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT 'Ortak dinleyiş',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      allow_requests INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_listening_rooms_owner ON listening_rooms(owner_id, is_active);
+
+    CREATE TABLE IF NOT EXISTS listening_room_members (
+      room_id BIGINT NOT NULL REFERENCES listening_rooms(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      role TEXT NOT NULL DEFAULT 'listener',
+      joined_at TIMESTAMP DEFAULT NOW(),
+      last_seen TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY(room_id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS listening_room_tracks (
+      id BIGSERIAL PRIMARY KEY,
+      room_id BIGINT NOT NULL REFERENCES listening_rooms(id) ON DELETE CASCADE,
+      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      added_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      position INTEGER NOT NULL DEFAULT 0,
+      state TEXT NOT NULL DEFAULT 'queued',
+      started_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_listening_room_tracks ON listening_room_tracks(room_id, position, id);
+
+    CREATE TABLE IF NOT EXISTS listening_room_requests (
+      id BIGSERIAL PRIMARY KEY,
+      room_id BIGINT NOT NULL REFERENCES listening_rooms(id) ON DELETE CASCADE,
+      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      requester_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS listening_room_bans (
+      room_id BIGINT NOT NULL REFERENCES listening_rooms(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      scope TEXT NOT NULL DEFAULT 'room',
+      created_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY(room_id, user_id, scope)
+    );
+  `);
+
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 
