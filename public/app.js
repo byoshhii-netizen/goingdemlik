@@ -8520,6 +8520,21 @@ async function createListeningRoomFromSong(song) {
   } catch (error) { toast(error.message, 'error'); }
 }
 
+async function createListeningRoomFromQueue(queue) {
+  const firstSong = queue?.[0];
+  if (!firstSong) return;
+  try {
+    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi' }) });
+    listeningRoom = { ...room, isOwner: true };
+    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: firstSong.id }) });
+    for (const song of queue.slice(1)) {
+      await api(`/listening-rooms/${room.public_id}/tracks`, { method: 'POST', body: JSON.stringify({ song_id: song.id }) });
+    }
+    await refreshListeningRoom();
+    toast('Ortak dinleyiş hazır. Linki paylaşabilirsin.');
+  } catch (error) { toast(error.message, 'error'); }
+}
+
 async function refreshListeningRoom() {
   if (!listeningRoom) return;
   const room = await api('/listening-rooms/' + encodeURIComponent(listeningRoom.public_id));
@@ -10348,7 +10363,8 @@ async function renderPlaylistDetail(app, plId) {
         <div class="pl-detail-actions">
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
-            <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>` : ''}
+            <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>
+            ${currentUser ? '<button class="btn btn-outline btn-sm" id="pl-listen-together" title="Playlisti ortak dinleyiş olarak başlat"><i class="fas fa-tower-broadcast"></i> Ortak başlat</button>' : ''}` : ''}
           ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
           ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
           ${!playlist.is_owner && playlist.is_public ? `<button class="btn btn-primary btn-sm" id="pl-save-btn" title="Kendi playlistlerine ekle"><i class="fas fa-bookmark"></i> Kütüphaneme ekle</button>` : ''}
@@ -10386,6 +10402,8 @@ async function renderPlaylistDetail(app, plId) {
       shuffledIndices = songs.map((_, i) => i);
       openMiniPlayer(songs[0].audio_url, songs[0].slug, songs[0], songs, 0);
     });
+
+    document.getElementById('pl-listen-together')?.addEventListener('click', () => createListeningRoomFromQueue(songs));
 
     document.getElementById('pl-copy-link')?.addEventListener('click', async e => {
       const copyButton = e.currentTarget;
