@@ -512,8 +512,11 @@ async function initDb() {
       book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      edited_at TIMESTAMP
     );
+
+    ALTER TABLE book_comments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
 
     CREATE TABLE IF NOT EXISTS book_access (
       book_id BIGINT NOT NULL REFERENCES books(id) ON DELETE CASCADE,

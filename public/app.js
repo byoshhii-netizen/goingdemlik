@@ -2987,10 +2987,11 @@ async function renderBookDetail(app, slug) {
       <textarea id="book-comment-input" rows="3" placeholder="Bu kitaba yorum yaz..."></textarea>
       <button class="btn btn-primary btn-sm" id="book-comment-submit"><i class="fas fa-paper-plane"></i> Gönder</button>
     </div>
-    ${comments.length ? `<div class="book-comments-list">${comments.map(c => `<div class="book-comment-item">
+    ${comments.length ? `<div class="book-comments-list">${comments.map(c => `<div class="book-comment-item" data-comment-id="${c.id}">
       <div class="book-comment-head">
         <span class="book-comment-author">${avatarImg(c, 'avatar-sm')} ${escHtml(c.username || 'Kullanıcı')}</span>
-        <span class="book-comment-date">${formatDate(c.created_at)}</span>
+        <span class="book-comment-date">${formatDate(c.created_at)}${c.edited_at ? ' · Düzenlendi' : ''}</span>
+        ${currentUser && currentUser.id === c.user_id ? `<button class="book-comment-edit" data-id="${c.id}" title="Yorumu düzenle"><i class="fas fa-edit"></i></button>` : ''}
         ${(currentUser && (currentUser.id === c.user_id || isOwner)) ? `<button class="book-comment-delete" data-id="${c.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}
       </div>
       <div class="book-comment-body">${escHtml(c.content)}</div>
@@ -3079,10 +3080,12 @@ async function renderBookDetail(app, slug) {
       const comment = await api(`/book/${encodeURIComponent(slug)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
       const list = $('.book-comments-list');
       if (list) {
-        list.insertAdjacentHTML('beforeend', `<div class="book-comment-item">
+        list.insertAdjacentHTML('beforeend', `<div class="book-comment-item" data-comment-id="${comment.id}">
           <div class="book-comment-head">
             <span class="book-comment-author">${avatarImg(comment, 'avatar-sm')} ${escHtml(comment.username || 'Kullanıcı')}</span>
             <span class="book-comment-date">${formatDate(comment.created_at)}</span>
+            <button class="book-comment-edit" data-id="${comment.id}" title="Yorumu düzenle"><i class="fas fa-edit"></i></button>
+            <button class="book-comment-delete" data-id="${comment.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>
           </div>
           <div class="book-comment-body">${escHtml(comment.content)}</div>
         </div>`);
@@ -3101,6 +3104,26 @@ async function renderBookDetail(app, slug) {
       btn.closest('.book-comment-item')?.remove();
       toast('Yorum silindi');
     } catch (e) { toast(e.message, 'error'); }
+  }));
+
+  $('.book-comment-edit')?.forEach(btn => btn.addEventListener('click', () => {
+    const item = btn.closest('.book-comment-item');
+    const body = item?.querySelector('.book-comment-body');
+    if (!body || body.querySelector('textarea')) return;
+    const original = body.textContent;
+    body.innerHTML = `<textarea class="book-comment-edit-input" rows="3">${escHtml(original)}</textarea><div class="book-comment-edit-actions"><button class="btn btn-ghost btn-sm book-comment-edit-cancel">İptal</button><button class="btn btn-primary btn-sm book-comment-edit-save"><i class="fas fa-check"></i> Kaydet</button></div>`;
+    body.querySelector('.book-comment-edit-cancel')?.addEventListener('click', () => { body.textContent = original; });
+    body.querySelector('.book-comment-edit-save')?.addEventListener('click', async () => {
+      const content = body.querySelector('textarea')?.value.trim();
+      if (!content) { toast('Yorum boş olamaz', 'error'); return; }
+      try {
+        const updated = await api(`/book/${encodeURIComponent(slug)}/comments/${encodeURIComponent(btn.dataset.id)}`, { method: 'PUT', body: JSON.stringify({ content }) });
+        body.textContent = updated.content;
+        const date = item.querySelector('.book-comment-date');
+        if (date) date.textContent = `${formatDate(updated.created_at)} · Düzenlendi`;
+        toast('Yorum güncellendi');
+      } catch (e) { toast(e.message, 'error'); }
+    });
   }));
 
   $('#book-like-btn')?.addEventListener('click', async () => {
@@ -8521,13 +8544,17 @@ async function createListeningRoomFromSong(song) {
 }
 
 async function createListeningRoomFromQueue(queue) {
-  const firstSong = queue?.[0];
-  if (!firstSong) return;
+  const validQueue = Array.isArray(queue) ? queue.filter(song => song && Number.isSafeInteger(Number(song?.id))) : [];
+  const firstSong = validQueue[0];
+  if (!firstSong) {
+    toast('Ortak dinleyişe eklenebilecek uygun şarkı bulunamadı.', 'error');
+    return;
+  }
   try {
     const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi' }) });
     listeningRoom = { ...room, isOwner: true };
     await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: Number(firstSong.id) }) });
-    const remainingIds = queue.slice(1).map(song => Number(song.id)).filter(Number.isSafeInteger);
+    const remainingIds = validQueue.slice(1).map(song => Number(song.id)).filter(Number.isSafeInteger);
     if (remainingIds.length) await api(`/listening-rooms/${room.public_id}/tracks/bulk`, { method: 'POST', body: JSON.stringify({ song_ids: remainingIds }) });
     await refreshListeningRoom();
     toast('Ortak dinleyiş hazır. Linki paylaşabilirsin.');

@@ -2949,7 +2949,7 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   const likeCount = parseInt(likeCountRows[0]?.c || 0);
   const liked = req.user?.id ? Boolean((await query('SELECT 1 FROM book_likes WHERE book_id=$1 AND user_id=$2 LIMIT 1', [book.id, req.user.id])).rows.length) : false;
   const { rows: commentRows } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
     FROM book_comments bc JOIN users u ON bc.user_id=u.id
     WHERE bc.book_id=$1 ORDER BY bc.created_at ASC
   `, [book.id]);
@@ -2965,7 +2965,7 @@ app.get('/api/book/:slug/comments', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const { rows } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
     FROM book_comments bc JOIN users u ON bc.user_id=u.id
     WHERE bc.book_id=$1 ORDER BY bc.created_at ASC
   `, [book.id]);
@@ -2983,9 +2983,29 @@ app.post('/api/book/:slug/comments', authMiddleware, async (req, res) => {
   `, [book.id, req.user.id, content]);
   await query('UPDATE books SET comment_count=COALESCE(comment_count,0)+1 WHERE id=$1', [book.id]);
   const { rows: full } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
     FROM book_comments bc JOIN users u ON bc.user_id=u.id WHERE bc.id=$1
   `, [inserted[0].id]);
+  res.json(full[0]);
+});
+
+app.put('/api/book/:slug/comments/:id', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  const { rows: commentRows } = await query('SELECT * FROM book_comments WHERE id=$1 AND book_id=$2', [req.params.id, book.id]);
+  if (!commentRows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  if (commentRows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Yalnızca kendi yorumunuzu düzenleyebilirsiniz' });
+  const content = String(req.body?.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
+  const { rows: updated } = await query(`
+    UPDATE book_comments SET content=$1, edited_at=NOW() WHERE id=$2
+    RETURNING id, book_id, user_id, content, created_at, edited_at
+  `, [content, commentRows[0].id]);
+  const { rows: full } = await query(`
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    FROM book_comments bc JOIN users u ON bc.user_id=u.id WHERE bc.id=$1
+  `, [updated[0].id]);
   res.json(full[0]);
 });
 
@@ -7040,15 +7060,16 @@ app.post('/api/listening-rooms/:publicId/tracks/bulk', authMiddleware, async (re
   const songIds = [...new Set((Array.isArray(req.body?.song_ids) ? req.body.song_ids : []).map(Number).filter(Number.isSafeInteger))];
   if (!songIds.length) return res.status(400).json({ error: 'Ortak dinleyişe eklenecek şarkı bulunamadı' });
   const { rows: songs } = await query(`SELECT id FROM songs WHERE id=ANY($1::bigint[]) AND status='active'`, [songIds]);
-  if (songs.length !== songIds.length) return res.status(404).json({ error: 'Playlistteki şarkılardan biri artık kullanılamıyor' });
+  if (!songs.length) return res.status(404).json({ error: 'Playlistteki şarkılar artık kullanılamıyor' });
+  const validSongIds = songs.map(song => Number(song.id));
   const { rows: positionRows } = await query('SELECT COALESCE(MAX(position),-1)+1 AS position FROM listening_room_tracks WHERE room_id=$1', [room.id]);
   const startPosition = Number(positionRows[0].position);
-  for (const [index, song] of songs.entries()) {
+  for (const [index, songId] of validSongIds.entries()) {
     await query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state)
-      VALUES($1,$2,$3,$4,'queued')`, [room.id, song.id, req.user.id, startPosition + index]);
+      VALUES($1,$2,$3,$4,'queued')`, [room.id, songId, req.user.id, startPosition + index]);
   }
   await query('UPDATE listening_rooms SET updated_at=NOW() WHERE id=$1', [room.id]);
-  res.status(201).json({ ok: true, state: await getListeningRoomState(room.id) });
+  res.status(201).json({ ok: true, queued_count: validSongIds.length, state: await getListeningRoomState(room.id) });
 });
 
 app.post('/api/listening-rooms/:publicId/requests', authMiddleware, async (req, res) => {
