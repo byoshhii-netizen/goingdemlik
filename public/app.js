@@ -8526,13 +8526,12 @@ async function createListeningRoomFromQueue(queue) {
   try {
     const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi' }) });
     listeningRoom = { ...room, isOwner: true };
-    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: firstSong.id }) });
-    for (const song of queue.slice(1)) {
-      await api(`/listening-rooms/${room.public_id}/tracks`, { method: 'POST', body: JSON.stringify({ song_id: song.id }) });
-    }
+    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: Number(firstSong.id) }) });
+    const remainingIds = queue.slice(1).map(song => Number(song.id)).filter(Number.isSafeInteger);
+    if (remainingIds.length) await api(`/listening-rooms/${room.public_id}/tracks/bulk`, { method: 'POST', body: JSON.stringify({ song_ids: remainingIds }) });
     await refreshListeningRoom();
     toast('Ortak dinleyiş hazır. Linki paylaşabilirsin.');
-  } catch (error) { toast(error.message, 'error'); }
+  } catch (error) { toast(error.message || 'Ortak dinleyiş başlatılamadı', 'error'); }
 }
 
 async function refreshListeningRoom() {

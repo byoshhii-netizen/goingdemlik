@@ -7034,6 +7034,23 @@ app.post('/api/listening-rooms/:publicId/tracks', authMiddleware, async (req, re
   res.status(201).json({ ok: true, track_id: rows[0].id, state: await getListeningRoomState(room.id) });
 });
 
+app.post('/api/listening-rooms/:publicId/tracks/bulk', authMiddleware, async (req, res) => {
+  const room = await getListeningRoomForOwner(req.params.publicId, req.user.id);
+  if (!room) return res.status(403).json({ error: 'Bu işlem yalnızca dinleyiş sahibine açık' });
+  const songIds = [...new Set((Array.isArray(req.body?.song_ids) ? req.body.song_ids : []).map(Number).filter(Number.isSafeInteger))];
+  if (!songIds.length) return res.status(400).json({ error: 'Ortak dinleyişe eklenecek şarkı bulunamadı' });
+  const { rows: songs } = await query(`SELECT id FROM songs WHERE id=ANY($1::bigint[]) AND status='active'`, [songIds]);
+  if (songs.length !== songIds.length) return res.status(404).json({ error: 'Playlistteki şarkılardan biri artık kullanılamıyor' });
+  const { rows: positionRows } = await query('SELECT COALESCE(MAX(position),-1)+1 AS position FROM listening_room_tracks WHERE room_id=$1', [room.id]);
+  const startPosition = Number(positionRows[0].position);
+  for (const [index, song] of songs.entries()) {
+    await query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state)
+      VALUES($1,$2,$3,$4,'queued')`, [room.id, song.id, req.user.id, startPosition + index]);
+  }
+  await query('UPDATE listening_rooms SET updated_at=NOW() WHERE id=$1', [room.id]);
+  res.status(201).json({ ok: true, state: await getListeningRoomState(room.id) });
+});
+
 app.post('/api/listening-rooms/:publicId/requests', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
