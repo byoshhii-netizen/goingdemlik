@@ -1666,15 +1666,19 @@ document.addEventListener('click', e => {
 async function renderHome(app) {
   document.title = siteName + ' – Topluluk Platformu';
   updatePageMeta(siteName + ' – Topluluk Platformu', 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.', '');
-  app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
 
   let settings = {};
-  try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
+  try { settings = await fetch('/api/settings/public').then(r => r.json()).catch(() => ({})); } catch {}
   const raw = settings.homepage_sections;
   let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
   if (!Array.isArray(sections)) sections = [sections];
   sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
   if (!sections.length) sections = ['konular'];
+
+  const isMediaOnlyHome = sections.length === 1 && sections[0] === 'fotograflar';
+  document.body.classList.toggle('home-media-only', isMediaOnlyHome);
+
+  app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
 
   async function renderForumsSection() {
     const html = `

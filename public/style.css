@@ -518,6 +518,18 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   gap: 12px;
   z-index: 130;
 }
+
+body.home-media-only .navbar {
+  display: none !important;
+}
+
+body.home-media-only #app {
+  margin-top: 0 !important;
+}
+
+body.home-media-only .container.page {
+  padding-top: 0 !important;
+}
 .mobile-books-backdrop {
   position: absolute;
   inset: 0;
