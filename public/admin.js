@@ -490,7 +490,16 @@ async function renderHomepageSections(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   let settings = {};
   try { settings = await adminApi('/settings'); } catch (e) { settings = {}; }
-  const current = settings.homepage_sections ? (function(){ try { return JSON.parse(settings.homepage_sections); } catch { return settings.homepage_sections; } })() : ['konular'];
+  const current = window.normalizeHomepageSections ? window.normalizeHomepageSections(settings.homepage_sections) : (() => {
+    let parsed = settings.homepage_sections;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { parsed = [parsed]; }
+    }
+    if (!Array.isArray(parsed)) parsed = [parsed];
+    parsed = parsed.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
+    if (!parsed.length || (parsed.length === 1 && parsed[0] === 'fotograflar')) return ['konular'];
+    return parsed.filter(s => !(s === 'fotograflar' && parsed.length === 1));
+  })();
   const currentArr = Array.isArray(current) ? current : [current];
   const available = [
     { id: 'konular', label: 'Konular' },

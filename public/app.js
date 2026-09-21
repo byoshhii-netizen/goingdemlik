@@ -1671,10 +1671,16 @@ async function renderHome(app) {
   let settings = {};
   try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
   const raw = settings.homepage_sections;
-  let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
-  if (!Array.isArray(sections)) sections = [sections];
-  sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
-  if (!sections.length) sections = ['konular'];
+  let sections = window.normalizeHomepageSections ? window.normalizeHomepageSections(raw) : (() => {
+    let parsed = raw;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { parsed = [parsed]; }
+    }
+    if (!Array.isArray(parsed)) parsed = [parsed];
+    parsed = parsed.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
+    if (!parsed.length || (parsed.length === 1 && parsed[0] === 'fotograflar')) return ['konular'];
+    return parsed.filter(s => !(s === 'fotograflar' && parsed.length === 1));
+  })();
 
   async function renderForumsSection() {
     const html = `
