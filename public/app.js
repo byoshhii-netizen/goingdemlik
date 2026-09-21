@@ -853,6 +853,8 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
+  document.body.classList.toggle('dm-chat-route', isDmChatRoute);
   updateNavActive(path);
   // Mesajlar sayfasında footer gizle
   const siteFooter = document.getElementById('site-footer');
@@ -7544,13 +7546,18 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
 
 function showDmOptionsMenu(username, convId) {
   showModal('Konuşma Seçenekleri', `
-    <div style="display:flex;flex-direction:column;gap:8px">
-      <div class="call-mute-title"><i class="fas fa-bell-slash"></i> Mesaj bildirimlerini sessize al</div>
-      <div class="call-mute-grid"><button class="btn btn-outline dm-mute-option" data-hours="2">2 saat</button><button class="btn btn-outline dm-mute-option" data-hours="5">5 saat</button><button class="btn btn-outline dm-mute-option" data-hours="10">10 saat</button><button class="btn btn-outline dm-mute-option" data-hours="24">24 saat</button><button class="btn btn-outline dm-mute-option" data-hours="forever">Kapatana kadar</button><button class="btn btn-outline dm-mute-option" data-hours="unmute">Sessizi aç</button></div>
-      <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Kilitle</button>
-      <button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>
-      <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
-      <button class="btn btn-danger" id="dm-opt-clear-all"><i class="fas fa-trash-alt"></i> Herkesten temizle</button>
+    <div class="dm-options-content">
+      <div class="dm-options-section">
+        <div class="call-mute-title"><i class="fas fa-bell-slash"></i> Mesaj bildirimlerini sessize al</div>
+        <div class="call-mute-grid"><button class="btn btn-outline dm-mute-option" data-hours="2">2 saat</button><button class="btn btn-outline dm-mute-option" data-hours="5">5 saat</button><button class="btn btn-outline dm-mute-option" data-hours="10">10 saat</button><button class="btn btn-outline dm-mute-option" data-hours="24">24 saat</button><button class="btn btn-outline dm-mute-option" data-hours="forever">Kapatana kadar</button><button class="btn btn-outline dm-mute-option" data-hours="unmute">Sessizi aç</button></div>
+      </div>
+      <div class="dm-options-actions">
+        <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Kilitle</button>
+        <button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>
+        <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
+        <button class="btn dm-clear-all" id="dm-opt-clear-all"><i class="fas fa-trash-alt"></i> Herkesten temizle</button>
+      </div>
+      <p class="dm-options-note"><i class="fas fa-circle-info"></i> “Herkesten temizle” işlemi geri alınamaz ve konuşmadaki mesajları iki taraftan kaldırır.</p>
     </div>
   `);
   document.querySelectorAll('.dm-mute-option').forEach(button => button.addEventListener('click', async () => {

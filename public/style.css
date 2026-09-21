@@ -2167,7 +2167,7 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .settings-nav-item.active { color: var(--accent-red2); }
 
 /* ===== MODAL ===== */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 20px; animation: fadeIn 0.15s ease; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.62); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 20px; animation: fadeIn 0.15s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 .modal { background: var(--bg-card); border: 1px solid rgba(189,162,117,0.25); border-radius: var(--radius); width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.7); animation: slideUp 0.2s ease; }
 @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -4489,4 +4489,110 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 @media (max-width: 380px) {
   .forum-card-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .forum-meta-item:last-child { grid-column: 1 / -1; }
+}
+
+/* ===== DM CONVERSATION OPTIONS ===== */
+.dm-options-content {
+  display: grid;
+  gap: 14px;
+}
+.dm-options-section {
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent-red2) 18%, var(--border));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--bg-card2) 72%, transparent);
+}
+.dm-options-section .call-mute-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+.dm-options-section .call-mute-title i { color: var(--accent-red2); }
+.call-mute-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+.call-mute-grid .btn {
+  min-height: 40px;
+  padding: 8px 6px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+.dm-options-actions {
+  display: grid;
+  gap: 9px;
+}
+.dm-options-actions .btn {
+  width: 100%;
+  min-height: 44px;
+  justify-content: flex-start;
+  padding-inline: 14px;
+  border-radius: 10px;
+}
+.dm-options-actions .dm-clear-all {
+  background: linear-gradient(135deg, #a83242, #76232f);
+  border: 1px solid #d45b68;
+  color: #fff;
+}
+.dm-options-actions .dm-clear-all:hover {
+  background: linear-gradient(135deg, #c74454, #922c3a);
+}
+.dm-options-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.dm-options-note i { margin-top: 2px; color: var(--accent-red2); }
+
+@media (max-width: 480px) {
+  .dm-options-content { gap: 12px; }
+  .dm-options-section { padding: 11px; }
+  .call-mute-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dm-options-actions { gap: 8px; }
+  .dm-options-actions .btn { min-height: 46px; }
+}
+
+/* ===== MOBILE DM CHAT ROUTE ===== */
+@media (max-width: 768px) {
+  /* Konuşma açılınca genel navbar yerine konuşmanın kendi header'ı en üstte kalır. */
+  body.dm-chat-route #navbar {
+    display: none !important;
+  }
+  body.dm-chat-route #app,
+  body.dm-chat-route .dm-layout {
+    min-height: 100dvh;
+  }
+  body.dm-chat-route .dm-layout {
+    height: 100dvh;
+  }
+  body.dm-chat-route .dm-chat-header {
+    min-height: 60px;
+    padding: 9px 12px;
+    background: color-mix(in srgb, var(--bg-secondary) 96%, transparent);
+    border-bottom-color: var(--border-hover);
+    position: relative;
+    z-index: 2;
+  }
+  body.dm-chat-route .dm-mobile-back-btn {
+    display: inline-flex !important;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 36px;
+    padding: 0 !important;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--text-primary);
+  }
+  body.dm-chat-route .dm-chat-header-left {
+    gap: 8px;
+  }
 }
