@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const slugify = require('slugify');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const cloudinary = require('cloudinary').v2;
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
@@ -183,12 +183,16 @@ const authLimiter = rateLimit({
   message: { error: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
 });
 
-// Upload: dakikada 5 yükleme
+// Upload limiti kullanıcı oturumuna göre çalışır; ortak ağdaki kullanıcılar birbirini kilitlemez.
 const uploadLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 15),
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 30),
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: req => {
+    const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+    return token ? crypto.createHash('sha256').update(token).digest('hex') : ipKeyGenerator(req.ip);
+  },
   message: { error: 'Çok fazla yükleme. Lütfen bekleyin.' },
 });
 
@@ -3052,8 +3056,8 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
   if (other.is_private && other.id !== uid) {
-    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
-    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+    const { rows: following } = await query("SELECT 1 FROM follows f JOIN follows reciprocal ON reciprocal.follower_id=f.following_id AND reciprocal.following_id=f.follower_id AND reciprocal.status='accepted' WHERE f.follower_id=$1 AND f.following_id=$2 AND f.status='accepted'", [uid, other.id]);
+    if (!following.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca takipleştiğiniz kullanıcılar mesaj gönderebilir' });
   }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
@@ -3738,20 +3742,23 @@ app.post('/api/group/:slug/upload', authMiddleware, upload.single('image'), asyn
 });
 
 // ===== TAKIP =====
+async function isOtherSongsEnabled() {
+  const { rows } = await query("SELECT value FROM settings WHERE key='other_songs_enabled'");
+  return !(rows[0]?.value === '0');
+}
+
 app.get('/api/users/:username/follow-status', optionalAuth, async (req, res) => {
   const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private, friendship_status: null, friendship_id: null, friend_request_incoming: false });
   const { rows } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
-  const { rows: friendship } = await query('SELECT id, status, requester_id, addressee_id FROM friendships WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1) ORDER BY id DESC LIMIT 1', [req.user.id, target[0].id]);
-  const relation = friendship[0] || null;
   res.json({
-    following: rows[0]?.status === 'accepted' || relation?.status === 'accepted',
+    following: rows[0]?.status === 'accepted',
     pending: rows[0]?.status === 'pending',
     is_private: !!target[0].is_private,
-    friendship_status: relation?.status || null,
-    friendship_id: relation?.id || null,
-    friend_request_incoming: !!relation && relation.requester_id === target[0].id
+    friendship_status: null,
+    friendship_id: null,
+    friend_request_incoming: false
   });
 });
 
@@ -3759,8 +3766,7 @@ app.post('/api/users/:username/follow', authMiddleware, async (req, res) => {
   const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (target[0].id === req.user.id) return res.status(400).json({ error: 'Kendinizi takip edemezsiniz' });
-  if (target[0].is_private) return res.status(400).json({ error: 'Gizli hesaplar için arkadaşlık isteği gönderin' });
-  const status = 'accepted';
+  const status = target[0].is_private ? 'pending' : 'accepted';
   await query(`INSERT INTO follows (follower_id, following_id, status) VALUES ($1,$2,$3)
     ON CONFLICT (follower_id, following_id) DO UPDATE SET status=EXCLUDED.status`, [req.user.id, target[0].id, status]);
   await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
@@ -4159,7 +4165,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
-  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))`;
+  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted'))`;
   const queryText = username
     ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
     : `${base} AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`;
@@ -4178,7 +4184,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id
-    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
+    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`,
     [req.params.id, userId]
   );
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -4487,7 +4493,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
   try {
   await ensurePhotoInteractionSchema();
   const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
-    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
+    WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (Number(rows[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
   const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
@@ -4516,7 +4522,7 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
     await ensurePhotoInteractionSchema();
     const photoId = req.params.id;
     const userId = req.user ? req.user.id : 0;
-    const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
+    const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, userId]);
     if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
       (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
@@ -4536,7 +4542,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
     const photoId = req.params.id;
     const { content } = req.body;
     if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
-    const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
+    const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted'))`, [photoId, req.user.id]);
     if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
     await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
@@ -5410,7 +5416,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds', 'other_songs_enabled'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -5530,6 +5536,9 @@ app.post('/api/songs', authMiddleware, upload.fields([
 ]), async (req, res) => {
   if (await denyIfRestricted(req, res, 'music')) return;
   const { song_type, title, artist_name, distributor, genre, lyrics, share_reason, rules_accepted } = req.body;
+  if (song_type === 'other' && !(await isOtherSongsEnabled())) {
+    return res.status(403).json({ error: 'Başkasının şarkısı paylaşma özelliği şu an kapalı.' });
+  }
   // Kendi müziği için artist rozeti zorunlu, başkasının müziği için değil
   if ((song_type === 'own' || !song_type) && !req.user.is_artist) {
     return res.status(403).json({ error: 'Kendi müziğini yüklemek için artist rozeti gerekli' });
@@ -5558,7 +5567,8 @@ app.get('/api/songs', async (req, res) => {
   // Süresi dolan banları otomatik aktife al
   await query(`UPDATE songs SET status='active', ban_reason='', ban_until=NULL WHERE status='suspended' AND ban_until IS NOT NULL AND ban_until < NOW()`);
   const { q, genre, artist, distributor } = req.query;
-  let where = "WHERE s.status='active'";
+  const otherEnabled = await isOtherSongsEnabled();
+  let where = `WHERE s.status='active'${otherEnabled ? '' : " AND s.song_type <> 'other'"}`;
   const params = [];
   if (q) {
     params.push(`%${q}%`);
@@ -5580,6 +5590,7 @@ app.get('/api/songs', async (req, res) => {
 
 // Tek müzik
 app.get('/api/songs/:slug', async (req, res) => {
+  const otherEnabled = await isOtherSongsEnabled();
   const { rows } = await query(
     `SELECT s.*, u.username as uploader, u.avatar as uploader_avatar, u.is_artist,
             COALESCE((SELECT json_agg(json_build_object(
@@ -5591,7 +5602,7 @@ app.get('/api/songs/:slug', async (req, res) => {
             JOIN songs rs ON rs.id=sr.recommended_song_id
             WHERE sr.song_id=s.id AND rs.status='active'), '[]'::json) AS recommendations
      FROM songs s LEFT JOIN users u ON s.uploader_id=u.id
-     WHERE s.slug=$1`,
+     WHERE s.slug=$1${otherEnabled ? '' : " AND s.song_type <> 'other'"}`,
     [req.params.slug]
   );
   if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
@@ -5847,10 +5858,12 @@ app.get('/api/music-rules', async (req, res) => {
 app.get('/muzikler', async (req, res) => {
   let songs = [];
   try {
+    const otherEnabled = await isOtherSongsEnabled();
     const { rows } = await query(`SELECT s.slug, s.title, s.artist_name, s.genre, s.cover_url,
         s.published_at, s.created_at, u.username
       FROM songs s LEFT JOIN users u ON u.id=s.uploader_id
       WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        ${otherEnabled ? '' : "AND s.song_type <> 'other'"}
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)
       ORDER BY COALESCE(s.published_at,s.created_at) DESC LIMIT 100`);
     songs = rows;
@@ -5870,9 +5883,11 @@ app.get('/muzikler', async (req, res) => {
   res.send(injectMeta('Müzikler – CigCig Müzik', 'CigCig müzik platformu. Türkçe müzikler, artist müzikleri.', `${SITE_URL}/muzikler`, '', '', serverPageBody('CİGCİG MÜZİK', 'Müzikler', 'Topluluktan yeni müzikleri keşfet.', songBody)));
 });
 app.get('/muzik/:slug', async (req, res) => {
+  const otherEnabled = await isOtherSongsEnabled();
   const { rows } = await query(`SELECT s.*, u.username
     FROM songs s LEFT JOIN users u ON u.id=s.uploader_id
     WHERE s.slug=$1 AND s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      ${otherEnabled ? '' : "AND s.song_type <> 'other'"}
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)`, [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const s = rows[0];
@@ -5940,6 +5955,7 @@ app.post('/api/playlists', authMiddleware, playlistCoverUpload.single('cover'), 
 
 app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
   try {
+    const otherEnabled = await isOtherSongsEnabled();
     const { rows: pl } = await query(`
       SELECT p.*, owner.username AS owner_username
       FROM playlists p
@@ -5954,7 +5970,7 @@ app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
       `SELECT ps.id as ps_id, ps.position, s.id, s.slug, s.title, s.artist_name, s.cover_url, s.audio_url, s.play_count
        FROM playlist_songs ps
        JOIN songs s ON s.id = ps.song_id
-       WHERE ps.playlist_id = $1 AND s.status = 'active'
+       WHERE ps.playlist_id = $1 AND s.status = 'active'${otherEnabled ? '' : " AND s.song_type <> 'other'"}
        ORDER BY ps.position ASC, ps.added_at ASC`,
       [pl[0].id]
     );
@@ -6874,14 +6890,13 @@ app.get('/api/search', async (req, res) => {
 app.get('/api/friends', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
-    SELECT f.id, f.created_at, f.status, f.requester_id, f.addressee_id,
-      CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END AS other_id,
-      u.username AS other_username, u.avatar AS other_avatar,
+    SELECT f.id, f.created_at, 'accepted' AS status, f.follower_id AS requester_id, f.following_id AS addressee_id,
+      f.following_id AS other_id, u.username AS other_username, u.avatar AS other_avatar,
       u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted
-    FROM friendships f
-    JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
-    WHERE (f.requester_id=$1 OR f.addressee_id=$1)
-      AND (f.status='pending' OR f.status='accepted')
+    FROM follows f
+    JOIN follows reciprocal ON reciprocal.follower_id=f.following_id AND reciprocal.following_id=f.follower_id AND reciprocal.status='accepted'
+    JOIN users u ON u.id=f.following_id
+    WHERE f.follower_id=$1 AND f.status='accepted'
   `, [uid]);
   res.json(rows);
 });
@@ -6927,9 +6942,10 @@ app.get('/api/profile/:username/friends', async (req, res) => {
   const uid = users[0].id;
   const { rows } = await query(`
     SELECT u.id, u.username, u.avatar, u.title
-    FROM friendships f
-    JOIN users u ON (u.id = CASE WHEN f.requester_id = $1 THEN f.addressee_id ELSE f.requester_id END)
-    WHERE (f.requester_id = $1 OR f.addressee_id = $1) AND f.status = 'accepted'
+    FROM follows f
+    JOIN follows reciprocal ON reciprocal.follower_id=f.following_id AND reciprocal.following_id=f.follower_id AND reciprocal.status='accepted'
+    JOIN users u ON u.id=f.following_id
+    WHERE f.follower_id=$1 AND f.status='accepted'
   `, [uid]);
   res.json(rows);
 });
