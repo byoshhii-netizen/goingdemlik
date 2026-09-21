@@ -1410,7 +1410,7 @@ body.home-media-only .container.page {
 .photo-card { break-inside: avoid; scroll-snap-align: start; margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); }
 .photo-card-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:13px; font-weight:700; }
 .photo-card-head .avatar-sm { width:28px; height:28px; }
-.photo-media-wrap { position:relative; overflow:hidden; aspect-ratio:3 / 4; background:var(--bg-card2); isolation:isolate; }
+.photo-media-wrap { position:relative; overflow:hidden; aspect-ratio:3 / 4; max-height:min(78svh, 620px); background:var(--bg-card2); isolation:isolate; }
 .photo-media-backdrop { position:absolute; inset:-18px; background-position:center; background-size:cover; filter:blur(18px); opacity:.42; transform:scale(1.06); }
 .photo-media-backdrop::after { content:''; position:absolute; inset:0; background:rgba(0,0,0,.28); }
 .photo-song-overlay { position:absolute; left:10px; right:10px; top:10px; z-index:2; display:flex; align-items:center; gap:7px; max-width:calc(100% - 20px); padding:8px 11px; border:1px solid rgba(255,255,255,.18); border-radius:9px; background:rgba(15,15,15,.78); color:#fff; text-align:left; backdrop-filter:blur(8px); }
@@ -1454,7 +1454,11 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 #photo-audio-control { position:fixed; right:20px; bottom:82px; z-index:90; display:flex; align-items:center; gap:8px; padding:7px; border:1px solid var(--border); border-radius:22px; background:var(--bg-card); box-shadow:0 8px 24px rgba(0,0,0,.28); }
 #photo-audio-control input { width:96px; accent-color:var(--accent-red); }
 @media (max-width:768px) { #photo-audio-control { right:12px; bottom:70px; padding:5px; } #photo-audio-control input { display:none; } }
-@media (max-width: 600px) { .photos-feed { gap:12px; } .photo-card { border-radius:12px; padding:10px; } }
+@media (max-width: 600px) {
+  .photos-feed { gap:12px; }
+  .photo-card { border-radius:12px; padding:10px; }
+  .photo-media-wrap { aspect-ratio:auto; height:min(62svh, 420px); max-height:min(62svh, 420px); }
+}
 @media (min-width: 1000px) {
   .photos-feed { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); align-items:start; gap:24px; }
   .photos-feed .photo-card { margin:0; }
