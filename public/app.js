@@ -1851,14 +1851,20 @@ async function renderForumList(app, queryString) {
   const activeTag = urlParams.get('tag') || '';
 
   app.innerHTML = `
-    <div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div>
+    <div class="container page forum-page">
+      <div class="page-header forum-page-header">
+        <div class="forum-page-heading">
+          <span class="forum-page-kicker"><i class="fas fa-comments"></i> Topluluk</span>
           <div class="page-title">Konular</div>
-          ${activeTag ? `<div class="page-subtitle"><i class="fas fa-hashtag" style="color:var(--accent-red2)"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli &nbsp;<a href="/forum" data-link style="font-size:12px;color:var(--accent-red2)"><i class="fas fa-times"></i> Temizle</a></div>` : ''}
+          <p class="forum-page-lead">Merak ettiğini sor, fikrini paylaş ve topluluğun cevaplarına katıl.</p>
+          ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
+        <button class="btn btn-primary forum-new-btn" id="forum-new-btn"><i class="fas fa-plus"></i><span>Yeni konu aç</span></button>
       </div>
-      <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="forum-search" placeholder="Konu veya #etiket ara..." /></div>
+      <div class="forum-toolbar">
+        <div class="search-bar forum-search"><i class="fas fa-search"></i><input type="search" id="forum-search" placeholder="Konu, kullanıcı veya #etiket ara..." autocomplete="off" /></div>
+        <span class="forum-toolbar-hint"><i class="fas fa-shield-heart"></i> Saygılı ve faydalı paylaşımlar</span>
+      </div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
 
@@ -1893,7 +1899,7 @@ function renderForumListItems(forums) {
   const el = $('#forums-list');
   if (!el) return;
   if (!forums.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Konu bulunamadı.</p></div>'; return; }
-  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>`;
+  el.innerHTML = `<div class="forum-list">${forums.map(f => forumCardHTML(f)).join('')}</div>`;
 }
 
 function forumCardHTML(f) {
@@ -1919,10 +1925,13 @@ function forumCardHTML(f) {
   const parsedImages = (() => { try { return JSON.parse(f.images || '[]'); } catch { return []; } })();
   const cardThumb = f.thumbnail || parsedImages[0] || f.banner_image || '';
 
-  return `<div class="forum-card" onclick="navigate('/forum/${escHtml(f.slug)}')">
+  return `<article class="forum-card" onclick="navigate('/forum/${escHtml(f.slug)}')">
     <div class="forum-card-accent"></div>
     <div class="forum-card-body">
-      <div class="forum-card-title">${escHtml(f.title)}</div>
+      <div class="forum-card-heading">
+        <div class="forum-card-title">${escHtml(f.title)}</div>
+        <span class="forum-card-open"><i class="fas fa-arrow-up-right-from-square"></i> Aç</span>
+      </div>
       <div class="forum-card-preview">${preview}${f.content.length > 140 ? '...' : ''}</div>
       ${tagsHTML ? `<div class="forum-tags-row">${tagsHTML}</div>` : ''}
       <div class="forum-card-meta">
@@ -1934,7 +1943,7 @@ function forumCardHTML(f) {
       </div>
     </div>
     ${cardThumb ? `<img src="${escHtml(cardThumb)}" class="forum-card-banner" alt="" />` : ''}
-  </div>`;
+  </article>`;
 }
 
 function poemCardHTML(poem) {
@@ -2102,8 +2111,8 @@ async function renderPoemDetail(app, slug) {
         <button class="forum-action-btn" id="poem-share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
       </div>
       <hr class="divider" />
-      <div class="comments-section">
-        <div class="comments-title"><i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${comments.length})</div>
+       <div class="comments-section">
+         <div class="comments-heading"><div><div class="comments-title"><i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span></div><p class="comments-lead">Düşünceni paylaş ve yazıya katkıda bulun.</p></div><span class="comments-sort"><i class="fas fa-arrow-down-wide-short"></i> En yeni</span></div>
         ${currentUser ? `
           <div id="comment-reply-area" class="comment-reply-area">
             <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
@@ -2112,10 +2121,9 @@ async function renderPoemDetail(app, slug) {
             </div>
             <button type="button" class="btn btn-ghost btn-sm" id="comment-reply-clear" style="padding:4px 8px;flex-shrink:0"><i class="fas fa-times"></i></button>
           </div>
-          <div class="comment-form">
+           <div class="comment-form" role="form" aria-label="Yorum yaz">
             ${avatarImg(currentUser, 'comment-avatar')}
-            <textarea id="comment-input" placeholder="Yorum yaz..."></textarea>
-            <button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i></button>
+             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000 · Ctrl/⌘ + Enter gönderir</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
           </div>` : `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>`}
         <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
@@ -2180,10 +2188,24 @@ async function renderPoemDetail(app, slug) {
       $('#comments-list').innerHTML = commentTreeHTML(comments);
       $('#comment-input').value = '';
       clearCommentReply();
+      const title = $('.comments-title');
+      if (title) title.innerHTML = `<i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span>`;
+      const count = $('#comment-char-count');
+      if (count) count.textContent = '0 / 2.000 · Ctrl/⌘ + Enter gönderir';
     } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#comment-reply-clear')?.addEventListener('click', clearCommentReply);
+  $('#comment-input')?.addEventListener('input', e => {
+    const count = $('#comment-char-count');
+    if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000 · Ctrl/⌘ + Enter gönderir`;
+  });
+  $('#comment-input')?.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      $('#comment-submit')?.click();
+    }
+  });
 
   $('#comments-list').addEventListener('click', async e => {
     const replyBtn = e.target.closest('.reply-comment-btn');
@@ -2226,48 +2248,51 @@ async function renderPoemDetail(app, slug) {
 
 function showNewForumModal(existing = null) {
   showModal(existing ? 'Konuyu Düzenle' : 'Yeni Konu Aç', `
-    <div class="form-group"><label>Başlık</label><input id="fm-title" type="text" placeholder="Konu başlığı" value="${existing ? escHtml(existing.title) : ''}" /></div>
-    <div class="form-group"><label>İçerik</label><textarea id="fm-content" rows="8" placeholder="Yazınızı buraya girin...">${existing ? escHtml(existing.content) : ''}</textarea></div>
-    <div class="form-group">
-      <label>Konu Türleri</label>
-      <div id="fm-tags-loading" style="color:var(--text-muted);padding:8px">Yükleniyor...</div>
-      <div id="fm-tags-checkboxes" style="display:none;max-height:160px;overflow-y:auto;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:10px;display:none"></div>
-      <div style="margin-top:8px"><small style="color:var(--text-muted)">veya virgülle ayırarak kendiniz ekleyin:</small></div>
-      <input type="text" id="fm-custom-tags" placeholder="Örn: bilim, siyaset, teknoloji" style="margin-top:4px" />
-    </div>
-    <div class="form-group">
-      <label>Kart Küçük Resmi <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(opsiyonel — boş bırakırsan 1. ek resim ya da banner kullanılır)</span></label>
-      <input type="file" id="fm-thumb-file" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px;margin-bottom:6px" />
+    <div class="forum-compose">
+      ${existing ? '' : `<div class="forum-compose-intro"><span class="forum-compose-icon"><i class="fas fa-lightbulb"></i></span><div><strong>Topluluğa bir soru bırak</strong><small>Başlığını net tut, detayları içerikte anlat. Böylece daha hızlı ve iyi cevaplar alırsın.</small></div></div>`}
+      <div class="form-group forum-compose-field"><label for="fm-title">Başlık</label><input id="fm-title" maxlength="140" type="text" placeholder="Örn. Bu konuda sizin deneyiminiz ne?" value="${existing ? escHtml(existing.title) : ''}" /><small class="field-hint">Konunun ne hakkında olduğunu tek cümlede anlat.</small></div>
+      <div class="form-group forum-compose-field"><div class="field-label-row"><label for="fm-content">İçerik</label><span id="fm-content-count">0 / 20.000</span></div><textarea id="fm-content" maxlength="20000" rows="9" placeholder="Düşünceni, sorunu veya bağlamı buraya yaz...">${existing ? escHtml(existing.content) : ''}</textarea><small class="field-hint">Satır atlayabilir, bağlantı veya etiket ekleyebilirsin.</small></div>
+      <div class="form-group forum-compose-field">
+        <div class="field-label-row"><label>Konu türleri</label><span>İsteğe bağlı</span></div>
+        <div id="fm-tags-loading" class="tag-picker-loading">Türler yükleniyor...</div>
+        <div id="fm-tags-checkboxes" class="tag-picker"></div>
+        <input type="text" id="fm-custom-tags" placeholder="Kendi etiketlerini yaz: bilim, teknoloji..." />
+      </div>
+      <div class="forum-compose-grid">
+        <div class="form-group forum-compose-field">
+          <label for="fm-thumb-file">Kart görseli <span>(isteğe bağlı)</span></label>
+          <input type="file" id="fm-thumb-file" accept="image/*" class="file-input" />
+          <small class="field-hint">Konu listesinde küçük kapak olarak görünür.</small>
       ${existing && existing.thumbnail ? `<img id="fm-thumb-preview" src="${escHtml(existing.thumbnail)}" style="width:90px;height:90px;object-fit:cover;border-radius:8px;border:1px solid var(--border)" />` : `<div id="fm-thumb-preview" style="display:none"></div>`}
-    </div>
-    <div class="form-group">
-      <label>Banner Resim (opsiyonel)</label>
-      <input type="file" id="fm-banner-file" accept="image/*" style="margin-bottom:8px" />
+        </div>
+        <div class="form-group forum-compose-field">
+          <label for="fm-banner-file">Banner görseli <span>(isteğe bağlı)</span></label>
+          <input type="file" id="fm-banner-file" accept="image/*" class="file-input" />
       ${existing && existing.banner_image ? `<img id="fm-banner-preview" src="${escHtml(existing.banner_image)}" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;margin-top:4px" />` : `<div id="fm-banner-preview" style="display:none"></div>`}
-      <div style="margin-top:8px">
-        <label style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:4px">FOTOĞRAF GÖRÜNÜMÜ</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 10px;border:1px solid var(--border);border-radius:6px">
-            <input type="radio" name="fm-fit" value="cover" ${!existing || (existing.banner_fit||'cover')==='cover' ? 'checked' : ''} style="width:auto" /> Kap (Dikdörtgen)
-          </label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 10px;border:1px solid var(--border);border-radius:6px">
-            <input type="radio" name="fm-fit" value="contain" ${existing && existing.banner_fit==='contain' ? 'checked' : ''} style="width:auto" /> Sığdır (Tam Görünsün)
-          </label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;padding:4px 10px;border:1px solid var(--border);border-radius:6px">
-            <input type="radio" name="fm-fit" value="original" ${existing && existing.banner_fit==='original' ? 'checked' : ''} style="width:auto" /> Gerçek Boyut
-          </label>
+          <div class="image-fit-picker">
+            <span>Görünüm</span>
+            <label><input type="radio" name="fm-fit" value="cover" ${!existing || (existing.banner_fit||'cover')==='cover' ? 'checked' : ''} /> Kapla</label>
+            <label><input type="radio" name="fm-fit" value="contain" ${existing && existing.banner_fit==='contain' ? 'checked' : ''} /> Sığdır</label>
+            <label><input type="radio" name="fm-fit" value="original" ${existing && existing.banner_fit==='original' ? 'checked' : ''} /> Gerçek boyut</label>
+          </div>
         </div>
       </div>
+      <div class="forum-compose-options">
+        <label class="compose-toggle"><input type="checkbox" id="fm-comments" ${!existing || existing.allow_comments ? 'checked' : ''} /><span class="toggle-ui"></span><span><strong>Yorumlara izin ver</strong><small>Topluluk konuya yanıt verebilsin.</small></span></label>
+        <div class="form-group forum-compose-field forum-extra-images"><label for="fm-images-file">Ek görseller <span>(en fazla 5)</span></label><input type="file" id="fm-images-file" accept="image/*" multiple class="file-input" /><div id="fm-images-preview" class="compose-image-preview"></div></div>
+      </div>
+      <div class="forum-compose-actions"><span class="compose-submit-hint"><i class="fas fa-lock"></i> Paylaşımın topluluk kurallarına uygun olsun.</span><button class="btn btn-primary" id="fm-submit">${existing ? 'Güncelle' : 'Yayınla'} <i class="fas fa-arrow-right"></i></button></div>
+      <div id="fm-error" class="form-error mt-4"></div>
     </div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="fm-comments" ${!existing || existing.allow_comments ? 'checked' : ''} /> Yorumlara izin ver</label></div>
-    <div class="form-group">
-      <label>Ek Resimler <span style="font-size:11px;font-weight:400;color:var(--text-muted)">(en fazla 5, her biri max 10MB)</span></label>
-      <input type="file" id="fm-images-file" accept="image/*" multiple style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
-      <div id="fm-images-preview" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"></div>
-    </div>
-    <button class="btn btn-primary" id="fm-submit" style="width:100%">${existing ? 'Güncelle' : 'Yayınla'}</button>
-    <div id="fm-error" class="form-error mt-4"></div>
   `);
+
+  const forumContentInput = $('#fm-content');
+  const forumContentCount = $('#fm-content-count');
+  const syncForumContentCount = () => {
+    if (forumContentInput && forumContentCount) forumContentCount.textContent = `${forumContentInput.value.length.toLocaleString('tr-TR')} / 20.000`;
+  };
+  forumContentInput?.addEventListener('input', syncForumContentCount);
+  syncForumContentCount();
 
   api('/tags').then(tags => {
     const container = $('#fm-tags-checkboxes');
@@ -2550,8 +2575,8 @@ async function renderForumDetail(app, slug) {
         ${currentUser ? `<button class="forum-action-btn" id="forward-forum-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
       </div>
       <hr class="divider" />
-      <div class="comments-section">
-        <div class="comments-title"><i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${comments.length})</div>
+       <div class="comments-section">
+         <div class="comments-heading"><div><div class="comments-title"><i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span></div><p class="comments-lead">Konuyu birlikte geliştirmek için düşünceni paylaş.</p></div><span class="comments-sort"><i class="fas fa-arrow-down-wide-short"></i> En yeni</span></div>
         ${currentUser && forum.allow_comments ? `
           <div id="comment-reply-area" class="comment-reply-area">
             <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">
@@ -2560,10 +2585,9 @@ async function renderForumDetail(app, slug) {
             </div>
             <button type="button" class="btn btn-ghost btn-sm" id="comment-reply-clear" style="padding:4px 8px;flex-shrink:0"><i class="fas fa-times"></i></button>
           </div>
-          <div class="comment-form">
+           <div class="comment-form" role="form" aria-label="Yorum yaz">
             ${avatarImg(currentUser, 'comment-avatar')}
-            <textarea id="comment-input" placeholder="Yorumunuzu yazın..."></textarea>
-            <button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i></button>
+             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000 · Ctrl/⌘ + Enter gönderir</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
           </div>` : (!currentUser && forum.allow_comments ? `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>` : (!forum.allow_comments ? `<p class="text-muted" style="margin-bottom:16px">Yorumlar kapatılmış.</p>` : ''))}
          <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
@@ -2628,11 +2652,23 @@ async function renderForumDetail(app, slug) {
       $('#comment-input').value = '';
       clearCommentReply();
       const title = $('.comments-title');
-      if (title) title.innerHTML = `<i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${$('#comments-list').children.length})`;
+      if (title) title.innerHTML = `<i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span>`;
+      const count = $('#comment-char-count');
+      if (count) count.textContent = '0 / 2.000 · Ctrl/⌘ + Enter gönderir';
     } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#comment-reply-clear')?.addEventListener('click', clearCommentReply);
+  $('#comment-input')?.addEventListener('input', e => {
+    const count = $('#comment-char-count');
+    if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000 · Ctrl/⌘ + Enter gönderir`;
+  });
+  $('#comment-input')?.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      $('#comment-submit')?.click();
+    }
+  });
 
   $('#comments-list').addEventListener('click', async e => {
     const replyBtn = e.target.closest('.reply-comment-btn');
@@ -2656,7 +2692,7 @@ async function renderForumDetail(app, slug) {
         await api('/forum/' + slug + '/comments/' + id, { method: 'DELETE' });
          del.closest('.comment-node')?.remove();
          const title = $('.comments-title');
-         if (title) title.innerHTML = `<i class="fas fa-comments" style="color:var(--accent-red)"></i> Yorumlar (${$('#comments-list').querySelectorAll('.comment').length})`;
+         if (title) title.innerHTML = `<i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${$('#comments-list').querySelectorAll('.comment').length}</span>`;
       } catch (e) { toast(e.message, 'error'); }
     }
 
