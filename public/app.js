@@ -1666,19 +1666,15 @@ document.addEventListener('click', e => {
 async function renderHome(app) {
   document.title = siteName + ' – Topluluk Platformu';
   updatePageMeta(siteName + ' – Topluluk Platformu', 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.', '');
+  app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
 
   let settings = {};
-  try { settings = await fetch('/api/settings/public').then(r => r.json()).catch(() => ({})); } catch {}
+  try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
   const raw = settings.homepage_sections;
   let sections = raw ? (function() { try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : [parsed]; } catch { return [raw]; } })() : ['konular'];
   if (!Array.isArray(sections)) sections = [sections];
   sections = sections.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
   if (!sections.length) sections = ['konular'];
-
-  const isMediaOnlyHome = sections.length === 1 && sections[0] === 'fotograflar';
-  document.body.classList.toggle('home-media-only', isMediaOnlyHome);
-
-  app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
 
   async function renderForumsSection() {
     const html = `
@@ -5552,66 +5548,8 @@ async function renderProfile(app, username) {
   bindFollowButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
-      const followType = button.dataset.followList;
-      const list = await api('/users/' + encodeURIComponent(profileUsername) + '/' + followType);
-      const modalTitle = followType === 'followers' ? 'Takipçiler' : 'Takip edilenler';
-      const isOwnFollowingList = isOwn && followType === 'following';
-      const rowsHtml = list.length
-        ? list.map(item => `
-          <div class="profile-follow-row">
-            <a href="${profileRoute(item.username)}" data-link class="profile-follow-user">
-              <span>${avatarImg(item)}</span>
-              <strong>${escHtml(item.username)}</strong>
-            </a>
-            ${isOwnFollowingList ? `<button class="btn btn-ghost btn-sm profile-unfollow-btn" data-target-username="${escHtml(item.username)}" type="button"><i class="fas fa-user-minus"></i> Takipten çık</button>` : ''}
-          </div>`).join('')
-        : '<div class="empty-state"><p>Henüz kimse yok.</p></div>';
-
-      showModal(modalTitle, `
-        <div class="profile-follow-list-modal">
-          <div class="profile-follow-search">
-            <i class="fas fa-search"></i>
-            <input type="text" id="profile-follow-search-input" placeholder="İsim ara..." autocomplete="off" />
-          </div>
-          <div class="profile-followers-list">${rowsHtml}</div>
-        </div>
-      `);
-
-      const searchInput = document.getElementById('profile-follow-search-input');
-      const followRows = document.querySelectorAll('.profile-follow-row');
-      searchInput?.addEventListener('input', event => {
-        const q = event.target.value.trim().toLocaleLowerCase('tr-TR');
-        followRows.forEach(row => {
-          const username = row.querySelector('.profile-follow-user strong')?.textContent || '';
-          row.style.display = username.toLocaleLowerCase('tr-TR').includes(q) ? '' : 'none';
-        });
-      });
-
-      if (isOwnFollowingList) {
-        document.querySelectorAll('.profile-unfollow-btn').forEach(button => {
-          button.addEventListener('click', async (event) => {
-            event.preventDefault();
-            const targetUsername = button.dataset.targetUsername;
-            if (!targetUsername) return;
-            button.disabled = true;
-            try {
-              await api('/users/' + encodeURIComponent(targetUsername) + '/follow', { method: 'DELETE' });
-              const row = button.closest('.profile-follow-row');
-              row?.remove();
-              const remainingCount = document.querySelectorAll('.profile-follow-row').length;
-              if (!remainingCount) {
-                const container = document.querySelector('.profile-followers-list');
-                if (container) container.innerHTML = '<div class="empty-state"><p>Henüz kimse yok.</p></div>';
-              }
-              toast('Takipten çıkıldı');
-            } catch (e) {
-              toast(e.message, 'error');
-            } finally {
-              button.disabled = false;
-            }
-          });
-        });
-      }
+      const list = await api('/users/' + encodeURIComponent(profileUsername) + '/' + button.dataset.followList);
+      showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
     } catch (e) { toast(e.message, 'error'); }
   }));
 
