@@ -13,6 +13,7 @@ const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { query, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
+const { normalizeHomepageSections } = require('./public/homepage-sections');
 
 function createPlaylistPublicId() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -588,6 +589,7 @@ async function adminMiddleware(req, res, next) {
   }
   if (req.method !== 'GET') {
     const allowed = [
+      /^\/api\/admin\/homepage-sections$/,
       /^\/api\/admin\/user\/\d+\/2fa$/,
       /^\/api\/admin\/user\/\d+\/ad-panels(?:\/\d+)?$/,
       /^\/api\/admin\/account-deletions\/\d+\/cancel$/,
@@ -5359,6 +5361,31 @@ app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Site ayarları yalnızca ana admine açıktır' });
   const { rows } = await query('SELECT * FROM settings');
   res.json(Object.fromEntries(rows.map(s => [s.key, s.value])));
+});
+
+app.get('/api/admin/homepage-sections', adminMiddleware, async (req, res) => {
+  const { rows } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+  res.json({ homepage_sections: rows[0]?.value || '[]' });
+});
+
+app.post('/api/admin/homepage-sections', adminMiddleware, async (req, res) => {
+  const { sections } = req.body;
+  const availableSections = new Set(['konular', 'kitaplar', 'gruplar', 'muzikler', 'playlistler', 'magaza', 'reals', 'videolar', 'fotograflar']);
+  if (!Array.isArray(sections) || sections.length === 0) {
+    return res.status(400).json({ error: 'En az bir ana sayfa bölümü seçin.' });
+  }
+  if (sections.some(section => typeof section !== 'string' || !availableSections.has(section))) {
+    return res.status(400).json({ error: 'Geçersiz ana sayfa bölümü seçildi.' });
+  }
+  const normalizedSections = normalizeHomepageSections(sections);
+  if (sections.length === 1 && sections[0] === 'fotograflar') {
+    return res.status(400).json({ error: 'Medya tek başına ana sayfa bölümü olamaz; başka bir bölüm daha seçin.' });
+  }
+  await query(
+    'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
+    ['homepage_sections', JSON.stringify(normalizedSections)]
+  );
+  res.json({ ok: true, homepage_sections: normalizedSections });
 });
 
 app.post('/api/admin/settings', adminMiddleware, async (req, res) => {

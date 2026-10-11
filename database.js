@@ -12,8 +12,9 @@ const isRemoteDatabase = Boolean(
   !process.env.DATABASE_URL.includes('127.0.0.1')
 );
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+const connectionString = process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim() ? String(process.env.DATABASE_URL).trim() : '';
+const pool = connectionString ? new Pool({
+  connectionString,
   max: Number(process.env.PGPOOL_MAX || 10),
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
@@ -22,9 +23,12 @@ const pool = new Pool({
     : isRemoteDatabase
       ? { rejectUnauthorized: true }
       : false,
-});
+}) : null;
 
-async function query(text, params) {
+async function query(text, params = []) {
+  if (!pool) {
+    return { rows: [], rowCount: 0, command: text };
+  }
   const client = await pool.connect();
   try {
     return await client.query(text, params);
@@ -34,6 +38,10 @@ async function query(text, params) {
 }
 
 async function initDb() {
+  if (!pool) {
+    console.log('CigCig local demo mode: database disabled, app will run without PostgreSQL.');
+    return true;
+  }
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,

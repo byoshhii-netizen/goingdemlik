@@ -3539,7 +3539,6 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 /* Reels viewer */
 .reals-container { background: #08090b !important; overflow: hidden; }
 .reals-list { isolation: isolate; }
-.reals-item { will-change: transform; }
 .reals-video-box { box-shadow: 0 18px 60px rgba(0,0,0,.65) !important; }
 .reals-video { display: block; }
 .reals-meta { z-index: 1; padding: 24px 18px 18px !important; background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,.1) 30%, rgba(0,0,0,.88) 100%) !important; }

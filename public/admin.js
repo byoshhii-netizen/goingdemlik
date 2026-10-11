@@ -488,8 +488,13 @@ async function renderAdSubmissions(main) {
 }
 async function renderHomepageSections(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
-  let settings = {};
-  try { settings = await adminApi('/settings'); } catch (e) { settings = {}; }
+  let settings;
+  try {
+    settings = await adminApi('/homepage-sections');
+  } catch (error) {
+    main.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Ana sayfa bölümleri yüklenemedi.')}</p></div>`;
+    return;
+  }
   const current = window.normalizeHomepageSections ? window.normalizeHomepageSections(settings.homepage_sections) : (() => {
     let parsed = settings.homepage_sections;
     if (typeof parsed === 'string') {
@@ -549,9 +554,9 @@ async function renderHomepageSections(main) {
     }).filter(Boolean);
     if (!selected.length) { toast('Bir bölüm seçin', 'error'); return; }
     try {
-      await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':sessionStorage.getItem('admin_token')}, body:JSON.stringify({ key:'homepage_sections', value: JSON.stringify(selected) }) });
+      await adminApi('/homepage-sections', { method: 'POST', body: JSON.stringify({ sections: selected }) });
       toast('Kaydedildi');
-    } catch (e) { toast(e.message,'error'); }
+    } catch (error) { toast(error.message, 'error'); }
   });
 }
 
