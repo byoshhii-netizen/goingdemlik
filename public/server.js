@@ -49,8 +49,9 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // Sesli arama geçici olarak kapalı; mikrofon erişimi açılmıyor.
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  // Sesli aramada mikrofon ve kamera aynı origin içinde kullanılabilsin;
+  // tarayıcı izinleri engellenmesin.
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=(self)');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
