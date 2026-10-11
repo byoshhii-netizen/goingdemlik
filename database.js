@@ -27,7 +27,7 @@ const pool = connectionString ? new Pool({
 
 async function query(text, params = []) {
   if (!pool) {
-    return { rows: [], rowCount: 0, command: text };
+    throw new Error('DATABASE_URL tanımlı değil; veritabanı işlemi gerçekleştirilemedi.');
   }
   const client = await pool.connect();
   try {
