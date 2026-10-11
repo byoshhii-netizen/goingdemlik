@@ -502,8 +502,7 @@ async function renderHomepageSections(main) {
     }
     if (!Array.isArray(parsed)) parsed = [parsed];
     parsed = parsed.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
-    if (!parsed.length || (parsed.length === 1 && parsed[0] === 'fotograflar')) return ['konular'];
-    return parsed.filter(s => !(s === 'fotograflar' && parsed.length === 1));
+    return parsed.length ? parsed : ['konular'];
   })();
   const currentArr = Array.isArray(current) ? current : [current];
   const available = [
@@ -3024,13 +3023,15 @@ async function renderSettings(main) {
           <div id="s-footer-msg" class="form-error mt-4"></div>
         </div>
       </div>
-      <div class="card">
-        <div class="card-header"><span><i class="fas fa-shield-halved" style="color:var(--red2);margin-right:8px"></i>KVKK Metni</span></div>
+      <div class="card settings-wide">
+        <div class="card-header"><span><i class="fas fa-shield-halved" style="color:var(--red2);margin-right:8px"></i>Kayıt ve Gizlilik Metinleri</span></div>
         <div class="card-body">
-          <div class="form-group"><textarea id="s-kvkk" rows="5">${escHtml(settings['kvkk_text']||'')}</textarea></div>
-          <button class="btn btn-primary" id="s-kvkk-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
-          <div id="s-kvkk-msg" class="form-error mt-4"></div>
-        </div></div>
+          <div class="adm-feature-copy"><strong>Kayıt sırasında kullanıcıların okuyacağı metinler</strong><p>Değişiklikler yeni kayıtlar için geçerlidir. Yayımlamadan önce veri sorumlusunun tam kimlik/iletişim bilgilerini ve kullandığınız hizmet sağlayıcılarını doğrulayın; mevzuata uygunluk için hukuk danışmanınıza inceletin.</p></div>
+          <div class="form-group"><label for="s-information-notice">Aydınlatma Metni</label><textarea id="s-information-notice" rows="10">${escHtml(settings['information_notice'] || '')}</textarea><button class="btn btn-primary" id="s-information-notice-save" style="width:100%;justify-content:center;margin-top:8px"><i class="fas fa-save"></i> Aydınlatma Metnini Kaydet</button><div id="s-information-notice-msg" class="form-error mt-4"></div></div>
+          <div class="form-group"><label for="s-privacy-policy">Gizlilik Sözleşmesi</label><textarea id="s-privacy-policy" rows="10">${escHtml(settings['privacy_policy'] || '')}</textarea><button class="btn btn-primary" id="s-privacy-policy-save" style="width:100%;justify-content:center;margin-top:8px"><i class="fas fa-save"></i> Gizlilik Sözleşmesini Kaydet</button><div id="s-privacy-policy-msg" class="form-error mt-4"></div></div>
+          <div class="form-group"><label for="s-kvkk">KVKK Bilgilendirmesi</label><textarea id="s-kvkk" rows="8">${escHtml(settings['kvkk_text'] || '')}</textarea><button class="btn btn-primary" id="s-kvkk-save" style="width:100%;justify-content:center;margin-top:8px"><i class="fas fa-save"></i> KVKK Metnini Kaydet</button><div id="s-kvkk-msg" class="form-error mt-4"></div></div>
+        </div>
+      </div>
         <div class="card"><div class="card-header"><span><i class="fas fa-ban" style="color:var(--accent-red2)"></i> Engelleme Ayarları</span></div><div class="card-body">
           <div class="form-group" style="display:flex;align-items:center;gap:12px;margin-bottom:4px">
             <input type="checkbox" id="s-block-new-accounts" ${settings['block_new_accounts']==='1'?'checked':''} style="width:18px;height:18px;cursor:pointer" />
@@ -3336,6 +3337,31 @@ async function renderSettings(main) {
   });
   document.getElementById('s-kvkk-save').addEventListener('click', async () => {
     await saveSetting('kvkk_text', document.getElementById('s-kvkk').value.trim(), document.getElementById('s-kvkk-msg'));
+  });
+  const saveLegalDocument = async (key, inputId, messageId) => {
+    const message = document.getElementById(messageId);
+    try {
+      const response = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+        body: JSON.stringify({ key, value: document.getElementById(inputId).value.trim() })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Metin kaydedilemedi');
+      message.style.color = 'var(--green)';
+      message.textContent = '✓ Metin kaydedildi. Yeni kayıtlar bu sürümü görecek.';
+      toast('Metin kaydedildi');
+    } catch (error) {
+      message.style.color = 'var(--red2)';
+      message.textContent = error.message;
+    }
+  };
+  document.getElementById('s-information-notice-save')?.addEventListener('click', () => {
+    saveLegalDocument('information_notice', 's-information-notice', 's-information-notice-msg');
+  });
+  document.getElementById('s-privacy-policy-save')?.addEventListener('click', () => {
+    saveLegalDocument('privacy_policy', 's-privacy-policy', 's-privacy-policy-msg');
+  });
 
   document.getElementById('s-block-new-save')?.addEventListener('click', async () => {
     const val = document.getElementById('s-block-new-accounts').checked ? '1' : '0';
@@ -3344,7 +3370,6 @@ async function renderSettings(main) {
     msg.style.color = 'var(--accent-green)';
     msg.textContent = 'Kaydedildi';
     setTimeout(() => { msg.textContent = ''; }, 2000);
-  });
   });
   document.getElementById('s-music-own-save').addEventListener('click', async () => {
     await saveSetting('music_own_rules', document.getElementById('s-music-own').value.trim(), document.getElementById('s-music-msg'));

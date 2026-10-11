@@ -1679,8 +1679,7 @@ async function renderHome(app) {
     }
     if (!Array.isArray(parsed)) parsed = [parsed];
     parsed = parsed.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
-    if (!parsed.length || (parsed.length === 1 && parsed[0] === 'fotograflar')) return ['konular'];
-    return parsed.filter(s => !(s === 'fotograflar' && parsed.length === 1));
+    return parsed.length ? parsed : ['konular'];
   })();
 
   async function renderForumsSection() {
@@ -6399,12 +6398,31 @@ function renderRegister(app) {
         <label class="checkbox-label"><input type="checkbox" id="reg-show-level" checked /> Seviye rozetini göster</label>
         <label class="checkbox-label"><input type="checkbox" id="reg-show-progress" checked /> Seviye ilerleme barını göster</label>
       </details>
-      <div class="form-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="reg-kvkk" />
-          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum. <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button></span>
+      <section class="register-legal" aria-labelledby="register-legal-title">
+        <div class="register-legal-heading">
+          <span class="register-legal-icon"><i class="fas fa-shield-halved"></i></span>
+          <div><h2 id="register-legal-title">Gizlilik ve yasal metinler</h2><p>Hesap oluşturmadan önce üç metni de inceleyin.</p></div>
+        </div>
+        <div class="register-legal-documents">
+          <details class="register-legal-document" open>
+            <summary><span><i class="fas fa-circle-info"></i> Aydınlatma Metni</span><i class="fas fa-chevron-down"></i></summary>
+            <div class="register-legal-reading" id="reg-legal-information">Metin yükleniyor…</div>
+          </details>
+          <details class="register-legal-document">
+            <summary><span><i class="fas fa-user-lock"></i> Gizlilik Sözleşmesi</span><i class="fas fa-chevron-down"></i></summary>
+            <div class="register-legal-reading" id="reg-legal-privacy">Metin yükleniyor…</div>
+          </details>
+          <details class="register-legal-document">
+            <summary><span><i class="fas fa-scale-balanced"></i> KVKK Bilgilendirmesi</span><i class="fas fa-chevron-down"></i></summary>
+            <div class="register-legal-reading" id="reg-legal-kvkk">Metin yükleniyor…</div>
+          </details>
+        </div>
+        <div class="register-legal-loading" id="reg-legal-status" role="status">Metinler güvenli bağlantı üzerinden yükleniyor…</div>
+        <label class="register-legal-consent" for="reg-kvkk">
+          <input type="checkbox" id="reg-kvkk" disabled />
+          <span><strong>Okudum ve kabul ediyorum.</strong><small>Aydınlatma Metni’ni, Gizlilik Sözleşmesi’ni ve KVKK Bilgilendirmesi’ni okudum; bu sürüm için onay veriyorum.</small></span>
         </label>
-      </div>
+      </section>
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="reg-btn">Kayıt Ol</button>
       <div id="reg-error" class="form-error mt-4" style="text-align:center"></div>
       <div class="auth-footer">Zaten hesabın var mı? <a href="/giris" data-link class="auth-link">Giriş Yap</a></div>
@@ -6462,18 +6480,47 @@ function renderRegister(app) {
     });
   });
 
-  $('#kvkk-btn').addEventListener('click', async () => {
+  let legalDocumentsVersion = '';
+  let legalDocumentsLoaded = false;
+  const legalStatus = $('#reg-legal-status');
+  const legalConsent = $('#reg-kvkk');
+  const loadLegalDocuments = async () => {
+    legalDocumentsLoaded = false;
+    legalConsent.disabled = true;
+    legalStatus.textContent = 'Metinler yükleniyor…';
+    legalStatus.classList.remove('is-error');
     try {
-      const r = await api('/kvkk');
-      showModal('KVKK Aydınlatma Metni', `<div style="white-space:pre-wrap;font-size:13px;line-height:1.7;color:var(--text-secondary);max-height:400px;overflow-y:auto">${escHtml(r.text)}</div>`);
-    } catch {}
-  });
+      const response = await fetch('/api/legal-documents', { cache: 'no-store' });
+      const documents = await response.json();
+      if (!response.ok) throw new Error(documents.error || 'Yasal metinler yüklenemedi.');
+      if (!documents.version || !documents.information_notice || !documents.privacy_policy || !documents.kvkk_text) {
+        throw new Error('Yasal metinler eksik geldi. Lütfen daha sonra tekrar deneyin.');
+      }
+      $('#reg-legal-information').textContent = documents.information_notice;
+      $('#reg-legal-privacy').textContent = documents.privacy_policy;
+      $('#reg-legal-kvkk').textContent = documents.kvkk_text;
+      legalDocumentsVersion = documents.version;
+      legalDocumentsLoaded = true;
+      legalConsent.disabled = false;
+      legalStatus.textContent = 'Metinler yüklendi. Her başlığı açıp metni okuyabilirsiniz.';
+    } catch (error) {
+      legalStatus.textContent = `${error.message} `;
+      legalStatus.classList.add('is-error');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'register-legal-retry';
+      retry.textContent = 'Tekrar dene';
+      retry.addEventListener('click', loadLegalDocuments, { once: true });
+      legalStatus.appendChild(retry);
+    }
+  };
+  loadLegalDocuments();
 
   const doRegister = async () => {
     const username = $('#reg-username').value.trim();
     const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
-    const kvkk_accepted = $('#reg-kvkk').checked;
+    const kvkk_accepted = legalDocumentsLoaded && legalConsent.checked;
     const birth_date = $('#reg-birth-date').value;
     const is_private = $('#reg-private').checked;
     const tag_permission = document.querySelector('input[name="reg-tags"]:checked')?.value || 'everyone';
@@ -6493,7 +6540,8 @@ function renderRegister(app) {
     if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
     if (age < 15 || birth > today) { $('#reg-error').textContent = '15 yaş altı kabul edilmez (¬‿¬) hııhıı'; return; }
     if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
-    if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
+    if (!legalDocumentsLoaded) { $('#reg-error').textContent = 'Kayıt için yasal metinlerin yüklenmesi gerekiyor.'; return; }
+    if (!kvkk_accepted) { $('#reg-error').textContent = 'Üç yasal metni okuyup kabul etmeniz gerekiyor.'; return; }
     try {
       const formData = new FormData();
       const show_level_badge = $('#reg-show-level').checked;
@@ -6501,7 +6549,7 @@ function renderRegister(app) {
       const two_factor_method = $('#reg-2fa-method').value;
       const two_factor_question = $('#reg-2fa-question').value;
       const two_factor_answer = $('#reg-2fa-answer').value;
-      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      Object.entries({ username, email, password, kvkk_accepted, legal_documents_version: legalDocumentsVersion, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       if (data.email_verification_required) {

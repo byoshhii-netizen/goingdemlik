@@ -14,6 +14,7 @@ const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { query, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 const { normalizeHomepageSections } = require('./public/homepage-sections');
+const { LEGAL_DOCUMENT_DEFAULTS, createLegalDocumentsVersion } = require('./legal-documents');
 
 function createPlaylistPublicId() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -347,7 +348,7 @@ function getSessionCookie(req) {
 
 function sanitizeUser(u) {
   if (!u) return null;
-  const { password_hash, spotify_token, spotify_refresh, two_factor_answer_hash, email_verification_token_hash, email_verification_expires_at, ...rest } = u;
+  const { password_hash, spotify_token, spotify_refresh, two_factor_answer_hash, email_verification_token_hash, email_verification_expires_at, legal_accepted_at, legal_documents_version, ...rest } = u;
   return rest;
 }
 
@@ -1358,7 +1359,7 @@ app.get(/^\/vmb\/(?:dosyalar|dosyalara)(?:\/.*)?$/, async (req, res) => {
 // ===== AUTH =====
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
-    const { username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const { username, email, password, kvkk_accepted, legal_documents_version, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
     const emailAddress = String(email || '').trim().toLowerCase();
     let parsedHomepageSections = homepage_sections;
     let parsedProfileVisibility = profile_visibility;
@@ -1366,7 +1367,11 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     try { if (typeof parsedProfileVisibility === 'string') parsedProfileVisibility = JSON.parse(parsedProfileVisibility); } catch { parsedProfileVisibility = null; }
     if (!username || !emailAddress || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
     if (!isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
-    if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
+    if (![true, 'true', '1'].includes(kvkk_accepted)) return res.status(400).json({ error: 'Aydınlatma Metni, Gizlilik Sözleşmesi ve KVKK onayı zorunludur' });
+    const legalDocuments = await getLegalDocuments();
+    if (typeof legal_documents_version !== 'string' || legal_documents_version !== legalDocuments.version) {
+      return res.status(409).json({ error: 'Yasal metinler güncellenmiş. Lütfen sayfayı yenileyip metinleri tekrar okuyun.' });
+    }
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
@@ -1404,8 +1409,8 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const registrationCode = twoFactorMethod === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
     const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *',
-      [username, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,legal_accepted_at,legal_documents_version,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *',
+      [username, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, legalDocuments.version, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
     if (registrationCode) {
       const challenge = createChallengeToken();
@@ -5365,6 +5370,7 @@ app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
 
 app.get('/api/admin/homepage-sections', adminMiddleware, async (req, res) => {
   const { rows } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+  res.set('Cache-Control', 'no-store');
   res.json({ homepage_sections: rows[0]?.value || '[]' });
 });
 
@@ -5378,9 +5384,6 @@ app.post('/api/admin/homepage-sections', adminMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'Geçersiz ana sayfa bölümü seçildi.' });
   }
   const normalizedSections = normalizeHomepageSections(sections);
-  if (sections.length === 1 && sections[0] === 'fotograflar') {
-    return res.status(400).json({ error: 'Medya tek başına ana sayfa bölümü olamaz; başka bir bölüm daha seçin.' });
-  }
   await query(
     'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value',
     ['homepage_sections', JSON.stringify(normalizedSections)]
@@ -5431,9 +5434,27 @@ app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async
   res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
 });
 
+async function getLegalDocuments() {
+  const keys = Object.keys(LEGAL_DOCUMENT_DEFAULTS);
+  const { rows } = await query('SELECT key,value FROM settings WHERE key = ANY($1)', [keys]);
+  const stored = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  const documents = Object.fromEntries(keys.map(key => [
+    key,
+    typeof stored[key] === 'string' && stored[key].trim() ? stored[key] : LEGAL_DOCUMENT_DEFAULTS[key]
+  ]));
+  return { ...documents, version: createLegalDocumentsVersion(documents) };
+}
+
+app.get('/api/legal-documents', async (req, res) => {
+  const documents = await getLegalDocuments();
+  res.set('Cache-Control', 'no-store');
+  res.json(documents);
+});
+
 app.get('/api/kvkk', async (req, res) => {
-  const { rows } = await query("SELECT value FROM settings WHERE key='kvkk_text'");
-  res.json({ text: rows[0]?.value || '' });
+  const documents = await getLegalDocuments();
+  res.set('Cache-Control', 'no-store');
+  res.json({ text: documents.kvkk_text, version: documents.version });
 });
 
 app.get('/api/public-settings', async (req, res) => {
@@ -6194,6 +6215,7 @@ app.get('/api/settings/public', async (req, res) => {
     'photo_song_clip_seconds'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
+  res.set('Cache-Control', 'no-store');
   const obj = {};
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';

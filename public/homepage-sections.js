@@ -19,13 +19,7 @@
       .filter(Boolean);
 
     if (!sections.length) return ['konular'];
-
-    const normalized = sections.filter(section => section !== 'fotograflar' || sections.length > 1);
-    if (!normalized.length || (normalized.length === 1 && normalized[0] === 'fotograflar')) {
-      return ['konular'];
-    }
-
-    return normalized;
+    return sections;
   }
 
   if (typeof window !== 'undefined') {

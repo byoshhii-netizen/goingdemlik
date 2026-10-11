@@ -1,5 +1,6 @@
 const { Pool } = require('pg');
 const { hashPassword } = require('./password');
+const { LEGAL_DOCUMENT_DEFAULTS } = require('./legal-documents');
 
 const isRailwayDatabase = Boolean(
   process.env.DATABASE_URL &&
@@ -67,6 +68,8 @@ async function initDb() {
       banned_ip TEXT DEFAULT '',
       ip TEXT DEFAULT '',
       kvkk_accepted INTEGER DEFAULT 0,
+      legal_accepted_at TIMESTAMP,
+      legal_documents_version TEXT DEFAULT '',
       forum_count INTEGER DEFAULT 0,
       book_count INTEGER DEFAULT 0,
       comment_count INTEGER DEFAULT 0,
@@ -84,6 +87,8 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS legal_accepted_at TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS legal_documents_version TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tag_permission TEXT DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
@@ -1502,31 +1507,21 @@ async function initDb() {
     await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['admin_password', hash]);
   }
 
-  // Seed KVKK
+  // Seed legal documents
   const { rows: kvkkRows } = await query("SELECT value FROM settings WHERE key='kvkk_text'");
   if (kvkkRows.length === 0) {
-    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['kvkk_text', `KİŞİSEL VERİLERİN KORUNMASI KANUNU (KVKK) AYDINLATMA METNİ
-
-TeaTube olarak, 6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında kişisel verilerinizin işlenmesine ilişkin sizi bilgilendirmek isteriz.
-
-1. VERİ SORUMLUSU
-TeaTube platformu, veri sorumlusu sıfatıyla hareket etmektedir.
-
-2. İŞLENEN KİŞİSEL VERİLER
-Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) işlenmektedir.
-
-3. KİŞİSEL VERİLERİN İŞLENME AMACI
-Kişisel verileriniz; platform hizmetlerinin sunulması, hesap yönetimi, güvenlik ve sahteciliğin önlenmesi amacıyla işlenmektedir.
-
-4. KİŞİSEL VERİLERİN AKTARILMASI
-Kişisel verileriniz yasal yükümlülükler dışında üçüncü kişilerle paylaşılmamaktadır.
-
-5. HAKLARINIZ
-KVKK'nın 11. maddesi kapsamında; kişisel verilerinize erişim, düzeltme, silme ve işlemenin kısıtlanmasını talep etme haklarına sahipsiniz.
-
-6. İLETİŞİM
-Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
+    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['kvkk_text', LEGAL_DOCUMENT_DEFAULTS.kvkk_text]);
+  } else if (String(kvkkRows[0].value || '').includes('TeaTube olarak')) {
+    await query('UPDATE settings SET value=$1 WHERE key=$2', [LEGAL_DOCUMENT_DEFAULTS.kvkk_text, 'kvkk_text']);
   }
+  await query(
+    'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING',
+    ['information_notice', LEGAL_DOCUMENT_DEFAULTS.information_notice]
+  );
+  await query(
+    'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING',
+    ['privacy_policy', LEGAL_DOCUMENT_DEFAULTS.privacy_policy]
+  );
 
   // Kaydedilen başkasına ait playlistler, kopyayı alan kullanıcıya ait
   // olsa da orijinal sahibini gösterebilmelidir.
