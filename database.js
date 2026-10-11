@@ -1,6 +1,5 @@
 const { Pool } = require('pg');
 const { hashPassword } = require('./password');
-const { LEGAL_DOCUMENT_DEFAULTS } = require('./legal-documents');
 
 const isRailwayDatabase = Boolean(
   process.env.DATABASE_URL &&
@@ -13,9 +12,8 @@ const isRemoteDatabase = Boolean(
   !process.env.DATABASE_URL.includes('127.0.0.1')
 );
 
-const connectionString = process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim() ? String(process.env.DATABASE_URL).trim() : '';
-const pool = connectionString ? new Pool({
-  connectionString,
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PGPOOL_MAX || 10),
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
@@ -24,12 +22,9 @@ const pool = connectionString ? new Pool({
     : isRemoteDatabase
       ? { rejectUnauthorized: true }
       : false,
-}) : null;
+});
 
-async function query(text, params = []) {
-  if (!pool) {
-    throw new Error('DATABASE_URL tanımlı değil; veritabanı işlemi gerçekleştirilemedi.');
-  }
+async function query(text, params) {
   const client = await pool.connect();
   try {
     return await client.query(text, params);
@@ -39,15 +34,10 @@ async function query(text, params = []) {
 }
 
 async function initDb() {
-  if (!pool) {
-    console.log('CigCig local demo mode: database disabled, app will run without PostgreSQL.');
-    return true;
-  }
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
-      display_name TEXT DEFAULT '',
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       two_factor_method TEXT NOT NULL DEFAULT 'none',
@@ -69,25 +59,12 @@ async function initDb() {
       banned_ip TEXT DEFAULT '',
       ip TEXT DEFAULT '',
       kvkk_accepted INTEGER DEFAULT 0,
-      legal_accepted_at TIMESTAMP,
-      legal_documents_version TEXT DEFAULT '',
       forum_count INTEGER DEFAULT 0,
       book_count INTEGER DEFAULT 0,
       comment_count INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       last_active TIMESTAMP DEFAULT NOW()
     );
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
-    UPDATE users SET display_name=username WHERE display_name IS NULL OR display_name='';
-
-    CREATE TABLE IF NOT EXISTS nickname_changes (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      changed_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_nickname_changes_user_time ON nickname_changes(user_id, changed_at DESC);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
@@ -99,8 +76,6 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS legal_accepted_at TIMESTAMP;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS legal_documents_version TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tag_permission TEXT DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
@@ -259,8 +234,7 @@ async function initDb() {
       ('vmb_founder', 'VMB Kurucusu'),
       ('vmb_image_url', '/vmb-emblem.svg'),
       ('vmb_files', '[]'),
-      ('photo_song_clip_seconds', '30'),
-      ('combined_profile_content_count', '0')
+      ('photo_song_clip_seconds', '30')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
@@ -1520,21 +1494,31 @@ async function initDb() {
     await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['admin_password', hash]);
   }
 
-  // Seed legal documents
+  // Seed KVKK
   const { rows: kvkkRows } = await query("SELECT value FROM settings WHERE key='kvkk_text'");
   if (kvkkRows.length === 0) {
-    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['kvkk_text', LEGAL_DOCUMENT_DEFAULTS.kvkk_text]);
-  } else if (String(kvkkRows[0].value || '').includes('TeaTube olarak')) {
-    await query('UPDATE settings SET value=$1 WHERE key=$2', [LEGAL_DOCUMENT_DEFAULTS.kvkk_text, 'kvkk_text']);
+    await query('INSERT INTO settings (key,value) VALUES ($1,$2)', ['kvkk_text', `KİŞİSEL VERİLERİN KORUNMASI KANUNU (KVKK) AYDINLATMA METNİ
+
+TeaTube olarak, 6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında kişisel verilerinizin işlenmesine ilişkin sizi bilgilendirmek isteriz.
+
+1. VERİ SORUMLUSU
+TeaTube platformu, veri sorumlusu sıfatıyla hareket etmektedir.
+
+2. İŞLENEN KİŞİSEL VERİLER
+Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) işlenmektedir.
+
+3. KİŞİSEL VERİLERİN İŞLENME AMACI
+Kişisel verileriniz; platform hizmetlerinin sunulması, hesap yönetimi, güvenlik ve sahteciliğin önlenmesi amacıyla işlenmektedir.
+
+4. KİŞİSEL VERİLERİN AKTARILMASI
+Kişisel verileriniz yasal yükümlülükler dışında üçüncü kişilerle paylaşılmamaktadır.
+
+5. HAKLARINIZ
+KVKK'nın 11. maddesi kapsamında; kişisel verilerinize erişim, düzeltme, silme ve işlemenin kısıtlanmasını talep etme haklarına sahipsiniz.
+
+6. İLETİŞİM
+Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
   }
-  await query(
-    'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING',
-    ['information_notice', LEGAL_DOCUMENT_DEFAULTS.information_notice]
-  );
-  await query(
-    'INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO NOTHING',
-    ['privacy_policy', LEGAL_DOCUMENT_DEFAULTS.privacy_policy]
-  );
 
   // Kaydedilen başkasına ait playlistler, kopyayı alan kullanıcıya ait
   // olsa da orijinal sahibini gösterebilmelidir.
@@ -1598,22 +1582,4 @@ async function initDb() {
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 
-async function withTransaction(callback) {
-  if (!pool) {
-    throw new Error('DATABASE_URL tanımlı değil; veritabanı işlemi gerçekleştirilemedi.');
-  }
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await callback(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-module.exports = { query, pool, initDb, withTransaction };
+module.exports = { query, pool, initDb };
