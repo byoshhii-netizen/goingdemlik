@@ -1819,10 +1819,27 @@ async function renderHome(app) {
   }
 
   async function renderPhotosSection() {
-    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Medya</div></div><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
+    const html = `<div class="section"><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     loadStoriesBar($('#home-stories-bar'));
-    try { const ps = shuffleArray(await api('/photos')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
+    const el = $('#home-photos');
+    const loadPhotos = async () => {
+      try {
+        const photos = await api('/photos');
+        if (!Array.isArray(photos)) throw new Error('Medya yanıtı beklenen biçimde değil.');
+        const shuffledPhotos = shuffleArray(photos);
+        el.innerHTML = shuffledPhotos.length
+          ? shuffledPhotos.slice(0, 6).map(photoCardHTML).join('')
+          : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>';
+        bindPhotoFeed(el);
+        if (shuffledPhotos.length) setupPhotoAudio(el);
+      } catch (error) {
+        console.error('Anasayfa medya akışı yüklenemedi:', error);
+        el.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>Medya şu anda yüklenemedi.</p><button type="button" class="btn btn-outline btn-sm" id="home-photos-retry"><i class="fas fa-rotate-right"></i> Yeniden dene</button></div>`;
+        el.querySelector('#home-photos-retry')?.addEventListener('click', loadPhotos);
+      }
+    };
+    await loadPhotos();
   }
 
   async function renderVideosSection() {
