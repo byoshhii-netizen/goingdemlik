@@ -1,7 +1,10 @@
 {
   "name": "CigCig",
   "short_name": "CigCig",
-  "description": "CigCig topluluk platformu",
+  "lang": "tr-TR",
+  "iarc_rating_id": "",
+  "description": "Şiirler, kitaplar, forum konuları ve Reals alanı içeren topluluk platformu.",
+  "categories": ["social", "entertainment"],
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

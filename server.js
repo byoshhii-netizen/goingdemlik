@@ -11,7 +11,7 @@ const cloudinary = require('cloudinary').v2;
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const { query, initDb } = require('./database');
+const { query, initDb, withTransaction } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 const { normalizeHomepageSections } = require('./public/homepage-sections');
 const { LEGAL_DOCUMENT_DEFAULTS, createLegalDocumentsVersion } = require('./legal-documents');
@@ -1359,13 +1359,15 @@ app.get(/^\/vmb\/(?:dosyalar|dosyalara)(?:\/.*)?$/, async (req, res) => {
 // ===== AUTH =====
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
-    const { username, email, password, kvkk_accepted, legal_documents_version, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const { username: rawUsername, display_name: rawDisplayName, email, password, kvkk_accepted, legal_documents_version, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const username = String(rawUsername || '').trim().toLowerCase();
+    const displayName = String(rawDisplayName || '').trim();
     const emailAddress = String(email || '').trim().toLowerCase();
     let parsedHomepageSections = homepage_sections;
     let parsedProfileVisibility = profile_visibility;
     try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
     try { if (typeof parsedProfileVisibility === 'string') parsedProfileVisibility = JSON.parse(parsedProfileVisibility); } catch { parsedProfileVisibility = null; }
-    if (!username || !emailAddress || !password) return res.status(400).json({ error: 'Tüm alanlar zorunlu' });
+    if (!username || !displayName || !emailAddress || !password) return res.status(400).json({ error: 'Kullanıcı adı, takma ad, e-posta ve şifre zorunlu' });
     if (!isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
     if (![true, 'true', '1'].includes(kvkk_accepted)) return res.status(400).json({ error: 'Aydınlatma Metni, Gizlilik Sözleşmesi ve KVKK onayı zorunludur' });
     const legalDocuments = await getLegalDocuments();
@@ -1373,7 +1375,8 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
       return res.status(409).json({ error: 'Yasal metinler güncellenmiş. Lütfen sayfayı yenileyip metinleri tekrar okuyun.' });
     }
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
-    if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
+    if (username.length < 3 || username.length > 30 || !/^[a-zA-Zğüşıöç0-9_]+$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı; harf, rakam ve alt çizgi kullanın' });
+    if ([...displayName].length > 32) return res.status(400).json({ error: 'Takma ad en fazla 32 karakter olabilir' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
     const twoFactorMethod = ['none', 'email', 'question'].includes(two_factor_method) ? two_factor_method : 'none';
     if (twoFactorMethod === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta doğrulama servisi yapılandırılmamış' });
@@ -1409,8 +1412,8 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const registrationCode = twoFactorMethod === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
     const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
-      'INSERT INTO users (username,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,legal_accepted_at,legal_documents_version,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *',
-      [username, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, legalDocuments.version, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      'INSERT INTO users (username,display_name,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,legal_accepted_at,legal_documents_version,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *',
+      [username, displayName, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, legalDocuments.version, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
     if (registrationCode) {
       const challenge = createChallengeToken();
@@ -1886,6 +1889,30 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     'SELECT * FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50',
     [req.user.id]
   );
+  res.json(rows);
+});
+
+app.get('/api/friends/suggestions', authMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT u.id, u.username, u.display_name, u.avatar, u.avatar_removed, u.name_color
+    FROM users u
+    WHERE u.id<>$1
+      AND COALESCE(u.banned,0)=0
+      AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (
+        SELECT 1 FROM friendships f
+        WHERE (f.requester_id=$1 AND f.addressee_id=u.id)
+           OR (f.requester_id=u.id AND f.addressee_id=$1)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_id=$1 AND b.blocked_id=u.id)
+           OR (b.blocker_id=u.id AND b.blocked_id=$1)
+      )
+    ORDER BY RANDOM()
+    LIMIT 8
+  `, [req.user.id]);
+  res.set('Cache-Control', 'no-store');
   res.json(rows);
 });
 
@@ -3842,7 +3869,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   if (user.is_private && !isOwner && !isFollower) {
     return res.json({ user: sanitizeUser(user), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
-  const [forums, books, groups, level, levels, bpCount, photos, videos, reals] = await Promise.all([
+  const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, profileContentCounts] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT b.* FROM books b WHERE (b.user_id=$1 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$1)) AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
@@ -3858,9 +3885,18 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
       FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+    query(`SELECT id,title,artist_name,cover_url,slug,play_count
+      FROM songs WHERE uploader_id=$1 AND status='active' ORDER BY published_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+    query(`SELECT
+      COALESCE(u.forum_count, 0) + COALESCE(u.book_count, 0) + COALESCE(u.comment_count, 0) +
+      (SELECT COUNT(*) FROM photos p WHERE p.user_id=u.id) +
+      (SELECT COUNT(*) FROM songs s WHERE s.uploader_id=u.id AND s.status='active') AS content_count,
+      (SELECT COUNT(*) FROM photos p WHERE p.user_id=u.id) AS photo_count,
+      (SELECT COUNT(*) FROM songs s WHERE s.uploader_id=u.id AND s.status='active') AS song_count
+      FROM users u WHERE u.id=$1`, [user.id]).then(r => r.rows[0] || {}),
   ]);
   const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
-  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, ad_panels, level, levels, book_page_count: bpCount, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, songs, ad_panels, level, levels, book_page_count: bpCount, profile_content_count: Number(profileContentCounts.content_count || 0), profile_photo_count: Number(profileContentCounts.photo_count || 0), profile_song_count: Number(profileContentCounts.song_count || 0), private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -3892,6 +3928,15 @@ app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
   const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following', 'followers_list', 'following_list'];
   const visibility = {};
   allowed.forEach(key => { visibility[key] = req.body.visibility?.[key] !== false; });
+  const { rows: combinedSetting } = await query("SELECT value FROM settings WHERE key='combined_profile_content_count'");
+  if (combinedSetting[0]?.value === '1') {
+    const { rows: current } = await query('SELECT profile_visibility FROM users WHERE id=$1', [req.user.id]);
+    let savedVisibility = {};
+    try { savedVisibility = current[0]?.profile_visibility ? JSON.parse(current[0].profile_visibility) : {}; } catch {}
+    ['forums', 'books', 'comments', 'photos', 'music'].forEach(key => {
+      visibility[key] = savedVisibility[key] !== false;
+    });
+  }
   await query('UPDATE users SET profile_visibility=$1 WHERE id=$2', [JSON.stringify(visibility), req.user.id]);
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
   res.json({ visibility, user: sanitizeUser(rows[0]) });
@@ -4048,6 +4093,56 @@ app.put('/api/profile/username', authMiddleware, async (req, res) => {
     const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.user.id]);
     res.json(sanitizeUser(rows[0]));
   } catch (e) { res.status(500).json({ error: 'Güncelleme hatası: ' + e.message }); }
+});
+
+app.put('/api/profile/nickname', authMiddleware, async (req, res) => {
+  const nickname = String(req.body?.nickname || '').trim();
+  const nicknameLength = [...nickname].length;
+  if (!nickname || nicknameLength > 32) {
+    return res.status(400).json({ error: 'Takma ad 1-32 karakter arasında olmalı' });
+  }
+  if (nickname === String(req.user.display_name || req.user.username)) {
+    return res.status(400).json({ error: 'Bu zaten mevcut takma adınız' });
+  }
+
+  try {
+    const updated = await withTransaction(async client => {
+      await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [req.user.id]);
+      const { rows: changes } = await client.query(
+        `SELECT COUNT(*)::int AS count, MIN(changed_at) AS oldest
+         FROM nickname_changes
+         WHERE user_id=$1 AND changed_at > NOW() - INTERVAL '48 hours'`,
+        [req.user.id]
+      );
+      if (changes[0].count >= 2) {
+        const availableAt = new Date(new Date(changes[0].oldest).getTime() + 48 * 60 * 60 * 1000);
+        const error = new Error(`Takma adını 48 saat içinde 2 kez değiştirebilirsin. Yeniden ${availableAt.toLocaleString('tr-TR')} tarihinde deneyebilirsin.`);
+        error.status = 429;
+        throw error;
+      }
+      await client.query('UPDATE users SET display_name=$1 WHERE id=$2', [nickname, req.user.id]);
+      await client.query('INSERT INTO nickname_changes(user_id) VALUES($1)', [req.user.id]);
+      const { rows } = await client.query('SELECT * FROM users WHERE id=$1', [req.user.id]);
+      return rows[0];
+    });
+    res.json(sanitizeUser(updated));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message || 'Takma ad güncellenemedi' });
+  }
+});
+
+app.get('/api/profile/nickname-status', authMiddleware, async (req, res) => {
+  const { rows } = await query(
+    `SELECT COUNT(*)::int AS count, MIN(changed_at) AS oldest
+     FROM nickname_changes
+     WHERE user_id=$1 AND changed_at > NOW() - INTERVAL '48 hours'`,
+    [req.user.id]
+  );
+  const count = rows[0]?.count || 0;
+  const availableAt = count >= 2
+    ? new Date(new Date(rows[0].oldest).getTime() + 48 * 60 * 60 * 1000).toISOString()
+    : null;
+  res.json({ changes: count, remaining: Math.max(0, 2 - count), available_at: availableAt });
 });
 
 app.put('/api/profile/password', authMiddleware, async (req, res) => {
@@ -5406,6 +5501,9 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     }
     value = String(seconds);
   }
+  if (key === 'combined_profile_content_count' && !['0', '1'].includes(String(value))) {
+    return res.status(400).json({ error: 'Birleşik içerik sayısı 0 veya 1 olmalı' });
+  }
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
   res.json({ ok: true });
@@ -5444,6 +5542,41 @@ async function getLegalDocuments() {
   ]));
   return { ...documents, version: createLegalDocumentsVersion(documents) };
 }
+
+app.get(['/gizlilik', '/privacy-policy'], async (req, res, next) => {
+  try {
+    const documents = await getLegalDocuments();
+    res.set('Cache-Control', 'no-store');
+    res.type('html').send(`<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="index, follow">
+  <meta name="description" content="CigCig Gizlilik Politikası ve kullanıcı kişisel verilerinin işlenmesi hakkında bilgiler.">
+  <link rel="canonical" href="https://cigcig.xyz/gizlilik">
+  <title>Gizlilik Politikası | CigCig</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:#101010;color:#f3f0e9}
+    body{margin:0;padding:clamp(20px,5vw,64px) 16px;line-height:1.7}
+    main{max-width:820px;margin:0 auto;padding:clamp(22px,5vw,48px);border:1px solid #34312b;border-radius:18px;background:#181818}
+    h1{margin-top:0;color:#e8c98b;font-size:clamp(1.8rem,5vw,2.5rem)}
+    .policy-content{white-space:pre-wrap;overflow-wrap:anywhere}
+    a{color:#e8c98b}
+  </style>
+</head>
+<body>
+  <main>
+    <a href="/">CigCig ana sayfasına dön</a>
+    <h1>Gizlilik Politikası</h1>
+    <div class="policy-content">${escapeHtml(documents.privacy_policy)}</div>
+  </main>
+</body>
+</html>`);
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.get('/api/legal-documents', async (req, res) => {
   const documents = await getLegalDocuments();
@@ -6212,7 +6345,7 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url',
-    'photo_song_clip_seconds'
+    'photo_song_clip_seconds','combined_profile_content_count'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   res.set('Cache-Control', 'no-store');
@@ -6760,7 +6893,7 @@ app.get('/profil/:username', async (req, res) => {
 app.get('/api/search/users', async (req, res) => {
   const q = req.query.q;
   if (!q || q.length < 2) return res.json([]);
-  const { rows } = await query(`SELECT id, username, avatar, name_color FROM users WHERE username ILIKE $1 AND banned=0 LIMIT 20`, [`%${q}%`]);
+  const { rows } = await query(`SELECT id, username, display_name, avatar, name_color FROM users WHERE username ILIKE $1 AND banned=0 LIMIT 20`, [`%${q}%`]);
   res.json(rows);
 });
 
@@ -6925,7 +7058,7 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT f.id, f.created_at, f.status, f.requester_id, f.addressee_id,
       CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END AS other_id,
-      u.username AS other_username, u.avatar AS other_avatar,
+      u.username AS other_username, u.display_name AS other_display_name, u.avatar AS other_avatar,
       u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted
     FROM friendships f
     JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
@@ -7214,7 +7347,7 @@ async function getCallForUser(callId, userId) {
 
 app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
   const { rows } = await query(`
-    SELECT c.id, c.status, c.created_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT c.id, c.status, c.created_at, u.username, u.display_name, u.avatar, u.avatar_removed, u.name_color
     FROM voice_calls c JOIN users u ON u.id=c.caller_id
     WHERE c.callee_id=$1 AND c.status='ringing' AND c.created_at > NOW() - INTERVAL '2 minutes'
     ORDER BY c.created_at DESC LIMIT 1
@@ -7224,7 +7357,7 @@ app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
 
 app.post('/api/voice-calls', authMiddleware, async (req, res) => {
   const username = String(req.body?.username || '').trim();
-  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color FROM users WHERE username=$1', [username]);
+  const { rows: target } = await query('SELECT id,username,display_name,avatar,avatar_removed,name_color FROM users WHERE username=$1', [username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (target[0].id === req.user.id) return res.status(400).json({ error: 'Kendinizi arayamazsınız' });
   const { rows: mutual } = await query(`
@@ -7276,6 +7409,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT c.*,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
+      CASE WHEN c.user1_id=$1 THEN u2.display_name ELSE u1.display_name END as other_display_name,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
@@ -7355,7 +7489,7 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
-  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows: target } = await query('SELECT id,username,display_name,avatar,avatar_removed,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
   if (other.is_private && other.id !== uid) {

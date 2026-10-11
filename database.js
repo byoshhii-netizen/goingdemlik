@@ -47,6 +47,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
+      display_name TEXT DEFAULT '',
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       two_factor_method TEXT NOT NULL DEFAULT 'none',
@@ -76,6 +77,17 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       last_active TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
+    UPDATE users SET display_name=username WHERE display_name IS NULL OR display_name='';
+
+    CREATE TABLE IF NOT EXISTS nickname_changes (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      changed_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_nickname_changes_user_time ON nickname_changes(user_id, changed_at DESC);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
@@ -247,7 +259,8 @@ async function initDb() {
       ('vmb_founder', 'VMB Kurucusu'),
       ('vmb_image_url', '/vmb-emblem.svg'),
       ('vmb_files', '[]'),
-      ('photo_song_clip_seconds', '30')
+      ('photo_song_clip_seconds', '30'),
+      ('combined_profile_content_count', '0')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
@@ -1585,4 +1598,22 @@ async function initDb() {
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 
-module.exports = { query, pool, initDb };
+async function withTransaction(callback) {
+  if (!pool) {
+    throw new Error('DATABASE_URL tanımlı değil; veritabanı işlemi gerçekleştirilemedi.');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { query, pool, initDb, withTransaction };

@@ -2906,6 +2906,15 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-layer-group" style="color:var(--red2);margin-right:8px"></i>Profil İçerik Sayısı</span></div>
+        <div class="card-body">
+          <label class="checkbox-label"><input type="checkbox" id="s-combined-profile-content" ${settings['combined_profile_content_count'] === '1' ? 'checked' : ''} /> İçerik Sayısı Birleşik</label>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin:10px 0 14px">Açıkken forum, kitap, fotoğraf, müzik ve yorum adetleri profilde tek bir “İçerik” sayısı olarak görünür. Kullanıcıların bu ayrı sayı tercihleri gizlenir; kapatınca daha önceki tercihler korunur.</small>
+          <button class="btn btn-primary" id="s-combined-profile-content-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı kaydet</button>
+          <div id="s-combined-profile-content-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Fotoğraf Müzik Süresi</span></div>
         <div class="card-body">
           <div class="form-group"><label>Fotoğraflarda müzik kaç saniye çalsın?</label><input id="s-photo-song-clip" type="number" min="1" max="300" step="1" value="${escHtml(settings['photo_song_clip_seconds'] || '30')}" /></div>
@@ -3271,6 +3280,25 @@ async function renderSettings(main) {
     const msg = document.getElementById('s-general-msg');
     await saveSetting('site_name', document.getElementById('s-sitename').value.trim(), msg);
     await saveSetting('site_description', document.getElementById('s-desc').value.trim(), msg);
+  });
+  document.getElementById('s-combined-profile-content-save')?.addEventListener('click', async () => {
+    const message = document.getElementById('s-combined-profile-content-msg');
+    const value = document.getElementById('s-combined-profile-content').checked ? '1' : '0';
+    try {
+      const response = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+        body: JSON.stringify({ key: 'combined_profile_content_count', value })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Ayar kaydedilemedi');
+      message.style.color = 'var(--green)';
+      message.textContent = 'Birleşik içerik sayısı ayarı kaydedildi.';
+      toast('Kaydedildi');
+    } catch (error) {
+      message.style.color = 'var(--red2)';
+      message.textContent = error.message;
+    }
   });
   document.getElementById('s-call-ringtone-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-call-ringtone-msg');

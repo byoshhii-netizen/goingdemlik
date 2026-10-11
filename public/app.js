@@ -78,6 +78,7 @@ function limitMediaAudioClip(audio, startSeconds, onClipEnd, clipSeconds = MEDIA
   audio.addEventListener('timeupdate', () => {
     if (clipEnd !== null && audio.currentTime >= clipEnd - 0.05) finish();
   });
+  document.getElementById('dm-share-profile-btn')?.addEventListener('click', () => shareProfile(other));
   audio.addEventListener('ended', finish);
   setStartPosition();
   return audio;
@@ -396,7 +397,7 @@ function renderVoiceCallPanel(call, mode, other) {
     <button class="voice-call-close" id="voice-call-close" title="Küçült"><i class="fas fa-times"></i></button>
     <div class="voice-call-kicker"><span class="voice-call-live-dot"></span> CIGCIG SESLİ ARAMA</div>
     <div class="voice-call-avatars">${callAvatar(mode === 'incoming' ? other : currentUser)}<span class="voice-call-wave"><i></i><i></i><i></i><i></i></span>${callAvatar(mode === 'incoming' ? currentUser : other)}</div>
-    <div class="voice-call-names"><strong>${escHtml(mode === 'incoming' ? other.username : currentUser.username)}</strong><span>${mode === 'incoming' ? 'seni arıyor' : 'aranıyor'}</span><strong>${escHtml(mode === 'incoming' ? currentUser.username : other.username)}</strong></div>
+    <div class="voice-call-names"><strong>${escHtml(mode === 'incoming' ? (other.display_name || other.username) : (currentUser.display_name || currentUser.username))}</strong><span>${mode === 'incoming' ? 'seni arıyor' : 'aranıyor'}</span><strong>${escHtml(mode === 'incoming' ? (currentUser.display_name || currentUser.username) : (other.display_name || other.username))}</strong></div>
     <div class="voice-call-dots"><i></i><i></i><i></i></div>
     <div class="voice-call-status" id="voice-call-status">${mode === 'incoming' ? 'Gelen arama' : 'Bağlantı kuruluyor'}</div>
     <div class="voice-call-quality" id="voice-call-quality"><span></span><span></span><span></span><em>Bekleniyor</em></div>
@@ -500,20 +501,19 @@ const VOICE_RTC_CONFIG = {
 };
 
 async function startVoiceCall(username, other, microphoneStream = null) {
+  let stream = microphoneStream;
   try {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Mikrofon erişimi için CigCig’i HTTPS üzerinden açın ve tarayıcı ayarlarından mikrofon izni verin.');
+    }
+    stream = stream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
     activeVoiceCall = { id: call.id, role: 'caller', other, seenIce: 0 };
     renderVoiceCallPanel(call, 'outgoing', other);
     activeVoiceCall.ringtone = new Audio();
     await loadCallRingtone(activeVoiceCall.ringtone);
     activeVoiceCall.ringtone.loop = true; activeVoiceCall.ringtone.play().catch(() => {});
-    try {
-      activeVoiceCall.stream = microphoneStream || await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (error) {
-      showVoicePermissionRetry(call, other);
-      toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
-      return;
-    }
+    activeVoiceCall.stream = stream;
     activeVoiceCall.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
     activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
     activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
@@ -522,7 +522,11 @@ async function startVoiceCall(username, other, microphoneStream = null) {
     const offer = await activeVoiceCall.peer.createOffer(); await activeVoiceCall.peer.setLocalDescription(offer);
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'offer', value: offer }) });
     voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1200);
-  } catch (error) { microphoneStream?.getTracks().forEach(track => track.stop()); toast(error.message || 'Arama başlatılamadı', 'error'); endVoiceCall(true); }
+  } catch (error) {
+    if (!activeVoiceCall || activeVoiceCall.stream !== stream) stream?.getTracks().forEach(track => track.stop());
+    toast(error.message || 'Arama başlatılamadı', 'error');
+    if (activeVoiceCall) await endVoiceCall(true);
+  }
 }
 
 async function pollVoiceCall(id) {
@@ -542,14 +546,26 @@ async function acceptVoiceCall(call, other) {
   stopVoiceCallAudio();
   try {
     activeVoiceCall = { id: call.id, role: 'callee', other, seenIce: 0 };
-    renderVoiceCallPanel(call, 'connected', other);
+    const status = document.querySelector('#voice-call-status');
+    if (status) status.textContent = 'Mikrofon izni bekleniyor';
     try {
-      activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        throw new Error('Mikrofon erişimi için CigCig’i HTTPS üzerinden açın ve tarayıcı ayarlarından mikrofon izni verin.');
+      }
+      activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch (error) {
       showVoicePermissionRetry(call, other);
-      toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
+      const permissionMessage = error.name === 'NotAllowedError'
+        ? 'Tarayıcı mikrofon iznini engelliyor. Site ayarlarından Mikrofon iznini açın.'
+        : error.name === 'NotReadableError'
+          ? 'Mikrofon başka bir uygulama tarafından kullanılıyor.'
+          : error.message || 'Mikrofon başlatılamadı.';
+      const statusText = document.querySelector('#voice-call-status');
+      if (statusText) statusText.textContent = permissionMessage;
+      toast(permissionMessage, 'error');
       return;
     }
+    renderVoiceCallPanel(call, 'connected', other);
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
     activeVoiceCall.peer = new RTCPeerConnection(VOICE_RTC_CONFIG); activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
     activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
@@ -572,7 +588,7 @@ async function loadCallRingtone(audio) { try { const s = await fetch('/api/setti
 
 async function pollIncomingVoiceCall() {
   if (!currentUser || isVoiceCallMuted() || activeVoiceCall || document.getElementById('voice-call-layer')) return;
-  try { const call = await api('/voice-calls/incoming'); if (!call) return; const other = { username: call.username, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color }; renderVoiceCallPanel(call, 'incoming', other); const ringtone = new Audio(); await loadCallRingtone(ringtone); ringtone.loop = true; ringtone.play().catch(() => {}); activeVoiceCall = { id: call.id, role: 'callee', other, ringtone }; } catch {}
+  try { const call = await api('/voice-calls/incoming'); if (!call) return; const other = { username: call.username, display_name: call.display_name, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color }; renderVoiceCallPanel(call, 'incoming', other); const ringtone = new Audio(); await loadCallRingtone(ringtone); ringtone.loop = true; ringtone.play().catch(() => {}); activeVoiceCall = { id: call.id, role: 'callee', other, ringtone }; } catch {}
 }
 
 async function apiForm(path, formData, method = 'POST') {
@@ -661,6 +677,22 @@ function profileRoute(username) {
   return '/profil/' + encodeURIComponent(routeKey);
 }
 
+async function shareProfile(user) {
+  const url = new URL(profileRoute(user.username), location.origin).href;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: user.display_name || user.username, url });
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast('Profil bağlantısı kopyalandı');
+    } else {
+      throw new Error('Bu cihazda paylaşım veya panoya kopyalama desteklenmiyor.');
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') toast(error.message || 'Profil paylaşılamadı', 'error');
+  }
+}
+
 function profileBadgeHTML(badge, compact = false) {
   if (!badge) return '';
   const color = escHtml(badge.color || '#6b7280');
@@ -676,7 +708,9 @@ function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
-  return `<span class="user-badge" ${color}>${escHtml(u.username)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  const nickname = String(u.display_name || u.username || '');
+  const username = String(u.username || '');
+  return `<span class="user-badge user-identity" ${color}><span class="user-identity-nickname">${escHtml(nickname)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span><small>@${escHtml(username)}</small></span>`;
 }
 
 function avatarImg(u, cls = 'avatar-sm') {
@@ -853,7 +887,9 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  const isDmRoute = path === '/mesajlar' || path.startsWith('/mesajlar/');
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
+  document.body.classList.toggle('dm-route', isDmRoute);
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
   updateNavActive(path);
   // Mesajlar sayfasında footer gizle
@@ -1003,6 +1039,10 @@ async function renderRealsFeed(app, initialId = null) {
       <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında">?</button>
       <div id="reals-list" class="reals-list"></div>
     </div>`;
+
+    app.querySelectorAll('.dm-find-friends').forEach(button => {
+      button.addEventListener('click', () => navigate('/arkadaslar'));
+    });
 
   if (!localStorage.getItem('cigcig_reals_intro_seen')) {
     document.getElementById('reals-intro-ok')?.addEventListener('click', () => { localStorage.setItem('cigcig_reals_intro_seen', '1'); hideModal(); });
@@ -1779,7 +1819,7 @@ async function renderHome(app) {
   }
 
   async function renderPhotosSection() {
-    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Medya</div><a href="/fotograflar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
+    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Medya</div></div><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     loadStoriesBar($('#home-stories-bar'));
     try { const ps = shuffleArray(await api('/photos')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
@@ -1860,18 +1900,9 @@ async function renderForumList(app, queryString) {
 
   app.innerHTML = `
     <div class="container page forum-page">
-      <div class="page-header forum-page-header">
-        <div class="forum-page-heading">
-          <span class="forum-page-kicker"><i class="fas fa-comments"></i> Topluluk</span>
-          <div class="page-title">Konular</div>
-          <p class="forum-page-lead">Merak ettiğini sor, fikrini paylaş ve topluluğun cevaplarına katıl.</p>
-          ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
-        </div>
-        <button class="btn btn-primary forum-new-btn" id="forum-new-btn"><i class="fas fa-plus"></i><span>Yeni konu aç</span></button>
-      </div>
       <div class="forum-toolbar">
         <div class="search-bar forum-search"><i class="fas fa-search"></i><input type="search" id="forum-search" placeholder="Konu, kullanıcı veya #etiket ara..." autocomplete="off" /></div>
-        <span class="forum-toolbar-hint"><i class="fas fa-shield-heart"></i> Saygılı ve faydalı paylaşımlar</span>
+        ${activeTag ? `<span class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></span>` : ''}
       </div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
@@ -1897,10 +1928,6 @@ async function renderForumList(app, queryString) {
     renderForumListItems(filtered);
   });
 
-  $('#forum-new-btn')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewForumModal();
-  });
 }
 
 function renderForumListItems(forums) {
@@ -5361,8 +5388,10 @@ async function renderProfile(app, username) {
   const profileReals = Array.isArray(reals) ? reals : [];
   const profileSpotify = await getSpotifyNowPlaying(user.username);
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges'];
+  let combinedProfileContentCount = false;
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
+    combinedProfileContentCount = settings.combined_profile_content_count === '1';
     const configured = JSON.parse(settings.profile_tabs || '[]');
     if (Array.isArray(configured)) {
       const configuredWithoutVideos = configured.filter(tab => tab !== 'videos');
@@ -5403,7 +5432,7 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}</div>
+       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.display_name || user.username)}</div><small class="profile-username-handle">@${escHtml(user.username)}</small>
        ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
@@ -5474,8 +5503,9 @@ async function renderProfile(app, username) {
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
       <div class="profile-info">
-        <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}
+        <div class="profile-identity" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
+          <div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.display_name || user.username)}</div>
+          <small class="profile-username-handle">@${escHtml(user.username)}</small>
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -5489,13 +5519,14 @@ async function renderProfile(app, username) {
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
         <div class="profile-stats" style="margin-top:12px">
+          ${combinedProfileContentCount ? `<div class="profile-stat"><div class="profile-stat-num">${Number(data.profile_content_count || 0)}</div><div class="profile-stat-label">İçerik</div></div>` : ''}
           ${profileVisibility.followers ? (profileVisibility.followers_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`) : ''}
           ${profileVisibility.following ? (profileVisibility.following_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`) : ''}
-          ${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
-          ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
-          ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
-          ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
-          ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}
+          ${!combinedProfileContentCount && profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
+          ${!combinedProfileContentCount && profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
+          ${!combinedProfileContentCount && profileVisibility.music && Number(data.profile_song_count || 0) > 0 ? `<div class="profile-stat"><div class="profile-stat-num">${Number(data.profile_song_count)}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
+          ${!combinedProfileContentCount && profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
+          ${!combinedProfileContentCount && profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${Number(data.profile_photo_count || 0)}</div><div class="profile-stat-label">Fotoğraf</div></div>` : ''}
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
@@ -5783,7 +5814,18 @@ async function renderSettingsSection(section) {
     const now = new Date();
     const isBlocked = changes >= 2 && resetAt && resetAt > now;
     const resetDateStr = resetAt ? resetAt.toLocaleDateString('tr-TR') : '';
+    let nicknameStatus = { remaining: 2, available_at: null };
+    try { nicknameStatus = await api('/profile/nickname-status'); } catch {}
     el.innerHTML = `
+      <div class="card nickname-settings-card">
+        <div class="card-header"><span><i class="fas fa-signature"></i> Takma Ad</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Profilde görünen adın</label><input type="text" id="new-nickname" maxlength="32" value="${escHtml(currentUser.display_name || currentUser.username)}" placeholder="Örn. Deniz Yılmaz" /></div>
+          <div class="settings-help">1-32 karakter; boşluk kullanabilirsin. Takma ad benzersiz olmak zorunda değildir. 48 saat içinde en fazla 2 kez değiştirilebilir. Kalan hak: <strong>${nicknameStatus.remaining}/2</strong>${nicknameStatus.available_at ? ` · Yeniden ${new Date(nicknameStatus.available_at).toLocaleString('tr-TR')} tarihinde değiştirebilirsin.` : ''}</div>
+          <button class="btn btn-primary" id="save-nickname-btn"><i class="fas fa-save"></i> Takma adı kaydet</button>
+          <div id="nickname-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><span>Kullanıcı Adını Değiştir</span></div>
         <div class="card-body">
@@ -5806,6 +5848,18 @@ async function renderSettingsSection(section) {
           `}
         </div>
       </div>`;
+    $('#save-nickname-btn')?.addEventListener('click', async () => {
+      const nickname = ($('#new-nickname').value || '').trim();
+      if (!nickname) { $('#nickname-msg').textContent = 'Takma ad boş olamaz'; return; }
+      try {
+        currentUser = await api('/profile/nickname', { method: 'PUT', body: JSON.stringify({ nickname }) });
+        updateNavUI();
+        toast('Takma ad güncellendi');
+        renderSettingsSection('username');
+      } catch (error) {
+        $('#nickname-msg').textContent = error.message;
+      }
+    });
     if (!isBlocked) {
       $('#save-username-btn').addEventListener('click', async () => {
         const val = ($('#new-username').value || '').trim();
@@ -5992,18 +6046,25 @@ async function renderSettingsSection(section) {
   } else if (section === 'profile-visibility') {
     let visibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true, followers_list: true, following_list: true };
     try { visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility }; } catch {}
+    let combinedProfileContentCount = false;
+    try {
+      const publicSettings = await fetch('/api/settings/public').then(response => response.json());
+      combinedProfileContentCount = publicSettings.combined_profile_content_count === '1';
+    } catch {}
     const items = [
       ['followers', 'Takipçi sayımı', 'Profilindeki takipçi sayısını göster', 'fas fa-user-plus'],
       ['following', 'Takip sayımı', 'Profilindeki takip edilen sayısını göster', 'fas fa-user-check'],
+    ];
+    if (!combinedProfileContentCount) items.push(
       ['forums', 'Forum sayısı', 'Profilindeki forum/konu sayısını göster', 'fas fa-comments'],
       ['books', 'Kitap sayısı', 'Profilindeki kitap sayısını göster', 'fas fa-book'],
       ['comments', 'Yorum sayısı', 'Profilindeki yorum sayısını göster', 'fas fa-comment'],
       ['photos', 'Fotoğraf sayısı', 'Profilindeki fotoğraf sayısını göster', 'fas fa-images'],
       ['music', 'Müzik sayısı', 'Profilindeki müzik sayısını göster', 'fas fa-music']
-    ];
+    );
     items.push(['followers_list', 'Takipçileri göster', 'Takipçi listesini profilinden aç', 'fas fa-users']);
     items.push(['following_list', 'Takip ettiklerini göster', 'Takip edilenler listesini profilinden aç', 'fas fa-user-check']);
-    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:6px"></i>Profil Ayarları</span></div><div class="card-body"><p class="settings-help">Profilinde hangi bilgilerin ve listelerin görüneceğini seç.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} /></label>`).join('')}</div><button class="btn btn-primary" id="save-profile-visibility"><i class="fas fa-save"></i> Kaydet</button><div id="profile-visibility-msg" class="form-error mt-4"></div></div></div>`;
+    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:6px"></i>Profil Ayarları</span></div><div class="card-body"><p class="settings-help">${combinedProfileContentCount ? 'İçerik adetleri yönetici tarafından profilde tek bir “İçerik” sayısında birleştirildi. Diğer görünürlük tercihlerini buradan yönetebilirsin.' : 'Profilinde hangi bilgilerin ve listelerin görüneceğini seç.'}</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} /></label>`).join('')}</div><button class="btn btn-primary" id="save-profile-visibility"><i class="fas fa-save"></i> Kaydet</button><div id="profile-visibility-msg" class="form-error mt-4"></div></div></div>`;
     $('#save-profile-visibility').addEventListener('click', async () => {
       const next = {};
       el.querySelectorAll('[data-visibility]').forEach(input => { next[input.dataset.visibility] = input.checked; });
@@ -6330,7 +6391,8 @@ function renderRegister(app) {
           <small id="reg-avatar-name">JPG, PNG, WEBP veya GIF · en fazla 5 MB</small>
         </div>
       </div>
-      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
+      <div class="form-group"><label>Takma Ad</label><input type="text" id="reg-display-name" maxlength="32" placeholder="Profilde görünecek adın (1-32 karakter)" autocomplete="nickname" /></div>
+      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" maxlength="30" placeholder="3-30 karakter, boşluksuz" autocomplete="username" /></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
           E-posta
@@ -6436,6 +6498,16 @@ function renderRegister(app) {
     const selectedSections = Array.isArray(sections) ? sections : [];
     const defaults = new Set(selectedSections.map(section => sectionMap[section] || section));
     const details = document.querySelector('.register-preferences');
+    const combinedProfileContentCount = settings.combined_profile_content_count === '1';
+    if (combinedProfileContentCount && details) {
+      details.querySelectorAll('[data-reg-stat="forums"],[data-reg-stat="books"],[data-reg-stat="comments"],[data-reg-stat="photos"],[data-reg-stat="music"]').forEach(input => {
+        input.closest('.checkbox-label')?.remove();
+      });
+      const hint = document.createElement('p');
+      hint.className = 'form-hint';
+      hint.textContent = 'İçerik sayıları yönetici tarafından tek bir “İçerik” sayısında birleştirildi.';
+      details.insertBefore(hint, details.querySelector('[data-reg-stat="followers"]')?.closest('.checkbox-label') || null);
+    }
     const orderedStats = selectedSections.map(section => sectionMap[section] || section).filter(stat => ['forums', 'books', 'comments', 'photos', 'music'].includes(stat));
     if (details && defaults.size) {
       details.querySelectorAll('[data-reg-stat]').forEach(input => { input.checked = defaults.has(input.dataset.regStat); });
@@ -6518,6 +6590,7 @@ function renderRegister(app) {
 
   const doRegister = async () => {
     const username = $('#reg-username').value.trim();
+    const display_name = $('#reg-display-name').value.trim();
     const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
     const kvkk_accepted = legalDocumentsLoaded && legalConsent.checked;
@@ -6532,7 +6605,7 @@ function renderRegister(app) {
       profile_visibility[input.dataset.regStat] = input.checked;
       if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
     });
-    if (!username || !email || !password || !birth_date) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    if (!username || !display_name || !email || !password || !birth_date) { $('#reg-error').textContent = 'Takma ad, kullanıcı adı, e-posta, şifre ve doğum tarihi zorunlu'; return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#reg-error').textContent = 'Geçerli bir e-posta adresi girin'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
     const today = new Date();
@@ -6540,6 +6613,8 @@ function renderRegister(app) {
     if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
     if (age < 15 || birth > today) { $('#reg-error').textContent = '15 yaş altı kabul edilmez (¬‿¬) hııhıı'; return; }
     if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
+    if (username.length < 3 || username.length > 30 || !/^[a-zA-Zğüşıöç0-9_]+$/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adı 3-30 karakter olmalı; harf, rakam ve alt çizgi kullanın'; return; }
+    if ([...display_name].length > 32) { $('#reg-error').textContent = 'Takma ad en fazla 32 karakter olabilir'; return; }
     if (!legalDocumentsLoaded) { $('#reg-error').textContent = 'Kayıt için yasal metinlerin yüklenmesi gerekiyor.'; return; }
     if (!kvkk_accepted) { $('#reg-error').textContent = 'Üç yasal metni okuyup kabul etmeniz gerekiyor.'; return; }
     try {
@@ -6549,7 +6624,7 @@ function renderRegister(app) {
       const two_factor_method = $('#reg-2fa-method').value;
       const two_factor_question = $('#reg-2fa-question').value;
       const two_factor_answer = $('#reg-2fa-answer').value;
-      Object.entries({ username, email, password, kvkk_accepted, legal_documents_version: legalDocumentsVersion, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      Object.entries({ username, display_name, email, password, kvkk_accepted, legal_documents_version: legalDocumentsVersion, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       if (data.email_verification_required) {
@@ -6870,6 +6945,12 @@ async function init() {
     const footer = document.getElementById('site-footer');
     if (footer) {
       footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
+      const privacyLink = document.createElement('a');
+      privacyLink.href = '/gizlilik';
+      privacyLink.textContent = 'Gizlilik Politikası';
+      privacyLink.style.marginLeft = '12px';
+      privacyLink.style.color = 'inherit';
+      footer.appendChild(privacyLink);
     }
   } catch {}
   loadAnnouncements();
@@ -7001,6 +7082,13 @@ async function renderMessages(app, targetUsername) {
 
   let convs = [], hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
+  let noFriends = false;
+  if (!convs.length) {
+    try {
+      const friendships = await api('/friends');
+      noFriends = !friendships.some(friend => friend.status === 'accepted');
+    } catch {}
+  }
 
   function convItemHTML(c, isHidden) {
     const unread = c.unread_count || 0;
@@ -7009,10 +7097,10 @@ async function renderMessages(app, targetUsername) {
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
     return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}">
-      <span class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}</span>
+      <span class="dm-conv-avatar-link" aria-label="${escHtml(c.other_display_name || c.other_username)} sohbetini aç">${avatarHTML}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
-          <span class="dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}>${escHtml(c.other_username)}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
+          <span class="dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}>${escHtml(c.other_display_name || c.other_username)}<small>@${escHtml(c.other_username)}</small></span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
           ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
         </div>
         <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
@@ -7066,11 +7154,17 @@ async function renderMessages(app, targetUsername) {
       <div id="dm-conv-list" class="dm-conv-list">
         ${convs.length
           ? convs.map(c => convItemHTML(c, false)).join('')
-          : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'}
+          : noFriends
+            ? '<div class="dm-no-friends"><i class="fas fa-user-group"></i><p>Hiç arkadaşınız yok, hadi arkadaş edinin.</p><button class="btn btn-primary btn-sm dm-find-friends">Arkadaş edinin</button></div>'
+            : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'}
       </div>
     </div>
     <div class="dm-main" id="dm-main">
-      ${!targetUsername ? `<div class="dm-empty">
+      ${!targetUsername ? noFriends ? `<div class="dm-empty dm-no-friends-main">
+        <i class="fas fa-user-group"></i>
+        <p>Hiç arkadaşınız yok, hadi arkadaş edinin.</p>
+        <button class="btn btn-primary dm-find-friends"><i class="fas fa-user-plus"></i> Arkadaş edinin</button>
+      </div>` : `<div class="dm-empty">
         <i class="fas fa-comments" style="font-size:44px;opacity:0.25"></i>
         <p style="color:var(--text-muted);margin-top:8px">Bir konuşma seçin</p>
       </div>` : ''}
@@ -7245,12 +7339,14 @@ async function renderDMChat(username) {
         </a>
         <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
-            <strong>${escHtml(other.username)}</strong>
+            <strong>${escHtml(other.display_name || other.username)}</strong>
+            <small>@${escHtml(other.username)}</small>
           </a>
           ${spotifyNowPlayingMarkup(otherSpotify, true)}
         </div>
       </div>
       <div class="dm-chat-header-right">
+        <button class="btn btn-ghost btn-sm" id="dm-share-profile-btn" title="Profili paylaş" aria-label="Profili paylaş"><i class="fas fa-share-nodes"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -8107,6 +8203,9 @@ async function renderFriends(app) {
   try { friends = await api('/friends'); } catch {}
   let blocks = [];
   try { blocks = await api('/blocks'); } catch {}
+  let suggestions = [];
+  let suggestionError = '';
+  try { suggestions = await api('/friends/suggestions'); } catch (error) { suggestionError = error.message || 'Öneriler yüklenemedi.'; }
 
   const pending_in = friends.filter(f => f.status === 'pending' && f.addressee_id == currentUser.id);
   const pending_out = friends.filter(f => f.status === 'pending' && f.requester_id == currentUser.id);
@@ -8114,6 +8213,22 @@ async function renderFriends(app) {
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
+    <section class="friend-suggestions card card-body">
+      <div class="friend-suggestions-heading"><span><i class="fas fa-wand-magic-sparkles"></i></span><div><strong>Senin için önerilenler</strong><small>Her ziyaretinde yeni kişiler keşfet.</small></div></div>
+      ${suggestionError ? `<div class="empty-state">${escHtml(suggestionError)}</div>` : suggestions.length ? `<div class="friend-suggestions-grid">${suggestions.map(person => {
+        const relation = friends.find(friend => friend.other_username === person.username);
+        const alreadyRequested = Boolean(relation);
+        return `<article class="friend-suggestion">
+          <a class="friend-suggestion-profile" href="${profileRoute(person.username)}" data-link>
+            ${avatarImg(person, 'avatar-md')}
+            ${userDisplayName(person)}
+          </a>
+          <button class="btn ${alreadyRequested ? 'btn-outline' : 'btn-primary'} btn-sm friend-suggestion-add" data-username="${escHtml(person.username)}" ${alreadyRequested ? 'disabled' : ''}>
+            <i class="fas fa-user-plus"></i> ${relation?.status === 'accepted' ? 'Arkadaşsınız' : alreadyRequested ? 'İstek gönderildi' : 'Ekle'}
+          </button>
+        </article>`;
+      }).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Şu an önerilecek yeni kişi bulunamadı.</p></div>'}
+    </section>
     <div class="friends-search-box card card-body" style="margin-bottom:20px">
       <div style="font-size:14px;font-weight:600;margin-bottom:12px"><i class="fas fa-search" style="color:var(--accent-red)"></i> Kullanıcı Ara</div>
       <div style="display:flex;gap:8px">
@@ -8170,6 +8285,21 @@ async function renderFriends(app) {
     });
   };
 
+  app.querySelectorAll('.friend-suggestion-add:not(:disabled)').forEach(button => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await api(`/friends/request/${encodeURIComponent(button.dataset.username)}`, { method: 'POST' });
+        button.classList.remove('btn-primary');
+        button.classList.add('btn-outline');
+        button.innerHTML = '<i class="fas fa-clock"></i> İstek gönderildi';
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message || 'Arkadaşlık isteği gönderilemedi.', 'error');
+      }
+    });
+  });
+
   $('#friend-search-btn')?.addEventListener('click', () => doFriendSearch());
   $('#friend-search-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doFriendSearch(); });
 
@@ -8183,7 +8313,7 @@ async function renderFriends(app) {
       if (!users.length) { res.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center">Sonuç bulunamadı</p>'; return; }
       res.innerHTML = users.map(u => { const relation = friends.find(friend => friend.other_username === u.username); const requestPending = relation?.status === 'pending' && String(relation.requester_id) === String(currentUser.id); const accepted = relation?.status === 'accepted'; return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <a href="/mesajlar/${encodeURIComponent(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
+        <a href="${profileRoute(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${userDisplayName(u)}</a>
         <button class="btn ${requestPending || accepted ? 'btn-outline' : 'btn-primary'} btn-sm send-friend-btn" data-username="${escHtml(u.username)}" ${requestPending || accepted ? 'disabled' : ''}><i class="fas fa-user-plus"></i> ${accepted ? 'Arkadaşsınız' : requestPending ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>
       </div>`; }).join('');
       $$('.send-friend-btn').forEach(btn => {
@@ -8251,7 +8381,7 @@ function friendItemHTML(f, type, myId) {
   return `<div class="card card-body friend-card" data-type="${type}" data-username="${escHtml(other_username)}" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
-      <a href="/mesajlar/${encodeURIComponent(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
+      <a href="/mesajlar/${encodeURIComponent(other_username)}" data-link class="friend-item-identity"><strong>${escHtml(f.other_display_name || other_username)}</strong><small>@${escHtml(other_username)}</small></a>
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
@@ -11069,11 +11199,7 @@ async function renderMyOrders(app) {
 
   app.innerHTML = `
     <div class="container page" style="max-width:700px;margin:0 auto;padding:24px 16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:10px">
-        <div>
-          <h1 style="font-size:22px;font-weight:800;margin:0">Siparişlerim</h1>
-          <div style="font-size:13px;color:var(--text-muted);margin-top:2px">Ödeme geçmişiniz ve aktif üyelikleriniz</div>
-        </div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;margin-bottom:24px;flex-wrap:wrap;gap:10px">
         <a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a>
       </div>
       ${subsHTML}
