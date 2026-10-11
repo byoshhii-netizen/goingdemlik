@@ -396,7 +396,7 @@ function renderVoiceCallPanel(call, mode, other) {
     <button class="voice-call-close" id="voice-call-close" title="Küçült"><i class="fas fa-times"></i></button>
     <div class="voice-call-kicker"><span class="voice-call-live-dot"></span> CIGCIG SESLİ ARAMA</div>
     <div class="voice-call-avatars">${callAvatar(mode === 'incoming' ? other : currentUser)}<span class="voice-call-wave"><i></i><i></i><i></i><i></i></span>${callAvatar(mode === 'incoming' ? currentUser : other)}</div>
-    <div class="voice-call-names"><strong>${escHtml(mode === 'incoming' ? other.username : currentUser.username)}</strong><span>${mode === 'incoming' ? 'seni arıyor' : 'aranıyor'}</span><strong>${escHtml(mode === 'incoming' ? currentUser.username : other.username)}</strong></div>
+    <div class="voice-call-names"><strong>${escHtml(mode === 'incoming' ? (other.nickname || other.username) : (currentUser.nickname || currentUser.username))}<small>@${escHtml(mode === 'incoming' ? other.username : currentUser.username)}</small></strong><span>${mode === 'incoming' ? 'seni arıyor' : 'aranıyor'}</span><strong>${escHtml(mode === 'incoming' ? (currentUser.nickname || currentUser.username) : (other.nickname || other.username))}<small>@${escHtml(mode === 'incoming' ? currentUser.username : other.username)}</small></strong></div>
     <div class="voice-call-dots"><i></i><i></i><i></i></div>
     <div class="voice-call-status" id="voice-call-status">${mode === 'incoming' ? 'Gelen arama' : 'Bağlantı kuruluyor'}</div>
     <div class="voice-call-quality" id="voice-call-quality"><span></span><span></span><span></span><em>Bekleniyor</em></div>
@@ -572,7 +572,7 @@ async function loadCallRingtone(audio) { try { const s = await fetch('/api/setti
 
 async function pollIncomingVoiceCall() {
   if (!currentUser || isVoiceCallMuted() || activeVoiceCall || document.getElementById('voice-call-layer')) return;
-  try { const call = await api('/voice-calls/incoming'); if (!call) return; const other = { username: call.username, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color }; renderVoiceCallPanel(call, 'incoming', other); const ringtone = new Audio(); await loadCallRingtone(ringtone); ringtone.loop = true; ringtone.play().catch(() => {}); activeVoiceCall = { id: call.id, role: 'callee', other, ringtone }; } catch {}
+  try { const call = await api('/voice-calls/incoming'); if (!call) return; const other = { username: call.username, nickname: call.nickname, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color }; renderVoiceCallPanel(call, 'incoming', other); const ringtone = new Audio(); await loadCallRingtone(ringtone); ringtone.loop = true; ringtone.play().catch(() => {}); activeVoiceCall = { id: call.id, role: 'callee', other, ringtone }; } catch {}
 }
 
 async function apiForm(path, formData, method = 'POST') {
@@ -676,7 +676,7 @@ function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
-  return `<span class="user-badge" ${color}>${escHtml(u.username)}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
 
 function avatarImg(u, cls = 'avatar-sm') {
@@ -737,6 +737,10 @@ function spotifyNowPlayingMarkup(data, compact = false) {
       ${data.url ? `<a href="${normalizeExternalUrl(data.url)}" target="_blank" rel="noopener noreferrer" style="color:#1ED760;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:rgba(30,215,96,0.12);flex-shrink:0"><i class="fab fa-spotify"></i></a>` : ''}
     </div>
   `;
+  app.querySelector('.dm-find-friends-btn')?.addEventListener('click', event => {
+    event.preventDefault();
+    navigate('/arkadaslar');
+  });
 }
 
 function updateAppIcon(user) {
@@ -855,6 +859,7 @@ function renderRoute(fullPath) {
   const [path, queryStr] = fullPath.split('?');
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
+  document.body.classList.toggle('messages-page', path === '/mesajlar' || path.startsWith('/mesajlar/'));
   updateNavActive(path);
   // Mesajlar sayfasında footer gizle
   const siteFooter = document.getElementById('site-footer');
@@ -1402,7 +1407,8 @@ function updateNavUI() {
     const canAccessVmb = hasVmbAccess();
     const nav = currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="nav-avatar" />` : `<div class="nav-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:12px"></i></div>`;
     const btn = $('#nav-user-btn');
-    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link" onclick="event.stopPropagation()">${nav}</a><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
+    btn.title = `${currentUser.nickname || currentUser.username} (@${currentUser.username})`;
+    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link" onclick="event.stopPropagation()">${nav}</a><span class="nav-user-identity"><strong>${escHtml(currentUser.nickname || currentUser.username)}</strong><small>@${escHtml(currentUser.username)}</small></span><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
     $('#dropdown-profile').setAttribute('href', profileRoute(currentUser.username));
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -1779,7 +1785,7 @@ async function renderHome(app) {
   }
 
   async function renderPhotosSection() {
-    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Medya</div><a href="/fotograflar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
+    const html = `<div class="section home-media-section"><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     loadStoriesBar($('#home-stories-bar'));
     try { const ps = shuffleArray(await api('/photos')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
@@ -1860,18 +1866,9 @@ async function renderForumList(app, queryString) {
 
   app.innerHTML = `
     <div class="container page forum-page">
-      <div class="page-header forum-page-header">
-        <div class="forum-page-heading">
-          <span class="forum-page-kicker"><i class="fas fa-comments"></i> Topluluk</span>
-          <div class="page-title">Konular</div>
-          <p class="forum-page-lead">Merak ettiğini sor, fikrini paylaş ve topluluğun cevaplarına katıl.</p>
-          ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
-        </div>
-        <button class="btn btn-primary forum-new-btn" id="forum-new-btn"><i class="fas fa-plus"></i><span>Yeni konu aç</span></button>
-      </div>
       <div class="forum-toolbar">
         <div class="search-bar forum-search"><i class="fas fa-search"></i><input type="search" id="forum-search" placeholder="Konu, kullanıcı veya #etiket ara..." autocomplete="off" /></div>
-        <span class="forum-toolbar-hint"><i class="fas fa-shield-heart"></i> Saygılı ve faydalı paylaşımlar</span>
+        ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
       </div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
@@ -1897,10 +1894,6 @@ async function renderForumList(app, queryString) {
     renderForumListItems(filtered);
   });
 
-  $('#forum-new-btn')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewForumModal();
-  });
 }
 
 function renderForumListItems(forums) {
@@ -1912,7 +1905,6 @@ function renderForumListItems(forums) {
 
 function forumCardHTML(f) {
   const preview = f.content.substring(0, 140).replace(/</g,'&lt;');
-  const authorName = f.username || 'Silinmiş Kullanıcı';
   const authorClick = f.username
     ? `onclick="event.stopPropagation();navigate('${profileRoute(f.username)}')" style="cursor:pointer"`
     : `style="cursor:default;opacity:0.6"`;
@@ -1943,7 +1935,7 @@ function forumCardHTML(f) {
       <div class="forum-card-preview">${preview}${f.content.length > 140 ? '...' : ''}</div>
       ${tagsHTML ? `<div class="forum-tags-row">${tagsHTML}</div>` : ''}
       <div class="forum-card-meta">
-        <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${escHtml(authorName)}</span>
+        <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${f.username ? userDisplayName(f) : 'Silinmiş Kullanıcı'}</span>
         <span class="forum-meta-item"><i class="fas fa-eye"></i>${f.views || 0}</span>
         <span class="forum-meta-item"><i class="fas fa-heart"></i>${f.like_count || 0}</span>
         <span class="forum-meta-item"><i class="fas fa-comment"></i>${f.comment_count || 0}</span>
@@ -1956,7 +1948,6 @@ function forumCardHTML(f) {
 
 function poemCardHTML(poem) {
   const preview = String(poem.content || '').replace(/\s+/g, ' ').trim();
-  const authorName = poem.username || 'Silinmiş Kullanıcı';
   const authorClick = poem.username
     ? `onclick="event.stopPropagation();navigate('${profileRoute(poem.username)}')" style="cursor:pointer"`
     : `style="cursor:default;opacity:0.6"`;
@@ -1971,7 +1962,7 @@ function poemCardHTML(poem) {
     <div class="poem-card-title">${escHtml(poem.title)}</div>
     <div class="poem-card-preview">${escHtml(preview.length > 220 ? preview.substring(0, 220) + '...' : preview)}</div>
     <div class="poem-card-meta">
-      <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${escHtml(authorName)}</span>
+      <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${poem.username ? userDisplayName(poem) : 'Silinmiş Kullanıcı'}</span>
       <span class="forum-meta-item"><i class="fas fa-heart"></i>${poem.like_count || 0}</span>
       <span class="forum-meta-item"><i class="fas fa-comment"></i>${poem.comment_count || 0}</span>
       <span class="forum-meta-item" title="${dateStr} ${timeStr}"><i class="fas fa-clock"></i>${dateStr}</span>
@@ -2724,7 +2715,7 @@ function commentHTML(c) {
   const canDel = currentUser && currentUser.id === c.user_id;
   const canReply = !!currentUser;
   return `<div class="comment">
-    ${c.username ? `<a href="${profileRoute(c.username)}" data-link class="comment-avatar-link" title="${escHtml(c.username)} profiline git" aria-label="${escHtml(c.username)} profili">${avatarImg(c, 'comment-avatar')}</a>` : avatarImg(c, 'comment-avatar')}
+    ${c.username ? `<a href="${profileRoute(c.username)}" data-link class="comment-avatar-link" title="@${escHtml(c.username)} profiline git" aria-label="@${escHtml(c.username)} profili">${avatarImg(c, 'comment-avatar')}</a>` : avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
       <div class="comment-header">
         <span class="comment-author">${c.username ? `<a href="${profileRoute(c.username)}" data-link title="${escHtml(c.username)} profiline git">${userDisplayName(c)}</a>` : userDisplayName(c)}</span>
@@ -4684,7 +4675,7 @@ async function renderGroupDetail(app, slug) {
       if (!member) return;
       const canManage = member.user_id !== currentUser?.id && member.role !== 'owner';
       showModal('Üye bilgileri', `<div class="group-member-detail">
-        <div class="group-member-detail-head">${avatarImg(member, 'group-member-detail-avatar')}<div><strong>${escHtml(member.username)}</strong><small>${member.role === 'moderator' ? 'Moderatör' : 'Grup üyesi'}</small></div></div>
+        <div class="group-member-detail-head">${avatarImg(member, 'group-member-detail-avatar')}<div><strong>${escHtml(member.nickname || member.username)}</strong><small>@${escHtml(member.username)} · ${member.role === 'moderator' ? 'Moderatör' : 'Grup üyesi'}</small></div></div>
         <div class="group-member-joined"><i class="fas fa-calendar-check"></i><span>Katılım tarihi</span><b>${formatDate(member.joined_at)}</b></div>
         ${canManage ? `<div class="group-member-actions"><button class="btn btn-outline member-mute-btn" data-id="${member.user_id}"><i class="fas fa-volume-xmark"></i> Susturma süresini ayarla</button><button class="btn btn-outline member-kick-btn" data-id="${member.user_id}"><i class="fas fa-user-minus"></i> Gruptan at</button><button class="btn btn-danger member-ban-btn" data-id="${member.user_id}"><i class="fas fa-ban"></i> IP ile yasakla</button></div>` : ''}
         <div id="member-action-error" class="form-error mt-4"></div>
@@ -4692,22 +4683,22 @@ async function renderGroupDetail(app, slug) {
       const actionError = $('#member-action-error');
       const targetId = member.user_id;
       document.querySelector('.member-mute-btn')?.addEventListener('click', async () => {
-        showModal(`${escHtml(member.username)} susturma süresi`, `<div class="form-group"><label>Ne kadar süre susturulsun?</label><select id="member-mute-duration"><option value="10">10 dakika</option><option value="30">30 dakika</option><option value="60" selected>1 saat</option><option value="180">3 saat</option><option value="1440">1 gün</option><option value="10080">7 gün</option></select></div><button class="btn btn-primary" id="member-mute-confirm" style="width:100%"><i class="fas fa-volume-xmark"></i> Sustur</button><div id="member-mute-error" class="form-error mt-4"></div>`);
+        showModal(`${escHtml(member.nickname || member.username)} (@${escHtml(member.username)}) susturma süresi`, `<div class="form-group"><label>Ne kadar süre susturulsun?</label><select id="member-mute-duration"><option value="10">10 dakika</option><option value="30">30 dakika</option><option value="60" selected>1 saat</option><option value="180">3 saat</option><option value="1440">1 gün</option><option value="10080">7 gün</option></select></div><button class="btn btn-primary" id="member-mute-confirm" style="width:100%"><i class="fas fa-volume-xmark"></i> Sustur</button><div id="member-mute-error" class="form-error mt-4"></div>`);
         $('#member-mute-confirm').addEventListener('click', async () => {
           const minutes = Number($('#member-mute-duration').value);
-          try { await api(`/group/${slug}/mute/${targetId}`, { method: 'POST', body: JSON.stringify({ minutes }) }); hideModal(); toast(`${member.username} susturuldu`); }
+          try { await api(`/group/${slug}/mute/${targetId}`, { method: 'POST', body: JSON.stringify({ minutes }) }); hideModal(); toast(`${member.nickname || member.username} (@${member.username}) susturuldu`); }
           catch (error) { $('#member-mute-error').textContent = error.message; }
         });
       });
       document.querySelector('.member-kick-btn')?.addEventListener('click', async () => {
-        if (!confirm(`${member.username} gruptan atılsın mı?`)) return;
+        if (!confirm(`${member.nickname || member.username} (@${member.username}) gruptan atılsın mı?`)) return;
         try { await api(`/group/${slug}/kick/${targetId}`, { method: 'POST' }); hideModal(); toast('Üye gruptan atıldı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
       document.querySelector('.member-ban-btn')?.addEventListener('click', async () => {
-        const reason = prompt(`${member.username} için grup yasaklama nedeni:`);
+        const reason = prompt(`${member.nickname || member.username} (@${member.username}) için grup yasaklama nedeni:`);
         if (reason === null || !reason.trim()) return;
-        if (!confirm(`${member.username} bu gruptan yasaklansın mı?`)) return;
+        if (!confirm(`${member.nickname || member.username} (@${member.username}) bu gruptan yasaklansın mı?`)) return;
         try { await api(`/group/${slug}/ban/${targetId}`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) }); hideModal(); toast('Üye bu gruptan yasaklandı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
@@ -4764,7 +4755,7 @@ function memberItemHTML(m, isOwner, groupSlug) {
   return `<div class="member-item" data-member-id="${m.user_id}" role="button" tabindex="0">
     ${m.username ? `<a href="${profileLink}" data-link class="member-profile-link" aria-label="${escHtml(m.username)} profilini aç">${avatarHTML}</a>` : avatarHTML}
     <div style="flex:1">
-      ${m.username ? `<a href="${profileLink}" data-link class="member-name-link">${escHtml(m.username)}</a>` : `<div style="font-size:13px;font-weight:600">${escHtml(m.username || 'Silinmiş kullanıcı')}</div>`}${friendBadge}
+      ${m.username ? `<a href="${profileLink}" data-link class="member-name-link user-identity"><strong>${escHtml(m.nickname || m.username)}</strong><small>@${escHtml(m.username)}</small></a>` : `<div style="font-size:13px;font-weight:600">${escHtml(m.nickname || m.username || 'Silinmiş kullanıcı')}</div>`}${friendBadge}
       ${roleLabel}
     </div>
   </div>`;
@@ -5345,7 +5336,7 @@ async function renderProfile(app, username) {
       <div class="profile-header">
         <div class="profile-avatar-wrap"><div class="profile-avatar-placeholder"><i class="fas fa-user-slash"></i></div></div>
         <div class="profile-info">
-          <div class="profile-username">${escHtml(data.user.username)}</div>
+                <div class="profile-username">${escHtml(data.user.nickname || data.user.username)}<small>@${escHtml(data.user.username)}</small></div>
           <div style="margin-top:12px;color:var(--text-muted);font-size:14px"><i class="fas fa-ban" style="color:var(--accent-red2)"></i> Bu kullanıcının profili görüntülenemiyor.</div>
           <div style="margin-top:8px;font-size:13px;color:var(--text-muted)">Ad: <strong>Bilinmiyor</strong> · Konum: <strong>Bilinmiyor</strong> · Forum: <strong>Bilinmiyor</strong></div>
         </div>
@@ -5361,8 +5352,10 @@ async function renderProfile(app, username) {
   const profileReals = Array.isArray(reals) ? reals : [];
   const profileSpotify = await getSpotifyNowPlaying(user.username);
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges'];
+  let combinedContentCount = false;
   try {
     const settings = await fetch('/api/settings/public').then(response => response.json());
+    combinedContentCount = settings.content_count_combined === '1';
     const configured = JSON.parse(settings.profile_tabs || '[]');
     if (Array.isArray(configured)) {
       const configuredWithoutVideos = configured.filter(tab => tab !== 'videos');
@@ -5403,7 +5396,7 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}</div>
+       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.nickname || user.username)}<small>@${escHtml(user.username)}</small></div>
        ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
@@ -5475,7 +5468,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.username)}
+          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.nickname || user.username)}<small>@${escHtml(user.username)}</small>
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -5491,11 +5484,13 @@ async function renderProfile(app, username) {
         <div class="profile-stats" style="margin-top:12px">
           ${profileVisibility.followers ? (profileVisibility.followers_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`) : ''}
           ${profileVisibility.following ? (profileVisibility.following_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`) : ''}
-          ${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
-          ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
-          ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
-          ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
-          ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}
+          ${combinedContentCount
+            ? `<div class="profile-stat"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></div>`
+            : `${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
+              ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
+              ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
+              ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
+              ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}`}
         </div>
         ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
@@ -5667,6 +5662,7 @@ async function renderSettings(app) {
       <div class="settings-nav">
         <div class="settings-nav-item active" data-section="profile"><i class="fas fa-user"></i> Profil</div>
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
+        <div class="settings-nav-item" data-section="nickname"><i class="fas fa-signature"></i> Takma Ad</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
@@ -5775,6 +5771,42 @@ async function renderSettingsSection(section) {
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
     $('#avatar-file').addEventListener('change', e => openAvatarCrop(e.target.files[0], file => { selectedAvatarFile = file; $('#s-remove-avatar').checked = false; toast('Profil fotoğrafı hazır'); }));
+
+  } else if (section === 'nickname') {
+    const changes = Number(currentUser.nickname_changes || 0);
+    const resetAt = currentUser.nickname_change_reset_at ? new Date(currentUser.nickname_change_reset_at) : null;
+    const isBlocked = changes >= 2 && resetAt && resetAt > new Date();
+    const resetDateStr = resetAt ? resetAt.toLocaleString('tr-TR') : '';
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span>Takma Adını Değiştir</span></div>
+        <div class="card-body">
+          <div class="form-group">
+            <label>Mevcut Takma Ad</label>
+            <div style="padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:14px">${escHtml(currentUser.nickname || currentUser.username)} <small>@${escHtml(currentUser.username)}</small></div>
+          </div>
+          <div style="padding:10px 14px;background:var(--bg-card2);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--text-muted)">
+            Takma adını 48 saat içinde <strong>2 kez</strong> değiştirebilirsin. Takma ad boşluk içerebilir ve başkalarıyla aynı olabilir.
+            ${isBlocked ? `<br><span style="color:var(--accent-red2);margin-top:6px;display:block"><i class="fas fa-clock"></i> Yeni takma adını ${resetDateStr} sonrasında değiştirebilirsin.</span>` : `<br><span style="color:var(--accent-red);margin-top:4px;display:block">Kalan hak: <strong>${2 - changes}/2</strong>${resetAt ? ` · Hakların ${resetDateStr} tarihinde yenilenir` : ''}</span>`}
+          </div>
+          ${isBlocked ? '' : `<div class="form-group"><label>Yeni Takma Ad</label><input type="text" id="new-nickname" maxlength="32" value="${escHtml(currentUser.nickname || currentUser.username)}" placeholder="En fazla 32 karakter" /></div>
+          <button class="btn btn-primary" id="save-nickname-btn">Takma Adı Değiştir</button>
+          <div id="nickname-msg" class="form-error mt-4"></div>`}
+        </div>
+      </div>`;
+    if (!isBlocked) {
+      $('#save-nickname-btn').addEventListener('click', async () => {
+        const nickname = ($('#new-nickname').value || '').trim().replace(/\s+/g, ' ');
+        if (!nickname) { $('#nickname-msg').textContent = 'Takma ad zorunlu'; return; }
+        if (nickname.length > 32) { $('#nickname-msg').textContent = 'Takma ad en fazla 32 karakter olabilir'; return; }
+        try {
+          currentUser = await api('/profile/nickname', { method: 'PUT', body: JSON.stringify({ nickname }) });
+          updateNavUI();
+          toast('Takma ad güncellendi');
+          renderSettingsSection('nickname');
+        } catch (error) { $('#nickname-msg').textContent = error.message; }
+      });
+    }
 
   } else if (section === 'username') {
     const changes = currentUser.username_changes || 0;
@@ -5992,14 +6024,22 @@ async function renderSettingsSection(section) {
   } else if (section === 'profile-visibility') {
     let visibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true, followers_list: true, following_list: true };
     try { visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility }; } catch {}
+    let combinedContentCount = false;
+    try {
+      const response = await fetch('/api/settings/public');
+      if (!response.ok) throw new Error('Site ayarları yüklenemedi');
+      combinedContentCount = (await response.json()).content_count_combined === '1';
+    } catch (error) { console.error('Profil ayarları yüklenemedi:', error); }
     const items = [
       ['followers', 'Takipçi sayımı', 'Profilindeki takipçi sayısını göster', 'fas fa-user-plus'],
       ['following', 'Takip sayımı', 'Profilindeki takip edilen sayısını göster', 'fas fa-user-check'],
-      ['forums', 'Forum sayısı', 'Profilindeki forum/konu sayısını göster', 'fas fa-comments'],
-      ['books', 'Kitap sayısı', 'Profilindeki kitap sayısını göster', 'fas fa-book'],
-      ['comments', 'Yorum sayısı', 'Profilindeki yorum sayısını göster', 'fas fa-comment'],
-      ['photos', 'Fotoğraf sayısı', 'Profilindeki fotoğraf sayısını göster', 'fas fa-images'],
-      ['music', 'Müzik sayısı', 'Profilindeki müzik sayısını göster', 'fas fa-music']
+      ...(!combinedContentCount ? [
+        ['forums', 'Forum sayısı', 'Profilindeki forum/konu sayısını göster', 'fas fa-comments'],
+        ['books', 'Kitap sayısı', 'Profilindeki kitap sayısını göster', 'fas fa-book'],
+        ['comments', 'Yorum sayısı', 'Profilindeki yorum sayısını göster', 'fas fa-comment'],
+        ['photos', 'Fotoğraf sayısı', 'Profilindeki fotoğraf sayısını göster', 'fas fa-images'],
+        ['music', 'Müzik sayısı', 'Profilindeki müzik sayısını göster', 'fas fa-music']
+      ] : [])
     ];
     items.push(['followers_list', 'Takipçileri göster', 'Takipçi listesini profilinden aç', 'fas fa-users']);
     items.push(['following_list', 'Takip ettiklerini göster', 'Takip edilenler listesini profilinden aç', 'fas fa-user-check']);
@@ -6197,7 +6237,7 @@ function renderLogin(app) {
       <div class="auth-site-wordmark">CigCig</div>
       <div class="auth-title">Tekrar hoş geldin</div>
       <p class="auth-subtitle">Hesabına giriş yap ve kaldığın yerden devam et.</p>
-      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="login-id" placeholder="kullanıcı_adı" autocomplete="username" /></div>
+      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="login-id" placeholder="@kullanıcı_adı" autocomplete="username" /></div>
       <div class="form-group">
         <label>Şifre</label>
         <div style="position:relative">
@@ -6330,7 +6370,8 @@ function renderRegister(app) {
           <small id="reg-avatar-name">JPG, PNG, WEBP veya GIF · en fazla 5 MB</small>
         </div>
       </div>
-      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" placeholder="..." autocomplete="username" /></div>
+      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" maxlength="30" placeholder="3-30 karakter, harf/rakam/alt çizgi" autocomplete="username" /></div>
+      <div class="form-group"><label>Takma Ad</label><input type="text" id="reg-nickname" maxlength="32" placeholder="Ekranda görünecek adın (en fazla 32 karakter)" autocomplete="nickname" /><div class="form-hint">Boşluk kullanabilirsin; takma adın benzersiz olmak zorunda değil.</div></div>
       <div class="form-group">
         <label style="display:flex;align-items:center;gap:8px">
           E-posta
@@ -6417,6 +6458,11 @@ function renderRegister(app) {
     const selectedSections = Array.isArray(sections) ? sections : [];
     const defaults = new Set(selectedSections.map(section => sectionMap[section] || section));
     const details = document.querySelector('.register-preferences');
+    if (settings.content_count_combined === '1') {
+      details?.querySelectorAll('[data-reg-stat="forums"], [data-reg-stat="books"], [data-reg-stat="comments"], [data-reg-stat="photos"], [data-reg-stat="music"]').forEach(input => {
+        input.closest('.checkbox-label')?.remove();
+      });
+    }
     const orderedStats = selectedSections.map(section => sectionMap[section] || section).filter(stat => ['forums', 'books', 'comments', 'photos', 'music'].includes(stat));
     if (details && defaults.size) {
       details.querySelectorAll('[data-reg-stat]').forEach(input => { input.checked = defaults.has(input.dataset.regStat); });
@@ -6470,6 +6516,7 @@ function renderRegister(app) {
 
   const doRegister = async () => {
     const username = $('#reg-username').value.trim();
+    const nickname = $('#reg-nickname').value.trim().replace(/\s+/g, ' ');
     const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
     const kvkk_accepted = $('#reg-kvkk').checked;
@@ -6484,7 +6531,7 @@ function renderRegister(app) {
       profile_visibility[input.dataset.regStat] = input.checked;
       if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
     });
-    if (!username || !email || !password || !birth_date) { $('#reg-error').textContent = 'Tüm alanları doldurun'; return; }
+    if (!username || !nickname || !email || !password || !birth_date) { $('#reg-error').textContent = 'Kullanıcı adı, takma ad ve diğer alanları doldurun'; return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#reg-error').textContent = 'Geçerli bir e-posta adresi girin'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
     const today = new Date();
@@ -6492,6 +6539,8 @@ function renderRegister(app) {
     if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
     if (age < 15 || birth > today) { $('#reg-error').textContent = '15 yaş altı kabul edilmez (¬‿¬) hııhıı'; return; }
     if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
+    if (username.length < 3 || username.length > 30 || !/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adı 3-30 karakter olmalı; harf, rakam ve alt çizgi kullanabilirsin'; return; }
+    if (nickname.length > 32) { $('#reg-error').textContent = 'Takma ad en fazla 32 karakter olabilir'; return; }
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
       const formData = new FormData();
@@ -6500,7 +6549,7 @@ function renderRegister(app) {
       const two_factor_method = $('#reg-2fa-method').value;
       const two_factor_question = $('#reg-2fa-question').value;
       const two_factor_answer = $('#reg-2fa-answer').value;
-      Object.entries({ username, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      Object.entries({ username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       if (data.email_verification_required) {
@@ -6863,7 +6912,7 @@ async function showForwardVideoModal(video) {
     ? `<div class="empty-state" style="padding:20px"><p>Henüz mesajlaşma yok. Bir kullanıcıya mesaj gönderin.</p></div>`
     : convs.map(c => `<div class="forward-item" data-username="${escHtml(c.other_username)}" style="display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
       ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-      <span style="color:var(--text-primary);font-size:14px">${escHtml(c.other_username)}</span>
+      <span class="user-identity" style="color:var(--text-primary);font-size:14px"><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span>
     </div>`).join('');
   showModal('Videoyu İlet', `
     <div style="margin-bottom:12px">
@@ -6902,7 +6951,7 @@ async function showForwardForumModal(forum) {
     ? `<div class="empty-state" style="padding:20px"><p>Henüz mesajlaşma yok. Bir kullanıcıya mesaj gönderin.</p></div>`
     : convs.map(c => `<div class="forward-item" data-username="${escHtml(c.other_username)}" style="display:flex;align-items:center;gap:10px;padding:10px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
       ${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-      <span style="color:var(--text-primary);font-size:14px">${escHtml(c.other_username)}</span>
+      <span class="user-identity" style="color:var(--text-primary);font-size:14px"><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span>
     </div>`).join('');
   showModal('Forumu İlet', `
     <div style="margin-bottom:12px">
@@ -6936,7 +6985,7 @@ async function showForwardForumModal(forum) {
 async function showForwardPhotoModal(photoId) {
   let convs=[]; try { convs=await api('/conversations'); } catch {}
   const listHTML = convs.length
-    ? convs.map(c => `<button type="button" class="forward-user-item" data-username="${escHtml(c.other_username)}"><span class="forward-user-avatar">${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><span class="forward-user-name">${escHtml(c.other_username)}</span><i class="fas fa-check forward-user-check"></i></button>`).join('')
+    ? convs.map(c => `<button type="button" class="forward-user-item" data-username="${escHtml(c.other_username)}"><span class="forward-user-avatar">${c.other_avatar ? `<img src="${escHtml(c.other_avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><span class="user-identity forward-user-name"><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span><i class="fas fa-check forward-user-check"></i></button>`).join('')
     : '<div class="forward-empty"><i class="fas fa-comments"></i><span>Henüz mesajlaştığın kullanıcı yok.</span></div>';
   showModal('Fotoğrafı İlet', `<div class="forward-modal"><div class="forward-modal-intro"><i class="fas fa-share"></i><span>Fotoğrafı kime göndermek istiyorsun?</span></div><label class="forward-search"><i class="fas fa-search"></i><input id="photo-fwd-search" type="search" placeholder="İsim veya kullanıcı adı ara..." autocomplete="off" /></label><div id="photo-fwd-list" class="forward-user-list">${listHTML}</div><div class="forward-direct"><span>Listede yok mu?</span><input id="photo-fwd-name" placeholder="Kullanıcı adını yaz" autocomplete="off" /></div><button class="btn btn-primary" id="photo-fwd-send" style="width:100%;margin-top:12px"><i class="fas fa-paper-plane"></i> Fotoğrafı İlet</button><div class="form-error mt-4" id="photo-fwd-error"></div></div>`);
   const selectUser = username => { $('#photo-fwd-name').value = username; $$('#photo-fwd-list .forward-user-item').forEach(item => item.classList.toggle('selected', item.dataset.username === username)); };
@@ -6952,6 +7001,9 @@ async function renderMessages(app, targetUsername) {
 
   let convs = [], hiddenConvs = [];
   try { convs = await api('/conversations'); } catch {}
+  let friends = null;
+  try { friends = await api('/friends'); } catch {}
+  const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
 
   function convItemHTML(c, isHidden) {
     const unread = c.unread_count || 0;
@@ -6963,7 +7015,7 @@ async function renderMessages(app, targetUsername) {
       <span class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
-          <span class="dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}>${escHtml(c.other_username)}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
+          <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
           ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
         </div>
         <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
@@ -7022,8 +7074,12 @@ async function renderMessages(app, targetUsername) {
     </div>
     <div class="dm-main" id="dm-main">
       ${!targetUsername ? `<div class="dm-empty">
-        <i class="fas fa-comments" style="font-size:44px;opacity:0.25"></i>
-        <p style="color:var(--text-muted);margin-top:8px">Bir konuşma seçin</p>
+        ${friends && !hasAcceptedFriends && convs.length === 0
+          ? `<i class="fas fa-user-friends dm-empty-friends-icon"></i>
+             <p>Hiç arkadaşınız yok, hadi arkadaş edinin.</p>
+             <a href="/arkadaslar" data-link class="btn btn-primary dm-find-friends-btn"><i class="fas fa-user-plus"></i> Arkadaş edinin</a>`
+          : `<i class="fas fa-comments" style="font-size:44px;opacity:0.25"></i>
+             <p style="color:var(--text-muted);margin-top:8px">Bir konuşma seçin</p>`}
       </div>` : ''}
     </div>
   </div>`;
@@ -7076,7 +7132,7 @@ async function renderMessages(app, targetUsername) {
         <div id="new-dm-friends" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
           ${accepted.map(f => `<button class="btn btn-outline btn-sm" style="justify-content:flex-start;gap:8px" data-action="open-dm" data-username="${escHtml(f.other_username)}">
             ${hasUsableAvatar({ avatar: f.other_avatar, avatar_removed: f.other_avatar_removed }) ? `<img src="${escHtml(f.other_avatar)}" class="avatar-sm" style="width:24px;height:24px" />` : `<div class="avatar-sm avatar-placeholder" style="width:24px;height:24px"><i class="fas fa-user" style="font-size:10px"></i></div>`}
-            ${escHtml(f.other_username)}
+            <span class="user-identity"><strong>${escHtml(f.other_nickname || f.other_username)}</strong><small>@${escHtml(f.other_username)}</small></span>
           </button>`).join('')}
         </div>
       </div>` : ''}
@@ -7141,7 +7197,7 @@ async function renderDMChat(username) {
         <div class="dm-chat-header-left">
           <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
           <i class="fas fa-lock" style="color:var(--accent-red2)"></i>
-          <span class="dm-chat-username">${escHtml(other.username)}</span>
+          <span class="dm-chat-username">${escHtml(other.nickname || other.username)} <small>@${escHtml(other.username)}</small></span>
         </div>
       </div>
       <div class="dm-empty">
@@ -7196,12 +7252,13 @@ async function renderDMChat(username) {
         </a>
         <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
-            <strong>${escHtml(other.username)}</strong>
+            <strong>${escHtml(other.nickname || other.username)}</strong><small>@${escHtml(other.username)}</small>
           </a>
           ${spotifyNowPlayingMarkup(otherSpotify, true)}
         </div>
       </div>
       <div class="dm-chat-header-right">
+        <button class="btn btn-ghost btn-sm" id="dm-share-profile-btn" title="Profili paylaş" aria-label="Profili paylaş"><i class="fas fa-share-nodes"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -7243,6 +7300,18 @@ async function renderDMChat(username) {
 
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
+  document.getElementById('dm-share-profile-btn')?.addEventListener('click', async () => {
+    const profileUrl = new URL(profileRoute(other.username), location.origin).href;
+    try {
+      if (navigator.share) await navigator.share({ title: `${other.nickname || other.username} profili`, url: profileUrl });
+      else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(profileUrl);
+        toast('Profil bağlantısı kopyalandı');
+      } else throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
+    } catch (error) {
+      if (error.name !== 'AbortError') toast(error.message || 'Profil paylaşılamadı', 'error');
+    }
+  });
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
 
@@ -7732,7 +7801,7 @@ async function renderVmb(app, section = 'home') {
     const avatar = member.avatar && !member.avatar_removed
       ? `<img src="${escHtml(member.avatar)}" alt="" />`
       : '<span class="vmb-member-avatar-fallback"><i class="fas fa-user"></i></span>';
-    return `<a href="${profileRoute(member.username)}" data-link class="vmb-member-card">${avatar}<span><strong>${escHtml(member.username)}</strong><small>${member.bio ? escHtml(member.bio) : 'VMB üyesi'}</small></span><i class="fas fa-arrow-right"></i></a>`;
+    return `<a href="${profileRoute(member.username)}" data-link class="vmb-member-card">${avatar}<span><strong>${escHtml(member.nickname || member.username)}</strong><small>@${escHtml(member.username)}</small></span><i class="fas fa-arrow-right"></i></a>`;
   }).join('') : '<div class="vmb-empty"><i class="fas fa-users-slash"></i><p>Henüz üye bulunmuyor.</p></div>';
 
   app.innerHTML = `<div class="container page vmb-page">
@@ -8058,6 +8127,10 @@ async function renderFriends(app) {
   try { friends = await api('/friends'); } catch {}
   let blocks = [];
   try { blocks = await api('/blocks'); } catch {}
+  let suggestions = [];
+  let suggestionsError = '';
+  try { suggestions = await api('/friends/suggestions'); }
+  catch (error) { suggestionsError = error.message || 'Öneriler yüklenemedi'; }
 
   const pending_in = friends.filter(f => f.status === 'pending' && f.addressee_id == currentUser.id);
   const pending_out = friends.filter(f => f.status === 'pending' && f.requester_id == currentUser.id);
@@ -8109,6 +8182,18 @@ async function renderFriends(app) {
           </div>
         </div>
       </div>
+      <aside class="friends-suggestions">
+        <div class="friends-panel">
+          <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><b>Önerilenler</b><small>Senin için seçilen yeni kişiler</small></span></div>
+          ${suggestionsError ? `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(suggestionsError)}</p></div>` : suggestions.length ? suggestions.map(user => `<div class="friend-suggestion-card">
+            <a class="friend-suggestion-identity" href="${profileRoute(user.username)}" data-link>
+              ${hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" class="avatar-sm" alt="" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
+              <span><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+            </a>
+            <button class="btn btn-outline btn-sm suggestion-add-btn" data-username="${escHtml(user.username)}"><i class="fas fa-user-plus"></i><span>Ekle</span></button>
+          </div>`).join('') : '<div class="empty-state"><i class="fas fa-users"></i><p>Şu an önerilecek yeni kişi yok.</p></div>'}
+        </div>
+      </aside>
     </div>
   </div>`;
 
@@ -8123,6 +8208,18 @@ async function renderFriends(app) {
 
   $('#friend-search-btn')?.addEventListener('click', () => doFriendSearch());
   $('#friend-search-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') doFriendSearch(); });
+  app.querySelectorAll('.suggestion-add-btn').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      await api(`/friends/request/${encodeURIComponent(button.dataset.username)}`, { method: 'POST' });
+      button.innerHTML = '<i class="fas fa-check"></i><span>İstek gönderildi</span>';
+      button.classList.remove('btn-outline');
+      button.classList.add('btn-primary');
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  }));
 
   async function doFriendSearch() {
     const q = $('#friend-search-input').value.trim();
@@ -8134,7 +8231,7 @@ async function renderFriends(app) {
       if (!users.length) { res.innerHTML = '<p style="color:var(--text-muted);font-size:13px;text-align:center">Sonuç bulunamadı</p>'; return; }
       res.innerHTML = users.map(u => { const relation = friends.find(friend => friend.other_username === u.username); const requestPending = relation?.status === 'pending' && String(relation.requester_id) === String(currentUser.id); const accepted = relation?.status === 'accepted'; return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" class="avatar-sm" />` : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`}
-        <a href="/mesajlar/${encodeURIComponent(u.username)}" data-link style="flex:1;color:var(--text-primary);font-size:14px">${escHtml(u.username)}</a>
+        <a href="${profileRoute(u.username)}" data-link class="user-identity" style="flex:1;color:var(--text-primary);font-size:14px"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></a>
         <button class="btn ${requestPending || accepted ? 'btn-outline' : 'btn-primary'} btn-sm send-friend-btn" data-username="${escHtml(u.username)}" ${requestPending || accepted ? 'disabled' : ''}><i class="fas fa-user-plus"></i> ${accepted ? 'Arkadaşsınız' : requestPending ? 'İstek gönderildi' : 'Arkadaş ekle'}</button>
       </div>`; }).join('');
       $$('.send-friend-btn').forEach(btn => {
@@ -8187,6 +8284,7 @@ async function renderFriends(app) {
 
 function friendItemHTML(f, type, myId) {
   const other_username = f.other_username;
+  const other_nickname = f.other_nickname || other_username;
   const other_avatar = f.other_avatar;
   const isDeleted = f.other_is_deleted == 1 || f.other_is_deleted === true;
   if (isDeleted) {
@@ -8202,7 +8300,7 @@ function friendItemHTML(f, type, myId) {
   return `<div class="card card-body friend-card" data-type="${type}" data-username="${escHtml(other_username)}" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
-      <a href="/mesajlar/${encodeURIComponent(other_username)}" data-link style="font-weight:600;font-size:14px;color:var(--text-primary)">${escHtml(other_username)}</a>
+      <a href="${profileRoute(other_username)}" data-link class="user-identity" style="font-weight:600;font-size:14px;color:var(--text-primary)"><strong>${escHtml(other_nickname)}</strong><small>@${escHtml(other_username)}</small></a>
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
@@ -8624,7 +8722,7 @@ function renderListeningRoomView(app, quiet = false) {
   const state = listeningRoom.state || { members: [], tracks: [], requests: [] };
   const track = currentListeningTrack();
   if (!quiet || !app.querySelector('.listening-room-page')) app.innerHTML = `<div class="container page listening-room-page"><div class="listening-room-heading"><div><span class="eyebrow"><i class="fas fa-tower-broadcast"></i> CANLI ORTAK DİNLEYİŞ</span><h1>${escHtml(listeningRoom.title)}</h1><p><a href="${profileRoute(listeningRoom.owner_username)}" data-link>${escHtml(listeningRoom.owner_username)}</a> yönetiyor · ${state.members.length} kişi</p></div><button class="btn btn-outline" id="listening-share"><i class="fas fa-link"></i> Ortak linki paylaş</button></div><div class="listening-room-grid"><section class="listening-room-panel"><h2><i class="fas fa-wave-square"></i> Şimdi dinleniyor</h2><div id="listening-current">${track ? `<strong>${escHtml(track.title)}</strong><span>${escHtml(track.artist_name)}</span>` : 'Sırada şarkı bekleniyor.'}</div>${listeningRoom.isOwner ? `<button class="btn btn-outline btn-sm" id="listening-skip"><i class="fas fa-forward"></i> Sıradakini çal</button><div id="listening-requests"></div>` : '<p class="listening-hint">Başka bir müzik açarsan sahibine istek gönderilir.</p>'}</section><section class="listening-room-panel"><h2><i class="fas fa-users"></i> Dinleyiştekiler</h2><div class="listening-members" id="listening-members"></div><button class="btn btn-danger btn-sm" id="listening-leave"><i class="fas fa-right-from-bracket"></i> Çıkış</button></section></div></div>`;
-  const members = document.getElementById('listening-members'); if (members) members.innerHTML = state.members.map(member => `<a class="listening-member" href="${profileRoute(member.username)}" data-link><i class="fas fa-user-circle"></i><span>${escHtml(member.username)}</span>${member.role === 'owner' ? '<b>SAHİP</b>' : ''}</a>`).join('');
+  const members = document.getElementById('listening-members'); if (members) members.innerHTML = state.members.map(member => `<a class="listening-member" href="${profileRoute(member.username)}" data-link><i class="fas fa-user-circle"></i><span class="user-identity"><strong>${escHtml(member.nickname || member.username)}</strong><small>@${escHtml(member.username)}</small></span>${member.role === 'owner' ? '<b>SAHİP</b>' : ''}</a>`).join('');
   const requests = document.getElementById('listening-requests'); if (requests) requests.innerHTML = state.requests.map(item => `<div class="listening-request"><span>${escHtml(item.title)}<small>${escHtml(item.requester_username)}</small></span><button class="btn btn-primary btn-xs" data-request="accept" data-id="${item.id}"><i class="fas fa-check"></i></button><button class="btn btn-outline btn-xs" data-request="reject" data-id="${item.id}"><i class="fas fa-xmark"></i></button></div>`).join('');
   if (!quiet) {
     document.getElementById('listening-share')?.addEventListener('click', async () => { await navigator.clipboard?.writeText(location.origin + listeningRoom.share_url); toast('Ortak link kopyalandı'); });
@@ -11020,13 +11118,7 @@ async function renderMyOrders(app) {
 
   app.innerHTML = `
     <div class="container page" style="max-width:700px;margin:0 auto;padding:24px 16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:10px">
-        <div>
-          <h1 style="font-size:22px;font-weight:800;margin:0">Siparişlerim</h1>
-          <div style="font-size:13px;color:var(--text-muted);margin-top:2px">Ödeme geçmişiniz ve aktif üyelikleriniz</div>
-        </div>
-        <a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a>
-      </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:20px"><a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a></div>
       ${subsHTML}
       <div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
         <i class="fas fa-receipt" style="color:var(--accent-red2)"></i> Sipariş Geçmişi

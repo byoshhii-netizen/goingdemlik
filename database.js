@@ -80,6 +80,12 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname_changes INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname_change_reset_at TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
+    UPDATE users SET nickname=username WHERE nickname IS NULL OR BTRIM(nickname)='';
     UPDATE users SET tag_permission='everyone' WHERE tag_permission IS NULL OR tag_permission='';
 
     CREATE TABLE IF NOT EXISTS follows (
@@ -234,7 +240,8 @@ async function initDb() {
       ('vmb_founder', 'VMB Kurucusu'),
       ('vmb_image_url', '/vmb-emblem.svg'),
       ('vmb_files', '[]'),
-      ('photo_song_clip_seconds', '30')
+      ('photo_song_clip_seconds', '30'),
+      ('content_count_combined', '0')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 

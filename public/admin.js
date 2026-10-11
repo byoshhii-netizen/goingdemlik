@@ -2910,6 +2910,15 @@ async function renderSettings(main) {
           <div id="s-photo-song-clip-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card adm-feature-card">
+        <div class="card-header"><span><i class="fas fa-chart-simple" style="color:var(--red2);margin-right:8px"></i>Profil İçerik Sayısı</span><span class="adm-setting-status ${settings['content_count_combined']==='1'?'is-on':''}">${settings['content_count_combined']==='1'?'AÇIK':'KAPALI'}</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy"><strong>İçerik sayılarını birleştir</strong><p>Açıkken profilde konu, kitap, fotoğraf, müzik ve yorum sayıları tek bir “İçerik” sayısında toplanır. Kullanıcıların bu beş sayı için ayrı görünürlük ayarları gösterilmez. Kapalıyken kullanıcı tercihleri korunur.</p></div>
+          <label class="adm-toggle-row" for="s-content-count-combined"><span><i class="fas fa-layer-group"></i> İçerik Sayısı Birleşik</span><span class="adm-toggle"><input type="checkbox" id="s-content-count-combined" ${settings['content_count_combined']==='1'?'checked':''}><span></span></span></label>
+          <button class="btn btn-primary" id="s-content-count-combined-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
+          <div id="s-content-count-combined-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><span><i class="fas fa-phone-volume" style="color:var(--red2);margin-right:8px"></i>Sesli Arama Sesi</span></div>
         <div class="card-body">
@@ -3324,6 +3333,27 @@ async function renderSettings(main) {
     await saveSetting('first_visit_auth', document.getElementById('s-first-visit-auth').checked ? '1' : '0', msg);
     msg.style.color = 'var(--green)';
     msg.textContent = '✓ Ayar kaydedildi';
+  });
+  document.getElementById('s-content-count-combined-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-content-count-combined-msg');
+    try {
+      const enabled = document.getElementById('s-content-count-combined').checked;
+      const response = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+        body: JSON.stringify({ key: 'content_count_combined', value: enabled ? '1' : '0' })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || 'Ayar kaydedilemedi');
+      const status = document.querySelector('#s-content-count-combined')?.closest('.card')?.querySelector('.adm-setting-status');
+      if (status) {
+        status.textContent = enabled ? 'AÇIK' : 'KAPALI';
+        status.classList.toggle('is-on', enabled);
+      }
+      toast('Kaydedildi');
+      msg.style.color = 'var(--green)';
+      msg.textContent = '✓ Profil içerik sayısı ayarı kaydedildi';
+    } catch (error) { msg.textContent = error.message || 'Ayar kaydedilemedi'; }
   });
   document.getElementById('s-footer-save').addEventListener('click', async () => {
     const msg = document.getElementById('s-footer-msg');
