@@ -859,13 +859,13 @@ function renderRoute(fullPath) {
   const [path, queryStr] = fullPath.split('?');
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
-  document.body.classList.toggle('messages-page', path === '/mesajlar' || path.startsWith('/mesajlar/'));
+  document.body.classList.toggle('messages-page', path === '/mesajlar');
   document.body.classList.toggle('reals-page', path === '/reals' || path.startsWith('/reals/'));
   updateNavActive(path);
-  // Mesajlar sayfasında footer gizle
+  // Mesaj başlığı/sohbet ekranında footer gizlenir; genel mesaj listesi sabit kalır.
   const siteFooter = document.getElementById('site-footer');
   if (siteFooter) {
-    siteFooter.style.display = (path === '/mesajlar' || path.startsWith('/mesajlar/') || path === '/reals') ? 'none' : '';
+    siteFooter.style.display = (isDmChatRoute || path === '/reals') ? 'none' : '';
   }
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
@@ -2974,7 +2974,7 @@ async function renderBookDetail(app, slug) {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Kitap bulunamadı veya gizli.</p></div></div>'; return;
   }
 
-  const { book, chapters, pages, comments = [] } = data;
+  const { book, chapters, pages } = data;
   document.title = book.title + ' – ' + siteName;
   updatePageMeta(book.title + ' – ' + siteName, book.preface ? book.preface.substring(0,155) : book.title + ' – CigCig\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
@@ -3017,22 +3017,7 @@ async function renderBookDetail(app, slug) {
 
   const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug)).join('');
 
-  const bookCommentsHTML = currentUser ? `<div class="book-comments-section">
-    <div class="book-comments-title"><i class="fas fa-comment-dots"></i> Kitap Yorumları (${comments.length || 0})</div>
-    <div class="book-comment-form">
-      <textarea id="book-comment-input" rows="3" placeholder="Bu kitaba yorum yaz..."></textarea>
-      <button class="btn btn-primary btn-sm" id="book-comment-submit"><i class="fas fa-paper-plane"></i> Gönder</button>
-    </div>
-    ${comments.length ? `<div class="book-comments-list">${comments.map(c => `<div class="book-comment-item" data-comment-id="${c.id}">
-      <div class="book-comment-head">
-        <span class="book-comment-author">${avatarImg(c, 'avatar-sm')} ${escHtml(c.username || 'Kullanıcı')}</span>
-        <span class="book-comment-date">${formatDate(c.created_at)}${c.edited_at ? ' · Düzenlendi' : ''}</span>
-        ${currentUser && currentUser.id === c.user_id ? `<button class="book-comment-edit" data-id="${c.id}" title="Yorumu düzenle"><i class="fas fa-edit"></i></button>` : ''}
-        ${(currentUser && (currentUser.id === c.user_id || isOwner)) ? `<button class="book-comment-delete" data-id="${c.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}
-      </div>
-      <div class="book-comment-body">${escHtml(c.content)}</div>
-    </div>`).join('')}</div>` : `<div class="empty-state"><i class="fas fa-comment-dots"></i><p>Henüz yorum yok.</p></div>`}
-  </div>` : `<div class="book-comments-section"><div class="book-comments-title"><i class="fas fa-comment-dots"></i> Kitap Yorumları (${comments.length || 0})</div><div class="empty-state"><i class="fas fa-user-lock"></i><p>Yorum yapmak için giriş yapın.</p></div></div>`;
+  // Kitap yorumları kapatıldı: kitap sayfasında yorum alanı gösterilmeyecek.
 
   // İsimsiz kitap hatırlatma banner'ı
   const unnamedBannerHTML = (isOwner && book.is_unnamed) ? `
@@ -3100,7 +3085,6 @@ async function renderBookDetail(app, slug) {
         </div>` : ''}
       </div>
     </div>
-    ${bookCommentsHTML}
     <div class="chapters-list">
       ${resumeHTML}
       ${!chapters.length && !pages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
@@ -3108,59 +3092,6 @@ async function renderBookDetail(app, slug) {
       ${chapListHTML}
     </div>
   </div>`;
-
-  $('#book-comment-submit')?.addEventListener('click', async () => {
-    const content = $('#book-comment-input')?.value.trim();
-    if (!content) { toast('Yorum boş olamaz', 'error'); return; }
-    try {
-      const comment = await api(`/book/${encodeURIComponent(slug)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
-      const list = $('.book-comments-list');
-      if (list) {
-        list.insertAdjacentHTML('beforeend', `<div class="book-comment-item" data-comment-id="${comment.id}">
-          <div class="book-comment-head">
-            <span class="book-comment-author">${avatarImg(comment, 'avatar-sm')} ${escHtml(comment.username || 'Kullanıcı')}</span>
-            <span class="book-comment-date">${formatDate(comment.created_at)}</span>
-            <button class="book-comment-edit" data-id="${comment.id}" title="Yorumu düzenle"><i class="fas fa-edit"></i></button>
-            <button class="book-comment-delete" data-id="${comment.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>
-          </div>
-          <div class="book-comment-body">${escHtml(comment.content)}</div>
-        </div>`);
-      } else {
-        renderBookDetail(app, slug);
-      }
-      $('#book-comment-input').value = '';
-    } catch (e) { toast(e.message, 'error'); }
-  });
-
-  $('.book-comment-delete')?.forEach(btn => btn.addEventListener('click', async event => {
-    event.preventDefault();
-    const id = btn.dataset.id;
-    try {
-      await api(`/book/${encodeURIComponent(slug)}/comments/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      btn.closest('.book-comment-item')?.remove();
-      toast('Yorum silindi');
-    } catch (e) { toast(e.message, 'error'); }
-  }));
-
-  $('.book-comment-edit')?.forEach(btn => btn.addEventListener('click', () => {
-    const item = btn.closest('.book-comment-item');
-    const body = item?.querySelector('.book-comment-body');
-    if (!body || body.querySelector('textarea')) return;
-    const original = body.textContent;
-    body.innerHTML = `<textarea class="book-comment-edit-input" rows="3">${escHtml(original)}</textarea><div class="book-comment-edit-actions"><button class="btn btn-ghost btn-sm book-comment-edit-cancel">İptal</button><button class="btn btn-primary btn-sm book-comment-edit-save"><i class="fas fa-check"></i> Kaydet</button></div>`;
-    body.querySelector('.book-comment-edit-cancel')?.addEventListener('click', () => { body.textContent = original; });
-    body.querySelector('.book-comment-edit-save')?.addEventListener('click', async () => {
-      const content = body.querySelector('textarea')?.value.trim();
-      if (!content) { toast('Yorum boş olamaz', 'error'); return; }
-      try {
-        const updated = await api(`/book/${encodeURIComponent(slug)}/comments/${encodeURIComponent(btn.dataset.id)}`, { method: 'PUT', body: JSON.stringify({ content }) });
-        body.textContent = updated.content;
-        const date = item.querySelector('.book-comment-date');
-        if (date) date.textContent = `${formatDate(updated.created_at)} · Düzenlendi`;
-        toast('Yorum güncellendi');
-      } catch (e) { toast(e.message, 'error'); }
-    });
-  }));
 
   $('#book-like-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
@@ -5590,7 +5521,9 @@ async function renderProfile(app, username) {
         return { blocked_by_me: Array.isArray(blocks) && blocks.some(block => block.username === username) };
       };
       function buildMenuItems(fs) {
-        const items = [];
+        const items = [
+          { icon: 'fa-share-nodes', label: 'Profili Paylaş', action: 'share-profile' }
+        ];
         if (!fs?.blocked_by_me) {
           items.push({ icon: 'fa-ban', label: 'Engelle', action: 'block-user', danger: true });
         } else {
@@ -5622,7 +5555,17 @@ async function renderProfile(app, username) {
             const action = el.dataset.action;
             const fid = el.dataset.id;
             try {
-              if (action === 'block-user') {
+              if (action === 'share-profile') {
+                const profileUrl = new URL(profileRoute(username), location.origin).href;
+                if (navigator.share) {
+                  await navigator.share({ title: `${user.nickname || user.username} profili`, url: profileUrl });
+                } else if (navigator.clipboard?.writeText) {
+                  await navigator.clipboard.writeText(profileUrl);
+                  toast('Profil bağlantısı kopyalandı');
+                } else {
+                  throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
+                }
+              } else if (action === 'block-user') {
                 if (!confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
                 await api('/block/' + encodeURIComponent(username), { method: 'POST' });
                 toast('Kullanıcı engellendi');
@@ -5639,16 +5582,21 @@ async function renderProfile(app, username) {
 
       getBlockStatus().then(renderMenu).catch(() => renderMenu({}));
 
-      document.getElementById('profile-friend-btn')?.addEventListener('click', e => {
-        e.stopPropagation();
-        moreMenu.style.display = moreMenu.style.display === 'none' ? 'block' : 'none';
-      });
+      const toggleProfileMenu = (event) => {
+        if (event) event.stopPropagation();
+        const isOpen = moreMenu.style.display === 'block';
+        moreMenu.style.display = isOpen ? 'none' : 'block';
+        moreBtn.setAttribute('aria-expanded', String(!isOpen));
+      };
 
-      moreBtn.addEventListener('click', e => {
-        e.stopPropagation();
-        moreMenu.style.display = moreMenu.style.display === 'none' ? 'block' : 'none';
-      });
-      document.addEventListener('click', () => { if (moreMenu) moreMenu.style.display = 'none'; }, { once: false });
+      document.getElementById('profile-friend-btn')?.addEventListener('click', toggleProfileMenu);
+      moreBtn.addEventListener('click', toggleProfileMenu);
+      document.addEventListener('click', (event) => {
+        if (!event.target.closest('#profile-more-btn') && !event.target.closest('#profile-more-menu')) {
+          if (moreMenu) moreMenu.style.display = 'none';
+          moreBtn.setAttribute('aria-expanded', 'false');
+        }
+      }, { once: false });
     }
   }
 }
@@ -7301,7 +7249,6 @@ async function renderDMChat(username) {
         </div>
       </div>
       <div class="dm-chat-header-right">
-        <button class="btn btn-ghost btn-sm" id="dm-share-profile-btn" title="Profili paylaş" aria-label="Profili paylaş"><i class="fas fa-share-nodes"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -7343,18 +7290,6 @@ async function renderDMChat(username) {
 
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
-  document.getElementById('dm-share-profile-btn')?.addEventListener('click', async () => {
-    const profileUrl = new URL(profileRoute(other.username), location.origin).href;
-    try {
-      if (navigator.share) await navigator.share({ title: `${other.nickname || other.username} profili`, url: profileUrl });
-      else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(profileUrl);
-        toast('Profil bağlantısı kopyalandı');
-      } else throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
-    } catch (error) {
-      if (error.name !== 'AbortError') toast(error.message || 'Profil paylaşılamadı', 'error');
-    }
-  });
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
 
@@ -8489,9 +8424,6 @@ async function renderMusicList(app) {
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         ${currentUser ? `<a href="/playlistlerim" data-link class="btn btn-outline btn-sm"><i class="fas fa-list"></i> Playlistlerim</a>` : ''}
-        ${currentUser && !currentUser.is_artist ? `<a href="/artist-basvuru" data-link class="btn btn-outline btn-sm"><i class="fas fa-microphone"></i> Artist Başvurusu</a>` : ''}
-        ${currentUser?.is_artist ? `<a href="/artist-panel" data-link class="btn btn-primary btn-sm"><i class="fas fa-upload"></i> Şarkı Yükle</a>` : ''}
-        ${currentUser && !currentUser.is_artist ? `<a href="/sarki-yukle" data-link class="btn btn-outline btn-sm"><i class="fas fa-share"></i> Şarkı Paylaş</a>` : ''}
       </div>
     </div>
     <div class="music-search-bar" style="margin-bottom:20px">
@@ -10361,11 +10293,11 @@ async function renderMyPlaylists(app) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Playlistlerim – ' + siteName;
   app.innerHTML = `<div class="container page">
-    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:24px">
-      <div class="page-title" style="display:flex;align-items:center;gap:10px">
-        <i class="fas fa-list" style="color:var(--accent-red2)"></i> Playlistlerim
+    <div class="page-header my-playlists-header">
+      <div class="page-title my-playlists-title">
+        <i class="fas fa-list" aria-hidden="true"></i> Playlistlerim
       </div>
-      <button class="btn btn-primary btn-sm" id="pl-create-btn"><i class="fas fa-plus"></i> Playlist Oluştur</button>
+      <button class="btn btn-primary btn-sm my-playlists-create" id="pl-create-btn"><i class="fas fa-plus"></i> Playlist Oluştur</button>
     </div>
     <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
   </div>`;
