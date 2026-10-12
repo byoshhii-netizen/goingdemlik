@@ -7753,7 +7753,7 @@ app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) =>
   const isUser1 = conv.user1_id == uid;
   const untilColumn = isUser1 ? 'muted_until_user1' : 'muted_until_user2';
   const foreverColumn = isUser1 ? 'mute_forever_user1' : 'mute_forever_user2';
-  if (hours === null || hours === undefined || Number(hours) < 0) {
+  if (hours === null || hours === undefined || String(hours) === 'unmute' || Number(hours) < 0) {
     await query(`UPDATE dm_conversations SET ${untilColumn}=NULL, ${foreverColumn}=0 WHERE id=$1`, [conv.id]);
   } else if (String(hours) === 'forever' || Number(hours) === 0) {
     await query(`UPDATE dm_conversations SET ${untilColumn}=NULL, ${foreverColumn}=1 WHERE id=$1`, [conv.id]);
