@@ -107,6 +107,7 @@
       '--accent-red': accent,
       '--accent-red2': isLight ? blend(accent, '#000000', 0.18) : blend(accent, '#ffffff', 0.18),
       '--accent-red-dark': isLight ? blend(accent, '#000000', 0.38) : blend(accent, '#000000', 0.34),
+      '--accent-rgb': (() => { const color = rgb(accent); return `${color.r},${color.g},${color.b}`; })(),
       '--accent-contrast': contrastColor(accent),
       '--text-primary': text,
       '--text-secondary': secondaryText,

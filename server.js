@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { Readable } = require('stream');
 const multer = require('multer');
 const slugify = require('slugify');
 const rateLimit = require('express-rate-limit');
@@ -5552,6 +5553,45 @@ app.get('/api/public-settings', async (req, res) => {
   res.json(result);
 });
 
+app.get('/api/image-proxy', async (req, res) => {
+  let imageUrl;
+  try {
+    imageUrl = new URL(String(req.query.url || ''));
+  } catch {
+    return res.status(400).json({ error: 'Görsel adresi geçersiz.' });
+  }
+  if (imageUrl.protocol !== 'https:' || imageUrl.hostname !== 'res.cloudinary.com' || imageUrl.port
+    || imageUrl.username || imageUrl.password || !/\/image\/upload\//.test(imageUrl.pathname)) {
+    return res.status(400).json({ error: 'Yalnızca herkese açık Cloudinary görselleri açılabilir.' });
+  }
+  try {
+    const upstream = await fetch(imageUrl, { redirect: 'error', signal: AbortSignal.timeout(20000) });
+    if (!upstream.ok || !upstream.body) return res.status(502).json({ error: 'Görsel kaynağına ulaşılamadı.' });
+    const contentType = String(upstream.headers.get('content-type') || '').split(';', 1)[0].toLowerCase();
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/bmp'].includes(contentType)) {
+      return res.status(415).json({ error: 'Desteklenmeyen görsel biçimi.' });
+    }
+    res.set({
+      'Content-Type': contentType,
+      'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+      'X-Content-Type-Options': 'nosniff'
+    });
+    const imageStream = Readable.fromWeb(upstream.body);
+    imageStream.on('error', error => {
+      console.error('[image-proxy] Cloudinary görsel akışı kesildi:', error.message);
+      if (!res.headersSent) res.status(502);
+      res.destroy(error);
+    });
+    imageStream.pipe(res);
+  } catch (error) {
+    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+      return res.status(504).json({ error: 'Görsel yüklemesi zaman aşımına uğradı.' });
+    }
+    console.error('[image-proxy] Cloudinary görseli yüklenemedi:', error.message);
+    return res.status(502).json({ error: 'Görsel şu anda açılamıyor.' });
+  }
+});
+
 // ===== ADMİN YETKİLİ YÖNETİMİ =====
 app.post('/api/admin/user/:id/set-admin', adminMiddleware, async (req, res) => {
   const { is_admin } = req.body;
@@ -6041,6 +6081,30 @@ app.get('/playlistlerim', (req, res) => res.send(injectMeta('Playlistlerim – C
 app.get('/playlist/:id', (req, res) => res.send(injectMeta('Playlist – CigCig Müzik', 'CigCig Müzik playlist', `${SITE_URL}/playlist/${req.params.id}`, '')));
 
 // ===== PLAYLIST API =====
+app.get('/api/public-playlists', async (req, res) => {
+  try {
+    const search = String(req.query.q || '').trim().slice(0, 100);
+    const pattern = `%${search}%`;
+    const { rows } = await query(
+      `SELECT p.public_id, p.name, p.description, p.cover_url, p.created_at,
+              owner.username AS owner_username, CAST(COUNT(ps.id) AS INTEGER) AS song_count
+       FROM playlists p
+       JOIN users owner ON owner.id = p.user_id
+       LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id
+       WHERE p.is_public = 1 AND p.source_playlist_id IS NULL
+         AND ($1 = '' OR p.name ILIKE $2 OR p.description ILIKE $2 OR owner.username ILIKE $2)
+       GROUP BY p.id, owner.username
+       ORDER BY p.created_at DESC
+       LIMIT 40`,
+      [search, pattern]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('[public-playlists] Playlist araması başarısız:', error.message);
+    res.status(500).json({ error: 'Herkese açık playlistler yüklenemedi.' });
+  }
+});
+
 app.get('/api/playlists', authMiddleware, async (req, res) => {
   try {
     const { rows } = await query(

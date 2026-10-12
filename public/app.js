@@ -654,6 +654,18 @@ function normalizeExternalUrl(value) {
   return 'https://' + url;
 }
 
+function siteImageUrl(value) {
+  const source = String(value || '').trim();
+  if (!source || source.startsWith('/api/image-proxy?')) return source;
+  try {
+    const url = new URL(source, location.origin);
+    if (url.protocol !== 'https:' || url.hostname !== 'res.cloudinary.com' || !/\/image\/upload\//.test(url.pathname)) return source;
+    return '/api/image-proxy?url=' + encodeURIComponent(url.href);
+  } catch {
+    return source;
+  }
+}
+
 function profileRoute(username) {
   const routeKey = String(username || '').toLocaleLowerCase('tr-TR')
     .replace(/[çğıöşüÇĞİÖŞÜ]/g, char => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', Ç: 'c', Ğ: 'g', İ: 'i', Ö: 'o', Ş: 's', Ü: 'u' }[char] || char))
@@ -762,13 +774,13 @@ function renderContent(text) {
     const url = trailing ? match.slice(0, -trailing.length) : match;
     const placeholder = `__CIGCIG_LINK_${links.length}__`;
     const href = normalizeExternalUrl(url);
-    links.push({ placeholder, url, href, isImage: /\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$/i.test(url) });
+    links.push({ placeholder, url, href, imageHref: siteImageUrl(href), isImage: /\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$/i.test(url) });
     return placeholder + trailing;
   });
   safe = safe;
-  links.forEach(({ placeholder, url, href, isImage }) => {
+  links.forEach(({ placeholder, url, href, imageHref, isImage }) => {
     safe = safe.replaceAll(placeholder, isImage
-      ? `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-image-link"><img src="${href}" alt="Paylaşılan görsel" loading="lazy" /></a>`
+      ? `<a href="${imageHref}" target="_blank" rel="noopener noreferrer" class="inline-image-link"><img src="${imageHref}" alt="Paylaşılan görsel" loading="lazy" /></a>`
       : `<a href="${href}" target="_blank" rel="noopener noreferrer" class="inline-link" data-preview-url="${href}">${url}</a>`);
   });
   return safe;
@@ -786,10 +798,10 @@ async function enhanceLinkPreviews(root = document) {
       if (preview.is_image) {
         const imageLink = document.createElement('a');
         imageLink.className = 'inline-image-link';
-        imageLink.href = preview.url || rawUrl;
+        imageLink.href = siteImageUrl(preview.url || rawUrl);
         imageLink.target = '_blank';
         imageLink.rel = 'noopener noreferrer';
-        imageLink.innerHTML = `<img src="${escHtml(preview.image || preview.url || rawUrl)}" alt="Paylaşılan görsel" loading="lazy" />`;
+        imageLink.innerHTML = `<img src="${escHtml(siteImageUrl(preview.image || preview.url || rawUrl))}" alt="Paylaşılan görsel" loading="lazy" />`;
         link.replaceWith(imageLink);
         return;
       }
@@ -4043,7 +4055,26 @@ async function renderGroupDetail(app, slug) {
   const clearChatSelection = () => {
     groupChatSelection.clear();
     groupChatSelectionMode = false;
-    document.querySelectorAll('.chat-msg-select').forEach(box => { box.checked = false; box.closest('.chat-msg')?.classList.remove('selected'); });
+    document.querySelectorAll('.chat-msg-select').forEach(box => {
+      box.checked = false;
+      box.style.display = 'none';
+      box.closest('.chat-msg')?.classList.remove('selected');
+    });
+    updateSelectionToolbar();
+  };
+  const selectGroupMessage = id => {
+    const key = String(id);
+    if (!messages.some(message => String(message.id) === key)) return;
+    groupChatSelectionMode = true;
+    groupChatSelection.add(key);
+    const row = messageIdToRow(key);
+    row?.classList.add('selected');
+    const checkbox = row?.querySelector('.chat-msg-select');
+    if (checkbox) {
+      checkbox.style.display = '';
+      checkbox.checked = true;
+    }
+    document.querySelectorAll('.chat-msg-select').forEach(box => { box.style.display = ''; });
     updateSelectionToolbar();
   };
 
@@ -4068,12 +4099,14 @@ async function renderGroupDetail(app, slug) {
     groupChatSelection = new Set(ids);
     groupChatSelectionMode = true;
     document.querySelectorAll('.chat-msg-select').forEach(box => {
+      box.style.display = '';
       const id = box.dataset.id;
       const checked = ids.includes(String(id));
       box.checked = checked;
       box.closest('.chat-msg')?.classList.toggle('selected', checked);
     });
     updateSelectionToolbar();
+    installMessageSelectionGestures(chatEl, '.chat-msg', selectGroupMessage);
   });
   toolbar.querySelector('#chat-clear-selection')?.addEventListener('click', clearChatSelection);
   toolbar.querySelector('#chat-bulk-delete-me')?.addEventListener('click', async () => {
@@ -4337,13 +4370,7 @@ async function renderGroupDetail(app, slug) {
         const id = item.dataset.id;
         try {
           if (action === 'select') {
-            groupChatSelectionMode = true;
-            groupChatSelection.add(String(id));
-            const row = messageIdToRow(id);
-            row?.classList.add('selected');
-            const checkbox = row?.querySelector('.chat-msg-select');
-            if (checkbox) checkbox.checked = true;
-            updateSelectionToolbar();
+            selectGroupMessage(id);
           } else if (action === 'edit') {
             const target = document.querySelector(`.edit-msg[data-id="${CSS.escape(id)}"]`);
             if (target) target.click();
@@ -4634,8 +4661,8 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
   const displayName = m.username || 'Silinmiş kullanıcı';
   const avatar = hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`;
   const canAction = currentUser && (isOwn || canModerate);
-  const selectBox = groupChatSelectionMode ? `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />` : '';
-  return `<div class="chat-msg ${isOwn ? 'own' : ''}" data-message-id="${m.id}">
+  const selectBox = `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" aria-label="Mesajı seç" style="display:${groupChatSelectionMode ? 'block' : 'none'}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />`;
+  return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}">
     ${selectBox}
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
@@ -4688,8 +4715,13 @@ function videoCardHTML(v) {
 }
 
 function realsProfileCardHTML(v) {
-  const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
-  return `<div class="video-card reals-profile-card" onclick="navigate('/reals')"><div class="video-thumb">${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}</div><div class="video-card-body"><div class="video-card-title">${escHtml(v.title)}</div><div class="video-card-meta"><span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span><span>•</span><span>${v.views || 0} izlenme</span></div>${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}</div></div>`;
+  return `<a class="video-card reals-profile-card" href="/reals/${encodeURIComponent(v.id)}" data-link aria-label="${escHtml(v.title || 'Reals videosu')}">
+    <div class="video-thumb">
+      ${v.banner_image ? `<img src="${escHtml(siteImageUrl(v.banner_image))}" alt="" loading="lazy" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}
+      <span class="reals-profile-play"><i class="fas fa-play"></i></span>
+      <span class="reals-profile-caption"><strong>${escHtml(v.title || 'Reals')}</strong><small>${escHtml(v.username || 'Silinmiş kullanıcı')} · ${Number(v.views) || 0} izlenme</small></span>
+    </div>
+  </a>`;
 }
 
 function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyor') {
@@ -5317,7 +5349,7 @@ async function renderProfile(app, username) {
     try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
-  const savedContentHTML = profileSavedVideos.length ? `<div class="grid-3">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
+  const savedContentHTML = profileSavedVideos.length ? `<div class="profile-saved-content-grid">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
   const profileSongsHTML = profileSongs.length ? `<div class="grid-3" style="gap:16px">${profileSongs.map(s => `
       <div class="song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -5428,7 +5460,7 @@ async function renderProfile(app, username) {
       ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(videoCardHTML).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
     </div>
     <div id="tab-reals" class="hidden">
-      ${profileReals.length ? `<div class="grid-3">${profileReals.map(v => realsProfileCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
+      ${profileReals.length ? `<div class="profile-reels-grid">${profileReals.map(v => realsProfileCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
     </div>
     <div id="tab-saved" class="hidden">
       ${savedContentHTML}
@@ -6869,6 +6901,7 @@ async function init() {
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
+    window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
     siteAuthRequired = ps.auth_required === '1';
@@ -6989,7 +7022,44 @@ function installHoverDescriptions() {
   }).observe(document.body, { childList: true, subtree: true });
 }
 
+function installSiteImageUrls() {
+  const rewriteImage = image => {
+    const rawSource = image.getAttribute('src');
+    if (!rawSource) return;
+    const proxiedSource = siteImageUrl(rawSource);
+    if (proxiedSource !== rawSource) {
+      image.setAttribute('src', proxiedSource);
+      const parentLink = image.closest('a[href]');
+      if (parentLink) {
+        const proxiedHref = siteImageUrl(parentLink.getAttribute('href'));
+        if (proxiedHref !== parentLink.getAttribute('href')) parentLink.setAttribute('href', proxiedHref);
+      }
+    }
+  };
+  const scan = node => {
+    if (!(node instanceof Element)) return;
+    if (node.matches('img')) rewriteImage(node);
+    node.querySelectorAll('img').forEach(rewriteImage);
+    if (node.matches('a[href]')) {
+      const proxiedHref = siteImageUrl(node.getAttribute('href'));
+      if (proxiedHref !== node.getAttribute('href')) node.setAttribute('href', proxiedHref);
+    }
+  };
+  scan(document.body);
+  new MutationObserver(records => {
+    records.forEach(record => {
+      if (record.type === 'attributes') {
+        if (record.target instanceof HTMLImageElement) rewriteImage(record.target);
+        else scan(record.target);
+      } else {
+        record.addedNodes.forEach(scan);
+      }
+    });
+  }).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'href'] });
+}
+
 installHoverDescriptions();
+installSiteImageUrls();
 init();
 
 // ===== VIDEO İLET MODAL =====
@@ -7509,6 +7579,7 @@ async function renderDMChat(username) {
   const msgsEl = document.getElementById('dm-messages');
   if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
   enhanceLinkPreviews(msgsEl);
+  installMessageSelectionGestures(msgsEl, '.dm-msg-wrap', enterDmSelection);
 
   // Reply management
   const setReply = (id) => { replyToId = id; };
@@ -7609,6 +7680,17 @@ async function renderDMChat(username) {
     if (cb) {
       const id = cb.dataset.id;
       if (cb.checked) dmSelectedIds.add(id); else dmSelectedIds.delete(id);
+      cb.closest('.dm-msg-wrap')?.classList.toggle('dm-msg-selected', cb.checked);
+      updateDmSelActions();
+      return;
+    }
+    const messageRow = e.target.closest('.dm-msg-wrap');
+    if (messageRow && dmSelectionMode && !e.target.closest('a, button, input, textarea, select, label')) {
+      const id = String(messageRow.dataset.id);
+      if (dmSelectedIds.has(id)) dmSelectedIds.delete(id); else dmSelectedIds.add(id);
+      const checked = dmSelectedIds.has(id);
+      messageRow.querySelector('.dm-msg-cb').checked = checked;
+      messageRow.classList.toggle('dm-msg-selected', checked);
       updateDmSelActions();
     }
   });
@@ -7672,8 +7754,22 @@ function exitDmSelection() {
   dmSelectedIds = new Set();
   document.querySelectorAll('.dm-msg-cb-wrap').forEach(el => el.style.display = 'none');
   document.querySelectorAll('.dm-msg-cb').forEach(el => el.checked = false);
+  document.querySelectorAll('.dm-msg-wrap').forEach(el => el.classList.remove('dm-msg-selected'));
   const bar = document.getElementById('dm-sel-actions-bar');
   if (bar) bar.classList.remove('visible');
+}
+
+function enterDmSelection(messageId) {
+  const id = String(messageId);
+  const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  dmSelectionMode = true;
+  dmSelectedIds.add(id);
+  document.querySelectorAll('.dm-msg-cb-wrap').forEach(element => { element.style.display = 'flex'; });
+  const checkbox = row.querySelector('.dm-msg-cb');
+  if (checkbox) checkbox.checked = true;
+  row.classList.add('dm-msg-selected');
+  updateDmSelActions();
 }
 
 function updateDmSelActions() {
@@ -7681,7 +7777,68 @@ function updateDmSelActions() {
   const deleteAllButton = document.getElementById('dm-sel-delete-all');
   const onlyOwnMessages = [...dmSelectedIds].every(id => document.querySelector(`.dm-msg-wrap[data-id="${id}"]`)?.classList.contains('dm-own'));
   if (bar) { if (dmSelectedIds.size > 0) bar.classList.add('visible'); else bar.classList.remove('visible'); }
+  const selectionLabel = bar?.querySelector('.dm-selection-label');
+  if (selectionLabel) selectionLabel.textContent = `${dmSelectedIds.size} mesaj seçildi`;
   if (deleteAllButton) deleteAllButton.hidden = !dmSelectedIds.size || !onlyOwnMessages;
+}
+
+function installMessageSelectionGestures(container, selector, onSelect) {
+  if (!container) return;
+  let holdTimer = null;
+  let activePointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let suppressClickUntil = 0;
+
+  const getMessageRow = event => {
+    if (!(event.target instanceof Element)) return null;
+    const row = event.target.closest(selector);
+    if (!row || !container.contains(row) || event.target.closest('a, button, input, textarea, select, label, [contenteditable="true"]')) return null;
+    if (!(row.dataset.messageId || row.dataset.id)) return null;
+    return row;
+  };
+  const clearHold = () => {
+    if (holdTimer !== null) clearTimeout(holdTimer);
+    holdTimer = null;
+    activePointerId = null;
+  };
+
+  container.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    const row = getMessageRow(event);
+    if (!row) return;
+    clearHold();
+    activePointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      if (!row.isConnected) return;
+      suppressClickUntil = Date.now() + 800;
+      onSelect(row.dataset.messageId || row.dataset.id);
+    }, 550);
+  });
+  container.addEventListener('pointermove', event => {
+    if (activePointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - startX, event.clientY - startY) > 12) clearHold();
+  });
+  container.addEventListener('pointerup', event => {
+    if (activePointerId === event.pointerId) clearHold();
+  });
+  container.addEventListener('pointercancel', clearHold);
+  container.addEventListener('contextmenu', event => {
+    const row = getMessageRow(event);
+    if (!row) return;
+    event.preventDefault();
+    clearHold();
+    onSelect(row.dataset.messageId || row.dataset.id);
+  });
+  container.addEventListener('click', event => {
+    if (Date.now() > suppressClickUntil || !getMessageRow(event)) return;
+    suppressClickUntil = 0;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
 }
 
 function dmMessageHTML(m, myId, selMode) {
@@ -7693,7 +7850,7 @@ function dmMessageHTML(m, myId, selMode) {
   const senderName = m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}" data-id="${m.id}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -7799,12 +7956,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
         if (rb) rb.classList.add('visible');
         if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
       } else if (item.action === 'select') {
-        dmSelectionMode = true;
-        dmSelectedIds.add(String(msgId));
-        document.querySelectorAll('.dm-msg-cb-wrap').forEach(el => el.style.display = 'flex');
-        const cb = document.querySelector(`.dm-msg-cb[data-id="${msgId}"]`);
-        if (cb) cb.checked = true;
-        updateDmSelActions();
+        enterDmSelection(msgId);
       } else if (item.action === 'delete-me') {
         try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'me' }) }); renderDMChat(username); }
         catch (e) { toast(e.message, 'error'); }
@@ -8710,6 +8862,16 @@ async function renderMusicList(app) {
         <input type="text" id="music-search" placeholder="Şarkı adı, sanatçı, tür, dağıtıcı, şarkı sözü ara..." style="width:100%" />
       </div>
     </div>
+    <section class="music-public-playlists" aria-labelledby="public-playlists-title">
+      <div class="section-header">
+        <div class="section-title" id="public-playlists-title"><div class="section-title-bar"></div>Herkese Açık Playlistler</div>
+      </div>
+      <div class="search-bar music-public-playlist-search">
+        <i class="fas fa-search"></i>
+        <input type="search" id="public-playlist-search" aria-label="Herkese açık playlist ara" placeholder="Playlist, açıklama veya kullanıcı ara..." autocomplete="off" />
+      </div>
+      <div id="public-playlist-results"><div class="loading-center"><div class="spinner"></div></div></div>
+    </section>
     <div id="music-list"></div>
   </div>`;
 
@@ -8807,6 +8969,37 @@ async function renderMusicList(app) {
   loadSongs();
   let t; document.getElementById('music-search')?.addEventListener('input', e => {
     clearTimeout(t); t = setTimeout(() => loadSongs(e.target.value.trim()), 400);
+  });
+  let publicPlaylistRequest = 0;
+  const loadPublicPlaylists = async (search = '') => {
+    const results = document.getElementById('public-playlist-results');
+    if (!results) return;
+    const requestId = ++publicPlaylistRequest;
+    results.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+    try {
+      const playlists = await api('/public-playlists?q=' + encodeURIComponent(search));
+      if (requestId !== publicPlaylistRequest || !results.isConnected) return;
+      results.innerHTML = playlists.length
+        ? `<div class="public-playlists-grid">${playlists.map(playlist => `
+          <a class="public-playlist-card" href="/playlist/${encodeURIComponent(playlist.public_id)}" data-link>
+            <div class="public-playlist-cover">${playlist.cover_url ? `<img src="${escHtml(siteImageUrl(playlist.cover_url))}" alt="" loading="lazy" />` : '<i class="fas fa-music"></i>'}</div>
+            <div class="public-playlist-copy">
+              <strong>${escHtml(playlist.name)}</strong>
+              <span>@${escHtml(playlist.owner_username || 'Kullanıcı')} · ${Number(playlist.song_count) || 0} şarkı</span>
+              ${playlist.description ? `<small>${escHtml(playlist.description)}</small>` : ''}
+            </div>
+          </a>`).join('')}</div>`
+        : '<div class="empty-state"><i class="fas fa-list"></i><p>Eşleşen herkese açık playlist bulunamadı.</p></div>';
+    } catch (error) {
+      if (requestId !== publicPlaylistRequest || !results.isConnected) return;
+      results.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Playlistler yüklenemedi.')}</p></div>`;
+    }
+  };
+  loadPublicPlaylists();
+  let playlistSearchTimer;
+  document.getElementById('public-playlist-search')?.addEventListener('input', event => {
+    clearTimeout(playlistSearchTimer);
+    playlistSearchTimer = setTimeout(() => loadPublicPlaylists(event.target.value.trim()), 300);
   });
 }
 

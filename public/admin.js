@@ -7,13 +7,27 @@ function applyThemeColor(hex) {
   const toHex = (v) => v.toString(16).padStart(2,'0');
   const hex2 = '#' + toHex(l(r)) + toHex(l(g)) + toHex(l(b));
   const hexDark = '#' + toHex(d(r)) + toHex(d(g)) + toHex(d(b));
-  const root = document.documentElement.style;
-  root.setProperty('--red', hex);
-  root.setProperty('--red2', hex2);
-  root.setProperty('--red-glow', `rgba(${r},${g},${b},0.25)`);
-  root.setProperty('--border-red', `rgba(${r},${g},${b},0.2)`);
-  root.setProperty('--theme-hex', hex);
-  root.setProperty('--theme-dark', hexDark);
+  const variables = {
+    '--accent-red': hex,
+    '--accent-red2': hex2,
+    '--accent-red-dark': hexDark,
+    '--accent-contrast': '#ffffff',
+    '--accent-rgb': `${r},${g},${b}`,
+    '--red': hex,
+    '--red2': hex2,
+    '--red-glow': `rgba(${r},${g},${b},0.25)`,
+    '--border-red': `rgba(${r},${g},${b},0.2)`,
+    '--bg-active': `rgba(${r},${g},${b},0.1)`,
+    '--border': `rgba(${r},${g},${b},0.18)`,
+    '--border-hover': `rgba(${r},${g},${b},0.5)`,
+    '--grad-red': `linear-gradient(135deg, ${hex}, ${hexDark})`,
+    '--glow': `0 0 20px rgba(${r},${g},${b},0.15)`,
+    '--theme-hex': hex,
+    '--theme-dark': hexDark
+  };
+  [document.documentElement, document.body].filter(Boolean).forEach(target => {
+    Object.entries(variables).forEach(([name, value]) => target.style.setProperty(name, value));
+  });
   window.__themeColor = hex;
   // Btn-primary arka planlarını güncelle
   document.querySelectorAll('.btn-primary').forEach(el => {
@@ -3450,11 +3464,12 @@ async function renderSettings(main) {
       return;
     }
     try {
-      await fetch('/api/admin/settings', {
+      const response = await fetch('/api/admin/settings', {
         method:'POST',
         headers:{'Content-Type':'application/json','X-Admin-Token':adminToken},
         body:JSON.stringify({key:'primary_color', value:finalHex})
       });
+      if (!response.ok) throw new Error('Tema rengi kaydedilemedi.');
       applyThemeColor(finalHex);
       syncColorUI(finalHex);
       toast('Tema rengi kaydedildi!');
@@ -3464,13 +3479,14 @@ async function renderSettings(main) {
 
   document.getElementById('s-color-reset')?.addEventListener('click', async () => {
     const defaultColor = '#BDA275';
-    syncColorUI(defaultColor);
     try {
-      await fetch('/api/admin/settings', {
+      const response = await fetch('/api/admin/settings', {
         method:'POST',
         headers:{'Content-Type':'application/json','X-Admin-Token':adminToken},
         body:JSON.stringify({key:'primary_color', value:defaultColor})
       });
+      if (!response.ok) throw new Error('Varsayılan tema rengi kaydedilemedi.');
+      syncColorUI(defaultColor);
       toast('Varsayılan renge döndürüldü');
       colorMsg.style.color='var(--green)'; colorMsg.textContent='✓ Sıfırlandı';
     } catch(e) { colorMsg.style.color='var(--red2)'; colorMsg.textContent=e.message; }
