@@ -3011,17 +3011,17 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card adm-feature-card">
-        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Siteye Giriş Zorunluluğu</span><span class="adm-setting-status ${settings['auth_required']==='1'?'is-on':''}">${settings['auth_required']==='1'?'AÇIK':'KAPALI'}</span></div>
+        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Kayıt Zorunluluğu</span><span class="adm-setting-status ${settings['auth_required']==='1'?'is-on':''}">${settings['auth_required']==='1'?'AÇIK':'KAPALI'}</span></div>
         <div class="card-body">
           <div class="adm-feature-copy">
-            <strong>Siteyi yalnızca giriş yapanlar gezsin</strong>
-            <p>Açıkken hesabıyla giriş yapmamış ziyaretçiler site sayfalarına erişemez ve giriş ekranına yönlendirilir. Hesabı açık olan kullanıcıların oturumu etkilenmez. Kapatıldığında sayfalar herkese açılır; yorum, mesaj ve paylaşım gibi mevcut giriş gerektiren işlemler yine giriş istemeye devam eder.</p>
+            <strong>Ana sayfa ve tüm site bölümleri için hesap iste</strong>
+            <p>Açıkken giriş yapmamış ziyaretçiler ana sayfaya, bölümlere veya doğrudan bir route'a erişemez; giriş ekranına yönlendirilir ve girişten sonra istedikleri sayfaya döner. Kapatıldığında içerikler herkese açılır; yorum, mesaj ve paylaşım gibi giriş gerektiren işlemler yine hesap ister.</p>
           </div>
           <label class="adm-toggle-row" for="s-auth-required">
-            <span><i class="fas fa-user-check"></i> Site genelinde giriş zorunluluğunu etkinleştir</span>
+            <span><i class="fas fa-user-check"></i> Kayıt zorunluluğunu etkinleştir</span>
             <span class="adm-toggle"><input type="checkbox" id="s-auth-required" ${settings['auth_required']==='1'?'checked':''}><span></span></span>
           </label>
-          <button class="btn btn-primary" id="s-auth-required-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Giriş Zorunluluğu Ayarını Kaydet</button>
+          <button class="btn btn-primary" id="s-auth-required-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
           <div id="s-auth-required-msg" class="form-error mt-4"></div>
         </div>
       </div>

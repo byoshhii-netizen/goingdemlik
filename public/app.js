@@ -882,19 +882,8 @@ function renderRoute(fullPath) {
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
 
-  // İçerik sayfaları herkese açık kalır; böylece paylaşılmış bağlantılar ve
-  // arama motorları oturum açma ekranına yönlendirilmeden içeriği görebilir.
-  const publicContentRoute = path === '/forum' || path.startsWith('/forum/')
-    || path === '/siirler' || path.startsWith('/siir/')
-    || path === '/kitaplar' || path.startsWith('/kitap/')
-    || path === '/gruplar' || path.startsWith('/grup/')
-    || path === '/fotograflar' || path.startsWith('/foto/')
-    || path === '/muzikler' || path.startsWith('/muzik/')
-    || path === '/video' || path === '/videolar' || path.startsWith('/video/')
-    || path === '/reals' || path.startsWith('/reals/')
-    || path.startsWith('/profil/')
-    || path.startsWith('/ortak-dinleyis/');
-  if (siteAuthRequired && !currentUser && !publicContentRoute && path !== '/giris' && path !== '/kayit' && !isForgotPasswordRoute(path)) {
+  const isAuthRoute = path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path);
+  if (siteAuthRequired && !currentUser && !isAuthRoute) {
     const returnTo = path + (queryStr ? '?' + queryStr : '');
     return navigate('/giris?returnTo=' + encodeURIComponent(returnTo), false);
   }
@@ -6305,7 +6294,7 @@ function renderLogin(app) {
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="login-btn">Giriş Yap</button>
       <div style="text-align:center;margin-top:12px"><a href="${createForgotPasswordRoute()}" data-link class="auth-link">Şifremi Unuttum</a></div>
       <div id="login-error" class="form-error mt-4" style="text-align:center"></div>
-      <div class="auth-footer">Hesabın yok mu? <a href="/kayit" data-link class="auth-link">Kayıt Ol</a></div>
+      <div class="auth-footer">Hesabın yok mu? <a href="${returnTo === '/' ? '/kayit' : '/kayit?returnTo=' + encodeURIComponent(returnTo)}" data-link class="auth-link">Kayıt Ol</a></div>
     </div>
   </div>`;
 
@@ -6407,6 +6396,10 @@ function renderLogin(app) {
 
 function renderRegister(app) {
   if (currentUser) { navigate('/'); return; }
+  const requestedPath = new URLSearchParams(location.search).get('returnTo');
+  const returnTo = requestedPath && requestedPath.startsWith('/') && !requestedPath.startsWith('//')
+    ? requestedPath
+    : '/';
   let selectedRegisterAvatar = null;
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
@@ -6619,7 +6612,7 @@ function renderRegister(app) {
           const code = $('#reg-email-code').value.trim();
           try {
             await api('/auth/verify-registration-email', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, code }) });
-            navigate('/giris');
+            navigate('/giris?returnTo=' + encodeURIComponent(returnTo));
             toast('E-posta doğrulandı. Şimdi giriş yapabilirsin.');
           } catch (e) { $('#reg-email-verify-error').textContent = e.message; }
         };
@@ -6631,7 +6624,7 @@ function renderRegister(app) {
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
-      navigate('/');
+      navigate(returnTo);
     } catch (e) { $('#reg-error').textContent = e.message; }
   };
 
