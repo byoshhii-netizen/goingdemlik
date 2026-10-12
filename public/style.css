@@ -4728,6 +4728,9 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   body.dm-chat-route .dm-layout {
     height: 100dvh;
   }
+  body.dm-chat-route .dm-layout.dm-mobile-chat-open .dm-main {
+    inset: 0;
+  }
   body.dm-chat-route .dm-chat-header {
     min-height: 60px;
     padding: 9px 12px;
