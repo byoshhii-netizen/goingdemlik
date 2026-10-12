@@ -860,6 +860,7 @@ function renderRoute(fullPath) {
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
   document.body.classList.toggle('messages-page', path === '/mesajlar' || path.startsWith('/mesajlar/'));
+  document.body.classList.toggle('reals-page', path === '/reals' || path.startsWith('/reals/'));
   updateNavActive(path);
   // Mesajlar sayfasında footer gizle
   const siteFooter = document.getElementById('site-footer');
@@ -5336,7 +5337,7 @@ async function renderProfile(app, username) {
       <div class="profile-header">
         <div class="profile-avatar-wrap"><div class="profile-avatar-placeholder"><i class="fas fa-user-slash"></i></div></div>
         <div class="profile-info">
-                <div class="profile-username">${escHtml(data.user.nickname || data.user.username)}<small>@${escHtml(data.user.username)}</small></div>
+                <div class="profile-username"><span class="profile-name-identity"><strong>${escHtml(data.user.nickname || data.user.username)}</strong><small>@${escHtml(data.user.username)}</small></span></div>
           <div style="margin-top:12px;color:var(--text-muted);font-size:14px"><i class="fas fa-ban" style="color:var(--accent-red2)"></i> Bu kullanıcının profili görüntülenemiyor.</div>
           <div style="margin-top:8px;font-size:13px;color:var(--text-muted)">Ad: <strong>Bilinmiyor</strong> · Konum: <strong>Bilinmiyor</strong> · Forum: <strong>Bilinmiyor</strong></div>
         </div>
@@ -5396,7 +5397,7 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-       <div class="profile-info"><div class="profile-username">${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.nickname || user.username)}<small>@${escHtml(user.username)}</small></div>
+       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span></div>
        ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
@@ -5468,7 +5469,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          ${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i>' : ''}${escHtml(user.nickname || user.username)}<small>@${escHtml(user.username)}</small>
+          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -5690,6 +5691,9 @@ async function renderSettingsSection(section) {
   if (section === 'profile') {
     let selectedAvatarFile = null;
     const links = (() => { try { return JSON.parse(currentUser.links || '[]'); } catch { return []; } })();
+    const nicknameResetAt = currentUser.nickname_change_reset_at ? new Date(currentUser.nickname_change_reset_at) : null;
+    const nicknameChanges = nicknameResetAt && nicknameResetAt <= new Date() ? 0 : Number(currentUser.nickname_changes || 0);
+    const nicknameBlocked = nicknameChanges >= 2 && nicknameResetAt && nicknameResetAt > new Date();
     el.innerHTML = `
       <div class="card">
         <div class="card-header"><span>Profil Bilgileri</span></div>
@@ -5702,6 +5706,15 @@ async function renderSettingsSection(section) {
             </div>
           </div>
           <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-remove-avatar" ${currentUser.avatar_removed ? 'checked' : ''} /> Profil fotoğrafını kaldır, fotoğrafsız görün</label>
+          <div class="form-group">
+            <label for="s-nickname">Takma Ad</label>
+            <div class="nickname-edit-row">
+              <input type="text" id="s-nickname" maxlength="32" value="${escHtml(currentUser.nickname || currentUser.username)}" placeholder="Takma adın (en fazla 32 karakter)" ${nicknameBlocked ? 'disabled' : ''} />
+              <button type="button" class="btn btn-outline" id="save-nickname-btn" ${nicknameBlocked ? 'disabled' : ''}>Takma Adı Kaydet</button>
+            </div>
+            <div class="form-hint">Profilinde görünen addır. 48 saat içinde en fazla 2 kez değiştirebilirsin.${nicknameBlocked ? ` Yeniden değiştirme zamanı: ${nicknameResetAt.toLocaleString('tr-TR')}.` : ` Kalan değişiklik hakkı: ${2 - nicknameChanges}/2.`}</div>
+            <div id="profile-nickname-msg" class="form-error mt-4"></div>
+          </div>
           <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="3">${escHtml(currentUser.bio || '')}</textarea></div>
           <div class="form-row">
             <div class="form-group"><label>Ünvan <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
@@ -5771,10 +5784,32 @@ async function renderSettingsSection(section) {
       } catch (e) { $('#profile-msg').textContent = e.message; }
     });
     $('#avatar-file').addEventListener('change', e => openAvatarCrop(e.target.files[0], file => { selectedAvatarFile = file; $('#s-remove-avatar').checked = false; toast('Profil fotoğrafı hazır'); }));
+    if (!nicknameBlocked) {
+      $('#save-nickname-btn').addEventListener('click', async () => {
+        const nickname = ($('#s-nickname').value || '').trim().replace(/\s+/g, ' ');
+        const message = $('#profile-nickname-msg');
+        if (!nickname) { message.textContent = 'Takma ad boş bırakılamaz.'; return; }
+        if (nickname.length > 32) { message.textContent = 'Takma ad en fazla 32 karakter olabilir.'; return; }
+        if (nickname === (currentUser.nickname || currentUser.username)) { message.textContent = 'Yeni takma ad mevcut takma adınla aynı.'; return; }
+        const button = $('#save-nickname-btn');
+        button.disabled = true;
+        try {
+          currentUser = await api('/profile/nickname', { method: 'PUT', body: JSON.stringify({ nickname }) });
+          updateNavUI();
+          message.style.color = 'var(--green)';
+          message.textContent = 'Takma ad güncellendi.';
+          toast('Takma ad güncellendi');
+          renderSettingsSection('profile');
+        } catch (error) {
+          message.textContent = error.message;
+          button.disabled = false;
+        }
+      });
+    }
 
   } else if (section === 'nickname') {
-    const changes = Number(currentUser.nickname_changes || 0);
     const resetAt = currentUser.nickname_change_reset_at ? new Date(currentUser.nickname_change_reset_at) : null;
+    const changes = resetAt && resetAt <= new Date() ? 0 : Number(currentUser.nickname_changes || 0);
     const isBlocked = changes >= 2 && resetAt && resetAt > new Date();
     const resetDateStr = resetAt ? resetAt.toLocaleString('tr-TR') : '';
     el.innerHTML = `
@@ -6010,12 +6045,20 @@ async function renderSettingsSection(section) {
     if (!selected.length) selected = ['konular'];
     el.innerHTML = `<div class="card homepage-preferences"><div class="card-header"><span><i class="fas fa-layer-group" style="color:var(--accent-red2);margin-right:6px"></i>Ana Sayfa Bölümleri</span></div><div class="card-body"><p class="settings-help">Ana sayfanda görmek istediğin bölümleri seç. Kartları sürükleyerek sıralarını değiştirebilirsin.</p><div id="homepage-section-picker" class="homepage-section-picker">${options.map(([id, title, desc, icon]) => `<label class="homepage-section-option" draggable="true" data-section-id="${id}"><input type="checkbox" value="${id}" ${selected.includes(id) ? 'checked' : ''}/><span class="homepage-section-icon"><i class="${icon}"></i></span><span class="homepage-section-copy"><b>${title}</b><small>${desc}</small></span><i class="fas fa-grip-vertical homepage-section-drag"></i></label>`).join('')}</div><button class="btn btn-primary" id="save-homepage-btn"><i class="fas fa-save"></i> Seçimleri Kaydet</button><div id="homepage-msg" class="form-error mt-4"></div></div></div>`;
     const picker = $('#homepage-section-picker');
+    const syncHomepageOptionState = () => {
+      picker.querySelectorAll('.homepage-section-option').forEach(item => {
+        const checked = !!item.querySelector('input')?.checked;
+        item.classList.toggle('is-selected', checked);
+      });
+    };
     let dragged = null;
     picker.querySelectorAll('.homepage-section-option').forEach(item => {
       item.addEventListener('dragstart', () => { dragged = item; item.classList.add('dragging'); });
       item.addEventListener('dragend', () => { dragged = null; item.classList.remove('dragging'); });
       item.addEventListener('dragover', event => { event.preventDefault(); if (dragged && dragged !== item) { const box = item.getBoundingClientRect(); picker.insertBefore(dragged, event.clientY < box.top + box.height / 2 ? item : item.nextSibling); } });
+      item.querySelector('input')?.addEventListener('change', syncHomepageOptionState);
     });
+    syncHomepageOptionState();
     $('#save-homepage-btn').addEventListener('click', async () => {
       const sections = [...picker.querySelectorAll('input:checked')].map(input => input.value);
       if (!sections.length) { $('#homepage-msg').textContent = 'En az bir bölüm seçmelisin.'; return; }
