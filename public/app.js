@@ -6925,6 +6925,71 @@ async function loadAnnouncements() {
   } catch {}
 }
 
+function installHoverDescriptions() {
+  const iconDescriptions = {
+    'fa-play': 'Çal',
+    'fa-pause': 'Duraklat',
+    'fa-random': 'Karıştır',
+    'fa-shuffle': 'Karışık çal',
+    'fa-redo-alt': 'Şarkıyı tekrarla',
+    'fa-repeat': 'Şarkıyı tekrarla',
+    'fa-step-backward': 'Önceki şarkı',
+    'fa-step-forward': 'Sonraki şarkı',
+    'fa-volume-up': 'Ses düzeyi',
+    'fa-volume-high': 'Ses düzeyi',
+    'fa-volume-off': 'Sesi aç',
+    'fa-volume-xmark': 'Sesi kapat',
+    'fa-plus': 'Ekle',
+    'fa-times': 'Kapat',
+    'fa-xmark': 'Kapat',
+    'fa-trash': 'Sil',
+    'fa-trash-alt': 'Sil',
+    'fa-edit': 'Düzenle',
+    'fa-pen': 'Düzenle',
+    'fa-search': 'Ara',
+    'fa-magnifying-glass': 'Ara',
+    'fa-heart': 'Beğen',
+    'fa-share': 'Paylaş',
+    'fa-share-alt': 'Paylaş',
+    'fa-comment': 'Yorumlar',
+    'fa-ellipsis-h': 'Diğer seçenekler',
+    'fa-ellipsis-v': 'Diğer seçenekler',
+    'fa-ellipsis': 'Diğer seçenekler',
+    'fa-lock': 'Kilitle',
+    'fa-unlock': 'Kilidi aç',
+    'fa-bell': 'Bildirimler',
+    'fa-bell-slash': 'Sessize al',
+    'fa-link': 'Linki kopyala',
+    'fa-download': 'İndir',
+    'fa-upload': 'Yükle',
+    'fa-camera': 'Fotoğraf',
+    'fa-arrow-left': 'Geri',
+    'fa-chevron-left': 'Geri',
+    'fa-arrow-right': 'İleri',
+    'fa-chevron-right': 'İleri'
+  };
+  const selector = 'button, a[href], [role="button"], input[type="button"], input[type="submit"], input[type="range"], select';
+  const describe = element => {
+    if (element.hasAttribute('title')) return;
+    const explicit = element.getAttribute('aria-label') || element.dataset.tooltip || element.getAttribute('placeholder');
+    const text = (element.innerText || element.value || '').replace(/\s+/g, ' ').trim();
+    const icon = element.querySelector('i, svg');
+    const iconDescription = icon && [...icon.classList].map(name => iconDescriptions[name]).find(Boolean);
+    const label = explicit || (text.length > 1 && text.length <= 80 ? text : '') || iconDescription;
+    if (label) element.setAttribute('title', label);
+  };
+  const scan = node => {
+    if (!(node instanceof Element)) return;
+    if (node.matches(selector)) describe(node);
+    node.querySelectorAll(selector).forEach(describe);
+  };
+  scan(document.body);
+  new MutationObserver(records => {
+    records.forEach(record => record.addedNodes.forEach(scan));
+  }).observe(document.body, { childList: true, subtree: true });
+}
+
+installHoverDescriptions();
 init();
 
 // ===== VIDEO İLET MODAL =====
@@ -8751,9 +8816,10 @@ let currentSlug = null;
 // Playlist queue state
 let currentQueue = [];         // [{id, slug, title, artist_name, cover_url, audio_url}, ...]
 let currentQueueIndex = -1;
-let playerShuffle = false;
-let playerRepeatOne = false;
-let shuffledIndices = [];      // shuffled order of indices
+const MUSIC_AUTO_SHUFFLE_KEY = 'cigcig_music_auto_shuffle';
+const MUSIC_REPEAT_ONE_KEY = 'cigcig_music_repeat_one';
+let playerAutoShuffle = localStorage.getItem(MUSIC_AUTO_SHUFFLE_KEY) === '1';
+let playerRepeatOne = localStorage.getItem(MUSIC_REPEAT_ONE_KEY) === '1';
 let musicAdBypass = false;
 let guestMusicSongCount = 0;
 let listeningRoom = null;
@@ -8817,12 +8883,34 @@ function playMusicAd(ad, onComplete) {
   audio.play().catch(() => toast('Reklamı başlatmak için tarayıcıda oynatmaya izin verin.', 'error'));
 }
 
-function buildShuffledOrder(len, startIdx) {
-  const arr = [];
-  for (let i = 0; i < len; i++) if (i !== startIdx) arr.push(i);
-  for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; }
-  arr.unshift(startIdx);
-  return arr;
+async function playRandomNextTrack() {
+  const queuedSongs = currentQueue
+    .map((track, index) => ({ track, index }))
+    .filter(({ track, index }) => index !== currentQueueIndex && track?.audio_url && track?.slug !== currentSlug);
+  if (queuedSongs.length) {
+    const next = queuedSongs[Math.floor(Math.random() * queuedSongs.length)];
+    openMiniPlayer(next.track.audio_url, next.track.slug, next.track, currentQueue, next.index);
+    return true;
+  }
+
+  const librarySongs = (await api('/songs'))
+    .filter(track => track?.audio_url && track?.slug !== currentSlug);
+  if (!librarySongs.length) return false;
+  const nextIndex = Math.floor(Math.random() * librarySongs.length);
+  const next = librarySongs[nextIndex];
+  currentQueue = librarySongs;
+  currentQueueIndex = nextIndex;
+  openMiniPlayer(next.audio_url, next.slug, next, currentQueue, currentQueueIndex);
+  return true;
+}
+
+function shuffleCurrentQueue() {
+  const current = currentQueue[currentQueueIndex];
+  if (!current || currentQueue.length < 2) return false;
+  const remaining = currentQueue.filter((_, index) => index !== currentQueueIndex);
+  currentQueue = [current, ...shuffleArray(remaining)];
+  currentQueueIndex = 0;
+  return true;
 }
 
 async function renderListeningRoom(app, publicId) {
@@ -8959,12 +9047,10 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   if (queue && queue.length > 0) {
     currentQueue = queue;
     currentQueueIndex = queueIndex !== undefined ? queueIndex : 0;
-    if (playerShuffle) shuffledIndices = buildShuffledOrder(queue.length, currentQueueIndex);
   } else if (!queue && currentQueue.length === 0) {
     // Single song – create a one-item queue
     currentQueue = [song || { slug, audio_url: audioUrl }];
     currentQueueIndex = 0;
-    shuffledIndices = [0];
   }
 
   let player = document.getElementById('global-music-player');
@@ -8982,8 +9068,8 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
 
   const title = song?.title || '', artist = song?.artist_name || '', cover = song?.cover_url || '';
 
-  const shuffleActive = playerShuffle ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
-  const repeatActive  = playerRepeatOne ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
+  const autoShuffleActive = playerAutoShuffle ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
+  const repeatActive = playerRepeatOne ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
 
   player.innerHTML = `
     <div class="gplayer-inner">
@@ -8996,11 +9082,12 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
       </div>
       <div class="gplayer-controls">
         ${currentUser ? '<button class="gplayer-mode-btn" id="gp-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
-        <button class="${shuffleActive}" id="gp-shuffle" title="Karışık çal"><i class="fas fa-random"></i></button>
-        <button class="gplayer-btn" id="gp-prev" title="Önceki"><i class="fas fa-step-backward"></i></button>
-        <button class="gplayer-btn gplayer-play" id="gp-play"><i class="fas fa-pause"></i></button>
-        <button class="gplayer-btn" id="gp-next" title="Sonraki"><i class="fas fa-step-forward"></i></button>
-        <button class="${repeatActive}" id="gp-repeat" title="Tekrarla (bu şarkı)"><i class="fas fa-redo-alt"></i></button>
+        <button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i></button>
+        <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı'}" aria-label="Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}"><i class="fas fa-shuffle"></i></button>
+        <button class="gplayer-btn" id="gp-prev" type="button" title="Önceki şarkı"><i class="fas fa-step-backward"></i></button>
+        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="Duraklat"><i class="fas fa-pause"></i></button>
+        <button class="gplayer-btn" id="gp-next" type="button" title="Sonraki şarkı"><i class="fas fa-step-forward"></i></button>
+        <button class="${repeatActive}" id="gp-repeat" type="button" title="${playerRepeatOne ? 'Şarkıyı tekrarla açık' : 'Şarkıyı tekrarla kapalı'}" aria-label="Şarkıyı tekrarla ${playerRepeatOne ? 'açık' : 'kapalı'}"><i class="fas fa-redo-alt"></i></button>
       </div>
       <div class="gplayer-progress-wrap">
         <span class="gplayer-time" id="gp-cur">0:00</span>
@@ -9013,10 +9100,10 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
         <span class="gplayer-time" id="gp-dur">0:00</span>
       </div>
       <div class="gplayer-vol-wrap">
-        <button class="gplayer-vol-btn" id="gp-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
+        <button class="gplayer-vol-btn" id="gp-vol-btn" type="button" title="Ses düzeyini kapat veya aç"><i class="fas fa-volume-up"></i></button>
         <input type="range" class="gplayer-vol-slider" id="gp-vol" min="0" max="100" value="80" step="1" title="Ses seviyesi" />
       </div>
-      <button class="gplayer-close" id="gp-close"><i class="fas fa-times"></i></button>
+      <button class="gplayer-close" id="gp-close" type="button" title="Oynatıcıyı kapat" aria-label="Oynatıcıyı kapat"><i class="fas fa-times"></i></button>
     </div>`;
   player.style.display = 'block';
   document.getElementById('gp-listen-together')?.addEventListener('click', () => createListeningRoomFromSong(song));
@@ -9039,11 +9126,28 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
       await refreshListeningRoom().catch(() => {});
       return;
     }
-    const continueQueue = () => {
-      if (playerRepeatOne) { audio.currentTime = 0; audio.play().catch(()=>{}); return; }
+    if (playerRepeatOne) {
+      audio.currentTime = 0;
+      audio.play().catch(() => {});
+      return;
+    }
+    const continueQueue = async () => {
+      if (playerAutoShuffle) {
+        try {
+          if (await playRandomNextTrack()) return;
+        } catch (error) {
+          toast(error.message || 'Rastgele şarkı yüklenemedi.', 'error');
+        }
+      }
       const next = getNextQueueIndex(1);
       if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
-      else { const pb=document.getElementById('gp-play'); if(pb) pb.innerHTML='<i class="fas fa-play"></i>'; }
+      else {
+        const pb = document.getElementById('gp-play');
+        if (pb) {
+          pb.innerHTML = '<i class="fas fa-play"></i>';
+          pb.title = 'Devam et';
+        }
+      }
     };
     if (!song?.is_music_ad && !listeningRoomAdsDisabled()) {
       if (currentUser) {
@@ -9075,8 +9179,15 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
       api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
       return;
     }
-    if (audio.paused) { audio.play(); document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>'; }
-    else { audio.pause(); document.getElementById('gp-play').innerHTML='<i class="fas fa-play"></i>'; }
+    if (audio.paused) {
+      audio.play();
+      document.getElementById('gp-play').innerHTML='<i class="fas fa-pause"></i>';
+      document.getElementById('gp-play').title = 'Duraklat';
+    } else {
+      audio.pause();
+      document.getElementById('gp-play').innerHTML='<i class="fas fa-play"></i>';
+      document.getElementById('gp-play').title = 'Devam et';
+    }
   });
   document.getElementById('gp-seek').addEventListener('input', e => {
     if (audio.duration) audio.currentTime = (parseFloat(e.target.value)/100)*audio.duration;
@@ -9096,17 +9207,42 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
   });
 
-  // Karışık modunu aç/kapat
+  // Karıştır: çalma kuyruğunu bir kez yeniden sırala.
   document.getElementById('gp-shuffle').addEventListener('click', () => {
-    playerShuffle = !playerShuffle;
-    document.getElementById('gp-shuffle').classList.toggle('active', playerShuffle);
-    if (playerShuffle) shuffledIndices = buildShuffledOrder(currentQueue.length, currentQueueIndex);
+    if (shuffleCurrentQueue()) {
+      toast('Sıradaki şarkılar karıştırıldı');
+      return;
+    }
+    api('/songs').then(songs => {
+      const current = { slug: currentSlug, audio_url: currentAudio?.src };
+      const remaining = shuffleArray(songs.filter(track => track?.audio_url && track?.slug !== currentSlug));
+      if (!current.slug || !current.audio_url || !remaining.length) {
+        toast('Karıştırılacak başka şarkı bulunamadı.', 'error');
+        return;
+      }
+      currentQueue = [current, ...remaining];
+      currentQueueIndex = 0;
+      toast('Şarkı listesi karıştırıldı');
+    }).catch(error => toast(error.message || 'Şarkılar yüklenemedi.', 'error'));
   });
 
-  // Tekrar modunu aç/kapat
+  // Otomatik karışık çalma tercihi yenilemeler arasında saklanır.
+  document.getElementById('gp-auto-shuffle').addEventListener('click', event => {
+    playerAutoShuffle = !playerAutoShuffle;
+    localStorage.setItem(MUSIC_AUTO_SHUFFLE_KEY, playerAutoShuffle ? '1' : '0');
+    const button = event.currentTarget;
+    button.classList.toggle('active', playerAutoShuffle);
+    button.title = playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı';
+    button.setAttribute('aria-label', `Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}`);
+  });
+
+  // Tekrar modunu aç/kapat ve tercihi yenilemeler arasında koru.
   document.getElementById('gp-repeat').addEventListener('click', () => {
     playerRepeatOne = !playerRepeatOne;
+    localStorage.setItem(MUSIC_REPEAT_ONE_KEY, playerRepeatOne ? '1' : '0');
     document.getElementById('gp-repeat').classList.toggle('active', playerRepeatOne);
+    document.getElementById('gp-repeat').title = playerRepeatOne ? 'Şarkıyı tekrarla açık' : 'Şarkıyı tekrarla kapalı';
+    document.getElementById('gp-repeat').setAttribute('aria-label', `Şarkıyı tekrarla ${playerRepeatOne ? 'açık' : 'kapalı'}`);
   });
 
   // Ses kontrolü
@@ -9146,16 +9282,9 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
 // Kuyrukta önceki/sonraki indeksi hesapla
 function getNextQueueIndex(dir) { // dir: +1 ileri, -1 geri
   if (currentQueue.length <= 1) return null;
-  if (playerShuffle && shuffledIndices.length > 0) {
-    const pos = shuffledIndices.indexOf(currentQueueIndex);
-    const newPos = pos + dir;
-    if (newPos < 0 || newPos >= shuffledIndices.length) return null;
-    return shuffledIndices[newPos];
-  } else {
-    const newIdx = currentQueueIndex + dir;
-    if (newIdx < 0 || newIdx >= currentQueue.length) return null;
-    return newIdx;
-  }
+  const newIdx = currentQueueIndex + dir;
+  if (newIdx < 0 || newIdx >= currentQueue.length) return null;
+  return newIdx;
 }
 
 async function renderMusicDetail(app, slug) {
@@ -10724,7 +10853,7 @@ async function renderPlaylistDetail(app, plId) {
         <div class="pl-detail-actions">
           ${songs.length ? `
             <button class="btn btn-primary btn-sm" id="pl-play-seq" title="Sırayla çal"><i class="fas fa-play"></i> Çal</button>
-            <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Karışık çal"><i class="fas fa-random"></i> Karışık</button>
+            <button class="btn btn-outline btn-sm" id="pl-play-shuf" title="Playlisti bir kez karıştırıp çal"><i class="fas fa-random"></i> Karıştır</button>
             ${currentUser ? '<button class="btn btn-outline btn-sm" id="pl-listen-together" title="Playlisti ortak dinleyiş olarak başlat"><i class="fas fa-tower-broadcast"></i> Ortak başlat</button>' : ''}` : ''}
           ${canManagePlaylist() ? `<button class="btn btn-outline btn-sm" id="pl-add-songs-btn"><i class="fas fa-plus"></i> Şarkı Ekle</button>` : ''}
           ${canManagePlaylist() ? `<button class="btn btn-ghost btn-sm" id="pl-edit-btn" title="Düzenle"><i class="fas fa-edit"></i></button>` : ''}
@@ -10757,10 +10886,8 @@ async function renderPlaylistDetail(app, plId) {
     // Sırayla çal
     document.getElementById('pl-play-seq')?.addEventListener('click', () => {
       if (!songs.length) return;
-      playerShuffle = false;
       currentQueue = songs;
       currentQueueIndex = 0;
-      shuffledIndices = songs.map((_, i) => i);
       openMiniPlayer(songs[0].audio_url, songs[0].slug, songs[0], songs, 0);
     });
 
@@ -10778,12 +10905,10 @@ async function renderPlaylistDetail(app, plId) {
     // Karışık çal
     document.getElementById('pl-play-shuf')?.addEventListener('click', () => {
       if (!songs.length) return;
-      playerShuffle = true;
       const shuffled = [...songs];
       for (let i = shuffled.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
       currentQueue = shuffled;
       currentQueueIndex = 0;
-      shuffledIndices = shuffled.map((_, i) => i);
       openMiniPlayer(shuffled[0].audio_url, shuffled[0].slug, shuffled[0], shuffled, 0);
     });
 
