@@ -3270,8 +3270,42 @@ app.get('/api/groups', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/my-groups', authMiddleware, async (req, res) => {
-  const { rows } = await query(`SELECT g.*, gm.role FROM groups g JOIN group_members gm ON gm.group_id=g.id WHERE gm.user_id=$1 ORDER BY g.name ASC`, [req.user.id]);
+  const { rows } = await query(`
+    SELECT g.*, gm.role, gm.inbox_muted_until, gm.inbox_mute_forever,
+      (SELECT gm2.content FROM group_messages gm2
+        WHERE gm2.group_id=g.id
+          AND NOT EXISTS (SELECT 1 FROM group_message_deletions d WHERE d.message_id=gm2.id AND d.user_id=$1)
+        ORDER BY gm2.created_at DESC LIMIT 1) AS last_message,
+      (SELECT gm2.created_at FROM group_messages gm2
+        WHERE gm2.group_id=g.id
+        ORDER BY gm2.created_at DESC LIMIT 1) AS last_message_at
+    FROM groups g JOIN group_members gm ON gm.group_id=g.id
+    WHERE gm.user_id=$1 ORDER BY COALESCE(
+      (SELECT gm2.created_at FROM group_messages gm2 WHERE gm2.group_id=g.id ORDER BY gm2.created_at DESC LIMIT 1),
+      gm.joined_at
+    ) DESC
+  `, [req.user.id]);
   res.json(rows);
+});
+
+app.post('/api/group/:slug/notifications-mute', authMiddleware, async (req, res) => {
+  const { rows: groups } = await query('SELECT id FROM groups WHERE slug=$1', [req.params.slug]);
+  if (!groups.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+  const groupId = groups[0].id;
+  const { rows: members } = await query('SELECT id FROM group_members WHERE group_id=$1 AND user_id=$2', [groupId, req.user.id]);
+  if (!members.length) return res.status(403).json({ error: 'Bu grubun üyesi değilsiniz' });
+
+  const { hours } = req.body || {};
+  if (hours === null || hours === undefined || String(hours) === 'unmute') {
+    await query('UPDATE group_members SET inbox_muted_until=NULL, inbox_mute_forever=0 WHERE group_id=$1 AND user_id=$2', [groupId, req.user.id]);
+  } else if (String(hours) === 'forever') {
+    await query('UPDATE group_members SET inbox_muted_until=NULL, inbox_mute_forever=1 WHERE group_id=$1 AND user_id=$2', [groupId, req.user.id]);
+  } else {
+    const duration = Number(hours);
+    if (![2, 5, 10, 24].includes(duration)) return res.status(400).json({ error: 'Geçersiz sessize alma süresi' });
+    await query("UPDATE group_members SET inbox_muted_until=NOW() + ($1 * INTERVAL '1 hour'), inbox_mute_forever=0 WHERE group_id=$2 AND user_id=$3", [duration, groupId, req.user.id]);
+  }
+  res.json({ ok: true });
 });
 
 app.get('/api/group/:slug', optionalAuth, async (req, res) => {
@@ -3605,12 +3639,6 @@ app.delete('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => 
   const msg = msgRows[0];
   const { rows: member } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
   if (!member.length) return res.status(403).json({ error: 'Üye değilsiniz' });
-  const { rows: permissions } = await query('SELECT can_delete_messages FROM moderator_permissions WHERE group_id=$1 AND user_id=$2', [group.id, req.user.id]);
-  const canModerate = member[0].role === 'owner' || (member[0].role === 'moderator' && permissions[0]?.can_delete_messages);
-  if (msg.user_id == req.user.id || canModerate) {
-    await query('DELETE FROM group_messages WHERE id=$1', [msg.id]);
-    return res.json({ ok: true, scope: canModerate && msg.user_id != req.user.id ? 'moderated' : 'everyone' });
-  }
   await query('INSERT INTO group_message_deletions (message_id,user_id) VALUES ($1,$2) ON CONFLICT (message_id,user_id) DO NOTHING', [msg.id, req.user.id]);
   res.json({ ok: true, scope: 'me' });
 });
@@ -3873,6 +3901,59 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
     FROM video_saves s JOIN videos v ON v.id=s.video_id LEFT JOIN users u ON u.id=v.user_id
     WHERE s.user_id=$1 ORDER BY v.created_at DESC`, [req.user.id]);
   res.json(rows);
+});
+
+app.get('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
+  const { rows } = await query(
+    'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled FROM dm_user_settings WHERE user_id=$1',
+    [req.user.id]
+  );
+  const settings = rows[0] || {};
+  res.json({
+    search_unlock_enabled: Number(settings.search_unlock_enabled) === 1,
+    icon_unlock_enabled: settings.icon_unlock_enabled === undefined || Number(settings.icon_unlock_enabled) === 1,
+    has_search_code: Boolean(settings.search_code_hash)
+  });
+});
+
+app.put('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
+  const { rows: currentRows } = await query(
+    'SELECT search_code_hash FROM dm_user_settings WHERE user_id=$1',
+    [req.user.id]
+  );
+  const currentHash = currentRows[0]?.search_code_hash || '';
+  const searchUnlockEnabled = req.body?.search_unlock_enabled === true;
+  const iconUnlockEnabled = req.body?.icon_unlock_enabled === true;
+  const searchCode = typeof req.body?.search_code === 'string' ? req.body.search_code.trim() : '';
+  const clearSearchCode = req.body?.clear_search_code === true;
+
+  if (searchCode && (searchCode.length < 4 || searchCode.length > 64)) {
+    return res.status(400).json({ error: 'Arama kodu 4-64 karakter arasında olmalıdır' });
+  }
+  const searchCodeHash = clearSearchCode
+    ? ''
+    : searchCode
+      ? crypto.createHash('sha256').update(searchCode).digest('hex')
+      : currentHash;
+  if (searchUnlockEnabled && !searchCodeHash) {
+    return res.status(400).json({ error: 'Arama kodunu kullanmak için önce bir özel kod belirleyin' });
+  }
+
+  const { rows } = await query(`
+    INSERT INTO dm_user_settings (user_id,search_code_hash,search_unlock_enabled,icon_unlock_enabled,updated_at)
+    VALUES ($1,$2,$3,$4,NOW())
+    ON CONFLICT (user_id) DO UPDATE SET
+      search_code_hash=EXCLUDED.search_code_hash,
+      search_unlock_enabled=EXCLUDED.search_unlock_enabled,
+      icon_unlock_enabled=EXCLUDED.icon_unlock_enabled,
+      updated_at=NOW()
+    RETURNING search_code_hash,search_unlock_enabled,icon_unlock_enabled
+  `, [req.user.id, searchCodeHash, searchUnlockEnabled ? 1 : 0, iconUnlockEnabled ? 1 : 0]);
+  res.json({
+    search_unlock_enabled: Number(rows[0].search_unlock_enabled) === 1,
+    icon_unlock_enabled: Number(rows[0].icon_unlock_enabled) === 1,
+    has_search_code: Boolean(rows[0].search_code_hash)
+  });
 });
 
 app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
@@ -7345,6 +7426,9 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
+  if (!(await isDmIconUnlockEnabled(req.user.id))) {
+    return res.status(403).json({ error: 'Kilit simgesiyle açma ayarlardan kapalı' });
+  }
   const crypto = require('crypto');
   const password = String(req.body?.password || '');
   const inputHash = crypto.createHash('sha256').update(password).digest('hex');
@@ -7362,6 +7446,43 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
   `, [req.user.id, inputHash]);
   if (!rows.length) return res.status(403).json({ error: 'Şifre yanlış veya kilitli sohbet bulunamadı' });
   res.json(rows);
+});
+
+function matchesDmLockHash(savedHash, code) {
+  if (typeof code !== 'string' || !code || !savedHash) return false;
+  const inputHash = crypto.createHash('sha256').update(code).digest('hex');
+  const savedBuffer = Buffer.from(savedHash, 'hex');
+  const inputBuffer = Buffer.from(inputHash, 'hex');
+  return savedBuffer.length === inputBuffer.length && crypto.timingSafeEqual(savedBuffer, inputBuffer);
+}
+
+async function isValidDmSearchCode(userId, code) {
+  if (typeof code !== 'string' || !code) return false;
+  const { rows } = await query(
+    'SELECT search_code_hash,search_unlock_enabled FROM dm_user_settings WHERE user_id=$1',
+    [userId]
+  );
+  return Number(rows[0]?.search_unlock_enabled) === 1
+    && matchesDmLockHash(rows[0]?.search_code_hash || '', code);
+}
+
+async function isDmIconUnlockEnabled(userId) {
+  const { rows } = await query('SELECT icon_unlock_enabled FROM dm_user_settings WHERE user_id=$1', [userId]);
+  return !rows.length || Number(rows[0].icon_unlock_enabled) === 1;
+}
+
+async function isValidDmConversationCode(userId, hiddenPass, code) {
+  if (!code || !hiddenPass) return false;
+  if (!(await isDmIconUnlockEnabled(userId))) return false;
+  return matchesDmLockHash(hiddenPass, code);
+}
+
+app.post('/api/conversations/unlock-search', authMiddleware, async (req, res) => {
+  const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+  if (!(await isValidDmSearchCode(req.user.id, code))) {
+    return res.status(403).json({ error: 'Özel kod yanlış veya arama koduyla kilit açma kapalı' });
+  }
+  res.json({ ok: true });
 });
 
 app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
@@ -7395,8 +7516,14 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   }
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
-  const isHidden = isUser1 ? conv.hidden_by_user1 : conv.hidden_by_user2;
+  let isHidden = isUser1 ? conv.hidden_by_user1 : conv.hidden_by_user2;
   const hiddenPass = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
+  const searchCodeIsValid = isHidden && await isValidDmSearchCode(uid, req.get('X-DM-Search-Code') || '');
+  const conversationCodeIsValid = isHidden
+    && await isValidDmConversationCode(uid, hiddenPass || '', req.get('X-DM-Conversation-Code') || '');
+  if (searchCodeIsValid || conversationCodeIsValid) {
+    isHidden = false;
+  }
   if (isHidden) return res.json({ conv, other, messages: [], isHidden: true, hasPassword: !!hiddenPass });
   const requestedLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 100);
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
@@ -7575,6 +7702,9 @@ app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) =>
 });
 
 app.post('/api/conversation/:username/unhide', authMiddleware, async (req, res) => {
+  if (!(await isDmIconUnlockEnabled(req.user.id))) {
+    return res.status(403).json({ error: 'Kilit simgesiyle açma ayarlardan kapalı' });
+  }
   const { password } = req.body;
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });

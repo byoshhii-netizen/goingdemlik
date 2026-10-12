@@ -1453,6 +1453,9 @@ function updateNavUI() {
       }
     }
   } else {
+    dmSearchUnlockCode = '';
+    dmIconUnlockCode = '';
+    dmSearchUnlockedConvs = [];
     authEl.classList.remove('hidden');
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -3769,6 +3772,8 @@ async function renderGroupDetail(app, slug) {
   const visibility = group.visibility || (group.type === 'private' ? 'private' : group.invite_only ? 'invite' : 'public');
   const isOpenGroup = visibility === 'public';
   const currentGroupMember = currentUser ? members.find(m => Number(m.user_id) === Number(currentUser.id)) : null;
+  const groupInboxMuted = Number(currentGroupMember?.inbox_mute_forever) === 1
+    || (currentGroupMember?.inbox_muted_until && new Date(currentGroupMember.inbox_muted_until) > new Date());
   const mutedUntil = currentGroupMember && currentGroupMember.muted_until ? new Date(currentGroupMember.muted_until) : null;
   const isMuted = !!(mutedUntil && mutedUntil > new Date());
   const mutedRemainingText = isMuted ? formatRemainingDuration(mutedUntil.getTime() - Date.now()) : '';
@@ -4025,18 +4030,12 @@ async function renderGroupDetail(app, slug) {
     const selected = [...groupChatSelection];
     const toolbar = document.getElementById('chat-selection-toolbar');
     if (!toolbar) return;
-    const canDeleteEveryone = selected.length > 0 && selected.every(id => {
-      const msg = messages.find(m => String(m.id) === String(id));
-      return !!msg && (msg.user_id === currentUser?.id || isOwner || isMod);
-    });
-    const canDeleteMe = selected.length > 0 && (isOwner || isMod || selected.every(id => {
+    const canDeleteMe = selected.length > 0 && selected.every(id => {
       const msg = messages.find(m => String(m.id) === String(id));
       return !!msg && (msg.user_id === currentUser?.id || msg.user_id !== currentUser?.id);
-    }));
+    });
     toolbar.classList.toggle('hidden', !groupChatSelectionMode || selected.length === 0);
-    const deleteEveryoneBtn = document.getElementById('chat-bulk-delete-everyone');
     const deleteMeBtn = document.getElementById('chat-bulk-delete-me');
-    if (deleteEveryoneBtn) deleteEveryoneBtn.disabled = !canDeleteEveryone;
     if (deleteMeBtn) deleteMeBtn.disabled = !canDeleteMe;
     const countLabel = document.getElementById('chat-selection-count');
     if (countLabel) countLabel.textContent = `${selected.length} seçildi`;
@@ -4056,7 +4055,6 @@ async function renderGroupDetail(app, slug) {
       <span id="chat-selection-count">0 seçildi</span>
       <button class="btn btn-ghost btn-sm" id="chat-select-all" type="button"><i class="fas fa-check-square"></i> Hepsini seç</button>
       <button class="btn btn-ghost btn-sm" id="chat-clear-selection" type="button"><i class="fas fa-times"></i> İptal</button>
-      <button class="btn btn-danger btn-sm" id="chat-bulk-delete-everyone" type="button" disabled><i class="fas fa-trash"></i> Herkesten sil</button>
       <button class="btn btn-outline btn-sm" id="chat-bulk-delete-me" type="button" disabled><i class="fas fa-eye-slash"></i> Benden sil</button>
     </div>
   `;
@@ -4082,20 +4080,6 @@ async function renderGroupDetail(app, slug) {
     const ids = [...groupChatSelection];
     if (!ids.length) return;
     for (const id of ids) {
-      try { await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'error'); }
-    }
-    clearChatSelection();
-    try { const fresh = await api('/group/' + slug + '/messages'); const chatEl2 = $('#chat-messages'); if (chatEl2) { chatEl2.innerHTML = fresh.map(m => chatMsgHTML(m, isOwner || isMod, !!canSend)).join(''); enhanceLinkPreviews(chatEl2); } messages.splice(0, messages.length, ...fresh); } catch (e) { toast(e.message, 'error'); }
-  });
-  toolbar.querySelector('#chat-bulk-delete-everyone')?.addEventListener('click', async () => {
-    const ids = [...groupChatSelection];
-    if (!ids.length) return;
-    for (const id of ids) {
-      const msg = messages.find(m => String(m.id) === String(id));
-      if (!msg || !(msg.user_id === currentUser?.id || isOwner || isMod)) {
-        toast('Sadece kendi mesajını herkesten silebilirsin veya yönetici olmalısın.', 'error');
-        return;
-      }
       try { await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'error'); }
     }
     clearChatSelection();
@@ -4293,7 +4277,7 @@ async function renderGroupDetail(app, slug) {
         if (chatEl2 && newMsgs.length && chatSignature(newMsgs) !== lastChatSignature) {
           const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
           const incoming = newest.filter(item => Number(item.user_id) !== Number(currentUser?.id));
-          if (incoming.length && document.hidden) {
+          if (incoming.length && document.hidden && !groupInboxMuted) {
             const first = incoming[0];
             const senderName = first.username || 'Birisi';
             const preview = first.content || (first.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı');
@@ -4340,7 +4324,6 @@ async function renderGroupDetail(app, slug) {
       menu.innerHTML = `
         <button class="msg-menu-item" data-action="select" data-id="${msgId}"><i class="fas fa-check-square"></i> Seç</button>
         ${currentUser && isOwn ? `<button class="msg-menu-item" data-action="edit" data-id="${msgId}"><i class="fas fa-pen"></i> Düzenle</button>` : ''}
-        ${currentUser && (isOwn || isOwner || isMod) ? `<button class="msg-menu-item danger" data-action="delete-everyone" data-id="${msgId}"><i class="fas fa-trash"></i> Herkesten sil</button>` : ''}
         ${currentUser ? `<button class="msg-menu-item" data-action="delete-me" data-id="${msgId}"><i class="fas fa-eye-slash"></i> Benden sil</button>` : ''}
       `;
       document.body.appendChild(menu);
@@ -4367,13 +4350,7 @@ async function renderGroupDetail(app, slug) {
           } else if (action === 'delete-me') {
             await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' });
             const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(id)}"]`);
-            if (row && !row.classList.contains('own') && !(isOwner || isMod)) {
-              row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>';
-            } else if (row) row.remove();
-          } else if (action === 'delete-everyone') {
-            await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' });
-            const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(id)}"]`);
-            row?.remove();
+            if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>';
           }
         } catch (err) { toast(err.message, 'error'); }
         closeOpenMessageMenu();
@@ -4421,7 +4398,7 @@ async function renderGroupDetail(app, slug) {
       return;
     }
     if (!del) return;
-    try { await api('/group/' + slug + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.chat-msg'); if (row?.classList.contains('own') || isOwner || isMod) row?.remove(); else if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
+    try { await api('/group/' + slug + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.chat-msg'); if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#join-requests-btn')?.addEventListener('click', async () => {
@@ -4652,7 +4629,6 @@ async function renderGroupDetail(app, slug) {
 
 function chatMsgHTML(m, canModerate = false, canReply = false) {
   const isOwn = currentUser && currentUser.id === m.user_id;
-  const deleteLabel = isOwn || canModerate ? 'Herkesten sil' : 'Benden sil';
   if (m.deleted_for_me) return `<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
   const profileLink = m.username ? profileRoute(m.username) : '#';
   const displayName = m.username || 'Silinmiş kullanıcı';
@@ -5616,6 +5592,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
         <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-sliders"></i> Profil Seçenekleri</div>
+        <div class="settings-nav-item" data-section="dm-lock"><i class="fas fa-lock"></i> Sohbet Kilidi</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
         <div class="settings-nav-item" data-section="account" style="color:var(--accent-red2)"><i class="fas fa-exclamation-triangle"></i> Hesap</div>
       </div>
@@ -6039,6 +6016,61 @@ async function renderSettingsSection(section) {
       const next = {};
       el.querySelectorAll('[data-visibility]').forEach(input => { next[input.dataset.visibility] = input.checked; });
       try { const result = await api('/me/profile-visibility', { method: 'PUT', body: JSON.stringify({ visibility: next }) }); currentUser = result.user; updateNavUI(); toast('Profil görünürlük ayarları kaydedildi'); } catch (error) { $('#profile-visibility-msg').textContent = error.message; }
+    });
+  } else if (section === 'dm-lock') {
+    let lockSettings;
+    try {
+      lockSettings = await api('/me/dm-lock-settings');
+    } catch (error) {
+      el.innerHTML = `<div class="card"><div class="card-body"><div class="form-error">${escHtml(error.message)}</div></div></div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--accent-red2);margin-right:6px"></i>Sohbet Kilidi</span></div>
+        <div class="card-body">
+          <p class="settings-help">Kilitli sohbetlerine hangi yollardan erişebileceğini seç. Arama koduyla açılan sohbetler yalnızca bu sayfa açıkken görünür; sayfayı yenilediğinde tekrar kilitlenir.</p>
+          <label class="profile-visibility-option">
+            <span class="profile-visibility-icon"><i class="fas fa-lock-open"></i></span>
+            <span><b>Kilit simgesiyle aç</b><small>Kilit simgesinden şifre girerek kilitli sohbetleri görüntüle.</small></span>
+            <input type="checkbox" id="dm-lock-icon-enabled" ${lockSettings.icon_unlock_enabled ? 'checked' : ''} />
+          </label>
+          <label class="profile-visibility-option">
+            <span class="profile-visibility-icon"><i class="fas fa-magnifying-glass"></i></span>
+            <span><b>Kişi arama koduyla aç</b><small>Mesajlar sayfasındaki arama alanına özel kodu yazıp Enter'a bas.</small></span>
+            <input type="checkbox" id="dm-lock-search-enabled" ${lockSettings.search_unlock_enabled ? 'checked' : ''} />
+          </label>
+          <div class="form-group" style="margin-top:16px">
+            <label for="dm-lock-search-code">Özel arama kodu</label>
+            <input id="dm-lock-search-code" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="${lockSettings.has_search_code ? 'Değiştirmek için yeni kod girin' : 'En az 4 karakter'}" />
+            <small class="field-hint">${lockSettings.has_search_code ? 'Kayıtlı bir kod var. Değiştirmek için yeni kod gir veya kaldırma seçeneğini kullan.' : 'Bu kod şifreli olarak saklanır ve yalnızca kilitli sohbetleri geçici açmak için kullanılır.'}</small>
+          </div>
+          ${lockSettings.has_search_code ? `<label class="checkbox-label"><input type="checkbox" id="dm-lock-clear-code" /> Kayıtlı arama kodunu kaldır</label>` : ''}
+          <button class="btn btn-primary" id="save-dm-lock-settings"><i class="fas fa-save"></i> Ayarları Kaydet</button>
+          <div id="dm-lock-settings-msg" class="form-error mt-4"></div>
+        </div>
+      </div>`;
+    $('#save-dm-lock-settings')?.addEventListener('click', async () => {
+      const message = $('#dm-lock-settings-msg');
+      const button = $('#save-dm-lock-settings');
+      button.disabled = true;
+      const clearSearchCode = $('#dm-lock-clear-code')?.checked || false;
+      try {
+        lockSettings = await api('/me/dm-lock-settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            icon_unlock_enabled: $('#dm-lock-icon-enabled').checked,
+            search_unlock_enabled: !clearSearchCode && $('#dm-lock-search-enabled').checked,
+            search_code: $('#dm-lock-search-code').value,
+            clear_search_code: clearSearchCode
+          })
+        });
+        toast('Sohbet kilidi ayarları kaydedildi');
+        renderSettingsSection('dm-lock');
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
     });
   } else if (section === 'notifications') {
     el.innerHTML = `
@@ -6986,27 +7018,65 @@ async function showForwardPhotoModal(photoId) {
 }
 
 // ===== MESAJLAR SAYFASI =====
+let dmLockSettings = { search_unlock_enabled: false, icon_unlock_enabled: true, has_search_code: false };
+let dmSearchUnlockCode = '';
+let dmIconUnlockCode = '';
+let dmSearchUnlockedConvs = [];
+
+function updateConversationMuteState(conversation, hours) {
+  const isUser1 = String(conversation.user1_id) === String(currentUser.id);
+  const untilKey = isUser1 ? 'muted_until_user1' : 'muted_until_user2';
+  const foreverKey = isUser1 ? 'mute_forever_user1' : 'mute_forever_user2';
+  if (hours === null || hours === undefined) {
+    conversation[untilKey] = null;
+    conversation[foreverKey] = 0;
+  } else if (String(hours) === 'forever') {
+    conversation[untilKey] = null;
+    conversation[foreverKey] = 1;
+  } else {
+    conversation[untilKey] = new Date(Date.now() + Number(hours) * 3600000).toISOString();
+    conversation[foreverKey] = 0;
+  }
+}
+
 async function renderMessages(app, targetUsername) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - ' + siteName;
 
-  let convs = [], hiddenConvs = [];
-  try { convs = await api('/conversations'); } catch {}
+  let convs = [], hiddenConvs = [], groups = [];
+  try { convs = await api('/conversations'); } catch (error) { toast(error.message, 'error'); }
+  try { groups = await api('/my-groups'); } catch (error) { toast(error.message, 'error'); }
+  try { dmLockSettings = await api('/me/dm-lock-settings'); } catch (error) { toast(error.message, 'error'); }
   let friends = null;
   try { friends = await api('/friends'); } catch {}
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
 
-  function convItemHTML(c, isHidden) {
+  function convItemHTML(c, isHidden, isGroup = false) {
+    if (isGroup) {
+      const muted = Number(c.inbox_mute_forever) === 1 || (c.inbox_muted_until && new Date(c.inbox_muted_until) > new Date());
+      return `<div class="dm-conv-item dm-group-conv${muted ? ' dm-conv-muted' : ''}" data-is-group="1" data-group-slug="${escHtml(c.slug)}" data-search-name="${escHtml(c.name || '')}">
+        <span class="dm-group-avatar" aria-hidden="true"><i class="fas fa-people-group"></i></span>
+        <div class="dm-conv-info">
+          <div class="dm-conv-name-row"><span class="dm-conv-name"><strong>${escHtml(c.name || 'Grup')}</strong></span>${muted ? '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Grup sessizde"></i>' : ''}</div>
+          <div class="dm-conv-last">${escHtml((c.last_message || 'Grup sohbeti').substring(0, 40))}</div>
+        </div>
+        <button type="button" class="dm-conv-options-btn" title="Grup seçenekleri" aria-label="${escHtml(c.name || 'Grup')} seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
+      </div>`;
+    }
     const unread = c.unread_count || 0;
-    const otherProfile = c.other_username ? profileRoute(c.other_username) : '#';
     const avatarHTML = hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed })
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
-    return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}">
+    const isUser1 = String(c.user1_id) === String(currentUser.id);
+    const muteForever = Number(c[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1;
+    const mutedUntil = c[isUser1 ? 'muted_until_user1' : 'muted_until_user2'];
+    const muted = muteForever || (mutedUntil && new Date(mutedUntil) > new Date());
+    return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}${muted ? ' dm-conv-muted' : ''}${dmSearchUnlockedConvs.some(hidden => String(hidden.id) === String(c.id)) ? ' dm-search-unlocked' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}" data-search-name="${escHtml((c.other_nickname || '') + ' ' + (c.other_username || ''))}">
       <span class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
           <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
+          ${muted ? '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>' : ''}
           ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
         </div>
         <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
@@ -7019,18 +7089,72 @@ async function renderMessages(app, targetUsername) {
     item.dataset.bound = '1';
     item.querySelector('.dm-conv-options-btn')?.addEventListener('click', event => {
       event.stopPropagation();
-      showDmOptionsMenu(item.dataset.username, item.dataset.conversationId);
+      if (item.dataset.isGroup === '1') {
+        const group = groups.find(entry => entry.slug === item.dataset.groupSlug);
+        const muted = group && (Number(group.inbox_mute_forever) === 1 || (group.inbox_muted_until && new Date(group.inbox_muted_until) > new Date()));
+        showGroupInboxOptionsMenu(item.dataset.groupSlug, group?.name || 'Grup', !!muted, async () => {
+          try { groups = await api('/my-groups'); renderInboxList(); } catch (error) { toast(error.message, 'error'); }
+        });
+      } else {
+        const conversation = convs.find(entry => String(entry.id) === String(item.dataset.conversationId));
+        const isUser1 = String(conversation?.user1_id) === String(currentUser.id);
+        const muted = Number(conversation?.[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1
+          || (conversation?.[isUser1 ? 'muted_until_user1' : 'muted_until_user2'] && new Date(conversation[isUser1 ? 'muted_until_user1' : 'muted_until_user2']) > new Date());
+        showDmOptionsMenu(item.dataset.username, item.dataset.conversationId, !!muted, (nextMuted, hours) => {
+          if (conversation) updateConversationMuteState(conversation, hours);
+          const muteIcon = item.querySelector('.dm-conv-mute-icon');
+          if (nextMuted && !muteIcon) item.querySelector('.dm-conv-name-row')?.insertAdjacentHTML('beforeend', '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>');
+          if (!nextMuted) muteIcon?.remove();
+          item.classList.toggle('dm-conv-muted', nextMuted);
+        });
+      }
     });
     item.addEventListener('click', event => {
+      if (event?.target?.closest?.('.dm-conv-options-btn')) return;
       if (event?.target?.closest?.('a')) {
         event.preventDefault();
         event.stopPropagation();
       }
       document.querySelectorAll('.dm-conv-item').forEach(other => other.classList.remove('active'));
       item.classList.add('active');
-      navigate('/mesajlar/' + item.dataset.username);
+      if (item.dataset.isGroup === '1') navigate('/grup/' + item.dataset.groupSlug);
+      else navigate('/mesajlar/' + item.dataset.username);
     });
   });
+
+  const muteExpirationTimers = [];
+  const renderInboxList = () => {
+    const list = document.getElementById('dm-conv-list');
+    if (!list) return;
+    muteExpirationTimers.forEach(timer => clearTimeout(timer));
+    muteExpirationTimers.length = 0;
+    const entries = [
+      ...convs.map(c => ({ item: c, isGroup: false, time: new Date(c.last_message_at || c.created_at || 0).getTime() || 0 })),
+      ...groups.map(group => ({ item: group, isGroup: true, time: new Date(group.last_message_at || group.created_at || 0).getTime() || 0 })),
+      ...dmSearchUnlockedConvs
+        .filter(hidden => !convs.some(conversation => String(conversation.id) === String(hidden.id)))
+        .map(c => ({ item: c, isGroup: false, hidden: true, time: new Date(c.last_message_at || c.created_at || 0).getTime() || 0 }))
+    ].sort((a, b) => b.time - a.time);
+    entries.forEach(entry => {
+      const item = entry.item;
+      const isUser1 = String(item.user1_id) === String(currentUser.id);
+      const mutedUntil = entry.isGroup
+        ? item.inbox_muted_until
+        : item[isUser1 ? 'muted_until_user1' : 'muted_until_user2'];
+      const delay = new Date(mutedUntil || 0).getTime() - Date.now();
+      if (delay > 0 && delay < 2147483000) {
+        muteExpirationTimers.push(window.setTimeout(renderInboxList, delay + 100));
+      }
+    });
+    list.innerHTML = entries.length
+      ? entries.map(entry => convItemHTML(entry.item, !!entry.hidden, entry.isGroup)).join('')
+      : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>';
+    bindConversationItems();
+    const query = (document.getElementById('dm-search')?.value || '').toLocaleLowerCase('tr-TR');
+    list.querySelectorAll('.dm-conv-item').forEach(item => {
+      item.style.display = !query || item.dataset.searchName.toLocaleLowerCase('tr-TR').includes(query) ? '' : 'none';
+    });
+  };
 
   app.innerHTML = `<div class="dm-layout${targetUsername ? ' dm-mobile-chat-open' : ''}">
     <div class="dm-sidebar">
@@ -7040,12 +7164,12 @@ async function renderMessages(app, targetUsername) {
           <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button"><i class="fas fa-user-friends"></i> Arkadaşlar<span id="dm-friends-badge" class="friend-request-dot"></span></button>
         </div>
         <div class="dm-sidebar-actions">
-          <button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>
+          ${dmLockSettings.icon_unlock_enabled ? '<button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>' : ''}
           <button class="btn btn-primary dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj"><i class="fas fa-plus"></i></button>
         </div>
       </div>
       <div class="dm-search-wrap">
-        <input id="dm-search" type="text" placeholder="Ara..." class="dm-search" />
+        <input id="dm-search" type="text" placeholder="${dmLockSettings.search_unlock_enabled ? 'Kişi ara veya özel kod yaz...' : 'Ara...'}" class="dm-search" />
       </div>
       <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
         <div class="dm-hidden-panel-content">
@@ -7058,9 +7182,11 @@ async function renderMessages(app, targetUsername) {
         </div>
       </div>
       <div id="dm-conv-list" class="dm-conv-list">
-        ${convs.length
-          ? convs.map(c => convItemHTML(c, false)).join('')
-          : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'}
+        ${[
+          ...convs.map(c => ({ item: c, group: false, time: new Date(c.last_message_at || c.created_at || 0).getTime() || 0 })),
+          ...groups.map(group => ({ item: group, group: true, time: new Date(group.last_message_at || group.created_at || 0).getTime() || 0 }))
+        ].sort((a, b) => b.time - a.time).map(entry => convItemHTML(entry.item, false, entry.group)).join('')
+          || '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'}
       </div>
     </div>
     <div class="dm-main" id="dm-main">
@@ -7074,13 +7200,30 @@ async function renderMessages(app, targetUsername) {
       </div>` : ''}
     </div>
   </div>`;
+  renderInboxList();
 
-  // Search filter
+  // Search filter and temporary locked-chat access code
   document.getElementById('dm-search')?.addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll('.dm-conv-item').forEach(el => {
-      el.style.display = el.dataset.username.toLowerCase().includes(q) ? '' : 'none';
+    const q = e.target.value.toLocaleLowerCase('tr-TR');
+    document.querySelectorAll('#dm-conv-list .dm-conv-item').forEach(el => {
+      el.style.display = !q || el.dataset.searchName.toLocaleLowerCase('tr-TR').includes(q) ? '' : 'none';
     });
+  });
+  document.getElementById('dm-search')?.addEventListener('keydown', async event => {
+    if (event.key !== 'Enter' || !dmLockSettings.search_unlock_enabled) return;
+    const input = event.currentTarget;
+    const code = input.value.trim();
+    if (!code) return;
+    try {
+      await api('/conversations/unlock-search', { method: 'POST', body: JSON.stringify({ code }) });
+      dmSearchUnlockCode = code;
+      dmSearchUnlockedConvs = await api('/conversations/hidden');
+      input.value = '';
+      renderInboxList();
+      toast(dmSearchUnlockedConvs.length ? 'Kilitli sohbetler bu sayfa yenilenene kadar açıldı' : 'Açılacak kilitli sohbet yok');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
   });
 
   // Hidden toggle
@@ -7092,6 +7235,7 @@ async function renderMessages(app, targetUsername) {
       button.disabled = true;
       try {
         hiddenConvs = await api('/conversations/unlock', { method: 'POST', body: JSON.stringify({ password }) });
+        dmIconUnlockCode = password;
         hideModal();
         const panel = $('#dm-hidden-panel');
         const list = $('#dm-hidden-list');
@@ -7107,7 +7251,7 @@ async function renderMessages(app, targetUsername) {
 
   // Friends nav
   document.getElementById('dm-friends-btn')?.addEventListener('click', () => navigate('/arkadaslar'));
-  document.getElementById('dm-groups-btn')?.addEventListener('click', () => showMyGroupsModal());
+  document.getElementById('dm-groups-btn')?.addEventListener('click', () => navigate('/gruplar'));
 
   // New DM
   document.getElementById('new-dm-btn')?.addEventListener('click', async () => {
@@ -7162,8 +7306,10 @@ async function renderDMChat(username) {
   if (!mainEl) return;
   mainEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%"><div class="spinner"></div></div>`;
 
+  const searchUnlockHeaders = dmSearchUnlockCode ? { 'X-DM-Search-Code': dmSearchUnlockCode } : {};
+  if (dmIconUnlockCode) searchUnlockHeaders['X-DM-Conversation-Code'] = dmIconUnlockCode;
   let data;
-  try { data = await api(`/conversation/${encodeURIComponent(username)}`); }
+  try { data = await api(`/conversation/${encodeURIComponent(username)}`, { headers: searchUnlockHeaders }); }
   catch (e) {
     mainEl.innerHTML = `<div class="dm-empty"><i class="fas fa-exclamation-circle" style="font-size:32px;opacity:0.4"></i><p style="color:var(--accent-red2);margin-top:8px">${escHtml(e.message)}</p></div>`;
     return;
@@ -7194,7 +7340,9 @@ async function renderDMChat(username) {
       <div class="dm-empty">
         <i class="fas fa-lock" style="font-size:36px;opacity:0.3"></i>
         <p style="color:var(--text-muted);margin-top:10px">Bu konuşma kilitli</p>
-        ${hasPassword
+        ${!dmLockSettings.icon_unlock_enabled
+          ? `<p class="settings-help">Kilit simgesiyle açma kapalı. Sohbet Kilidi ayarlarında etkinleştirdiysen mesaj listesindeki arama kodunu kullan.</p>`
+          : hasPassword
           ? `<div style="margin-top:16px;display:flex;gap:8px;width:100%;max-width:280px;position:relative">
                <input id="dm-unlock-pass" type="password" placeholder="Şifre" style="flex:1;padding:9px 40px 9px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px" />
                <button type="button" id="dm-unlock-pass-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px">
@@ -7216,7 +7364,6 @@ async function renderDMChat(username) {
       const pass = document.getElementById('dm-unlock-pass')?.value || '';
       try {
         await api(`/conversation/${encodeURIComponent(username)}/unhide`, { method: 'POST', body: JSON.stringify({ password: pass }) });
-        sessionStorage.setItem('dm_unlocked_' + username, '1');
         renderDMChat(username);
       } catch (e) { document.getElementById('dm-unlock-err').textContent = e.message; }
     });
@@ -7404,7 +7551,17 @@ async function renderDMChat(username) {
   // Options
   document.getElementById('dm-options-btn')?.addEventListener('click', e => {
     e.stopPropagation();
-    showDmOptionsMenu(username, conv.id);
+    const isUser1 = String(conv.user1_id) === String(currentUser.id);
+    const muted = Number(conv[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1
+      || (conv[isUser1 ? 'muted_until_user1' : 'muted_until_user2'] && new Date(conv[isUser1 ? 'muted_until_user1' : 'muted_until_user2']) > new Date());
+    const item = document.querySelector(`.dm-conv-item[data-conversation-id="${CSS.escape(String(conv.id))}"]`);
+    showDmOptionsMenu(username, conv.id, !!muted, (nextMuted, hours) => {
+      updateConversationMuteState(conv, nextMuted ? hours : null);
+      const muteIcon = item?.querySelector('.dm-conv-mute-icon');
+      if (nextMuted && item && !muteIcon) item.querySelector('.dm-conv-name-row')?.insertAdjacentHTML('beforeend', '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>');
+      if (!nextMuted) muteIcon?.remove();
+      item?.classList.toggle('dm-conv-muted', nextMuted);
+    });
   });
 
   // Sel actions
@@ -7428,7 +7585,7 @@ async function renderDMChat(username) {
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
     try {
-      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100`);
+      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100`, { headers: searchUnlockHeaders });
       const refreshedMsgs = conversationUpdate?.messages || [];
       const el = document.getElementById('dm-messages');
       if (!el) return;
@@ -7597,31 +7754,87 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
 }
 
-function showDmOptionsMenu(username, convId) {
+function showMuteDurationPicker(title, onSelect) {
+  showModal(title, `
+    <div class="dm-options-content">
+      <p class="settings-help">Bildirimlerin ne kadar süre sessiz kalacağını seç.</p>
+      <div class="call-mute-grid mute-duration-grid">
+        <button class="btn btn-outline mute-duration-option" data-hours="2">2 saat</button>
+        <button class="btn btn-outline mute-duration-option" data-hours="5">5 saat</button>
+        <button class="btn btn-outline mute-duration-option" data-hours="10">10 saat</button>
+        <button class="btn btn-outline mute-duration-option" data-hours="24">24 saat</button>
+        <button class="btn btn-outline mute-duration-option" data-hours="forever">Kapatana kadar</button>
+      </div>
+    </div>`);
+  document.querySelectorAll('.mute-duration-option').forEach(button => {
+    button.addEventListener('click', () => onSelect(button.dataset.hours));
+  });
+}
+
+function showGroupInboxOptionsMenu(slug, name, isMuted, onMuteChange) {
+  showModal(`${escHtml(name)} · Grup seçenekleri`, `
+    <div class="dm-options-content">
+      <div class="dm-options-actions">
+        ${isMuted
+          ? '<button class="btn btn-outline" id="group-inbox-unmute"><i class="fas fa-bell"></i> Sesi Aç</button>'
+          : '<button class="btn btn-outline" id="group-inbox-mute"><i class="fas fa-bell-slash"></i> Sessize Al</button>'}
+      </div>
+    </div>`);
+  document.getElementById('group-inbox-mute')?.addEventListener('click', () => {
+    showMuteDurationPicker('Grup bildirimlerini sessize al', async hours => {
+      try {
+        await api(`/group/${encodeURIComponent(slug)}/notifications-mute`, { method: 'POST', body: JSON.stringify({ hours }) });
+        hideModal();
+        onMuteChange?.(true);
+        toast(hours === 'forever' ? 'Grup bildirimleri kapatıldı' : `Grup ${hours} saat sessize alındı`);
+      } catch (error) { toast(error.message, 'error'); }
+    });
+  });
+  document.getElementById('group-inbox-unmute')?.addEventListener('click', async () => {
+    try {
+      await api(`/group/${encodeURIComponent(slug)}/notifications-mute`, { method: 'POST', body: JSON.stringify({ hours: 'unmute' }) });
+      hideModal();
+      onMuteChange?.(false);
+      toast('Grup bildirimleri açıldı');
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () => {}) {
   showModal('Konuşma Seçenekleri', `
     <div class="dm-options-content">
       <div class="dm-options-section">
-        <div class="call-mute-title"><i class="fas fa-bell-slash"></i> Mesaj bildirimlerini sessize al</div>
-        <div class="call-mute-grid"><button class="btn btn-outline dm-mute-option" data-hours="2">2 saat</button><button class="btn btn-outline dm-mute-option" data-hours="5">5 saat</button><button class="btn btn-outline dm-mute-option" data-hours="10">10 saat</button><button class="btn btn-outline dm-mute-option" data-hours="24">24 saat</button><button class="btn btn-outline dm-mute-option" data-hours="forever">Kapatana kadar</button><button class="btn btn-outline dm-mute-option" data-hours="unmute">Sessizi aç</button></div>
+        ${isMuted
+          ? '<button class="btn btn-outline" id="dm-opt-unmute"><i class="fas fa-bell"></i> Sesi Aç</button>'
+          : '<button class="btn btn-outline" id="dm-opt-mute"><i class="fas fa-bell-slash"></i> Sessize Al</button>'}
       </div>
       <div class="dm-options-actions">
-        <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Kilitle</button>
-        <button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>
+        ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Kilitle</button>' : ''}
+        ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>' : ''}
         <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
         <button class="btn dm-clear-all" id="dm-opt-clear-all"><i class="fas fa-trash-alt"></i> Herkesten temizle</button>
       </div>
       <p class="dm-options-note"><i class="fas fa-circle-info"></i> “Herkesten temizle” işlemi geri alınamaz ve konuşmadaki mesajları iki taraftan kaldırır.</p>
     </div>
   `);
-  document.querySelectorAll('.dm-mute-option').forEach(button => button.addEventListener('click', async () => {
-    const value = button.dataset.hours;
-    const hours = value === 'unmute' ? null : value;
+  document.getElementById('dm-opt-mute')?.addEventListener('click', () => {
+    showMuteDurationPicker('Mesaj bildirimlerini sessize al', async hours => {
+      try {
+        await api(`/conversation/${encodeURIComponent(username)}/mute`, { method: 'POST', body: JSON.stringify({ hours }) });
+        hideModal();
+        onMuteChange(true, hours);
+        toast(hours === 'forever' ? 'Mesaj bildirimleri kapatıldı' : `Mesaj bildirimleri ${hours} saat sessizde`);
+      } catch (error) { toast(error.message, 'error'); }
+    });
+  });
+  document.getElementById('dm-opt-unmute')?.addEventListener('click', async () => {
     try {
-      await api(`/conversation/${encodeURIComponent(username)}/mute`, { method: 'POST', body: JSON.stringify({ hours }) });
+      await api(`/conversation/${encodeURIComponent(username)}/mute`, { method: 'POST', body: JSON.stringify({ hours: 'unmute' }) });
       hideModal();
-      toast(value === 'unmute' ? 'Mesaj bildirimleri açıldı' : value === 'forever' ? 'Mesaj bildirimleri kapatıldı' : `Mesaj bildirimleri ${value} saat sessizde`);
-    } catch (e) { toast(e.message, 'error'); }
-  }));
+      onMuteChange(false, null);
+      toast('Mesaj bildirimleri açıldı');
+    } catch (error) { toast(error.message, 'error'); }
+  });
   document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
     showModal('Konuşmayı Gizle', `

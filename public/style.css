@@ -2768,6 +2768,15 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-conv-item.active { background: var(--bg-active); border-color: var(--border-hover); }
 .dm-conv-item { border-radius: 12px; margin: 4px 8px; }
 .dm-conv-item.dm-unread .dm-conv-name { font-weight: 700; color: var(--text-primary); }
+.dm-group-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex: 0 0 40px; border-radius: 13px;
+  color: var(--accent-red2); background: rgba(189,162,117,.12);
+  border: 1px solid rgba(189,162,117,.18); font-size: 16px;
+}
+.dm-group-conv .dm-conv-name { font-weight: 650; }
+.dm-conv-mute-icon { flex: 0 0 auto; color: var(--text-muted); font-size: 11px; }
+.dm-search-unlocked { border-color: rgba(189,162,117,.28); }
 .dm-conv-info { flex: 1; min-width: 0; }
 .dm-conv-name-row { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
 .dm-conv-name { font-size: 14px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

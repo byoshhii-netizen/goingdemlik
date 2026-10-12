@@ -584,6 +584,8 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     ALTER TABLE group_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
+    ALTER TABLE group_members ADD COLUMN IF NOT EXISTS inbox_muted_until TIMESTAMP;
+    ALTER TABLE group_members ADD COLUMN IF NOT EXISTS inbox_mute_forever INTEGER DEFAULT 0;
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
     UPDATE groups SET visibility=CASE WHEN type='private' THEN 'private' WHEN invite_only=1 THEN 'invite' ELSE 'public' END WHERE visibility IS NULL OR visibility='';
 
@@ -920,6 +922,13 @@ async function initDb() {
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user2 TIMESTAMP;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user1 INTEGER DEFAULT 0;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user2 INTEGER DEFAULT 0;
+    CREATE TABLE IF NOT EXISTS dm_user_settings (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      search_code_hash TEXT DEFAULT '',
+      search_unlock_enabled INTEGER DEFAULT 0,
+      icon_unlock_enabled INTEGER DEFAULT 1,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
     CREATE TABLE IF NOT EXISTS voice_calls (
       id UUID PRIMARY KEY,
       caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
