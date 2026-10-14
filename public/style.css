@@ -733,47 +733,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 }
 .reals-profile-caption strong { font-size:14px; }
 .reals-profile-caption small { font-size:11px; opacity:.85; }
-.music-public-playlists { margin-top:36px; }
-.music-public-playlist-search { max-width:560px; margin:0 0 18px; }
-.public-playlists-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:14px; }
-.public-playlist-card {
-  display:flex;
-  align-items:center;
-  gap:12px;
-  min-width:0;
-  padding:12px;
-  border:1px solid var(--border);
-  border-radius:14px;
-  background:var(--bg-card);
-  color:var(--text-primary);
-  text-decoration:none;
-  transition:border-color .2s,transform .2s,background .2s;
-}
-.public-playlist-card:hover { border-color:var(--accent-red); transform:translateY(-2px); background:var(--bg-card2); }
-.public-playlist-cover {
-  display:grid;
-  place-items:center;
-  flex:0 0 64px;
-  width:64px;
-  aspect-ratio:1;
-  overflow:hidden;
-  border-radius:10px;
-  background:linear-gradient(135deg,var(--accent-red),var(--accent-red-dark));
-  color:#fff;
-  font-size:22px;
-}
-.public-playlist-cover img { width:100%; height:100%; object-fit:cover; }
-.public-playlist-copy { display:grid; gap:4px; min-width:0; }
-.public-playlist-copy strong,.public-playlist-copy span,.public-playlist-copy small {
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-.public-playlist-copy strong { font-size:14px; }
-.public-playlist-copy span,.public-playlist-copy small { color:var(--text-muted); font-size:12px; }
 @media (max-width: 600px) {
   .profile-reels-grid, .profile-saved-content-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
-  .public-playlists-grid { grid-template-columns:1fr; gap:10px; }
 }
 .video-card-body { padding: 14px; display:grid; gap:8px; flex:1; }
 .video-card-title { font-size: 15px; font-weight: 700; color: var(--text-primary); line-height:1.35; }

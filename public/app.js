@@ -8855,16 +8855,6 @@ async function renderMusicList(app) {
         <input type="text" id="music-search" placeholder="Şarkı adı, sanatçı, tür, dağıtıcı, şarkı sözü ara..." style="width:100%" />
       </div>
     </div>
-    <section class="music-public-playlists" aria-labelledby="public-playlists-title">
-      <div class="section-header">
-        <div class="section-title" id="public-playlists-title"><div class="section-title-bar"></div>Herkese Açık Playlistler</div>
-      </div>
-      <div class="search-bar music-public-playlist-search">
-        <i class="fas fa-search"></i>
-        <input type="search" id="public-playlist-search" aria-label="Herkese açık playlist ara" placeholder="Playlist, açıklama veya kullanıcı ara..." autocomplete="off" />
-      </div>
-      <div id="public-playlist-results"><div class="empty-state"><i class="fas fa-search"></i><p>Playlistleri görmek için arama yapın.</p></div></div>
-    </section>
     <div id="music-list"></div>
   </div>`;
 
@@ -8962,40 +8952,6 @@ async function renderMusicList(app) {
   loadSongs();
   let t; document.getElementById('music-search')?.addEventListener('input', e => {
     clearTimeout(t); t = setTimeout(() => loadSongs(e.target.value.trim()), 400);
-  });
-  let publicPlaylistRequest = 0;
-  const loadPublicPlaylists = async (search = '') => {
-    const results = document.getElementById('public-playlist-results');
-    if (!results) return;
-    const requestId = ++publicPlaylistRequest;
-    if (!search) {
-      results.innerHTML = '<div class="empty-state"><i class="fas fa-search"></i><p>Playlistleri görmek için arama yapın.</p></div>';
-      return;
-    }
-    results.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
-    try {
-      const playlists = await api('/public-playlists?q=' + encodeURIComponent(search));
-      if (requestId !== publicPlaylistRequest || !results.isConnected) return;
-      results.innerHTML = playlists.length
-        ? `<div class="public-playlists-grid">${playlists.map(playlist => `
-          <a class="public-playlist-card" href="/playlist/${encodeURIComponent(playlist.public_id)}" data-link>
-            <div class="public-playlist-cover">${playlist.cover_url ? `<img src="${escHtml(siteImageUrl(playlist.cover_url))}" alt="" loading="lazy" />` : '<i class="fas fa-music"></i>'}</div>
-            <div class="public-playlist-copy">
-              <strong>${escHtml(playlist.name)}</strong>
-              <span>@${escHtml(playlist.owner_username || 'Kullanıcı')} · ${Number(playlist.song_count) || 0} şarkı</span>
-              ${playlist.description ? `<small>${escHtml(playlist.description)}</small>` : ''}
-            </div>
-          </a>`).join('')}</div>`
-        : '<div class="empty-state"><i class="fas fa-list"></i><p>Eşleşen herkese açık playlist bulunamadı.</p></div>';
-    } catch (error) {
-      if (requestId !== publicPlaylistRequest || !results.isConnected) return;
-      results.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Playlistler yüklenemedi.')}</p></div>`;
-    }
-  };
-  let playlistSearchTimer;
-  document.getElementById('public-playlist-search')?.addEventListener('input', event => {
-    clearTimeout(playlistSearchTimer);
-    playlistSearchTimer = setTimeout(() => loadPublicPlaylists(event.target.value.trim()), 300);
   });
 }
 
