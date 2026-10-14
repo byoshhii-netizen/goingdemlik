@@ -6084,6 +6084,7 @@ app.get('/playlist/:id', (req, res) => res.send(injectMeta('Playlist – CigCig 
 app.get('/api/public-playlists', async (req, res) => {
   try {
     const search = String(req.query.q || '').trim().slice(0, 100);
+    if (!search) return res.json([]);
     const pattern = `%${search}%`;
     const { rows } = await query(
       `SELECT p.public_id, p.name, p.description, p.cover_url, p.created_at,

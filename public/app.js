@@ -8863,7 +8863,7 @@ async function renderMusicList(app) {
         <i class="fas fa-search"></i>
         <input type="search" id="public-playlist-search" aria-label="Herkese açık playlist ara" placeholder="Playlist, açıklama veya kullanıcı ara..." autocomplete="off" />
       </div>
-      <div id="public-playlist-results"><div class="loading-center"><div class="spinner"></div></div></div>
+      <div id="public-playlist-results"><div class="empty-state"><i class="fas fa-search"></i><p>Playlistleri görmek için arama yapın.</p></div></div>
     </section>
     <div id="music-list"></div>
   </div>`;
@@ -8968,6 +8968,10 @@ async function renderMusicList(app) {
     const results = document.getElementById('public-playlist-results');
     if (!results) return;
     const requestId = ++publicPlaylistRequest;
+    if (!search) {
+      results.innerHTML = '<div class="empty-state"><i class="fas fa-search"></i><p>Playlistleri görmek için arama yapın.</p></div>';
+      return;
+    }
     results.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
     try {
       const playlists = await api('/public-playlists?q=' + encodeURIComponent(search));
@@ -8988,7 +8992,6 @@ async function renderMusicList(app) {
       results.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Playlistler yüklenemedi.')}</p></div>`;
     }
   };
-  loadPublicPlaylists();
   let playlistSearchTimer;
   document.getElementById('public-playlist-search')?.addEventListener('input', event => {
     clearTimeout(playlistSearchTimer);
