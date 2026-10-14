@@ -927,8 +927,11 @@ async function initDb() {
       search_code_hash TEXT DEFAULT '',
       search_unlock_enabled INTEGER DEFAULT 0,
       icon_unlock_enabled INTEGER DEFAULT 1,
+      icon_code_hash TEXT DEFAULT '',
       updated_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS icon_code_hash TEXT DEFAULT '';
+    UPDATE dm_user_settings SET icon_unlock_enabled=0 WHERE COALESCE(icon_code_hash,'')='';
     CREATE TABLE IF NOT EXISTS voice_calls (
       id UUID PRIMARY KEY,
       caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

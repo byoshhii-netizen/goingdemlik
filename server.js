@@ -12,7 +12,7 @@ const cloudinary = require('cloudinary').v2;
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const { query, initDb } = require('./database');
+const { query, pool, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 
 function createPlaylistPublicId() {
@@ -3906,55 +3906,119 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
 
 app.get('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
   const { rows } = await query(
-    'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled FROM dm_user_settings WHERE user_id=$1',
+    'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash FROM dm_user_settings WHERE user_id=$1',
     [req.user.id]
   );
   const settings = rows[0] || {};
   res.json({
     search_unlock_enabled: Number(settings.search_unlock_enabled) === 1,
-    icon_unlock_enabled: settings.icon_unlock_enabled === undefined || Number(settings.icon_unlock_enabled) === 1,
-    has_search_code: Boolean(settings.search_code_hash)
+    icon_unlock_enabled: Boolean(settings.icon_code_hash) && Number(settings.icon_unlock_enabled) === 1,
+    has_search_code: Boolean(settings.search_code_hash),
+    has_icon_code: Boolean(settings.icon_code_hash)
   });
 });
 
 app.put('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
-  const { rows: currentRows } = await query(
-    'SELECT search_code_hash FROM dm_user_settings WHERE user_id=$1',
-    [req.user.id]
-  );
-  const currentHash = currentRows[0]?.search_code_hash || '';
-  const searchUnlockEnabled = req.body?.search_unlock_enabled === true;
-  const iconUnlockEnabled = req.body?.icon_unlock_enabled === true;
+  const {
+    current_icon_code: currentIconCode,
+    icon_code: iconCode,
+    forgot_icon_code: forgotIconCode
+  } = req.body || {};
+  const searchUnlockEnabled = req.body?.search_unlock_enabled;
+  const iconUnlockEnabled = req.body?.icon_unlock_enabled;
   const searchCode = typeof req.body?.search_code === 'string' ? req.body.search_code.trim() : '';
   const clearSearchCode = req.body?.clear_search_code === true;
 
   if (searchCode && (searchCode.length < 4 || searchCode.length > 64)) {
     return res.status(400).json({ error: 'Arama kodu 4-64 karakter arasında olmalıdır' });
   }
-  const searchCodeHash = clearSearchCode
-    ? ''
-    : searchCode
-      ? crypto.createHash('sha256').update(searchCode).digest('hex')
-      : currentHash;
-  if (searchUnlockEnabled && !searchCodeHash) {
-    return res.status(400).json({ error: 'Arama kodunu kullanmak için önce bir özel kod belirleyin' });
+  const nextIconCode = typeof iconCode === 'string' ? iconCode.trim() : '';
+  const oldIconCode = typeof currentIconCode === 'string' ? currentIconCode : '';
+  const isForgotFlow = forgotIconCode === true;
+  if (nextIconCode && (nextIconCode.length < 4 || nextIconCode.length > 64)) {
+    return res.status(400).json({ error: 'Kilit simgesi şifresi 4-64 karakter arasında olmalıdır' });
   }
 
-  const { rows } = await query(`
-    INSERT INTO dm_user_settings (user_id,search_code_hash,search_unlock_enabled,icon_unlock_enabled,updated_at)
-    VALUES ($1,$2,$3,$4,NOW())
-    ON CONFLICT (user_id) DO UPDATE SET
-      search_code_hash=EXCLUDED.search_code_hash,
-      search_unlock_enabled=EXCLUDED.search_unlock_enabled,
-      icon_unlock_enabled=EXCLUDED.icon_unlock_enabled,
-      updated_at=NOW()
-    RETURNING search_code_hash,search_unlock_enabled,icon_unlock_enabled
-  `, [req.user.id, searchCodeHash, searchUnlockEnabled ? 1 : 0, iconUnlockEnabled ? 1 : 0]);
-  res.json({
-    search_unlock_enabled: Number(rows[0].search_unlock_enabled) === 1,
-    icon_unlock_enabled: Number(rows[0].icon_unlock_enabled) === 1,
-    has_search_code: Boolean(rows[0].search_code_hash)
-  });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [req.user.id]);
+    const { rows: currentRows } = await client.query(
+      'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash FROM dm_user_settings WHERE user_id=$1 FOR UPDATE',
+      [req.user.id]
+    );
+    const current = currentRows[0] || {};
+    const currentIconHash = current.icon_code_hash || '';
+    if (nextIconCode && currentIconHash && !isForgotFlow && !matchesDmLockHash(currentIconHash, oldIconCode)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Kilit simgesi şifresini değiştirmek için mevcut şifreyi doğru girin' });
+    }
+    if (isForgotFlow && !nextIconCode) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Yeni kilit simgesi şifresi gerekli' });
+    }
+    const nextSearchCodeHash = clearSearchCode
+      ? ''
+      : searchCode
+        ? crypto.createHash('sha256').update(searchCode).digest('hex')
+        : current.search_code_hash || '';
+    const nextSearchUnlockEnabled = typeof searchUnlockEnabled === 'boolean'
+      ? searchUnlockEnabled
+      : Number(current.search_unlock_enabled) === 1;
+    const nextIconCodeHash = nextIconCode
+      ? crypto.createHash('sha256').update(nextIconCode).digest('hex')
+      : currentIconHash;
+    const nextIconUnlockEnabled = typeof iconUnlockEnabled === 'boolean'
+      ? iconUnlockEnabled
+      : Boolean(nextIconCodeHash) && (
+        !currentIconHash || Number(current.icon_unlock_enabled) === 1
+      );
+    if (nextSearchUnlockEnabled && !nextSearchCodeHash) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Arama kodunu kullanmak için önce bir özel kod belirleyin' });
+    }
+    if (nextIconUnlockEnabled && !nextIconCodeHash) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Kilit simgesiyle açmayı kullanmak için önce ayrı bir şifre belirleyin' });
+    }
+    let unlockedConversationCount = 0;
+    if (isForgotFlow) {
+      const { rowCount: user1Count } = await client.query(
+        'UPDATE dm_conversations SET hidden_by_user1=0,hidden_pass_user1=$1 WHERE user1_id=$2 AND hidden_by_user1=1',
+        ['', req.user.id]
+      );
+      const { rowCount: user2Count } = await client.query(
+        'UPDATE dm_conversations SET hidden_by_user2=0,hidden_pass_user2=$1 WHERE user2_id=$2 AND hidden_by_user2=1',
+        ['', req.user.id]
+      );
+      unlockedConversationCount = user1Count + user2Count;
+    }
+    const { rows } = await client.query(`
+      INSERT INTO dm_user_settings (user_id,search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash,updated_at)
+      VALUES ($1,$2,$3,$4,$5,NOW())
+      ON CONFLICT (user_id) DO UPDATE SET
+        search_code_hash=EXCLUDED.search_code_hash,
+        search_unlock_enabled=EXCLUDED.search_unlock_enabled,
+        icon_unlock_enabled=EXCLUDED.icon_unlock_enabled,
+        icon_code_hash=EXCLUDED.icon_code_hash,
+        updated_at=NOW()
+      RETURNING search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash
+    `, [req.user.id, nextSearchCodeHash, nextSearchUnlockEnabled ? 1 : 0, nextIconUnlockEnabled ? 1 : 0, nextIconCodeHash]);
+    await client.query('COMMIT');
+    res.json({
+      search_unlock_enabled: Number(rows[0].search_unlock_enabled) === 1,
+      icon_unlock_enabled: Number(rows[0].icon_unlock_enabled) === 1,
+      has_search_code: Boolean(rows[0].search_code_hash),
+      has_icon_code: Boolean(rows[0].icon_code_hash),
+      unlocked_conversation_count: unlockedConversationCount
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('[dm-lock-settings] Sohbet kilidi ayarları kaydedilemedi:', error.message);
+    res.status(500).json({ error: 'Sohbet kilidi ayarları kaydedilemedi' });
+  } finally {
+    client.release();
+  }
 });
 
 app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
@@ -7471,6 +7535,11 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
 
 app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
   const uid = req.user.id;
+  const searchCode = req.get('X-DM-Search-Code') || '';
+  const iconCode = req.get('X-DM-Conversation-Code') || '';
+  const hasValidUnlockCode = await isValidDmSearchCode(uid, searchCode)
+    || await isValidDmIconCode(uid, iconCode);
+  if (!hasValidUnlockCode) return res.status(403).json({ error: 'Kilitli sohbetleri görmek için geçerli bir açma kodu gerekli' });
   const { rows } = await query(`
     SELECT c.*,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
@@ -7494,9 +7563,10 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
   if (!(await isDmIconUnlockEnabled(req.user.id))) {
     return res.status(403).json({ error: 'Kilit simgesiyle açma ayarlardan kapalı' });
   }
-  const crypto = require('crypto');
   const password = String(req.body?.password || '');
-  const inputHash = crypto.createHash('sha256').update(password).digest('hex');
+  if (!(await isValidDmIconCode(req.user.id, password))) {
+    return res.status(403).json({ error: 'Kilit simgesi şifresi yanlış' });
+  }
   const { rows } = await query(`
     SELECT c.*, CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
@@ -7505,11 +7575,9 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
-    WHERE ((c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1))
-      AND (CASE WHEN c.user1_id=$1 THEN c.hidden_pass_user1 ELSE c.hidden_pass_user2 END) = $2
+    WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
     ORDER BY c.last_message_at DESC
-  `, [req.user.id, inputHash]);
-  if (!rows.length) return res.status(403).json({ error: 'Şifre yanlış veya kilitli sohbet bulunamadı' });
+  `, [req.user.id]);
   res.json(rows);
 });
 
@@ -7532,14 +7600,15 @@ async function isValidDmSearchCode(userId, code) {
 }
 
 async function isDmIconUnlockEnabled(userId) {
-  const { rows } = await query('SELECT icon_unlock_enabled FROM dm_user_settings WHERE user_id=$1', [userId]);
-  return !rows.length || Number(rows[0].icon_unlock_enabled) === 1;
+  const { rows } = await query('SELECT icon_unlock_enabled,icon_code_hash FROM dm_user_settings WHERE user_id=$1', [userId]);
+  return Boolean(rows[0]?.icon_code_hash) && Number(rows[0].icon_unlock_enabled) === 1;
 }
 
-async function isValidDmConversationCode(userId, hiddenPass, code) {
-  if (!code || !hiddenPass) return false;
+async function isValidDmIconCode(userId, code) {
+  if (typeof code !== 'string' || !code) return false;
   if (!(await isDmIconUnlockEnabled(userId))) return false;
-  return matchesDmLockHash(hiddenPass, code);
+  const { rows } = await query('SELECT icon_code_hash FROM dm_user_settings WHERE user_id=$1', [userId]);
+  return matchesDmLockHash(rows[0]?.icon_code_hash || '', code);
 }
 
 app.post('/api/conversations/unlock-search', authMiddleware, async (req, res) => {
@@ -7585,7 +7654,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const hiddenPass = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
   const searchCodeIsValid = isHidden && await isValidDmSearchCode(uid, req.get('X-DM-Search-Code') || '');
   const conversationCodeIsValid = isHidden
-    && await isValidDmConversationCode(uid, hiddenPass || '', req.get('X-DM-Conversation-Code') || '');
+    && await isValidDmIconCode(uid, req.get('X-DM-Conversation-Code') || '');
   if (searchCodeIsValid || conversationCodeIsValid) {
     isHidden = false;
   }
@@ -7767,9 +7836,6 @@ app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) =>
 });
 
 app.post('/api/conversation/:username/unhide', authMiddleware, async (req, res) => {
-  if (!(await isDmIconUnlockEnabled(req.user.id))) {
-    return res.status(403).json({ error: 'Kilit simgesiyle açma ayarlardan kapalı' });
-  }
   const { password } = req.body;
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });

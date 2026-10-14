@@ -316,8 +316,9 @@ body {
     user-select: none;
     touch-action: manipulation;
   }
-  input, textarea, select, [contenteditable="true"],
-  .book-text, .forum-detail-content, .video-description-text, .comment-content {
+  input, textarea, select, [contenteditable="true"], .book-text,
+  .ebook-page-content.book-owner-content .book-text,
+  .forum-detail-content, .video-description-text, .comment-content {
     -webkit-user-select: text;
     user-select: text;
     touch-action: auto;
@@ -1212,6 +1213,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   display: none !important;
 }
 .book-text { font-size: inherit; color: var(--book-text, #2c1a0e); line-height: 2.0; white-space: pre-wrap; font-family: 'Literata', Georgia, serif; }
+.ebook-page-content.book-reader-content .book-text { -webkit-user-select: none; user-select: none; }
+.ebook-page-content.book-owner-content .book-text { -webkit-user-select: text; user-select: text; }
 .ebook-page-image { width: 100%; max-height: 320px; border-radius: 16px; margin-bottom: 18px; object-fit: cover; }
 .ebook-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
 .ebook-nav-btn { display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; width: calc(50% - 6px); padding: 14px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); text-decoration: none; }
@@ -3497,7 +3500,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .gplayer-title { max-width: 100px; font-size: 11px; }
   .gplayer-artist { max-width: 100px; }
   .gplayer-btn:not(.gplayer-play):not(#gp-close) { display: none; }
-  .gplayer-vol-wrap { display: none; }
+  .gplayer-vol-wrap { display: flex; gap: 3px; }
+  .gplayer-vol-slider { width: 48px; }
   #global-music-player { bottom: 56px; } /* bottom bar yüksekliği */
 }
 

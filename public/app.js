@@ -1679,8 +1679,15 @@ async function renderHome(app) {
   updatePageMeta(siteName + ' – Topluluk Platformu', 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.', '');
   app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
 
-  let settings = {};
-  try { settings = await fetch('/api/settings/public').then(r=>r.json()).catch(()=>({})); } catch {}
+  let settings;
+  try {
+    const response = await fetch('/api/settings/public');
+    if (!response.ok) throw new Error('Ana sayfa ayarları yüklenemedi.');
+    settings = await response.json();
+  } catch (error) {
+    $('#home-sections').innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message || 'Ana sayfa ayarları yüklenemedi.')}</p></div>`;
+    return;
+  }
   const raw = settings.homepage_sections;
   let sections = window.normalizeHomepageSections ? window.normalizeHomepageSections(raw) : (() => {
     let parsed = raw;
@@ -1796,6 +1803,16 @@ async function renderHome(app) {
     try { const ps = shuffleArray(await api('/photos')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
   }
 
+  async function renderRealsSection() {
+    const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Öne Çıkan Reals</div><a href="/reals" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-reals" class="video-list-grid"></div></div>`;
+    const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
+    try {
+      const reals = await api('/reals');
+      const el = $('#home-reals');
+      el.innerHTML = reals.length ? reals.slice(0, 6).map(realsProfileCardHTML).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-circle-play"></i><p>Henüz Reals yok.</p></div>';
+    } catch {}
+  }
+
   async function renderVideosSection() {
     const html = `<div class="section home-video-section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Önerilen Videolar</div><a href="/video" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-videos" class="video-list-grid"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
@@ -1849,6 +1866,7 @@ async function renderHome(app) {
     fotograflar: renderPhotosSection,
     magaza: renderShopSection,
     playlistler: renderPlaylistsSection,
+    reals: renderRealsSection,
     videolar: renderVideosSection
   };
 
@@ -3511,7 +3529,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
         </div>
 
         <!-- İçerik -->
-        <div class="ebook-page-content" id="ebook-content" style="font-size:${fontSize}px">
+        <div class="ebook-page-content ${isOwner ? 'book-owner-content' : 'book-reader-content'}" id="ebook-content" style="font-size:${fontSize}px">
           ${page.image_url ? `<img src="${escHtml(page.image_url)}" class="ebook-page-image" alt="" />` : ''}
           <div class="book-title-heading">${escHtml(page.title)}</div>
           <div class="book-text">${escHtml(page.content.trim())}</div>
@@ -6053,9 +6071,18 @@ async function renderSettingsSection(section) {
           <p class="settings-help">Kilitli sohbetlerine hangi yollardan erişebileceğini seç. Arama koduyla açılan sohbetler yalnızca bu sayfa açıkken görünür; sayfayı yenilediğinde tekrar kilitlenir.</p>
           <label class="profile-visibility-option">
             <span class="profile-visibility-icon"><i class="fas fa-lock-open"></i></span>
-            <span><b>Kilit simgesiyle aç</b><small>Kilit simgesinden şifre girerek kilitli sohbetleri görüntüle.</small></span>
+            <span><b>Kilit simgesiyle aç</b><small>Ayarlarında belirlediğin ayrı kilit simgesi şifresiyle kilitli sohbetlerini görüntüle.</small></span>
             <input type="checkbox" id="dm-lock-icon-enabled" ${lockSettings.icon_unlock_enabled ? 'checked' : ''} />
           </label>
+          <div class="form-group" style="margin-top:16px">
+            <label for="dm-lock-icon-current">${lockSettings.has_icon_code ? 'Mevcut kilit simgesi şifresi' : 'Kilit simgesi şifresi'}</label>
+            ${lockSettings.has_icon_code ? '<input id="dm-lock-icon-current" type="password" autocomplete="current-password" placeholder="Değişiklik için mevcut şifre" />' : '<small class="field-hint">Kilitli konuşma şifrelerinden farklı, yalnızca kilit simgesinden açmak için kullanılır.</small>'}
+            <input id="dm-lock-icon-new" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="${lockSettings.has_icon_code ? 'Yeni şifre (değiştirmek için)' : 'Yeni şifre (en az 4 karakter)'}" style="margin-top:8px" />
+            <input id="dm-lock-icon-confirm" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="Yeni şifreyi tekrar girin" style="margin-top:8px" />
+            <button type="button" class="btn btn-outline btn-sm" id="save-dm-icon-code" style="margin-top:8px"><i class="fas fa-key"></i> ${lockSettings.has_icon_code ? 'Kilit Simgesi Şifresini Değiştir' : 'Kilit Simgesi Şifresi Oluştur'}</button>
+            ${lockSettings.has_icon_code ? '<button type="button" class="btn btn-ghost btn-sm" id="forgot-dm-icon-code" style="margin-top:8px">Kilidi Unuttum</button>' : ''}
+            <div id="dm-icon-code-msg" class="form-error mt-4"></div>
+          </div>
           <label class="profile-visibility-option">
             <span class="profile-visibility-icon"><i class="fas fa-magnifying-glass"></i></span>
             <span><b>Kişi arama koduyla aç</b><small>Mesajlar sayfasındaki arama alanına özel kodu yazıp Enter'a bas.</small></span>
@@ -6092,6 +6119,70 @@ async function renderSettingsSection(section) {
         message.textContent = error.message;
         button.disabled = false;
       }
+    });
+    $('#save-dm-icon-code')?.addEventListener('click', async () => {
+      const message = $('#dm-icon-code-msg');
+      const nextCode = $('#dm-lock-icon-new').value;
+      if (nextCode.length < 4 || nextCode.length > 64) {
+        message.textContent = 'Yeni kilit simgesi şifresi 4-64 karakter arasında olmalıdır.';
+        return;
+      }
+      if (nextCode !== $('#dm-lock-icon-confirm').value) {
+        message.textContent = 'Yeni şifreler eşleşmiyor.';
+        return;
+      }
+      const button = $('#save-dm-icon-code');
+      button.disabled = true;
+      try {
+        await api('/me/dm-lock-settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            current_icon_code: $('#dm-lock-icon-current')?.value || '',
+            icon_code: nextCode
+          })
+        });
+        toast(lockSettings.has_icon_code ? 'Kilit simgesi şifresi değiştirildi' : 'Kilit simgesi şifresi oluşturuldu');
+        renderSettingsSection('dm-lock');
+      } catch (error) {
+        message.textContent = error.message;
+        button.disabled = false;
+      }
+    });
+    $('#forgot-dm-icon-code')?.addEventListener('click', () => {
+      showModal('Kilit Simgesi Şifresini Sıfırla', `
+        <p style="margin-bottom:12px">Mevcut şifre olmadan yeni bir kilit simgesi şifresi oluşturulacak. Bu hesaptaki kilitli sohbetler kilitten çıkarılacak ve sohbet şifreleri temizlenecek. <strong>Mesajlar silinmeyecek.</strong></p>
+        <div class="form-group"><label for="dm-forgot-icon-new">Yeni şifre</label><input id="dm-forgot-icon-new" type="password" minlength="4" maxlength="64" autocomplete="new-password" /></div>
+        <div class="form-group"><label for="dm-forgot-icon-confirm">Yeni şifreyi tekrar girin</label><input id="dm-forgot-icon-confirm" type="password" minlength="4" maxlength="64" autocomplete="new-password" /></div>
+        <div id="dm-forgot-icon-error" class="form-error mt-4"></div>
+        <div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn btn-primary" id="dm-forgot-icon-submit" style="flex:1">Sohbet Kilitlerini Temizle ve Yeni Şifre Oluştur</button><button type="button" class="btn btn-outline" id="dm-forgot-icon-cancel">Vazgeç</button></div>
+      `);
+      $('#dm-forgot-icon-cancel').onclick = hideModal;
+      $('#dm-forgot-icon-submit').onclick = async () => {
+        const button = $('#dm-forgot-icon-submit');
+        const nextCode = $('#dm-forgot-icon-new').value;
+        const errorEl = $('#dm-forgot-icon-error');
+        if (nextCode.length < 4 || nextCode.length > 64) {
+          errorEl.textContent = 'Yeni şifre 4-64 karakter arasında olmalıdır.';
+          return;
+        }
+        if (nextCode !== $('#dm-forgot-icon-confirm').value) {
+          errorEl.textContent = 'Yeni şifreler eşleşmiyor.';
+          return;
+        }
+        button.disabled = true;
+        try {
+          const result = await api('/me/dm-lock-settings', {
+            method: 'PUT',
+            body: JSON.stringify({ icon_code: nextCode, forgot_icon_code: true, icon_unlock_enabled: true })
+          });
+          hideModal();
+          toast(`Yeni şifre oluşturuldu; ${result.unlocked_conversation_count} kilitli sohbet kilitten çıkarıldı. Mesajlar silinmedi.`);
+          renderSettingsSection('dm-lock');
+        } catch (error) {
+          errorEl.textContent = error.message;
+          button.disabled = false;
+        }
+      };
     });
   } else if (section === 'notifications') {
     el.innerHTML = `
@@ -7345,7 +7436,7 @@ async function renderMessages(app, targetUsername) {
     try {
       await api('/conversations/unlock-search', { method: 'POST', body: JSON.stringify({ code }) });
       dmSearchUnlockCode = code;
-      dmSearchUnlockedConvs = await api('/conversations/hidden');
+      dmSearchUnlockedConvs = await api('/conversations/hidden', { headers: { 'X-DM-Search-Code': code } });
       input.value = '';
       renderInboxList();
       toast(dmSearchUnlockedConvs.length ? 'Kilitli sohbetler bu sayfa yenilenene kadar açıldı' : 'Açılacak kilitli sohbet yok');
@@ -7356,7 +7447,7 @@ async function renderMessages(app, targetUsername) {
 
   // Hidden toggle
   document.getElementById('dm-hidden-toggle-btn')?.addEventListener('click', () => {
-    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için şifreni gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Şifre" autocomplete="off" autocapitalize="none" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
+    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için Sohbet Kilidi ayarlarında belirlediğin kilit simgesi şifresini gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Kilit simgesi şifresi" autocomplete="off" autocapitalize="none" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
     $('#dm-global-unlock-btn')?.addEventListener('click', async () => {
       const button = $('#dm-global-unlock-btn');
       const password = $('#dm-global-unlock-pass')?.value || '';
@@ -9402,7 +9493,9 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     updateVolIcon(Math.round(savedVol * 100));
     volSlider.addEventListener('input', e => {
       const v = parseInt(e.target.value);
-      setMediaVolume(v / 100);
+      const volume = v / 100;
+      audio.volume = volume;
+      setMediaVolume(volume);
       updateVolIcon(v);
     });
   }
