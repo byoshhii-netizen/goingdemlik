@@ -56,9 +56,12 @@ SITE_URL=https://cigcig.xyz
 APP_SECRET=<en az 32 karakterlik rastgele uygulama sirri>
 RESEND_API_KEY=re_<Resend API anahtari>
 EMAIL_FROM=CigCig <noreply@alanadiniz.com>
+OPENAI_API_KEY=<OpenAI API anahtari>
 ```
 
 Not: R2 ve Cloudinary anahtarlarini bu dosyaya veya git reposuna gercek degerleriyle yazmayin. Railway Variables uzerinden girin.
+
+Müzik sözlerini OpenAI Whisper ile otomatik çıkarmak için `OPENAI_API_KEY` değişkenini de Railway Variables alanına ekleyin. Bu özellik kullanıldığında seçilen ses dosyası OpenAI'a gönderilir; anahtar tanımlı değilse otomatik söz çıkarma çalışmaz.
 
 ## E-posta ve 2 asamali dogrulama
 

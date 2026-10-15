@@ -741,6 +741,17 @@ const upload = multer({
     }
   }
 });
+const lyricsTranscriptionUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const audioExtensions = ['.aac', '.flac', '.m4a', '.mp3', '.mp4', '.mpeg', '.mpga', '.oga', '.ogg', '.wav', '.webm'];
+    if (file.mimetype.startsWith('audio/') || audioExtensions.includes(path.extname(file.originalname || '').toLowerCase())) return cb(null, true);
+    const error = new Error('Sözleri çıkarmak için bir ses dosyası seçin.');
+    error.status = 400;
+    cb(error);
+  }
+});
 
 // VMB arşivi, görsel/video/ses dışında belge ve arşiv dosyalarını da kabul eder.
 // Yönetim kontrolü upload route'unda yapılır; bu middleware diğer yüklemeleri etkilemez.
@@ -5761,12 +5772,77 @@ app.get('/api/artist/my-application', authMiddleware, async (req, res) => {
 });
 
 // Müzik yükleme (sadece artist)
+function parseTimedLyrics(value) {
+  if (value == null || value === '') return [];
+  let segments;
+  try {
+    segments = typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    throw new Error('Zamanlı şarkı sözleri geçersiz biçimde gönderildi.');
+  }
+  if (!Array.isArray(segments) || segments.length > 5000) {
+    throw new Error('Zamanlı şarkı sözleri geçersiz biçimde gönderildi.');
+  }
+  let totalTextLength = 0;
+  return segments.map(segment => {
+    const start = Number(segment?.start);
+    const end = Number(segment?.end);
+    const text = String(segment?.text || '').trim();
+    totalTextLength += text.length;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || end > 86400 || !text || text.length > 2000) {
+      throw new Error('Zamanlı şarkı sözlerinde geçersiz satır var.');
+    }
+    if (totalTextLength > 200000) throw new Error('Şarkı sözleri çok uzun.');
+    return { start, end, text };
+  });
+}
+
+app.post('/api/songs/transcribe', authMiddleware, uploadLimiter, lyricsTranscriptionUpload.single('audio'), async (req, res) => {
+  if (await denyIfRestricted(req, res, 'music')) return;
+  if (!req.file) return res.status(400).json({ error: 'Önce şarkı ses dosyasını seçin.' });
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(503).json({ error: 'Otomatik söz çıkarma şu an yapılandırılmamış. Sunucuya OPENAI_API_KEY eklenmeli.' });
+  }
+
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([req.file.buffer], { type: req.file.mimetype }), path.basename(req.file.originalname || 'song-audio.mp3'));
+    form.append('model', 'whisper-1');
+    form.append('response_format', 'verbose_json');
+    form.append('timestamp_granularities[]', 'segment');
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+      body: form,
+      signal: AbortSignal.timeout(120000)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('Song transcription provider error:', response.status, result.error?.message || 'Unknown error');
+      return res.status(502).json({ error: result.error?.message || 'Sözler otomatik çıkarılamadı.' });
+    }
+    const segments = parseTimedLyrics((result.segments || []).map(segment => ({
+      start: segment.start,
+      end: segment.end,
+      text: segment.text
+    })));
+    const lyrics = String(result.text || segments.map(segment => segment.text).join('\n')).trim();
+    if (!lyrics) return res.status(422).json({ error: 'Ses dosyasında çıkarılabilecek söz bulunamadı.' });
+    res.json({ lyrics, segments });
+  } catch (error) {
+    console.error('Song transcription failed:', error);
+    res.status(error.name === 'TimeoutError' ? 504 : 502).json({
+      error: error.name === 'TimeoutError' ? 'Söz çıkarma zaman aşımına uğradı. Tekrar deneyin.' : (error.message || 'Sözler otomatik çıkarılamadı.')
+    });
+  }
+});
+
 app.post('/api/songs', authMiddleware, upload.fields([
   { name: 'audio', maxCount: 1 },
   { name: 'cover', maxCount: 1 }
 ]), async (req, res) => {
   if (await denyIfRestricted(req, res, 'music')) return;
-  const { song_type, title, artist_name, distributor, genre, lyrics, share_reason, rules_accepted } = req.body;
+  const { song_type, title, artist_name, distributor, genre, lyrics, lyrics_timed, share_reason, rules_accepted } = req.body;
   // Kendi müziği için artist rozeti zorunlu, başkasının müziği için değil
   if ((song_type === 'own' || !song_type) && !req.user.is_artist) {
     return res.status(403).json({ error: 'Kendi müziğini yüklemek için artist rozeti gerekli' });
@@ -5774,13 +5850,15 @@ app.post('/api/songs', authMiddleware, upload.fields([
   if (!rules_accepted) return res.status(400).json({ error: 'Kuralları kabul etmelisiniz' });
   if (!title || !artist_name) return res.status(400).json({ error: 'Başlık ve sanatçı adı gerekli' });
   if (!req.files?.audio?.[0]) return res.status(400).json({ error: 'Ses dosyası gerekli' });
+  let timedLyrics;
+  try { timedLyrics = parseTimedLyrics(lyrics_timed); } catch (error) { return res.status(400).json({ error: error.message }); }
   let audio_url = '', cover_url = '';
   try { audio_url = await handleUpload(req.files.audio[0]); } catch (e) { return res.status(500).json({ error: 'Ses yüklenemedi: ' + e.message }); }
   if (req.files?.cover?.[0]) { try { cover_url = await handleUpload(req.files.cover[0]); } catch {} }
   const { rows } = await query(
-    `INSERT INTO songs (uploader_id, song_type, title, artist_name, distributor, genre, lyrics, cover_url, audio_url, share_reason, slug)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'tmp') RETURNING id`,
-    [req.user.id, song_type || 'own', title, artist_name, distributor || '', genre || '', lyrics || '', cover_url, audio_url, share_reason || '']
+    `INSERT INTO songs (uploader_id, song_type, title, artist_name, distributor, genre, lyrics, lyrics_timed, cover_url, audio_url, share_reason, slug)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,'tmp') RETURNING id`,
+    [req.user.id, song_type || 'own', title, artist_name, distributor || '', genre || '', lyrics || '', JSON.stringify(timedLyrics), cover_url, audio_url, share_reason || '']
   );
   const id = rows[0].id;
   const slug = makeSongSlug(title, id);
@@ -5805,7 +5883,7 @@ app.get('/api/songs', async (req, res) => {
   if (artist && !q) { params.push(`%${artist}%`); where += ` AND s.artist_name ILIKE $${params.length}`; }
   if (distributor && !q) { params.push(`%${distributor}%`); where += ` AND s.distributor ILIKE $${params.length}`; }
   const { rows } = await query(
-    `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url,
+    `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url, s.lyrics, s.lyrics_timed,
             s.remastered_audio_url, s.play_count, s.slug, s.song_type, s.published_at, s.share_reason,
             u.username as uploader, u.avatar as uploader_avatar
     FROM songs s JOIN users u ON s.uploader_id=u.id AND COALESCE(u.is_deleted,0)=0
@@ -5906,15 +5984,22 @@ app.put('/api/songs/:id', authMiddleware, upload.fields([
   if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   const song = rows[0];
   if (song.uploader_id !== req.user.id) return res.status(403).json({ error: 'Bu müziği düzenleme yetkiniz yok' });
-  const { title, artist_name, genre, lyrics, share_reason, distributor } = req.body;
+  const { title, artist_name, genre, lyrics, lyrics_timed, share_reason, distributor } = req.body;
+  const lyricsValue = lyrics ?? song.lyrics;
+  let timedLyrics;
+  try {
+    timedLyrics = lyrics_timed != null
+      ? parseTimedLyrics(lyrics_timed)
+      : (lyricsValue !== song.lyrics ? [] : parseTimedLyrics(song.lyrics_timed || []));
+  } catch (error) { return res.status(400).json({ error: error.message }); }
   let audio_url = song.audio_url, cover_url = song.cover_url;
   if (req.files?.audio?.[0]) { try { audio_url = await handleUpload(req.files.audio[0]); } catch {} }
   if (req.files?.cover?.[0]) { try { cover_url = await handleUpload(req.files.cover[0]); } catch {} }
   await query(
-    `UPDATE songs SET title=$1, artist_name=$2, genre=$3, lyrics=$4, share_reason=$5,
-     distributor=$6, audio_url=$7, cover_url=$8 WHERE id=$9`,
+    `UPDATE songs SET title=$1, artist_name=$2, genre=$3, lyrics=$4, lyrics_timed=$5::jsonb, share_reason=$6,
+     distributor=$7, audio_url=$8, cover_url=$9 WHERE id=$10`,
     [title || song.title, artist_name || song.artist_name, genre ?? song.genre,
-     lyrics ?? song.lyrics, share_reason ?? song.share_reason,
+     lyricsValue, JSON.stringify(timedLyrics), share_reason ?? song.share_reason,
      distributor ?? song.distributor, audio_url, cover_url, song.id]
   );
   await logAction(req.user.username, 'edit_song', song.slug);
@@ -5934,6 +6019,7 @@ app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
   if (req.files?.cover?.[0]) { try { cover_url = await handleUpload(req.files.cover[0]); } catch {} }
   await query(
     `UPDATE songs SET title=$1, artist_name=$2, distributor=$3, genre=$4, lyrics=$5,
+     lyrics_timed=CASE WHEN $5 IS DISTINCT FROM lyrics THEN '[]'::jsonb ELSE lyrics_timed END,
      play_count=$6, status=$7, audio_url=$8, cover_url=$9 WHERE id=$10`,
     [title || song.title, artist_name || song.artist_name, distributor ?? song.distributor,
      genre ?? song.genre, lyrics ?? song.lyrics, parseInt(play_count) || song.play_count,
@@ -6213,7 +6299,7 @@ app.get('/api/playlists/:id', optionalAuth, async (req, res) => {
     const isOwner = !!req.user && String(pl[0].user_id) === String(req.user.id);
     if (!pl[0].is_public && !isOwner) return res.status(404).json({ error: 'Playlist bulunamadı' });
     const { rows: songs } = await query(
-      `SELECT ps.id as ps_id, ps.position, s.id, s.slug, s.title, s.artist_name, s.cover_url, s.audio_url, s.play_count
+      `SELECT ps.id as ps_id, ps.position, s.id, s.slug, s.title, s.artist_name, s.cover_url, s.audio_url, s.play_count, s.lyrics, s.lyrics_timed
        FROM playlist_songs ps
        JOIN songs s ON s.id = ps.song_id
        WHERE ps.playlist_id = $1 AND s.status = 'active'

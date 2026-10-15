@@ -12,8 +12,9 @@ const isRemoteDatabase = Boolean(
   !process.env.DATABASE_URL.includes('127.0.0.1')
 );
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+const connectionString = process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim() ? String(process.env.DATABASE_URL).trim() : '';
+const pool = connectionString ? new Pool({
+  connectionString,
   max: Number(process.env.PGPOOL_MAX || 10),
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
@@ -22,9 +23,12 @@ const pool = new Pool({
     : isRemoteDatabase
       ? { rejectUnauthorized: true }
       : false,
-});
+}) : null;
 
-async function query(text, params) {
+async function query(text, params = []) {
+  if (!pool) {
+    return { rows: [], rowCount: 0, command: text };
+  }
   const client = await pool.connect();
   try {
     return await client.query(text, params);
@@ -34,6 +38,10 @@ async function query(text, params) {
 }
 
 async function initDb() {
+  if (!pool) {
+    console.log('CigCig local demo mode: database disabled, app will run without PostgreSQL.');
+    return true;
+  }
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
@@ -80,12 +88,6 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname_changes INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS nickname_change_reset_at TIMESTAMP;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_changes INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username_change_reset_at TIMESTAMP;
-    UPDATE users SET nickname=username WHERE nickname IS NULL OR BTRIM(nickname)='';
     UPDATE users SET tag_permission='everyone' WHERE tag_permission IS NULL OR tag_permission='';
 
     CREATE TABLE IF NOT EXISTS follows (
@@ -240,8 +242,7 @@ async function initDb() {
       ('vmb_founder', 'VMB Kurucusu'),
       ('vmb_image_url', '/vmb-emblem.svg'),
       ('vmb_files', '[]'),
-      ('photo_song_clip_seconds', '30'),
-      ('content_count_combined', '0')
+      ('photo_song_clip_seconds', '30')
     ON CONFLICT (key) DO NOTHING;
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
@@ -584,8 +585,6 @@ async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     ALTER TABLE group_members ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
-    ALTER TABLE group_members ADD COLUMN IF NOT EXISTS inbox_muted_until TIMESTAMP;
-    ALTER TABLE group_members ADD COLUMN IF NOT EXISTS inbox_mute_forever INTEGER DEFAULT 0;
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
     UPDATE groups SET visibility=CASE WHEN type='private' THEN 'private' WHEN invite_only=1 THEN 'invite' ELSE 'public' END WHERE visibility IS NULL OR visibility='';
 
@@ -922,16 +921,6 @@ async function initDb() {
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user2 TIMESTAMP;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user1 INTEGER DEFAULT 0;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user2 INTEGER DEFAULT 0;
-    CREATE TABLE IF NOT EXISTS dm_user_settings (
-      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      search_code_hash TEXT DEFAULT '',
-      search_unlock_enabled INTEGER DEFAULT 0,
-      icon_unlock_enabled INTEGER DEFAULT 1,
-      icon_code_hash TEXT DEFAULT '',
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS icon_code_hash TEXT DEFAULT '';
-    UPDATE dm_user_settings SET icon_unlock_enabled=0 WHERE COALESCE(icon_code_hash,'')='';
     CREATE TABLE IF NOT EXISTS voice_calls (
       id UUID PRIMARY KEY,
       caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1247,6 +1236,7 @@ async function initDb() {
       distributor TEXT DEFAULT '',
       genre TEXT DEFAULT '',
       lyrics TEXT DEFAULT '',
+      lyrics_timed JSONB NOT NULL DEFAULT '[]'::jsonb,
       cover_url TEXT DEFAULT '',
       audio_url TEXT NOT NULL,
       share_reason TEXT DEFAULT '',
@@ -1260,6 +1250,7 @@ async function initDb() {
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS remastered_audio_url TEXT DEFAULT '';
+    ALTER TABLE songs ADD COLUMN IF NOT EXISTS lyrics_timed JSONB NOT NULL DEFAULT '[]'::jsonb;
 
     CREATE TABLE IF NOT EXISTS song_recommendations (
       id BIGSERIAL PRIMARY KEY,

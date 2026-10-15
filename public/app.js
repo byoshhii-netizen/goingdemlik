@@ -305,7 +305,7 @@ function openAvatarCrop(file, onApply) {
   }, 'image/jpeg', 0.92));
 }
 
-function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initialFilter = 'none', onApply } = {}) {
+function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initialFilter = 'none', onApply, onCancel } = {}) {
   if (!file || !file.type.startsWith('image/')) return;
   const url = URL.createObjectURL(file);
   const canvasWidth = aspect === 9 / 16 ? 360 : 420;
@@ -351,8 +351,9 @@ function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initia
   canvas.addEventListener('pointerup', () => { dragging = false; });
   canvas.addEventListener('pointercancel', () => { dragging = false; });
   const cleanup = () => { URL.revokeObjectURL(url); hideModal(); };
-  $('#media-editor-cancel').addEventListener('click', cleanup);
+  $('#media-editor-cancel').addEventListener('click', () => { cleanup(); onCancel?.(); });
   $('#media-editor-apply').addEventListener('click', () => canvas.toBlob(blob => {
+    if (!blob) return toast('Görsel düzenlenemedi.', 'error');
     URL.revokeObjectURL(url);
     hideModal();
     onApply?.(new File([blob], file.name.replace(/\.[^.]+$/, '') + '-duzenlenmis.jpg', { type: 'image/jpeg' }), filter);
@@ -584,6 +585,54 @@ async function apiForm(path, formData, method = 'POST') {
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
   if (!res.ok) throw new Error(data.error || 'Hata');
   return data;
+}
+
+async function transcribeSongFile(file) {
+  if (!file) throw new Error('Önce şarkının ses dosyasını seçin.');
+  const form = new FormData();
+  form.append('audio', file);
+  return apiForm('/songs/transcribe', form);
+}
+
+function getTimedLyrics(song) {
+  let segments = song?.lyrics_timed || [];
+  if (typeof segments === 'string') {
+    try { segments = JSON.parse(segments); } catch { segments = []; }
+  }
+  if (!Array.isArray(segments)) return [];
+  return segments.filter(segment =>
+    Number.isFinite(Number(segment?.start)) &&
+    Number.isFinite(Number(segment?.end)) &&
+    Number(segment.end) > Number(segment.start) &&
+    String(segment.text || '').trim()
+  );
+}
+
+function lyricsLinesHTML(lyrics, segments) {
+  if (segments.length) {
+    return segments.map((segment, index) =>
+      `<div class="song-lyric-line" data-index="${index}" data-start="${Number(segment.start)}" data-end="${Number(segment.end)}">${escHtml(segment.text)}</div>`
+    ).join('');
+  }
+  return escHtml(lyrics || '');
+}
+
+function updateLyricsHighlight(root, time) {
+  if (!root) return;
+  const lines = root.querySelectorAll('.song-lyric-line');
+  let activeIndex = -1;
+  lines.forEach((line, index) => {
+    const active = time >= Number(line.dataset.start) && time < Number(line.dataset.end);
+    line.classList.toggle('active', active);
+    if (active) activeIndex = index;
+  });
+  if (activeIndex >= 0 && root.dataset.activeIndex !== String(activeIndex)) {
+    root.dataset.activeIndex = String(activeIndex);
+    const bounds = root.getBoundingClientRect();
+    if (bounds.top < window.innerHeight && bounds.bottom > 0) {
+      lines[activeIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
 }
 
 function apiFormWithTimeout(path, formData, timeout = 120000) {
@@ -9303,6 +9352,8 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
 
   const title = song?.title || '', artist = song?.artist_name || '', cover = song?.cover_url || '';
+  let miniLyrics = getTimedLyrics(song);
+  let miniLyricsText = String(song?.lyrics || '');
 
   const autoShuffleActive = playerAutoShuffle ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
   const repeatActive = playerRepeatOne ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
@@ -9339,10 +9390,39 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
         <button class="gplayer-vol-btn" id="gp-vol-btn" type="button" title="Ses düzeyini kapat veya aç"><i class="fas fa-volume-up"></i></button>
         <input type="range" class="gplayer-vol-slider" id="gp-vol" min="0" max="100" value="80" step="1" title="Ses seviyesi" />
       </div>
+      <button class="gplayer-btn gplayer-lyrics-toggle" id="gp-lyrics-toggle" type="button" title="Şarkı sözlerini aç" aria-label="Şarkı sözlerini aç" disabled><i class="fas fa-align-left"></i></button>
       <button class="gplayer-close" id="gp-close" type="button" title="Oynatıcıyı kapat" aria-label="Oynatıcıyı kapat"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="gplayer-lyrics-panel" id="gp-lyrics-panel">
+      <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
+      <div class="song-lyrics-text song-lyrics-timed" id="gp-lyrics-content"></div>
     </div>`;
   player.style.display = 'block';
   document.getElementById('gp-listen-together')?.addEventListener('click', () => createListeningRoomFromSong(song));
+  const lyricsButton = document.getElementById('gp-lyrics-toggle');
+  const lyricsPanel = document.getElementById('gp-lyrics-panel');
+  const renderMiniLyrics = () => {
+    const content = document.getElementById('gp-lyrics-content');
+    if (!content) return;
+    content.innerHTML = lyricsLinesHTML(miniLyricsText, miniLyrics);
+    content.classList.toggle('song-lyrics-timed', miniLyrics.length > 0);
+    lyricsButton.disabled = !miniLyricsText.trim() && !miniLyrics.length;
+  };
+  renderMiniLyrics();
+  lyricsButton.addEventListener('click', () => {
+    lyricsPanel.classList.toggle('open');
+    lyricsButton.classList.toggle('active', lyricsPanel.classList.contains('open'));
+  });
+  if (!miniLyricsText.trim() && !miniLyrics.length && slug && !song?.is_music_ad) {
+    api('/songs/' + encodeURIComponent(slug)).then(details => {
+      if (currentAudio !== audio) return;
+      miniLyrics = getTimedLyrics(details);
+      miniLyricsText = String(details.lyrics || '');
+      renderMiniLyrics();
+    }).catch(error => {
+      if (currentAudio === audio) toast(error.message || 'Şarkı sözleri yüklenemedi.', 'error');
+    });
+  }
   const savedVol = getMediaVolume();
 
   function fmtTime(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
@@ -9353,6 +9433,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     const fill = document.getElementById('gp-fill'); if(fill) fill.style.width = pct+'%';
     const seek = document.getElementById('gp-seek'); if(seek) seek.value = pct;
     const cur = document.getElementById('gp-cur'); if(cur) cur.textContent = fmtTime(audio.currentTime);
+    if (lyricsPanel?.classList.contains('open')) updateLyricsHighlight(document.getElementById('gp-lyrics-content'), audio.currentTime);
   });
 
   // Şarkı bitince: repeat one, sıradaki çal veya dur
@@ -9533,7 +9614,8 @@ async function renderMusicDetail(app, slug) {
   }
   document.title = `${song.title} – ${song.artist_name} | ${siteName}`;
   const isOwn = song.song_type === 'own';
-  const hasLyrics = !!song.lyrics?.trim();
+  const timedLyrics = getTimedLyrics(song);
+  const hasLyrics = !!song.lyrics?.trim() || timedLyrics.length > 0;
   const isUploader = currentUser && currentUser.id === song.uploader_id;
 
   app.innerHTML = `
@@ -9613,7 +9695,7 @@ async function renderMusicDetail(app, slug) {
       ${hasLyrics ? `
         <div class="song-lyrics-section">
           <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
-          <div class="song-lyrics-text">${escHtml(song.lyrics)}</div>
+          <div class="song-lyrics-text ${timedLyrics.length ? 'song-lyrics-timed' : ''}" id="detail-lyrics">${lyricsLinesHTML(song.lyrics, timedLyrics)}</div>
         </div>
       ` : ''}
     </div>
@@ -9636,6 +9718,7 @@ async function renderMusicDetail(app, slug) {
     if(fill) fill.style.width = pct + '%';
     if(seek) seek.value = pct;
     if(curEl) curEl.textContent = fmt(audio.currentTime);
+    if (timedLyrics.length) updateLyricsHighlight(document.getElementById('detail-lyrics'), audio.currentTime);
   });
   audio.addEventListener('ended', async () => {
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
@@ -9734,6 +9817,8 @@ async function renderMusicDetail(app, slug) {
   const editBtn = document.getElementById('song-edit-btn');
   if (editBtn) {
     editBtn.addEventListener('click', () => {
+      let editedTimedLyrics = getTimedLyrics(song);
+      let transcribedLyricsText = song.lyrics || '';
       showModal(`✏️ Şarkıyı Düzenle — ${escHtml(song.title)}`, `
         <div class="form-group"><label>Şarkı Adı</label><input id="ue-title" value="${escHtml(song.title)}" /></div>
         ${song.song_type === 'own' ? `
@@ -9743,7 +9828,7 @@ async function renderMusicDetail(app, slug) {
         </div>` : `
         <div class="form-group"><label>Sanatçı Adı</label><input id="ue-artist" value="${escHtml(song.artist_name)}" /></div>`}
         <div class="form-group"><label>Müzik Türü</label><input id="ue-genre" value="${escHtml(song.genre||'')}" /></div>
-        <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
+        <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea><button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="ue-transcribe"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button><small class="song-transcribe-status" id="ue-transcribe-status">Ses dosyasını seçin. Ses OpenAI Whisper'a gönderilir; sonuçları kontrol edin.</small></div>
         ${song.song_type === 'other' ? `<div class="form-group"><label>Paylaşma Sebebi</label><textarea id="ue-reason" rows="2">${escHtml(song.share_reason||'')}</textarea></div>` : ''}
         <div class="form-group"><label>Yeni Kapak Fotoğrafı (1:1 kare) <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
           <input type="file" id="ue-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
@@ -9754,6 +9839,29 @@ async function renderMusicDetail(app, slug) {
         <button class="btn btn-primary" id="ue-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
         <div id="ue-msg" style="margin-top:8px;font-size:12px;color:var(--accent-red2);text-align:center"></div>
       `);
+      document.getElementById('ue-transcribe').addEventListener('click', async event => {
+        const button = event.currentTarget;
+        const status = document.getElementById('ue-transcribe-status');
+        button.disabled = true;
+        button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Sözler çıkarılıyor...';
+        status.textContent = '';
+        try {
+          const result = await transcribeSongFile(document.getElementById('ue-audio')?.files[0]);
+          document.getElementById('ue-lyrics').value = result.lyrics;
+          transcribedLyricsText = result.lyrics;
+          editedTimedLyrics = result.segments;
+          status.textContent = `${result.segments.length} zamanlı söz satırı hazır.`;
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          button.disabled = false;
+          button.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar';
+        }
+      });
+      document.getElementById('ue-lyrics').addEventListener('input', event => {
+        if (event.target.value !== transcribedLyricsText) editedTimedLyrics = [];
+      });
+      document.getElementById('ue-audio').addEventListener('change', () => { editedTimedLyrics = []; });
       document.getElementById('ue-save').addEventListener('click', async () => {
         const btn = document.getElementById('ue-save');
         const msg = document.getElementById('ue-msg');
@@ -9763,6 +9871,7 @@ async function renderMusicDetail(app, slug) {
         fd.append('artist_name', document.getElementById('ue-artist').value.trim());
         fd.append('genre', document.getElementById('ue-genre')?.value.trim() || '');
         fd.append('lyrics', document.getElementById('ue-lyrics')?.value.trim() || '');
+        fd.append('lyrics_timed', JSON.stringify(editedTimedLyrics));
         const dist = document.getElementById('ue-dist'); if (dist) fd.append('distributor', dist.value.trim());
         const reason = document.getElementById('ue-reason'); if (reason) fd.append('share_reason', reason.value.trim());
         const coverFile = document.getElementById('ue-cover')?.files[0]; if (coverFile) fd.append('cover', await squareCoverFile(coverFile));
@@ -9950,7 +10059,7 @@ async function renderArtistPanel(app) {
           <div class="form-group"><label>Şarkı Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
           <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
+          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea><button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="s-transcribe"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button>          <small class="song-transcribe-status" id="s-transcribe-status">Ses OpenAI Whisper'a gönderilir; sonuçları kontrol et. API kullanımı ücret oluşturabilir.</small></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.own_rules)}</div>
           <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Şarkı yayınlama kurallarını okudum ve kabul ediyorum</label>
         </div>
@@ -9958,7 +10067,7 @@ async function renderArtistPanel(app) {
           <div class="form-group"><label>Şarkı Adı *</label><input id="s-title-o" /></div>
           <div class="form-group"><label>Şarkı Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover-o" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
+          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea><button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="s-transcribe-o"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button>          <small class="song-transcribe-status" id="s-transcribe-status-o">Ses OpenAI Whisper'a gönderilir; sonuçları kontrol et. API kullanımı ücret oluşturabilir.</small></div>
           <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.other_rules)}</div>
@@ -9975,6 +10084,41 @@ async function renderArtistPanel(app) {
     document.getElementById('own-fields').style.display = own ? '' : 'none';
     document.getElementById('other-fields').style.display = own ? 'none' : '';
   }));
+
+  let ownTimedLyrics = [], otherTimedLyrics = [];
+  const bindTranscribe = (buttonId, audioId, lyricsId, statusId, onTranscript) => {
+    const button = document.getElementById(buttonId);
+    const lyricsField = document.getElementById(lyricsId);
+    const status = document.getElementById(statusId);
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Sözler çıkarılıyor...';
+      status.textContent = '';
+      try {
+        const result = await transcribeSongFile(document.getElementById(audioId)?.files[0]);
+        lyricsField.value = result.lyrics;
+        onTranscript(result);
+        status.textContent = `${result.segments.length} zamanlı söz satırı hazır. Kaydedince çalma sırasında vurgulanır.`;
+      } catch (error) {
+        status.textContent = error.message;
+      } finally {
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar';
+      }
+    });
+    lyricsField.addEventListener('input', () => {
+      if (lyricsField.value !== lyricsField.dataset.transcribedText) onTranscript(null);
+    });
+    document.getElementById(audioId).addEventListener('change', () => onTranscript(null));
+  };
+  bindTranscribe('s-transcribe', 's-audio', 's-lyrics', 's-transcribe-status', result => {
+    ownTimedLyrics = result?.segments || [];
+    document.getElementById('s-lyrics').dataset.transcribedText = result?.lyrics || '';
+  });
+  bindTranscribe('s-transcribe-o', 's-audio-o', 's-lyrics-o', 's-transcribe-status-o', result => {
+    otherTimedLyrics = result?.segments || [];
+    document.getElementById('s-lyrics-o').dataset.transcribedText = result?.lyrics || '';
+  });
 
   document.getElementById('song-upload-btn').addEventListener('click', async () => {
     const isOwn = document.getElementById('st-own').checked;
@@ -9995,6 +10139,7 @@ async function renderArtistPanel(app) {
       fd.append('distributor', document.getElementById('s-distributor')?.value.trim()||'');
       fd.append('genre', document.getElementById('s-genre')?.value.trim()||'');
       fd.append('lyrics', document.getElementById('s-lyrics')?.value.trim()||'');
+      fd.append('lyrics_timed', JSON.stringify(ownTimedLyrics));
       fd.append('audio', audio);
       const cover = document.getElementById('s-cover')?.files[0]; if(cover) fd.append('cover', await squareCoverFile(cover));
     } else {
@@ -10005,6 +10150,7 @@ async function renderArtistPanel(app) {
       if (!audio) { msg.style.color='var(--accent-red2)'; msg.textContent='Ses dosyası gerekli'; return; }
       fd.append('title', title); fd.append('artist_name', artist);
       fd.append('lyrics', document.getElementById('s-lyrics-o')?.value.trim()||'');
+      fd.append('lyrics_timed', JSON.stringify(otherTimedLyrics));
       fd.append('share_reason', document.getElementById('s-reason')?.value.trim()||'');
       fd.append('audio', audio);
       const cover = document.getElementById('s-cover-o')?.files[0]; if(cover) fd.append('cover', await squareCoverFile(cover));
@@ -10065,6 +10211,8 @@ async function renderShareSong(app) {
         <div class="form-group">
           <label>Şarkı Sözleri (isteğe bağlı)</label>
           <textarea id="ss-lyrics" rows="5" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea>
+          <button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="ss-transcribe"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button>
+          <small class="song-transcribe-status" id="ss-transcribe-status">Ses OpenAI Whisper'a gönderilir; sonuçları kontrol et. API kullanımı ücret oluşturabilir.</small>
         </div>
         <div class="form-group">
           <label>Neden paylaşıyorsunuz? *</label>
@@ -10085,6 +10233,32 @@ async function renderShareSong(app) {
       </div>
     </div>
   </div>`;
+
+  let shareTimedLyrics = [];
+  let transcribedShareLyrics = '';
+  document.getElementById('ss-transcribe').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const status = document.getElementById('ss-transcribe-status');
+    button.disabled = true;
+    button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Sözler çıkarılıyor...';
+    status.textContent = '';
+    try {
+      const result = await transcribeSongFile(document.getElementById('ss-audio').files[0]);
+      document.getElementById('ss-lyrics').value = result.lyrics;
+      transcribedShareLyrics = result.lyrics;
+      shareTimedLyrics = result.segments;
+      status.textContent = `${result.segments.length} zamanlı söz satırı hazır.`;
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar';
+    }
+  });
+  document.getElementById('ss-lyrics').addEventListener('input', event => {
+    if (event.target.value !== transcribedShareLyrics) shareTimedLyrics = [];
+  });
+  document.getElementById('ss-audio').addEventListener('change', () => { shareTimedLyrics = []; });
 
   document.getElementById('ss-submit').addEventListener('click', async () => {
     const msg = document.getElementById('ss-msg');
@@ -10111,6 +10285,7 @@ async function renderShareSong(app) {
     fd.append('artist_name', artist);
     fd.append('genre', genre);
     fd.append('lyrics', lyrics);
+    fd.append('lyrics_timed', JSON.stringify(shareTimedLyrics));
     fd.append('share_reason', reason);
     fd.append('audio', audio);
     if (cover) fd.append('cover', await squareCoverFile(cover));
@@ -10949,7 +11124,15 @@ async function renderMyPlaylists(app) {
 }
 
 function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave, coverUrl = '') {
-  showModal(mode === 'create' ? 'Yeni playlist' : 'Playlisti düzenle', `
+  let selectedCover = null;
+  let removeCover = false;
+  let formName = name || '';
+  let formDescription = desc || '';
+  let formIsPublic = isPublic;
+  let coverPreviewUrl = coverUrl;
+
+  const renderForm = () => {
+    showModal(mode === 'create' ? 'Yeni playlist' : 'Playlisti düzenle', `
     <div class="pl-editor">
       <div class="pl-editor-intro">
         <div class="pl-editor-kicker">${mode === 'create' ? 'MÜZİK KÜTÜPHANEN' : 'PLAYLİST AYARLARI'}</div>
@@ -10958,33 +11141,33 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
       </div>
 
       <div class="pl-cover-picker" id="plm-cover-picker" tabindex="0" role="button">
-        <div class="pl-cover-preview ${coverUrl ? 'has-image' : ''}" id="plm-cover-preview">
-          ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>`}
+        <div class="pl-cover-preview ${coverPreviewUrl ? 'has-image' : ''}" id="plm-cover-preview">
+          ${coverPreviewUrl ? `<img src="${escHtml(coverPreviewUrl)}" alt="" />` : `<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>`}
         </div>
         <div class="pl-cover-copy">
           <strong>Kapak görseli</strong>
-          <span>JPG, PNG veya WEBP · en fazla 8 MB</span>
-          <em id="plm-cover-status">${coverUrl ? 'Görseli değiştirmek için tıkla' : 'Bir görsel seç'}</em>
+          <span>JPG, PNG veya WEBP · en fazla 8 MB · seçince kare kadrajı ayarlayabilirsin</span>
+          <em id="plm-cover-status">${coverPreviewUrl ? (selectedCover ? 'Kırpılmış görsel hazır' : 'Görseli değiştirmek için tıkla') : 'Bir görsel seç'}</em>
         </div>
         <i class="fas fa-camera pl-cover-camera"></i>
         <input type="file" id="plm-cover" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden />
       </div>
-      ${coverUrl ? `<button type="button" class="pl-cover-remove" id="plm-cover-remove"><i class="fas fa-trash-alt"></i> Kapağı kaldır</button>` : ''}
+      ${coverPreviewUrl ? `<button type="button" class="pl-cover-remove" id="plm-cover-remove"><i class="fas fa-trash-alt"></i> Kapağı kaldır</button>` : ''}
 
       <div class="form-group pl-name-field">
         <label for="plm-name">Playlist adı <span>*</span></label>
-        <input id="plm-name" value="${escHtml(name||'')}" placeholder="Örn. Gece yolculuğu" autocomplete="off" />
+        <input id="plm-name" value="${escHtml(formName)}" placeholder="Örn. Gece yolculuğu" autocomplete="off" />
       </div>
 
       <div class="form-group pl-description-field">
         <label for="plm-desc">Açıklama <small>İsteğe bağlı</small></label>
-        <textarea id="plm-desc" rows="2" placeholder="Bu listeyi özel yapan ne?">${escHtml(desc||'')}</textarea>
+        <textarea id="plm-desc" rows="2" placeholder="Bu listeyi özel yapan ne?">${escHtml(formDescription)}</textarea>
       </div>
 
       <label class="pl-visibility-card" for="plm-public">
         <span class="pl-visibility-icon"><i class="fas fa-globe"></i></span>
         <span class="pl-visibility-copy"><strong>Herkese açık</strong><small>Linke sahip olan herkes görebilir ve kendi playlistine ekleyebilir.</small></span>
-        <span class="pl-switch"><input type="checkbox" id="plm-public" ${isPublic ? 'checked' : ''} /><span></span></span>
+        <span class="pl-switch"><input type="checkbox" id="plm-public" ${formIsPublic ? 'checked' : ''} /><span></span></span>
       </label>
       <div class="pl-private-note"><i class="fas fa-lock"></i> Gizli yaptığında playlist, linki olan kişiler dahil başkalarına görünmez.</div>
 
@@ -10993,72 +11176,74 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
     </div>
   `);
 
-  let selectedCover = null;
-  let removeCover = false;
-  const coverInput = document.getElementById('plm-cover');
-  const coverPicker = document.getElementById('plm-cover-picker');
-  const coverPreview = document.getElementById('plm-cover-preview');
-  const coverStatus = document.getElementById('plm-cover-status');
-  const refreshCoverPreview = (src, label) => {
-    coverPreview.classList.toggle('has-image', !!src);
-    coverPreview.innerHTML = src ? `<img src="${escHtml(src)}" alt="" />` : '<span class="pl-cover-placeholder"><i class="fas fa-image" aria-hidden="true"></i></span>';
-    if (coverStatus) coverStatus.textContent = label;
-  };
-  coverPicker?.addEventListener('click', () => coverInput?.click());
-  coverPicker?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); coverInput?.click(); } });
-  coverInput?.addEventListener('change', () => {
-    const file = coverInput.files?.[0];
-    if (!file) return;
-    selectedCover = file;
-    removeCover = false;
-    const url = URL.createObjectURL(file);
-    refreshCoverPreview(url, file.name);
-    document.getElementById('plm-cover-remove')?.remove();
-  });
-  document.getElementById('plm-cover-remove')?.addEventListener('click', e => {
-    e.preventDefault();
-    selectedCover = null;
-    removeCover = true;
-    if (coverInput) coverInput.value = '';
-    refreshCoverPreview('', 'Bir görsel seç');
-  });
+    const coverInput = document.getElementById('plm-cover');
+    const coverPicker = document.getElementById('plm-cover-picker');
+    coverPicker?.addEventListener('click', () => coverInput?.click());
+    coverPicker?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); coverInput?.click(); } });
+    coverInput?.addEventListener('change', () => {
+      const file = coverInput.files?.[0];
+      if (!file) return;
+      formName = document.getElementById('plm-name').value;
+      formDescription = document.getElementById('plm-desc').value;
+      formIsPublic = document.getElementById('plm-public').checked;
+      openMediaEditor(file, {
+        title: 'Playlist kapağını ayarla',
+        aspect: 1,
+        onApply: croppedFile => {
+          selectedCover = croppedFile;
+          coverPreviewUrl = URL.createObjectURL(croppedFile);
+          removeCover = false;
+          renderForm();
+        },
+        onCancel: renderForm
+      });
+    });
+    document.getElementById('plm-cover-remove')?.addEventListener('click', e => {
+      e.preventDefault();
+      selectedCover = null;
+      removeCover = true;
+      coverPreviewUrl = '';
+      renderForm();
+    });
 
-  document.getElementById('plm-save')?.addEventListener('click', async () => {
-    const n = document.getElementById('plm-name').value.trim();
-    const d = document.getElementById('plm-desc').value.trim();
-    const isPublicValue = document.getElementById('plm-public').checked;
-    const msg = document.getElementById('plm-msg');
-    const btn = document.getElementById('plm-save');
-    if (!n) { msg.textContent = 'Playlist adı zorunlu'; return; }
-    btn.disabled = true;
-    try {
-      let payload;
-      if (selectedCover) {
-        payload = new FormData();
-        payload.append('name', n);
-        payload.append('description', d);
-        payload.append('is_public', String(isPublicValue));
-        payload.append('cover', selectedCover);
-        if (mode === 'edit' && removeCover) payload.append('remove_cover', 'true');
-      } else {
-        payload = { name: n, description: d, is_public: isPublicValue };
-        if (mode === 'edit' && (removeCover || coverUrl)) payload.cover_url = removeCover ? '' : coverUrl;
-      }
-      if (mode === 'create') {
-        await (payload instanceof FormData
-          ? apiForm('/playlists', payload)
-          : api('/playlists', { method: 'POST', body: JSON.stringify(payload) }));
-        toast('Playlist oluşturuldu!');
-      } else {
-        await (payload instanceof FormData
-          ? apiForm('/playlists/' + plId, payload, 'PUT')
-          : api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify(payload) }));
-        toast('Playlist güncellendi!');
-      }
-      hideModal();
-      if (onSave) onSave();
-    } catch(err) { msg.textContent = err.message; btn.disabled = false; }
-  });
+    document.getElementById('plm-save')?.addEventListener('click', async () => {
+      const n = document.getElementById('plm-name').value.trim();
+      const d = document.getElementById('plm-desc').value.trim();
+      const isPublicValue = document.getElementById('plm-public').checked;
+      const msg = document.getElementById('plm-msg');
+      const btn = document.getElementById('plm-save');
+      if (!n) { msg.textContent = 'Playlist adı zorunlu'; return; }
+      btn.disabled = true;
+      try {
+        let payload;
+        if (selectedCover) {
+          payload = new FormData();
+          payload.append('name', n);
+          payload.append('description', d);
+          payload.append('is_public', String(isPublicValue));
+          payload.append('cover', selectedCover);
+          if (mode === 'edit' && removeCover) payload.append('remove_cover', 'true');
+        } else {
+          payload = { name: n, description: d, is_public: isPublicValue };
+          if (mode === 'edit' && (removeCover || coverUrl)) payload.cover_url = removeCover ? '' : coverUrl;
+        }
+        if (mode === 'create') {
+          await (payload instanceof FormData
+            ? apiForm('/playlists', payload)
+            : api('/playlists', { method: 'POST', body: JSON.stringify(payload) }));
+          toast('Playlist oluşturuldu!');
+        } else {
+          await (payload instanceof FormData
+            ? apiForm('/playlists/' + plId, payload, 'PUT')
+            : api('/playlists/' + plId, { method: 'PUT', body: JSON.stringify(payload) }));
+          toast('Playlist güncellendi!');
+        }
+        hideModal();
+        if (onSave) onSave();
+      } catch(err) { msg.textContent = err.message; btn.disabled = false; }
+    });
+  };
+  renderForm();
 }
 
 // ===== PLAYLİST DETAY =====
