@@ -3097,6 +3097,17 @@ async function renderSettings(main) {
           <div id="s-photo-song-clip-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card">
+        <div class="card-header"><span><i class="fas fa-book-open" style="color:var(--red2);margin-right:8px"></i>Kitap Okuma Yazı Tipi</span></div>
+        <div class="card-body">
+          <div class="form-group"><label>Okuyucuda kullanılacak yazı tipi</label><select id="s-book-reader-font">
+            ${['Georgia', 'Palatino', 'Literata', 'Merriweather'].map(font => `<option value="${font}" ${(settings['book_reader_font'] || 'Georgia') === font ? 'selected' : ''}>${font}</option>`).join('')}
+          </select></div>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Seçim, kitap okuma sayfalarında ziyaretçilere uygulanır.</small>
+          <button class="btn btn-primary" id="s-book-reader-font-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Yazı tipini kaydet</button>
+          <div id="s-book-reader-font-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card adm-feature-card">
         <div class="card-header"><span><i class="fas fa-chart-simple" style="color:var(--red2);margin-right:8px"></i>Profil İçerik Sayısı</span><span class="adm-setting-status ${settings['content_count_combined']==='1'?'is-on':''}">${settings['content_count_combined']==='1'?'AÇIK':'KAPALI'}</span></div>
         <div class="card-body">
@@ -3386,7 +3397,8 @@ async function renderSettings(main) {
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Ayar kaydedilemedi');
       toast('Kaydedildi');
-    } catch(e) { if(msgEl) msgEl.textContent=e.message; }
+      return true;
+    } catch(e) { if(msgEl) msgEl.textContent=e.message; return false; }
   }
 
   document.getElementById('s-photo-song-clip-save')?.addEventListener('click', async () => {
@@ -3401,6 +3413,14 @@ async function renderSettings(main) {
     await saveSetting('photo_song_clip_seconds', String(seconds), msg);
     msg.style.color = 'var(--green)';
     msg.textContent = `✓ Fotoğraf müziği ${seconds} saniye olarak kaydedildi.`;
+  });
+
+  document.getElementById('s-book-reader-font-save')?.addEventListener('click', async () => {
+    const select = document.getElementById('s-book-reader-font');
+    const msg = document.getElementById('s-book-reader-font-msg');
+    if (!await saveSetting('book_reader_font', select.value, msg)) return;
+    msg.style.color = 'var(--green)';
+    msg.textContent = '✓ Kitap yazı tipi kaydedildi.';
   });
 
   document.getElementById('s-light-theme-save')?.addEventListener('click', async () => {

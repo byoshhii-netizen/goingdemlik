@@ -998,6 +998,8 @@ function renderRoute(fullPath) {
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
   document.body.classList.toggle('messages-page', path === '/mesajlar');
   document.body.classList.toggle('reals-page', path === '/reals' || path.startsWith('/reals/'));
+  document.body.classList.toggle('home-page', path === '/');
+  document.body.classList.toggle('music-list-page', path === '/muzikler');
   updateNavActive(path);
   // Mesaj başlığı/sohbet ekranında footer gizlenir; genel mesaj listesi sabit kalır.
   const siteFooter = document.getElementById('site-footer');
@@ -1177,10 +1179,7 @@ async function renderRealsFeed(app, initialId = null) {
     });
   }
   const followStates = new Map();
-  if (currentUser) await Promise.all(orderedReals.map(async real => {
-    if (!real.username || real.username === currentUser.username) return;
-    try { followStates.set(real.username, await api('/users/' + encodeURIComponent(real.username) + '/follow-status')); } catch {}
-  }));
+  const followRequests = new Map();
 
   document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
     try { const data = await fetch('/api/reals-settings').then(response => response.json()); showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`); } catch {}
@@ -1189,6 +1188,24 @@ async function renderRealsFeed(app, initialId = null) {
   let watchedIds = new Set();
   let idx = 0;
   let items = [];
+  const loadedRealsIndices = new Set();
+  function ensureRealsFollowState(item) {
+    const button = item?.querySelector('.reals-follow-btn');
+    const username = button?.dataset.username;
+    if (!username || !currentUser || followStates.has(username)) return;
+    if (followRequests.has(username)) return;
+    const request = api('/users/' + encodeURIComponent(username) + '/follow-status')
+      .then(state => {
+        if (followStates.has(username)) return;
+        followStates.set(username, state);
+        if (!document.body.contains(item)) return;
+        const followButton = item.querySelector('.reals-follow-btn');
+        if (followButton) followButton.textContent = state.following ? 'Takiptesin' : state.pending ? 'İstek gönderildi' : 'Takip et';
+      })
+      .catch(() => {})
+      .finally(() => followRequests.delete(username));
+    followRequests.set(username, request);
+  }
   async function openRealsComments(video, isAd = false) {
     const commentBase = isAd ? '/reals-ads/' + encodeURIComponent(video.id) : '/video/' + encodeURIComponent(video.id);
     const activeVideo = items[idx]?.querySelector('video');
@@ -1270,13 +1287,14 @@ async function renderRealsFeed(app, initialId = null) {
   }
 
   function renderItems() {
+    loadedRealsIndices.clear();
     listEl.innerHTML = feedItems.map(r => {
       if (r.isRealsAd) {
         const site = normalizeExternalUrl(r.site_url || '#');
         return `
       <div class="reals-item reals-ad-item" data-id="ad-${r.id}" data-ad-id="${r.id}" data-video-url="${escHtml(r.video_url)}">
         <div class="reals-video-box reals-ad-box">
-        <video class="reals-video reals-ad-video" preload="auto" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
+        <video class="reals-video reals-ad-video" preload="none" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1294,7 +1312,7 @@ async function renderRealsFeed(app, initialId = null) {
       return `
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
         <div class="reals-video-box">
-        <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
+        <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
@@ -1316,7 +1334,11 @@ async function renderRealsFeed(app, initialId = null) {
       </div>`;
     }).join('');
     items = Array.from(document.querySelectorAll('.reals-item'));
-    const getFeedItem = item => feedItems.find(feedItem => String(feedItem.isRealsAd ? `ad-${feedItem.id}` : feedItem.id) === item.dataset.id);
+    const feedItemByKey = new Map(feedItems.map(feedItem => [
+      String(feedItem.isRealsAd ? `ad-${feedItem.id}` : feedItem.id),
+      feedItem
+    ]));
+    const getFeedItem = item => feedItemByKey.get(item?.dataset.id);
     items.forEach(it => {
       const video = getFeedItem(it);
       const likeButton = it.querySelector('.like-btn');
@@ -1430,8 +1452,10 @@ async function renderRealsFeed(app, initialId = null) {
 
   function showIndex(i, shouldScroll = true) {
     if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
+    if (i === idx && loadedRealsIndices.has(i)) return;
     const previousId = items[idx]?.dataset.id;
     if (previousId && i !== idx && !items[idx]?.dataset.adId) watchedIds.add(Number(previousId));
+    const previousIdx = idx;
     idx = i;
     activeRealsAudio?.pause();
     activeRealsAudio = null;
@@ -1441,33 +1465,50 @@ async function renderRealsFeed(app, initialId = null) {
       history.replaceState({}, '', '/reals/' + encodeURIComponent(activeRealId));
     }
     if (shouldScroll) listEl.scrollTo({ top: i * listEl.clientHeight, behavior: 'smooth' });
-    items.forEach((it, j) => {
+    for (const j of [...loadedRealsIndices]) {
+      if (Math.abs(j - idx) <= 1) continue;
+      const video = items[j]?.querySelector('video');
+      if (video) {
+        setRealsVideoSource(video, '');
+        video.pause();
+        video.currentTime = 0;
+        video.muted = true;
+      }
+      loadedRealsIndices.delete(j);
+    }
+    for (let j = Math.max(0, idx - 1); j <= Math.min(items.length - 1, idx + 1); j++) {
+      const it = items[j];
+      if (!it) continue;
       it.classList.toggle('is-active', j === idx);
       const vid = it.querySelector('video');
       const videoUrl = it.dataset.videoUrl;
-      if (Math.abs(j - idx) <= 1) {
-        setRealsVideoSource(vid, videoUrl);
-        vid.muted = realsMuted || j !== idx;
-        if (j === idx) {
-          const viewPromise = it.dataset.adId
-            ? api('/reals-ads/' + it.dataset.adId + '/view', { method: 'POST' })
-            : api('/video/' + it.dataset.id + '/view', { method: 'POST' });
-          viewPromise.catch(() => {});
-          vid.play().catch(() => {});
-          if (!realsMuted && !it.dataset.adId && it.dataset.songAudio) {
-            activeRealsAudio = trackMediaAudio(new Audio(it.dataset.songAudio));
-            activeRealsAudio.currentTime = Number(it.dataset.songStart) || 0;
-            activeRealsAudio.loop = true;
-            activeRealsAudio.play().catch(() => {});
-          }
-        }
-      } else {
-        setRealsVideoSource(vid, '');
+      setRealsVideoSource(vid, videoUrl);
+      loadedRealsIndices.add(j);
+      ensureRealsFollowState(it);
+      if (j !== idx) {
         vid.pause();
-        vid.currentTime = 0;
         vid.muted = true;
+        continue;
       }
-    });
+      vid.muted = realsMuted;
+      const viewPromise = it.dataset.adId
+        ? api('/reals-ads/' + it.dataset.adId + '/view', { method: 'POST' })
+        : api('/video/' + it.dataset.id + '/view', { method: 'POST' });
+      viewPromise.catch(() => {});
+      vid.play().catch(() => {});
+      if (!realsMuted && !it.dataset.adId && it.dataset.songAudio) {
+        activeRealsAudio = trackMediaAudio(new Audio(it.dataset.songAudio));
+        activeRealsAudio.currentTime = Number(it.dataset.songStart) || 0;
+        activeRealsAudio.loop = true;
+        activeRealsAudio.play().catch(() => {});
+      }
+    }
+    if (previousIdx !== idx) {
+      const previousItem = items[previousIdx];
+      if (previousItem && previousIdx >= Math.max(0, idx - 1) && previousIdx <= Math.min(items.length - 1, idx + 1)) {
+        previousItem.querySelector('video')?.pause();
+      }
+    }
   }
 
   renderItems();
@@ -1485,14 +1526,22 @@ async function renderRealsFeed(app, initialId = null) {
   });
 
   let scrollFrame = null;
+  let scrollEndTimer = null;
+  const settleRealsScroll = () => {
+    clearTimeout(scrollEndTimer);
+    scrollEndTimer = null;
+    const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(listEl.scrollTop / Math.max(1, listEl.clientHeight))));
+    if (nextIndex !== idx) showIndex(nextIndex, false);
+  };
   listEl.addEventListener('scroll', () => {
     if (scrollFrame) return;
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = null;
-      const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(listEl.scrollTop / Math.max(1, listEl.clientHeight))));
-      if (nextIndex !== idx) showIndex(nextIndex, false);
+      clearTimeout(scrollEndTimer);
+      scrollEndTimer = setTimeout(settleRealsScroll, 160);
     });
   }, { passive: true });
+  listEl.addEventListener('scrollend', settleRealsScroll, { passive: true });
   window.addEventListener('keydown', e => {
     if (location.pathname !== '/reals') return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); showIndex(idx+1); }
@@ -5899,7 +5948,7 @@ async function renderProfile(app, username) {
       ${books.length ? `<div class="grid-3">${books.map(b => bookCardHTML(b)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
     </div>
     <div id="tab-photos" class="hidden">
-      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="${escHtml(photo.title || photo.caption || 'Fotoğraf')}" />${photo.title ? `<span>${escHtml(photo.title)}</span>` : ''}</a>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
+      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
@@ -6272,13 +6321,27 @@ async function renderSettingsSection(section) {
             }
           </div>
           ${isBlocked ? '' : `
-          <div class="form-group"><label>Yeni Kullanıcı Adı</label><input type="text" id="new-username" placeholder="3-30 karakter, harf/rakam/alt çizgi" maxlength="30" /></div>
+          <div class="form-group"><label>Yeni Kullanıcı Adı</label><input type="text" id="new-username" placeholder="3-30 karakter, harf/rakam/alt çizgi" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" /></div>
           <button class="btn btn-primary" id="save-username-btn">Kullanıcı Adını Değiştir</button>
           <div id="username-msg" class="form-error mt-4"></div>
           `}
         </div>
       </div>`;
     if (!isBlocked) {
+      const usernameInput = $('#new-username');
+      usernameInput?.addEventListener('beforeinput', event => {
+        if (event.data && /\s/.test(event.data)) event.preventDefault();
+      });
+      usernameInput?.addEventListener('input', () => {
+        const originalValue = usernameInput.value;
+        const caret = usernameInput.selectionStart;
+        const cleaned = originalValue.replace(/\s/g, '');
+        if (cleaned !== originalValue) {
+          usernameInput.value = cleaned;
+          const nextCaret = originalValue.slice(0, caret).replace(/\s/g, '').length;
+          usernameInput.setSelectionRange(nextCaret, nextCaret);
+        }
+      });
       $('#save-username-btn').addEventListener('click', async () => {
         const val = ($('#new-username').value || '').trim();
         if (!val) { $('#username-msg').textContent = 'Kullanıcı adı zorunlu'; return; }
@@ -7448,6 +7511,13 @@ async function init() {
       const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
       document.documentElement.style.setProperty('--book-text', luminance > 0.5 ? '#2c1a0e' : '#f5f0e8');
     }
+    const bookFontFamilies = {
+      Georgia: "'Georgia', serif",
+      Palatino: "'Palatino Linotype', 'Book Antiqua', serif",
+      Literata: "'Literata', Georgia, serif",
+      Merriweather: "'Merriweather', Georgia, serif"
+    };
+    document.documentElement.style.setProperty('--book-reader-font', bookFontFamilies[ps.book_reader_font] || bookFontFamilies.Georgia);
     const brandSpan = document.querySelector('.nav-brand span');
     if (brandSpan) brandSpan.textContent = siteName;
     const footer = document.getElementById('site-footer');
@@ -7832,7 +7902,7 @@ async function renderMessages(app, targetUsername) {
         </div>
       </div>
       <div class="dm-search-wrap">
-        <input id="dm-search" type="text" placeholder="${dmLockSettings.search_unlock_enabled ? 'Kişi ara veya özel kod yaz...' : 'Ara...'}" class="dm-search" />
+        <input id="dm-search" type="text" placeholder="Kişi ara..." class="dm-search" />
       </div>
       <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
         <div class="dm-hidden-panel-content">
@@ -9451,6 +9521,7 @@ async function renderMusicList(app) {
 
   let songs = [];
   let userPlaylists = [];
+  let hasAttemptedResumeRestore = false;
   if (currentUser) {
     try { userPlaylists = await api('/playlists'); } catch {}
   }
@@ -9490,6 +9561,10 @@ async function renderMusicList(app) {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
       songs = await api(url);
       songs.sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
+      if (!hasAttemptedResumeRestore) {
+        hasAttemptedResumeRestore = true;
+        restoreSavedMusicPlayback(songs);
+      }
       if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok.</p></div>'; return; }
       el.innerHTML = `<div class="music-table">
         <div class="music-table-header">
@@ -9537,7 +9612,13 @@ async function renderMusicList(app) {
           showAddToPlaylistMenu(btn.dataset.songId, btn.parentElement);
         });
       });
-    } catch(err) { el.innerHTML = `<div class="empty-state"><p>${escHtml(err.message)}</p></div>`; }
+    } catch(err) {
+      if (!hasAttemptedResumeRestore) {
+        hasAttemptedResumeRestore = true;
+        restoreSavedMusicPlayback(songs);
+      }
+      el.innerHTML = `<div class="empty-state"><p>${escHtml(err.message)}</p></div>`;
+    }
   };
 
   loadSongs();
@@ -9554,6 +9635,7 @@ let currentQueue = [];         // [{id, slug, title, artist_name, cover_url, aud
 let currentQueueIndex = -1;
 const MUSIC_AUTO_SHUFFLE_KEY = 'cigcig_music_auto_shuffle';
 const MUSIC_REPEAT_ONE_KEY = 'cigcig_music_repeat_one';
+const MUSIC_RESUME_KEY = 'cigcig_music_resume';
 let playerAutoShuffle = localStorage.getItem(MUSIC_AUTO_SHUFFLE_KEY) === '1';
 let playerRepeatOne = localStorage.getItem(MUSIC_REPEAT_ONE_KEY) === '1';
 let musicAdBypass = false;
@@ -9561,6 +9643,63 @@ let guestMusicSongCount = 0;
 let listeningRoom = null;
 let listeningRoomPoll = null;
 let listeningInternalOpen = false;
+
+function readSavedMusicPlayback() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MUSIC_RESUME_KEY) || 'null');
+    return saved && (saved.type === 'song' || saved.type === 'ad') ? saved : null;
+  } catch {
+    localStorage.removeItem(MUSIC_RESUME_KEY);
+    return null;
+  }
+}
+
+function clearSavedMusicPlayback() {
+  localStorage.removeItem(MUSIC_RESUME_KEY);
+}
+
+function saveMusicPlayback(audio, force = false) {
+  if (!audio?.musicResume || audio.dataset.listeningTrackId || audio.ended) return;
+  const now = Date.now();
+  if (!force && now - (audio.musicResume.lastSavedAt || 0) < 1500) return;
+  audio.musicResume.lastSavedAt = now;
+  localStorage.setItem(MUSIC_RESUME_KEY, JSON.stringify({
+    ...audio.musicResume,
+    currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    wasPlaying: !audio.paused,
+    lastSavedAt: now
+  }));
+}
+
+function bindMusicPlaybackPersistence(audio) {
+  audio.addEventListener('timeupdate', () => saveMusicPlayback(audio));
+  audio.addEventListener('pause', () => saveMusicPlayback(audio, true));
+  audio.addEventListener('play', () => saveMusicPlayback(audio, true));
+  audio.addEventListener('ended', clearSavedMusicPlayback);
+}
+
+function restoreSavedMusicPlayback(songs = []) {
+  if (!document.body.classList.contains('music-list-page') || currentAudio) return;
+  const saved = readSavedMusicPlayback();
+  if (!saved) return;
+  if (saved.type === 'ad' && saved.ad?.audio_url && saved.ad.id) {
+    playMusicAd(saved.ad, null, Number(saved.currentTime) || 0, { autoplay: false, restore: true });
+    return;
+  }
+  const song = songs.find(track => track.slug === saved.slug) || (songs.length === 0 ? saved.song : null);
+  if (!song?.slug || !song.audio_url) return;
+  const availableAudioUrls = [song.audio_url, song.remastered_audio_url]
+    .filter(Boolean)
+    .map(url => new URL(url, location.origin).href);
+  const candidateUrl = saved.audio_url ? new URL(saved.audio_url, location.origin).href : '';
+  const resumeUrl = availableAudioUrls.includes(candidateUrl) ? candidateUrl : song.audio_url;
+  openMiniPlayer(resumeUrl, song.slug, { ...song, audio_url: resumeUrl }, undefined, undefined, {
+    autoplay: false,
+    skipPendingAd: true,
+    countPlay: false,
+    startAt: Number(saved.currentTime) || 0
+  });
+}
 
 async function playGuestMusicAdIfDue(onComplete) {
   guestMusicSongCount += 1;
@@ -9580,23 +9719,34 @@ document.addEventListener('visibilitychange', () => {
   document.querySelectorAll('video').forEach(video => video.pause());
 });
 
-function playMusicAd(ad, onComplete) {
+function playMusicAd(ad, onComplete, startAt = 0, options = {}) {
   if (currentAudio) { currentAudio.pause(); currentAudio = null; }
   let player = document.getElementById('global-music-player');
   if (!player) { player = document.createElement('div'); player.id = 'global-music-player'; document.body.appendChild(player); }
   player.classList.add('music-ad-player');
   const audio = trackMediaAudio(new Audio(ad.audio_url));
   currentAudio = audio;
-  player.innerHTML = `<div class="gplayer-inner" style="justify-content:center">
-    <div class="gplayer-info" style="flex:0 1 460px">
+  audio.musicResume = { type: 'ad', ad: { id: ad.id, audio_url: ad.audio_url, title: ad.title, cover_url: ad.cover_url, site_url: ad.site_url } };
+  bindMusicPlaybackPersistence(audio);
+  player.innerHTML = `<div class="gplayer-inner music-ad-inner">
+    <div class="gplayer-info">
       ${ad.cover_url ? `<img src="${escHtml(ad.cover_url)}" class="gplayer-cover" />` : `<div class="gplayer-cover gplayer-cover-ph"><i class="fas fa-bullhorn"></i></div>`}
       <div style="min-width:0;flex:1"><div class="gplayer-title">Reklam · ${escHtml(ad.title)}</div><div class="gplayer-artist">Sponsorlu içerik</div></div>
-      <button id="music-ad-toggle" class="gplayer-btn gplayer-play" type="button" title="Durdur"><i class="fas fa-pause"></i></button>
-      ${ad.site_url ? `<button id="music-ad-link" class="btn btn-outline btn-sm" style="flex-shrink:0">Siteye Git</button>` : ''}
+    </div>
+    <div class="gplayer-controls">
+      <button id="music-ad-toggle" class="gplayer-btn gplayer-play" type="button" title="${options.autoplay === false ? 'Devam et' : 'Durdur'}"><i class="fas fa-${options.autoplay === false ? 'play' : 'pause'}"></i></button>
+      ${ad.site_url ? `<button id="music-ad-link" class="btn btn-outline btn-sm">Siteye Git</button>` : ''}
+    </div>
+    <div class="gplayer-progress-wrap">
+      <span class="gplayer-time" id="music-ad-cur">0:00</span>
+      <div class="gplayer-bar-wrap"><div class="gplayer-bar-bg"><div class="gplayer-bar-fill" id="music-ad-fill" style="width:0%"></div></div>
+        <input type="range" class="gplayer-seek" id="music-ad-seek" min="0" max="100" value="0" step="0.1" aria-label="Reklamda konum" />
+      </div>
+      <span class="gplayer-time" id="music-ad-dur">0:00</span>
     </div>
   </div>`;
   player.style.display = 'block';
-  api('/music-ads/' + ad.id + '/start', { method:'POST' }).catch(() => {});
+  if (!options.restore) api('/music-ads/' + ad.id + '/start', { method:'POST' }).catch(() => {});
   document.getElementById('music-ad-link')?.addEventListener('click', () => {
     api('/music-ads/' + ad.id + '/click', { method:'POST' }).catch(() => {});
     window.open(normalizeExternalUrl(ad.site_url), '_blank', 'noopener,noreferrer');
@@ -9610,13 +9760,35 @@ function playMusicAd(ad, onComplete) {
       btn.title='Devam Et'; btn.innerHTML='<i class="fas fa-play"></i>';
     }
   });
+  const formatTime = seconds => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+  audio.addEventListener('loadedmetadata', () => {
+    if (Number.isFinite(audio.duration)) {
+      const duration = document.getElementById('music-ad-dur');
+      if (duration) duration.textContent = formatTime(audio.duration);
+      if (startAt > 0 && startAt < audio.duration) audio.currentTime = startAt;
+    }
+  });
+  audio.addEventListener('timeupdate', () => {
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    const percent = audio.currentTime / audio.duration * 100;
+    const fill = document.getElementById('music-ad-fill');
+    const seek = document.getElementById('music-ad-seek');
+    const current = document.getElementById('music-ad-cur');
+    if (fill) fill.style.width = `${percent}%`;
+    if (seek) seek.value = percent;
+    if (current) current.textContent = formatTime(audio.currentTime);
+  });
+  document.getElementById('music-ad-seek')?.addEventListener('input', event => {
+    if (audio.duration) audio.currentTime = Number(event.target.value) / 100 * audio.duration;
+    saveMusicPlayback(audio, true);
+  });
   audio.addEventListener('ended', async () => {
     await api('/music-ads/' + ad.id + '/complete', { method:'POST' }).catch(() => {});
     currentAudio = null;
     if (onComplete) onComplete(); else player.style.display = 'none';
   });
   audio.addEventListener('error', () => toast('Reklam ses dosyası yüklenemedi. Reklam tamamlanana kadar müzik duraklatıldı.', 'error'));
-  audio.play().catch(() => toast('Reklamı başlatmak için tarayıcıda oynatmaya izin verin.', 'error'));
+  if (options.autoplay !== false) audio.play().catch(() => toast('Reklamı başlatmak için tarayıcıda oynatmaya izin verin.', 'error'));
 }
 
 async function playRandomNextTrack() {
@@ -9762,7 +9934,7 @@ async function leaveListeningRoom() {
   if (currentAudio?.dataset?.listeningTrackId) { currentAudio.pause(); currentAudio = null; }
 }
 
-function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
+function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   if (listeningRoom && !listeningInternalOpen) {
     if (listeningRoom.isOwner) {
       api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: song?.id }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
@@ -9772,11 +9944,11 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
     return;
   }
   // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
-  if (currentUser && !listeningRoomAdsDisabled() && !musicAdBypass && !song?.is_music_ad) {
+  if (!options.skipPendingAd && currentUser && !listeningRoomAdsDisabled() && !musicAdBypass && !song?.is_music_ad) {
     api('/music-ads/pending').then(result => {
-      if (result?.ad) return playMusicAd(result.ad, () => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
-      musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false;
-    }).catch(() => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex); musicAdBypass = false; });
+      if (result?.ad) return playMusicAd(result.ad, () => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true }); musicAdBypass = false; });
+      musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true }); musicAdBypass = false;
+    }).catch(() => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true }); musicAdBypass = false; });
     return;
   }
   // If queue provided, update global queue state
@@ -9800,7 +9972,22 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
   const audio = trackMediaAudio(new Audio(audioUrl));
   currentAudio = audio; currentSlug = slug;
-  fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
+  audio.musicResume = {
+    type: 'song',
+    slug,
+    audio_url: audio.src,
+    song: song ? {
+      id: song.id,
+      slug: song.slug || slug,
+      audio_url: audio.src,
+      title: song.title || '',
+      artist_name: song.artist_name || '',
+      cover_url: song.cover_url || '',
+      remastered_audio_url: song.remastered_audio_url || ''
+    } : { slug, audio_url: audioUrl }
+  };
+  bindMusicPlaybackPersistence(audio);
+  if (options.countPlay !== false) fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
 
   const title = song?.title || '', artist = song?.artist_name || '', cover = song?.cover_url || '';
   let miniLyrics = getTimedLyrics(song);
@@ -9823,7 +10010,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
         <button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i></button>
         <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı'}" aria-label="Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}"><i class="fas fa-shuffle"></i></button>
         <button class="gplayer-btn" id="gp-prev" type="button" title="Önceki şarkı"><i class="fas fa-step-backward"></i></button>
-        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="Duraklat"><i class="fas fa-pause"></i></button>
+        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="${options.autoplay === false ? 'Devam et' : 'Duraklat'}"><i class="fas fa-${options.autoplay === false ? 'play' : 'pause'}"></i></button>
         <button class="gplayer-btn" id="gp-next" type="button" title="Sonraki şarkı"><i class="fas fa-step-forward"></i></button>
         <button class="${repeatActive}" id="gp-repeat" type="button" title="${playerRepeatOne ? 'Şarkıyı tekrarla açık' : 'Şarkıyı tekrarla kapalı'}" aria-label="Şarkıyı tekrarla ${playerRepeatOne ? 'açık' : 'kapalı'}"><i class="fas fa-redo-alt"></i></button>
       </div>
@@ -9878,7 +10065,12 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
 
   function fmtTime(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
-  audio.addEventListener('loadedmetadata', () => { const el=document.getElementById('gp-dur'); if(el) el.textContent = fmtTime(audio.duration); const start=Math.max(0,Number(song?.start_seconds)||0); if(start && start < audio.duration) audio.currentTime=start; });
+  audio.addEventListener('loadedmetadata', () => {
+    const el=document.getElementById('gp-dur');
+    if(el) el.textContent = fmtTime(audio.duration);
+    const requestedStart = Number(options.startAt) || Number(song?.start_seconds) || 0;
+    if (requestedStart > 0 && requestedStart < audio.duration) audio.currentTime = requestedStart;
+  });
   audio.addEventListener('timeupdate', () => {
     const pct = audio.duration ? (audio.currentTime/audio.duration)*100 : 0;
     const fill = document.getElementById('gp-fill'); if(fill) fill.style.width = pct+'%';
@@ -9959,6 +10151,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   });
   document.getElementById('gp-seek').addEventListener('input', e => {
     if (audio.duration) audio.currentTime = (parseFloat(e.target.value)/100)*audio.duration;
+    saveMusicPlayback(audio, true);
   });
   document.getElementById('gp-close').addEventListener('click', () => {
     audio.pause(); currentAudio=null; currentQueue=[]; currentQueueIndex=-1; player.style.display='none';
@@ -10046,7 +10239,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex) {
   const detailPlay = document.getElementById('detail-play-btn');
   if (detailPlay) detailPlay.innerHTML = '<i class="fas fa-pause"></i> Durdur';
 
-  audio.play().catch(() => {});
+  if (options.autoplay !== false) audio.play().catch(() => {});
 }
 
 // Kuyrukta önceki/sonraki indeksi hesapla
@@ -10159,12 +10352,45 @@ async function renderMusicDetail(app, slug) {
   const curEl = document.getElementById('dp-cur');
   const durEl = document.getElementById('dp-dur');
   document.getElementById('detail-listen-together')?.addEventListener('click', () => createListeningRoomFromSong(song));
-  let activeVariant = 'original';
+  const savedPlayback = readSavedMusicPlayback();
+  const originalAudioUrl = new URL(song.audio_url, location.origin).href;
+  const remasteredAudioUrl = song.remastered_audio_url ? new URL(song.remastered_audio_url, location.origin).href : null;
+  const savedDetailPlayback = savedPlayback?.type === 'song' && savedPlayback.slug === song.slug
+    && [originalAudioUrl, remasteredAudioUrl].includes(savedPlayback.audio_url)
+    ? savedPlayback
+    : null;
+  if (savedDetailPlayback) audio.src = savedDetailPlayback.audio_url;
+  let activeVariant = savedDetailPlayback?.audio_url === remasteredAudioUrl ? 'remastered' : 'original';
+  audio.musicResume = {
+    type: 'song',
+    slug: song.slug,
+    audio_url: audio.src,
+    song: {
+      id: song.id,
+      slug: song.slug,
+      audio_url: audio.src,
+      title: song.title,
+      artist_name: song.artist_name,
+      cover_url: song.cover_url || '',
+      remastered_audio_url: song.remastered_audio_url || ''
+    }
+  };
+  bindMusicPlaybackPersistence(audio);
+  const remasteredToggle = document.getElementById('song-remastered-toggle');
+  if (remasteredToggle && activeVariant === 'remastered') {
+    remasteredToggle.innerHTML = '<i class="fas fa-music"></i> Orijinal versiyonu dinle';
+  }
 
   function fmt(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
-  audio.addEventListener('loadedmetadata', () => { if(durEl) durEl.textContent = fmt(audio.duration); });
+  audio.addEventListener('loadedmetadata', () => {
+    if (durEl) durEl.textContent = fmt(audio.duration);
+    const startAt = Number(savedDetailPlayback?.currentTime) || 0;
+    if (startAt > 0 && startAt < audio.duration) audio.currentTime = startAt;
+  });
   audio.addEventListener('timeupdate', () => {
+    audio.musicResume.audio_url = audio.currentSrc || audio.src;
+    audio.musicResume.song.audio_url = audio.musicResume.audio_url;
     const pct = audio.duration ? (audio.currentTime/audio.duration)*100 : 0;
     if(fill) fill.style.width = pct + '%';
     if(seek) seek.value = pct;
@@ -10180,12 +10406,13 @@ async function renderMusicDetail(app, slug) {
   });
 
   let halfCounted = false;
-  const remasteredToggle = document.getElementById('song-remastered-toggle');
   remasteredToggle?.addEventListener('click', () => {
     activeVariant = activeVariant === 'original' ? 'remastered' : 'original';
     audio.pause();
     audio.src = activeVariant === 'remastered' ? song.remastered_audio_url : song.audio_url;
     audio.load();
+    audio.musicResume.audio_url = audio.src;
+    audio.musicResume.song.audio_url = audio.src;
     halfCounted = false;
     remasteredToggle.innerHTML = activeVariant === 'remastered'
       ? '<i class="fas fa-music"></i> Orijinal versiyonu dinle'
@@ -10223,7 +10450,10 @@ async function renderMusicDetail(app, slug) {
     }
   });
 
-  seek?.addEventListener('input', e => { if(audio.duration) audio.currentTime=(parseFloat(e.target.value)/100)*audio.duration; });
+  seek?.addEventListener('input', e => {
+    if (audio.duration) audio.currentTime = (parseFloat(e.target.value) / 100) * audio.duration;
+    saveMusicPlayback(audio, true);
+  });
 
   const savedVol = getMediaVolume();
   const detailVolSlider = document.getElementById('detail-vol');
@@ -11030,7 +11260,7 @@ async function renderStoryRoute(app, storyId) {
     const currentGroupIndex = currentGroup ? currentGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id) : -1;
     document.title = '@' + story.username + ' hikayesi - ' + siteName;
     const routeStoryKey = item => String(item.public_id || item.id);
-    const navigateToStory = target => target && navigate('/hikaye/' + encodeURIComponent(routeStoryKey(target)));
+      const navigateToStory = target => target && navigate('/hikaye/' + encodeURIComponent(routeStoryKey(target)));
     app.innerHTML = `<div class="story-route-page">
       <div class="story-route-back"><a href="/fotograflar" data-link><i class="fas fa-arrow-left"></i> Hikayelere dön</a></div>
       <div class="story-route-viewer">
@@ -11066,11 +11296,86 @@ async function renderStoryRoute(app, storyId) {
     </div>`;
     api('/stories/' + encodeURIComponent(story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
     $('#story-route-prev')?.addEventListener('click', () => navigateToStory(previousStory));
-    $('#story-route-tap-prev')?.addEventListener('click', () => navigateToStory(previousStory));
     $('#story-route-next')?.addEventListener('click', () => navigateToStory(nextStory));
-    $('#story-route-tap-next')?.addEventListener('click', () => navigateToStory(nextStory));
     $('#story-route-share')?.addEventListener('click', () => shareStory(story));
-    $('#story-route-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; $('#story-route-like')?.classList.toggle('active', result.liked); $('#story-route-like i')?.classList.toggle('fas', result.liked); $('#story-route-like i')?.classList.toggle('far', !result.liked); } catch (error) { toast(error.message, 'error'); } });
+    const storyLikeButton = $('#story-route-like');
+    const storyLikeIcon = storyLikeButton?.querySelector('i');
+    const storyMedia = document.querySelector('.story-route-media');
+    let storyLikePending = false;
+    let lastStoryTapAt = 0;
+    let storyTapTimer = null;
+    let suppressStoryTapClick = false;
+    const animateStoryLike = () => {
+      const burst = document.createElement('span');
+      burst.className = 'story-route-like-burst';
+      burst.innerHTML = '<i class="fas fa-heart"></i>';
+      storyMedia?.appendChild(burst);
+      setTimeout(() => burst.remove(), 850);
+    };
+    const setStoryLiked = liked => {
+      story.liked = liked;
+      storyLikeButton?.classList.toggle('active', liked);
+      storyLikeIcon?.classList.toggle('fas', liked);
+      storyLikeIcon?.classList.toggle('far', !liked);
+    };
+    const likeStoryFromGesture = async () => {
+      animateStoryLike();
+      if (!currentUser) return;
+      if (story.liked || storyLikePending) return;
+      storyLikePending = true;
+      setStoryLiked(true);
+      try {
+        const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' });
+        story.like_count = result.like_count;
+        setStoryLiked(result.liked);
+      } catch (error) {
+        setStoryLiked(false);
+        toast(error.message, 'error');
+      } finally {
+        storyLikePending = false;
+      }
+    };
+    storyLikeButton?.addEventListener('click', async () => {
+      if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error');
+      if (storyLikePending) return;
+      storyLikePending = true;
+      try {
+        const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' });
+        story.like_count = result.like_count;
+        setStoryLiked(result.liked);
+      } catch (error) {
+        toast(error.message, 'error');
+      } finally {
+        storyLikePending = false;
+      }
+    });
+    const bindStoryTapNavigation = (selector, target) => {
+      document.querySelector(selector)?.addEventListener('click', event => {
+        event.preventDefault();
+        if (suppressStoryTapClick) {
+          suppressStoryTapClick = false;
+          return;
+        }
+        clearTimeout(storyTapTimer);
+        storyTapTimer = setTimeout(() => navigateToStory(target), 280);
+      });
+    };
+    bindStoryTapNavigation('#story-route-tap-prev', previousStory);
+    bindStoryTapNavigation('#story-route-tap-next', nextStory);
+    storyMedia?.addEventListener('pointerup', event => {
+      if (event.target.closest('.story-route-song, a')) return;
+      const now = Date.now();
+      if (now - lastStoryTapAt <= 320) {
+        lastStoryTapAt = 0;
+        clearTimeout(storyTapTimer);
+        suppressStoryTapClick = !!event.target.closest('.story-route-tap');
+        event.preventDefault();
+        event.stopPropagation();
+        likeStoryFromGesture();
+      } else {
+        lastStoryTapAt = now;
+      }
+    });
     $('#story-route-reply-open')?.addEventListener('click', event => { $('#story-route-reply').hidden = false; event.currentTarget.hidden = true; $('#story-route-reply-input')?.focus(); });
     const sendStoryReply = async () => {
       const input = $('#story-route-reply-input');
@@ -11233,7 +11538,7 @@ function bindPhotoFeed(feed) {
   });
 
   feed.querySelectorAll('.photo-delete').forEach(x => x.onclick = async e => {
-    const c = e.target.closest('[data-photo-id]');
+    const c = x.closest('[data-photo-id]');
     if (!c) return;
     if (confirm('Fotoğraf silinsin mi?')) {
       await api('/photos/' + c.dataset.photoId, { method: 'DELETE' });
@@ -11250,7 +11555,7 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-comment').forEach(x => x.onclick = async e => {
     e.preventDefault();
     e.stopPropagation();
-    const c = e.target.closest('[data-photo-id]');
+    const c = x.closest('[data-photo-id]');
     if (!c) return;
     const box = c.querySelector('.photo-comment-box');
     if (!box) return;
@@ -11273,13 +11578,13 @@ function bindPhotoFeed(feed) {
     e.stopPropagation();
     if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error');
     if (x.disabled) return;
-    const c = e.target.closest('[data-photo-id]');
+    const c = x.closest('[data-photo-id]');
     if (!c) return;
     x.disabled = true;
     try {
       const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
       const n = x.querySelector('span');
-      if (n) n.textContent = String(r.like_count ?? Math.max(0, Number(n.textContent) + (r.liked ? 1 : -1)));
+      if (n && Number.isFinite(Number(r.like_count))) n.textContent = String(r.like_count);
       const icon = x.querySelector('i');
       if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
       x.classList.toggle('liked', !!r.liked);
@@ -11326,7 +11631,7 @@ async function renderPhotoDetail(app, photoId) {
 
 function setupPhotoAudio(feed) {
   // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
-  // tıklamasıyla açılır; seçilen yerden itibaren en fazla 30 saniye çalar.
+  // tıklamasıyla açılır; seçilen yerden itibaren yönetici sınırına kadar çalar.
   photoAudioObserver?.disconnect();
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);

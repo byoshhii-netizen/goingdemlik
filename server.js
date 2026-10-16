@@ -5780,6 +5780,13 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     }
     value = String(seconds);
   }
+  if (key === 'book_reader_font') {
+    const allowedFonts = new Set(['Georgia', 'Palatino', 'Literata', 'Merriweather']);
+    if (!allowedFonts.has(String(value))) {
+      return res.status(400).json({ error: 'Geçerli bir kitap yazı tipi seçin' });
+    }
+    value = String(value);
+  }
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
   res.json({ ok: true });
@@ -5814,7 +5821,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
