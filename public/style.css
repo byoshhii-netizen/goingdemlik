@@ -2821,18 +2821,12 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .mobile-bottom-bar i { font-size: 18px; }
   body { padding-bottom: 60px; }
   #toast-container { bottom: 72px; }
-  #app.mobile-swipe-enter-next { animation: mobileSwipeEnterNext .24s cubic-bezier(.2,.75,.25,1) both; }
-  #app.mobile-swipe-enter-previous { animation: mobileSwipeEnterPrevious .24s cubic-bezier(.2,.75,.25,1) both; }
 }
 @keyframes mobileCreateBackdropIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mobileCreateMenuIn { from { opacity: 0; transform: translate(-50%, calc(-50% + 16px)) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
-@keyframes mobileSwipeEnterNext { from { opacity: .72; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
-@keyframes mobileSwipeEnterPrevious { from { opacity: .72; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
 @media (prefers-reduced-motion: reduce) {
   .mobile-create-backdrop,
-  .mobile-create-menu,
-  #app.mobile-swipe-enter-next,
-  #app.mobile-swipe-enter-previous { animation-duration: .01ms !important; }
+  .mobile-create-menu { animation-duration: .01ms !important; }
 }
 @media (min-width: 769px) {
   .mobile-bottom-bar { display: none; }

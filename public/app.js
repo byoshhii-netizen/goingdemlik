@@ -2,9 +2,8 @@ let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realtimeSocket = null;
 let realtimeSocketToken = null;
-let pendingMobileSwipeDirection = null;
-let mobileSwipeAnimationTimer = null;
 let mobileSwipeStart = null;
+let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
 let activeGroupChannelRefresh = null;
 // Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
@@ -671,8 +670,16 @@ function timeAgo(dt) {
   return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-function dmPresenceMarkup(isOnline, lastActive) {
-  if (isOnline) {
+function isDmPresenceOnline(lastActive) {
+  if (!lastActive) return false;
+  const heartbeatAt = new Date(lastActive).getTime();
+  if (!Number.isFinite(heartbeatAt)) return false;
+  const age = Date.now() - heartbeatAt;
+  return age >= -5000 && age < 30000;
+}
+
+function dmPresenceMarkup(_isOnline, lastActive) {
+  if (isDmPresenceOnline(lastActive)) {
     return '<span class="dm-presence-label is-online"><span class="dm-presence-indicator"></span>Çevrimiçi</span>';
   }
   if (!lastActive) return '<span class="dm-presence-label">Çevrimdışı</span>';
@@ -682,15 +689,16 @@ function dmPresenceMarkup(isOnline, lastActive) {
     : '<span class="dm-presence-label">Çevrimdışı</span>';
 }
 
-function updateDmPresence(root, isOnline, lastActive) {
+function updateDmPresence(root, _isOnline, lastActive) {
+  const online = isDmPresenceOnline(lastActive);
   const slot = root.querySelector('.dm-presence-slot');
-  if (slot) slot.innerHTML = dmPresenceMarkup(isOnline, lastActive);
+  if (slot) slot.innerHTML = dmPresenceMarkup(online, lastActive);
   const avatar = root.matches('.dm-presence-avatar') ? root : root.querySelector('.dm-presence-avatar');
   if (!avatar) return;
   const dot = avatar.querySelector('.dm-presence-dot');
-  if (isOnline && !dot) {
+  if (online && !dot) {
     avatar.insertAdjacentHTML('beforeend', '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>');
-  } else if (!isOnline) {
+  } else if (!online) {
     dot?.remove();
   }
 }
@@ -934,12 +942,11 @@ async function enhanceLinkPreviews(root = document) {
   }));
 }
 
-function navigate(path, push = true, swipeDirection = null) {
+function navigate(path, push = true) {
   closeMobileMenu();
   closeMobileCreateMenu();
   $('#new-dropdown')?.classList.add('hidden');
   if (push) history.pushState({}, '', path);
-  pendingMobileSwipeDirection = swipeDirection;
   // path içindeki query string'i renderRoute'a geçir
   renderRoute(path);
 }
@@ -995,17 +1002,6 @@ function renderRoute(fullPath) {
     siteFooter.style.display = (isDmChatRoute || path === '/reals') ? 'none' : '';
   }
   const app = $('#app');
-  if (pendingMobileSwipeDirection && window.matchMedia('(max-width: 768px)').matches) {
-    const animationClass = pendingMobileSwipeDirection === 'next'
-      ? 'mobile-swipe-enter-next'
-      : 'mobile-swipe-enter-previous';
-    pendingMobileSwipeDirection = null;
-    app.classList.remove('mobile-swipe-enter-next', 'mobile-swipe-enter-previous');
-    clearTimeout(mobileSwipeAnimationTimer);
-    void app.offsetWidth;
-    app.classList.add(animationClass);
-    mobileSwipeAnimationTimer = setTimeout(() => app.classList.remove(animationClass), 280);
-  }
   const segs = path.split('/').filter(Boolean);
 
   const isAuthRoute = path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path);
@@ -1524,6 +1520,7 @@ let presenceHeartbeatTimer = null;
 let presenceHeartbeatUserId = null;
 let presenceClientId = null;
 let presenceHeartbeatRequest = null;
+let sendPresenceHeartbeat = null;
 
 function syncRealtimeSocket() {
   if (!currentUser || !currentToken || typeof window.io !== 'function') {
@@ -1618,6 +1615,7 @@ function syncPresenceHeartbeat() {
     presenceHeartbeatTimer = null;
     presenceHeartbeatUserId = null;
     presenceClientId = null;
+    sendPresenceHeartbeat = null;
     return;
   }
   if (presenceHeartbeatTimer && String(presenceHeartbeatUserId) === String(currentUser.id)) return;
@@ -1626,7 +1624,7 @@ function syncPresenceHeartbeat() {
   presenceHeartbeatUserId = currentUser.id;
   presenceClientId = createPresenceClientId();
 
-  const sendHeartbeat = async () => {
+  sendPresenceHeartbeat = async () => {
     if (presenceHeartbeatRequest) return;
     if (!currentUser || !currentToken || String(currentUser.id) !== String(presenceHeartbeatUserId)) return;
     try {
@@ -1638,9 +1636,13 @@ function syncPresenceHeartbeat() {
       presenceHeartbeatRequest = null;
     }
   };
-  sendHeartbeat();
-  presenceHeartbeatTimer = setInterval(sendHeartbeat, 15000);
+  sendPresenceHeartbeat();
+  presenceHeartbeatTimer = setInterval(sendPresenceHeartbeat, 15000);
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) sendPresenceHeartbeat?.();
+});
 
 window.addEventListener('pagehide', () => {
   if (!currentToken || !presenceClientId || presenceHeartbeatRequest) return;
@@ -1770,7 +1772,7 @@ function getMobileSwipeRoute(section) {
 function shouldIgnoreMobileSwipe(target) {
   if (!(target instanceof Element)) return true;
   return Boolean(target.closest(
-    'input, textarea, select, button, [contenteditable="true"], [role="button"], ' +
+    'input, textarea, select, button, a, [contenteditable="true"], [role="button"], ' +
     '.navbar, .mobile-bottom-bar, .modal-overlay:not(.hidden), ' +
     '.mobile-new-dropdown, .mobile-books-dropdown, [data-no-swipe]'
   ));
@@ -1794,14 +1796,16 @@ document.addEventListener('touchend', event => {
   if (!mobileSwipeStart || event.changedTouches.length !== 1) return;
   const start = mobileSwipeStart;
   mobileSwipeStart = null;
-  if (start.path !== location.pathname || shouldIgnoreMobileSwipe(event.target)) return;
+  if (Date.now() - lastMobileSwipeAt < 700 || start.path !== location.pathname || shouldIgnoreMobileSwipe(event.target)) return;
 
   const touch = event.changedTouches[0];
   const deltaX = touch.clientX - start.x;
   const deltaY = touch.clientY - start.y;
   const distance = Math.abs(deltaX);
   const elapsed = Math.max(1, Date.now() - start.time);
-  if (distance < 64 || distance <= Math.abs(deltaY) * 1.25 || distance / elapsed < 0.18) return;
+  if (distance < Math.max(84, window.innerWidth * 0.17) ||
+      distance <= Math.abs(deltaY) * 1.5 ||
+      distance / elapsed < 0.3) return;
 
   const section = mobileSwipeSection(start.path);
   if (section === 'home' && deltaX > 0 && start.x < window.innerWidth - 24 && currentUser) {
@@ -1813,7 +1817,8 @@ document.addEventListener('touchend', event => {
   const currentIndex = sections.indexOf(section);
   const nextIndex = currentIndex + (deltaX < 0 ? 1 : -1);
   if (currentIndex < 0 || nextIndex < 0 || nextIndex >= sections.length) return;
-  navigate(getMobileSwipeRoute(sections[nextIndex]), true, deltaX < 0 ? 'next' : 'previous');
+  lastMobileSwipeAt = Date.now();
+  navigate(getMobileSwipeRoute(sections[nextIndex]));
 }, { passive: true });
 
 document.addEventListener('touchcancel', () => { mobileSwipeStart = null; }, { passive: true });
@@ -7722,7 +7727,7 @@ async function renderMessages(app, targetUsername) {
     const mutedUntil = c[isUser1 ? 'muted_until_user1' : 'muted_until_user2'];
     const muted = muteForever || (mutedUntil && new Date(mutedUntil) > new Date());
     return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}${muted ? ' dm-conv-muted' : ''}${dmSearchUnlockedConvs.some(hidden => String(hidden.id) === String(c.id)) ? ' dm-search-unlocked' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}" data-search-name="${escHtml((c.other_nickname || '') + ' ' + (c.other_username || ''))}">
-      <span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${c.other_is_online ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>
+      <span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
           <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong></span><span class="dm-presence-slot">${presenceHTML}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
@@ -8071,7 +8076,7 @@ async function renderDMChat(username) {
           ${hasUsableAvatar(other)
             ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
             : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
-          ${other.is_online ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}
+          ${isDmPresenceOnline(other.last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}
         </a>
         <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
