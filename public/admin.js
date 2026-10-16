@@ -681,14 +681,37 @@ async function renderDashboard(main) {
 
 // ===== USERS =====
 async function renderUsers(main) {
+  main.innerHTML = `
+    <div class="adm-section-header">
+      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-users"></i></div> Kullanıcılar</div>
+    </div>
+    <div class="invite-admin-tabs">
+      <button type="button" class="invite-admin-tab active" id="admin-users-tab-users"><i class="fas fa-users"></i> Kullanıcılar</button>
+      <button type="button" class="invite-admin-tab" id="admin-users-tab-invites"><i class="fas fa-ticket"></i> Davet Kodları</button>
+    </div>
+    <div id="admin-users-content"></div>`;
+  const content = $('#admin-users-content');
+  const usersTab = $('#admin-users-tab-users');
+  const invitesTab = $('#admin-users-tab-invites');
+  const selectTab = (tab, render) => {
+    usersTab.classList.toggle('active', tab === usersTab);
+    invitesTab.classList.toggle('active', tab === invitesTab);
+    render(content);
+  };
+  usersTab.addEventListener('click', () => selectTab(usersTab, renderUserDirectory));
+  invitesTab.addEventListener('click', () => selectTab(invitesTab, renderInviteCodes));
+  await renderUserDirectory(content);
+}
+
+async function renderUserDirectory(main) {
   let users = [];
   try { users = await adminApi('/users'); } catch (e) {
-    main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-users"></i></div> Kullanıcılar</div></div><div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2);padding:20px"><i class="fas fa-exclamation-circle"></i> ${escHtml(e.message)}</div></div>`;
     return;
   }
   main.innerHTML = `
     <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-users"></i></div> Kullanıcılar <span style="font-size:13px;font-weight:400;color:var(--text2)">(${users.length})</span></div>
+      <div style="font-size:12px;color:var(--text2)">${users.length} kullanıcı kayıtlı</div>
       <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="user-search" placeholder="Kullanıcı, e-posta, IP ara..." style="min-width:240px" /></div>
     </div>
     <div class="card">
@@ -703,6 +726,152 @@ async function renderUsers(main) {
   $('#user-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderUsersTable(users.filter(u => u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.ip||'').includes(q)));
+  });
+}
+
+async function renderInviteCodes(content) {
+  content.innerHTML = `
+    <section class="invite-manager-hero">
+      <div class="invite-manager-icon"><i class="fas fa-ticket"></i></div>
+      <div><span class="invite-manager-kicker">KAYIT TAKİBİ</span><h2>Davet kodları</h2><p>Özel kod oluştur, kayıt bağlantısını paylaş ve kod üzerinden kayıt olan hesapları IP ve tarihle takip et. Aynı bağlantı farklı kişilerce kullanılabilir; her hesap yalnızca bir kez sayılır.</p></div>
+      <span class="invite-manager-shield"><i class="fas fa-shield-halved"></i> Yalnızca yetkililer</span>
+    </section>
+    <section class="invite-create-card">
+      <div class="invite-create-heading"><div><strong>Yeni davet bağlantısı</strong><span>Kendi kodunu belirle veya benzersiz bir kodu otomatik oluştur.</span></div></div>
+      <div class="invite-create-controls">
+        <label class="invite-code-input"><span>Kendi davet kodun</span><input id="invite-code-new" maxlength="32" autocomplete="off" placeholder="Örn. CIGCIG2026" /></label>
+        <button type="button" class="btn btn-outline" id="invite-create-manual"><i class="fas fa-plus"></i> Bu kodu oluştur</button>
+        <button type="button" class="btn btn-primary" id="invite-create-auto"><i class="fas fa-wand-magic-sparkles"></i> Otomatik oluştur</button>
+      </div>
+      <div id="invite-create-error" class="form-error"></div>
+    </section>
+    <div class="invite-list-heading"><div><h3>Oluşturulan davetler</h3><span id="invite-list-count">Yükleniyor…</span></div><button type="button" class="btn btn-ghost btn-sm" id="invite-refresh"><i class="fas fa-rotate"></i> Yenile</button></div>
+    <div class="invite-code-list" id="invite-code-list"><div class="loading-center"><div class="spinner"></div></div></div>`;
+
+  const list = $('#invite-code-list');
+  const error = $('#invite-create-error');
+  const renderList = async () => {
+    list.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+    try {
+      const invites = await adminApi('/invite-codes');
+      $('#invite-list-count').textContent = `${invites.length} davet bağlantısı`;
+      list.innerHTML = invites.length ? invites.map(invite => `
+        <article class="invite-code-card">
+          <div class="invite-code-card-head">
+            <div class="invite-code-mark"><i class="fas fa-ticket"></i></div>
+            <div class="invite-code-identity"><strong>${escHtml(invite.code)}</strong><span>${formatDate(invite.created_at)} tarihinde oluşturuldu</span></div>
+            <span class="invite-status ${Number(invite.is_active) ? 'is-active' : 'is-inactive'}"><i class="fas fa-circle"></i>${Number(invite.is_active) ? 'Aktif' : 'Pasif'}</span>
+          </div>
+          <div class="invite-code-link"><i class="fas fa-link"></i><a href="${escHtml(invite.link)}" target="_blank" rel="noopener noreferrer">${escHtml(invite.link)}</a><button type="button" class="btn btn-ghost btn-xs invite-copy-btn" data-link="${escHtml(invite.link)}" title="Bağlantıyı kopyala"><i class="fas fa-copy"></i></button></div>
+          <div class="invite-code-card-footer">
+            <button type="button" class="invite-registrations-btn" data-id="${invite.id}"><i class="fas fa-user-plus"></i><strong>${Number(invite.registration_count) || 0}</strong><span>kayıt olan hesap</span></button>
+            <div class="invite-code-actions">
+              <button type="button" class="btn btn-outline btn-xs invite-toggle-btn" data-id="${invite.id}" data-active="${Number(invite.is_active) ? 1 : 0}" title="${Number(invite.is_active) ? 'Bağlantıyı devre dışı bırak' : 'Bağlantıyı etkinleştir'}"><i class="fas ${Number(invite.is_active) ? 'fa-toggle-on' : 'fa-toggle-off'}"></i> ${Number(invite.is_active) ? 'Devre dışı bırak' : 'Etkinleştir'}</button>
+              <button type="button" class="btn btn-outline btn-xs invite-edit-btn" data-id="${invite.id}" data-code="${escHtml(invite.code)}" data-active="${Number(invite.is_active) ? 1 : 0}" title="Düzenle"><i class="fas fa-pen"></i></button>
+              <button type="button" class="btn btn-danger btn-xs invite-delete-btn" data-id="${invite.id}" title="Sil"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>
+        </article>`).join('') : '<div class="invite-empty"><i class="fas fa-ticket"></i><strong>Henüz davet bağlantısı yok</strong><span>Yukarıdan bir kod belirleyerek veya otomatik oluşturarak başlayabilirsin.</span></div>';
+    } catch (requestError) {
+      $('#invite-list-count').textContent = 'Davetler yüklenemedi';
+      list.innerHTML = `<div class="invite-empty invite-empty-error"><i class="fas fa-triangle-exclamation"></i><strong>Davet bağlantıları alınamadı</strong><span>${escHtml(requestError.message)}</span></div>`;
+    }
+  };
+  const createInvite = async code => {
+    error.textContent = '';
+    try {
+      await adminApi('/invite-codes', { method: 'POST', body: JSON.stringify(code ? { code } : {}) });
+      $('#invite-code-new').value = '';
+      toast('Davet bağlantısı oluşturuldu');
+      await renderList();
+    } catch (requestError) { error.textContent = requestError.message; }
+  };
+  $('#invite-create-manual').addEventListener('click', () => {
+    const code = $('#invite-code-new').value.trim();
+    if (!code) { error.textContent = 'Önce kullanmak istediğin kodu yaz.'; return; }
+    createInvite(code);
+  });
+  $('#invite-code-new').addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); $('#invite-create-manual').click(); }
+  });
+  $('#invite-create-auto').addEventListener('click', () => createInvite(''));
+  $('#invite-refresh').addEventListener('click', renderList);
+  list.addEventListener('click', async event => {
+    const copy = event.target.closest('.invite-copy-btn');
+    const registrations = event.target.closest('.invite-registrations-btn');
+    const toggle = event.target.closest('.invite-toggle-btn');
+    const edit = event.target.closest('.invite-edit-btn');
+    const remove = event.target.closest('.invite-delete-btn');
+    if (copy) {
+      try {
+        await navigator.clipboard.writeText(copy.dataset.link);
+        toast('Davet bağlantısı kopyalandı');
+      } catch (requestError) { toast('Bağlantı kopyalanamadı: ' + requestError.message, 'error'); }
+    }
+    if (registrations) await showInviteRegistrations(registrations.dataset.id);
+    if (toggle) {
+      toggle.disabled = true;
+      try {
+        await adminApi('/invite-codes/' + toggle.dataset.id, {
+          method: 'PUT',
+          body: JSON.stringify({ is_active: toggle.dataset.active !== '1' })
+        });
+        toast(toggle.dataset.active === '1' ? 'Davet bağlantısı devre dışı bırakıldı' : 'Davet bağlantısı etkinleştirildi');
+        await renderList();
+      } catch (requestError) { toggle.disabled = false; toast(requestError.message, 'error'); }
+    }
+    if (edit) showEditInviteModal(edit.dataset.id, edit.dataset.code, edit.dataset.active === '1', renderList);
+    if (remove) {
+      if (!confirm('Bu davet bağlantısı listeden kaldırılsın mı? Bağlantı devre dışı kalır ve kod tekrar kullanılamaz.')) return;
+      remove.disabled = true;
+      try {
+        await adminApi('/invite-codes/' + remove.dataset.id, { method: 'DELETE' });
+        toast('Davet bağlantısı silindi');
+        await renderList();
+      } catch (requestError) { remove.disabled = false; toast(requestError.message, 'error'); }
+    }
+  });
+  await renderList();
+}
+
+async function showInviteRegistrations(inviteId) {
+  showModal('Davetle kayıt olanlar', '<div class="loading-center"><div class="spinner"></div></div>');
+  try {
+    const registrations = await adminApi('/invite-codes/' + inviteId + '/registrations');
+    $('#modal-body').innerHTML = registrations.length ? `
+      <div class="invite-registration-summary"><i class="fas fa-user-check"></i><span>${registrations.length} başarılı kayıt</span></div>
+      <div class="invite-registration-list">${registrations.map(registration => `
+        <article class="invite-registration-row">
+          <div class="invite-registration-user"><span class="invite-registration-avatar"><i class="fas fa-user"></i></span><div><strong>${escHtml(registration.username)}</strong><small>Hesap #${escHtml(registration.user_id)}</small></div></div>
+          <div class="invite-registration-meta"><span><i class="fas fa-calendar"></i>${formatDate(registration.registered_at)}</span><span><i class="fas fa-location-dot"></i>${escHtml(registration.registration_ip || 'IP yok')}</span></div>
+        </article>`).join('')}</div>` : '<div class="invite-empty"><i class="fas fa-user-slash"></i><strong>Henüz kayıt yok</strong><span>Bu bağlantıyla başarıyla kayıt olan hesaplar burada görünür.</span></div>';
+  } catch (requestError) {
+    $('#modal-body').innerHTML = `<div class="invite-empty invite-empty-error"><i class="fas fa-triangle-exclamation"></i><strong>Kayıtlar alınamadı</strong><span>${escHtml(requestError.message)}</span></div>`;
+  }
+}
+
+function showEditInviteModal(id, code, active, onSaved) {
+  showModal('Davet kodunu düzenle', `
+    <div class="invite-edit-intro"><i class="fas fa-ticket"></i><span>Kodu değiştirdiğinde daha önce kopyalanmış eski bağlantılar çalışmayı bırakır.</span></div>
+    <div class="form-group"><label>Davet kodu</label><input id="invite-edit-code" maxlength="32" value="${escHtml(code)}" autocomplete="off" /></div>
+    <label class="checkbox-label"><input type="checkbox" id="invite-edit-active" ${active ? 'checked' : ''} /> Bağlantı aktif</label>
+    <button type="button" class="btn btn-primary" id="invite-edit-save" style="width:100%;justify-content:center"><i class="fas fa-check"></i> Değişiklikleri kaydet</button>
+    <div id="invite-edit-error" class="form-error"></div>`);
+  $('#invite-edit-save').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await adminApi('/invite-codes/' + id, {
+        method: 'PUT',
+        body: JSON.stringify({ code: $('#invite-edit-code').value.trim(), is_active: $('#invite-edit-active').checked })
+      });
+      hideModal();
+      toast('Davet kodu güncellendi');
+      await onSaved();
+    } catch (requestError) {
+      $('#invite-edit-error').textContent = requestError.message;
+      button.disabled = false;
+    }
   });
 }
 

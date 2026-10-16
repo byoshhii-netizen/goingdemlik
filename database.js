@@ -200,6 +200,26 @@ async function initDb() {
     );
     ALTER TABLE auth_challenges ADD COLUMN IF NOT EXISTS target_value TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON auth_challenges(expires_at);
+    CREATE TABLE IF NOT EXISTS invite_codes (
+      id BIGSERIAL PRIMARY KEY,
+      code TEXT NOT NULL UNIQUE,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      deleted_at TIMESTAMP
+    );
+    CREATE TABLE IF NOT EXISTS invite_registrations (
+      id BIGSERIAL PRIMARY KEY,
+      invite_code_id BIGINT REFERENCES invite_codes(id) ON DELETE SET NULL,
+      invite_code TEXT NOT NULL,
+      user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+      username TEXT NOT NULL,
+      registration_ip TEXT NOT NULL DEFAULT '',
+      registered_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_invite_registrations_code_time
+      ON invite_registrations(invite_code_id, registered_at DESC);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
     UPDATE sessions SET expires_at=created_at + INTERVAL '30 days' WHERE expires_at IS NULL;
     ALTER TABLE sessions ALTER COLUMN expires_at SET DEFAULT (NOW() + INTERVAL '30 days');

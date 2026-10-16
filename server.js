@@ -614,7 +614,7 @@ async function adminMiddleware(req, res, next) {
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
       [/\/user\/\d+\/ad-panels/, hasAdminPermission(permissions, 'can_view_users')],
-      [/\/users/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/reals-ads/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
+      [/\/(users|invite-codes)/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/reals-ads/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
       [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
     ];
     const rule = readRules.find(([pattern]) => pattern.test(req.path));
@@ -628,6 +628,7 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
       /^\/api\/admin\/user\/\d+\/(badge|vmb)$/, /^\/api\/admin\/songs\/\d+\/ban$/,
+      /^\/api\/admin\/invite-codes(?:\/\d+(?:\/registrations)?)?$/,
       /^\/api\/admin\/badges(?:\/\d+(?:\/users(?:\/\d+)?)?)?$/,
       /^\/api\/admin\/group\/\d+\/(status|messages)$/, /^\/api\/admin\/group\/\d+$/,
       /^\/api\/admin\/reals-ads(?:\/\d+)?$/,
@@ -636,6 +637,7 @@ async function adminMiddleware(req, res, next) {
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
     if (/\/user\/\d+\/ad-panels/.test(req.path) && !hasAdminPermission(permissions, 'can_view_users')) return res.status(403).json({ error: 'Üye yönetimi yetkisi yok' });
+    if (/\/invite-codes/.test(req.path) && !hasAdminPermission(permissions, 'can_view_users')) return res.status(403).json({ error: 'Davet kodu yönetme yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
     if (/\/group\//.test(req.path) && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Grup yönetimi yalnızca ana admin yetkisindedir' });
@@ -1399,9 +1401,24 @@ app.get(/^\/vmb\/(?:dosyalar|dosyalara)(?:\/.*)?$/, async (req, res) => {
 });
 
 // ===== AUTH =====
+async function trackInviteRegistration(code, user, ip) {
+  if (!code) return false;
+  const { rows } = await query(
+    `INSERT INTO invite_registrations (invite_code_id, invite_code, user_id, username, registration_ip)
+     SELECT id, code, $2, $3, $4
+     FROM invite_codes
+     WHERE code=$1 AND is_active=1 AND deleted_at IS NULL
+     ON CONFLICT (user_id) DO NOTHING
+     RETURNING id`,
+    [code, user.id, user.username, ip || '']
+  );
+  return rows.length > 0;
+}
+
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
     const { username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const inviteCode = String(req.body.invite_code || '').trim().toUpperCase();
     const usernameValue = String(username || '').trim();
     const nicknameValue = String(nickname || '').trim().replace(/\s+/g, ' ');
     const emailAddress = String(email || '').trim().toLowerCase();
@@ -1443,6 +1460,14 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
+    if (inviteCode) {
+      if (!/^[A-Z0-9_-]{3,32}$/.test(inviteCode)) return res.status(400).json({ error: 'Davet kodu geçersiz' });
+      const { rows: inviteRows } = await query(
+        'SELECT id FROM invite_codes WHERE code=$1 AND is_active=1 AND deleted_at IS NULL',
+        [inviteCode]
+      );
+      if (!inviteRows.length) return res.status(410).json({ error: 'Bu davet bağlantısı artık aktif değil' });
+    }
     const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [usernameValue, emailAddress]);
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     let avatar = '';
@@ -1456,7 +1481,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (registrationCode) {
       const challenge = createChallengeToken();
       try {
-        await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, 'registration', 'email', hashChallengeValue(registrationCode)]);
+        await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,target_value,expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, 'registration', 'email', hashChallengeValue(registrationCode), inviteCode]);
         await sendEmailCode(emailAddress, usernameValue, registrationCode);
       } catch (error) {
         await query('DELETE FROM auth_challenges WHERE user_id=$1 AND purpose=$2', [user.id, 'registration']);
@@ -1465,6 +1490,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
       }
       return res.json({ email_verification_required: true, challenge, maskedEmail: maskEmail(email) });
     }
+    await trackInviteRegistration(inviteCode, user, ip);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(usernameValue, 'register', '', '', ip);
@@ -1547,6 +1573,9 @@ app.post('/api/auth/verify-registration-email', async (req, res) => {
     if (!record || record.attempts >= 5) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
     await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
     if (hashChallengeValue(code) !== record.code_hash) return res.status(401).json({ error: 'Kod geçersiz veya süresi dolmuş' });
+    const { rows: users } = await query('SELECT id,username,ip FROM users WHERE id=$1', [record.user_id]);
+    if (!users.length) return res.status(404).json({ error: 'Kayıt bulunamadı' });
+    await trackInviteRegistration(record.target_value, users[0], users[0].ip);
     await query('UPDATE users SET email_verified=1 WHERE id=$1', [record.user_id]);
     await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
     res.json({ ok: true });
@@ -3658,7 +3687,8 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   io.to(memberRows.map(member => `user:${member.user_id}`)).emit('group:message', {
     slug: group.slug,
     messageId: msg[0].id,
-    senderId: req.user.id
+    senderId: req.user.id,
+    message: msg[0]
   });
   res.json(msg[0]);
 });
@@ -4712,22 +4742,37 @@ app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
 app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
   const content = String(req.body.content || '').trim();
   if (!content) return res.status(400).json({ error: 'Yanıt boş olamaz' });
-  const { rows: stories } = await query('SELECT s.id,s.user_id FROM stories s WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0', [req.params.id]);
+  const { rows: stories } = await query(
+    `SELECT s.id, s.user_id, u.username AS owner_username
+     FROM stories s
+     JOIN users u ON u.id=s.user_id
+     WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0`,
+    [req.params.id]
+  );
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [stories[0].id, req.user.id, content]);
-  if (stories[0].user_id !== req.user.id) {
-    const user1 = Math.min(req.user.id, stories[0].user_id);
-    const user2 = Math.max(req.user.id, stories[0].user_id);
+  const story = stories[0];
+  const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [story.id, req.user.id, content]);
+  if (Number(story.user_id) !== Number(req.user.id)) {
+    const user1 = Math.min(Number(req.user.id), Number(story.user_id));
+    const user2 = Math.max(Number(req.user.id), Number(story.user_id));
     let { rows: conversations } = await query('SELECT id FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [user1, user2]);
-    if (!conversations.length) ({ rows: conversations } = await query('INSERT INTO dm_conversations (user1_id,user2_id) VALUES ($1,$2) RETURNING id', [user1, user2]));
+    if (!conversations.length) {
+      ({ rows: conversations } = await query(
+        'INSERT INTO dm_conversations (user1_id,user2_id) VALUES ($1,$2) ON CONFLICT (user1_id,user2_id) DO NOTHING RETURNING id',
+        [user1, user2]
+      ));
+      if (!conversations.length) {
+        ({ rows: conversations } = await query('SELECT id FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [user1, user2]));
+      }
+    }
     const { rows: messages } = await query(
       'INSERT INTO dm_messages (conversation_id,sender_id,content,shared_story_id) VALUES ($1,$2,$3,$4) RETURNING id',
-      [conversations[0].id, req.user.id, content, stories[0].id]
+      [conversations[0].id, req.user.id, content, story.id]
     );
     await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conversations[0].id]);
     emitDirectMessage(conversations[0].id, req.user, { id: story.user_id, username: story.owner_username }, { id: messages[0].id, content });
     await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
-      stories[0].user_id, 'story_reply', req.user.username, req.user.avatar || '', 'Hikayenize yanıt geldi', `${req.user.username} hikayenize yanıt verdi: ${content}`, '/fotograflar'
+      story.user_id, 'story_reply', req.user.username, req.user.avatar || '', 'Hikayenize yanıt geldi', `${req.user.username} hikayenize yanıt verdi: ${content}`, '/fotograflar'
     ]);
   }
   res.json(rows[0]);
@@ -5228,6 +5273,111 @@ app.get('/api/admin/users', adminMiddleware, async (req, res) => {
     ORDER BY u.created_at DESC
   `);
   res.json(rows.map(u => ({ ...sanitizeUser(u), badges: Array.isArray(u.badges) ? u.badges : [] })));
+});
+
+app.get('/api/admin/invite-codes', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT ic.id, ic.code, ic.is_active, ic.created_at, ic.updated_at,
+           COUNT(ir.id)::int AS registration_count
+    FROM invite_codes ic
+    LEFT JOIN invite_registrations ir ON ir.invite_code_id=ic.id
+    WHERE ic.deleted_at IS NULL
+    GROUP BY ic.id
+    ORDER BY ic.created_at DESC
+  `);
+  res.json(rows.map(invite => ({
+    ...invite,
+    link: `${SITE_URL.replace(/\/+$/, '')}/kayit?invite=${encodeURIComponent(invite.code)}`
+  })));
+});
+
+app.get('/api/admin/invite-codes/:id/registrations', adminMiddleware, async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Geçersiz davet kodu' });
+  const { rows: codes } = await query('SELECT id FROM invite_codes WHERE id=$1 AND deleted_at IS NULL', [id]);
+  if (!codes.length) return res.status(404).json({ error: 'Davet kodu bulunamadı' });
+  const { rows } = await query(
+    `SELECT id, user_id, username, registration_ip, registered_at
+     FROM invite_registrations
+     WHERE invite_code_id=$1
+     ORDER BY registered_at DESC`,
+    [id]
+  );
+  res.json(rows);
+});
+
+app.post('/api/admin/invite-codes', adminMiddleware, async (req, res) => {
+  let code = String(req.body?.code || '').trim().toUpperCase();
+  if (code && !/^[A-Z0-9_-]{3,32}$/.test(code)) {
+    return res.status(400).json({ error: 'Kod 3-32 karakter olmalı; harf, rakam, tire ve alt çizgi kullanılabilir' });
+  }
+  const automatic = !code;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (automatic) code = crypto.randomBytes(6).toString('hex').toUpperCase();
+    try {
+      const { rows } = await query(
+        'INSERT INTO invite_codes (code, created_by) VALUES ($1,$2) RETURNING id, code, is_active, created_at, updated_at',
+        [code, req.adminUser.id]
+      );
+      const invite = rows[0];
+      res.status(201).json({
+        ...invite,
+        registration_count: 0,
+        link: `${SITE_URL.replace(/\/+$/, '')}/kayit?invite=${encodeURIComponent(invite.code)}`
+      });
+      return;
+    } catch (error) {
+      if (error.code === '23505') {
+        if (automatic) continue;
+        return res.status(409).json({ error: 'Bu davet kodu zaten kullanılıyor' });
+      }
+      console.error('Davet kodu oluşturulamadı:', error.message);
+      return res.status(500).json({ error: 'Davet kodu oluşturulamadı' });
+    }
+  }
+  res.status(503).json({ error: 'Benzersiz bir davet kodu oluşturulamadı. Tekrar deneyin.' });
+});
+
+app.put('/api/admin/invite-codes/:id', adminMiddleware, async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Geçersiz davet kodu' });
+  const { rows: existing } = await query('SELECT code, is_active FROM invite_codes WHERE id=$1 AND deleted_at IS NULL', [id]);
+  if (!existing.length) return res.status(404).json({ error: 'Davet kodu bulunamadı' });
+  const code = req.body?.code === undefined ? existing[0].code : String(req.body.code).trim().toUpperCase();
+  const isActive = req.body?.is_active === undefined
+    ? Number(existing[0].is_active)
+    : req.body.is_active === true || req.body.is_active === 1 || req.body.is_active === '1' ? 1
+      : req.body.is_active === false || req.body.is_active === 0 || req.body.is_active === '0' ? 0
+        : null;
+  if (!/^[A-Z0-9_-]{3,32}$/.test(code)) {
+    return res.status(400).json({ error: 'Kod 3-32 karakter olmalı; harf, rakam, tire ve alt çizgi kullanılabilir' });
+  }
+  if (isActive === null) return res.status(400).json({ error: 'Aktiflik değeri geçersiz' });
+  try {
+    const { rows } = await query(
+      'UPDATE invite_codes SET code=$1, is_active=$2, updated_at=NOW() WHERE id=$3 AND deleted_at IS NULL RETURNING id, code, is_active, created_at, updated_at',
+      [code, isActive, id]
+    );
+    res.json({
+      ...rows[0],
+      link: `${SITE_URL.replace(/\/+$/, '')}/kayit?invite=${encodeURIComponent(rows[0].code)}`
+    });
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'Bu davet kodu zaten kullanılıyor' });
+    console.error('Davet kodu güncellenemedi:', error.message);
+    res.status(500).json({ error: 'Davet kodu güncellenemedi' });
+  }
+});
+
+app.delete('/api/admin/invite-codes/:id', adminMiddleware, async (req, res) => {
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Geçersiz davet kodu' });
+  const { rows } = await query(
+    'UPDATE invite_codes SET is_active=0, deleted_at=NOW(), updated_at=NOW() WHERE id=$1 AND deleted_at IS NULL RETURNING id',
+    [id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Davet kodu bulunamadı' });
+  res.json({ ok: true });
 });
 
 app.get('/api/admin/user/:id/ad-panels', adminMiddleware, async (req, res) => {
@@ -9187,16 +9337,34 @@ initDb().then(() => {
            VALUES ($1, $2, $3, $4) RETURNING *`,
           [channelId, req.user.id, content, image_url]
         );
+        const { rows: messageRows } = await query(
+          `SELECT gcm.*, u.username, u.avatar
+           FROM group_channel_messages gcm
+           LEFT JOIN users u ON u.id = gcm.user_id
+           WHERE gcm.id = $1`,
+          [result.rows[0].id]
+        );
+        const message = messageRows[0];
 
-        const { rows: groupMembers } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [groupId]);
-        const memberRooms = [...new Set([...groupMembers.map(member => String(member.user_id)), String(req.user.id)])]
-          .map(userId => `user:${userId}`);
+        const recipientIds = new Set([String(access.channel.owner_id), String(req.user.id)]);
+        if (access.channel.visibility === 'approval_only') {
+          const { rows: pendingMembers } = await query(
+            `SELECT user_id FROM group_approval_requests WHERE group_id=$1 AND status='pending'`,
+            [groupId]
+          );
+          pendingMembers.forEach(member => recipientIds.add(String(member.user_id)));
+        } else {
+          const { rows: groupMembers } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [groupId]);
+          groupMembers.forEach(member => recipientIds.add(String(member.user_id)));
+        }
+        const memberRooms = [...recipientIds].map(userId => `user:${userId}`);
         io.to(memberRooms).emit('group-channel:message', {
           slug,
-          channelId: result.rows[0].channel_id,
-          messageId: result.rows[0].id
+          channelId: message.channel_id,
+          messageId: message.id,
+          message
         });
-        res.json(result.rows[0]);
+        res.json(message);
       } catch (e) {
         console.error('Mesaj gönderme hatası:', e.message);
         res.status(500).json({ error: 'Mesaj gönderilemedi' });

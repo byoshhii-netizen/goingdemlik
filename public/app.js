@@ -2,6 +2,9 @@ let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realtimeSocket = null;
 let realtimeSocketToken = null;
+let pendingMobileSwipeDirection = null;
+let mobileSwipeAnimationTimer = null;
+let mobileSwipeStart = null;
 let activeGroupMessageRefresh = null;
 let activeGroupChannelRefresh = null;
 // Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
@@ -761,6 +764,35 @@ function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
 }
 
+function closeMobileCreateMenu() {
+  const dropdown = $('#mobile-new-dropdown');
+  if (!dropdown) return;
+  dropdown.classList.add('hidden');
+  dropdown.classList.remove('mobile-create-menu');
+  const anchor = $('#mobile-create-menu-anchor');
+  if (anchor && dropdown.parentElement !== anchor) anchor.appendChild(dropdown);
+  $('#mobile-new-toggle')?.setAttribute('aria-expanded', 'false');
+  $('#mobile-create-backdrop')?.remove();
+  document.body.classList.remove('mobile-create-menu-open');
+}
+
+function openMobileCreateMenu() {
+  const dropdown = $('#mobile-new-dropdown');
+  if (!dropdown) return;
+  dropdown.classList.remove('hidden');
+  dropdown.classList.add('mobile-create-menu');
+  document.body.appendChild(dropdown);
+  $('#mobile-new-toggle')?.setAttribute('aria-expanded', 'true');
+  document.body.classList.add('mobile-create-menu-open');
+  if (!$('#mobile-create-backdrop')) {
+    const backdrop = document.createElement('div');
+    backdrop.id = 'mobile-create-backdrop';
+    backdrop.className = 'mobile-create-backdrop';
+    backdrop.addEventListener('click', closeMobileCreateMenu);
+    document.body.appendChild(backdrop);
+  }
+}
+
 function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
@@ -902,11 +934,12 @@ async function enhanceLinkPreviews(root = document) {
   }));
 }
 
-function navigate(path, push = true) {
+function navigate(path, push = true, swipeDirection = null) {
   closeMobileMenu();
-  $('#mobile-new-dropdown')?.classList.add('hidden');
+  closeMobileCreateMenu();
   $('#new-dropdown')?.classList.add('hidden');
   if (push) history.pushState({}, '', path);
+  pendingMobileSwipeDirection = swipeDirection;
   // path içindeki query string'i renderRoute'a geçir
   renderRoute(path);
 }
@@ -923,7 +956,10 @@ function isForgotPasswordRoute(path) {
   return /^\/[a-zA-Z0-9]{24}$/.test(path);
 }
 
-window.addEventListener('popstate', () => renderRoute(location.pathname + location.search));
+window.addEventListener('popstate', () => {
+  closeMobileCreateMenu();
+  renderRoute(location.pathname + location.search);
+});
 
 document.addEventListener('click', e => {
   const a = e.target.closest('[data-link]');
@@ -959,6 +995,17 @@ function renderRoute(fullPath) {
     siteFooter.style.display = (isDmChatRoute || path === '/reals') ? 'none' : '';
   }
   const app = $('#app');
+  if (pendingMobileSwipeDirection && window.matchMedia('(max-width: 768px)').matches) {
+    const animationClass = pendingMobileSwipeDirection === 'next'
+      ? 'mobile-swipe-enter-next'
+      : 'mobile-swipe-enter-previous';
+    pendingMobileSwipeDirection = null;
+    app.classList.remove('mobile-swipe-enter-next', 'mobile-swipe-enter-previous');
+    clearTimeout(mobileSwipeAnimationTimer);
+    void app.offsetWidth;
+    app.classList.add(animationClass);
+    mobileSwipeAnimationTimer = setTimeout(() => app.classList.remove(animationClass), 280);
+  }
   const segs = path.split('/').filter(Boolean);
 
   const isAuthRoute = path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path);
@@ -1492,12 +1539,12 @@ function syncRealtimeSocket() {
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
   realtimeSocket.on('group:message', event => {
     if (event?.slug && activeGroupMessageRefresh) {
-      activeGroupMessageRefresh(event.slug);
+      activeGroupMessageRefresh(event);
     }
   });
   realtimeSocket.on('group-channel:message', event => {
     if (event?.slug && activeGroupChannelRefresh) {
-      activeGroupChannelRefresh(event.slug, event.channelId);
+      activeGroupChannelRefresh(event.slug, event.channelId, event.message);
     }
   });
   realtimeSocket.on('connect_error', error => {
@@ -1612,7 +1659,6 @@ function updateNavUI() {
   const authEl = $('#nav-auth');
   const userEl = $('#nav-user');
   const mobAuth = $('#mobile-menu-auth');
-  const mobNew = $('#mobile-new-dropdown');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
 
@@ -1633,7 +1679,7 @@ function updateNavUI() {
     }
 
     if (mobAuth) mobAuth.classList.add('hidden');
-    if (mobNew) mobNew.classList.add('hidden');
+    closeMobileCreateMenu();
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     const dropdownVmb = $('#dropdown-vmb');
     if (dropdownVmb) dropdownVmb.style.display = canAccessVmb ? '' : 'none';
@@ -1679,7 +1725,7 @@ function updateNavUI() {
     }
     userEl.classList.add('hidden');
     if (mobAuth) mobAuth.classList.remove('hidden');
-    if (mobNew) mobNew.classList.add('hidden');
+    closeMobileCreateMenu();
     if (mobNewToggle) mobNewToggle.classList.add('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = '';
 
@@ -1690,7 +1736,7 @@ function updateNavUI() {
       mbbAuth.querySelector('i').className = 'fas fa-sign-in-alt';
       mbbAuth.querySelector('i').style.display = '';
       const avatar = $('#mbb-avatar'); if (avatar) { avatar.style.display = 'none'; avatar.classList.remove('avatar-fallback-logo'); }
-      $('#mobile-new-dropdown')?.classList.add('hidden');
+      closeMobileCreateMenu();
       $('#new-dropdown')?.classList.add('hidden');
     }
   }
@@ -1702,6 +1748,75 @@ function updateMobileBottomBar(path) {
     a.classList.toggle('active', href === path || (href !== '/' && path.startsWith(href)));
   });
 }
+
+function mobileSwipeSection(path) {
+  if (path === '/') return 'home';
+  if (path === '/reals' || path.startsWith('/reals/')) return 'reals';
+  if (path === '/mesajlar') return 'messages';
+  if (path === '/muzikler') return 'music';
+  if (path.startsWith('/profil/')) return 'profile';
+  return null;
+}
+
+function getMobileSwipeRoute(section) {
+  if (section === 'home') return '/';
+  if (section === 'reals') return '/reals';
+  if (section === 'messages') return '/mesajlar';
+  if (section === 'music') return '/muzikler';
+  if (section === 'profile') return currentUser ? profileRoute(currentUser.username) : '/giris';
+  return null;
+}
+
+function shouldIgnoreMobileSwipe(target) {
+  if (!(target instanceof Element)) return true;
+  return Boolean(target.closest(
+    'input, textarea, select, button, [contenteditable="true"], [role="button"], ' +
+    '.navbar, .mobile-bottom-bar, .modal-overlay:not(.hidden), ' +
+    '.mobile-new-dropdown, .mobile-books-dropdown, [data-no-swipe]'
+  ));
+}
+
+document.addEventListener('touchstart', event => {
+  mobileSwipeStart = null;
+  if (!window.matchMedia('(max-width: 768px)').matches || event.touches.length !== 1) return;
+  if (document.body.classList.contains('mobile-create-menu-open')) return;
+  if (!mobileSwipeSection(location.pathname) || shouldIgnoreMobileSwipe(event.target)) return;
+  const touch = event.touches[0];
+  mobileSwipeStart = {
+    x: touch.clientX,
+    y: touch.clientY,
+    path: location.pathname,
+    time: Date.now()
+  };
+}, { passive: true });
+
+document.addEventListener('touchend', event => {
+  if (!mobileSwipeStart || event.changedTouches.length !== 1) return;
+  const start = mobileSwipeStart;
+  mobileSwipeStart = null;
+  if (start.path !== location.pathname || shouldIgnoreMobileSwipe(event.target)) return;
+
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - start.x;
+  const deltaY = touch.clientY - start.y;
+  const distance = Math.abs(deltaX);
+  const elapsed = Math.max(1, Date.now() - start.time);
+  if (distance < 64 || distance <= Math.abs(deltaY) * 1.25 || distance / elapsed < 0.18) return;
+
+  const section = mobileSwipeSection(start.path);
+  if (section === 'home' && deltaX > 0 && start.x < window.innerWidth - 24 && currentUser) {
+    openMobileCreateMenu();
+    return;
+  }
+
+  const sections = ['home', 'reals', 'messages', 'music', 'profile'];
+  const currentIndex = sections.indexOf(section);
+  const nextIndex = currentIndex + (deltaX < 0 ? 1 : -1);
+  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= sections.length) return;
+  navigate(getMobileSwipeRoute(sections[nextIndex]), true, deltaX < 0 ? 'next' : 'previous');
+}, { passive: true });
+
+document.addEventListener('touchcancel', () => { mobileSwipeStart = null; }, { passive: true });
 
 $('#nav-user-btn').addEventListener('click', () => {
   $('#dropdown-menu').classList.toggle('hidden');
@@ -1815,7 +1930,8 @@ $('#mobile-toggle').addEventListener('click', () => {
 
 $('#mobile-new-toggle')?.addEventListener('click', e => {
   e.stopPropagation();
-  $('#mobile-new-dropdown')?.classList.toggle('hidden');
+  if ($('#mobile-new-dropdown')?.classList.contains('hidden')) openMobileCreateMenu();
+  else closeMobileCreateMenu();
 });
 
 async function showMyGroupsModal() {
@@ -1868,10 +1984,16 @@ document.addEventListener('click', e => {
     $('#mobile-menu')?.classList.add('hidden');
   }
   if (!$('#mobile-new-dropdown')?.contains(e.target) && !$('#mobile-new-toggle')?.contains(e.target)) {
-    $('#mobile-new-dropdown')?.classList.add('hidden');
+    closeMobileCreateMenu();
   }
   if (!$('#mobile-books-dropdown')?.contains(e.target) && !$('#mobile-books-btn')?.contains(e.target)) {
     closeMobileBooksMenu();
+  }
+});
+
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && document.body.classList.contains('mobile-create-menu-open')) {
+    closeMobileCreateMenu();
   }
 });
 
@@ -1884,16 +2006,17 @@ document.addEventListener('click', e => {
   const mobNewStory = e.target.closest('#mob-new-story');
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
-  if (mobNewForum) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
-  if (mobNewPoem) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
-  if (mobNewBook) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
-  if (mobNewGroup) { $('#mobile-new-dropdown').classList.add('hidden'); navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
-  if (mobNewPhoto) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); }
-  if (mobNewStory) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); }
-  if (mobNewVideo) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
   const mobNewReals = e.target.closest('#mob-new-reals');
-  if (mobNewReals) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else navigate('/giris'); }
-  if (mobNewMusic) { $('#mobile-new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); }
+  if (mobNewForum || mobNewPoem || mobNewBook || mobNewGroup || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic) closeMobileCreateMenu();
+  if (mobNewForum) { if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
+  if (mobNewPoem) { if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
+  if (mobNewBook) { navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
+  if (mobNewGroup) { navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
+  if (mobNewPhoto) { if (currentUser) showPhotoUploadModal(); }
+  if (mobNewStory) { if (currentUser) showStoryUploadModal(); }
+  if (mobNewVideo) { if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
+  if (mobNewReals) { if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else navigate('/giris'); }
+  if (mobNewMusic) { if (currentUser) navigate('/sarki-yukle'); }
 });
 
 async function renderHome(app) {
@@ -4089,7 +4212,7 @@ async function renderGroupDetail(app, slug) {
     return;
   }
 
-  app.innerHTML = `<div class="container page">
+  app.innerHTML = `<div class="container page group-detail-page">
     <div class="group-hero">
       ${heroBanner ? `<img src="${escHtml(heroBanner)}" class="group-hero-cover" alt="" />` : `<div class="group-hero-cover group-hero-cover-placeholder"><i class="fas fa-users"></i></div>`}
       <div class="group-hero-content">
@@ -4170,10 +4293,21 @@ async function renderGroupDetail(app, slug) {
   let activeChannel = channels.find(channel => Number(channel.is_default) === 1) || channels[0] || null;
   let channelLoadVersion = 0;
   const visibleChannels = () => channels.filter(channel => isOwner || isMod ? true : approvalPending ? channel.visibility === 'approval_only' : channel.visibility !== 'approval_only');
-  const channelMessageHTML = message => `<article class="channel-message">
+  const channelMessageHTML = message => `<article class="channel-message" data-message-id="${escHtml(message.id)}">
     ${message.username ? `<a href="${profileRoute(message.username)}" data-link><img class="channel-message-avatar" src="${escHtml(message.avatar || '/icons/cigcig-192.png')}" alt="${escHtml(message.username)}" /></a>` : '<div class="channel-message-avatar"></div>'}
     <div><div class="channel-message-meta"><strong>${escHtml(message.username || 'Silinmiş kullanıcı')}</strong><time>${timeAgo(message.created_at)}</time></div><div class="channel-message-content">${renderContent(message.content || '')}</div></div>
   </article>`;
+  const realtimeChannelMessages = new Map();
+  const appendChannelMessage = message => {
+    if (!message || Number(message.channel_id) !== Number(activeChannel?.id)) return;
+    const alreadyRendered = [...channelMessages.querySelectorAll('.channel-message')]
+      .some(element => element.dataset.messageId === String(message.id));
+    if (alreadyRendered) return;
+    if (channelMessages.querySelector('.empty-state, .loading-center')) channelMessages.innerHTML = '';
+    channelMessages.insertAdjacentHTML('beforeend', channelMessageHTML(message));
+    enhanceLinkPreviews(channelMessages);
+    channelMessages.scrollTop = channelMessages.scrollHeight;
+  };
   const loadChannelMessages = async channel => {
     const loadVersion = ++channelLoadVersion;
     if (!channel) { channelMessages.innerHTML = '<div class="empty-state"><i class="fas fa-hashtag"></i><p>Henüz kanal yok.</p></div>'; return; }
@@ -4186,14 +4320,31 @@ async function renderGroupDetail(app, slug) {
     try {
       const channelMessagesData = await api(`/group/${slug}/channel/${channel.id}/messages`);
       if (loadVersion !== channelLoadVersion) return;
-      channelMessages.innerHTML = channelMessagesData.length ? channelMessagesData.map(channelMessageHTML).join('') : '<div class="empty-state"><i class="fas fa-comments"></i><p>Bu kanalda henüz mesaj yok.</p></div>';
+      const mergedMessages = new Map(channelMessagesData.map(message => [String(message.id), message]));
+      for (const [id, message] of realtimeChannelMessages) {
+        if (Number(message.channel_id) === Number(channel.id)) mergedMessages.set(id, message);
+      }
+      channelMessagesData.forEach(message => realtimeChannelMessages.delete(String(message.id)));
+      const visibleMessages = [...mergedMessages.values()].sort((a, b) => {
+        const timeDifference = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        return timeDifference || Number(a.id) - Number(b.id);
+      });
+      channelMessages.innerHTML = visibleMessages.length ? visibleMessages.map(channelMessageHTML).join('') : '<div class="empty-state"><i class="fas fa-comments"></i><p>Bu kanalda henüz mesaj yok.</p></div>';
       enhanceLinkPreviews(channelMessages);
       channelMessages.scrollTop = channelMessages.scrollHeight;
     } catch (error) { channelMessages.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>${escHtml(error.message)}</p></div>`; }
   };
-  activeGroupChannelRefresh = async (requestedSlug, channelId) => {
+  activeGroupChannelRefresh = async (requestedSlug, channelId, message) => {
     if (requestedSlug !== slug || location.pathname !== '/grup/' + slug || !channelMessages || !activeChannel
       || Number(activeChannel.id) !== Number(channelId)) return;
+    if (message) {
+      realtimeChannelMessages.set(String(message.id), message);
+      while (realtimeChannelMessages.size > 120) {
+        realtimeChannelMessages.delete(realtimeChannelMessages.keys().next().value);
+      }
+      appendChannelMessage(message);
+      return;
+    }
     await loadChannelMessages(activeChannel);
   };
   const renderChannels = () => {
@@ -4228,10 +4379,8 @@ async function renderGroupDetail(app, slug) {
     try {
       const message = await api(`/group/${slug}/channel/${channelId}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
       if (Number(activeChannel?.id) !== Number(channelId)) return;
-      if (channelMessages.querySelector('.empty-state')) channelMessages.innerHTML = '';
-      channelMessages.insertAdjacentHTML('beforeend', channelMessageHTML({ ...message, username: currentUser.username, avatar: currentUser.avatar }));
+      appendChannelMessage({ ...message, username: currentUser.username, avatar: currentUser.avatar });
       input.value = '';
-      channelMessages.scrollTop = channelMessages.scrollHeight;
     } catch (error) { toast(error.message, 'error'); }
     finally { sendButton.disabled = false; }
   });
@@ -4409,14 +4558,54 @@ async function renderGroupDetail(app, slug) {
     try { await api('/group/' + slug + '/join', { method: 'POST' }); toast('Gruba katıldınız!'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
   });
   $('#leave-btn')?.addEventListener('click', async () => {
-    if (!confirm('Gruptan ayrılmak istiyor musunuz?')) return;
-    try { await api('/group/' + slug + '/leave', { method: 'POST' }); toast('Gruptan ayrıldınız.'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
+    showModal('Gruptan ayrılmak istiyor musunuz?', `<div class="group-leave-confirm">
+      <div class="group-leave-confirm-icon"><i class="fas fa-right-from-bracket"></i></div>
+      <p><strong>${escHtml(group.name)}</strong> grubundan ayrılacaksınız. Grup sohbetine erişiminiz sona erecek.</p>
+      <div class="group-leave-confirm-actions">
+        <button type="button" class="btn btn-outline" id="leave-cancel-btn">Vazgeç</button>
+        <button type="button" class="btn btn-danger" id="leave-confirm-btn"><i class="fas fa-sign-out-alt"></i> Gruptan ayrıl</button>
+      </div>
+    </div>`);
+    $('#leave-cancel-btn')?.addEventListener('click', hideModal);
+    $('#leave-confirm-btn')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.innerHTML = '<span class="spinner" style="width:14px;height:14px;display:inline-block"></span> Ayrılıyor...';
+      try {
+        await api('/group/' + slug + '/leave', { method: 'POST' });
+        hideModal();
+        toast('Gruptan ayrıldınız.');
+        renderRoute(location.pathname);
+      } catch (error) {
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-sign-out-alt"></i> Gruptan ayrıl';
+        toast(error.message, 'error');
+      }
+    });
   });
 
   let lastId = messages.length ? Number(messages[messages.length - 1].id) : 0;
   let lastChatSignature = chatSignature(messages);
-  const refreshGroupMessages = async requestedSlug => {
+  const refreshGroupMessages = async request => {
+    const requestedSlug = typeof request === 'string' ? request : request?.slug;
     if (requestedSlug !== slug || !$('#chat-messages') || location.pathname !== '/grup/' + slug) return;
+    if (request && typeof request === 'object' && request.message) {
+      const message = request.message;
+      if (messages.some(item => String(item.id) === String(message.id))) return;
+      const chatEl2 = $('#chat-messages');
+      const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
+      chatEl2.insertAdjacentHTML('beforeend', chatMsgHTML(message, window._chatCanMod, !!canSend));
+      enhanceLinkPreviews(chatEl2);
+      messages.push(message);
+      lastChatSignature = chatSignature(messages);
+      lastId = Math.max(lastId, Number(message.id));
+      if (wasBottom) chatEl2.scrollTop = chatEl2.scrollHeight;
+      if (Number(message.user_id) !== Number(currentUser?.id) && document.hidden && !groupInboxMuted) {
+        await triggerGroupMessageNotification(group.name, message.username || 'Birisi',
+          message.content || (message.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı'));
+      }
+      return;
+    }
     try {
       const newMsgs = await api('/group/' + slug + '/messages');
       const newest = newMsgs.filter(m => Number(m.id) > lastId);
@@ -4540,15 +4729,17 @@ async function renderGroupDetail(app, slug) {
           image_url = uploaded.url;
         }
         const msg = await api('/group/' + slug + '/messages', { method: 'POST', body: JSON.stringify({ content, image_url, reply_to_id: groupReplyToId }) });
-        $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod, !!canSend));
-        enhanceLinkPreviews(chatEl);
-        messages.push(msg);
-        lastChatSignature = chatSignature(messages);
+        if (!messages.some(item => String(item.id) === String(msg.id))) {
+          $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod, !!canSend));
+          enhanceLinkPreviews(chatEl);
+          messages.push(msg);
+          lastChatSignature = chatSignature(messages);
+        }
         input.value = '';
         resetAttachment();
         clearGroupReply();
         chatEl.scrollTop = chatEl.scrollHeight;
-        lastId = Number(msg.id); // Çift mesaj önleme: poll bu mesajı tekrar eklemesin
+        lastId = Math.max(lastId, Number(msg.id));
       } catch (e) { toast(e.message, 'error'); }
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
@@ -6728,6 +6919,7 @@ function renderRegister(app) {
   const returnTo = requestedPath && requestedPath.startsWith('/') && !requestedPath.startsWith('//')
     ? requestedPath
     : '/';
+  const inviteCode = String(new URLSearchParams(location.search).get('invite') || '').trim().toUpperCase();
   let selectedRegisterAvatar = null;
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
@@ -6736,6 +6928,7 @@ function renderRegister(app) {
       <div class="auth-site-wordmark">CigCig</div>
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
+      ${inviteCode ? `<div class="register-invite-notice"><i class="fas fa-ticket"></i><span>Davet kodu <strong>${escHtml(inviteCode)}</strong> ile kayıt oluyorsun.</span></div>` : ''}
       <div class="register-profile-photo">
         <div class="register-avatar-preview" id="reg-avatar-preview"><i class="fas fa-user"></i></div>
         <div class="register-profile-copy">
@@ -6925,7 +7118,7 @@ function renderRegister(app) {
       const two_factor_method = $('#reg-2fa-method').value;
       const two_factor_question = $('#reg-2fa-question').value;
       const two_factor_answer = $('#reg-2fa-answer').value;
-      Object.entries({ username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      Object.entries({ username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, invite_code: inviteCode, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       if (data.email_verification_required) {
@@ -7218,7 +7411,7 @@ async function checkUnreadMessages() {
 
 async function init() {
   $('#new-dropdown')?.classList.add('hidden');
-  $('#mobile-new-dropdown')?.classList.add('hidden');
+  closeMobileCreateMenu();
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
@@ -10817,8 +11010,7 @@ async function renderStoryRoute(app, storyId) {
             ${story.is_owner ? `<button type="button" class="story-route-icon" id="story-route-viewers" aria-label="Hikayeyi görenler" title="${story.total_views || 0} görüntülenme"><i class="far fa-eye"></i></button><button type="button" class="story-route-icon" id="story-route-edit" aria-label="Hikayeyi düzenle" title="Düzenle"><i class="fas fa-ellipsis"></i></button>` : ''}
             <a class="story-route-icon" href="/fotograflar" data-link aria-label="Hikayelerden çık" title="Kapat"><i class="fas fa-times"></i></a>
           </header>
-          <div class="story-route-media" style="--story-backdrop:url('${escHtml(story.media_url)}')">
-            <div class="story-route-backdrop" aria-hidden="true"></div>
+          <div class="story-route-media">
             ${story.media_type === 'video' ? `<video class="story-route-asset" src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
             <button class="story-route-tap story-route-tap-left" id="story-route-tap-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>
             <button class="story-route-tap story-route-tap-right" id="story-route-tap-next" aria-label="Sonraki hikaye"></button>
@@ -10845,7 +11037,32 @@ async function renderStoryRoute(app, storyId) {
     $('#story-route-share')?.addEventListener('click', () => shareStory(story));
     $('#story-route-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; $('#story-route-like')?.classList.toggle('active', result.liked); $('#story-route-like i')?.classList.toggle('fas', result.liked); $('#story-route-like i')?.classList.toggle('far', !result.liked); } catch (error) { toast(error.message, 'error'); } });
     $('#story-route-reply-open')?.addEventListener('click', event => { $('#story-route-reply').hidden = false; event.currentTarget.hidden = true; $('#story-route-reply-input')?.focus(); });
-    $('#story-route-reply-send')?.addEventListener('click', async () => { const input = $('#story-route-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + (story.public_id || story.id) + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt DM olarak gönderildi'); input.value = ''; $('#story-route-reply').hidden = true; $('#story-route-reply-open').hidden = false; } catch (error) { toast(error.message, 'error'); } });
+    const sendStoryReply = async () => {
+      const input = $('#story-route-reply-input');
+      const sendButton = $('#story-route-reply-send');
+      const content = input?.value.trim();
+      if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error');
+      if (!content || !sendButton || sendButton.disabled) return;
+      sendButton.disabled = true;
+      try {
+        await api('/stories/' + (story.public_id || story.id) + '/replies', { method: 'POST', body: JSON.stringify({ content }) });
+        toast('Yanıt DM olarak gönderildi');
+        input.value = '';
+        $('#story-route-reply').hidden = true;
+        $('#story-route-reply-open').hidden = false;
+      } catch (error) {
+        toast(error.message, 'error');
+      } finally {
+        sendButton.disabled = false;
+      }
+    };
+    $('#story-route-reply-send')?.addEventListener('click', sendStoryReply);
+    $('#story-route-reply-input')?.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        sendStoryReply();
+      }
+    });
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
     $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
