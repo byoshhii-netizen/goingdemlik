@@ -1625,7 +1625,7 @@ async function handleRealtimeDirectMessage(event) {
         const newMessages = Array.isArray(update) ? update : update.messages || [];
         newMessages.forEach(message => {
           if (!messagesEl.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`)) {
-            messagesEl.insertAdjacentHTML('beforeend', dmMessageHTML(message, currentUser.id, dmSelectionMode));
+            appendDMMessage(messagesEl, message, currentUser.id, dmSelectionMode);
           }
         });
         if (newMessages.length) {
@@ -8365,7 +8365,7 @@ async function renderDMChat(username) {
 
     <!-- Messages -->
     <div class="dm-messages" id="dm-messages">
-      ${messages.map(m => dmMessageHTML(m, currentUser.id, false)).join('')}
+      ${dmMessagesHTML(messages, currentUser.id)}
     </div>
 
     <!-- Reply bar -->
@@ -8473,7 +8473,7 @@ async function renderDMChat(username) {
       window.__dmClearReply?.();
       const el = document.getElementById('dm-messages');
       if (el) {
-        el.insertAdjacentHTML('beforeend', dmMessageHTML(msg, currentUser.id, false));
+        appendDMMessage(el, msg, currentUser.id, false);
         enhanceLinkPreviews(el);
         el.scrollTop = el.scrollHeight;
       }
@@ -8561,7 +8561,7 @@ async function renderDMChat(username) {
       const wasBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
       refreshedMsgs.forEach(message => {
         if (!el.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`)) {
-          el.insertAdjacentHTML('beforeend', dmMessageHTML(message, currentUser.id, dmSelectionMode));
+          appendDMMessage(el, message, currentUser.id, dmSelectionMode);
         }
       });
       if (refreshedMsgs.length) {
@@ -8683,7 +8683,26 @@ function installMessageSelectionGestures(container, selector, onSelect) {
   }, true);
 }
 
-function dmMessageHTML(m, myId, selMode) {
+function dmMessagesHTML(messages, myId) {
+  let previousMessage = null;
+  return messages.map(message => {
+    const html = dmMessageHTML(message, myId, false, previousMessage);
+    if (html) previousMessage = message;
+    return html;
+  }).join('');
+}
+
+function appendDMMessage(container, message, myId, selMode) {
+  const previousElement = container.lastElementChild?.matches('.dm-msg-wrap')
+    ? container.lastElementChild
+    : null;
+  const previousMessage = previousElement
+    ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt }
+    : null;
+  container.insertAdjacentHTML('beforeend', dmMessageHTML(message, myId, selMode, previousMessage));
+}
+
+function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const isOwn = m.sender_id == myId;
   const deleted = m.deleted_for_all;
   const messageText = String(m.content || '');
@@ -8691,18 +8710,27 @@ function dmMessageHTML(m, myId, selMode) {
   if (hiddenForMe && !deleted) return '';
   const senderName = m.sender_nickname || m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
+  const messageTime = Date.parse(m.created_at);
+  const previousTime = Date.parse(previousMessage?.created_at);
+  const isContinued = previousMessage
+    && String(previousMessage.sender_id) === String(m.sender_id)
+    && Number.isFinite(messageTime)
+    && Number.isFinite(previousTime)
+    && Math.abs(messageTime - previousTime) <= 60_000;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
-    ${!isOwn
+    ${!isOwn && !isContinued
       ? `<a href="${senderProfile}" data-link class="dm-msg-avatar-link" aria-label="${escHtml(senderName)} profilini aç">${hasUsableAvatar({ avatar: m.sender_avatar, avatar_removed: m.sender_avatar_removed })
           ? `<img src="${escHtml(m.sender_avatar)}" class="avatar-sm" style="flex-shrink:0" />`
           : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}</a>`
       : ''}
     <div class="dm-msg-content">
-      ${m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`}
+      ${!isOwn && !isContinued
+        ? m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`
+        : ''}
       ${m.reply_to_id && m.reply_content
         ? `<div class="dm-reply-preview">
              <span style="color:var(--text-muted);font-size:11px;font-weight:600">${escHtml(m.reply_username || '')}</span>
