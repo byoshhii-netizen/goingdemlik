@@ -7601,6 +7601,8 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      COALESCE(presence.is_online, FALSE) as other_is_online,
+      presence.last_active as other_last_active,
       (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
         AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
         ORDER BY m.created_at DESC LIMIT 1) as last_message,
@@ -7613,6 +7615,12 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
     JOIN users u2 ON c.user2_id=u2.id
+    LEFT JOIN LATERAL (
+      SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
+        MAX(last_heartbeat) as last_active
+      FROM user_presence_sessions
+      WHERE user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
+    ) presence ON TRUE
     WHERE (c.user1_id=$1 AND c.hidden_by_user1=0) OR (c.user2_id=$1 AND c.hidden_by_user2=0)
     ORDER BY c.last_message_at DESC
   `, [uid]);
@@ -7633,12 +7641,20 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      COALESCE(presence.is_online, FALSE) as other_is_online,
+      presence.last_active as other_last_active,
       (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
         AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
         ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
     JOIN users u2 ON c.user2_id=u2.id
+    LEFT JOIN LATERAL (
+      SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
+        MAX(last_heartbeat) as last_active
+      FROM user_presence_sessions
+      WHERE user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
+    ) presence ON TRUE
     WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
     ORDER BY c.last_message_at DESC
   `, [uid]);
@@ -7659,12 +7675,47 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      COALESCE(presence.is_online, FALSE) as other_is_online,
+      presence.last_active as other_last_active,
       (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
+    LEFT JOIN LATERAL (
+      SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
+        MAX(last_heartbeat) as last_active
+      FROM user_presence_sessions
+      WHERE user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
+    ) presence ON TRUE
     WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
     ORDER BY c.last_message_at DESC
   `, [req.user.id]);
   res.json(rows);
+});
+
+app.post('/api/presence/heartbeat', authMiddleware, async (req, res) => {
+  const clientId = typeof req.body?.client_id === 'string' ? req.body.client_id : '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+    return res.status(400).json({ error: 'Geçersiz oturum kimliği' });
+  }
+  await query(
+    'DELETE FROM user_presence_sessions WHERE user_id=$1 AND last_heartbeat < NOW() - INTERVAL \'30 days\'',
+    [req.user.id]
+  );
+  await query(`
+    INSERT INTO user_presence_sessions (user_id, client_id, last_heartbeat)
+    VALUES ($1, $2, NOW())
+    ON CONFLICT (user_id, client_id)
+    DO UPDATE SET last_heartbeat=NOW()
+  `, [req.user.id, clientId]);
+  res.json({ ok: true });
+});
+
+app.post('/api/presence/leave', authMiddleware, async (req, res) => {
+  const clientId = typeof req.body?.client_id === 'string' ? req.body.client_id : '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+    return res.status(400).json({ error: 'Geçersiz oturum kimliği' });
+  }
+  await query('DELETE FROM user_presence_sessions WHERE user_id=$1 AND client_id=$2', [req.user.id, clientId]);
+  res.json({ ok: true });
 });
 
 function matchesDmLockHash(savedHash, code) {
@@ -7721,7 +7772,20 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
-  const { rows: target } = await query('SELECT id,username,avatar,avatar_removed,name_color,is_private FROM users WHERE username=$1', [req.params.username]);  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const { rows: target } = await query(`
+    SELECT u.id,u.username,u.avatar,u.avatar_removed,u.name_color,u.is_private,
+      COALESCE(presence.is_online, FALSE) as is_online,
+      presence.last_active
+    FROM users u
+    LEFT JOIN LATERAL (
+      SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
+        MAX(last_heartbeat) as last_active
+      FROM user_presence_sessions
+      WHERE user_id=u.id
+    ) presence ON TRUE
+    WHERE u.username=$1
+  `, [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
   if (other.is_private && other.id !== uid) {

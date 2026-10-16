@@ -664,6 +664,30 @@ function timeAgo(dt) {
   return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
+function dmPresenceMarkup(isOnline, lastActive) {
+  if (isOnline) {
+    return '<span class="dm-presence-label is-online"><span class="dm-presence-indicator"></span>Çevrimiçi</span>';
+  }
+  if (!lastActive) return '<span class="dm-presence-label">Çevrimdışı</span>';
+  const lastActiveLabel = timeAgo(lastActive);
+  return lastActiveLabel
+    ? `<span class="dm-presence-label" title="Son aktiflik: ${escHtml(lastActiveLabel)}">Son aktif ${escHtml(lastActiveLabel)}</span>`
+    : '<span class="dm-presence-label">Çevrimdışı</span>';
+}
+
+function updateDmPresence(root, isOnline, lastActive) {
+  const slot = root.querySelector('.dm-presence-slot');
+  if (slot) slot.innerHTML = dmPresenceMarkup(isOnline, lastActive);
+  const avatar = root.matches('.dm-presence-avatar') ? root : root.querySelector('.dm-presence-avatar');
+  if (!avatar) return;
+  const dot = avatar.querySelector('.dm-presence-dot');
+  if (isOnline && !dot) {
+    avatar.insertAdjacentHTML('beforeend', '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>');
+  } else if (!isOnline) {
+    dot?.remove();
+  }
+}
+
 function formatDate(dt) {
   return new Date(dt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
@@ -1445,7 +1469,63 @@ async function initAuth() {
   }
 }
 
+let presenceHeartbeatTimer = null;
+let presenceHeartbeatUserId = null;
+let presenceClientId = null;
+let presenceHeartbeatRequest = null;
+
+function createPresenceClientId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+    const random = window.crypto?.getRandomValues
+      ? window.crypto.getRandomValues(new Uint8Array(1))[0] & 15
+      : Math.floor(Math.random() * 16);
+    return (char === 'x' ? random : (random & 3) | 8).toString(16);
+  });
+}
+
+function syncPresenceHeartbeat() {
+  if (!currentUser || !currentToken) {
+    if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
+    presenceHeartbeatTimer = null;
+    presenceHeartbeatUserId = null;
+    presenceClientId = null;
+    return;
+  }
+  if (presenceHeartbeatTimer && String(presenceHeartbeatUserId) === String(currentUser.id)) return;
+
+  if (presenceHeartbeatTimer) clearInterval(presenceHeartbeatTimer);
+  presenceHeartbeatUserId = currentUser.id;
+  presenceClientId = createPresenceClientId();
+
+  const sendHeartbeat = async () => {
+    if (presenceHeartbeatRequest) return;
+    if (!currentUser || !currentToken || String(currentUser.id) !== String(presenceHeartbeatUserId)) return;
+    try {
+      presenceHeartbeatRequest = api('/presence/heartbeat', { method: 'POST', body: JSON.stringify({ client_id: presenceClientId }) });
+      await presenceHeartbeatRequest;
+    } catch (error) {
+      console.warn('Çevrimiçi durumu güncellenemedi:', error.message);
+    } finally {
+      presenceHeartbeatRequest = null;
+    }
+  };
+  sendHeartbeat();
+  presenceHeartbeatTimer = setInterval(sendHeartbeat, 15000);
+}
+
+window.addEventListener('pagehide', () => {
+  if (!currentToken || !presenceClientId || presenceHeartbeatRequest) return;
+  fetch('/api/presence/leave', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
+    body: JSON.stringify({ client_id: presenceClientId }),
+    keepalive: true
+  }).catch(error => console.warn('Çevrimiçi oturum kapatılamadı:', error.message));
+});
+
 function updateNavUI() {
+  syncPresenceHeartbeat();
   updateAppIcon(currentUser);
   const authEl = $('#nav-auth');
   const userEl = $('#nav-user');
@@ -1630,6 +1710,14 @@ $('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classL
 $('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
 $('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else { navigate('/giris'); } });
 $('#logout-btn').addEventListener('click', async () => {
+  if (presenceClientId && currentToken) {
+    try {
+      await presenceHeartbeatRequest;
+      await api('/presence/leave', { method: 'POST', body: JSON.stringify({ client_id: presenceClientId }) });
+    } catch (error) {
+      console.warn('Çevrimiçi oturum kapatılamadı:', error.message);
+    }
+  }
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
   currentToken = null; currentUser = null;
   localStorage.removeItem('token');
@@ -7337,15 +7425,16 @@ async function renderMessages(app, targetUsername) {
     const avatarHTML = hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed })
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
+    const presenceHTML = dmPresenceMarkup(c.other_is_online, c.other_last_active);
     const isUser1 = String(c.user1_id) === String(currentUser.id);
     const muteForever = Number(c[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1;
     const mutedUntil = c[isUser1 ? 'muted_until_user1' : 'muted_until_user2'];
     const muted = muteForever || (mutedUntil && new Date(mutedUntil) > new Date());
     return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}${muted ? ' dm-conv-muted' : ''}${dmSearchUnlockedConvs.some(hidden => String(hidden.id) === String(c.id)) ? ' dm-search-unlocked' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}" data-search-name="${escHtml((c.other_nickname || '') + ' ' + (c.other_username || ''))}">
-      <span class="dm-conv-avatar-link" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}</span>
+      <span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${c.other_is_online ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
-          <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
+          <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span><span class="dm-presence-slot">${presenceHTML}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
           ${muted ? '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>' : ''}
           ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
         </div>
@@ -7471,6 +7560,38 @@ async function renderMessages(app, targetUsername) {
     </div>
   </div>`;
   renderInboxList();
+  if (dmPresencePollTimer) clearInterval(dmPresencePollTimer);
+  dmPresencePollTimer = setInterval(async () => {
+    if (!document.getElementById('dm-conv-list')) {
+      clearInterval(dmPresencePollTimer);
+      dmPresencePollTimer = null;
+      return;
+    }
+    try {
+      const updatedConversations = await api('/conversations');
+      updatedConversations.forEach(conversation => {
+        const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(conversation.other_username)}"]`);
+        if (item) updateDmPresence(item, conversation.other_is_online, conversation.other_last_active);
+      });
+      if (targetUsername) {
+        const chat = document.querySelector('.dm-chat');
+        const activeConversation = updatedConversations.find(
+          conversation => String(conversation.other_username).toLowerCase() === String(targetUsername).toLowerCase()
+        );
+        if (chat && activeConversation) {
+          updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active);
+        } else if (chat) {
+          const headers = {};
+          if (dmSearchUnlockCode) headers['X-DM-Search-Code'] = dmSearchUnlockCode;
+          if (dmIconUnlockCode) headers['X-DM-Conversation-Code'] = dmIconUnlockCode;
+          const detail = await api(`/conversation/${encodeURIComponent(targetUsername)}?limit=1`, { headers });
+          if (detail.other) updateDmPresence(chat, detail.other.is_online, detail.other.last_active);
+        }
+      }
+    } catch (error) {
+      console.warn('Sohbet çevrimiçi durumları yenilenemedi:', error.message);
+    }
+  }, 10000);
 
   // Search filter and temporary locked-chat access code
   document.getElementById('dm-search')?.addEventListener('input', e => {
@@ -7567,6 +7688,7 @@ async function renderMessages(app, targetUsername) {
 let dmSelectionMode = false;
 let dmSelectedIds = new Set();
 let dmPollTimer = null;
+let dmPresencePollTimer = null;
 
 async function renderDMChat(username) {
   // Önceki poll'u temizle
@@ -7605,6 +7727,7 @@ async function renderDMChat(username) {
           <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
           <i class="fas fa-lock" style="color:var(--accent-red2)"></i>
           <span class="dm-chat-username">${escHtml(other.nickname || other.username)} <small>@${escHtml(other.username)}</small></span>
+          <span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>
         </div>
       </div>
       <div class="dm-empty">
@@ -7653,15 +7776,17 @@ async function renderDMChat(username) {
     <div class="dm-chat-header">
       <div class="dm-chat-header-left">
         <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
-        <a href="${profileRoute(other.username)}" data-link class="dm-chat-avatar-link" aria-label="${escHtml(other.username)} profilini aç">
+        <a href="${profileRoute(other.username)}" data-link class="dm-chat-avatar-link dm-presence-avatar" aria-label="${escHtml(other.username)} profilini aç">
           ${hasUsableAvatar(other)
             ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
             : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
+          ${other.is_online ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}
         </a>
         <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
             <strong>${escHtml(other.nickname || other.username)}</strong><small>@${escHtml(other.username)}</small>
           </a>
+          <span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>
           ${spotifyNowPlayingMarkup(otherSpotify, true)}
         </div>
       </div>
@@ -7876,6 +8001,14 @@ async function renderDMChat(username) {
       if (refreshedMsgs.length) lastPollMsgId = Number(refreshedMsgs[refreshedMsgs.length - 1].id);
       enhanceLinkPreviews(el);
       const conversationList = await api('/conversations').catch(() => []);
+      conversationList.forEach(conversation => {
+        const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(conversation.other_username)}"]`);
+        if (item) updateDmPresence(item, conversation.other_is_online, conversation.other_last_active);
+      });
+      if (conversationUpdate?.other) {
+        const header = document.querySelector('.dm-chat');
+        if (header) updateDmPresence(header, conversationUpdate.other.is_online, conversationUpdate.other.last_active);
+      }
       const activeConversation = conversationList.find(item => String(item.other_username).toLowerCase() === String(username).toLowerCase());
       const activeConversationEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(username)}"] .dm-conv-last`);
       if (activeConversationEl) activeConversationEl.textContent = (activeConversation?.last_message || '').substring(0, 40);

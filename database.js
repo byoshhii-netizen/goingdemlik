@@ -90,6 +90,15 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
     UPDATE users SET tag_permission='everyone' WHERE tag_permission IS NULL OR tag_permission='';
 
+    CREATE TABLE IF NOT EXISTS user_presence_sessions (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      client_id TEXT NOT NULL,
+      last_heartbeat TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, client_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_presence_sessions_user_heartbeat
+      ON user_presence_sessions(user_id, last_heartbeat DESC);
+
     CREATE TABLE IF NOT EXISTS follows (
       id BIGSERIAL PRIMARY KEY,
       follower_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
