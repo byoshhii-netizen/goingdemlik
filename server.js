@@ -187,13 +187,14 @@ const authLimiter = rateLimit({
   message: { error: 'Çok fazla giriş denemesi. 15 dakika bekleyin.' },
 });
 
-// Upload: dakikada 5 yükleme
+// Yalnızca gerçek yükleme/oluşturma işlemlerini kullanıcı başına sınırla.
 const uploadLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 15),
+  windowMs: 10 * 60 * 1000,
+  max: Number(process.env.UPLOAD_RATE_LIMIT_MAX || 30),
+  keyGenerator: req => String(req.user.id),
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Çok fazla yükleme. Lütfen bekleyin.' },
+  message: { error: 'Kısa sürede çok fazla içerik yükledin. Biraz bekleyip tekrar dene.' },
 });
 
 const adminAuthLimiter = rateLimit({
@@ -213,7 +214,6 @@ const vmbAdminAuthLimiter = rateLimit({
 
 app.use('/api', generalLimiter);
 app.use('/api/auth', authLimiter);
-app.use(['/api/photos', '/api/stories', '/api/upload-video'], uploadLimiter);
 app.use(['/api/admin/auth', '/api/reklampanel'], adminAuthLimiter);
 app.use('/api/vmb-admin/auth', vmbAdminAuthLimiter);
 
@@ -4352,7 +4352,7 @@ app.post('/api/upload-image', authMiddleware, upload.single('image'), async (req
   }
 });
 
-app.post('/api/upload-video', authMiddleware, (req, res, next) => {
+app.post('/api/upload-video', authMiddleware, uploadLimiter, (req, res, next) => {
   largeVideoUpload.single('file')(req, res, error => {
     if (error) return res.status(400).json({ error: error.code === 'LIMIT_FILE_SIZE' ? 'Video boyutu 500 MB sınırını geçemez.' : error.message });
     next();
@@ -4367,7 +4367,7 @@ app.post('/api/upload-video', authMiddleware, (req, res, next) => {
   }
 });
 
-app.post('/api/reals/upload-url', authMiddleware, async (req, res) => {
+app.post('/api/reals/upload-url', authMiddleware, uploadLimiter, async (req, res) => {
   if (await denyIfRestricted(req, res, 'reals')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Reals R2 depolama ayarlanmamış.' });
   const contentType = String(req.body?.content_type || 'video/mp4');
@@ -4472,7 +4472,7 @@ app.post('/api/photos/:id/view', optionalAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/photos', authMiddleware, upload.single('image'), async (req, res) => {
+app.post('/api/photos', authMiddleware, uploadLimiter, upload.single('image'), async (req, res) => {
   if (await denyIfRestricted(req, res, 'photo')) return;
   if (!req.file) return res.status(400).json({ error: 'Fotoğraf seçin' });
   try {
@@ -4563,7 +4563,7 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   res.json(story);
 });
 
-app.post('/api/stories', authMiddleware, async (req, res, next) => {
+app.post('/api/stories', authMiddleware, uploadLimiter, async (req, res, next) => {
   if (await denyIfRestricted(req, res, 'story')) return;
   next();
 }, (req, res, next) => {
@@ -4606,7 +4606,7 @@ app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
   } catch (error) { res.status(500).json({ error: 'Hikaye video bağlantısı oluşturulamadı: ' + error.message }); }
 });
 
-app.post('/api/stories/from-url', authMiddleware, async (req, res) => {
+app.post('/api/stories/from-url', authMiddleware, uploadLimiter, async (req, res) => {
   if (await denyIfRestricted(req, res, 'story')) return;
   const { media_url, caption, song_id, song_start_seconds, media_filter, duration_hours } = req.body;
   if (!media_url) return res.status(400).json({ error: 'Hikaye videosu gerekli' });

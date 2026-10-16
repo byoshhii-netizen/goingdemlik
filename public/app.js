@@ -224,9 +224,11 @@ function toast(msg, type = 'success', duration = 3500) {
   setTimeout(() => t.remove(), duration);
 }
 
-function showModal(title, bodyHTML) {
+function showModal(title, bodyHTML, modalClass = '') {
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
+  $('#modal').classList.remove('social-compose-modal');
+  if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
 
@@ -238,6 +240,7 @@ function hideModal() {
   window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
+  $('#modal')?.classList.remove('social-compose-modal');
 }
 
 function attachPasswordToggle(inputEl, toggleBtnEl, iconEl) {
@@ -5184,34 +5187,39 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   try { videoSettings = await api('/video-settings'); } catch {}
   const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
-  showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals Yükle' : 'Video Yükle'), `
-    <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" /></div>
-    <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="5">${escHtml(defaultDescription)}</textarea></div>
-    <div class="form-group">
-      <label>Video Dosyası</label>
-      <input type="file" id="video-file" accept="video/*" />
-      <video id="video-upload-preview" controls muted playsinline style="display:none;width:100%;max-height:420px;aspect-ratio:9/16;object-fit:contain;border-radius:8px;margin-top:10px;background:#000"></video>
-      ${existing && existing.video_url ? `<div style="margin-top:8px;font-size:12px;color:var(--text-secondary)">Mevcut video: ${escHtml(existing.video_url)}</div>` : ''}
+  showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals oluştur' : 'Video oluştur'), `
+    <div class="social-compose social-compose-video${forceReals || existing?.is_reals ? ' social-compose-reals' : ''}">
+      <section class="social-compose-preview-pane">
+        <div class="social-compose-preview-frame social-compose-video-frame">
+          <video id="video-upload-preview" controls muted playsinline></video>
+          ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(existing.video_url)}" controls muted playsinline></video>` : ''}
+          <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
+          <label class="social-compose-pick"><i class="fas fa-plus"></i> Video seç<input type="file" id="video-file" accept="video/*" /></label>
+        </div>
+        <div class="social-compose-upload-hint"><i class="fas fa-mobile-screen"></i><span>${forceReals ? 'Dikey videolar Reals akışında tam ekran görüntülenir.' : 'Videonu ekle, önizle ve paylaşım bilgilerini tamamla.'}</span></div>
+      </section>
+      <section class="social-compose-fields">
+        <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>${forceReals ? 'Reals paylaşımı' : 'Video paylaşımı'}</span></div>
+        <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" placeholder="${forceReals ? 'Reals için kısa bir başlık…' : 'Videona bir başlık ekle…'}" /></div>
+        <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="4" placeholder="Ne düşünüyorsun?">${escHtml(defaultDescription)}</textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
+          <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
+        </div>
+        <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
+        <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
+        <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
+        <div class="social-compose-options">
+          <label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label>
+          <label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label>
+          <label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label>
+        </div>
+        <div id="video-error" class="form-error"></div>
+        <button class="btn btn-primary social-compose-submit" id="video-submit"><i class="fas fa-paper-plane"></i> ${existing ? 'Değişiklikleri kaydet' : 'Paylaş'}</button>
+        <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
+      </section>
     </div>
-    <div class="form-group">
-      <label>Banner / Kapak</label>
-      <input type="file" id="video-banner-file" accept="image/*" />
-      <img id="video-banner-preview" alt="Kapak önizleme" style="display:none;width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />
-      ${existing && existing.banner_image ? `<img src="${escHtml(existing.banner_image)}" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin-top:8px" />` : ''}
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
-      <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
-    </div>
-    <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
-    <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label></div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label></div>
-    <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label></div>
-    <button class="btn btn-primary" id="video-submit" style="width:100%">${existing ? 'Güncelle' : 'Yükle'}</button>
-    <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
-    <div id="video-error" class="form-error mt-4"></div>
-  `);
+  `, 'social-compose-modal');
 
   const videoInput = $('#video-file');
   const bannerInput = $('#video-banner-file');
@@ -5223,7 +5231,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     const file = videoInput.files[0];
     if (!file) return;
     const uploadPreview = $('#video-upload-preview');
-    if (uploadPreview) { uploadPreview.src = URL.createObjectURL(file); uploadPreview.style.display = 'block'; }
+    if (uploadPreview) { uploadPreview.src = URL.createObjectURL(file); uploadPreview.style.display = 'block'; $('#video-preview-empty')?.classList.add('hidden'); document.querySelector('.social-compose-existing-preview')?.remove(); }
     if (bannerInput?.files?.length) return;
     try {
       const generated = await generateVideoPoster(file);
@@ -10886,13 +10894,35 @@ function showStoryUploadModal() {
   const pendingStoryFile = window.__pendingStoryFile || null;
   delete window.__storyUploadDraft;
   delete window.__pendingStoryFile;
-  showModal('Hikaye ekle', `<div class="story-compose"><div class="form-group"><label>Fotoğraf veya video</label><input id="story-media" type="file" accept="image/*,video/*" /></div><div id="story-media-preview" class="story-media-preview" hidden></div><div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda filtre uygulanarak kaydedilir; videolarda izleme ekranına uygulanır.</small></div><div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div><div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div><div class="form-group"><label>Müzik seç</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div><div id="story-song-player" class="story-selected-song" hidden></div><button class="btn btn-primary" id="story-save" style="width:100%">Paylaş</button><div id="story-error" class="form-error mt-4"></div></div>`);
+  showModal('Hikaye oluştur', `<div class="social-compose social-compose-story">
+    <section class="social-compose-preview-pane">
+      <div class="social-compose-preview-frame social-compose-story-frame">
+        <div id="story-media-preview" class="story-media-preview" hidden></div>
+        <div class="social-compose-preview-empty" id="story-preview-empty"><i class="fas fa-circle-plus"></i><strong>Hikayeni oluştur</strong><span>Fotoğrafını veya videonu buraya ekle</span></div>
+        <label class="social-compose-pick"><i class="fas fa-plus"></i> Fotoğraf veya video seç<input id="story-media" type="file" accept="image/*,video/*" /></label>
+      </div>
+      <div class="social-compose-upload-hint"><i class="fas fa-clock"></i><span>Hikayen seçtiğin süre boyunca yayında kalır.</span></div>
+    </section>
+    <section class="social-compose-fields story-compose">
+      <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>Hikaye paylaşımı</span></div>
+      <div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div>
+      <div class="form-row">
+        <div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div>
+        <div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda kaydedilir, videolarda izleme ekranında uygulanır.</small></div>
+      </div>
+      <div class="form-group"><label>Müzik ekle</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div>
+      <div id="story-song-player" class="story-selected-song" hidden></div>
+      <div id="story-error" class="form-error"></div>
+      <button class="btn btn-primary social-compose-submit" id="story-save"><i class="fas fa-paper-plane"></i> Hikayeni paylaş</button>
+    </section>
+  </div>`, 'social-compose-modal');
   let songs = [], selectedSong = null, selectedStoryFile = pendingStoryFile;
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   const renderMediaPreview = file => {
     if (!file) return;
     const url = URL.createObjectURL(file);
     preview.hidden = false;
+    $('#story-preview-empty')?.classList.add('hidden');
     preview.innerHTML = file.type.startsWith('video/')
       ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss($('#story-media-filter').value)}"></video>`
       : `<img src="${url}" alt="Seçilen hikaye önizlemesi" />`;
@@ -10952,7 +10982,7 @@ function showStoryUploadModal() {
     if (file.size > 500 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 500 MB sınırını geçemez.'; return; }
     submitButton.disabled = true;
     submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
-    const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
+    const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); form.append('media_filter', $('#story-media-filter').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
     try {
       if (file.type.startsWith('video/')) {
         const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type, content_length: file.size }) });
@@ -11424,19 +11454,33 @@ function showPhotoUploadModal() {
   const pendingPhotoFile = window.__pendingPhotoFile || null;
   delete window.__photoUploadDraft;
   delete window.__pendingPhotoFile;
-  showModal('Fotoğraf At', `
-    <div class="form-group"><label>Fotoğraf *</label><input id="photo-file" type="file" accept="image/*" /><div id="photo-file-preview" class="photo-file-preview" hidden></div></div>
-    <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" /></div>
-    <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3"></textarea></div>
-    <div class="form-group"><label>Konum</label><input id="photo-location" /></div>
-    <div class="form-group"><label>Müzik seç</label><input id="photo-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
-    <div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div>
-    <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
-    <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
-    <label class="checkbox-label"><input id="photo-shares" type="checkbox" checked/> Paylaşım ve iletme açık</label>
-    <button class="btn btn-primary" id="photo-save" style="width:100%">Paylaş</button>
-    <div id="photo-error" class="form-error mt-4"></div>
-  `);
+  showModal('Fotoğraf oluştur', `
+    <div class="social-compose social-compose-photo">
+      <section class="social-compose-preview-pane">
+        <div class="social-compose-preview-frame social-compose-photo-frame">
+          <div id="photo-file-preview" class="photo-file-preview" hidden></div>
+          <div class="social-compose-preview-empty" id="photo-preview-empty"><i class="fas fa-image"></i><strong>Fotoğrafını ekle</strong><span>Paylaşım önizlemen burada görünür</span></div>
+          <label class="social-compose-pick"><i class="fas fa-plus"></i> Fotoğraf seç<input id="photo-file" type="file" accept="image/*" /></label>
+        </div>
+        <div class="social-compose-upload-hint"><i class="fas fa-crop-simple"></i><span>Paylaşmadan önce fotoğrafını kırpıp düzenleyebilirsin.</span></div>
+      </section>
+      <section class="social-compose-fields">
+        <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>Fotoğraf paylaşımı</span></div>
+        <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" placeholder="Paylaşımına bir başlık ekle…" /></div>
+        <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3" placeholder="Fotoğrafınla ilgili bir şeyler yaz…"></textarea></div>
+        <div class="form-group"><label>Konum</label><input id="photo-location" placeholder="Konum ekle" /></div>
+        <div class="form-group"><label>Müzik ekle</label><input id="photo-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
+        <div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div>
+        <div class="social-compose-options">
+          <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
+          <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
+          <label class="checkbox-label"><input id="photo-shares" type="checkbox" checked/> Paylaşım ve iletme açık</label>
+        </div>
+        <div id="photo-error" class="form-error"></div>
+        <button class="btn btn-primary social-compose-submit" id="photo-save"><i class="fas fa-paper-plane"></i> Paylaş</button>
+      </section>
+    </div>
+  `, 'social-compose-modal');
 
   let selectedPhotoFile = pendingPhotoFile;
   let songs = [];
@@ -11467,7 +11511,7 @@ function showPhotoUploadModal() {
   });
   if (pendingPhotoFile) {
     const preview = document.getElementById('photo-file-preview');
-    if (preview) { preview.hidden = false; preview.innerHTML = `<img src="${URL.createObjectURL(pendingPhotoFile)}" alt="Düzenlenen fotoğraf önizlemesi" />`; }
+    if (preview) { preview.hidden = false; preview.innerHTML = `<img src="${URL.createObjectURL(pendingPhotoFile)}" alt="Düzenlenen fotoğraf önizlemesi" />`; $('#photo-preview-empty')?.classList.add('hidden'); }
   }
   if (savedDraft) {
     $('#photo-title').value = savedDraft.title;
