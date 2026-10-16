@@ -906,6 +906,7 @@ document.addEventListener('click', e => {
 });
 
 function renderRoute(fullPath) {
+  clearStoryRoutePlayback();
   // Sayfa değişiminde fotoğraf ses kontrolünü kaldır
   document.getElementById('photo-audio-control')?.remove();
   photoAudioObserver?.disconnect();
@@ -919,6 +920,7 @@ function renderRoute(fullPath) {
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
+  document.body.classList.toggle('story-page', path.startsWith('/hikaye/'));
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
   document.body.classList.toggle('messages-page', path === '/mesajlar');
   document.body.classList.toggle('reals-page', path === '/reals' || path.startsWith('/reals/'));
@@ -10525,10 +10527,23 @@ function showStoryUploadModal() {
   });
 }
 
+let storyRouteTimer = null;
+let storyRouteKeyHandler = null;
+
+function clearStoryRoutePlayback() {
+  if (storyRouteTimer) { clearInterval(storyRouteTimer); storyRouteTimer = null; }
+  if (storyRouteKeyHandler) {
+    document.removeEventListener('keydown', storyRouteKeyHandler);
+    storyRouteKeyHandler = null;
+  }
+}
+
 async function renderStoryRoute(app, storyId) {
+  clearStoryRoutePlayback();
   try {
     const story = await api('/stories/' + encodeURIComponent(storyId));
     const allStories = await api('/stories');
+    if (!allStories.some(item => String(item.id) === String(story.id) || item.public_id === story.public_id)) allStories.push(story);
     const storyGroups = [];
     allStories.forEach(item => {
       let group = storyGroups.find(groupItem => groupItem.user_id === item.user_id);
@@ -10543,30 +10558,51 @@ async function renderStoryRoute(app, storyId) {
     const currentGroup = storyGroups.find(group => group.user_id === story.user_id);
     const currentGroupIndex = currentGroup ? currentGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id) : -1;
     document.title = '@' + story.username + ' hikayesi - ' + siteName;
-    app.innerHTML = `<div class="container page"><div class="story-route"><div class="story-route-media"><div class="story-route-head">${avatarImg(story)}<div><b>@${escHtml(story.username)}</b><small>${timeAgo(story.created_at)} · ${currentGroupIndex + 1}/${currentGroup?.stories.length || 1}</small></div></div><button class="story-route-tap story-route-tap-left" id="story-route-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}<button class="story-route-tap story-route-tap-right" id="story-route-next" aria-label="Sonraki hikaye" ${nextStory ? '' : 'disabled'}></button></div>${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<div class="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><input id="story-route-volume" type="range" min="0" max="100" value="80" aria-label="Hikaye sesi" /></div>` : ''}<div class="story-route-actions"><button class="btn btn-ghost" id="story-route-share"><i class="fas fa-share-alt"></i> Paylaş</button>${story.is_owner ? `<button class="btn btn-ghost" id="story-route-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button class="btn btn-ghost" id="story-route-edit"><i class="fas fa-pen"></i> Düzenle</button><button class="btn btn-ghost text-danger" id="story-route-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div><div class="story-route-note">Bu hikaye artık akışta görünmüyor olabilir, ancak bağlantısından izlenebilir.</div></div></div>`;
-    const routeVolume = $('#story-route-volume');
-    if (routeVolume) {
-      routeVolume.value = Math.round(getMediaVolume() * 100);
-      routeVolume.addEventListener('input', event => {
-        event.preventDefault();
-        event.stopPropagation();
-        setMediaVolume(Number(event.target.value) / 100);
-      });
-      routeVolume.addEventListener('click', event => event.stopPropagation());
-      routeVolume.addEventListener('pointerdown', event => event.stopPropagation());
-    }
+    const routeStoryKey = item => String(item.public_id || item.id);
+    const navigateToStory = target => target && navigate('/hikaye/' + encodeURIComponent(routeStoryKey(target)));
+    app.innerHTML = `<div class="story-route-page">
+      <div class="story-route-back"><a href="/fotograflar" data-link><i class="fas fa-arrow-left"></i> Hikayelere dön</a></div>
+      <div class="story-route-viewer">
+        <button class="story-route-nav" id="story-route-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}><i class="fas fa-chevron-left"></i></button>
+        <article class="story-route" aria-label="@${escHtml(story.username)} kullanıcısının hikayesi">
+          <div class="story-route-progress" aria-label="Hikaye ilerlemesi">${(currentGroup?.stories || [story]).map((item, index) => `<span class="${index < Math.max(0, currentGroupIndex) ? 'complete' : ''}"><i ${index === Math.max(0, currentGroupIndex) ? 'id="story-route-progress-fill"' : ''}></i></span>`).join('')}</div>
+          <header class="story-route-head">
+            ${hasUsableAvatar(story) ? `<img src="${escHtml(story.avatar)}" alt="" />` : '<span class="story-route-avatar"><i class="fas fa-user"></i></span>'}
+            <span class="story-route-identity"><b>${escHtml(story.username)}</b><small>${timeAgo(story.created_at)}</small></span>
+            <span class="story-route-count">${currentGroupIndex + 1}/${currentGroup?.stories.length || 1}</span>
+            <button type="button" class="story-route-icon" id="story-route-share" aria-label="Hikayeyi paylaş" title="Paylaş"><i class="fas fa-paper-plane"></i></button>
+            ${story.is_owner ? `<button type="button" class="story-route-icon" id="story-route-viewers" aria-label="Hikayeyi görenler" title="${story.total_views || 0} görüntülenme"><i class="far fa-eye"></i></button><button type="button" class="story-route-icon" id="story-route-edit" aria-label="Hikayeyi düzenle" title="Düzenle"><i class="fas fa-ellipsis"></i></button>` : ''}
+            <a class="story-route-icon" href="/fotograflar" data-link aria-label="Hikayelerden çık" title="Kapat"><i class="fas fa-times"></i></a>
+          </header>
+          <div class="story-route-media" style="--story-backdrop:url('${escHtml(story.media_url)}')">
+            <div class="story-route-backdrop" aria-hidden="true"></div>
+            ${story.media_type === 'video' ? `<video class="story-route-asset" src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
+            <button class="story-route-tap story-route-tap-left" id="story-route-tap-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>
+            <button class="story-route-tap story-route-tap-right" id="story-route-tap-next" aria-label="Sonraki hikaye"></button>
+            <div class="story-route-overlay-copy">
+              ${story.song_audio_url ? `<button type="button" class="story-route-song" id="story-route-song"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}
+              ${story.caption ? `<p class="story-route-caption">${escHtml(story.caption)}</p>` : ''}
+            </div>
+          </div>
+          <footer class="story-route-footer">
+            <div class="story-route-reply" id="story-route-reply" hidden><input id="story-route-reply-input" maxlength="500" placeholder="Yanıtını yaz..." aria-label="Hikayeye yanıt yaz" /><button type="button" id="story-route-reply-send" aria-label="Yanıtı gönder"><i class="fas fa-paper-plane"></i></button></div>
+            <button class="story-route-reply-open" id="story-route-reply-open" type="button">Mesaj gönder...</button>
+            <button class="story-route-heart ${story.liked ? 'active' : ''}" id="story-route-like" type="button" aria-label="Beğen"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i></button>
+            ${story.is_owner ? `<button class="story-route-icon story-route-delete" id="story-route-delete" type="button" aria-label="Hikayeyi sil" title="Sil"><i class="fas fa-trash"></i></button>` : ''}
+          </footer>
+        </article>
+        <button class="story-route-nav" id="story-route-next" aria-label="Sonraki hikaye" ${nextStory ? '' : 'disabled'}><i class="fas fa-chevron-right"></i></button>
+      </div>
+    </div>`;
     api('/stories/' + encodeURIComponent(story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
-    $('#story-route-prev')?.addEventListener('click', event => { event.preventDefault(); event.currentTarget.blur(); if (previousStory) navigate('/hikaye/' + encodeURIComponent(previousStory.public_id || previousStory.id)); });
-    $('#story-route-next')?.addEventListener('click', event => { event.preventDefault(); event.currentTarget.blur(); if (nextStory) navigate('/hikaye/' + encodeURIComponent(nextStory.public_id || nextStory.id)); });
+    $('#story-route-prev')?.addEventListener('click', () => navigateToStory(previousStory));
+    $('#story-route-tap-prev')?.addEventListener('click', () => navigateToStory(previousStory));
+    $('#story-route-next')?.addEventListener('click', () => navigateToStory(nextStory));
+    $('#story-route-tap-next')?.addEventListener('click', () => navigateToStory(nextStory));
     $('#story-route-share')?.addEventListener('click', () => shareStory(story));
-    const routeActions = document.querySelector('.story-route-actions');
-    if (routeActions) {
-      routeActions.insertAdjacentHTML('afterbegin', `<button class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-route-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button class="btn btn-ghost" id="story-route-reply-open"><i class="far fa-comment"></i> Yanıtla</button>`);
-      routeActions.insertAdjacentHTML('afterend', '<div class="story-route-reply" id="story-route-reply" hidden><input id="story-route-reply-input" maxlength="500" placeholder="Hikayeye yanıt yaz..." /><button class="btn btn-primary btn-sm" id="story-route-reply-send"><i class="fas fa-paper-plane"></i></button></div>');
-    }
-    $('#story-route-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; renderStoryRoute(app, storyId); } catch (error) { toast(error.message, 'error'); } });
-    $('#story-route-reply-open')?.addEventListener('click', () => { $('#story-route-reply').hidden = !$('#story-route-reply').hidden; $('#story-route-reply-input')?.focus(); });
-    $('#story-route-reply-send')?.addEventListener('click', async () => { const input = $('#story-route-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + (story.public_id || story.id) + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt DM olarak gönderildi'); input.value = ''; } catch (error) { toast(error.message, 'error'); } });
+    $('#story-route-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + (story.public_id || story.id) + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; $('#story-route-like')?.classList.toggle('active', result.liked); $('#story-route-like i')?.classList.toggle('fas', result.liked); $('#story-route-like i')?.classList.toggle('far', !result.liked); } catch (error) { toast(error.message, 'error'); } });
+    $('#story-route-reply-open')?.addEventListener('click', event => { $('#story-route-reply').hidden = false; event.currentTarget.hidden = true; $('#story-route-reply-input')?.focus(); });
+    $('#story-route-reply-send')?.addEventListener('click', async () => { const input = $('#story-route-reply-input'); if (!currentUser) return toast('Yanıtlamak için giriş yapın.', 'error'); if (!input?.value.trim()) return; try { await api('/stories/' + (story.public_id || story.id) + '/replies', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) }); toast('Yanıt DM olarak gönderildi'); input.value = ''; $('#story-route-reply').hidden = true; $('#story-route-reply-open').hidden = false; } catch (error) { toast(error.message, 'error'); } });
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
     $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
@@ -10579,10 +10615,45 @@ async function renderStoryRoute(app, storyId) {
           activeStoryAudio = null;
         }
       });
+      $('#story-route-song')?.addEventListener('click', () => {
+        const icon = $('#story-route-song i');
+        if (routeAudio.paused) {
+          routeAudio.play().then(() => { if (icon) icon.className = 'fas fa-volume-up'; }).catch(() => toast('Hikaye müziği başlatılamadı.', 'error'));
+        } else {
+          routeAudio.pause();
+          if (icon) icon.className = 'fas fa-volume-mute';
+        }
+      });
       routeAudio.play().catch(() => {});
     }
-    api('/stories/' + (story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
+    const progressFill = $('#story-route-progress-fill');
+    const routeVideo = story.media_type === 'video' ? document.querySelector('.story-route-asset') : null;
+    if (story.media_type === 'video' && routeVideo) {
+      routeVideo.addEventListener('timeupdate', () => {
+        if (progressFill && Number.isFinite(routeVideo.duration) && routeVideo.duration > 0) progressFill.style.width = `${Math.min(100, routeVideo.currentTime / routeVideo.duration * 100)}%`;
+      });
+      routeVideo.addEventListener('ended', () => navigateToStory(nextStory));
+    } else {
+      const storyDuration = 6000;
+      const startedAt = Date.now();
+      storyRouteTimer = setInterval(() => {
+        const elapsed = Date.now() - startedAt;
+        if (progressFill) progressFill.style.width = `${Math.min(100, elapsed / storyDuration * 100)}%`;
+        if (elapsed >= storyDuration) {
+          clearStoryRoutePlayback();
+          navigateToStory(nextStory);
+        }
+      }, 80);
+    }
+    storyRouteKeyHandler = event => {
+      if (event.target.closest('input, textarea, select, button')) return;
+      if (event.key === 'ArrowLeft') navigateToStory(previousStory);
+      if (event.key === 'ArrowRight') navigateToStory(nextStory);
+      if (event.key === 'Escape') navigate('/fotograflar');
+    };
+    document.addEventListener('keydown', storyRouteKeyHandler);
   } catch (error) {
+    clearStoryRoutePlayback();
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-circle-exclamation"></i><p>${escHtml(error.message || 'Hikaye bulunamadı')}</p></div></div>`;
   }
 }
