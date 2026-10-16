@@ -1,5 +1,9 @@
 let currentUser = null;
 let currentToken = localStorage.getItem('token');
+let realtimeSocket = null;
+let realtimeSocketToken = null;
+let activeGroupMessageRefresh = null;
+let activeGroupChannelRefresh = null;
 // Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
 // atama kontrollü PUT isteklerine mevcut oturum tokenını da ekle.
 const nativeFetch = window.fetch.bind(window);
@@ -1474,6 +1478,83 @@ let presenceHeartbeatUserId = null;
 let presenceClientId = null;
 let presenceHeartbeatRequest = null;
 
+function syncRealtimeSocket() {
+  if (!currentUser || !currentToken || typeof window.io !== 'function') {
+    realtimeSocket?.disconnect();
+    realtimeSocket = null;
+    realtimeSocketToken = null;
+    return;
+  }
+  if (realtimeSocket && realtimeSocketToken === currentToken) return;
+  realtimeSocket?.disconnect();
+  realtimeSocketToken = currentToken;
+  realtimeSocket = window.io({ auth: { token: currentToken } });
+  realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
+  realtimeSocket.on('group:message', event => {
+    if (event?.slug && activeGroupMessageRefresh) {
+      activeGroupMessageRefresh(event.slug);
+    }
+  });
+  realtimeSocket.on('group-channel:message', event => {
+    if (event?.slug && activeGroupChannelRefresh) {
+      activeGroupChannelRefresh(event.slug, event.channelId);
+    }
+  });
+  realtimeSocket.on('connect_error', error => {
+    console.warn('Gerçek zamanlı mesaj bağlantısı kurulamadı:', error.message);
+  });
+}
+
+async function handleRealtimeDirectMessage(event) {
+  if (!currentUser || !event?.usernames || !Array.isArray(event.usernames)) return;
+  const peerUsername = event.usernames.find(username => String(username).toLowerCase() !== String(currentUser.username).toLowerCase())
+    || currentUser.username;
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const currentChatUsername = pathParts[0] === 'mesajlar' && pathParts.length > 1
+    ? decodeURIComponent(pathParts[1])
+    : '';
+
+  if (currentChatUsername && currentChatUsername.toLowerCase() === String(peerUsername).toLowerCase()) {
+    const messagesEl = document.getElementById('dm-messages');
+    if (messagesEl) {
+      const wasBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60;
+      const lastId = [...messagesEl.querySelectorAll('.dm-msg-wrap[data-id]')]
+        .reduce((latest, message) => Math.max(latest, Number(message.dataset.id) || 0), 0);
+      try {
+        const headers = {};
+        if (dmSearchUnlockCode) headers['X-DM-Search-Code'] = dmSearchUnlockCode;
+        if (dmIconUnlockCode) headers['X-DM-Conversation-Code'] = dmIconUnlockCode;
+        const update = await api(`/conversation/${encodeURIComponent(peerUsername)}?limit=100&after_id=${lastId}`, { headers });
+        const newMessages = Array.isArray(update) ? update : update.messages || [];
+        newMessages.forEach(message => {
+          if (!messagesEl.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`)) {
+            messagesEl.insertAdjacentHTML('beforeend', dmMessageHTML(message, currentUser.id, dmSelectionMode));
+          }
+        });
+        if (newMessages.length) {
+          enhanceLinkPreviews(messagesEl);
+          if (wasBottom) messagesEl.scrollTop = messagesEl.scrollHeight;
+          await api(`/conversation/${encodeURIComponent(peerUsername)}/mark-read`, { method: 'POST' });
+          checkUnreadMessages();
+        }
+      } catch (error) {
+        console.error('Yeni mesaj alınamadı:', error.message);
+      }
+    }
+  } else if (location.pathname === '/mesajlar') {
+    renderRoute(location.pathname + location.search);
+  } else {
+    const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(peerUsername)}"]`);
+    if (item) {
+      const preview = item.querySelector('.dm-conv-last');
+      if (preview) preview.textContent = event.preview || 'Yeni mesaj';
+      const list = item.parentElement;
+      if (list?.firstElementChild !== item) list?.insertBefore(item, list.firstElementChild);
+    }
+  }
+  checkUnreadMessages();
+}
+
 function createPresenceClientId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
@@ -1525,6 +1606,7 @@ window.addEventListener('pagehide', () => {
 });
 
 function updateNavUI() {
+  syncRealtimeSocket();
   syncPresenceHeartbeat();
   updateAppIcon(currentUser);
   const authEl = $('#nav-auth');
@@ -1541,7 +1623,8 @@ function updateNavUI() {
     const nav = currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="nav-avatar" />` : `<div class="nav-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:12px"></i></div>`;
     const btn = $('#nav-user-btn');
     btn.title = `${currentUser.nickname || currentUser.username} (@${currentUser.username})`;
-    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link" onclick="event.stopPropagation()">${nav}</a><span class="nav-user-identity"><strong>${escHtml(currentUser.nickname || currentUser.username)}</strong><small>@${escHtml(currentUser.username)}</small></span><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
+    btn.setAttribute('aria-label', 'Hesap menüsünü aç');
+    btn.innerHTML = nav;
     $('#dropdown-profile').setAttribute('href', profileRoute(currentUser.username));
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -4108,6 +4191,11 @@ async function renderGroupDetail(app, slug) {
       channelMessages.scrollTop = channelMessages.scrollHeight;
     } catch (error) { channelMessages.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>${escHtml(error.message)}</p></div>`; }
   };
+  activeGroupChannelRefresh = async (requestedSlug, channelId) => {
+    if (requestedSlug !== slug || location.pathname !== '/grup/' + slug || !channelMessages || !activeChannel
+      || Number(activeChannel.id) !== Number(channelId)) return;
+    await loadChannelMessages(activeChannel);
+  };
   const renderChannels = () => {
     const allowed = visibleChannels();
     if (!activeChannel || !allowed.some(channel => Number(channel.id) === Number(activeChannel.id))) activeChannel = allowed[0] || null;
@@ -4325,6 +4413,41 @@ async function renderGroupDetail(app, slug) {
     try { await api('/group/' + slug + '/leave', { method: 'POST' }); toast('Gruptan ayrıldınız.'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
   });
 
+  let lastId = messages.length ? Number(messages[messages.length - 1].id) : 0;
+  let lastChatSignature = chatSignature(messages);
+  const refreshGroupMessages = async requestedSlug => {
+    if (requestedSlug !== slug || !$('#chat-messages') || location.pathname !== '/grup/' + slug) return;
+    try {
+      const newMsgs = await api('/group/' + slug + '/messages');
+      const newest = newMsgs.filter(m => Number(m.id) > lastId);
+      const chatEl2 = $('#chat-messages');
+      if (chatEl2 && newMsgs.length && chatSignature(newMsgs) !== lastChatSignature) {
+        const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
+        const incoming = newest.filter(item => Number(item.user_id) !== Number(currentUser?.id));
+        if (incoming.length && document.hidden && !groupInboxMuted) {
+          const first = incoming[0];
+          const senderName = first.username || 'Birisi';
+          const preview = first.content || (first.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı');
+          await triggerGroupMessageNotification(group.name, senderName, preview);
+        }
+        chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod, !!canSend)).join('');
+        enhanceLinkPreviews(chatEl2);
+        lastChatSignature = chatSignature(newMsgs);
+        lastId = Math.max(lastId, ...newMsgs.map(m => Number(m.id)));
+        if (wasBottom || newest.length) chatEl2.scrollTop = chatEl2.scrollHeight;
+      }
+    } catch (error) {
+      console.error('Grup mesajları yenilenemedi:', error.message);
+    }
+  };
+  activeGroupMessageRefresh = refreshGroupMessages;
+  if (currentUser && isMember) {
+    chatPollInterval = setInterval(async () => {
+      await refreshGroupMessages(slug);
+      if (activeChannel) await loadChannelMessages(activeChannel);
+    }, 15000);
+  }
+
   if (canSend) {
     document.addEventListener('click', event => {
       if (!event.target.closest('.msg-menu-popover') && !event.target.closest('.msg-menu-trigger')) {
@@ -4445,31 +4568,6 @@ async function renderGroupDetail(app, slug) {
       prepareChatImage(file);
     });
 
-    let lastId = messages.length ? Number(messages[messages.length - 1].id) : 0;
-    let lastChatSignature = chatSignature(messages);
-    chatPollInterval = setInterval(async () => {
-      if (!$('#chat-messages')) { clearInterval(chatPollInterval); return; }
-      try {
-        const newMsgs = await api('/group/' + slug + '/messages');
-        const newest = newMsgs.filter(m => Number(m.id) > lastId);
-        const chatEl2 = $('#chat-messages');
-        if (chatEl2 && newMsgs.length && chatSignature(newMsgs) !== lastChatSignature) {
-          const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
-          const incoming = newest.filter(item => Number(item.user_id) !== Number(currentUser?.id));
-          if (incoming.length && document.hidden && !groupInboxMuted) {
-            const first = incoming[0];
-            const senderName = first.username || 'Birisi';
-            const preview = first.content || (first.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı');
-            await triggerGroupMessageNotification(group.name, senderName, preview);
-          }
-          chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod, !!canSend)).join('');
-          enhanceLinkPreviews(chatEl2);
-          lastChatSignature = chatSignature(newMsgs);
-          lastId = Math.max(lastId, ...newMsgs.map(m => Number(m.id)));
-          if (wasBottom || newest.length) chatEl2.scrollTop = chatEl2.scrollHeight;
-        }
-      } catch {}
-    }, 5000);
   }
 
   $('#chat-messages')?.addEventListener('click', async e => {
@@ -7434,7 +7532,7 @@ async function renderMessages(app, targetUsername) {
       <span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${c.other_is_online ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
-          <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong><small>@${escHtml(c.other_username)}</small></span><span class="dm-presence-slot">${presenceHTML}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
+          <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong></span><span class="dm-presence-slot">${presenceHTML}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
           ${muted ? '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>' : ''}
           ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
         </div>
@@ -7726,7 +7824,7 @@ async function renderDMChat(username) {
         <div class="dm-chat-header-left">
           <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
           <i class="fas fa-lock" style="color:var(--accent-red2)"></i>
-          <span class="dm-chat-username">${escHtml(other.nickname || other.username)} <small>@${escHtml(other.username)}</small></span>
+          <span class="dm-chat-username">${escHtml(other.nickname || other.username)}</span>
           <span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>
         </div>
       </div>
@@ -7784,7 +7882,7 @@ async function renderDMChat(username) {
         </a>
         <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
-            <strong>${escHtml(other.nickname || other.username)}</strong><small>@${escHtml(other.username)}</small>
+            <strong>${escHtml(other.nickname || other.username)}</strong>
           </a>
           <span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>
           ${spotifyNowPlayingMarkup(otherSpotify, true)}
@@ -7992,14 +8090,21 @@ async function renderDMChat(username) {
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
     try {
-      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100`, { headers: searchUnlockHeaders });
-      const refreshedMsgs = conversationUpdate?.messages || [];
+      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100&after_id=${lastPollMsgId}`, { headers: searchUnlockHeaders });
+      const refreshedMsgs = Array.isArray(conversationUpdate) ? conversationUpdate : conversationUpdate?.messages || [];
       const el = document.getElementById('dm-messages');
       if (!el) return;
       const wasBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-      el.innerHTML = refreshedMsgs.map(m => dmMessageHTML(m, currentUser.id, dmSelectionMode)).join('');
-      if (refreshedMsgs.length) lastPollMsgId = Number(refreshedMsgs[refreshedMsgs.length - 1].id);
-      enhanceLinkPreviews(el);
+      refreshedMsgs.forEach(message => {
+        if (!el.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`)) {
+          el.insertAdjacentHTML('beforeend', dmMessageHTML(message, currentUser.id, dmSelectionMode));
+        }
+      });
+      if (refreshedMsgs.length) {
+        lastPollMsgId = Math.max(lastPollMsgId, ...refreshedMsgs.map(message => Number(message.id)));
+        enhanceLinkPreviews(el);
+        if (wasBottom) el.scrollTop = el.scrollHeight;
+      }
       const conversationList = await api('/conversations').catch(() => []);
       conversationList.forEach(conversation => {
         const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(conversation.other_username)}"]`);
@@ -8010,10 +8115,15 @@ async function renderDMChat(username) {
         if (header) updateDmPresence(header, conversationUpdate.other.is_online, conversationUpdate.other.last_active);
       }
       const activeConversation = conversationList.find(item => String(item.other_username).toLowerCase() === String(username).toLowerCase());
+      if (activeConversation) {
+        const chat = document.querySelector('.dm-chat');
+        if (chat) updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active);
+      }
       const activeConversationEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(username)}"] .dm-conv-last`);
       if (activeConversationEl) activeConversationEl.textContent = (activeConversation?.last_message || '').substring(0, 40);
-      if (wasBottom) el.scrollTop = el.scrollHeight;
-    } catch {}
+    } catch (error) {
+      console.error('Özel mesajlar yenilenemedi:', error.message);
+    }
   }, 2500);
 }
 
@@ -8115,7 +8225,7 @@ function dmMessageHTML(m, myId, selMode) {
   const messageText = String(m.content || '');
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe && !deleted) return '';
-  const senderName = m.sender_username || 'Silinmiş kullanıcı';
+  const senderName = m.sender_nickname || m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
 
   return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}">

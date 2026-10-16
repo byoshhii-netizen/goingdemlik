@@ -503,6 +503,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   font-size: 14px;
   transition: border-color 0.2s;
 }
+.nav-user-btn { padding: 5px; border-radius: 50%; }
+.nav-user-btn .nav-avatar { display: block; width: 32px; height: 32px; }
 .nav-user-btn:hover { border-color: var(--border-hover); }
 .nav-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; background: var(--bg-card2); }
 .nav-user-identity { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15; }

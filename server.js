@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const http = require('http');
 const { randomUUID } = require('crypto');
 const crypto = require('crypto');
 const path = require('path');
@@ -12,6 +13,7 @@ const cloudinary = require('cloudinary').v2;
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { Server } = require('socket.io');
 const { query, pool, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 
@@ -30,6 +32,8 @@ function profileRouteKey(username) {
 const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü', 'cgiosu'), '[^a-z0-9]', '', 'g')";
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || '').trim();
@@ -495,6 +499,36 @@ async function authMiddleware(req, res, next) {
   if (users[0].banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
   req.user = users[0];
   next();
+}
+
+io.use(async (socket, next) => {
+  try {
+    const token = String(socket.handshake.auth?.token || '');
+    if (!token) return next(new Error('Giriş gerekli'));
+    const { rows } = await query(
+      'SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW()',
+      [token]
+    );
+    if (!rows.length || rows[0].banned) return next(new Error('Oturum geçersiz veya süresi dolmuş'));
+    socket.data.user = rows[0];
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+io.on('connection', socket => {
+  socket.join(`user:${socket.data.user.id}`);
+});
+
+function emitDirectMessage(conversationId, sender, recipient, message) {
+  io.to([`user:${sender.id}`, `user:${recipient.id}`]).emit('dm:message', {
+    conversationId,
+    messageId: message.id,
+    senderId: sender.id,
+    usernames: [sender.username, recipient.username],
+    preview: message.content || (message.image_url ? 'Fotoğraf' : 'Yeni mesaj')
+  });
 }
 
 async function requireVmbMiddleware(req, res, next) {
@@ -3060,7 +3094,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   const book = bRows[0];
   const username = String(req.body?.username || '').trim();
   if (!username) return res.status(400).json({ error: 'Kitap iletilecek kullanıcı adı gerekli' });
-  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [username]);
+  const { rows: target } = await query('SELECT id,username,is_private FROM users WHERE username=$1', [username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
@@ -3087,7 +3121,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   const { rows: full } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
+      u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
@@ -3105,6 +3139,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
   `, [msgRows[0].id]);
+  emitDirectMessage(conv.id, req.user, other, full[0]);
   res.json({ ok: true, message: full[0] });
 });
 
@@ -3619,6 +3654,12 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     [group.id, req.user.id, content||'', image_url||'', replyId]);
   await notifyGroupMentions(group, req.user, content || '').catch(() => {});
   const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows: memberRows } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [group.id]);
+  io.to(memberRows.map(member => `user:${member.user_id}`)).emit('group:message', {
+    slug: group.slug,
+    messageId: msg[0].id,
+    senderId: req.user.id
+  });
   res.json(msg[0]);
 });
 
@@ -4679,8 +4720,12 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
     const user2 = Math.max(req.user.id, stories[0].user_id);
     let { rows: conversations } = await query('SELECT id FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [user1, user2]);
     if (!conversations.length) ({ rows: conversations } = await query('INSERT INTO dm_conversations (user1_id,user2_id) VALUES ($1,$2) RETURNING id', [user1, user2]));
-    await query('INSERT INTO dm_messages (conversation_id,sender_id,content,shared_story_id) VALUES ($1,$2,$3,$4)', [conversations[0].id, req.user.id, content, stories[0].id]);
+    const { rows: messages } = await query(
+      'INSERT INTO dm_messages (conversation_id,sender_id,content,shared_story_id) VALUES ($1,$2,$3,$4) RETURNING id',
+      [conversations[0].id, req.user.id, content, stories[0].id]
+    );
     await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conversations[0].id]);
+    emitDirectMessage(conversations[0].id, req.user, { id: story.user_id, username: story.owner_username }, { id: messages[0].id, content });
     await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [
       stories[0].user_id, 'story_reply', req.user.username, req.user.avatar || '', 'Hikayenize yanıt geldi', `${req.user.username} hikayenize yanıt verdi: ${content}`, '/fotograflar'
     ]);
@@ -7773,7 +7818,7 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: target } = await query(`
-    SELECT u.id,u.username,u.avatar,u.avatar_removed,u.name_color,u.is_private,
+    SELECT u.id,u.username,u.nickname,u.avatar,u.avatar_removed,u.name_color,u.is_private,
       COALESCE(presence.is_online, FALSE) as is_online,
       presence.last_active
     FROM users u
@@ -7815,7 +7860,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: msgs } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
+      u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
@@ -7871,7 +7916,7 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true });
 });
 
-app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
+app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,username,is_private FROM users WHERE username=$1', [req.params.username]);
   if (await denyIfRestricted(req, res, 'message')) return;
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
@@ -7919,7 +7964,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   const { rows: full } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
-      u.username as sender_username, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
+      u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
@@ -7937,7 +7982,9 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
   `, [msgRows[0].id]);
-  res.json(full[0]);
+  const sentMessage = full[0];
+  emitDirectMessage(conv.id, req.user, other, sentMessage);
+  res.json(sentMessage);
 });
 
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
@@ -9141,6 +9188,14 @@ initDb().then(() => {
           [channelId, req.user.id, content, image_url]
         );
 
+        const { rows: groupMembers } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [groupId]);
+        const memberRooms = [...new Set([...groupMembers.map(member => String(member.user_id)), String(req.user.id)])]
+          .map(userId => `user:${userId}`);
+        io.to(memberRooms).emit('group-channel:message', {
+          slug,
+          channelId: result.rows[0].channel_id,
+          messageId: result.rows[0].id
+        });
         res.json(result.rows[0]);
       } catch (e) {
         console.error('Mesaj gönderme hatası:', e.message);
@@ -9307,7 +9362,7 @@ initDb().then(() => {
 
     // ===== KANAL SİSTEMİ API'LAR SONU =====
 
-    app.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
+    server.listen(PORT, () => console.log(`CigCig çalışıyor: http://localhost:${PORT}`));
   });
 }).catch(err => {
   console.error('DB başlatma hatası:', err);
