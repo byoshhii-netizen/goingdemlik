@@ -898,8 +898,12 @@ async function initDb() {
       video_id BIGINT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP,
+      is_pinned BOOLEAN NOT NULL DEFAULT FALSE
     );
+    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
+    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
     CREATE TABLE IF NOT EXISTS photo_comment_likes (
       id BIGSERIAL PRIMARY KEY,
       comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,

@@ -1221,12 +1221,41 @@ async function renderRealsFeed(app, initialId = null) {
     };
     sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
     sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
+    const list = sheet.querySelector('.reals-comments-list');
+    let comments = [];
+    const renderComments = values => {
+      list.innerHTML = values.length
+        ? values.map(comment => renderVideoComment(comment, !isAd && Number(currentUser?.id) === Number(video.user_id), !isAd)).join('')
+        : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
+    };
     try {
-      const comments = await api(commentBase + '/comments');
-      const list = sheet.querySelector('.reals-comments-list');
+      comments = await api(commentBase + '/comments');
       if (!list || !document.body.contains(sheet)) return;
-      list.innerHTML = comments.length ? comments.map(comment => renderVideoComment(comment, !isAd && currentUser?.id === video.user_id)).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
+      renderComments(comments);
       list.addEventListener('click', async event => {
+        const editButton = event.target.closest('.video-comment-edit');
+        if (editButton) {
+          const nextContent = prompt('Yorumu düzenle', editButton.dataset.content);
+          if (nextContent === null) return;
+          try {
+            const updated = await api(commentBase + '/comments/' + editButton.dataset.id, { method: 'PUT', body: JSON.stringify({ content: nextContent.trim() }) });
+            comments = comments.map(comment => String(comment.id) === String(updated.id) ? { ...comment, ...updated } : comment);
+            renderComments(comments);
+            toast('Yorum güncellendi.');
+          } catch (error) { toast(error.message, 'error'); }
+          return;
+        }
+        const pinButton = event.target.closest('.video-comment-pin');
+        if (pinButton) {
+          pinButton.disabled = true;
+          try {
+            await api(commentBase + '/comments/' + pinButton.dataset.id + '/pin', { method: 'POST' });
+            comments = await api(commentBase + '/comments');
+            renderComments(comments);
+            toast(pinButton.dataset.pinned === 'true' ? 'Yorum sabitlemesi kaldırıldı.' : 'Yorum sabitlendi.');
+          } catch (error) { toast(error.message, 'error'); }
+          return;
+        }
         const likeButton = event.target.closest('.video-comment-like');
         const deleteButton = event.target.closest('.video-comment-delete');
         if (deleteButton) {
@@ -1246,7 +1275,7 @@ async function renderRealsFeed(app, initialId = null) {
         } catch (error) { toast(error.message, 'error'); } finally { likeButton.disabled = false; }
       });
     } catch (error) {
-      sheet.querySelector('.reals-comments-list').innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message)}</p></div>`;
+      list.innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message)}</p></div>`;
     }
     sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
       event.preventDefault();
@@ -1256,10 +1285,9 @@ async function renderRealsFeed(app, initialId = null) {
       const button = event.currentTarget.querySelector('button');
       button.disabled = true;
       try {
-        const comment = await api(commentBase + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
-        const list = sheet.querySelector('.reals-comments-list');
-        list.querySelector('.reals-comments-empty')?.remove();
-        list.insertAdjacentHTML('beforeend', renderVideoComment(comment, !isAd && currentUser?.id === video.user_id));
+        await api(commentBase + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        comments = await api(commentBase + '/comments');
+        renderComments(comments);
         input.value = '';
         list.scrollTop = list.scrollHeight;
       } catch (error) { toast(error.message, 'error'); } finally { button.disabled = false; }
@@ -4212,7 +4240,8 @@ async function renderGroupDetail(app, slug) {
     groupData = await api('/group/' + slug);
     members = await api('/group/' + slug + '/members');
     try { messages = await api('/group/' + slug + '/messages'); } catch {}
-    try { channels = await api('/group/' + slug + '/channels'); } catch {}
+    try { channels = await api('/group/' + slug + '/channels'); }
+    catch (error) { toast(error.message || 'Grup kanalları yüklenemedi', 'error'); }
   } catch (error) {
     const status = error.data?.group_status;
     if (status === 'suspended' || status === 'banned' || status === 'member_banned') {
@@ -5583,7 +5612,7 @@ async function renderVideoDetail(app, slug) {
   }
   document.title = video.title + ' – ' + siteName;
   updatePageMeta(video.title + ' – ' + siteName, video.description || 'CigCig videoları', video.banner_image || '');
-  const isOwner = currentUser && currentUser.id === video.user_id;
+  const isOwner = currentUser && Number(currentUser.id) === Number(video.user_id);
   let followState = false;
   if (currentUser && currentUser.username !== video.username) {
     try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
@@ -5748,7 +5777,15 @@ async function renderVideoDetail(app, slug) {
       const current = editBtn.dataset.content;
       const newText = prompt('Düzenle', current);
       if (newText === null) return;
-      try { const updated = await api('/video/' + slug + '/comments/' + id, { method: 'PUT', body: JSON.stringify({ content: newText.trim() }) }); editBtn.closest('.comment').querySelector('.comment-content').innerHTML = renderContent(updated.content); toast('Yorum güncellendi'); } catch (e) { toast(e.message,'error'); }
+      try {
+        const updated = await api('/video/' + slug + '/comments/' + id, { method: 'PUT', body: JSON.stringify({ content: newText.trim() }) });
+        const row = editBtn.closest('.comment');
+        row.querySelector('.comment-content').innerHTML = renderContent(updated.content);
+        editBtn.dataset.content = updated.content;
+        const editedTime = row.querySelector('.comment-time');
+        if (editedTime && !editedTime.textContent.includes('düzenlendi')) editedTime.textContent += ' • düzenlendi';
+        toast('Yorum güncellendi');
+      } catch (e) { toast(e.message,'error'); }
     }
     const pinBtn = e.target.closest('.video-comment-pin');
     if (pinBtn) {
@@ -5762,10 +5799,10 @@ async function renderVideoDetail(app, slug) {
   });
 }
 
-function renderVideoComment(c, isOwner) {
-  const canEdit = currentUser && (currentUser.id === c.user_id || isOwner);
-  const canPin = currentUser && isOwner;
-  const canDelete = currentUser && (currentUser.id === c.user_id || isOwner || currentUser.is_admin);
+function renderVideoComment(c, isOwner, allowModeration = true) {
+  const canEdit = allowModeration && currentUser && (Number(currentUser.id) === Number(c.user_id) || isOwner);
+  const canPin = allowModeration && currentUser && isOwner;
+  const canDelete = currentUser && (Number(currentUser.id) === Number(c.user_id) || isOwner || currentUser.is_admin);
   return `<div class="comment">
     ${avatarImg(c, 'comment-avatar')}
     <div class="comment-body">
@@ -5776,7 +5813,7 @@ function renderVideoComment(c, isOwner) {
       <div class="comment-content">${renderContent(c.content)}</div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px">
         <div style="display:flex;align-items:center;gap:8px">
-          ${canPin ? `<button class="btn btn-ghost btn-sm video-comment-pin" data-id="${c.id}" style="padding:2px 6px"><i class="fas fa-thumbtack"></i></button>` : ''}
+          ${canPin ? `<button class="btn btn-ghost btn-sm video-comment-pin" data-id="${c.id}" data-pinned="${Boolean(c.is_pinned)}" title="${c.is_pinned ? 'Sabitlemeyi kaldır' : 'Yorumu sabitle'}" style="padding:2px 6px"><i class="fas fa-thumbtack"></i>${c.is_pinned ? ' Sabitlemeyi kaldır' : ''}</button>` : ''}
           ${canEdit ? `<button class="btn btn-ghost btn-sm video-comment-edit" data-id="${c.id}" data-content="${escHtml(c.content)}" style="padding:2px 6px"><i class="fas fa-edit"></i></button>` : ''}
           ${canDelete ? `<button class="btn btn-ghost btn-sm video-comment-delete" data-id="${c.id}" title="Yorumu sil" style="padding:2px 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
         </div>
@@ -7953,11 +7990,12 @@ async function renderMessages(app, targetUsername) {
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
   const dmStories = storiesResult.status === 'fulfilled' ? storiesResult.value : [];
   const dmStoryByUsername = new Map();
+  const isStoryViewed = story => story?.viewed === true || story?.viewed === 1 || story?.viewed === 'true';
   dmStories.forEach(story => {
     const key = String(story.username || '').toLowerCase();
     if (!key) return;
     const previous = dmStoryByUsername.get(key);
-    if (!previous || (previous.viewed && !story.viewed) || (Boolean(previous.viewed) === Boolean(story.viewed) && new Date(story.created_at || 0) > new Date(previous.created_at || 0))) {
+    if (!previous || (isStoryViewed(previous) && !isStoryViewed(story)) || (isStoryViewed(previous) === isStoryViewed(story) && new Date(story.created_at || 0) > new Date(previous.created_at || 0))) {
       dmStoryByUsername.set(key, story);
     }
   });
@@ -7981,7 +8019,7 @@ async function renderMessages(app, targetUsername) {
     const presenceHTML = dmPresenceMarkup(c.other_is_online, c.other_last_active);
     const dmStory = dmStoryByUsername.get(String(c.other_username || '').toLowerCase());
     const storyAvatarHTML = dmStory
-      ? `<button type="button" class="dm-story-avatar-link" data-story-id="${escHtml(dmStory.public_id || dmStory.id)}" aria-label="${escHtml(c.other_nickname || c.other_username)} hikayesini aç"><span class="dm-story-ring${dmStory.viewed ? ' viewed' : ''}">${avatarHTML}</span>${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</button>`
+      ? `<button type="button" class="dm-story-avatar-link" data-story-id="${escHtml(dmStory.public_id || dmStory.id)}" aria-label="${escHtml(c.other_nickname || c.other_username)} hikayesini aç"><span class="dm-story-ring${isStoryViewed(dmStory) ? ' viewed' : ''}">${hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed }) ? `<img src="${escHtml(c.other_avatar)}" class="dm-story-avatar-media" alt="" />` : '<span class="dm-story-avatar-media avatar-placeholder"><i class="fas fa-user"></i></span>'}</span>${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</button>`
       : `<span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>`;
     const isUser1 = String(c.user1_id) === String(currentUser.id);
     const muteForever = Number(c[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1;
@@ -11953,7 +11991,6 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
-  document.getElementById('photo-audio-control')?.remove();
   let soundEnabled = localStorage.getItem('cigcig_photo_sound_enabled') === '1';
   let visibleCard = null;
 
@@ -11965,12 +12002,6 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
       const icon = button.querySelector('i');
       if (icon) icon.className = `fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}`;
     });
-    const control = document.getElementById('photo-audio-control');
-    if (control) {
-      control.classList.toggle('is-enabled', soundEnabled);
-      control.setAttribute('aria-label', soundEnabled ? 'Fotoğraf müziğini kapat' : 'Fotoğraf müziğini aç');
-      control.innerHTML = `<i class="fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}"></i>`;
-    }
   };
   const stop=()=>{
     activePhotoAudio?.pause();
@@ -12012,19 +12043,6 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
   };
 
   if (!disableAutoplay) {
-    const controlButton = document.createElement('button');
-    controlButton.type = 'button';
-    controlButton.id = 'photo-audio-control';
-    controlButton.className = 'photo-audio-global-control';
-    controlButton.addEventListener('click', () => {
-      if (visibleCard) play(visibleCard, true);
-      else {
-        soundEnabled = !soundEnabled;
-        localStorage.setItem('cigcig_photo_sound_enabled', soundEnabled ? '1' : '0');
-        syncButtons();
-      }
-    });
-    document.body.appendChild(controlButton);
     photoAudioObserver = new IntersectionObserver(entries => {
       entries.forEach(entry => { entry.target._photoVisibility = entry.isIntersecting ? entry.intersectionRatio : 0; });
       visibleCard = [...feed.querySelectorAll('[data-photo-id]')]

@@ -9007,7 +9007,7 @@ app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM video_comment_likes vcl WHERE vcl.comment_id=c.id) AS like_count,
     EXISTS(SELECT 1 FROM video_comment_likes vcl2 WHERE vcl2.comment_id=c.id AND vcl2.user_id=$2) AS liked
     FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id AND COALESCE(u.is_deleted,0)=0
-    WHERE (v.slug=$1 OR v.id::text=$1) AND (COALESCE((SELECT is_private FROM users WHERE id=v.user_id),0)=0 OR v.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY c.created_at ASC`, [req.params.slug, req.user?.id || 0]);
+    WHERE (v.slug=$1 OR v.id::text=$1) AND (COALESCE((SELECT is_private FROM users WHERE id=v.user_id),0)=0 OR v.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY c.is_pinned DESC, c.created_at ASC`, [req.params.slug, req.user?.id || 0]);
   res.json(rows);
 });
 
@@ -9023,6 +9023,24 @@ app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar });
 });
 
+app.put('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
+  const content = String(req.body.content || '').trim();
+  if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
+  if (content.length > 1000) return res.status(400).json({ error: 'Yorum en fazla 1000 karakter olabilir' });
+  const { rows } = await query(`SELECT c.id, c.user_id, v.id AS video_id, v.user_id AS video_owner_id
+    FROM video_comments c JOIN videos v ON v.id=c.video_id
+    WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const comment = rows[0];
+  if (Number(comment.user_id) !== Number(req.user.id) && Number(comment.video_owner_id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Bu yorumu düzenleme yetkiniz yok' });
+  }
+  const { rows: updatedRows } = await query(`UPDATE video_comments SET content=$1, updated_at=NOW()
+    WHERE id=$2 RETURNING *`, [content, comment.id]);
+  const { rows: userRows } = await query('SELECT username, avatar, avatar_removed FROM users WHERE id=$1', [comment.user_id]);
+  res.json({ ...updatedRows[0], ...userRows[0] });
+});
+
 app.post('/api/video/:slug/comments/:commentId/like', authMiddleware, async (req, res) => {
   const { rows: comments } = await query(`SELECT c.id FROM video_comments c JOIN videos v ON v.id=c.video_id
     WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
@@ -9034,6 +9052,26 @@ app.post('/api/video/:slug/comments/:commentId/like', authMiddleware, async (req
   }
   await query('INSERT INTO video_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [comments[0].id, req.user.id]);
   res.json({ liked: true });
+});
+
+app.post('/api/video/:slug/comments/:commentId/pin', authMiddleware, async (req, res) => {
+  const { rows } = await query(`SELECT c.id, c.video_id, c.is_pinned, v.user_id AS video_owner_id
+    FROM video_comments c JOIN videos v ON v.id=c.video_id
+    WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const comment = rows[0];
+  if (Number(comment.video_owner_id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Yorum sabitleme yetkiniz yok' });
+  }
+  const { rows: updatedRows } = await query(`WITH selected_comment AS (
+      SELECT is_pinned FROM video_comments WHERE id=$1 AND video_id=$2
+    )
+    UPDATE video_comments
+    SET is_pinned=CASE WHEN video_comments.id=$1 THEN NOT selected_comment.is_pinned ELSE FALSE END
+    FROM selected_comment
+    WHERE video_comments.video_id=$2
+    RETURNING video_comments.id, video_comments.is_pinned`, [comment.id, comment.video_id]);
+  res.json({ is_pinned: Boolean(updatedRows.find(row => Number(row.id) === Number(comment.id))?.is_pinned) });
 });
 
 app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
@@ -9182,21 +9220,29 @@ initDb().then(() => {
     app.get('/api/group/:slug/channels', optionalAuth, async (req, res) => {
       try {
         const { slug } = req.params;
+        if (!req.user) return res.status(401).json({ error: 'Giriş yapmalısınız' });
+        const { rows: groupRows } = await query('SELECT id, owner_id, allow_chat, status, suspended, banned FROM groups WHERE slug=$1', [slug]);
+        if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        if (await denyIfGroupUnavailable(req, res, groupRows[0])) return;
+        await query(`INSERT INTO group_channels (group_id, name, icon, is_default, can_write, created_by)
+          SELECT g.id, 'kanal', 'fas fa-hashtag', 1, 1, g.owner_id
+          FROM groups g
+          WHERE g.id=$1 AND COALESCE(g.allow_chat, 0)=1
+            AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=$2)
+            AND NOT EXISTS (SELECT 1 FROM group_channels gc WHERE gc.group_id=g.id AND gc.is_default=1)
+          ON CONFLICT (group_id, name) DO NOTHING`, [groupRows[0].id, req.user.id]);
         const result = await query(`
-          SELECT gc.id, gc.name, gc.icon, gc.description, gc.is_default, 
+          SELECT gc.id, gc.name, gc.icon, gc.description, gc.is_default,
                  gc.can_view_history, gc.can_write, gc.visibility, gc.moderators_can_manage, gc.moderators_can_write, gc.created_by,
-                 u.username as created_by_username, 
+                 u.username as created_by_username,
                  COUNT(gcm.id) as message_count
           FROM group_channels gc
           LEFT JOIN users u ON gc.created_by = u.id
           LEFT JOIN group_channel_messages gcm ON gc.id = gcm.channel_id
-          WHERE gc.group_id = (SELECT id FROM groups WHERE slug = $1)
+          WHERE gc.group_id = $1
           GROUP BY gc.id, u.id
           ORDER BY gc.is_default DESC, gc.created_at ASC
-        `, [slug]);
-        if (!req.user) return res.status(401).json({ error: 'Giriş yapmalısınız' });
-        const { rows: groupRows } = await query('SELECT id, owner_id FROM groups WHERE slug=$1', [slug]);
-        if (!groupRows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+        `, [groupRows[0].id]);
         const { rows: memberRows } = await query('SELECT role FROM group_members WHERE group_id=$1 AND user_id=$2', [groupRows[0].id, req.user.id]);
         const { rows: approvalRows } = await query('SELECT status FROM group_approval_requests WHERE group_id=$1 AND user_id=$2', [groupRows[0].id, req.user.id]);
         const isPrivileged = Number(groupRows[0].owner_id) === Number(req.user.id) || memberRows[0]?.role === 'moderator';
