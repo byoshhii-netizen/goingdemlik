@@ -4174,6 +4174,9 @@ app.put('/api/me/badges/:key', authMiddleware, async (req, res) => {
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
   const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_progress, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, avatar_removed } = req.body;
+  if (bio !== undefined && String(bio).length > 500) return res.status(400).json({ error: 'Biyografi en fazla 500 karakter olabilir.' });
+  if (title !== undefined && String(title).length > 100) return res.status(400).json({ error: 'Ünvan en fazla 100 karakter olabilir.' });
+  if (location !== undefined && String(location).length > 100) return res.status(400).json({ error: 'Konum en fazla 100 karakter olabilir.' });
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   if (canSetBadge && isReservedVmbBadgeName(badge_name)) return res.status(400).json({ error: 'VMB özel rozeti profil ayarlarından verilemez' });
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;

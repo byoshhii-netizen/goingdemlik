@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="/theme.js?v=20260902-theme"></script>
   <script src="/homepage-sections.js?v=20261014-homepage-sections"></script>
-  <link rel="stylesheet" href="/style.css?v=20261019-photo-fit-comments-books-mobile-video-dm-story-likes-music-picker-group-audio-v1" />
+  <link rel="stylesheet" href="/style.css?v=20261019-profile-privacy-story-ui-v1" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
     .user-icons{display:inline-flex;gap:6px;margin-left:8px}
@@ -176,6 +176,7 @@
       <div class="mobile-new-wrap" style="position:relative">
         <button class="mobile-header-action mobile-books-btn" id="mobile-books-btn" type="button" aria-label="Kütüphane" title="Kütüphane"><i class="fas fa-book"></i></button>
         <div class="mobile-new-dropdown mobile-books-dropdown hidden" id="mobile-books-dropdown">
+          <button class="btn btn-outline btn-sm" id="mob-forums-nav"><i class="fas fa-comments"></i> Konular</button>
           <button class="btn btn-outline btn-sm" id="mob-books-nav"><i class="fas fa-book"></i> Kitaplar</button>
           <button class="btn btn-outline btn-sm" id="mob-poems-nav"><i class="fas fa-pen-fancy"></i> Şiirler</button>
         </div>
@@ -261,7 +262,7 @@
 })();
 </script>
   <script src="/socket.io/socket.io.js"></script>
-  <script src="/app.js?v=20261019-photo-fit-comments-books-mobile-video-dm-story-likes-music-picker-group-audio-v1" ></script>
+  <script src="/app.js?v=20261019-profile-privacy-story-ui-v1" ></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---

@@ -17,6 +17,8 @@ window.fetch = (input, options = {}) => {
   return nativeFetch(input, options);
 };
 let activeStoryAudio = null;
+let storyRouteStoriesCache = [];
+let storyRouteStoriesCacheAt = 0;
 let activeRealsAudio = null;
 let storyComposerAudio = null;
 let activePhotoAudio = null;
@@ -1962,7 +1964,12 @@ $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classL
 $('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
 $('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
 $('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else { navigate('/giris'); } });
-$('#logout-btn').addEventListener('click', async () => {
+$('#logout-btn')?.addEventListener('click', () => {
+  showModal('Çıkış yap', '<div class="logout-confirm"><span class="logout-confirm-icon"><i class="fas fa-arrow-right-from-bracket"></i></span><p>Hesabından çıkış yapmak istediğine emin misin?</p><div class="logout-confirm-actions"><button type="button" class="btn btn-danger" id="logout-confirm-btn"><i class="fas fa-arrow-right-from-bracket"></i> Çıkış yap</button><button type="button" class="btn btn-outline" id="logout-cancel-btn">Vazgeç</button></div></div>');
+  $('#logout-cancel-btn')?.addEventListener('click', hideModal);
+  $('#logout-confirm-btn')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
   if (presenceClientId && currentToken) {
     try {
       await presenceHeartbeatRequest;
@@ -1975,8 +1982,10 @@ $('#logout-btn').addEventListener('click', async () => {
   currentToken = null; currentUser = null;
   localStorage.removeItem('token');
   updateNavUI();
+  hideModal();
   navigate('/');
   toast('Çıkış yapıldı');
+  });
 });
 
 $('#mobile-toggle').addEventListener('click', () => {
@@ -2027,6 +2036,10 @@ $('#mobile-books-btn')?.addEventListener('click', e => {
 $('#mob-books-nav')?.addEventListener('click', () => {
   closeMobileBooksMenu();
   navigate('/kitaplar');
+});
+$('#mob-forums-nav')?.addEventListener('click', () => {
+  closeMobileBooksMenu();
+  navigate('/konular');
 });
 $('#mob-poems-nav')?.addEventListener('click', () => {
   closeMobileBooksMenu();
@@ -2525,7 +2538,7 @@ async function renderPoemDetail(app, slug) {
       </div>
       <div class="poem-detail-content">${poemTextHTML(poem.content)}</div>
       <div class="poem-actions">
-        <button class="forum-action-btn ${liked ? 'liked' : ''}" id="poem-like-btn">
+        <button class="forum-action-btn like-count-control ${liked ? 'liked' : ''}" id="poem-like-btn" aria-label="${liked ? 'Beğeniyi kaldır' : 'Beğen'}">
           <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="poem-like-count">${poem.like_count || 0}</span> Beğeni
         </button>
         <button class="forum-action-btn" id="poem-share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
@@ -2543,7 +2556,7 @@ async function renderPoemDetail(app, slug) {
           </div>
            <div class="comment-form" role="form" aria-label="Yorum yaz">
             ${avatarImg(currentUser, 'comment-avatar')}
-             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000 · Ctrl/⌘ + Enter gönderir</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
+             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
           </div>` : `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>`}
         <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
@@ -2574,7 +2587,17 @@ async function renderPoemDetail(app, slug) {
       btn.classList.toggle('liked', liked);
       const icon = btn.querySelector('i');
       if (icon) icon.className = liked ? 'fas fa-heart' : 'far fa-heart';
-      count.textContent = String((parseInt(count.textContent) || 0) + (liked ? 1 : -1));
+      count.textContent = String(result.like_count ?? (parseInt(count.textContent) || 0));
+      btn.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Beğen');
+      if (liked) {
+        btn.classList.remove('like-pop');
+        requestAnimationFrame(() => btn.classList.add('like-pop'));
+      }
+      btn.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Beğen');
+      if (liked) {
+        btn.classList.remove('like-pop');
+        requestAnimationFrame(() => btn.classList.add('like-pop'));
+      }
     } catch (e) { toast(e.message, 'error'); }
   });
 
@@ -2611,14 +2634,14 @@ async function renderPoemDetail(app, slug) {
       const title = $('.comments-title');
       if (title) title.innerHTML = `<i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span>`;
       const count = $('#comment-char-count');
-      if (count) count.textContent = '0 / 2.000 · Ctrl/⌘ + Enter gönderir';
+      if (count) count.textContent = '0 / 2.000';
     } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#comment-reply-clear')?.addEventListener('click', clearCommentReply);
   $('#comment-input')?.addEventListener('input', e => {
     const count = $('#comment-char-count');
-    if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000 · Ctrl/⌘ + Enter gönderir`;
+    if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000`;
   });
   $('#comment-input')?.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -2988,8 +3011,8 @@ async function renderForumDetail(app, slug) {
         return `<div class="forum-tags-row" style="margin:12px 0">${html}</div>`;
       })()}
       <div class="forum-actions">
-        <button class="forum-action-btn ${liked ? 'liked' : ''}" id="like-btn">
-          <i class="fas fa-heart"></i> <span id="like-count">${forum.like_count || 0}</span> Beğeni
+        <button class="forum-action-btn like-count-control ${liked ? 'liked' : ''}" id="like-btn" aria-label="${liked ? 'Beğeniyi kaldır' : 'Beğen'}">
+          <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="like-count">${forum.like_count || 0}</span>
         </button>
         <button class="forum-action-btn" id="share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
         ${currentUser ? `<button class="forum-action-btn" id="forward-forum-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
@@ -3007,7 +3030,7 @@ async function renderForumDetail(app, slug) {
           </div>
            <div class="comment-form" role="form" aria-label="Yorum yaz">
             ${avatarImg(currentUser, 'comment-avatar')}
-             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000 · Ctrl/⌘ + Enter gönderir</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
+             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
           </div>` : (!currentUser && forum.allow_comments ? `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>` : (!forum.allow_comments ? `<p class="text-muted" style="margin-bottom:16px">Yorumlar kapatılmış.</p>` : ''))}
          <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
@@ -3029,8 +3052,15 @@ async function renderForumDetail(app, slug) {
       liked = r.liked;
       const btn = $('#like-btn'); const cnt = $('#like-count');
       btn.classList.toggle('liked', liked);
-      cnt.textContent = parseInt(cnt.textContent) + (liked ? 1 : -1);
-    } catch {}
+      cnt.textContent = String(r.like_count ?? (parseInt(cnt.textContent) || 0));
+      const icon = btn.querySelector('i');
+      if (icon) icon.className = `${liked ? 'fas' : 'far'} fa-heart`;
+      btn.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Beğen');
+      if (liked) {
+        btn.classList.remove('like-pop');
+        requestAnimationFrame(() => btn.classList.add('like-pop'));
+      }
+    } catch (error) { toast(error.message, 'error'); }
   });
 
   $('#share-btn').addEventListener('click', () => {
@@ -3074,14 +3104,14 @@ async function renderForumDetail(app, slug) {
       const title = $('.comments-title');
       if (title) title.innerHTML = `<i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span>`;
       const count = $('#comment-char-count');
-      if (count) count.textContent = '0 / 2.000 · Ctrl/⌘ + Enter gönderir';
+      if (count) count.textContent = '0 / 2.000';
     } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#comment-reply-clear')?.addEventListener('click', clearCommentReply);
   $('#comment-input')?.addEventListener('input', e => {
     const count = $('#comment-char-count');
-    if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000 · Ctrl/⌘ + Enter gönderir`;
+    if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000`;
   });
   $('#comment-input')?.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -3430,7 +3460,7 @@ async function renderBookDetail(app, slug) {
 
   const bookActionButtons = `
     <div class="book-detail-actions" style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" id="book-like-btn"><i class="${book.liked ? 'fas' : 'far'} fa-heart"></i> <span id="book-like-text">${book.liked ? 'Beğendin' : 'Beğen'}</span> <span id="book-like-count" class="badge-count">${book.like_count || 0}</span></button>
+      <button class="btn btn-outline btn-sm like-count-control ${book.liked ? 'liked' : ''}" id="book-like-btn" aria-label="${book.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${book.liked ? 'fas' : 'far'} fa-heart"></i> <span id="book-like-count" class="badge-count">${book.like_count || 0}</span></button>
       ${currentUser ? `<button class="btn btn-outline btn-sm" id="book-send-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
       <button class="btn btn-outline btn-sm" id="book-share-btn"><i class="fas fa-share-nodes"></i> Paylaş</button>
     </div>`;
@@ -3521,10 +3551,16 @@ async function renderBookDetail(app, slug) {
       book.like_count = Number(result.like_count || 0);
       const btn = $('#book-like-btn');
       const icon = btn?.querySelector('i');
-      const text = $('#book-like-text');
       const count = $('#book-like-count');
+      if (btn) {
+        btn.classList.toggle('liked', book.liked);
+        btn.setAttribute('aria-label', book.liked ? 'Beğeniyi kaldır' : 'Beğen');
+        if (book.liked) {
+          btn.classList.remove('like-pop');
+          requestAnimationFrame(() => btn.classList.add('like-pop'));
+        }
+      }
       if (btn && icon) icon.className = book.liked ? 'fas fa-heart' : 'far fa-heart';
-      if (text) text.textContent = book.liked ? 'Beğendin' : 'Beğen';
       if (count) count.textContent = String(book.like_count);
     } catch (e) { toast(e.message, 'error'); }
   });
@@ -5503,7 +5539,7 @@ async function renderVideoList(app) {
     updatePageMeta('Video – ' + siteName, 'CigCig video akışını keşfet.', '');
     app.innerHTML = `<div class="container page">
       <div class="video-home-header">
-        <div><div class="page-title"><i class="fas fa-video"></i> Video</div><div class="page-subtitle">İzleme alışkanlığına göre sıralanan videolar</div></div>
+        <div><div class="page-title"><i class="fas fa-video"></i> Video</div></div>
       </div>
       <div class="video-search-bar"><i class="fas fa-search"></i><input id="video-search-input" type="search" placeholder="Videolarda ara..." autocomplete="off" /></div>
       <div class="video-feed-label"><span><i class="fas fa-wand-magic-sparkles"></i> Sana özel akış</span><small>${videos.length} video</small></div>
@@ -7900,14 +7936,22 @@ async function renderMessages(app, targetUsername) {
   document.title = 'Mesajlar - ' + siteName;
 
   let convs = [], hiddenConvs = [], groups = [];
-  try { convs = await api('/conversations'); } catch (error) { toast(error.message, 'error'); }
-  try { groups = await api('/my-groups'); } catch (error) { toast(error.message, 'error'); }
-  try { dmLockSettings = await api('/me/dm-lock-settings'); } catch (error) { toast(error.message, 'error'); }
-  let friends = null;
-  try { friends = await api('/friends'); } catch {}
+  const [conversationsResult, groupsResult, lockResult, friendsResult, storiesResult] = await Promise.allSettled([
+    api('/conversations'),
+    api('/my-groups'),
+    api('/me/dm-lock-settings'),
+    api('/friends'),
+    api('/stories')
+  ]);
+  if (conversationsResult.status === 'fulfilled') convs = conversationsResult.value;
+  else toast(conversationsResult.reason?.message || 'Konuşmalar yüklenemedi', 'error');
+  if (groupsResult.status === 'fulfilled') groups = groupsResult.value;
+  else toast(groupsResult.reason?.message || 'Gruplar yüklenemedi', 'error');
+  if (lockResult.status === 'fulfilled') dmLockSettings = lockResult.value;
+  else toast(lockResult.reason?.message || 'Sohbet kilidi ayarları yüklenemedi', 'error');
+  const friends = friendsResult.status === 'fulfilled' ? friendsResult.value : null;
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
-  let dmStories = [];
-  try { dmStories = await api('/stories'); } catch {}
+  const dmStories = storiesResult.status === 'fulfilled' ? storiesResult.value : [];
   const dmStoryByUsername = new Map();
   dmStories.forEach(story => {
     const key = String(story.username || '').toLowerCase();
@@ -11172,7 +11216,7 @@ async function showStoryEditModal(story, refresh) {
   $('#edit-story-start').oninput = event => { const seconds = Number(event.target.value) || 0; $('#edit-story-time').textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0'); };
   $('#edit-story-start').dispatchEvent(new Event('input'));
   try { const songs = await api('/songs'); $('#edit-story-song').innerHTML += songs.map(song => `<option value="${song.id}" ${String(song.id) === String(story.song_id) ? 'selected' : ''}>${escHtml(song.title)} · ${escHtml(song.artist_name || '')}</option>`).join(''); } catch {}
-  $('#edit-story-save').onclick = async () => { try { await api('/stories/' + (story.public_id || story.id), { method: 'PUT', body: JSON.stringify({ caption: $('#edit-story-caption').value.trim(), duration_hours: $('#edit-story-duration').value, media_filter: $('#edit-story-filter').value, song_id: $('#edit-story-song').value || null, song_start_seconds: $('#edit-story-start').value }) }); hideModal(); toast('Hikaye güncellendi'); refresh?.(); } catch (error) { $('#edit-story-error').textContent = error.message; } };
+  $('#edit-story-save').onclick = async () => { try { await api('/stories/' + (story.public_id || story.id), { method: 'PUT', body: JSON.stringify({ caption: $('#edit-story-caption').value.trim(), duration_hours: $('#edit-story-duration').value, media_filter: $('#edit-story-filter').value, song_id: $('#edit-story-song').value || null, song_start_seconds: $('#edit-story-start').value }) }); storyRouteStoriesCacheAt = 0; hideModal(); toast('Hikaye güncellendi'); refresh?.(); } catch (error) { $('#edit-story-error').textContent = error.message; } };
 }
 
 async function showStoryViewers(story) {
@@ -11184,18 +11228,19 @@ async function loadStoriesBar(container) {
   if (!container) return;
   try {
     const stories = await api('/stories');
-    const groups = [];
+    storyRouteStoriesCache = stories;
+    storyRouteStoriesCacheAt = Date.now();
+    const groupsByUser = new Map();
     stories.forEach(story => {
-      let group = groups.find(item => item.user_id === story.user_id);
-      if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, avatar_removed: story.avatar_removed, stories: [] }; groups.push(group); }
+      const key = String(story.user_id);
+      let group = groupsByUser.get(key);
+      if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, avatar_removed: story.avatar_removed, stories: [] }; groupsByUser.set(key, group); }
       group.stories.push(story);
     });
-    groups.forEach(group => group.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
-    groups.flatMap(group => group.stories).forEach(story => {
-      if (story.media_type === 'image' && story.media_url) { const image = new Image(); image.src = story.media_url; }
-    });
+    const groupedStories = [...groupsByUser.values()];
+    groupedStories.forEach(group => group.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
     const ownUserId = currentUser?.id;
-    const visibleGroups = groups;
+    const visibleGroups = groupedStories;
     visibleGroups.sort((a, b) => {
       const aViewed = a.stories.every(story => story.viewed);
       const bViewed = b.stories.every(story => story.viewed);
@@ -11206,7 +11251,7 @@ async function loadStoriesBar(container) {
     const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
     container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
-      const group = groups[index];
+      const group = groupedStories[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
       if (storyIndex < 0) storyIndex = 0;
       const render = () => {
@@ -11451,25 +11496,42 @@ function clearStoryRoutePlayback() {
 async function renderStoryRoute(app, storyId) {
   clearStoryRoutePlayback();
   try {
-    const story = await api('/stories/' + encodeURIComponent(storyId));
-    const allStories = await api('/stories');
+    const cacheValid = Date.now() - storyRouteStoriesCacheAt < 30000;
+    const allStories = cacheValid ? storyRouteStoriesCache : await api('/stories');
+    if (!cacheValid) {
+      storyRouteStoriesCache = allStories;
+      storyRouteStoriesCacheAt = Date.now();
+    }
+    let story = allStories.find(item => String(item.id) === String(storyId) || item.public_id === storyId);
+    if (!story) story = await api('/stories/' + encodeURIComponent(storyId));
     if (!allStories.some(item => String(item.id) === String(story.id) || item.public_id === story.public_id)) allStories.push(story);
-    const storyGroups = [];
+    const storyGroupsByUser = new Map();
     allStories.forEach(item => {
-      let group = storyGroups.find(groupItem => groupItem.user_id === item.user_id);
-      if (!group) { group = { user_id: item.user_id, stories: [] }; storyGroups.push(group); }
+      const key = String(item.user_id);
+      let group = storyGroupsByUser.get(key);
+      if (!group) { group = { user_id: item.user_id, stories: [] }; storyGroupsByUser.set(key, group); }
       group.stories.push(item);
     });
+    const storyGroups = [...storyGroupsByUser.values()];
     storyGroups.forEach(group => group.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
     const storySequence = storyGroups.flatMap(group => group.stories);
     const storyIndex = Math.max(0, storySequence.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id));
     const previousStory = storySequence[storyIndex - 1];
     const nextStory = storySequence[storyIndex + 1];
+    [previousStory, nextStory].filter(item => item?.media_type === 'image' && item.media_url).forEach(item => {
+      const image = new Image();
+      image.src = item.media_url;
+    });
     const currentGroup = storyGroups.find(group => group.user_id === story.user_id);
     const currentGroupIndex = currentGroup ? currentGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id) : -1;
     document.title = '@' + story.username + ' hikayesi - ' + siteName;
     const routeStoryKey = item => String(item.public_id || item.id);
-      const navigateToStory = target => target && navigate('/hikaye/' + encodeURIComponent(routeStoryKey(target)));
+      const navigateToStory = target => {
+        if (!target) return;
+        document.body.dataset.storyTransition = storySequence.indexOf(target) >= storyIndex ? 'forward' : 'back';
+        navigate('/hikaye/' + encodeURIComponent(routeStoryKey(target)));
+        setTimeout(() => delete document.body.dataset.storyTransition, 220);
+      };
     app.innerHTML = `<div class="story-route-page">
       <div class="story-route-back"><a href="/fotograflar" data-link><i class="fas fa-arrow-left"></i> Hikayelere dön</a></div>
       <div class="story-route-viewer">
@@ -11514,6 +11576,7 @@ async function renderStoryRoute(app, storyId) {
     let lastStoryTapAt = 0;
     let storyTapTimer = null;
     let suppressStoryTapClick = false;
+    let storySwipeStart = null;
     const animateStoryLike = () => {
       const burst = document.createElement('span');
       burst.className = 'story-route-like-burst';
@@ -11573,6 +11636,19 @@ async function renderStoryRoute(app, storyId) {
     bindStoryTapNavigation('#story-route-tap-next', nextStory);
     storyMedia?.addEventListener('pointerup', event => {
       if (event.target.closest('.story-route-song, a')) return;
+      if (storySwipeStart) {
+        const deltaX = event.clientX - storySwipeStart.x;
+        const deltaY = event.clientY - storySwipeStart.y;
+        storySwipeStart = null;
+        if (Math.abs(deltaX) > 48 && Math.abs(deltaY) < 90) {
+          event.preventDefault();
+          event.stopPropagation();
+          clearTimeout(storyTapTimer);
+          suppressStoryTapClick = true;
+          navigateToStory(deltaX < 0 ? nextStory : previousStory);
+          return;
+        }
+      }
       const now = Date.now();
       if (now - lastStoryTapAt <= 320) {
         lastStoryTapAt = 0;
@@ -11585,6 +11661,10 @@ async function renderStoryRoute(app, storyId) {
         lastStoryTapAt = now;
       }
     });
+    storyMedia?.addEventListener('pointerdown', event => {
+      if (event.target.closest('.story-route-song, a')) return;
+      storySwipeStart = { x: event.clientX, y: event.clientY };
+    }, { passive: true });
     $('#story-route-reply-open')?.addEventListener('click', event => { $('#story-route-reply').hidden = false; event.currentTarget.hidden = true; $('#story-route-reply-input')?.focus(); });
     const sendStoryReply = async () => {
       const input = $('#story-route-reply-input');
@@ -12993,15 +13073,13 @@ async function renderMyOrders(app) {
         </div>
       </div>
     </div>`;
-  }).join('') : `<div class="empty-state"><i class="fas fa-receipt"></i><p>Henüz siparişiniz bulunmuyor.</p><a href="/magaza" data-link class="btn btn-primary" style="margin-top:12px"><i class="fas fa-store"></i> Mağazaya Git</a></div>`;
+  }).join('') : `<div class="orders-empty-state"><i class="fas fa-receipt"></i><h2>Henüz siparişin yok</h2><p>Mağazayı keşfet, sana uygun üyelik ve ürün seçeneklerine göz at.</p><a href="/magaza" data-link class="btn btn-primary"><i class="fas fa-store"></i> Mağazayı keşfet</a></div>`;
 
   app.innerHTML = `
-    <div class="container page" style="max-width:700px;margin:0 auto;padding:24px 16px">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:20px"><a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a></div>
+    <div class="container page orders-page" style="max-width:800px;margin:0 auto;padding:24px 16px">
+      <div class="orders-page-header"><div><h1><i class="fas fa-receipt" style="color:var(--accent-red2);margin-right:8px"></i>Siparişlerim</h1><p>Siparişlerini ve aktif üyeliklerini buradan takip et.</p></div><a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a></div>
       ${subsHTML}
-      <div style="font-size:15px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">
-        <i class="fas fa-receipt" style="color:var(--accent-red2)"></i> Sipariş Geçmişi
-      </div>
+      <div class="orders-history-heading"><i class="fas fa-clock-rotate-left"></i> Sipariş Geçmişi</div>
       ${ordersHTML}
     </div>
   `;
