@@ -601,6 +601,7 @@ async function initDb() {
       FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE SET NULL
     );
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS banner_image TEXT DEFAULT '';
+    ALTER TABLE groups ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS group_members (
       id BIGSERIAL PRIMARY KEY,
@@ -1495,6 +1496,7 @@ async function initDb() {
       SELECT g.id, 'kanal', 'fas fa-hashtag', 1, g.owner_id
       FROM groups g
       WHERE NOT EXISTS (SELECT 1 FROM group_channels gc WHERE gc.group_id = g.id);
+    UPDATE group_channels SET can_write=1 WHERE is_default=1 AND COALESCE(can_write, 0)=0;
   `);
 
   // Seed default levels

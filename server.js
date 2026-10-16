@@ -3407,18 +3407,18 @@ app.get('/api/group/:slug', optionalAuth, async (req, res) => {
 app.post('/api/groups', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'group')) return;
   try {
-    const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+    const { name, description, cover_image, banner_image, logo_url, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
     if (!name) return res.status(400).json({ error: 'İsim zorunlu' });
     const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
     const tempSlug = slugify(name, { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     const { rows } = await query(
-      'INSERT INTO groups (name,slug,description,cover_image,banner_image,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1) RETURNING id',
-      [name, tempSlug, description||'', cover_image||'', banner_image||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
+      'INSERT INTO groups (name,slug,description,cover_image,banner_image,logo_url,owner_id,type,visibility,allow_chat,allow_photos,invite_only,member_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,1) RETURNING id',
+      [name, tempSlug, description||'', cover_image||'', banner_image||'', logo_url||'', req.user.id, groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==false?1:0, allow_photos!==false?1:0, groupVisibility === 'public' ? 0 : 1]);
     const id = rows[0].id;
     const realSlug = makeSlug(name, id);
     await query('UPDATE groups SET slug=$1 WHERE id=$2', [realSlug, id]);
     await query('INSERT INTO group_members (group_id,user_id,role) VALUES ($1,$2,$3)', [id, req.user.id, 'owner']);
-    await query(`INSERT INTO group_channels (group_id, name, icon, is_default, created_by) VALUES ($1, 'kanal', 'fas fa-hashtag', 1, $2) ON CONFLICT (group_id, name) DO NOTHING`, [id, req.user.id]);
+    await query(`INSERT INTO group_channels (group_id, name, icon, is_default, can_write, created_by) VALUES ($1, 'kanal', 'fas fa-hashtag', 1, 1, $2) ON CONFLICT (group_id, name) DO NOTHING`, [id, req.user.id]);
     if (groupVisibility !== 'public') {
       await query('INSERT INTO group_invites (group_id,invite_code,created_by) VALUES ($1,$2,$3)', [id, randomUUID().substring(0, 8).toUpperCase(), req.user.id]);
     }
@@ -3434,12 +3434,13 @@ app.put('/api/group/:slug', authMiddleware, async (req, res) => {
   const group = rows[0];
   if (await denyIfGroupUnavailable(req, res, group)) return;
   if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { name, description, cover_image, banner_image, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
+  const { name, description, cover_image, banner_image, logo_url, type, visibility, allow_chat, allow_photos, invite_only } = req.body;
   const groupVisibility = ['public', 'invite', 'private'].includes(visibility) ? visibility : (type === 'private' ? 'private' : invite_only ? 'invite' : 'public');
   const resolvedCover = cover_image !== undefined ? cover_image : (group.cover_image || '');
   const resolvedBanner = banner_image !== undefined ? banner_image : (group.banner_image || '');
-  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,banner_image=$4,type=$5,visibility=$6,allow_chat=$7,allow_photos=$8,invite_only=$9 WHERE id=$10',
-    [name||group.name, description??group.description, resolvedCover, resolvedBanner,
+  const resolvedLogo = logo_url !== undefined ? logo_url : (group.logo_url || '');
+  await query('UPDATE groups SET name=$1,description=$2,cover_image=$3,banner_image=$4,logo_url=$5,type=$6,visibility=$7,allow_chat=$8,allow_photos=$9,invite_only=$10 WHERE id=$11',
+    [name||group.name, description??group.description, resolvedCover, resolvedBanner, resolvedLogo,
      groupVisibility === 'private' ? 'private' : 'public', groupVisibility, allow_chat!==undefined?(allow_chat?1:0):group.allow_chat,
      allow_photos!==undefined?(allow_photos?1:0):group.allow_photos,
      groupVisibility === 'public' ? 0 : 1, group.id]);
@@ -4422,6 +4423,12 @@ function ensurePhotoInteractionSchema() {
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(comment_id, user_id)
       );
+      DELETE FROM photo_likes a USING photo_likes b
+        WHERE a.id > b.id AND a.photo_id=b.photo_id AND a.user_id=b.user_id;
+      CREATE UNIQUE INDEX IF NOT EXISTS photo_likes_photo_user_unique ON photo_likes(photo_id,user_id);
+      DELETE FROM photo_comment_likes a USING photo_comment_likes b
+        WHERE a.id > b.id AND a.comment_id=b.comment_id AND a.user_id=b.user_id;
+      CREATE UNIQUE INDEX IF NOT EXISTS photo_comment_likes_comment_user_unique ON photo_comment_likes(comment_id,user_id);
     `).catch(error => {
       photoInteractionSchemaPromise = null;
       throw error;
@@ -4833,8 +4840,9 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
     await ensurePhotoInteractionSchema();
     if (await denyIfRestricted(req, res, 'comment')) return;
     const photoId = req.params.id;
-    const { content } = req.body;
-    if (!content || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
+    const content = req.body?.content;
+    if (typeof content !== 'string' || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
+    if (content.length > 2000) return res.status(400).json({ error: 'Yorum en fazla 2000 karakter olabilir.' });
     const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
     if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     if (Number(rows[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
@@ -7467,8 +7475,10 @@ app.post('/api/friends/request/:username', authMiddleware, async (req, res) => {
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla işlem yapılamaz' });
   const { rows: ex } = await query('SELECT * FROM friendships WHERE (requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)', [req.user.id, targetId]);
   if (ex.length) return res.status(400).json({ error: 'Zaten istek gönderilmiş veya arkadaşsınız' });
-  await query('INSERT INTO friendships (requester_id, addressee_id, status) VALUES ($1,$2,$3)', [req.user.id, targetId, 'pending']);
+  const { rows: friendship } = await query('INSERT INTO friendships (requester_id, addressee_id, status) VALUES ($1,$2,$3) RETURNING id', [req.user.id, targetId, 'pending']);
   await query(`INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,'friend_request',$2,$3,'Yeni arkadaşlık isteği','@' || $2 || ' sana arkadaşlık isteği gönderdi.',$4)`, [targetId, req.user.username, req.user.avatar || '', '/arkadaslar']);
+  io.to(`user:${req.user.id}`).emit('friends:updated', { tab: 'sent', request_id: friendship[0].id });
+  io.to(`user:${targetId}`).emit('friends:updated', { tab: 'requests', request_id: friendship[0].id });
   res.json({ ok: true });
 });
 
@@ -7484,11 +7494,17 @@ app.post('/api/friends/respond/:id', authMiddleware, async (req, res) => {
   } else {
     await query('DELETE FROM friendships WHERE id=$1', [rows[0].id]);
   }
+  io.to(`user:${req.user.id}`).emit('friends:updated', { tab: action === 'accept' ? 'friends' : 'requests' });
+  io.to(`user:${rows[0].requester_id}`).emit('friends:updated', { tab: action === 'accept' ? 'friends' : 'sent' });
   res.json({ ok: true });
 });
 
 app.delete('/api/friends/:id', authMiddleware, async (req, res) => {
+  const { rows: friendship } = await query('SELECT requester_id, addressee_id FROM friendships WHERE id=$1 AND (requester_id=$2 OR addressee_id=$2)', [req.params.id, req.user.id]);
+  if (!friendship.length) return res.status(404).json({ error: 'Arkadaşlık veya istek bulunamadı' });
   await query('DELETE FROM friendships WHERE id=$1 AND (requester_id=$2 OR addressee_id=$2)', [req.params.id, req.user.id]);
+  const peerId = String(friendship[0].requester_id) === String(req.user.id) ? friendship[0].addressee_id : friendship[0].requester_id;
+  io.to([`user:${req.user.id}`, `user:${peerId}`]).emit('friends:updated', { tab: 'sent' });
   res.json({ ok: true });
 });
 

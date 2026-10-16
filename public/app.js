@@ -31,6 +31,24 @@ const MEDIA_CLIP_SECONDS = 30;
 let photoSongClipSeconds = MEDIA_CLIP_SECONDS;
 const managedMediaAudio = new Set();
 
+function getRecommendedSongs(songs) {
+  const popular = [...songs]
+    .filter(song => song?.audio_url)
+    .sort((a, b) => (Number(b.play_count) || 0) - (Number(a.play_count) || 0));
+  if (popular.length <= 5) return popular;
+  const pool = popular.slice(0, Math.min(15, popular.length));
+  const rotation = Math.floor(Date.now() / (6 * 60 * 60 * 1000)) % pool.length;
+  return Array.from({ length: 5 }, (_, index) => pool[(rotation + index) % pool.length]);
+}
+
+function songPickerMarkup(songs, selectedSong) {
+  const recommendations = getRecommendedSongs(songs);
+  const recommendedIds = new Set(recommendations.map(song => String(song.id)));
+  const rest = songs.filter(song => !recommendedIds.has(String(song.id)));
+  const renderOptions = values => values.map(song => `<button type="button" class="story-song-option ${String(selectedSong?.id) === String(song.id) ? 'selected' : ''}" data-song-id="${escHtml(song.id)}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<span class="story-song-cover"><i class="fas fa-music"></i></span>'}<span><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></span><i class="fas fa-play story-song-option-play"></i></button>`).join('');
+  return `${recommendations.length ? `<div class="song-picker-section-title"><i class="fas fa-fire"></i> Şu an çok dinlenenler</div>${renderOptions(recommendations)}` : ''}${rest.length ? `<div class="song-picker-section-title"><i class="fas fa-music"></i> Tüm müzikler</div>${renderOptions(rest.slice(0, 30))}` : ''}` || '<small class="text-muted">Müzik bulunamadı.</small>';
+}
+
 function getMediaVolume() {
   const value = Number.parseFloat(localStorage.getItem(MEDIA_VOLUME_KEY) ?? '0.8');
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0.8;
@@ -134,44 +152,12 @@ async function playConfiguredNotificationSound(type = 'message') {
 
 async function triggerGroupMessageNotification(groupName, senderName, previewText) {
   await playConfiguredNotificationSound('message');
-  if ('Notification' in window) {
-    const permission = Notification.permission;
-    if (permission === 'granted') {
-      new Notification(groupName ? `${groupName} — ${senderName}` : senderName, {
-        body: previewText || 'Yeni bir mesaj var.',
-        tag: 'cigcig-group-message'
-      });
-      return;
-    }
-    if (permission === 'default') {
-      Notification.requestPermission().then(permissionState => {
-        if (permissionState === 'granted') {
-          new Notification(groupName ? `${groupName} — ${senderName}` : senderName, {
-            body: previewText || 'Yeni bir mesaj var.',
-            tag: 'cigcig-group-message'
-          });
-        }
-      }).catch(() => {});
-    }
-  }
+  toast(escHtml(`${groupName ? `${groupName} · ` : ''}${senderName}: ${previewText || 'Yeni bir mesaj var.'}`), 'success', 6000);
 }
 
 async function triggerMentionNotification(mentionText) {
   await playConfiguredNotificationSound('mention');
-  if ('Notification' in window) {
-    const permission = Notification.permission;
-    if (permission === 'granted') {
-      new Notification('Etiketlendin', { body: mentionText || 'Birisi seni etiketledi.', tag: 'cigcig-mention' });
-      return;
-    }
-    if (permission === 'default') {
-      Notification.requestPermission().then(permissionState => {
-        if (permissionState === 'granted') {
-          new Notification('Etiketlendin', { body: mentionText || 'Birisi seni etiketledi.', tag: 'cigcig-mention' });
-        }
-      }).catch(() => {});
-    }
-  }
+  toast(escHtml(mentionText || 'Birisi seni etiketledi.'), 'success', 6000);
 }
 
 function closeOpenMessageMenu() {
@@ -994,8 +980,10 @@ function renderRoute(fullPath) {
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
+  const isGroupChatRoute = path.startsWith('/grup/') && path.split('/').filter(Boolean).length > 1;
   document.body.classList.toggle('story-page', path.startsWith('/hikaye/'));
   document.body.classList.toggle('dm-chat-route', isDmChatRoute);
+  document.body.classList.toggle('group-chat-route', isGroupChatRoute);
   document.body.classList.toggle('messages-page', path === '/mesajlar');
   document.body.classList.toggle('reals-page', path === '/reals' || path.startsWith('/reals/'));
   document.body.classList.toggle('home-page', path === '/');
@@ -1596,9 +1584,20 @@ function syncRealtimeSocket() {
       activeGroupChannelRefresh(event.slug, event.channelId, event.message);
     }
   });
+  realtimeSocket.on('friends:updated', event => {
+    loadNotifCount();
+    if (location.pathname === '/arkadaslar') refreshFriendsRoute(event?.tab);
+  });
   realtimeSocket.on('connect_error', error => {
     console.warn('Gerçek zamanlı mesaj bağlantısı kurulamadı:', error.message);
   });
+}
+
+async function refreshFriendsRoute(tab) {
+  const app = document.getElementById('app');
+  if (!app || location.pathname !== '/arkadaslar') return;
+  await renderFriends(app);
+  if (tab && typeof window.showFriendsTab === 'function') window.showFriendsTab(tab);
 }
 
 async function handleRealtimeDirectMessage(event) {
@@ -1957,7 +1956,6 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); });
 $('#nav-new-poem')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); });
-$('#nav-new-group')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/gruplar'); });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
@@ -1996,7 +1994,7 @@ async function showMyGroupsModal() {
   showModal('Gruplarım', '<div class="loading-center"><div class="spinner"></div></div>');
   try {
     const groups = await api('/my-groups');
-    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon"><i class="fas fa-users"></i></span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div><button type="button" class="btn btn-primary my-groups-explore-btn" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
+    $('#modal-body').innerHTML = groups.length ? `<div class="my-groups-list">${groups.map(group => `<a href="/grup/${escHtml(group.slug)}" data-link class="my-group-item" onclick="hideModal()"><span class="my-group-icon">${group.logo_url ? `<img src="${escHtml(group.logo_url)}" alt="" />` : '<i class="fas fa-users"></i>'}</span><span><b>${escHtml(group.name)}</b><small>${group.member_count || 0} üye · Mesajlaş</small></span><i class="fas fa-chevron-right"></i></a>`).join('')}</div><button type="button" class="btn btn-primary my-groups-explore-btn" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button>` : `<div class="empty-state"><i class="fas fa-users"></i><p>Hiçbir grupta değilsin, katılmak ister misin?</p><button type="button" class="btn btn-primary" id="my-groups-explore"><i class="fas fa-compass"></i> Gruplara git</button></div>`;
     $('#my-groups-explore')?.addEventListener('click', () => { hideModal(); navigate('/gruplar'); });
   } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
@@ -2058,17 +2056,15 @@ document.addEventListener('click', e => {
   const mobNewForum = e.target.closest('#mob-new-forum');
   const mobNewPoem = e.target.closest('#mob-new-poem');
   const mobNewBook = e.target.closest('#mob-new-book');
-  const mobNewGroup = e.target.closest('#mob-new-group');
   const mobNewPhoto = e.target.closest('#mob-new-photo');
   const mobNewStory = e.target.closest('#mob-new-story');
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
   const mobNewReals = e.target.closest('#mob-new-reals');
-  if (mobNewForum || mobNewPoem || mobNewBook || mobNewGroup || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic) closeMobileCreateMenu();
+  if (mobNewForum || mobNewPoem || mobNewBook || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic) closeMobileCreateMenu();
   if (mobNewForum) { if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
   if (mobNewPoem) { if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
   if (mobNewBook) { navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
-  if (mobNewGroup) { navigate('/gruplar'); setTimeout(() => showNewGroupModal(), 100); }
   if (mobNewPhoto) { if (currentUser) showPhotoUploadModal(); }
   if (mobNewStory) { if (currentUser) showStoryUploadModal(); }
   if (mobNewVideo) { if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
@@ -4011,7 +4007,7 @@ async function renderGroupList(app) {
     <div class="container page">
       <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div><div class="page-title">Gruplar</div><div class="page-subtitle">Topluluğa katıl</div></div>
-        ${currentUser ? `<button class="btn btn-primary" id="new-group-btn"><i class="fas fa-plus"></i> Yeni Grup</button>` : ''}
+        ${currentUser ? `<button class="btn btn-primary group-create-button" id="new-group-btn" aria-label="Yeni grup oluştur"><i class="fas fa-plus"></i><span>Yeni Grup</span></button>` : ''}
       </div>
       <div id="join-invite-section" style="margin-bottom:16px">
         ${currentUser ? `<div style="display:flex;gap:8px;max-width:400px">
@@ -4073,6 +4069,7 @@ function groupCardHTML(g) {
   return `<div class="group-card" onclick="navigate('/grup/${escHtml(g.slug)}')">
     <div class="group-cover">
       ${coverUrl ? `<img src="${escHtml(coverUrl)}" alt="" />` : `<div class="group-cover-placeholder"><i class="fas fa-users"></i></div>`}
+      ${g.logo_url ? `<img class="group-card-logo" src="${escHtml(g.logo_url)}" alt="" />` : ''}
     </div>
     <div class="group-info">
       <div class="group-name">${escHtml(g.name)}</div>
@@ -4090,6 +4087,7 @@ function showNewGroupModal() {
   showModal('Yeni Grup', `
     <div class="form-group"><label>Grup Adı</label><input id="gr-name" type="text" /></div>
     <div class="form-group"><label>Açıklama</label><textarea id="gr-desc" rows="3"></textarea></div>
+    <div class="form-group"><label>Grup logosu (isteğe bağlı)</label><input type="file" id="gr-logo-file" accept="image/*" /><div id="gr-logo-preview" class="group-logo-preview"><i class="fas fa-users"></i><span>Logo eklenmedi</span></div></div>
     <div class="form-group">
       <label>Banner Resmi (opsiyonel)</label>
       <input type="file" id="gr-banner-file" accept="image/*" style="margin-bottom:8px" />
@@ -4128,6 +4126,12 @@ function showNewGroupModal() {
     };
     reader.readAsDataURL(file);
   });
+  $('#gr-logo-file').addEventListener('change', e => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { $('#gr-logo-preview').innerHTML = `<img src="${ev.target.result}" alt="Grup logosu önizleme" />`; };
+    reader.readAsDataURL(file);
+  });
 
   $('#gr-submit').addEventListener('click', async () => {
     const name = $('#gr-name').value.trim();
@@ -4135,6 +4139,7 @@ function showNewGroupModal() {
     try {
       let banner_image = '';
       let cover_image = '';
+      let logo_url = '';
       const bannerFile = $('#gr-banner-file').files[0];
       if (bannerFile) {
         const fd = new FormData(); fd.append('file', bannerFile);
@@ -4147,8 +4152,14 @@ function showNewGroupModal() {
         const r = await apiForm('/upload', fd);
         cover_image = r.url;
       }
+      const logoFile = $('#gr-logo-file').files[0];
+      if (logoFile) {
+        const fd = new FormData(); fd.append('file', logoFile);
+        const r = await apiForm('/upload', fd);
+        logo_url = r.url;
+      }
       const visibility = $('#gr-visibility').value;
-      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, banner_image, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
+      const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, banner_image, logo_url, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
       toast('Grup oluşturuldu'); hideModal(); navigate('/grup/' + g.slug);
     } catch (e) { $('#gr-error').textContent = e.message; }
   });
@@ -4274,7 +4285,7 @@ async function renderGroupDetail(app, slug) {
       ${heroBanner ? `<img src="${escHtml(heroBanner)}" class="group-hero-cover" alt="" />` : `<div class="group-hero-cover group-hero-cover-placeholder"><i class="fas fa-users"></i></div>`}
       <div class="group-hero-content">
         <div class="group-hero-copy">
-          <div class="group-hero-eyebrow"><i class="fas fa-users"></i> TOPLULUK</div>
+          <div class="group-hero-eyebrow">${group.logo_url ? `<img class="group-hero-logo" src="${escHtml(group.logo_url)}" alt="" />` : '<i class="fas fa-users"></i>'} TOPLULUK</div>
           <h1 class="group-hero-title">${escHtml(group.name)}</h1>
           ${group.description ? `<p class="group-hero-desc">${escHtml(group.description)}</p>` : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
         </div>
@@ -5207,9 +5218,10 @@ function videoCardHTML(v) {
 }
 
 function realsProfileCardHTML(v) {
+  const cover = v.banner_image || v.thumbnail || v.cover_url || v.poster || '';
   return `<a class="video-card reals-profile-card" href="/reals/${encodeURIComponent(v.id)}" data-link aria-label="${escHtml(v.title || 'Reals videosu')}">
     <div class="video-thumb">
-      ${v.banner_image ? `<img src="${escHtml(siteImageUrl(v.banner_image))}" alt="" loading="lazy" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}
+      ${cover ? `<img src="${escHtml(siteImageUrl(cover))}" alt="" loading="lazy" />` : `<div class="video-thumb-placeholder"><i class="fas fa-circle-play"></i></div>`}
       <span class="reals-profile-play"><i class="fas fa-play"></i></span>
       <span class="reals-profile-caption"><strong>${escHtml(v.title || 'Reals')}</strong><small>${escHtml(v.username || 'Silinmiş kullanıcı')} · ${Number(v.views) || 0} izlenme</small></span>
     </div>
@@ -5256,7 +5268,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
         </div>
         <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
-        <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled style="width:100%;margin-top:8px" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="video-song-time">0:00</b></div></div>
+        <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><div id="video-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="video-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="video-song-preview-audio" preload="none" style="display:none"></audio><div class="song-start-control"><label for="video-song-start">Şarkıda başlayacağı an</label><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled /><div class="media-time-row"><span>Başlangıç noktası</span><b id="video-song-time">0:00</b></div></div></div>
         <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
         <div class="social-compose-options">
           <label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label>
@@ -5273,6 +5285,10 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const videoInput = $('#video-file');
   const bannerInput = $('#video-banner-file');
   let selectedVideoSong = null;
+  const videoSongPreview = $('#video-song-preview-audio');
+  const videoSongPreviewButton = $('#video-song-preview');
+  const videoSongStart = $('#video-song-start');
+  const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
   const getVideoDuration = file => new Promise((resolve, reject) => { const probe = document.createElement('video'); probe.preload = 'metadata'; probe.onloadedmetadata = () => { URL.revokeObjectURL(probe.src); resolve(probe.duration); }; probe.onerror = () => reject(new Error('Video süresi okunamadı')); probe.src = URL.createObjectURL(file); });
 
@@ -5297,16 +5313,50 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   $('#video-song-start')?.addEventListener('input', event => {
     const seconds = Number(event.target.value) || 0;
     $('#video-song-time').textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    if (videoSongPreview && !videoSongPreview.paused) videoSongPreview.currentTime = seconds;
   });
+  videoSongPreviewButton?.addEventListener('click', () => {
+    if (!selectedVideoSong?.audio_url) return;
+    if (videoSongPreview.src !== new URL(selectedVideoSong.audio_url, location.href).href) videoSongPreview.src = selectedVideoSong.audio_url;
+    videoSongPreview.currentTime = Number(videoSongStart.value) || 0;
+    if (videoSongPreview.paused) {
+      videoSongPreview.play().then(() => { videoSongPreviewButton.innerHTML = '<i class="fas fa-pause"></i> Önizlemeyi durdur'; }).catch(error => toast(error.message || 'Müzik önizlemesi başlatılamadı', 'error'));
+    } else {
+      videoSongPreview.pause();
+      videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+    }
+  });
+  videoSongPreview?.addEventListener('ended', () => { videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat'; });
   api('/songs').then(songs => {
     const list = $('#video-song-list');
     const renderVideoSongs = values => {
-      list.innerHTML = `<button type="button" class="story-song-option ${!selectedVideoSong ? 'selected' : ''}" data-song-id="">Müzik yok</button>` + values.slice(0, 20).map(song => `<button type="button" class="story-song-option ${String(selectedVideoSong?.id) === String(song.id) ? 'selected' : ''}" data-song-id="${song.id}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<span class="story-song-cover"><i class="fas fa-music"></i></span>'}<span><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></span></button>`).join('');
+      list.innerHTML = `<button type="button" class="story-song-option ${!selectedVideoSong ? 'selected' : ''}" data-song-id="">Müzik yok</button>${songPickerMarkup(values, selectedVideoSong)}`;
       list.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => {
         selectedVideoSong = songs.find(song => String(song.id) === button.dataset.songId) || null;
         $('#video-song').value = selectedVideoSong?.id || '';
-        $('#video-song-start').disabled = !selectedVideoSong;
+        if (!selectedVideoSong) {
+          videoSongPreview.pause();
+          videoSongPreview.removeAttribute('src');
+          videoSongPreviewButton.disabled = true;
+          videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+          $('#video-song-player').hidden = true;
+        } else {
+          videoSongPreviewButton.disabled = !selectedVideoSong.audio_url;
+          videoSongPreview.src = selectedVideoSong.audio_url || '';
+          $('#video-song-player').hidden = false;
+          $('#video-song-player').innerHTML = `${selectedVideoSong.cover_url ? `<img src="${escHtml(selectedVideoSong.cover_url)}" alt="" />` : ''}<div><b>${escHtml(selectedVideoSong.title)}</b><small>${escHtml(selectedVideoSong.artist_name || '')}</small></div>`;
+        }
+        $('#video-song-start').disabled = !selectedVideoSong?.audio_url;
         $('#video-song-start').max = Math.max(0, Math.floor(Number(selectedVideoSong?.duration_seconds || 0)));
+        $('#video-song-start').value = Math.min(Number($('#video-song-start').value) || 0, Number($('#video-song-start').max) || 0);
+        if (selectedVideoSong?.audio_url) {
+          const probe = new Audio(selectedVideoSong.audio_url);
+          probe.addEventListener('loadedmetadata', () => {
+            $('#video-song-start').max = Math.floor(probe.duration || 0);
+            $('#video-song-start').dispatchEvent(new Event('input'));
+          });
+        }
+        $('#video-song-start').dispatchEvent(new Event('input'));
         renderVideoSongs(songs);
       });
     };
@@ -5314,6 +5364,24 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     $('#video-song-search').oninput = event => { const q = event.target.value.toLowerCase(); renderVideoSongs(songs.filter(song => `${song.title} ${song.artist_name || ''}`.toLowerCase().includes(q))); };
     if (existing?.song_id) {
       selectedVideoSong = songs.find(song => String(song.id) === String(existing.song_id)) || null;
+      if (selectedVideoSong) {
+        $('#video-song').value = selectedVideoSong.id;
+        $('#video-song-start').disabled = !selectedVideoSong.audio_url;
+        videoSongPreviewButton.disabled = !selectedVideoSong.audio_url;
+        videoSongPreview.src = selectedVideoSong.audio_url || '';
+        $('#video-song-start').max = Math.max(0, Math.floor(Number(selectedVideoSong.duration_seconds || 0)));
+        $('#video-song-start').value = Math.min(savedVideoSongStart, Number($('#video-song-start').max) || savedVideoSongStart);
+        $('#video-song-player').hidden = false;
+        $('#video-song-player').innerHTML = `${selectedVideoSong.cover_url ? `<img src="${escHtml(selectedVideoSong.cover_url)}" alt="" />` : ''}<div><b>${escHtml(selectedVideoSong.title)}</b><small>${escHtml(selectedVideoSong.artist_name || '')}</small></div>`;
+        if (selectedVideoSong.audio_url) {
+          const probe = new Audio(selectedVideoSong.audio_url);
+          probe.addEventListener('loadedmetadata', () => {
+            $('#video-song-start').max = Math.floor(probe.duration || 0);
+            $('#video-song-start').value = Math.min(savedVideoSongStart, Number($('#video-song-start').max));
+            $('#video-song-start').dispatchEvent(new Event('input'));
+          });
+        }
+      }
       $('#video-song-start').dispatchEvent(new Event('input'));
       renderVideoSongs(songs);
     }
@@ -5847,8 +5915,8 @@ async function renderProfile(app, username) {
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
   const savedContentHTML = profileSavedVideos.length ? `<div class="profile-saved-content-grid">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
-  const profileSongsHTML = profileSongs.length ? `<div class="grid-3" style="gap:16px">${profileSongs.map(s => `
-      <div class="song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
+  const profileSongsHTML = profileSongs.length ? `<div class="profile-songs-grid">${profileSongs.map(s => `
+      <div class="song-card profile-song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
         <div class="song-card-body">
           <div class="song-card-title">${escHtml(s.title)}</div>
@@ -6120,6 +6188,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
+        <div class="settings-nav-item" data-section="account-status"><i class="fas fa-user-shield"></i> Hesap Durumu</div>
         <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-sliders"></i> Profil Seçenekleri</div>
         <div class="settings-nav-item" data-section="dm-lock"><i class="fas fa-lock"></i> Sohbet Kilidi</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
@@ -6159,7 +6228,7 @@ async function renderSettingsSection(section) {
               <input type="file" id="avatar-file" accept="image/*" style="padding:6px" />
             </div>
           </div>
-          <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-remove-avatar" ${currentUser.avatar_removed ? 'checked' : ''} /> Profil fotoğrafını kaldır, fotoğrafsız görün</label>
+          <label class="profile-avatar-remove-option"><input type="checkbox" id="s-remove-avatar" ${currentUser.avatar_removed ? 'checked' : ''} /><span class="profile-avatar-remove-icon"><i class="fas fa-user-slash"></i></span><span><b>Profil fotoğrafını kaldır</b><small>Profilin fotoğrafsız görünsün; istediğin zaman tekrar yükleyebilirsin.</small></span></label>
           <div class="form-group">
             <label for="s-nickname">Takma Ad</label>
             <div class="nickname-edit-row">
@@ -6169,10 +6238,10 @@ async function renderSettingsSection(section) {
             <div class="form-hint">Profilinde görünen addır. 48 saat içinde en fazla 2 kez değiştirebilirsin.${nicknameBlocked ? ` Yeniden değiştirme zamanı: ${nicknameResetAt.toLocaleString('tr-TR')}.` : ` Kalan değişiklik hakkı: ${2 - nicknameChanges}/2.`}</div>
             <div id="profile-nickname-msg" class="form-error mt-4"></div>
           </div>
-          <div class="form-group"><label>Biyografi</label><textarea id="s-bio" rows="3">${escHtml(currentUser.bio || '')}</textarea></div>
+          <div class="form-group profile-field"><label for="s-bio">Biyografi</label><textarea id="s-bio" rows="3" maxlength="500">${escHtml(currentUser.bio || '')}</textarea><div class="profile-field-footer"><small>Kendini kısaca tanıt</small><output data-char-count-for="s-bio"></output></div></div>
           <div class="form-row">
-            <div class="form-group"><label>Ünvan <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-title" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /></div>
-            <div class="form-group"><label>Konum <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-location" value="${escHtml(currentUser.location || '')}" placeholder="Örn: İstanbul, Türkiye" /></div>
+            <div class="form-group profile-field"><label for="s-title">Ünvan <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-title" maxlength="100" value="${escHtml(currentUser.title || '')}" placeholder="Örn: Yazılım Geliştirici, Öğrenci..." /><div class="profile-field-footer"><small>Profilinde görünecek kısa başlık</small><output data-char-count-for="s-title"></output></div></div>
+            <div class="form-group profile-field"><label for="s-location">Konum <span style="color:var(--text-muted);font-size:11px">(opsiyonel)</span></label><input type="text" id="s-location" maxlength="100" value="${escHtml(currentUser.location || '')}" placeholder="Örn: İstanbul, Türkiye" /><div class="profile-field-footer"><small>Şehir veya bölge</small><output data-char-count-for="s-location"></output></div></div>
           </div>
           <div class="form-group">
             <label>Linkler</label>
@@ -6196,6 +6265,19 @@ async function renderSettingsSection(section) {
 
     let currentLinks = [...links];
     renderLinkRows(currentLinks);
+    const profileFieldLimits = { 's-bio': 500, 's-title': 100, 's-location': 100 };
+    Object.entries(profileFieldLimits).forEach(([id, limit]) => {
+      const field = document.getElementById(id);
+      const counter = el.querySelector(`[data-char-count-for="${id}"]`);
+      if (!field || !counter) return;
+      if (field.value.length > limit) field.value = field.value.slice(0, limit);
+      const updateCounter = () => {
+        counter.textContent = `${field.value.length} / ${limit}`;
+        counter.classList.toggle('is-near-limit', field.value.length >= limit * 0.9);
+      };
+      field.addEventListener('input', updateCounter);
+      updateCounter();
+    });
 
     $('#add-link-btn').addEventListener('click', () => {
       currentLinks.push({ label: '', url: '' });
@@ -6475,7 +6557,6 @@ async function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
-          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-private" ${currentUser.is_private ? 'checked' : ''} /> Hesabı gizliye al</label><div style="font-size:12px;color:var(--text-muted);margin-top:4px">Gizli hesaplarda içerik ve takip listeleri yalnızca kabul edilen takipçilere görünür.</div></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
@@ -6489,7 +6570,6 @@ async function renderSettingsSection(section) {
         show_level_color: $('#s-show-color').checked,
       };
       if (currentUser.is_vip || currentUser.is_plus) body.name_color = $('#s-name-color')?.value || '';
-      body.is_private = $('#s-private')?.checked || false;
       try {
         const fd = new FormData();
         Object.entries(body).forEach(([k, v]) => fd.append(k, v));
@@ -6497,6 +6577,50 @@ async function renderSettingsSection(section) {
         currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
       } catch (e) { $('#appear-msg').textContent = e.message; }
+    });
+  } else if (section === 'account-status') {
+    const isPrivate = !!currentUser.is_private;
+    el.innerHTML = `
+      <div class="card account-status-card">
+        <div class="card-header"><span><i class="fas fa-user-shield"></i> Hesap Durumu</span></div>
+        <div class="card-body">
+          <div class="account-status-summary">
+            <span class="account-status-icon ${isPrivate ? 'is-private' : ''}"><i class="fas ${isPrivate ? 'fa-lock' : 'fa-earth-americas'}"></i></span>
+            <span><b>${isPrivate ? 'Gizli hesap' : 'Herkese açık hesap'}</b><small>${isPrivate ? 'İçeriklerini yalnızca onaylı takipçilerin görebilir.' : 'Profilin ve içeriklerin herkese görünür.'}</small></span>
+          </div>
+          <label class="account-status-switch-row">
+            <span><b>Gizli hesap</b><small>Hesabının görünürlüğünü değiştir</small></span>
+            <span class="switch-control"><input type="checkbox" id="account-private-switch" role="switch" ${isPrivate ? 'checked' : ''} /><i></i></span>
+          </label>
+          <p class="settings-help">Gizli hesapta paylaşımlarını yalnızca onayladığın takipçiler görebilir. Sana sadece arkadaş olduğun kişiler mesaj gönderebilir.</p>
+        </div>
+      </div>`;
+    $('#account-private-switch')?.addEventListener('change', event => {
+      const nextPrivate = event.target.checked;
+      event.target.checked = isPrivate;
+      const title = nextPrivate ? 'Hesabını gizliye al' : 'Hesabını herkese açık yap';
+      const description = nextPrivate
+        ? 'Hesabınız gizliye alındığında insanlar sizin içeriklerinizi göremez ve size sadece arkadaş olduğunuz müddetçe yazabilir.'
+        : 'Hesabınız herkese açık olduğunda herkes profilinizi ve paylaşımlarınızı görebilir. Size arkadaşınız olmayan kişiler de mesaj gönderebilir.';
+      showModal(title, `<div class="account-status-confirm"><span class="account-status-icon ${nextPrivate ? 'is-private' : ''}"><i class="fas ${nextPrivate ? 'fa-lock' : 'fa-earth-americas'}"></i></span><p>${description}</p><div class="account-status-confirm-actions"><button type="button" class="btn ${nextPrivate ? 'btn-primary' : 'btn-danger'}" id="confirm-account-status">${nextPrivate ? 'Gizli hesaba geç' : 'Herkese açık yap'}</button><button type="button" class="btn btn-outline" id="cancel-account-status">Vazgeç</button></div><div class="form-error" id="account-status-error"></div></div>`);
+      $('#cancel-account-status')?.addEventListener('click', hideModal);
+      $('#confirm-account-status')?.addEventListener('click', async buttonEvent => {
+        const button = buttonEvent.currentTarget;
+        button.disabled = true;
+        try {
+          const fd = new FormData();
+          fd.append('is_private', String(nextPrivate));
+          const updated = await apiForm('/profile', fd, 'PUT');
+          currentUser = updated;
+          updateNavUI();
+          hideModal();
+          renderSettingsSection('account-status');
+          toast(nextPrivate ? 'Hesap gizliye alındı' : 'Hesap herkese açık yapıldı');
+        } catch (error) {
+          button.disabled = false;
+          $('#account-status-error').textContent = error.message;
+        }
+      });
     });
   } else if (section === '__removed-homepage') {
     const options = [
@@ -7782,12 +7906,23 @@ async function renderMessages(app, targetUsername) {
   let friends = null;
   try { friends = await api('/friends'); } catch {}
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
+  let dmStories = [];
+  try { dmStories = await api('/stories'); } catch {}
+  const dmStoryByUsername = new Map();
+  dmStories.forEach(story => {
+    const key = String(story.username || '').toLowerCase();
+    if (!key) return;
+    const previous = dmStoryByUsername.get(key);
+    if (!previous || (previous.viewed && !story.viewed) || (Boolean(previous.viewed) === Boolean(story.viewed) && new Date(story.created_at || 0) > new Date(previous.created_at || 0))) {
+      dmStoryByUsername.set(key, story);
+    }
+  });
 
   function convItemHTML(c, isHidden, isGroup = false) {
     if (isGroup) {
       const muted = Number(c.inbox_mute_forever) === 1 || (c.inbox_muted_until && new Date(c.inbox_muted_until) > new Date());
       return `<div class="dm-conv-item dm-group-conv${muted ? ' dm-conv-muted' : ''}" data-is-group="1" data-group-slug="${escHtml(c.slug)}" data-search-name="${escHtml(c.name || '')}">
-        <span class="dm-group-avatar" aria-hidden="true"><i class="fas fa-people-group"></i></span>
+        <span class="dm-group-avatar" aria-hidden="true">${c.logo_url ? `<img src="${escHtml(c.logo_url)}" alt="" />` : '<i class="fas fa-people-group"></i>'}</span>
         <div class="dm-conv-info">
           <div class="dm-conv-name-row"><span class="dm-conv-name"><strong>${escHtml(c.name || 'Grup')}</strong></span>${muted ? '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Grup sessizde"></i>' : ''}</div>
           <div class="dm-conv-last">${escHtml((c.last_message || 'Grup sohbeti').substring(0, 40))}</div>
@@ -7800,12 +7935,16 @@ async function renderMessages(app, targetUsername) {
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
     const presenceHTML = dmPresenceMarkup(c.other_is_online, c.other_last_active);
+    const dmStory = dmStoryByUsername.get(String(c.other_username || '').toLowerCase());
+    const storyAvatarHTML = dmStory
+      ? `<button type="button" class="dm-story-avatar-link" data-story-id="${escHtml(dmStory.public_id || dmStory.id)}" aria-label="${escHtml(c.other_nickname || c.other_username)} hikayesini aç"><span class="dm-story-ring${dmStory.viewed ? ' viewed' : ''}">${avatarHTML}</span>${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</button>`
+      : `<span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>`;
     const isUser1 = String(c.user1_id) === String(currentUser.id);
     const muteForever = Number(c[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1;
     const mutedUntil = c[isUser1 ? 'muted_until_user1' : 'muted_until_user2'];
     const muted = muteForever || (mutedUntil && new Date(mutedUntil) > new Date());
     return `<div class="dm-conv-item${unread > 0 ? ' dm-unread' : ''}${muted ? ' dm-conv-muted' : ''}${dmSearchUnlockedConvs.some(hidden => String(hidden.id) === String(c.id)) ? ' dm-search-unlocked' : ''}" data-username="${escHtml(c.other_username)}" data-conversation-id="${escHtml(c.id)}" data-search-name="${escHtml((c.other_nickname || '') + ' ' + (c.other_username || ''))}">
-      <span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>
+      ${storyAvatarHTML}
       <div class="dm-conv-info">
         <div class="dm-conv-name-row">
           <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong></span><span class="dm-presence-slot">${presenceHTML}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
@@ -7820,6 +7959,11 @@ async function renderMessages(app, targetUsername) {
   const bindConversationItems = () => document.querySelectorAll('.dm-conv-item').forEach(item => {
     if (item.dataset.bound) return;
     item.dataset.bound = '1';
+    item.querySelector('.dm-story-avatar-link')?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      navigate('/hikaye/' + encodeURIComponent(event.currentTarget.dataset.storyId));
+    });
     item.querySelector('.dm-conv-options-btn')?.addEventListener('click', event => {
       event.stopPropagation();
       if (item.dataset.isGroup === '1') {
@@ -8709,11 +8853,15 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
   document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
     showModal('Konuşmayı Gizle', `
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Şifre koyarsanız açmak için şifre gerekecek.</p>
-      <div class="form-group">
-        <label>Şifre (opsiyonel)</label>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Bu konuşmanın nasıl açılacağını seç.</p>
+      <div class="form-group"><label>Kilit türü</label><div class="dm-lock-type-options">
+        <label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="personal" checked /><span><i class="fas fa-key"></i><b>Bu sohbet için şifre</b><small>Yalnızca bu konuşmada kullanılır.</small></span></label>
+        ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="account" /><span><i class="fas fa-shield-halved"></i><b>Hesap kilit kodu</b><small>Sohbet Kilidi ayarlarında tanımladığın kodla açılır.</small></span></label>' : ''}
+      </div></div>
+      <div class="form-group" id="dm-hide-pass-group">
+        <label>Bu sohbetin şifresi</label>
         <div style="position:relative">
-          <input id="dm-hide-pass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" placeholder="Şifresiz bırakmak için boş bırakın" style="padding-right:40px" />
+          <input id="dm-hide-pass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" placeholder="Bir şifre belirle" style="padding-right:40px" />
           <button type="button" id="dm-hide-pass-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="dm-hide-pass-icon"></i></button>
         </div>
       </div>
@@ -8723,8 +8871,15 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       </div>
     `);
     attachPasswordToggle($('#dm-hide-pass'), $('#dm-hide-pass-toggle'), $('#dm-hide-pass-icon'));
+    document.querySelectorAll('input[name="dm-lock-type"]').forEach(input => input.addEventListener('change', () => {
+      const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
+      $('#dm-hide-pass-group').hidden = !personal;
+      if (!personal) $('#dm-hide-pass').value = '';
+    }));
     document.getElementById('dm-hide-confirm')?.addEventListener('click', async () => {
-      const pass = document.getElementById('dm-hide-pass')?.value || '';
+      const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
+      const pass = personal ? (document.getElementById('dm-hide-pass')?.value || '') : '';
+      if (personal && !pass) return toast('Bu sohbet için bir şifre belirle veya hesap kilit kodunu seç.', 'error');
       try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); }
       catch (e) { toast(e.message, 'error'); }
     });
@@ -9865,13 +10020,27 @@ function syncListeningAudio() {
 }
 
 async function createListeningRoomFromSong(song) {
+  const songId = Number(song?.id);
+  if (!Number.isSafeInteger(songId) || songId < 1 || !song?.audio_url) {
+    toast('Bu şarkı ortak dinleyişte kullanılamıyor.', 'error');
+    return;
+  }
+  let createdRoom = null;
   try {
-    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: `${song.title} ortak dinleyişi` }) });
+    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: `${song.title || 'Şarkı'} ortak dinleyişi` }) });
+    createdRoom = room;
     listeningRoom = { ...room, isOwner: true };
-    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: song.id }) });
+    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: songId }) });
     await refreshListeningRoom();
     toast('Ortak dinleyiş hazır. Linki paylaşabilirsin.');
-  } catch (error) { toast(error.message, 'error'); }
+  } catch (error) {
+    if (createdRoom) {
+      await api(`/listening-rooms/${createdRoom.public_id}/leave`, { method: 'POST' }).catch(() => {});
+      listeningRoom = null;
+      document.getElementById('listening-room-mini')?.remove();
+    }
+    toast(error.message || 'Ortak dinleyiş başlatılamadı', 'error');
+  }
 }
 
 async function createListeningRoomFromQueue(queue) {
@@ -10847,9 +11016,12 @@ async function renderArtistPanel(app) {
 // ===== BAŞKASININ ŞARKISINI PAYLAŞ (artist rozeti gerekmez) =====
 async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  if (window.otherSongsEnabled === false) { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-ban"></i><p>Başkasının şarkısı paylaşma özelliği şu an kapalı.</p></div></div>'; return; }
   // Artist olanlar kendi panelini kullansın
   if (currentUser.is_artist) { navigate('/artist-panel'); return; }
+  if (window.otherSongsEnabled === false) {
+    app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Artist özelliğine sahip değilsiniz. Başkasının şarkısı paylaşma şu an kapalı; lütfen artist başvurusu yapın.</p><a class="btn btn-primary" href="/artist-basvuru" data-link>Artist başvurusu yap</a></div></div>';
+    return;
+  }
   document.title = 'Şarkı Paylaş – ' + siteName;
 
   let rules = { other_rules: '' };
@@ -11185,7 +11357,43 @@ function showStoryUploadModal() {
     $('#story-caption').value = savedDraft.caption || '';
     $('#story-duration').value = savedDraft.duration || '24';
   }
-  const renderSongs = list => { songList.innerHTML = list.slice(0, 30).map(song => `<button type="button" class="story-song-option ${selectedSong?.id === song.id ? 'selected' : ''}" data-song-id="${song.id}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<span class="story-song-cover"><i class="fas fa-music"></i></span>'}<span><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></span><i class="fas fa-play story-song-option-play"></i></button>`).join('') || '<small class="text-muted">Müzik bulunamadı.</small>'; songList.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => { selectedSong = songs.find(song => String(song.id) === button.dataset.songId); $('#story-song').value = selectedSong.id; $('#story-song-start').disabled = !selectedSong.audio_url; $('#story-song-start').max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0))); if (selectedSong.audio_url) { const probe = new Audio(selectedSong.audio_url); probe.addEventListener('loadedmetadata', () => { $('#story-song-start').max = Math.max(0, Math.floor(probe.duration || 0)); }); } $('#story-song-start').value = Math.min(Number(savedDraft?.songStart) || 0, Number($('#story-song-start').max) || 0); $('#story-song-start').dispatchEvent(new Event('input')); renderSongs(songs); $('#story-song-player').hidden = false; $('#story-song-player').innerHTML = `<img src="${escHtml(selectedSong.cover_url || '')}" alt="" /><div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div><button type="button" id="story-song-toggle" class="btn btn-ghost"><i class="fas fa-play"></i></button>`; $('#story-song-toggle').onclick = () => { if (!storyComposerAudio || storyComposerAudio.src !== selectedSong.audio_url) { if (storyComposerAudio) storyComposerAudio.pause(); storyComposerAudio = new Audio(selectedSong.audio_url); } storyComposerAudio.currentTime = Number($('#story-song-start').value) || 0; if (storyComposerAudio.paused) { storyComposerAudio.play(); $('#story-song-toggle i').className = 'fas fa-pause'; } else { storyComposerAudio.pause(); $('#story-song-toggle i').className = 'fas fa-play'; } }; }); };
+  const renderSongs = list => {
+    songList.innerHTML = songPickerMarkup(list, selectedSong);
+    songList.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => {
+      if (storyComposerAudio) {
+        storyComposerAudio.pause();
+        untrackMediaAudio(storyComposerAudio);
+        storyComposerAudio = null;
+      }
+      selectedSong = songs.find(song => String(song.id) === button.dataset.songId);
+      if (!selectedSong) return;
+      $('#story-song').value = selectedSong.id;
+      $('#story-song-start').disabled = !selectedSong.audio_url;
+      $('#story-song-start').max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
+      if (selectedSong.audio_url) {
+        const probe = new Audio(selectedSong.audio_url);
+        probe.addEventListener('loadedmetadata', () => { $('#story-song-start').max = Math.max(0, Math.floor(probe.duration || 0)); });
+      }
+      $('#story-song-start').value = Math.min(Number(savedDraft?.songStart) || 0, Number($('#story-song-start').max) || 0);
+      $('#story-song-start').dispatchEvent(new Event('input'));
+      renderSongs(songs);
+      $('#story-song-player').hidden = false;
+      $('#story-song-player').innerHTML = `<img src="${escHtml(selectedSong.cover_url || '')}" alt="" /><div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div><button type="button" id="story-song-toggle" class="btn btn-ghost" aria-label="Önizlemeyi oynat"><i class="fas fa-play"></i></button>`;
+      $('#story-song-toggle').onclick = () => {
+        if (!storyComposerAudio || storyComposerAudio.src !== selectedSong.audio_url) {
+          if (storyComposerAudio) storyComposerAudio.pause();
+          storyComposerAudio = new Audio(selectedSong.audio_url);
+        }
+        storyComposerAudio.currentTime = Number($('#story-song-start').value) || 0;
+        if (storyComposerAudio.paused) {
+          storyComposerAudio.play().then(() => { $('#story-song-toggle i').className = 'fas fa-pause'; }).catch(error => toast(error.message || 'Müzik önizlemesi başlatılamadı', 'error'));
+        } else {
+          storyComposerAudio.pause();
+          $('#story-song-toggle i').className = 'fas fa-play';
+        }
+      };
+    });
+  };
   api('/songs').then(result => {
     songs = result;
     if (savedDraft?.songId) {
@@ -11203,6 +11411,7 @@ function showStoryUploadModal() {
   $('#story-song-start').oninput = event => {
     const seconds = Number(event.target.value) || 0;
     $('#story-song-time').textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    if (storyComposerAudio && !storyComposerAudio.paused) storyComposerAudio.currentTime = seconds;
   };
   $('#story-save').addEventListener('click', async event => {
     const submitButton = event.currentTarget;
@@ -11623,13 +11832,13 @@ async function renderPhotoDetail(app, photoId) {
     app.innerHTML = `<div class="container page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
     const shell = app.querySelector('.photo-detail-shell');
     bindPhotoFeed(shell);
-    setupPhotoAudio(shell, { disableAutoplay: true });
+    setupPhotoAudio(shell);
   } catch (error) {
     app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-image"></i><p>${escHtml(error.message || 'Fotoğraf bulunamadı')}</p></div></div>`;
   }
 }
 
-function setupPhotoAudio(feed) {
+function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
   // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
   // tıklamasıyla açılır; seçilen yerden itibaren yönetici sınırına kadar çalar.
   photoAudioObserver?.disconnect();
@@ -11637,32 +11846,48 @@ function setupPhotoAudio(feed) {
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
   document.getElementById('photo-audio-control')?.remove();
+  let soundEnabled = localStorage.getItem('cigcig_photo_sound_enabled') === '1';
+  let visibleCard = null;
 
-  const syncButtons=()=>feed.querySelectorAll('.photo-audio-toggle').forEach(button=>{
-    const isPlaying=activePhotoAudio?._photoId===button.closest('[data-photo-id]')?.dataset.photoId;
-    button.classList.toggle('is-playing', isPlaying);
-    button.title=isPlaying?'Müziği durdur':'Müziği aç';
-    button.setAttribute('aria-label', button.title);
-    const icon=button.querySelector('i');
-    if (icon) icon.className='fas '+(isPlaying?'fa-volume-high':'fa-volume-off');
-  });
+  const syncButtons = () => {
+    feed.querySelectorAll('.photo-audio-toggle').forEach(button => {
+      button.classList.toggle('is-playing', activePhotoAudio?._photoId === button.closest('[data-photo-id]')?.dataset.photoId);
+      button.title = soundEnabled ? 'Fotoğrafların sesini kapat' : 'Fotoğrafların sesini aç';
+      button.setAttribute('aria-label', button.title);
+      const icon = button.querySelector('i');
+      if (icon) icon.className = `fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}`;
+    });
+    const control = document.getElementById('photo-audio-control');
+    if (control) {
+      control.classList.toggle('is-enabled', soundEnabled);
+      control.setAttribute('aria-label', soundEnabled ? 'Fotoğraf müziğini kapat' : 'Fotoğraf müziğini aç');
+      control.innerHTML = `<i class="fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-xmark'}"></i>`;
+    }
+  };
   const stop=()=>{
     activePhotoAudio?.pause();
     untrackMediaAudio(activePhotoAudio);
     activePhotoAudio=null;
     syncButtons();
   };
-  const play=(card)=>{
+  const play=(card, toggle = false)=>{
     const songButton=card.querySelector('.photo-song');
-    if (!songButton?.dataset.audio) return;
+    if (!songButton?.dataset.audio) { stop(); return; }
+    if (toggle) {
+      soundEnabled = !soundEnabled;
+      localStorage.setItem('cigcig_photo_sound_enabled', soundEnabled ? '1' : '0');
+    }
     if (activePhotoAudio?._photoId===card.dataset.photoId) {
-      stop();
+      activePhotoAudio.muted = !soundEnabled;
+      if (soundEnabled) activePhotoAudio.play().catch(() => {});
+      syncButtons();
       return;
     }
     stop();
     const audio=trackMediaAudio(new Audio(songButton.dataset.audio));
     audio.preload='auto';
-    audio.muted=false;
+    audio.muted=!soundEnabled;
+    audio.volume=getMediaVolume();
     audio.load();
     audio._photoId=card.dataset.photoId;
     limitMediaAudioClip(audio, Number(songButton.dataset.start)||0, ()=>{
@@ -11675,25 +11900,46 @@ function setupPhotoAudio(feed) {
     activePhotoAudio=audio;
     syncButtons();
     const playPromise = audio.play();
-    playPromise?.catch(()=>{
-      if (activePhotoAudio===audio) {
-        activePhotoAudio=null;
+    playPromise?.catch(()=>{ if (activePhotoAudio===audio && soundEnabled) audio.muted=true; });
+  };
+
+  if (!disableAutoplay) {
+    const controlButton = document.createElement('button');
+    controlButton.type = 'button';
+    controlButton.id = 'photo-audio-control';
+    controlButton.className = 'photo-audio-global-control';
+    controlButton.addEventListener('click', () => {
+      if (visibleCard) play(visibleCard, true);
+      else {
+        soundEnabled = !soundEnabled;
+        localStorage.setItem('cigcig_photo_sound_enabled', soundEnabled ? '1' : '0');
         syncButtons();
       }
     });
-  };
-
+    document.body.appendChild(controlButton);
+    photoAudioObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => { entry.target._photoVisibility = entry.isIntersecting ? entry.intersectionRatio : 0; });
+      visibleCard = [...feed.querySelectorAll('[data-photo-id]')]
+        .filter(card => card._photoVisibility >= 0.35 && card.querySelector('.photo-song'))
+        .sort((a, b) => b._photoVisibility - a._photoVisibility)[0] || null;
+      if (visibleCard) play(visibleCard);
+      else stop();
+    }, { threshold: [0, 0.35, 0.6, 0.85] });
+    feed.querySelectorAll('[data-photo-id]').forEach(card => photoAudioObserver.observe(card));
+  }
   feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{
     event.preventDefault();
     event.stopPropagation();
     const card=button.closest('[data-photo-id]');
-    if (card) play(card);
+    if (card) { visibleCard = card; play(card, true); }
   }));
   feed.querySelectorAll('.photo-volume').forEach(slider => {
     slider.addEventListener('input', event => {
       event.preventDefault();
       event.stopPropagation();
-      setMediaVolume(Number(event.target.value) / 100);
+      const volume = Number(event.target.value) / 100;
+      setMediaVolume(volume);
+      if (activePhotoAudio) activePhotoAudio.volume = volume;
     });
     slider.addEventListener('click', event => event.stopPropagation());
     slider.addEventListener('pointerdown', event => event.stopPropagation());
@@ -11797,6 +12043,7 @@ function showPhotoUploadModal() {
   const previewPlayer = document.getElementById('photo-song-preview-player');
   const start = document.getElementById('photo-song-start');
   const time = document.getElementById('photo-song-time');
+  const savedSongStart = Math.max(0, Number(savedDraft?.start) || 0);
   document.getElementById('photo-file')?.addEventListener('change', event => {
     const file = event.target.files[0];
     const preview = document.getElementById('photo-file-preview');
@@ -11831,7 +12078,7 @@ function showPhotoUploadModal() {
   api('/songs').then(s => {
     songs = s;
     const renderSongs = list => {
-      songList.innerHTML = list.slice(0, 30).map(song => `<button type="button" class="story-song-option ${selectedSong?.id === song.id ? 'selected' : ''}" data-song-id="${song.id}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<span class="story-song-cover"><i class="fas fa-music"></i></span>'}<span><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></span><i class="fas fa-play story-song-option-play"></i></button>`).join('') || '<small class="text-muted">Müzik bulunamadı.</small>';
+      songList.innerHTML = songPickerMarkup(list, selectedSong);
       songList.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => {
         selectedSong = songs.find(song => String(song.id) === button.dataset.songId);
         songInput.value = selectedSong?.id || '';
@@ -11845,7 +12092,11 @@ function showPhotoUploadModal() {
           previewPlayer.onended = () => { previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat'; };
           previewPlayer.load();
           const probe = new Audio(selectedSong.audio_url);
-          probe.addEventListener('loadedmetadata', () => { start.max = Math.floor(probe.duration) || 0; });
+          probe.addEventListener('loadedmetadata', () => {
+            start.max = Math.floor(probe.duration) || 0;
+            if (savedDraft?.songId && String(savedDraft.songId) === String(selectedSong.id)) start.value = Math.min(savedSongStart, Number(start.max));
+            start.dispatchEvent(new Event('input'));
+          });
           updatePreviewUi();
         }
         document.getElementById('photo-song-player').hidden = !selectedSong;
@@ -11857,10 +12108,17 @@ function showPhotoUploadModal() {
       if (selectedSong) {
         songInput.value = selectedSong.id;
         start.disabled = !selectedSong.audio_url;
+        start.max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
+        if (savedDraft?.songId && String(savedDraft.songId) === String(selectedSong.id)) start.value = Math.min(savedSongStart, Number(start.max) || savedSongStart);
+        start.dispatchEvent(new Event('input'));
         if (selectedSong.audio_url) {
           previewPlayer.src = selectedSong.audio_url;
           const probe = new Audio(selectedSong.audio_url);
-          probe.addEventListener('loadedmetadata', () => { start.max = Math.floor(probe.duration) || 0; });
+          probe.addEventListener('loadedmetadata', () => {
+            start.max = Math.floor(probe.duration) || 0;
+            start.value = Math.min(savedSongStart, Number(start.max));
+            start.dispatchEvent(new Event('input'));
+          });
         }
       }
     }
