@@ -12209,8 +12209,9 @@ async function renderMusicDetail(app, slug) {
                 <span class="sdp-time" id="dp-dur">0:00</span>
               </div>
               <div class="sdp-vol-wrap">
-                <button id="detail-vol-btn" class="sdp-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
-                <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" />
+                <button id="detail-vol-btn" class="sdp-vol-btn" type="button" title="Sesi kapat" aria-label="Sesi kapat"><i class="fas fa-volume-up"></i></button>
+                <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" aria-label="Ses seviyesi" />
+                <output id="detail-vol-value" class="sdp-vol-value" for="detail-vol">80%</output>
               </div>
               ${currentUser ? '<button class="sdp-together-btn" id="detail-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
             </div>
@@ -12260,7 +12261,8 @@ async function renderMusicDetail(app, slug) {
     </div>
   `;
 
-  const audio = document.getElementById('detail-audio');
+  const audio = trackMediaAudio(document.getElementById('detail-audio'));
+  const savedVol = getMediaVolume();
   const playBtn = document.getElementById('detail-play-btn');
   const fill = document.getElementById('dp-fill');
   const seek = document.getElementById('dp-seek');
@@ -12370,29 +12372,40 @@ async function renderMusicDetail(app, slug) {
     saveMusicPlayback(audio, true);
   });
 
-  const savedVol = getMediaVolume();
   const detailVolSlider = document.getElementById('detail-vol');
   const detailVolBtn = document.getElementById('detail-vol-btn');
+  const detailVolValue = document.getElementById('detail-vol-value');
+  let lastAudibleVolume = savedVol > 0 ? savedVol : 0.8;
+  const updateVolumeControl = volume => {
+    const percentage = Math.round(volume * 100);
+    if (detailVolSlider) {
+      detailVolSlider.value = String(percentage);
+      detailVolSlider.style.setProperty('--volume-fill', `${percentage}%`);
+      detailVolSlider.setAttribute('aria-valuetext', `${percentage}%`);
+    }
+    if (detailVolValue) detailVolValue.value = `${percentage}%`;
+    if (detailVolBtn) {
+      const icon = percentage === 0 ? 'fa-volume-xmark' : percentage < 50 ? 'fa-volume-low' : 'fa-volume-high';
+      detailVolBtn.innerHTML = `<i class="fas ${icon}"></i>`;
+      detailVolBtn.title = percentage === 0 ? 'Sesi aç' : 'Sesi kapat';
+      detailVolBtn.setAttribute('aria-label', percentage === 0 ? 'Sesi aç' : 'Sesi kapat');
+      detailVolBtn.setAttribute('aria-pressed', String(percentage === 0));
+    }
+  };
   if (detailVolSlider) {
-    detailVolSlider.value = Math.round(savedVol * 100);
-    const updateVolIcon = (v) => {
-      if (!detailVolBtn) return;
-      detailVolBtn.innerHTML = v === 0 ? '<i class="fas fa-volume-mute"></i>' : v < 50 ? '<i class="fas fa-volume-down"></i>' : '<i class="fas fa-volume-up"></i>';
-    };
-    updateVolIcon(Math.round(savedVol * 100));
+    updateVolumeControl(savedVol);
     detailVolSlider.addEventListener('input', e => {
-      const v = parseInt(e.target.value);
-      setMediaVolume(v / 100);
-      updateVolIcon(v);
+      const volume = Number(e.target.value) / 100;
+      audio.volume = volume;
+      setMediaVolume(volume);
+      if (volume > 0) lastAudibleVolume = volume;
+      updateVolumeControl(volume);
     });
     detailVolBtn?.addEventListener('click', () => {
-      if (audio.volume > 0) {
-        setMediaVolume(0); detailVolSlider.value = 0;
-        if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
-      } else {
-        setMediaVolume(0.8); detailVolSlider.value = 80;
-        if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
-      }
+      const volume = audio.volume > 0 ? 0 : lastAudibleVolume;
+      audio.volume = volume;
+      setMediaVolume(volume);
+      updateVolumeControl(volume);
     });
   }
 
