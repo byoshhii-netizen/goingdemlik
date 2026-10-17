@@ -3985,11 +3985,12 @@ body.home-page #global-music-player { display:none !important; }
   .song-detail-title { font-size:22px; }
   .song-detail-info-row { justify-content:center; }
   .song-detail-actions-row { justify-content:center; }
-  .sdp-top-row { flex-wrap:wrap; }
-  .sdp-progress-wrap { flex:1 1 calc(100% - 62px); }
+  .song-detail-player { min-width:0; padding:14px; }
+  .sdp-top-row { flex-wrap:wrap; gap:10px; }
+  .sdp-progress-wrap { flex:1 1 calc(100% - 66px); }
   .sdp-together-btn { order:3; margin-left:auto; }
-  .sdp-vol-wrap { order:4; width:100%; justify-content:flex-end; }
-  .sdp-vol-slider { width:min(42vw,180px); }
+  .sdp-vol-wrap { order:4; flex:0 1 100%; width:100%; max-width:280px; min-width:0; justify-content:flex-end; margin-inline:auto; box-sizing:border-box; }
+  .sdp-vol-slider { flex:1 1 auto; width:auto; min-width:0; max-width:180px; }
   .song-lyrics-section { padding:20px 16px; }
 }
 

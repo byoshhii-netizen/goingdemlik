@@ -7860,7 +7860,7 @@ async function getListeningRoomState(roomId) {
     query(`SELECT m.user_id, m.role, m.joined_at, u.username, u.avatar, u.name_color
       FROM listening_room_members m JOIN users u ON u.id=m.user_id
       WHERE m.room_id=$1 ORDER BY m.joined_at`, [roomId]),
-    query(`SELECT t.*, s.public_id AS song_public_id, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
+    query(`SELECT t.*, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
       FROM listening_room_tracks t JOIN songs s ON s.id=t.song_id
       WHERE t.room_id=$1 AND t.state <> 'played' ORDER BY t.position, t.id`, [roomId]),
     query(`SELECT q.*, u.username AS requester_username, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
@@ -7872,11 +7872,30 @@ async function getListeningRoomState(roomId) {
 
 app.post('/api/listening-rooms', authMiddleware, async (req, res) => {
   const title = String(req.body?.title || 'Ortak dinleyiş').trim().slice(0, 80) || 'Ortak dinleyiş';
+  const requestedSongId = req.body?.song_id;
+  const initialSong = requestedSongId == null ? null : await getSongForListening(requestedSongId);
+  if (requestedSongId != null && !initialSong) return res.status(404).json({ error: 'Şarkı bulunamadı veya ortak dinleyişte kullanılamıyor' });
   const publicId = createListeningRoomId();
-  const { rows } = await query(`INSERT INTO listening_rooms(public_id,owner_id,title)
-    VALUES($1,$2,$3) RETURNING *`, [publicId, req.user.id, title]);
-  await query(`INSERT INTO listening_room_members(room_id,user_id,role) VALUES($1,$2,'owner')`, [rows[0].id, req.user.id]);
-  res.status(201).json({ ...rows[0], share_url: `/ortak-dinleyis/${publicId}`, state: await getListeningRoomState(rows[0].id) });
+  const client = await pool.connect();
+  let room;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(`INSERT INTO listening_rooms(public_id,owner_id,title)
+      VALUES($1,$2,$3) RETURNING *`, [publicId, req.user.id, title]);
+    room = rows[0];
+    await client.query(`INSERT INTO listening_room_members(room_id,user_id,role) VALUES($1,$2,'owner')`, [room.id, req.user.id]);
+    if (initialSong) {
+      await client.query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state,started_at)
+        VALUES($1,$2,$3,0,'playing',NOW())`, [room.id, initialSong.id, req.user.id]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  res.status(201).json({ ...room, share_url: `/ortak-dinleyis/${publicId}`, state: await getListeningRoomState(room.id) });
 });
 
 app.get('/api/listening-rooms/:publicId', authMiddleware, async (req, res) => {

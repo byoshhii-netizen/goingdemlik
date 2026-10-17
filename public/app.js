@@ -11773,10 +11773,9 @@ async function createListeningRoomFromSong(song) {
   }
   let createdRoom = null;
   try {
-    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: `${song.title || 'Şarkı'} ortak dinleyişi` }) });
+    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: `${song.title || 'Şarkı'} ortak dinleyişi`, song_id: songId }) });
     createdRoom = room;
     listeningRoom = { ...room, isOwner: true };
-    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: songId }) });
     await refreshListeningRoom();
     toast('Ortak dinleyiş hazır. Linki paylaşabilirsin.');
   } catch (error) {
@@ -11797,9 +11796,8 @@ async function createListeningRoomFromQueue(queue) {
     return;
   }
   try {
-    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi' }) });
+    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi', song_id: Number(firstSong.id) }) });
     listeningRoom = { ...room, isOwner: true };
-    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: Number(firstSong.id) }) });
     const remainingIds = validQueue.slice(1).map(song => Number(song.id)).filter(Number.isSafeInteger);
     if (remainingIds.length) await api(`/listening-rooms/${room.public_id}/tracks/bulk`, { method: 'POST', body: JSON.stringify({ song_ids: remainingIds }) });
     await refreshListeningRoom();
