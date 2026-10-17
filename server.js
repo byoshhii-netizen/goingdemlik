@@ -398,7 +398,7 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   const badges = [];
   const addBadge = (badge) => {
     if (!badge?.key || !badge.name) return;
-    const isActive = ['admin', 'red_verified'].includes(badge.key) ? true : (preferences.has(badge.key)
+    const isActive = badge.key === 'admin' ? true : (preferences.has(badge.key)
       ? preferences.get(badge.key)
       : (badge.key === 'level' ? Number(user.show_level_badge) !== 0 : true));
     if (includeInactive || isActive) badges.push({ ...badge, is_active: isActive });
@@ -540,6 +540,59 @@ io.use(async (socket, next) => {
 
 io.on('connection', socket => {
   socket.join(`user:${socket.data.user.id}`);
+  socket.data.dmTypingConversations = new Map();
+  socket.data.dmTypingQueue = Promise.resolve();
+  const processDmTyping = async payload => {
+    const conversationId = Number(payload?.conversationId);
+    if (!Number.isSafeInteger(conversationId) || conversationId < 1) return;
+    const userId = socket.data.user.id;
+    const typingConversations = socket.data.dmTypingConversations;
+    const active = payload?.active === true;
+    let otherUserId = typingConversations.get(conversationId);
+    if (active && !otherUserId) {
+      try {
+        const { rows } = await query(`SELECT CASE WHEN c.user1_id=$1 THEN c.user2_id ELSE c.user1_id END AS other_user_id
+          FROM dm_conversations c
+          WHERE c.id=$2 AND (c.user1_id=$1 OR c.user2_id=$1)
+            AND CASE WHEN c.user1_id=$1 THEN COALESCE(c.hidden_by_user1,0)=0 ELSE COALESCE(c.hidden_by_user2,0)=0 END
+            AND NOT EXISTS (
+              SELECT 1 FROM blocks b
+              WHERE (b.blocker_id=c.user1_id AND b.blocked_id=c.user2_id)
+                 OR (b.blocker_id=c.user2_id AND b.blocked_id=c.user1_id)
+            )
+          LIMIT 1`, [userId, conversationId]);
+        otherUserId = rows[0]?.other_user_id;
+        if (!otherUserId) return;
+        typingConversations.set(conversationId, otherUserId);
+      } catch (error) {
+        console.error('[dm:typing] Konuşma doğrulanamadı:', error.message);
+        return;
+      }
+    } else if (!active && !otherUserId) {
+      return;
+    }
+    if (!active) typingConversations.delete(conversationId);
+    io.to(`user:${otherUserId}`).emit('dm:typing', {
+      conversationId,
+      senderId: userId,
+      active
+    });
+  };
+  socket.on('dm:typing', payload => {
+    socket.data.dmTypingQueue = socket.data.dmTypingQueue
+      .then(() => processDmTyping(payload))
+      .catch(error => console.error('[dm:typing] Yazıyor bildirimi gönderilemedi:', error.message));
+  });
+  socket.on('disconnect', () => {
+    for (const [conversationId, otherUserId] of socket.data.dmTypingConversations) {
+      io.to(`user:${otherUserId}`).emit('dm:typing', {
+        conversationId,
+        senderId: socket.data.user.id,
+        active: false
+      });
+    }
+    socket.data.dmTypingConversations.clear();
+  });
 });
 
 function emitDirectMessage(conversationId, sender, recipient, message) {
@@ -8512,6 +8565,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: msgs } = await query(`
     SELECT     m.id, m.conversation_id, m.sender_id, m.content,
     CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '' ELSE m.image_url END AS image_url,
+    CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
     m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
@@ -8639,13 +8693,22 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   }
   let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id, image_url: bodyImageUrl } = req.body;
   content = content == null ? '' : String(content);
-  let image_url = String(bodyImageUrl || '');
+  const requestedImageUrls = Array.isArray(req.body?.image_urls)
+    ? req.body.image_urls.map(url => String(url || '').trim()).filter(Boolean)
+    : bodyImageUrl ? [String(bodyImageUrl).trim()] : [];
+  if (requestedImageUrls.length > 10) return res.status(400).json({ error: 'Bir mesajda en fazla 10 fotoğraf gönderebilirsiniz.' });
+  if (requestedImageUrls.some(url => url.length > 2048)) return res.status(400).json({ error: 'Fotoğraf adresi geçersiz.' });
+  const imageUrls = [...requestedImageUrls];
+  let image_url = imageUrls[0] || '';
   const imageViewLimit = Number(req.body?.image_view_limit ?? 0);
   if (![0, 1, 2, 3].includes(imageViewLimit)) return res.status(400).json({ error: 'Fotoğraf görüntüleme seçeneği geçersiz.' });
   if (req.file) {
-    try { image_url = await handleUpload(req.file); } catch (e) { return res.status(500).json({ error: 'Fotoğraf yüklenemedi: ' + e.message }); }
+    try {
+      image_url = await handleUpload(req.file);
+      imageUrls.unshift(image_url);
+    } catch (e) { return res.status(500).json({ error: 'Fotoğraf yüklenemedi: ' + e.message }); }
   }
-  if (imageViewLimit > 0 && !image_url) return res.status(400).json({ error: 'Sınırlı görüntülemeli mesaj için fotoğraf gerekli.' });
+  if (imageViewLimit > 0 && !imageUrls.length) return res.status(400).json({ error: 'Sınırlı görüntülemeli mesaj için fotoğraf gerekli.' });
   if (shared_photo_id && !content) content = ' ';
   if (shared_newspaper_id !== undefined && shared_newspaper_id !== null && shared_newspaper_id !== '') {
     const newspaperId = Number(shared_newspaper_id);
@@ -8657,10 +8720,10 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else {
     shared_newspaper_id = null;
   }
-  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *',
-    [conv.id, uid, content||'', image_url, imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
+    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   if (shared_forum_id) {
@@ -8676,7 +8739,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -8699,7 +8762,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     WHERE m.id=$1
   `, [msgRows[0].id]);
   const sentMessage = full[0];
-  emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '' } : sentMessage);
+  emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '', image_urls: [] } : sentMessage);
   res.json(sentMessage);
 });
 
@@ -8707,7 +8770,7 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
   const messageId = Number(req.params.messageId);
   if (!Number.isSafeInteger(messageId) || messageId < 1) return res.status(400).json({ error: 'Geçersiz mesaj.' });
   const { rows } = await query(`
-    SELECT m.id,m.conversation_id,m.sender_id,m.image_url,m.image_view_limit,m.image_view_count,
+    SELECT m.id,m.conversation_id,m.sender_id,m.image_url,m.image_urls,m.image_view_limit,m.image_view_count,
       c.user1_id,c.user2_id
     FROM dm_messages m JOIN dm_conversations c ON c.id=m.conversation_id
     JOIN users other ON other.username=$3
@@ -8722,10 +8785,13 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
   const { rows: updated } = await query(`UPDATE dm_messages
     SET image_view_count=image_view_count+1
     WHERE id=$1 AND image_view_count<image_view_limit
-    RETURNING image_url,image_view_limit,image_view_count`, [messageId]);
+    RETURNING image_url,image_urls,image_view_limit,image_view_count`, [messageId]);
   if (!updated.length) return res.status(410).json({ error: 'Bu fotoğraf için görüntüleme sayısı doldu.' });
   res.json({
     image_url: updated[0].image_url,
+    image_urls: Array.isArray(updated[0].image_urls) && updated[0].image_urls.length
+      ? updated[0].image_urls
+      : (updated[0].image_url ? [updated[0].image_url] : []),
     image_view_limit: Number(updated[0].image_view_limit),
     image_view_count: Number(updated[0].image_view_count)
   });

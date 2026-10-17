@@ -2,6 +2,10 @@ let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realtimeSocket = null;
 let realtimeSocketToken = null;
+let dmTypingTimer = null;
+let dmTypingConversationId = null;
+let dmTypingActive = false;
+let dmPeerTypingTimer = null;
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
@@ -760,11 +764,17 @@ function redVerificationIconHTML(enabled, verifiedAt) {
   const dateAttributes = verifiedAt
     ? ` data-red-verified-at="${escHtml(verifiedAt)}" role="button" tabindex="0" aria-label="Kırmızı Tik veriliş tarihi"`
     : '';
-  return `<span class="red-verification-tick"${dateAttributes} title="Kırmızı Tik"><i class="fas fa-circle-check"></i></span>`;
+  return `<span class="red-verification-tick"${dateAttributes} title="Kırmızı Tik"><i class="fas fa-circle-check" aria-hidden="true"></i></span>`;
+}
+
+function profileRedVerificationIconHTML(badges) {
+  const badge = Array.isArray(badges) ? badges.find(item => item.type === 'red_verified' && item.is_active !== false) : null;
+  return badge ? redVerificationIconHTML(1, badge.assigned_at) : '';
 }
 
 function profileBadgeHTML(badge, compact = false) {
   if (!badge) return '';
+  if (badge.type === 'red_verified') return redVerificationIconHTML(badge.is_active === false ? 0 : 1, badge.assigned_at);
   const color = escHtml(badge.color || '#6b7280');
   const icon = String(badge.icon || '').trim();
   const verificationDate = badge.type === 'red_verified' && badge.assigned_at
@@ -1657,6 +1667,7 @@ function syncRealtimeSocket() {
   realtimeSocket = window.io({ auth: { token: currentToken } });
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
   realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
+  realtimeSocket.on('dm:typing', handleRealtimeDmTyping);
   realtimeSocket.on('dm:theme', event => {
     if (!event?.conversationId || !event.themeKey) return;
     const chat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(event.conversationId))}"]`);
@@ -1681,7 +1692,31 @@ function syncRealtimeSocket() {
   });
 }
 
-async function refreshFriendsRoute(tab) {
+async function stopLocalDmTyping() {
+  if (dmTypingTimer) clearTimeout(dmTypingTimer);
+  dmTypingTimer = null;
+  if (dmTypingActive && dmTypingConversationId) {
+    realtimeSocket?.emit('dm:typing', { conversationId: dmTypingConversationId, active: false });
+  }
+  dmTypingActive = false;
+  dmTypingConversationId = null;
+}
+
+function handleRealtimeDmTyping(event) {
+  if (!event?.conversationId || String(event.senderId) === String(currentUser?.id)) return;
+  const chat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(event.conversationId))}"]`);
+  const indicator = chat?.querySelector('.dm-chat-typing');
+  if (!indicator) return;
+  if (dmPeerTypingTimer) clearTimeout(dmPeerTypingTimer);
+  dmPeerTypingTimer = null;
+  indicator.hidden = !event.active;
+  if (event.active) dmPeerTypingTimer = setTimeout(() => {
+    indicator.hidden = true;
+    dmPeerTypingTimer = null;
+  }, 4500);
+}
+
+function refreshFriendsRoute(tab) {
   const app = document.getElementById('app');
   if (!app || location.pathname !== '/arkadaslar') return;
   await renderFriends(app);
@@ -7458,7 +7493,7 @@ async function renderBadges(app) {
     return;
   }
 
-  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti' };
+  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti', red_verified: 'Profil rozeti' };
   const badgeRows = badges.length ? badges.map(badge => {
     const isLockedAdminBadge = badge.key === 'admin';
     return `
@@ -7493,7 +7528,7 @@ async function renderBadges(app) {
       <div class="card badges-settings-card">
         <div class="card-header"><span><i class="fas fa-sliders"></i> Rozet görünürlüğü</span><span class="badge-count">${badges.length} rozet</span></div>
         <div class="card-body">
-      <p class="settings-help">Rozeti pasif yaptığında sadece profilindeki rozet satırından gizlenir; rozet hesabından silinmez. <strong>Yetkili rozeti hesap güvenliği nedeniyle zorunludur ve gizlenemez.</strong></p>
+      <p class="settings-help">Rozeti pasif yaptığında profilinde ve adının yanında gösterilmez; rozet hesabından silinmez. <strong>Yetkili rozeti hesap güvenliği nedeniyle zorunludur ve gizlenemez.</strong></p>
           <div class="badge-settings-list">${badgeRows}</div>
         </div>
       </div>
@@ -7601,8 +7636,8 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span></div>
-       ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
+       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}</strong><small>@${escHtml(user.username)}</small></span></div>
+       ${Array.isArray(data.badges) && data.badges.some(badge => badge.type !== 'red_verified') ? `<div class="profile-badges-row">${data.badges.filter(badge => badge.type !== 'red_verified').map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
@@ -7661,7 +7696,8 @@ async function renderProfile(app, username) {
   }
 
   const links = (() => { try { return JSON.parse(user.links || '[]'); } catch { return []; } })();
-  const badgesHTML = badges.length ? `<div class="profile-badges-row">${badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : '';
+  const displayBadges = badges.filter(badge => badge.type !== 'red_verified');
+  const badgesHTML = displayBadges.length ? `<div class="profile-badges-row">${displayBadges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : '';
   const badgesPanelHTML = badges.length
     ? `<div class="profile-badges-panel">${badges.map(badge => `<div class="profile-badge-card">${profileBadgeHTML(badge)}<small>${badge.type === 'level' ? 'Seviye rozeti' : badge.type === 'admin' ? 'Yetkili rozeti' : 'Profil rozeti'}</small></div>`).join('')}</div>`
     : '<div class="empty-state"><i class="fas fa-award"></i><p>Bu profilde gösterilen rozet yok.</p></div>';
@@ -7673,7 +7709,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}</strong><small>@${escHtml(user.username)}</small></span>
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -9956,6 +9992,8 @@ let dmPresencePollTimer = null;
 async function renderDMChat(username) {
   // Önceki poll'u temizle
   if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
+  stopLocalDmTyping();
+  if (dmPeerTypingTimer) { clearTimeout(dmPeerTypingTimer); dmPeerTypingTimer = null; }
 
   const mainEl = document.getElementById('dm-main');
   if (!mainEl) return;
@@ -10030,7 +10068,8 @@ async function renderDMChat(username) {
   dmSelectedIds = new Set();
   dmSelectionMode = false;
   let replyToId = null;
-  let pendingImg = null;
+  const maxDmImages = 10;
+  let pendingImgs = [];
   const isSelfConversation = currentUser && (String(other.id) === String(currentUser.id) || String(other.username).toLowerCase() === String(currentUser.username).toLowerCase());
   const otherSpotifyPromise = getSpotifyNowPlaying(other.username);
 
@@ -10050,6 +10089,7 @@ async function renderDMChat(username) {
             <strong>${escHtml(other.nickname || other.username)}</strong>
           </a>
           <span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>
+          <span class="dm-chat-typing" hidden aria-live="polite">Yazıyor<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
           <span id="dm-chat-now-playing"></span>
         </div>
       </div>
@@ -10081,8 +10121,8 @@ async function renderDMChat(username) {
     <!-- Input bar -->
     <div class="dm-input-bar">
       <div class="dm-input-wrap">
-        <button class="dm-input-img-btn" id="dm-img-btn" type="button" title="Fotoğraf ekle"><i class="fas fa-image"></i></button>
-        <input type="file" id="dm-img-input" accept="image/*" style="display:none" />
+        <button class="dm-input-img-btn" id="dm-img-btn" type="button" title="Galeriden fotoğraf seç (en fazla 10)"><i class="fas fa-image"></i></button>
+        <input type="file" id="dm-img-input" accept="image/*" multiple style="display:none" />
         <div class="dm-image-view-limit-wrap" id="dm-image-view-limit-wrap" hidden>
           <label for="dm-image-view-limit">Görüntüleme</label>
           <select id="dm-image-view-limit">
@@ -10092,10 +10132,8 @@ async function renderDMChat(username) {
             <option value="3">3 kez</option>
           </select>
         </div>
-        <div class="dm-img-preview-wrap" id="dm-img-preview-wrap">
-          <img id="dm-img-thumb" />
-          <button class="dm-img-clear" onclick="window.__dmClearImg && window.__dmClearImg()" type="button">✕</button>
-        </div>
+        <div class="dm-img-preview-wrap" id="dm-img-preview-wrap" hidden></div>
+        <span class="dm-img-upload-status" id="dm-img-upload-status" aria-live="polite"></span>
         <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
       </div>
       <button class="dm-send-btn" id="dm-send-btn" type="button"><i class="fas fa-paper-plane"></i></button>
@@ -10129,14 +10167,30 @@ async function renderDMChat(username) {
   };
 
   // Image management
+  const renderDmImagePreview = () => {
+    const preview = document.getElementById('dm-img-preview-wrap');
+    const viewLimitWrap = document.getElementById('dm-image-view-limit-wrap');
+    const inputWrap = document.querySelector('.dm-input-wrap');
+    if (!preview) return;
+    preview.hidden = pendingImgs.length === 0;
+    inputWrap?.classList.toggle('dm-has-images', pendingImgs.length > 0);
+    if (viewLimitWrap) viewLimitWrap.hidden = pendingImgs.length === 0;
+    preview.innerHTML = pendingImgs.map((item, index) => `<span class="dm-img-preview-item">
+      <img src="${escHtml(item.previewUrl)}" alt="Seçilen fotoğraf ${index + 1}" />
+      <button class="dm-img-clear" data-remove-dm-image="${index}" type="button" aria-label="${index + 1}. fotoğrafı kaldır">×</button>
+    </span>`).join('');
+    preview.querySelectorAll('[data-remove-dm-image]').forEach(button => button.addEventListener('click', () => {
+      const [removed] = pendingImgs.splice(Number(button.dataset.removeDmImage), 1);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      renderDmImagePreview();
+    }));
+  };
   window.__dmClearImg = () => {
-    pendingImg = null;
-    const pw = document.getElementById('dm-img-preview-wrap');
-    if (pw) pw.style.display = 'none';
+    pendingImgs.forEach(item => URL.revokeObjectURL(item.previewUrl));
+    pendingImgs = [];
+    renderDmImagePreview();
     const viewLimit = document.getElementById('dm-image-view-limit');
     if (viewLimit) viewLimit.value = '0';
-    const viewLimitWrap = document.getElementById('dm-image-view-limit-wrap');
-    if (viewLimitWrap) viewLimitWrap.hidden = true;
     const inp = document.getElementById('dm-img-input');
     if (inp) inp.value = '';
   };
@@ -10145,17 +10199,20 @@ async function renderDMChat(username) {
     document.getElementById('dm-img-input')?.click();
   });
   document.getElementById('dm-img-input')?.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    pendingImg = file;
-    const viewLimitWrap = document.getElementById('dm-image-view-limit-wrap');
-    if (viewLimitWrap) viewLimitWrap.hidden = false;
-    const pw = document.getElementById('dm-img-preview-wrap');
-    const thumb = document.getElementById('dm-img-thumb');
-    if (pw && thumb) {
-      const reader = new FileReader();
-      reader.onload = ev => { thumb.src = ev.target.result; pw.style.display = 'block'; };
-      reader.readAsDataURL(file);
+    const selectedFiles = Array.from(e.target.files || []);
+    const validFiles = selectedFiles.filter(file => file.type.startsWith('image/'));
+    const availableSlots = maxDmImages - pendingImgs.length;
+    if (validFiles.length > availableSlots) toast(`Bir mesajda en fazla ${maxDmImages} fotoğraf seçebilirsin.`, 'error');
+    if (validFiles.length !== selectedFiles.length) toast('Yalnızca fotoğraf dosyaları eklenebilir.', 'error');
+    pendingImgs.push(...validFiles.slice(0, Math.max(0, availableSlots)).map(file => ({
+      file,
+      previewUrl: URL.createObjectURL(file)
+    })));
+    renderDmImagePreview();
+    e.target.value = '';
+    if (selectedFiles.length) {
+      const inputEl = document.getElementById('dm-input');
+      inputEl?.focus();
     }
   });
 
@@ -10165,6 +10222,19 @@ async function renderDMChat(username) {
     textareaEl.addEventListener('input', () => {
       textareaEl.style.height = 'auto';
       textareaEl.style.height = Math.min(textareaEl.scrollHeight, 120) + 'px';
+      if (dmTypingTimer) clearTimeout(dmTypingTimer);
+      const conversationId = document.querySelector('.dm-chat')?.dataset.conversationId;
+      if (textareaEl.value.trim() && conversationId && !isSelfConversation) {
+        if (!dmTypingActive || dmTypingConversationId !== conversationId) {
+          stopLocalDmTyping();
+          dmTypingConversationId = conversationId;
+          dmTypingActive = true;
+          realtimeSocket?.emit('dm:typing', { conversationId, active: true });
+        }
+        dmTypingTimer = setTimeout(stopLocalDmTyping, 1800);
+      } else {
+        stopLocalDmTyping();
+      }
     });
   }
 
@@ -10172,25 +10242,28 @@ async function renderDMChat(username) {
   const sendDmMessage = async () => {
     const inputEl = document.getElementById('dm-input');
     const content = inputEl?.value;
-    if ((!content || !content.trim()) && !pendingImg) return;
-    const imageViewLimit = pendingImg ? Number(document.getElementById('dm-image-view-limit')?.value || 0) : 0;
+    if ((!content || !content.trim()) && !pendingImgs.length) return;
+    stopLocalDmTyping();
+    const imageViewLimit = pendingImgs.length ? Number(document.getElementById('dm-image-view-limit')?.value || 0) : 0;
     const sendBtn = document.getElementById('dm-send-btn');
     if (sendBtn) sendBtn.disabled = true;
 
     try {
-      let imageUrl = null;
-      if (pendingImg) {
+      const imageUrls = [];
+      const uploadStatus = document.getElementById('dm-img-upload-status');
+      for (const [index, item] of pendingImgs.entries()) {
         const fd = new FormData();
-        fd.append('image', pendingImg);
+        fd.append('image', item.file);
+        if (uploadStatus) uploadStatus.textContent = `Fotoğraf yükleniyor ${index + 1}/${pendingImgs.length}`;
         const uploadRes = await apiForm('/upload-image', fd);
-        imageUrl = uploadRes.url;
-        window.__dmClearImg();
+        imageUrls.push(uploadRes.url);
       }
-      const payload = { content: content || '', reply_to_id: replyToId, image_view_limit: imageViewLimit };
-      if (imageUrl) payload.image_url = imageUrl;
+      const payload = { content: content || '', reply_to_id: replyToId, image_view_limit: imageViewLimit, image_urls: imageUrls };
       const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
         method: 'POST', body: JSON.stringify(payload)
       });
+      window.__dmClearImg();
+      if (uploadStatus) uploadStatus.textContent = '';
       if (inputEl) { inputEl.value = ''; inputEl.style.height = 'auto'; }
       window.__dmClearReply?.();
       const el = document.getElementById('dm-messages');
@@ -10201,7 +10274,11 @@ async function renderDMChat(username) {
       }
       lastPollMsgId = Number(msg.id);
     } catch (e) { toast(e.message, 'error'); }
-    finally { if (sendBtn) sendBtn.disabled = false; }
+    finally {
+      const uploadStatus = document.getElementById('dm-img-upload-status');
+      if (uploadStatus) uploadStatus.textContent = '';
+      if (sendBtn) sendBtn.disabled = false;
+    }
   };
 
   document.getElementById('dm-send-btn')?.addEventListener('click', sendDmMessage);
@@ -10231,7 +10308,7 @@ async function renderDMChat(username) {
           limitedPhotoButton.disabled = false;
         }
         if (row) row.dataset.imageViewCount = String(count);
-        showDmImageViewer(viewed.image_url, true);
+        showDmImageViewer(viewed.image_urls?.length ? viewed.image_urls : viewed.image_url, true);
       } catch (error) {
         if (error.status === 410) {
           limitedPhotoButton.outerHTML = '<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>';
@@ -10460,6 +10537,18 @@ function dmMessagesHTML(messages, myId) {
   }).join('');
 }
 
+function dmMessageImageUrls(message) {
+  let urls = message?.image_urls;
+  if (typeof urls === 'string') {
+    try { urls = JSON.parse(urls); } catch { urls = []; }
+  }
+  const validUrls = Array.isArray(urls) ? urls.filter(url => typeof url === 'string' && url.trim()) : [];
+  if (!validUrls.length && typeof message?.image_url === 'string' && message.image_url.trim()) {
+    validUrls.push(message.image_url);
+  }
+  return validUrls;
+}
+
 function appendDMMessage(container, message, myId, selMode) {
   const previousElement = container.lastElementChild?.matches('.dm-msg-wrap')
     ? container.lastElementChild
@@ -10470,16 +10559,19 @@ function appendDMMessage(container, message, myId, selMode) {
   container.insertAdjacentHTML('beforeend', dmMessageHTML(message, myId, selMode, previousMessage));
 }
 
-function showDmImageViewer(imageUrl, ephemeral = false) {
+function showDmImageViewer(imageUrls, ephemeral = false) {
+  const urls = (Array.isArray(imageUrls) ? imageUrls : [imageUrls]).filter(Boolean);
+  if (!urls.length) return;
   showModal(ephemeral ? 'Fotoğraf' : 'Fotoğrafı Görüntüle', `
-    <div class="dm-ephemeral-view">
-      <img class="${ephemeral ? 'dm-image-view dm-ephemeral-image' : 'dm-image-view'}" src="${escHtml(imageUrl)}" alt="Mesaj fotoğrafı" draggable="false" />
-      ${ephemeral ? `<span class="dm-ephemeral-watermark">@${escHtml(currentUser?.username || 'CigCig')} · CigCig</span>` : ''}
+    <div class="dm-ephemeral-view${urls.length > 1 ? ' dm-image-viewer-multiple' : ''}">
+      ${urls.map((url, index) => `<div class="dm-image-viewer-item"><img class="${ephemeral ? 'dm-image-view dm-ephemeral-image' : 'dm-image-view'}" src="${escHtml(url)}" alt="${urls.length > 1 ? `Mesaj fotoğrafı ${index + 1}` : 'Mesaj fotoğrafı'}" draggable="false" />${ephemeral ? `<span class="dm-ephemeral-watermark">@${escHtml(currentUser?.username || 'CigCig')} · CigCig</span>` : ''}</div>`).join('')}
     </div>
-    ${ephemeral ? '<p class="form-hint">Bu fotoğraf için sınırlı görüntüleme hakkı kullanıldı.</p>' : ''}
+    ${ephemeral ? '<p class="form-hint">Bu fotoğraflar için sınırlı görüntüleme hakkı kullanıldı.</p>' : ''}
   `);
-  document.querySelector('.dm-image-view')?.addEventListener('contextmenu', event => event.preventDefault());
-  document.querySelector('.dm-image-view')?.addEventListener('dragstart', event => event.preventDefault());
+  document.querySelectorAll('.dm-image-view').forEach(image => {
+    image.addEventListener('contextmenu', event => event.preventDefault());
+    image.addEventListener('dragstart', event => event.preventDefault());
+  });
 }
 
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
@@ -10492,6 +10584,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
   const messageTime = Date.parse(m.created_at);
   const previousTime = Date.parse(previousMessage?.created_at);
+  const imageUrls = dmMessageImageUrls(m);
   const isContinued = previousMessage
     && String(previousMessage.sender_id) === String(m.sender_id)
     && Number.isFinite(messageTime)
@@ -10524,9 +10617,11 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                ? Number(m.image_view_count) >= Number(m.image_view_limit)
                  ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
                  : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}"><i class="fas fa-eye"></i> Sınırlı görüntülemeli fotoğrafı aç</button>`
-               : m.image_url
-                 ? `<img src="${escHtml(m.image_url)}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(m.image_url)}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
-                 : ''}
+               : imageUrls.length === 1
+                 ? `<img src="${escHtml(imageUrls[0])}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(imageUrls[0])}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
+                 : imageUrls.length > 1
+                   ? `<div class="dm-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<img src="${escHtml(url)}" class="dm-message-image" alt="Mesaj fotoğrafı ${index + 1}" data-dm-image-url="${escHtml(url)}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`).join('')}</div>`
+                   : ''}
              ${m.shared_forum_id
                ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
                     ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}

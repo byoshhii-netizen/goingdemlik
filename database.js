@@ -1033,6 +1033,7 @@ async function initDb() {
       sender_id BIGINT NOT NULL,
       content TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
+      image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
       image_view_limit INTEGER NOT NULL DEFAULT 0,
       image_view_count INTEGER NOT NULL DEFAULT 0,
       shared_forum_id BIGINT,
@@ -1063,6 +1064,7 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
     UPDATE dm_messages SET shared_newspaper_id=NULL
       WHERE shared_newspaper_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM newspapers WHERE newspapers.id=dm_messages.shared_newspaper_id);
