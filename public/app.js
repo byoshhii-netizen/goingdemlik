@@ -1614,6 +1614,7 @@ function syncRealtimeSocket() {
   realtimeSocketToken = currentToken;
   realtimeSocket = window.io({ auth: { token: currentToken } });
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
+  realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
   realtimeSocket.on('group:message', event => {
     if (event?.slug && activeGroupMessageRefresh) {
       activeGroupMessageRefresh(event);
@@ -1688,6 +1689,40 @@ async function handleRealtimeDirectMessage(event) {
     }
   }
   checkUnreadMessages();
+}
+
+function handleRealtimeDirectMessageEdit(event) {
+  if (!currentUser || !Array.isArray(event?.usernames) || !event.message) return;
+  const peerUsername = event.usernames.find(username => String(username).toLowerCase() !== String(currentUser.username).toLowerCase());
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const currentChatUsername = pathParts[0] === 'mesajlar' && pathParts.length > 1
+    ? decodeURIComponent(pathParts[1])
+    : '';
+  if (!peerUsername || currentChatUsername.toLowerCase() !== String(peerUsername).toLowerCase()) return;
+
+  const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(event.message.id))}"]`);
+  const bubble = row?.querySelector('.dm-msg-bubble:not(.dm-deleted)');
+  if (!row || !bubble) return;
+
+  const content = String(event.message.content || '');
+  row.dataset.content = content;
+  let text = bubble.querySelector(':scope > span');
+  if (content) {
+    if (!text) {
+      text = document.createElement('span');
+      bubble.appendChild(text);
+    }
+    text.innerHTML = renderContent(content);
+  } else {
+    text?.remove();
+  }
+  bubble.classList.add('is-edited');
+  if (!bubble.querySelector('.dm-msg-edited-mark')) {
+    const marker = document.createElement('i');
+    marker.className = 'fas fa-pen dm-msg-edited-mark';
+    marker.title = 'Düzenlendi';
+    bubble.appendChild(marker);
+  }
 }
 
 function createPresenceClientId() {
@@ -10303,7 +10338,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     && Number.isFinite(previousTime)
     && Math.abs(messageTime - previousTime) <= 60_000;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -10324,7 +10359,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
         : ''}
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
-        : `<div class="dm-msg-bubble">
+        : `<div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
              ${m.image_url
                ? `<img src="${escHtml(m.image_url)}" class="dm-message-image" alt="" onerror="this.remove()" onclick="window.open('${escHtml(m.image_url)}','_blank')" />`
                : ''}
@@ -10362,6 +10397,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                   </a>`
                : ''}
              ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
+             ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}
            </div>`}
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
@@ -10388,15 +10424,23 @@ document.addEventListener('mouseout', e => {
 
 function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   document.getElementById('dm-msg-ctx')?.remove();
+  const messageRow = [...document.querySelectorAll('.dm-msg-wrap')].find(row => row.dataset.id === String(msgId));
+  const createdAt = Date.parse(messageRow?.dataset.createdAt || '');
+  const messageAge = Date.now() - createdAt;
+  const canEdit = isOwn
+    && Boolean(messageRow?.dataset.content?.trim())
+    && !messageRow?.querySelector('.dm-deleted')
+    && Number.isFinite(createdAt)
+    && messageAge <= 3 * 60 * 60 * 1000
+    && messageAge >= -5 * 60 * 1000;
   const rect = btn.getBoundingClientRect();
   const menu = document.createElement('div');
   menu.id = 'dm-msg-ctx';
-  const leftPos = Math.max(8, rect.left - 160);
-  const topPos = Math.min(rect.bottom + 4, window.innerHeight - 160);
-  menu.style.cssText = `position:fixed;left:${leftPos}px;top:${topPos}px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden`;
+  menu.style.cssText = 'position:fixed;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden';
   const items = [
     { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
+    ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
     ...(isOwn ? [{ label: '<i class="fas fa-trash-alt fa-fw"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
   ];
@@ -10418,6 +10462,43 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
         if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
       } else if (item.action === 'select') {
         enterDmSelection(msgId);
+      } else if (item.action === 'edit') {
+        showModal('Mesajı düzenle', `
+          <div class="form-group">
+            <label for="edit-dm-message">Mesaj metni</label>
+            <textarea id="edit-dm-message" rows="5" maxlength="5000">${escHtml(messageRow.dataset.content)}</textarea>
+          </div>
+          <button type="button" class="btn btn-primary" id="save-dm-message-edit" style="width:100%">Kaydet</button>
+          <div id="edit-dm-message-error" class="form-error mt-4"></div>`);
+        const input = document.getElementById('edit-dm-message');
+        const saveButton = document.getElementById('save-dm-message-edit');
+        const errorMessage = document.getElementById('edit-dm-message-error');
+        input?.focus();
+        input?.setSelectionRange(input.value.length, input.value.length);
+        saveButton?.addEventListener('click', async () => {
+          const content = input.value.trim();
+          if (!content) {
+            if (errorMessage) errorMessage.textContent = 'Mesaj boş olamaz.';
+            return;
+          }
+          saveButton.disabled = true;
+          try {
+            const updated = await api(`/messages/${encodeURIComponent(msgId)}`, {
+              method: 'PUT',
+              body: JSON.stringify({ content }),
+            });
+            handleRealtimeDirectMessageEdit({
+              usernames: [currentUser.username, username],
+              message: updated,
+            });
+          } catch (error) {
+            if (errorMessage) errorMessage.textContent = error.message || 'Mesaj düzenlenemedi.';
+            saveButton.disabled = false;
+            return;
+          }
+          if (document.getElementById('edit-dm-message') === input) hideModal();
+          toast('Mesaj düzenlendi.');
+        });
       } else if (item.action === 'delete-me') {
         try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'me' }) }); renderDMChat(username); }
         catch (e) { toast(e.message, 'error'); }
@@ -10429,6 +10510,8 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     menu.appendChild(el);
   });
   document.body.appendChild(menu);
+  menu.style.left = `${Math.max(8, Math.min(rect.left - menu.offsetWidth + rect.width, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
 }
 

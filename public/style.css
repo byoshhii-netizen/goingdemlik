@@ -3090,12 +3090,15 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-msg-content { display: flex; flex-direction: column; max-width: 68%; min-width: 0; height: auto; min-height: 0; flex: 0 1 auto; }
 .dm-msg-wrap.dm-own .dm-msg-content { align-items: flex-end; }
 .dm-msg-bubble {
+  position: relative;
   padding: 10px 14px; border-radius: 14px;
   font-size: 15px; line-height: 1.5;
   word-break: break-word; overflow-wrap: anywhere;
   white-space: normal;
   width: fit-content; max-width: 100%; height: auto; min-height: 0; flex: 0 0 auto;
 }
+.dm-msg-bubble.is-edited { padding-bottom: 27px; }
+.dm-msg-edited-mark { position:absolute; right:9px; bottom:7px; color:var(--text-muted); font-size:10px; opacity:.58; pointer-events:none; }
 .dm-msg-wrap:not(.dm-own) .dm-msg-bubble {
   background: var(--bg-card2);
   border: 1px solid var(--border-hover);

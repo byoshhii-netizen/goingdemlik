@@ -3367,7 +3367,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   const { rows: full } = await query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
@@ -8548,6 +8548,50 @@ app.post('/api/conversation/:username/set-password', authMiddleware, async (req,
     await query('UPDATE dm_conversations SET hidden_pass_user2=$1 WHERE id=$2', [passHash, conv.id]);
   }
   res.json({ ok: true });
+});
+
+app.put('/api/messages/:id', authMiddleware, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası' });
+  const content = typeof req.body?.content === 'string' ? req.body.content.trim() : null;
+  if (content === null) return res.status(400).json({ error: 'Mesaj metni gerekli' });
+  if (content.length > 5000) return res.status(400).json({ error: 'Mesaj en fazla 5000 karakter olabilir' });
+
+  const { rows } = await query('SELECT * FROM dm_messages WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
+  const msg = rows[0];
+  if (msg.sender_id != req.user.id) return res.status(403).json({ error: 'Sadece kendi mesajınızı düzenleyebilirsiniz' });
+  if (msg.deleted_for_all || msg.deleted_by_sender) return res.status(400).json({ error: 'Silinmiş mesaj düzenlenemez' });
+  if (!String(msg.content || '').trim()) return res.status(400).json({ error: 'Metin içermeyen mesaj düzenlenemez' });
+  if (!content && !msg.image_url && !msg.shared_forum_id && !msg.shared_video_id && !msg.shared_book_id && !msg.shared_photo_id && !msg.shared_story_id && !msg.shared_newspaper_id) {
+    return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  }
+
+  const { rows: updated } = await query(
+    `UPDATE dm_messages
+     SET content=$1, edited_at=NOW()
+     WHERE id=$2 AND sender_id=$3
+       AND created_at >= NOW() - INTERVAL '3 hours'
+       AND COALESCE(deleted_for_all,0)=0 AND COALESCE(deleted_by_sender,0)=0
+     RETURNING *`,
+    [content, msg.id, req.user.id]
+  );
+  if (!updated.length) return res.status(403).json({ error: 'Mesajlar yalnızca gönderildikten sonraki 3 saat içinde düzenlenebilir' });
+  const { rows: participants } = await query(
+    `SELECT c.user1_id, c.user2_id, user1.username AS user1_username, user2.username AS user2_username
+     FROM dm_conversations c
+     JOIN users user1 ON user1.id=c.user1_id
+     JOIN users user2 ON user2.id=c.user2_id
+     WHERE c.id=$1`,
+    [msg.conversation_id]
+  );
+  if (participants.length) {
+    const conversation = participants[0];
+    io.to([`user:${conversation.user1_id}`, `user:${conversation.user2_id}`]).emit('dm:message-edited', {
+      usernames: [conversation.user1_username, conversation.user2_username],
+      message: updated[0],
+    });
+  }
+  res.json(updated[0]);
 });
 
 app.delete('/api/messages/:id', authMiddleware, async (req, res) => {

@@ -1074,6 +1074,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
     CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation_created ON dm_messages(conversation_id, created_at, id);
 
     CREATE TABLE IF NOT EXISTS announcements (
