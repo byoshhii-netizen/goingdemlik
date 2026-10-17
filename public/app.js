@@ -1764,7 +1764,7 @@ function handleRealtimeDmTyping(event) {
   }, 4500);
 }
 
-function refreshFriendsRoute(tab) {
+async function refreshFriendsRoute(tab) {
   const app = document.getElementById('app');
   if (!app || location.pathname !== '/arkadaslar') return;
   await renderFriends(app);
