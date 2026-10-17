@@ -2629,7 +2629,7 @@ function showNewspaperUploadModal() {
         <span class="newspaper-publish-choice-cta">Görsel seç <i class="fas fa-arrow-right"></i></span>
       </button>
     </div>`);
-  $('#newspaper-create-choice')?.addEventListener('click', showNewspaperComposer);
+  $('#newspaper-create-choice')?.addEventListener('click', () => showNewspaperComposer());
   $('#newspaper-photo-choice')?.addEventListener('click', showNewspaperPhotoUploadModal);
 }
 
@@ -2639,7 +2639,7 @@ function showNewspaperPhotoUploadModal() {
   showModal('Yeni gazete yayımla', `
     <form class="newspaper-upload-form" id="newspaper-upload-form">
       <div class="newspaper-upload-banner"><span><i class="fas fa-feather-pointed"></i></span><div><strong>Yeni bir sayı arşive giriyor</strong><small>Gazete görselini, sayı adını ve basım tarihini ekleyin.</small></div></div>
-      <label class="newspaper-upload-field"><span>Gazete adı</span><input id="newspaper-name-input" name="newspaper_name" maxlength="100" required placeholder="Örn. CigCig Günlük" autocomplete="off" /></label>
+      <label class="newspaper-upload-field"><span>Gazete adı</span><input id="newspaper-name-input" name="newspaper_name" maxlength="100" required value="CigCig Gazetesi" autocomplete="off" /></label>
       <label class="newspaper-upload-field"><span>Gazete tarihi</span><input id="newspaper-date-input" name="newspaper_date" type="date" value="${today}" required /></label>
       <label class="newspaper-upload-file" for="newspaper-image-input"><span class="newspaper-upload-file-icon"><i class="fas fa-cloud-arrow-up"></i></span><strong>Gazete görselini seç</strong><small>Dikey sayfa önerilir · JPG, PNG veya WebP · En fazla 25 MB</small><input id="newspaper-image-input" name="image" type="file" accept="image/*" required /></label>
       <img class="newspaper-upload-preview hidden" id="newspaper-image-preview" alt="Gazete önizlemesi" />
@@ -2697,14 +2697,30 @@ function newspaperReadImage(file) {
     reader.onload = () => {
       const image = new Image();
       image.onerror = () => reject(new Error('Bu görsel açılamadı.'));
-      image.onload = () => resolve({ src: String(reader.result), image });
+      image.onload = () => {
+        const maxSide = 1800;
+        const ratio = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+        const context = canvas.getContext('2d');
+        if (!context) return reject(new Error('Görsel hazırlanamadı.'));
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const src = canvas.toDataURL('image/jpeg', .86);
+        const compressed = new Image();
+        compressed.onerror = () => reject(new Error('Sıkıştırılmış görsel açılamadı.'));
+        compressed.onload = () => resolve({ src, image: compressed });
+        compressed.src = src;
+      };
       image.src = String(reader.result);
     };
     reader.readAsDataURL(file);
   });
 }
 
-function showNewspaperComposer() {
+function showNewspaperComposerLegacy() {
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const editorState = {
@@ -3141,6 +3157,495 @@ function showNewspaperComposer() {
   });
   mastheadResizeObserver.observe(sheet);
   drawMasthead();
+  renderItems();
+}
+
+function openNewspaperDraftDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('Bu tarayıcı gazete taslaklarını saklayamıyor.'));
+    const request = indexedDB.open('cigcig-newspaper-drafts', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('owners', { keyPath: 'owner' });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(new Error(`Gazete taslak deposu açılamadı: ${request.error?.message || 'bilinmeyen hata'}`));
+  });
+}
+
+async function getNewspaperDrafts() {
+  const db = await openNewspaperDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('owners', 'readonly');
+    const request = transaction.objectStore('owners').get(String(currentUser?.id || 'unknown'));
+    request.onsuccess = () => resolve(Array.isArray(request.result?.drafts) ? request.result.drafts : []);
+    request.onerror = () => reject(new Error(`Gazete taslakları okunamadı: ${request.error?.message || 'bilinmeyen hata'}`));
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => { db.close(); reject(new Error('Gazete taslakları okunamadı.')); };
+  });
+}
+
+async function setNewspaperDrafts(drafts) {
+  const db = await openNewspaperDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('owners', 'readwrite');
+    transaction.objectStore('owners').put({ owner: String(currentUser?.id || 'unknown'), drafts });
+    transaction.oncomplete = () => { db.close(); resolve(); };
+    transaction.onerror = () => { db.close(); reject(new Error(`Taslak cihazda saklanamadı: ${transaction.error?.message || 'bilinmeyen hata'}`)); };
+    transaction.onabort = () => { db.close(); reject(new Error('Taslak kaydı iptal edildi.')); };
+  });
+}
+
+function loadNewspaperImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve({ src, image });
+    image.onerror = () => reject(new Error('Gazete görseli yüklenemedi veya dış kaynaktan kullanımına izin verilmiyor.'));
+    image.src = src;
+  });
+}
+
+async function showNewspaperComposer(draftId = null) {
+  let drafts;
+  try { drafts = await getNewspaperDrafts(); }
+  catch (error) {
+    showModal('Gazete taslakları', `<div class="form-error">${escHtml(error.message)}</div>`);
+    return;
+  }
+  if (!draftId && drafts.length) {
+    showModal('Gazete taslakları', `
+      <div class="newspaper-draft-intro"><i class="fas fa-cloud-arrow-down"></i><span>Kaydedilmiş taslağına devam et veya yeni bir gazete oluştur.</span></div>
+      <div class="newspaper-draft-list">${drafts.sort((a, b) => b.updatedAt - a.updatedAt).map(draft => `
+        <div class="newspaper-draft-card">
+          <button type="button" class="newspaper-draft-resume" data-draft-id="${escHtml(draft.id)}"><i class="fas fa-file-pen"></i><span><strong>${escHtml(draft.name || 'Adsız gazete')}</strong><small>${escHtml(draft.date || '')} · ${new Date(draft.updatedAt).toLocaleString('tr-TR')}</small></span><i class="fas fa-arrow-right"></i></button>
+          <button type="button" class="newspaper-draft-delete" data-delete-draft-id="${escHtml(draft.id)}" aria-label="Taslağı sil"><i class="fas fa-trash"></i></button>
+        </div>`).join('')}</div>
+      <button type="button" class="btn btn-primary" id="newspaper-new-from-drafts"><i class="fas fa-plus"></i> Yeni gazete oluştur</button>`);
+    $$('.newspaper-draft-resume').forEach(button => button.addEventListener('click', () => showNewspaperComposer(button.dataset.draftId)));
+    $$('.newspaper-draft-delete').forEach(button => button.addEventListener('click', async () => {
+      try {
+        await setNewspaperDrafts((await getNewspaperDrafts()).filter(draft => draft.id !== button.dataset.deleteDraftId));
+        button.closest('.newspaper-draft-card').remove();
+        if (!(await getNewspaperDrafts()).length) showNewspaperComposer('new');
+      } catch (error) { toast(error.message); }
+    }));
+    $('#newspaper-new-from-drafts')?.addEventListener('click', () => showNewspaperComposer('new'));
+    return;
+  }
+  let settings;
+  let issueNumber;
+  try {
+    [settings, issueNumber] = await Promise.all([api('/settings/public'), api('/newspapers/next-issue-number')]);
+  } catch (error) {
+    showModal('Gazete editörü açılamadı', `<div class="form-error">${escHtml(error.message || 'Gazete ayarları yüklenemedi.')}</div>`);
+    return;
+  }
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const state = {
+    items: [], selectedId: null, mastheadImages: { left: null },
+    masthead: { brand: 'CigCig', subtitle: 'GAZETESİ', height: 42, brandSize: 40 }
+  };
+  const draft = draftId && draftId !== 'new' ? drafts.find(item => item.id === draftId) : null;
+  if (draft) {
+    try {
+      const saved = draft.state || {};
+      state.items = await Promise.all((saved.items || []).map(async item => ({
+        ...item, asset: item.asset?.src ? await loadNewspaperImage(item.asset.src) : null
+      })));
+      state.masthead = { ...state.masthead, ...saved.masthead };
+      if (saved.mastheadImages?.left?.src) state.mastheadImages.left = await loadNewspaperImage(saved.mastheadImages.left.src);
+    } catch (error) {
+      showModal('Taslak açılamadı', `<div class="form-error">${escHtml(error.message)}</div>`);
+      return;
+    }
+  }
+  let flag = null;
+  let background = null;
+  try {
+    if (settings.newspaper_flag_url) flag = await loadNewspaperImage(settings.newspaper_flag_url);
+    if (settings.newspaper_background_url) background = await loadNewspaperImage(settings.newspaper_background_url);
+  } catch (error) {
+    showModal('Gazete görseli açılamadı', `<div class="form-error">${escHtml(error.message)}</div>`);
+    return;
+  }
+  const leftQuote = settings.newspaper_left_quote || '“Hakikatin sesi, milletin gazetesi...”';
+  const rightQuote = settings.newspaper_right_quote || '“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”';
+  const author = settings.newspaper_author || 'M. Kemal Atatürk';
+  showModal('A4 gazete tasarım editörü', `
+    <form class="newspaper-composer" id="newspaper-composer">
+      <div class="newspaper-composer-topbar">
+        <label><span>Sayı / gazete adı</span><input id="newspaper-name-input" maxlength="100" required placeholder="CigCig Gazetesi" /></label>
+        <label><span>Gazete tarihi</span><input id="newspaper-date-input" type="date" value="${today}" required /></label>
+        <div class="newspaper-composer-hint"><i class="fas fa-ruler-combined"></i> A4 · 210 × 297 mm</div>
+      </div>
+      <section class="newspaper-brand-panel">
+        <div class="newspaper-brand-heading"><span><i class="fas fa-stamp"></i></span><div><strong>Gazete markası</strong><small>Atatürk alıntısı, imzası ve bayrak yalnızca admin tarafından değiştirilir</small></div></div>
+        <div class="newspaper-brand-fields">
+          <label><span>Marka adı</span><input data-masthead="brand" value="${escHtml(state.masthead.brand)}" maxlength="32" /></label>
+          <label><span>Alt başlık</span><input data-masthead="subtitle" value="${escHtml(state.masthead.subtitle)}" maxlength="45" /></label>
+          <label><span>Marka yazı boyutu · pt</span><input data-masthead="brandSize" type="number" min="18" max="90" value="${state.masthead.brandSize}" /></label>
+          <label><span>Masthead yüksekliği · mm</span><input data-masthead="height" type="number" min="28" max="70" value="${state.masthead.height}" /></label>
+          <label class="newspaper-brand-image-field"><span>Sol görsel / amblem</span><input type="file" accept="image/*" data-masthead-image="left" /></label>
+        </div>
+      </section>
+      <div class="newspaper-editor-workspace">
+        <aside class="newspaper-editor-tools">
+          <div class="newspaper-editor-tools-title"><i class="fas fa-layer-group"></i> Sayfa öğeleri</div>
+          <div class="newspaper-editor-add-tools">
+            <button type="button" data-add-newspaper-item="heading"><i class="fas fa-heading"></i><span>Başlık ekle</span></button>
+            <button type="button" data-add-newspaper-item="text"><i class="fas fa-align-left"></i><span>Metin ekle</span></button>
+            <button type="button" data-add-newspaper-item="image"><i class="fas fa-image"></i><span>Fotoğraf ekle</span></button>
+            <button type="button" data-add-newspaper-item="line"><i class="fas fa-minus"></i><span>Çizgi çek</span></button>
+          </div>
+          <input id="newspaper-item-image-input" type="file" accept="image/*" hidden />
+          <div class="newspaper-editor-selection" id="newspaper-editor-selection"><div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div></div>
+          <p class="newspaper-editor-tip"><i class="fas fa-hand-pointer"></i> Taşı, köşelerden ölçülendir veya üstteki tutamaçla döndür. Düzenlemeler otomatik taslak olur.</p>
+          <div id="newspaper-compose-error" class="form-error" role="alert"></div>
+          <button type="button" class="btn btn-outline newspaper-composer-save-exit" id="newspaper-save-exit"><i class="fas fa-floppy-disk"></i> Taslağı kaydet ve çık</button>
+          <button type="submit" class="btn btn-primary newspaper-composer-publish" id="newspaper-compose-submit"><i class="fas fa-paper-plane"></i> Gazeteyi yayımla</button>
+        </aside>
+        <div class="newspaper-editor-stage-wrap">
+          <div class="newspaper-editor-scale-note"><span>ÖNİZLEME</span><span>Yayınlanacak A4 ile birebir</span></div>
+          <div class="newspaper-editor-sheet" id="newspaper-editor-sheet"><canvas class="newspaper-editor-canvas" id="newspaper-editor-canvas" width="2100" height="2970" aria-label="A4 gazete canlı önizlemesi"></canvas><div class="newspaper-editor-items" id="newspaper-editor-items"></div></div>
+        </div>
+      </div>
+    </form>`, 'newspaper-editor-modal');
+
+  const sheet = $('#newspaper-editor-sheet');
+  const canvas = $('#newspaper-editor-canvas');
+  const ctx = canvas.getContext('2d');
+  const layer = $('#newspaper-editor-items');
+  const inspector = $('#newspaper-editor-selection');
+  const nameInput = $('#newspaper-name-input');
+  const dateInput = $('#newspaper-date-input');
+  const errorEl = $('#newspaper-compose-error');
+  let nextItemId = Math.max(0, ...state.items.map(item => Number(item.id) || 0)) + 1;
+  let activeDraftId = draft?.id || null;
+  let saveTimer;
+  let suppressCloseSave = false;
+  nameInput.value = draft?.name || 'CigCig Gazetesi';
+  dateInput.value = draft?.date || today;
+  if (!ctx) { errorEl.textContent = 'Gazete önizlemesi başlatılamadı.'; return; }
+
+  const wrapText = (text, width) => {
+    const lines = [];
+    String(text || '').split('\n').forEach(paragraph => {
+      let line = '';
+      paragraph.split(/\s+/).forEach(word => {
+        const next = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(next).width > width) { lines.push(line); line = word; }
+        else line = next;
+      });
+      lines.push(line);
+    });
+    return lines;
+  };
+  const drawImageContain = (asset, x, y, width, height) => {
+    if (!asset?.image?.naturalWidth) return;
+    const ratio = Math.min(width / asset.image.naturalWidth, height / asset.image.naturalHeight);
+    const w = asset.image.naturalWidth * ratio;
+    const h = asset.image.naturalHeight * ratio;
+    ctx.drawImage(asset.image, x + (width - w) / 2, y + (height - h) / 2, w, h);
+  };
+  const drawPage = () => {
+    ctx.setTransform(canvas.width / 210, 0, 0, canvas.width / 210, 0, 0);
+    ctx.clearRect(0, 0, 210, 297);
+    ctx.fillStyle = '#faf8f0';
+    ctx.fillRect(0, 0, 210, 297);
+    if (background) {
+      const ratio = Math.max(210 / background.image.naturalWidth, 297 / background.image.naturalHeight);
+      const w = background.image.naturalWidth * ratio;
+      const h = background.image.naturalHeight * ratio;
+      ctx.drawImage(background.image, (210 - w) / 2, (297 - h) / 2, w, h);
+      ctx.fillStyle = 'rgba(250,248,240,.12)';
+      ctx.fillRect(0, 0, 210, 297);
+    } else {
+      ctx.fillStyle = 'rgba(70,55,30,.045)';
+      for (let i = 0; i < 700; i++) ctx.fillRect((i * 97) % 210, (i * 193) % 297, .16, .16);
+    }
+    const height = state.masthead.height;
+    ctx.strokeStyle = '#26221c';
+    ctx.lineWidth = .22;
+    ctx.strokeRect(5, 5, 200, height - 5);
+    const artHeight = height - 12;
+    drawImageContain(state.mastheadImages.left, 7, 8, 13, artHeight);
+    if (!state.mastheadImages.left) {
+      ctx.fillStyle = '#282721';
+      ctx.fillRect(8, 8 + artHeight * .78, 11, 1.4);
+      ctx.beginPath();
+      ctx.moveTo(8, 8 + artHeight * .78); ctx.lineTo(13.5, 8 + artHeight * .15); ctx.lineTo(20, 8 + artHeight * .78);
+      ctx.closePath(); ctx.fill(); ctx.fillRect(12.5, 8 + artHeight * .3, 2, artHeight * .47);
+    }
+    if (flag) drawImageContain(flag, 190, 8, 13, artHeight);
+    else {
+      ctx.fillStyle = '#c93435'; ctx.fillRect(190, 8 + artHeight * .28, 13, artHeight * .43);
+      const radius = Math.min(artHeight * .15, 1.65);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(195, 8 + artHeight * .495, radius, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c93435'; ctx.beginPath(); ctx.arc(195.7, 8 + artHeight * .495, radius * .77, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '2px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★', 198.2, 8 + artHeight * .495);
+    }
+    ctx.fillStyle = '#28251f'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.font = 'italic 2.5px Georgia, "Times New Roman", serif';
+    wrapText(leftQuote, 22).forEach((line, index) => ctx.fillText(line, 21.5, height * .34 + index * 3.1));
+    ctx.textAlign = 'right'; ctx.font = 'italic 2.35px Georgia, "Times New Roman", serif';
+    wrapText(rightQuote, 22).slice(0, 3).forEach((line, index) => ctx.fillText(line, 188.5, height * .23 + index * 2.8));
+    ctx.font = 'italic 2.1px Georgia, "Times New Roman", serif'; ctx.fillText(author, 188.5, height * .78);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#111';
+    ctx.font = `900 ${Math.min(state.masthead.brandSize * 25.4 / 72, height * .39)}px Georgia, "Times New Roman", serif`;
+    ctx.fillText(state.masthead.brand, 105, height * .26, 112);
+    ctx.font = '700 3.4px Georgia, "Times New Roman", serif'; ctx.fillText(state.masthead.subtitle, 105, height * .71, 112);
+    ctx.beginPath(); ctx.moveTo(5, height); ctx.lineTo(205, height); ctx.lineWidth = .4; ctx.stroke();
+    const stripY = height + 2.4;
+    ctx.beginPath(); ctx.moveTo(5, stripY + 3.2); ctx.lineTo(205, stripY + 3.2); ctx.lineWidth = .16; ctx.stroke();
+    ctx.fillStyle = '#39352f'; ctx.font = '700 2.5px Georgia, "Times New Roman", serif'; ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';     ctx.fillText(nameInput.value.trim() || 'CigCig Gazetesi', 7, stripY + 1.6, 52);
+    ctx.textAlign = 'center';
+    ctx.fillText(formatNewspaperDate(dateInput.value, { day: '2-digit', month: 'long', year: 'numeric' }), 105, stripY + 1.6, 86);
+    ctx.textAlign = 'right'; ctx.fillText(`SAYI ${Number(issueNumber.issue_number) || 1}`, 203, stripY + 1.6, 24);
+    for (const item of state.items) {
+      ctx.save();
+      ctx.translate(item.x + item.w / 2, item.y + item.h / 2);
+      ctx.rotate((Number(item.rotation) || 0) * Math.PI / 180);
+      ctx.translate(-item.w / 2, -item.h / 2);
+      ctx.fillStyle = item.color || '#1f1d19';
+      if (item.type === 'line') {
+        ctx.fillRect(item.direction === 'vertical' ? item.w / 2 - .15 : 0, item.direction === 'vertical' ? 0 : item.h / 2 - .15, item.direction === 'vertical' ? .3 : item.w, item.direction === 'vertical' ? item.h : .3);
+      } else if (item.type === 'image') drawImageContain(item.asset, 0, 0, item.w, item.h);
+      else {
+        const size = item.size * 25.4 / 72;
+        ctx.font = `${item.type === 'heading' ? '700' : '400'} ${size}px ${item.font || 'Georgia'}`;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.beginPath(); ctx.rect(0, 0, item.w, item.h); ctx.clip();
+        wrapText(item.content, item.w).forEach((line, index) => ctx.fillText(line, 0, index * size * (item.type === 'heading' ? 1.12 : 1.35), item.w));
+      }
+      ctx.restore();
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  };
+  const saveDraft = async () => {
+    try {
+      activeDraftId ||= globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const saved = {
+        id: activeDraftId, name: nameInput.value.trim() || 'Adsız gazete', date: dateInput.value, updatedAt: Date.now(),
+        state: {
+          items: state.items.map(item => ({ ...item, asset: item.asset ? { src: item.asset.src } : null })),
+          masthead: state.masthead,
+          mastheadImages: { left: state.mastheadImages.left ? { src: state.mastheadImages.left.src } : null }
+        }
+      };
+      await setNewspaperDrafts([saved, ...(await getNewspaperDrafts()).filter(item => item.id !== activeDraftId)]);
+      errorEl.textContent = '';
+      return true;
+    } catch (error) {
+      errorEl.textContent = error.message;
+      if ($('#modal-overlay')?.classList.contains('hidden')) toast(error.message, 'error');
+      return false;
+    }
+  };
+  const queueSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 350);
+  };
+  const renderInspector = () => {
+    const item = state.items.find(candidate => candidate.id === state.selectedId);
+    if (!item) {
+      inspector.innerHTML = '<div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div>';
+      return;
+    }
+    inspector.innerHTML = `
+      <div class="newspaper-editor-inspector-heading"><strong>${item.type === 'heading' ? 'Başlık' : item.type === 'text' ? 'Metin' : item.type === 'image' ? 'Fotoğraf' : 'Çizgi'} özellikleri</strong><button type="button" id="newspaper-item-delete" aria-label="Öğeyi sil"><i class="fas fa-trash"></i></button></div>
+      ${item.type === 'heading' || item.type === 'text' ? `<label><span>İçerik</span><textarea data-item-property="content" rows="3">${escHtml(item.content)}</textarea></label><label><span>Yazı karakteri</span><select data-item-property="font"><option value="Georgia" ${item.font === 'Georgia' ? 'selected' : ''}>Georgia — gazete serif</option><option value="'Times New Roman'" ${item.font === "'Times New Roman'" ? 'selected' : ''}>Times New Roman</option><option value="Arial" ${item.font === 'Arial' ? 'selected' : ''}>Arial</option><option value="'Courier New'" ${item.font === "'Courier New'" ? 'selected' : ''}>Courier</option></select></label><label><span>Yazı boyutu · pt</span><input data-item-property="size" type="number" min="8" max="96" value="${item.size}" /></label><label><span>Yazı rengi</span><input data-item-property="color" type="color" value="${item.color}" /></label>` : ''}
+      ${item.type === 'line' ? `<label><span>Çizgi yönü</span><select data-item-property="direction"><option value="horizontal" ${item.direction !== 'vertical' ? 'selected' : ''}>Yatay</option><option value="vertical" ${item.direction === 'vertical' ? 'selected' : ''}>Dikey</option></select></label>` : ''}
+      <div class="newspaper-editor-dimensions"><label><span>Genişlik · mm</span><input data-item-property="w" type="number" min="4" max="200" value="${Math.round(item.w)}" /></label><label><span>Yükseklik · mm</span><input data-item-property="h" type="number" min="4" max="280" value="${Math.round(item.h)}" /></label></div>
+      <label><span>Döndürme · °</span><input data-item-property="rotation" type="number" min="-180" max="180" value="${Math.round(item.rotation || 0)}" /></label>`;
+    inspector.querySelectorAll('[data-item-property]').forEach(input => {
+      input.addEventListener(input.type === 'color' || input.tagName === 'SELECT' ? 'change' : 'input', () => {
+        const keepFocus = document.activeElement === input;
+        const selectionStart = input.tagName === 'TEXTAREA' || input.type === 'text' ? input.selectionStart : null;
+        const selectionEnd = input.tagName === 'TEXTAREA' || input.type === 'text' ? input.selectionEnd : null;
+        const property = input.dataset.itemProperty;
+        if (['content', 'font', 'color', 'direction'].includes(property)) item[property] = input.value;
+        else if (property === 'size') item.size = Math.max(8, Math.min(96, Number(input.value) || 8));
+        else if (property === 'w') item.w = Math.max(4, Math.min(210 - item.x, Number(input.value) || 4));
+        else if (property === 'h') item.h = Math.max(4, Math.min(297 - item.y, Number(input.value) || 4));
+        else if (property === 'rotation') item.rotation = Math.max(-180, Math.min(180, Number(input.value) || 0));
+        renderItems();
+        const updated = inspector.querySelector(`[data-item-property="${property}"]`);
+        if (updated && keepFocus) {
+          updated.focus();
+          if (typeof selectionStart === 'number' && typeof selectionEnd === 'number') {
+            updated.setSelectionRange(selectionStart, selectionEnd);
+          }
+        }
+      });
+    });
+    $('#newspaper-item-delete')?.addEventListener('click', () => {
+      state.items = state.items.filter(candidate => candidate.id !== item.id);
+      state.selectedId = null;
+      renderItems();
+    });
+  };
+  const renderItems = () => {
+    layer.innerHTML = state.items.map(item => `<div class="newspaper-editor-item${item.id === state.selectedId ? ' is-selected' : ''}" data-newspaper-item="${item.id}" style="left:${item.x / 210 * 100}%;top:${item.y / 297 * 100}%;width:${item.w / 210 * 100}%;height:${item.h / 297 * 100}%;transform:rotate(${Number(item.rotation) || 0}deg)">${item.id === state.selectedId ? '<button type="button" class="newspaper-editor-rotate" aria-label="Döndür"></button><button type="button" class="newspaper-editor-resize resize-nw" data-resize-corner="nw" aria-label="Sol üstten boyutlandır"></button><button type="button" class="newspaper-editor-resize resize-ne" data-resize-corner="ne" aria-label="Sağ üstten boyutlandır"></button><button type="button" class="newspaper-editor-resize resize-sw" data-resize-corner="sw" aria-label="Sol alttan boyutlandır"></button><button type="button" class="newspaper-editor-resize resize-se" data-resize-corner="se" aria-label="Sağ alttan boyutlandır"></button>' : ''}</div>`).join('');
+    renderInspector();
+    drawPage();
+    queueSave();
+  };
+  const addItem = (type, asset = null) => {
+    const item = {
+      id: nextItemId++, type, x: 14, y: Math.min(297 - 10, Math.max(state.masthead.height + 9, 58 + state.items.length * 27)),
+      w: type === 'line' ? 180 : type === 'image' ? 82 : 145,
+      h: type === 'heading' ? 18 : type === 'text' ? 34 : type === 'image' ? 65 : 5,
+      content: type === 'heading' ? 'HABER BAŞLIĞI' : type === 'text' ? 'Haber metnini buraya yazın.' : '',
+      font: 'Georgia', size: type === 'heading' ? 24 : 12, color: '#1f1d19', asset,
+      direction: 'horizontal', rotation: 0
+    };
+    state.items.push(item);
+    state.selectedId = item.id;
+    renderItems();
+    inspector.querySelector('[data-item-property="content"]')?.focus();
+  };
+  const getPosition = event => {
+    const rect = sheet.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) / rect.width * 210, y: (event.clientY - rect.top) / rect.height * 297 };
+  };
+  const publish = async event => {
+    event.preventDefault();
+    const button = $('#newspaper-compose-submit');
+    if (!state.items.length) { errorEl.textContent = 'Gazetene en az bir başlık, metin, fotoğraf veya çizgi ekle.'; return; }
+    if (!nameInput.value.trim() || !dateInput.value) { errorEl.textContent = 'Gazete adı ve tarihi gerekli.'; return; }
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> A4 sayfa hazırlanıyor…';
+    try {
+      drawPage();
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
+      if (!blob) throw new Error('Gazete görseli oluşturulamadı.');
+      if (blob.size > 25 * 1024 * 1024) throw new Error('Oluşturulan gazete 25 MB sınırını aştı.');
+      const form = new FormData();
+      form.append('newspaper_name', nameInput.value.trim());
+      form.append('newspaper_date', dateInput.value);
+      form.append('image', new File([blob], 'a4-gazete.jpg', { type: 'image/jpeg' }));
+      await apiForm('/newspapers', form);
+      suppressCloseSave = true;
+      if (activeDraftId) {
+        try { await setNewspaperDrafts((await getNewspaperDrafts()).filter(item => item.id !== activeDraftId)); }
+        catch (error) { toast(`Gazete yayımlandı ancak taslak temizlenemedi: ${error.message}`); }
+      }
+      hideModal();
+      navigate('/gazeteler');
+      toast('A4 gazeten arşivde yayımlandı.');
+    } catch (error) {
+      errorEl.textContent = error.message || 'Gazete yayımlanamadı.';
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-paper-plane"></i> Gazeteyi yayımla';
+    }
+  };
+  document.querySelectorAll('[data-masthead]').forEach(input => {
+    const update = () => {
+      const key = input.dataset.masthead;
+      state.masthead[key] = input.type === 'number' ? Math.max(key === 'height' ? 28 : 18, Math.min(key === 'height' ? 70 : 90, Number(input.value) || 40)) : input.value;
+      if (key === 'height') {
+        state.items.forEach(item => {
+          item.y = Math.min(297 - item.h, Math.max(state.masthead.height + 7, item.y));
+        });
+      }
+      drawPage();
+      queueSave();
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+  });
+  [nameInput, dateInput].forEach(input => input.addEventListener('input', () => { drawPage(); queueSave(); }));
+  document.querySelector('[data-masthead-image]')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) { errorEl.textContent = 'Amblem görseli en fazla 10 MB olmalıdır.'; return; }
+    try { state.mastheadImages.left = await newspaperReadImage(file); drawPage(); queueSave(); }
+    catch (error) { errorEl.textContent = error.message; }
+  });
+  document.querySelectorAll('[data-add-newspaper-item]').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.addNewspaperItem === 'image') $('#newspaper-item-image-input').click();
+    else addItem(button.dataset.addNewspaperItem);
+  }));
+  $('#newspaper-item-image-input')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) { errorEl.textContent = 'Sayfa görseli en fazla 10 MB olmalıdır.'; event.target.value = ''; return; }
+    try { addItem('image', await newspaperReadImage(file)); }
+    catch (error) { errorEl.textContent = error.message; }
+  });
+  layer.addEventListener('pointerdown', event => {
+    const element = event.target.closest('[data-newspaper-item]');
+    const item = state.items.find(candidate => candidate.id === Number(element?.dataset.newspaperItem));
+    if (!item) return;
+    state.selectedId = item.id;
+    renderItems();
+    event.preventDefault();
+    const selected = layer.querySelector(`[data-newspaper-item="${item.id}"]`);
+    const handle = event.target.closest('.newspaper-editor-resize, .newspaper-editor-rotate');
+    const corner = handle?.dataset.resizeCorner;
+    const rotating = handle?.classList.contains('newspaper-editor-rotate');
+    const start = getPosition(event);
+    const original = { x: item.x, y: item.y, w: item.w, h: item.h, rotation: item.rotation || 0 };
+    const center = { x: item.x + item.w / 2, y: item.y + item.h / 2 };
+    const startAngle = Math.atan2(start.y - center.y, start.x - center.x) * 180 / Math.PI;
+    selected.setPointerCapture(event.pointerId);
+    const move = moveEvent => {
+      const position = getPosition(moveEvent);
+      if (rotating) {
+        const angle = Math.atan2(position.y - center.y, position.x - center.x) * 180 / Math.PI;
+        item.rotation = Math.max(-180, Math.min(180, original.rotation + angle - startAngle));
+      } else if (corner) {
+        const dx = position.x - start.x;
+        const dy = position.y - start.y;
+        const left = corner.includes('w'), top = corner.includes('n');
+        item.w = Math.min(left ? original.x + original.w : 210 - original.x, Math.max(4, original.w + (left ? -dx : dx)));
+        item.h = Math.min(top ? original.y + original.h : 297 - original.y, Math.max(4, original.h + (top ? -dy : dy)));
+        item.x = left ? original.x + original.w - item.w : original.x;
+        item.y = top ? original.y + original.h - item.h : original.y;
+      } else {
+        item.x = Math.max(0, Math.min(210 - item.w, original.x + position.x - start.x));
+        item.y = Math.max(state.masthead.height + 7, Math.min(297 - item.h, original.y + position.y - start.y));
+      }
+      selected.style.left = `${item.x / 210 * 100}%`;
+      selected.style.top = `${item.y / 297 * 100}%`;
+      selected.style.width = `${item.w / 210 * 100}%`;
+      selected.style.height = `${item.h / 297 * 100}%`;
+      selected.style.transform = `rotate(${item.rotation}deg)`;
+      drawPage();
+    };
+    const finish = () => {
+      selected.removeEventListener('pointermove', move);
+      selected.removeEventListener('pointerup', finish);
+      selected.removeEventListener('pointercancel', finish);
+      renderItems();
+    };
+    selected.addEventListener('pointermove', move);
+    selected.addEventListener('pointerup', finish);
+    selected.addEventListener('pointercancel', finish);
+  });
+  $('#newspaper-composer')?.addEventListener('submit', publish);
+  $('#newspaper-save-exit')?.addEventListener('click', async () => {
+    clearTimeout(saveTimer);
+    if (!await saveDraft()) return;
+    suppressCloseSave = true;
+    hideModal();
+    toast('Taslağın kaydedildi. Gazeteler bölümünden devam edebilirsin.');
+  });
+  const closeObserver = new MutationObserver(() => {
+    const modalClosed = $('#modal-overlay')?.classList.contains('hidden');
+    if (sheet.isConnected && !modalClosed) return;
+    closeObserver.disconnect();
+    clearTimeout(saveTimer);
+    if (!suppressCloseSave) saveDraft();
+  });
+  closeObserver.observe(document.body, { childList: true, subtree: true });
+  closeObserver.observe($('#modal-overlay'), { attributes: true, attributeFilter: ['class'] });
+  const resizeObserver = new ResizeObserver(() => {
+    if (!sheet.isConnected) resizeObserver.disconnect();
+    else drawPage();
+  });
+  resizeObserver.observe(sheet);
+  drawPage();
   renderItems();
 }
 

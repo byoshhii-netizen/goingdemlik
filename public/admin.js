@@ -397,7 +397,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
-    journalists: renderJournalists,
+    journalists: renderJournalists, 'newspaper-settings': renderNewspaperSettings,
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
@@ -3199,6 +3199,96 @@ async function renderArtistApps(main) {
       }
     });
   }
+}
+
+async function renderNewspaperSettings(main) {
+  let settings;
+  try { settings = await adminApi('/settings'); }
+  catch (error) {
+    main.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(error.message || 'Gazete ayarları yüklenemedi.')}</p></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="settings-page">
+      <div class="settings-hero">
+        <div class="settings-hero-icon"><i class="fas fa-newspaper"></i></div>
+        <div><div class="settings-kicker">YAYIN YÖNETİMİ</div><h1>Gazete Ayarları</h1><p>Gazete editörünün ortak masthead görünümünü ve A4 sayfa zeminini yönetin.</p></div>
+        <div class="settings-hero-mark"><i class="fas fa-lock"></i><span>Ana admin</span></div>
+      </div>
+      <div class="settings-grid">
+        <div class="card settings-wide">
+          <div class="card-header"><span><i class="fas fa-quote-left" style="color:var(--red2);margin-right:8px"></i>Masthead ve sayfa zemini</span></div>
+          <div class="card-body">
+            <p style="font-size:12px;color:var(--text2);line-height:1.6;margin:0 0 16px">Bu değerleri yalnızca ana admin değiştirebilir. Atatürk alıntısı, imzası, bayrak ve arka plan; editör önizlemesinde ve yayımlanan A4 sayfada aynı şekilde kullanılır.</p>
+            <div class="form-group"><label>Sol alıntı</label><input id="s-newspaper-left-quote" maxlength="180" value="${escHtml(settings.newspaper_left_quote || '“Hakikatin sesi, milletin gazetesi...”')}" /></div>
+            <div class="form-group"><label>Sağ alıntı</label><textarea id="s-newspaper-right-quote" rows="2" maxlength="260">${escHtml(settings.newspaper_right_quote || '“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”')}</textarea></div>
+            <div class="form-group"><label>Alıntı imzası</label><input id="s-newspaper-author" maxlength="80" value="${escHtml(settings.newspaper_author || 'M. Kemal Atatürk')}" /></div>
+            <div class="form-group"><label>Bayrak görseli URL'si</label><input id="s-newspaper-flag-url" type="url" value="${escHtml(settings.newspaper_flag_url || '')}" placeholder="Görsel yükleyebilir veya HTTPS adresi girebilirsiniz" /></div>
+            <div class="form-group"><label>Bayrak görseli yükle</label><input id="s-newspaper-flag-file" type="file" accept="image/*" /></div>
+            <div class="form-group"><label>A4 sayfa arka planı URL'si</label><input id="s-newspaper-background-url" type="url" value="${escHtml(settings.newspaper_background_url || '')}" placeholder="Görsel yükleyebilir veya HTTPS adresi girebilirsiniz" /></div>
+            <div class="form-group"><label>A4 sayfa arka planı yükle</label><input id="s-newspaper-background-file" type="file" accept="image/*" /></div>
+            <button class="btn btn-primary" id="s-newspaper-branding-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Gazete ayarlarını kaydet</button>
+            <div id="s-newspaper-branding-msg" class="form-error mt-4" role="status"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  const message = document.getElementById('s-newspaper-branding-msg');
+  for (const [field, inputId] of [['flag', 's-newspaper-flag-url'], ['background', 's-newspaper-background-url']]) {
+    document.getElementById(`s-newspaper-${field}-file`)?.addEventListener('change', async event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
+        message.textContent = 'Gazete görselleri en fazla 10 MB olmalıdır.';
+        event.target.value = '';
+        return;
+      }
+      try {
+        message.style.color = 'var(--text2)';
+        message.textContent = 'Görsel yükleniyor…';
+        const form = new FormData();
+        form.append('image', file);
+        const response = await fetch('/api/admin/upload-newspaper-asset', {
+          method: 'POST', headers: { 'X-Admin-Token': adminToken }, body: form
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Gazete görseli yüklenemedi.');
+        document.getElementById(inputId).value = result.url;
+        message.textContent = 'Görsel yüklendi. Değişikliği uygulamak için ayarları kaydedin.';
+      } catch (error) {
+        message.style.color = 'var(--red2)';
+        message.textContent = error.message || 'Gazete görseli yüklenemedi.';
+      }
+    });
+  }
+  document.getElementById('s-newspaper-branding-save')?.addEventListener('click', async () => {
+    const values = [
+      ['newspaper_left_quote', document.getElementById('s-newspaper-left-quote').value.trim()],
+      ['newspaper_right_quote', document.getElementById('s-newspaper-right-quote').value.trim()],
+      ['newspaper_author', document.getElementById('s-newspaper-author').value.trim()],
+      ['newspaper_flag_url', document.getElementById('s-newspaper-flag-url').value.trim()],
+      ['newspaper_background_url', document.getElementById('s-newspaper-background-url').value.trim()]
+    ];
+    message.style.color = 'var(--red2)';
+    message.textContent = '';
+    for (const [key, value] of values) {
+      try {
+        const response = await fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+          body: JSON.stringify({ key, value })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Gazete ayarı kaydedilemedi.');
+      } catch (error) {
+        message.textContent = error.message;
+        return;
+      }
+    }
+    message.style.color = 'var(--green)';
+    message.textContent = '✓ Gazete ayarları kaydedildi.';
+    toast('Gazete ayarları kaydedildi.');
+  });
 }
 
 // ===== SETTINGS =====

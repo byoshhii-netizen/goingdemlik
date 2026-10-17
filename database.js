@@ -445,6 +445,24 @@ async function initDb() {
       share_count INTEGER NOT NULL DEFAULT 0
     );
     ALTER TABLE newspapers ADD COLUMN IF NOT EXISTS journalist_since TIMESTAMP;
+    ALTER TABLE newspapers ADD COLUMN IF NOT EXISTS issue_number BIGINT;
+    CREATE SEQUENCE IF NOT EXISTS newspaper_issue_number_seq;
+    WITH numbered AS (
+      SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS issue_number
+      FROM newspapers
+      WHERE issue_number IS NULL
+    )
+    UPDATE newspapers n
+    SET issue_number = numbered.issue_number
+    FROM numbered
+    WHERE n.id = numbered.id;
+    SELECT setval(
+      'newspaper_issue_number_seq',
+      GREATEST(COALESCE((SELECT MAX(issue_number) FROM newspapers), 1), 1),
+      COALESCE((SELECT MAX(issue_number) FROM newspapers), 0) > 0
+    );
+    ALTER TABLE newspapers ALTER COLUMN issue_number SET DEFAULT nextval('newspaper_issue_number_seq');
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_newspapers_issue_number ON newspapers(issue_number);
     CREATE INDEX IF NOT EXISTS idx_newspapers_date ON newspapers(newspaper_date DESC, created_at DESC);
     CREATE TABLE IF NOT EXISTS newspaper_likes (
       id BIGSERIAL PRIMARY KEY,

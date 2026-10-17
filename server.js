@@ -2566,7 +2566,7 @@ app.get('/api/journalists', async (req, res) => {
 app.get('/api/newspapers', optionalAuth, async (req, res) => {
   const userId = req.user?.id || 0;
   const { rows } = await query(`
-    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, n.share_count,
+    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
       u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
       (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
       (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
@@ -2581,12 +2581,19 @@ app.get('/api/newspapers', optionalAuth, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/newspapers/next-issue-number', authMiddleware, async (req, res) => {
+  const { rows: journalists } = await query('SELECT user_id FROM journalists WHERE user_id=$1', [req.user.id]);
+  if (!journalists.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
+  const { rows } = await query('SELECT COALESCE(MAX(issue_number), 0)::bigint + 1 AS issue_number FROM newspapers');
+  res.json({ issue_number: Number(rows[0].issue_number) });
+});
+
 app.get('/api/newspapers/:id', optionalAuth, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
   const userId = req.user?.id || 0;
   const { rows } = await query(`
-    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, n.share_count,
+    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
       u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
       (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
       (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
@@ -2624,11 +2631,11 @@ app.post('/api/newspapers', authMiddleware, uploadLimiter, upload.single('image'
     const imageUrl = await handleUpload(req.file);
     const { rows } = await query(`
       INSERT INTO newspapers (journalist_id,newspaper_name,newspaper_date,image_url,journalist_since)
-      SELECT $1,$2,$3,$4,assigned_at FROM journalists WHERE user_id=$1 RETURNING id
+      SELECT $1,$2,$3,$4,assigned_at FROM journalists WHERE user_id=$1 RETURNING id, issue_number
     `, [req.user.id, newspaperName, newspaperDate, imageUrl]);
     if (!rows.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
     const { rows: newspaper } = await query(`
-      SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, n.share_count,
+      SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
         u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
         0::int AS like_count, 0::int AS comment_count, FALSE AS liked
       FROM newspapers n JOIN users u ON u.id=n.journalist_id WHERE n.id=$1
@@ -6026,6 +6033,22 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
+  const newspaperTextLimits = {
+    newspaper_left_quote: 180,
+    newspaper_right_quote: 260,
+    newspaper_author: 80,
+    newspaper_flag_url: 2048,
+    newspaper_background_url: 2048
+  };
+  if (Object.hasOwn(newspaperTextLimits, key)) {
+    value = String(value || '').trim();
+    if (value.length > newspaperTextLimits[key]) {
+      return res.status(400).json({ error: 'Gazete ayarı izin verilen uzunluğu aşıyor' });
+    }
+    if (key.endsWith('_url') && value && !/^https?:\/\/\S+$/i.test(value)) {
+      return res.status(400).json({ error: 'Gazete görseli için geçerli bir HTTPS/HTTP adresi girin' });
+    }
+  }
   if (key === 'admin_password' && String(value || '').length < 12) {
     return res.status(400).json({ error: 'Admin şifresi en az 12 karakter olmalı' });
   }
@@ -6046,6 +6069,18 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
   res.json({ ok: true });
+});
+
+app.post('/api/admin/upload-newspaper-asset', adminMiddleware, upload.single('image'), async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Gazete görsellerini yalnızca ana admin değiştirebilir' });
+  if (!req.file || !req.file.mimetype?.startsWith('image/')) {
+    return res.status(400).json({ error: 'Gazete için bir görsel dosyası seçin' });
+  }
+  try {
+    res.json({ url: await handleUpload(req.file) });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Gazete görseli yüklenemedi' });
+  }
 });
 
 app.post('/api/admin/upload-call-ringtone', adminMiddleware, upload.single('ringtone'), async (req, res) => {
@@ -6970,7 +7005,8 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
-    'photo_song_clip_seconds'
+    'photo_song_clip_seconds','newspaper_left_quote','newspaper_right_quote','newspaper_author',
+    'newspaper_flag_url','newspaper_background_url'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
