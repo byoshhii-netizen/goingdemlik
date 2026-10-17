@@ -2472,6 +2472,154 @@ function newspaperCommentHTML(comment, newspaper) {
   </article>`;
 }
 
+function showNewspaperViewer(imageUrl, imageAlt) {
+  const existingViewer = document.querySelector('.newspaper-viewer');
+  existingViewer?.querySelector('.newspaper-viewer-close')?.click();
+  const returnFocus = document.activeElement;
+
+  const viewer = document.createElement('div');
+  viewer.className = 'newspaper-viewer';
+  viewer.setAttribute('role', 'dialog');
+  viewer.setAttribute('aria-modal', 'true');
+  viewer.setAttribute('aria-label', 'Gazete yakınlaştırılmış görünümü');
+  viewer.innerHTML = `
+    <header class="newspaper-viewer-toolbar">
+      <span class="newspaper-viewer-title"><i class="fas fa-newspaper"></i><span>Gazete okuyucu</span></span>
+      <div class="newspaper-viewer-controls" aria-label="Yakınlaştırma kontrolleri">
+        <button type="button" data-viewer-zoom="-1" aria-label="Uzaklaştır"><i class="fas fa-minus"></i></button>
+        <span class="newspaper-viewer-zoom" aria-live="polite">100%</span>
+        <button type="button" data-viewer-zoom="1" aria-label="Yakınlaştır"><i class="fas fa-plus"></i></button>
+        <button type="button" data-viewer-fit aria-label="Sayfayı sığdır"><i class="fas fa-compress"></i></button>
+        <button type="button" class="newspaper-viewer-close" aria-label="Kapat"><i class="fas fa-xmark"></i></button>
+      </div>
+    </header>
+    <div class="newspaper-viewer-stage">
+      <img class="newspaper-viewer-image" src="${escHtml(imageUrl)}" alt="${escHtml(imageAlt)}" draggable="false" />
+      <span class="newspaper-viewer-hint">İki parmakla yakınlaştırın · Büyütülmüş sayfayı sürükleyin</span>
+    </div>`;
+
+  const stage = viewer.querySelector('.newspaper-viewer-stage');
+  const image = viewer.querySelector('.newspaper-viewer-image');
+  const zoomLabel = viewer.querySelector('.newspaper-viewer-zoom');
+  const previousOverflow = document.documentElement.style.overflow;
+  const pointers = new Map();
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let dragStart = null;
+  let pinchStart = null;
+
+  const clampOffset = () => {
+    const maxX = Math.max(0, (image.clientWidth * scale - stage.clientWidth) / 2);
+    const maxY = Math.max(0, (image.clientHeight * scale - stage.clientHeight) / 2);
+    offsetX = Math.max(-maxX, Math.min(maxX, offsetX));
+    offsetY = Math.max(-maxY, Math.min(maxY, offsetY));
+  };
+  const render = () => {
+    clampOffset();
+    image.style.transform = `translate3d(${offsetX}px,${offsetY}px,0) scale(${scale})`;
+    zoomLabel.textContent = `${Math.round(scale * 100)}%`;
+    stage.classList.toggle('is-zoomed', scale > 1);
+  };
+  const setScale = nextScale => {
+    scale = Math.max(1, Math.min(5, nextScale));
+    if (scale === 1) offsetX = offsetY = 0;
+    render();
+  };
+  const getPointerCenter = () => {
+    const points = [...pointers.values()];
+    return points.length > 1
+      ? { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }
+      : points[0];
+  };
+  const getPointerDistance = () => {
+    const points = [...pointers.values()];
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  };
+  const close = () => {
+    viewer.remove();
+    document.documentElement.style.overflow = previousOverflow;
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('resize', render);
+    returnFocus?.focus();
+  };
+  const onKeyDown = event => {
+    if (event.key === 'Escape') close();
+    else if (event.key === '+' || event.key === '=') setScale(scale + 0.5);
+    else if (event.key === '-') setScale(scale - 0.5);
+    else if (event.key === '0') setScale(1);
+  };
+
+  viewer.querySelector('.newspaper-viewer-close').addEventListener('click', close);
+  viewer.querySelector('[data-viewer-fit]').addEventListener('click', () => setScale(1));
+  viewer.querySelectorAll('[data-viewer-zoom]').forEach(button => {
+    button.addEventListener('click', () => setScale(scale + Number(button.dataset.viewerZoom) * 0.5));
+  });
+  viewer.addEventListener('click', event => {
+    if (event.target === viewer) close();
+  });
+  stage.addEventListener('wheel', event => {
+    event.preventDefault();
+    setScale(scale + (event.deltaY < 0 ? 0.25 : -0.25));
+  }, { passive: false });
+  stage.addEventListener('pointerdown', event => {
+    if (event.target.closest('button')) return;
+    stage.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 1) {
+      dragStart = { x: event.clientX - offsetX, y: event.clientY - offsetY };
+      pinchStart = null;
+    } else {
+      const center = getPointerCenter();
+      const stageRect = stage.getBoundingClientRect();
+      pinchStart = {
+        distance: getPointerDistance(),
+        scale,
+        focusX: (center.x - stageRect.left - stage.clientWidth / 2 - offsetX) / scale,
+        focusY: (center.y - stageRect.top - stage.clientHeight / 2 - offsetY) / scale,
+      };
+      dragStart = null;
+    }
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size > 1 && pinchStart) {
+      const center = getPointerCenter();
+      const stageRect = stage.getBoundingClientRect();
+      scale = Math.max(1, Math.min(5, pinchStart.scale * getPointerDistance() / Math.max(1, pinchStart.distance)));
+      offsetX = center.x - stageRect.left - stage.clientWidth / 2 - pinchStart.focusX * scale;
+      offsetY = center.y - stageRect.top - stage.clientHeight / 2 - pinchStart.focusY * scale;
+      if (scale === 1) offsetX = offsetY = 0;
+      render();
+    } else if (dragStart && scale > 1) {
+      offsetX = event.clientX - dragStart.x;
+      offsetY = event.clientY - dragStart.y;
+      render();
+    }
+  });
+  const finishPointer = event => {
+    pointers.delete(event.pointerId);
+    if (pointers.size === 1) {
+      const remaining = getPointerCenter();
+      dragStart = { x: remaining.x - offsetX, y: remaining.y - offsetY };
+      pinchStart = null;
+    } else if (pointers.size === 0) {
+      dragStart = null;
+      pinchStart = null;
+    }
+  };
+  stage.addEventListener('pointerup', finishPointer);
+  stage.addEventListener('pointercancel', finishPointer);
+  image.addEventListener('load', render, { once: true });
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('resize', render);
+  document.documentElement.style.overflow = 'hidden';
+  document.body.appendChild(viewer);
+  render();
+  viewer.querySelector('.newspaper-viewer-close').focus();
+}
+
 async function renderNewspaperDetail(app, newspaperId) {
   const safeId = String(newspaperId || '').split(/[?#]/)[0];
   if (!/^\d+$/.test(safeId)) {
@@ -2502,7 +2650,12 @@ async function renderNewspaperDetail(app, newspaperId) {
           <div class="newspaper-detail-date"><small>YAYIN TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date))}</strong><span>Sayı #${escHtml(newspaper.id)}</span></div>
         </header>
         <div class="newspaper-detail-rule"><span></span><i class="fas fa-star"></i><span></span></div>
-        <div class="newspaper-detail-sheet-wrap"><img class="newspaper-detail-sheet" src="${escHtml(newspaper.image_url)}" alt="${escHtml(newspaper.newspaper_name)} — ${escHtml(formatNewspaperDate(newspaper.newspaper_date))}" /></div>
+        <div class="newspaper-detail-sheet-wrap">
+          <button type="button" class="newspaper-detail-sheet-button" aria-label="Gazeteyi büyüt ve oku">
+            <img class="newspaper-detail-sheet" src="${escHtml(newspaper.image_url)}" alt="${escHtml(newspaper.newspaper_name)} — ${escHtml(formatNewspaperDate(newspaper.newspaper_date))}" />
+            <span class="newspaper-detail-zoom-hint"><i class="fas fa-magnifying-glass-plus"></i> Dokun ve yaklaştır</span>
+          </button>
+        </div>
         <footer class="newspaper-detail-byline">
           <a href="${profileRoute(newspaper.username)}" data-link class="newspaper-byline">
             ${avatarImg(newspaper, 'newspaper-author-avatar')}
@@ -2524,6 +2677,9 @@ async function renderNewspaperDetail(app, newspaperId) {
       </section>
     </div>`;
 
+  $('.newspaper-detail-sheet-button')?.addEventListener('click', () => {
+    showNewspaperViewer(newspaper.image_url, `${newspaper.newspaper_name} — ${formatNewspaperDate(newspaper.newspaper_date)}`);
+  });
   $('#newspaper-detail-like')?.addEventListener('click', async event => {
     if (!currentUser) return navigate('/giris');
     const button = event.currentTarget;
