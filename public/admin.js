@@ -1013,7 +1013,7 @@ function showEditInviteModal(id, code, active, onSaved) {
 
 function renderUsersTable(users) {
   const tbody = $('#users-tbody'); if (!tbody) return;
-  if (!users.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
   tbody.innerHTML = users.map(u => `<tr>
     <td style="color:var(--text3);font-size:11px">#${u.id}</td>
     <td>
@@ -1021,11 +1021,12 @@ function renderUsersTable(users) {
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover" />` : `<div style="width:28px;height:28px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="fas fa-user"></i></div>`}
         <div>
           <div style="font-weight:600;font-size:13px">${escHtml(u.username)}</div>
-          <div style="font-size:10px;color:var(--text3)">${u.is_admin ? '<span style="color:#7c87f5"><i class="fas fa-shield"></i> Admin</span>' : ''} ${u.is_vip ? '<span style="color:#facc15">VIP</span>' : ''} ${u.is_plus ? '<span style="color:#a855f7">Plus</span>' : ''}</div>
+          <div style="font-size:10px;color:var(--text3)">${u.is_admin ? '<span style="color:#7c87f5"><i class="fas fa-shield"></i> Admin</span>' : ''} ${u.is_vip ? '<span style="color:#facc15">VIP</span>' : ''} ${u.is_plus ? '<span style="color:#a855f7">Plus</span>' : ''} ${Number(u.is_red_verified) === 1 ? '<span style="color:#ef3340"><i class="fas fa-check-circle"></i> Kırmızı Tik</span>' : ''}</div>
         </div>
       </div>
     </td>
     <td><button class="btn btn-outline btn-xs user-badges-btn" data-id="${u.id}" title="Kullanıcının rozetlerini görüntüle"><i class="fas fa-award"></i> Rozetler${userBadgeList(u).length ? ` <span class="user-badges-count">${userBadgeList(u).length}</span>` : ''}</button></td>
+    <td><button class="btn btn-outline btn-xs user-red-tick-btn" data-id="${u.id}" title="Kırmızı Tik yönetimi"><i class="fas fa-check-circle" style="color:#ef3340"></i> Kırmızı Tik</button></td>
     <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
     <td><span class="badge ${u.two_factor_method && u.two_factor_method !== 'none' ? 'badge-green' : 'badge-gray'}"><i class="fas ${u.two_factor_method === 'email' ? 'fa-envelope' : u.two_factor_method === 'question' ? 'fa-circle-question' : 'fa-minus'}"></i> ${u.two_factor_method === 'email' ? 'E-posta' : u.two_factor_method === 'question' ? 'Soru' : 'Kapalı'}</span></td>
     <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
@@ -1062,6 +1063,7 @@ function renderUsersTable(users) {
     const restrict = e.target.closest('.restrict-user-btn');
     const twoFactor = e.target.closest('.user-2fa-btn');
     const badges = e.target.closest('.user-badges-btn');
+    const redTick = e.target.closest('.user-red-tick-btn');
     const adPanel = e.target.closest('.ad-panel-user-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
@@ -1071,8 +1073,59 @@ function renderUsersTable(users) {
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
     if (twoFactor) { const u = users.find(x => x.id == twoFactor.dataset.id); if (u) showAdminTwoFactorModal(u); }
     if (badges) { const u = users.find(x => x.id == badges.dataset.id); if (u) openUserBadgesModal(u); }
+    if (redTick) { const u = users.find(x => x.id == redTick.dataset.id); if (u) openRedTickModal(u); }
     if (adPanel) { const u = users.find(x => x.id == adPanel.dataset.id); if (u) showAdminAdPanelModal(u); }
   };
+}
+
+async function openRedTickModal(user) {
+  let history = [];
+  try {
+    history = await adminApi(`/users/${user.id}/red-tick/history`);
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+  const render = () => {
+    const active = Number(user.is_red_verified) === 1;
+    showModal(`Kırmızı Tik · ${user.username}`, `
+      <div class="form-group">
+        <p>${active
+          ? `Aktif · Verilme tarihi: ${user.red_verified_at ? new Date(user.red_verified_at).toLocaleString('tr-TR') : 'bilinmiyor'}`
+          : 'Bu kullanıcının aktif Kırmızı Tik rozeti yok.'}</p>
+        <button class="btn ${active ? 'btn-danger' : 'btn-primary'}" id="red-tick-toggle">
+          <i class="fas ${active ? 'fa-rotate-left' : 'fa-check-circle'}"></i>
+          ${active ? 'Kırmızı Tik’i geri al' : 'Kırmızı Tik ver'}
+        </button>
+      </div>
+      <div class="form-group">
+        <label>Atanma ve geri alma geçmişi</label>
+        <div class="user-red-tick-history">
+          ${history.length ? history.map(event => `<div><span>${event.action === 'granted' ? 'Tik verildi' : 'Tik geri alındı'}</span><small>${new Date(event.created_at).toLocaleString('tr-TR')} · ${escHtml(event.performed_by || 'admin')}</small></div>`).join('') : '<small>Henüz geçmiş kaydı yok.</small>'}
+        </div>
+      </div>
+    `);
+    $('#red-tick-toggle')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const result = await adminApi(`/users/${user.id}/red-tick`, {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: !active })
+        });
+        user.is_red_verified = result.is_red_verified;
+        user.red_verified_at = result.red_verified_at;
+        history = await adminApi(`/users/${user.id}/red-tick/history`);
+        render();
+        toast(active ? 'Kırmızı Tik geri alındı.' : 'Kırmızı Tik verildi.');
+        loadSection('users');
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message, 'error');
+      }
+    });
+  };
+  render();
 }
 
 async function showAdminTwoFactorModal(user) {
@@ -1890,12 +1943,46 @@ function showVideoEditModal(video) {
 
 // ===== MÜZİK REKLAMLARI =====
 async function renderMusicAds(main) {
-  let ads = [];
-  try { ads = await adminApi('/music-ads'); } catch (e) { main.innerHTML = `<p style="padding:20px;color:var(--red2)">${escHtml(e.message)}</p>`; return; }
+  let ads = [], settings;
+  try {
+    [ads, settings] = await Promise.all([adminApi('/music-ads'), adminApi('/music-ad-settings')]);
+  } catch (e) { main.innerHTML = `<p style="padding:20px;color:var(--red2)">${escHtml(e.message)}</p>`; return; }
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-headphones"></i></div> Müzik Reklamları</div><button class="btn btn-primary" id="ma-new"><i class="fas fa-plus"></i> Reklam Ekle</button></div>
+    <div class="card" style="margin-bottom:18px"><div class="card-body"><h3 style="margin:0 0 6px">Reklam sıklığı</h3><p style="margin:0 0 16px;color:var(--text-muted)">Dinleme en az 20 saniye doğrulanınca şarkı sayısına göre veya rastgele reklam gösterilir. Aynı şarkı günde bir kez sayılır.</p>
+      <div class="form-row"><div class="form-group"><label for="ma-frequency-mode">Yayın yöntemi</label><select id="ma-frequency-mode"><option value="interval" ${settings.mode === 'interval' ? 'selected' : ''}>Her belirli sayıda şarkıda</option><option value="random" ${settings.mode === 'random' ? 'selected' : ''}>Rastgele</option></select></div>
+      <div class="form-group" id="ma-interval-wrap"><label for="ma-interval">Kaç şarkıda bir?</label><input id="ma-interval" type="number" min="1" max="20" value="${settings.interval}" /></div>
+      <div class="form-group" id="ma-random-wrap"><label for="ma-random-frequency">Rastgele reklam sıklığı</label><select id="ma-random-frequency"><option value="rare" ${settings.random_frequency === 'rare' ? 'selected' : ''}>Nadir — her uygun şarkıda %15</option><option value="medium" ${settings.random_frequency === 'medium' ? 'selected' : ''}>Orta — her uygun şarkıda %30</option><option value="frequent" ${settings.random_frequency === 'frequent' ? 'selected' : ''}>Sık — her uygun şarkıda %50</option></select></div></div>
+      <button class="btn btn-outline" id="ma-settings-save"><i class="fas fa-save"></i> Sıklık ayarını kaydet</button><span id="ma-settings-status" style="margin-left:10px"></span>
+    </div></div>
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Panel ID</th><th>Başlık</th><th>Öncelik</th><th>Boost</th><th>Dinlenme</th><th>Tıklama</th><th>Durum</th><th></th></tr></thead><tbody>
       ${ads.length ? ads.map(a => `<tr><td><code>${escHtml(a.portal_code)}</code></td><td>${escHtml(a.title)}</td><td>${a.priority}</td><td>${a.boost_points}</td><td>${a.play_count}</td><td>${a.click_count}</td><td>${a.active ? 'Aktif' : 'Pasif'}</td><td><button class="btn btn-outline btn-xs ma-edit" data-id="${a.id}">Düzenle</button> <button class="btn btn-danger btn-xs ma-delete" data-id="${a.id}">Sil</button></td></tr>`).join('') : '<tr><td colspan="8" style="text-align:center;padding:28px">Henüz ses reklamı yok.</td></tr>'}
     </tbody></table></div></div>`;
+  const updateFrequencyFields = () => {
+    const randomMode = $('#ma-frequency-mode').value === 'random';
+    $('#ma-interval-wrap').style.display = randomMode ? 'none' : '';
+    $('#ma-random-wrap').style.display = randomMode ? '' : 'none';
+  };
+  $('#ma-frequency-mode')?.addEventListener('change', updateFrequencyFields);
+  updateFrequencyFields();
+  $('#ma-settings-save')?.addEventListener('click', async event => {
+    const button = event.currentTarget, status = $('#ma-settings-status');
+    button.disabled = true;
+    status.textContent = 'Kaydediliyor…';
+    try {
+      await adminApi('/music-ad-settings', { method: 'PUT', body: JSON.stringify({
+        mode: $('#ma-frequency-mode').value,
+        interval: Number($('#ma-interval').value),
+        random_frequency: $('#ma-random-frequency').value
+      }) });
+      status.style.color = '';
+      status.textContent = 'Kaydedildi';
+    } catch (error) {
+      status.textContent = error.message;
+      status.style.color = 'var(--red2)';
+    } finally {
+      button.disabled = false;
+    }
+  });
   $('#ma-new')?.addEventListener('click', () => showMusicAdModal());
   main.querySelectorAll('.ma-edit').forEach(btn => btn.addEventListener('click', () => showMusicAdModal(ads.find(a => String(a.id) === btn.dataset.id))));
   main.querySelectorAll('.ma-delete').forEach(btn => btn.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Reklam silinsin mi?')) return; try { await adminApi('/music-ads/'+btn.dataset.id,{method:'DELETE'}); renderMusicAds(main); } catch(e) { toast(e.message,'error'); } }));

@@ -61,6 +61,8 @@ async function initDb() {
       show_level_color INTEGER DEFAULT 1,
       is_vip INTEGER DEFAULT 0,
       is_plus INTEGER DEFAULT 0,
+      is_red_verified INTEGER NOT NULL DEFAULT 0,
+      red_verified_at TIMESTAMP,
       name_color TEXT DEFAULT '',
       banned INTEGER DEFAULT 0,
       ban_type TEXT DEFAULT '',
@@ -83,12 +85,24 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_required INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_red_verified INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS red_verified_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tag_permission TEXT DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
     UPDATE users SET tag_permission='everyone' WHERE tag_permission IS NULL OR tag_permission='';
+
+    CREATE TABLE IF NOT EXISTS red_verification_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      action TEXT NOT NULL CHECK (action IN ('granted','revoked')),
+      performed_by TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_red_verification_events_user
+      ON red_verification_events(user_id, created_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS user_presence_sessions (
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -900,11 +914,35 @@ async function initDb() {
       hidden_by_user2 INTEGER DEFAULT 0,
       hidden_pass_user1 TEXT DEFAULT '',
       hidden_pass_user2 TEXT DEFAULT '',
+      shared_theme_key TEXT DEFAULT '',
+      shared_theme_updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      shared_theme_updated_at TIMESTAMP,
       last_message_at TIMESTAMP DEFAULT NOW(),
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(user1_id, user2_id),
       FOREIGN KEY(user1_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(user2_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS dm_user_settings (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      search_code_hash TEXT DEFAULT '',
+      search_unlock_enabled INTEGER NOT NULL DEFAULT 0,
+      icon_unlock_enabled INTEGER NOT NULL DEFAULT 0,
+      icon_code_hash TEXT DEFAULT '',
+      default_theme_key TEXT NOT NULL DEFAULT 'default',
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS default_theme_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_key TEXT DEFAULT '';
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_updated_at TIMESTAMP;
+    CREATE TABLE IF NOT EXISTS dm_conversation_user_themes (
+      conversation_id BIGINT NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      theme_key TEXT NOT NULL DEFAULT 'default',
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(conversation_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS videos (
@@ -995,6 +1033,8 @@ async function initDb() {
       sender_id BIGINT NOT NULL,
       content TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
+      image_view_limit INTEGER NOT NULL DEFAULT 0,
+      image_view_count INTEGER NOT NULL DEFAULT 0,
       shared_forum_id BIGINT,
       shared_video_id BIGINT,
       shared_book_id BIGINT,
@@ -1021,6 +1061,8 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
     UPDATE dm_messages SET shared_newspaper_id=NULL
       WHERE shared_newspaper_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM newspapers WHERE newspapers.id=dm_messages.shared_newspaper_id);
@@ -1256,12 +1298,19 @@ async function initDb() {
       original_price NUMERIC(10,2) DEFAULT NULL,
       duration_days INTEGER NOT NULL DEFAULT 30,
       visible INTEGER NOT NULL DEFAULT 1,
+      purchase_enabled INTEGER NOT NULL DEFAULT 1,
       badge_color TEXT DEFAULT '#fbbf24',
       badge_icon TEXT DEFAULT 'fas fa-gem',
       sort_order INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE store_products ADD COLUMN IF NOT EXISTS purchase_enabled INTEGER NOT NULL DEFAULT 1;
+    INSERT INTO store_products (name,description,features,type,price,duration_days,visible,purchase_enabled,badge_color,badge_icon,sort_order)
+    SELECT 'Kırmızı Tik','CigCig tarafından doğrulanmış hesap rozeti. Bu ürün şu anda satın alınamaz.',
+      '[\"Doğrulanmış hesap rozeti\"]','red_tick',0,0,1,0,'#ef3340','fas fa-check',-10
+    WHERE NOT EXISTS (SELECT 1 FROM store_products WHERE type='red_tick');
+    UPDATE store_products SET purchase_enabled=0 WHERE type='red_tick';
 
     CREATE TABLE IF NOT EXISTS subscriptions (
       id BIGSERIAL PRIMARY KEY,
@@ -1413,9 +1462,33 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS music_ad_states (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       completed_song_count INTEGER DEFAULT 0,
+      listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
       pending_ad_id BIGINT REFERENCES music_ads(id) ON DELETE SET NULL,
       ad_started_at TIMESTAMP,
       updated_at TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE music_ad_states ADD COLUMN IF NOT EXISTS listening_date DATE NOT NULL DEFAULT CURRENT_DATE;
+
+    CREATE TABLE IF NOT EXISTS music_listen_sessions (
+      id UUID PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      last_position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+      listened_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
+      last_ping_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      counted_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_music_listen_sessions_user_song_date
+      ON music_listen_sessions(user_id, song_id, listening_date, created_at DESC);
+    CREATE TABLE IF NOT EXISTS music_ad_listens (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      listened_seconds DOUBLE PRECISION NOT NULL,
+      counted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY(user_id, song_id, listening_date)
     );
 
     -- Reals video reklamları. Reklamlar normal Reals içeriklerinden ayrıdır:
