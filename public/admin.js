@@ -238,7 +238,7 @@ async function renderBadges(main) {
       if (badge) openBadgeAssigner(badge);
     }
     if (deleteButton) {
-      if (!confirm('Bu rozet ve tüm kullanıcı atamaları silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu rozet ve tüm kullanıcı atamaları silinsin mi?')) return;
       try {
         await adminApi('/badges/' + deleteButton.dataset.id, { method: 'DELETE' });
         toast('Rozet silindi');
@@ -465,7 +465,7 @@ async function renderAccountDeletions(main) {
   tbody?.addEventListener('click', async event => {
     const button = event.target.closest('.cancel-account-delete');
     if (!button) return;
-    if (!confirm(`${button.dataset.username} kullanıcısının hesap silme talebi iptal edilsin mi?`)) return;
+    if (!await CigCigDialogs.confirm(`${button.dataset.username} kullanıcısının hesap silme talebi iptal edilsin mi?`)) return;
     button.disabled = true;
     try {
       await adminApi(`/account-deletions/${button.dataset.id}/cancel`, { method: 'POST' });
@@ -485,14 +485,14 @@ async function renderAdminStories(main) {
   main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => { try { const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers'); showModal('Hikaye görüntüleyenleri', viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${viewer.username ? escHtml(viewer.username) : '<i class="fas fa-user-secret"></i> Misafir'}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)} · IP: ${escHtml(viewer.ip || 'Bilinmiyor')}</small></span></div>`).join('')}</div>` : '<div class="empty-state">Henüz görüntüleyen yok.</div>'); } catch (error) { toast(error.message, 'error'); } });
   main.querySelectorAll('.story-admin-edit').forEach(button => button.onclick = async () => { const story = stories.find(item => String(item.public_id || item.id) === button.dataset.id); if (!story) return; showModal('Hikayeyi düzenle', `<div class="form-group"><label>Açıklama</label><textarea id="adm-story-caption">${escHtml(story.caption || '')}</textarea></div><div class="form-group"><label>Süre (saat)</label><input id="adm-story-duration" type="number" min="1" max="720" step="1" value="${Number(story.duration_hours) || 24}" /><small style="display:block;margin-top:5px;color:var(--text-muted)">1-720 saat arasında istediğin süreyi yazabilirsin.</small></div><button class="btn btn-primary" id="adm-story-save">Kaydet</button>`); $('#adm-story-save').onclick = async () => { const duration = Number($('#adm-story-duration').value); if (!Number.isInteger(duration) || duration < 1 || duration > 720) return toast('Süre 1-720 saat arasında tam sayı olmalı.', 'error'); try { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ caption: $('#adm-story-caption').value, duration_hours: duration }) }); hideModal(); toast('Hikaye güncellendi'); renderAdminStories(main); } catch (error) { toast(error.message, 'error'); } }; });
   main.querySelectorAll('.story-admin-suspend').forEach(button => button.onclick = async () => { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_suspended: button.dataset.suspended !== '1' }) }); toast(button.dataset.suspended === '1' ? 'Hikaye aktifleştirildi' : 'Hikaye askıya alındı'); renderAdminStories(main); });
-  main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => { if (!confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return; await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' }); toast('Hikaye silindi'); renderAdminStories(main); });
+  main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => { if (!await CigCigDialogs.confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return; await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' }); toast('Hikaye silindi'); renderAdminStories(main); });
 }
 
 // ===== HOMEPAGE SECTIONS =====
 async function renderAdminPhotos(main) {
   const photos = await adminApi('/photos');
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Medya</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
-  main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
+  main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(await CigCigDialogs.confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
 }
 async function renderAdSubmissions(main) {
   const ads = await adminApi('/ad-submissions');
@@ -851,7 +851,7 @@ async function renderJournalists(main) {
   main.querySelectorAll('.journalist-remove-btn').forEach(button => {
     button.addEventListener('click', async () => {
       const journalist = journalists.find(item => String(item.user_id) === button.dataset.id);
-      if (!journalist || !confirm(`@${journalist.username} kullanıcısının gazeteciliği kaldırılsın mı?`)) return;
+      if (!journalist || !await CigCigDialogs.confirm(`@${journalist.username} kullanıcısının gazeteciliği kaldırılsın mı?`)) return;
       button.disabled = true;
       try {
         await adminApi(`/journalists/${encodeURIComponent(button.dataset.id)}`, { method: 'DELETE' });
@@ -958,7 +958,7 @@ async function renderInviteCodes(content) {
     }
     if (edit) showEditInviteModal(edit.dataset.id, edit.dataset.code, edit.dataset.active === '1', renderList);
     if (remove) {
-      if (!confirm('Bu davet bağlantısı listeden kaldırılsın mı? Bağlantı devre dışı kalır ve kod tekrar kullanılamaz.')) return;
+      if (!await CigCigDialogs.confirm('Bu davet bağlantısı listeden kaldırılsın mı? Bağlantı devre dışı kalır ve kod tekrar kullanılamaz.')) return;
       remove.disabled = true;
       try {
         await adminApi('/invite-codes/' + remove.dataset.id, { method: 'DELETE' });
@@ -1065,8 +1065,8 @@ function renderUsersTable(users) {
     const adPanel = e.target.closest('.ad-panel-user-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
-    if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
-    if (del) { if (!confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
+    if (unban) { if (!await CigCigDialogs.confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
+    if (del) { if (!await CigCigDialogs.confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (perm) { const u = users.find(x => x.id == perm.dataset.id); if (u) showPermModal(u); }
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
     if (twoFactor) { const u = users.find(x => x.id == twoFactor.dataset.id); if (u) showAdminTwoFactorModal(u); }
@@ -1238,7 +1238,7 @@ async function showAdminAdPanelModal(user) {
   list.addEventListener('click', async event => {
     const button = event.target.closest('.admin-ad-panel-remove');
     if (!button) return;
-    if (!confirm('Bu reklam paneli kullanıcının profilinden kaldırılsın mı?')) return;
+    if (!await CigCigDialogs.confirm('Bu reklam paneli kullanıcının profilinden kaldırılsın mı?')) return;
     button.disabled = true;
     try {
       await adminApi('/user/' + user.id + '/ad-panels/' + button.dataset.assignmentId, { method: 'DELETE' });
@@ -1384,7 +1384,7 @@ async function renderForums(main) {
     });
     tbody.querySelectorAll('.del-forum-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu konuyu silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu konuyu silmek istediğine emin misin?')) return;
         try { await adminApi('/forum/'+btn.dataset.id, {method:'DELETE'}); toast('Konu silindi'); forums = forums.filter(f=>f.id!=btn.dataset.id); renderTable(forums); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -1548,7 +1548,7 @@ async function renderPoems(main) {
 
     tbody.querySelectorAll('.del-poem-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu şiiri silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu şiiri silmek istediğine emin misin?')) return;
         try {
           await adminApi('/poem/' + btn.dataset.id, { method: 'DELETE' });
           toast('Şiir silindi');
@@ -1618,7 +1618,7 @@ async function renderBooks(main) {
     </tr>`).join('');
     tbody.querySelectorAll('.del-book-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu kitabı silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu kitabı silmek istediğine emin misin?')) return;
         try { await adminApi('/book/'+btn.dataset.id, {method:'DELETE'}); toast('Kitap silindi'); books = books.filter(b=>b.id!=btn.dataset.id); renderTable(books); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -1762,18 +1762,18 @@ async function renderGroups(main) {
     }));
     tbody.querySelectorAll('.group-status-btn').forEach(btn => btn.addEventListener('click', async () => {
       if (btn.dataset.status === 'active') { await updateGroupStatus(btn.dataset.id, 'active', ''); return; }
-      const reason = prompt('Askıya alma nedeni:');
+      const reason = await CigCigDialogs.prompt('Bu grubun neden askıya alındığını belirtin.', '', { title: 'Askıya alma nedeni' });
       if (reason === null) return;
       await updateGroupStatus(btn.dataset.id, 'suspended', reason);
     }));
     tbody.querySelectorAll('.group-ban-btn').forEach(btn => btn.addEventListener('click', async () => {
-      const reason = prompt('Grubu yasaklama nedeni:');
+      const reason = await CigCigDialogs.prompt('Bu grubun neden yasaklandığını belirtin.', '', { title: 'Yasaklama nedeni' });
       if (reason === null) return;
       await updateGroupStatus(btn.dataset.id, 'banned', reason);
     }));
     tbody.querySelectorAll('.del-group-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu grubu silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu grubu silmek istediğine emin misin?')) return;
         try { await adminApi('/group/'+btn.dataset.id, {method:'DELETE'}); toast('Grup silindi'); groups = groups.filter(g=>g.id!=btn.dataset.id); renderTable(groups); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -1834,7 +1834,7 @@ async function renderVideos(main) {
       if (video) showVideoEditModal(video);
     }));
     tbody.querySelectorAll('.delete-video-btn').forEach(btn => btn.addEventListener('click', async () => {
-      if (!confirm('Bu videoyu silmek istediğine emin misin?')) return;
+      if (!await CigCigDialogs.confirm('Bu videoyu silmek istediğine emin misin?')) return;
       try { await adminApi('/video/' + btn.dataset.id, { method:'DELETE' }); toast('Video silindi'); videos = videos.filter(v => v.id != btn.dataset.id); renderTable(videos); }
       catch (e) { toast(e.message,'error'); }
     }));
@@ -1898,7 +1898,7 @@ async function renderMusicAds(main) {
     </tbody></table></div></div>`;
   $('#ma-new')?.addEventListener('click', () => showMusicAdModal());
   main.querySelectorAll('.ma-edit').forEach(btn => btn.addEventListener('click', () => showMusicAdModal(ads.find(a => String(a.id) === btn.dataset.id))));
-  main.querySelectorAll('.ma-delete').forEach(btn => btn.addEventListener('click', async () => { if (!confirm('Reklam silinsin mi?')) return; try { await adminApi('/music-ads/'+btn.dataset.id,{method:'DELETE'}); renderMusicAds(main); } catch(e) { toast(e.message,'error'); } }));
+  main.querySelectorAll('.ma-delete').forEach(btn => btn.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Reklam silinsin mi?')) return; try { await adminApi('/music-ads/'+btn.dataset.id,{method:'DELETE'}); renderMusicAds(main); } catch(e) { toast(e.message,'error'); } }));
 }
 function showMusicAdModal(ad = null) {
   showModal(ad ? 'Ses Reklamını Düzenle' : 'Yeni Ses Reklamı', `<div class="form-group"><label>Reklam başlığı</label><input id="ma-title" value="${escHtml(ad?.title||'')}" /></div>
@@ -1943,7 +1943,7 @@ async function renderRealsAds(main) {
   $('#ra-new')?.addEventListener('click', () => showRealsAdModal());
   main.querySelectorAll('.ra-edit').forEach(btn => btn.addEventListener('click', () => showRealsAdModal(ads.find(ad => String(ad.id) === btn.dataset.id))));
   main.querySelectorAll('.ra-delete').forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('Bu Reals reklamı silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu Reals reklamı silinsin mi?')) return;
     try { await adminApi('/reals-ads/' + btn.dataset.id, { method: 'DELETE' }); toast('Reals reklamı silindi'); renderRealsAds(main); } catch (e) { toast(e.message, 'error'); }
   }));
 }
@@ -2022,7 +2022,7 @@ async function renderVideoAds(main) {
       if (ad) showVideoAdModal(ad);
     }));
     tbody.querySelectorAll('.delete-ad-btn').forEach(btn => btn.addEventListener('click', async () => {
-      if (!confirm('Bu reklamı silmek istediğine emin misin?')) return;
+      if (!await CigCigDialogs.confirm('Bu reklamı silmek istediğine emin misin?')) return;
       try { await adminApi('/video-ads/' + btn.dataset.id, { method:'DELETE' }); toast('Reklam silindi'); ads = ads.filter(x => x.id != btn.dataset.id); renderTable(ads); }
       catch (e) { toast(e.message,'error'); }
     }));
@@ -2138,7 +2138,7 @@ async function renderArtists(main) {
     });
     tbody.querySelectorAll('.revoke-artist-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm(`${btn.dataset.name} kullanıcısının artist rozeti kaldırılsın mı?`)) return;
+        if (!await CigCigDialogs.confirm(`${btn.dataset.name} kullanıcısının artist rozeti kaldırılsın mı?`)) return;
         try {
           await adminApi('/artists/'+btn.dataset.id, { method:'PUT', body:JSON.stringify({ is_artist: 0 }) });
           toast('Artist rozeti kaldırıldı');
@@ -2224,7 +2224,7 @@ async function showArtistSongsModal(artistId, artistName) {
     });
     wrap.querySelectorAll('.song-unban-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Banı kaldırmak istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Banı kaldırmak istediğine emin misin?')) return;
         try {
           await adminApi('/songs/'+btn.dataset.id+'/unban', { method:'POST' });
           toast('Ban kaldırıldı');
@@ -2460,7 +2460,7 @@ async function renderLevels(main) {
     });
     tbody.querySelectorAll('.del-level-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu seviyeyi silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu seviyeyi silmek istediğine emin misin?')) return;
         try { await adminApi('/level/'+btn.dataset.id, {method:'DELETE'}); toast('Seviye silindi'); levels = levels.filter(l=>l.id!=btn.dataset.id); renderTable(); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -2616,7 +2616,7 @@ async function renderTags(main) {
     </tr>`).join('');
     tbody.querySelectorAll('.del-tag-btn:not([disabled])').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu etiketi silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu etiketi silmek istediğine emin misin?')) return;
         try { await adminApi('/tag/'+btn.dataset.id, {method:'DELETE'}); toast('Etiket silindi'); tags = tags.filter(t=>t.id!=btn.dataset.id); renderTable(); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -2866,7 +2866,7 @@ function renderAnnTable(anns) {
     const edit = e.target.closest('.ann-edit-btn');
     const del = e.target.closest('.ann-del-btn');
     if (edit) { const a = anns.find(x => x.id == edit.dataset.id); if (a) showAnnModal(a, anns); }
-    if (del) { if (!confirm('Duyuru silinsin mi?')) return; try { await adminApi('/announcements/'+del.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('announcements'); } catch(e){toast(e.message,'error');} }
+    if (del) { if (!await CigCigDialogs.confirm('Duyuru silinsin mi?')) return; try { await adminApi('/announcements/'+del.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('announcements'); } catch(e){toast(e.message,'error');} }
   });
 }
 
@@ -3031,13 +3031,13 @@ async function renderAdminSongs(main) {
       const ds = e.target.closest('.ds-btn');
       if (es) { const s = list.find(x => x.id == es.dataset.id); if (s) showSongEditModal(s); }
       if (sus) {
-        if (!confirm('Müzik askıya alınsın mı?')) return;
+        if (!await CigCigDialogs.confirm('Müzik askıya alınsın mı?')) return;
         try { await adminApi('/songs/'+sus.dataset.id, {method:'PUT', body:JSON.stringify({status:'suspended'})}); toast('Askıya alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
       if (unsus) {
         try { await adminApi('/songs/'+unsus.dataset.id, {method:'PUT', body:JSON.stringify({status:'active'})}); toast('Aktife alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
-      if (ds) { if (!confirm('Müzik kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
+      if (ds) { if (!await CigCigDialogs.confirm('Müzik kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
     });
   };
   render(songs);
@@ -3184,14 +3184,14 @@ async function renderArtistApps(main) {
       const approve = e.target.closest('.approve-app-btn');
       const reject = e.target.closest('.reject-app-btn');
       if (approve) {
-        if (!confirm('Başvuru onaylansın mı? Kullanıcıya artist rozeti verilecek.')) return;
+        if (!await CigCigDialogs.confirm('Başvuru onaylansın mı? Kullanıcıya artist rozeti verilecek.')) return;
         try {
           await adminApi('/artist-applications/'+approve.dataset.id+'/review', { method:'POST', body:JSON.stringify({status:'accepted'}) });
           toast('✓ Artist rozeti verildi!'); loadSection('artist-apps');
         } catch(e) { toast(e.message, 'error'); }
       }
       if (reject) {
-        if (!confirm('Başvuru reddedilsin mi?')) return;
+        if (!await CigCigDialogs.confirm('Başvuru reddedilsin mi?')) return;
         try {
           await adminApi('/artist-applications/'+reject.dataset.id+'/review', { method:'POST', body:JSON.stringify({status:'rejected'}) });
           toast('Başvuru reddedildi'); loadSection('artist-apps');
@@ -4098,7 +4098,7 @@ async function renderShop(main) {
     // Sil
     container.querySelectorAll('.shop-del-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu ürün silinsin mi?')) return;
+        if (!await CigCigDialogs.confirm('Bu ürün silinsin mi?')) return;
         try {
           await adminApi('/shop/products/' + btn.dataset.id, { method: 'DELETE' });
           const idx = products.findIndex(p => String(p.id) === String(btn.dataset.id));

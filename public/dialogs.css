@@ -1,0 +1,97 @@
+.cig-dialog-open { overflow: hidden; }
+.cig-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 5, 8, .78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: cig-dialog-fade-in .16s ease-out;
+}
+.cig-dialog {
+  position: relative;
+  width: min(100%, 440px);
+  padding: 28px;
+  border: 1px solid rgba(189, 162, 117, .24);
+  border-radius: 20px;
+  background: linear-gradient(150deg, #1b1b22, #111116 74%);
+  color: #f5f3ef;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .58), 0 0 45px rgba(189, 162, 117, .08);
+  animation: cig-dialog-rise-in .2s ease-out;
+}
+.cig-dialog-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(189, 162, 117, .24);
+  border-radius: 14px;
+  background: rgba(189, 162, 117, .1);
+  color: #d7bb8e;
+  font-size: 18px;
+}
+.cig-dialog h2 { margin: 0 34px 8px 0; font-size: 19px; line-height: 1.35; }
+.cig-dialog p { margin: 0 0 18px; color: #b6b3bd; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cig-dialog-close {
+  position: absolute;
+  top: 17px;
+  right: 17px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .045);
+  color: #aaa7b1;
+}
+.cig-dialog-close:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.cig-dialog-input {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 12px;
+  outline: none;
+  background: rgba(5, 5, 8, .68);
+  color: #f5f3ef;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+}
+.cig-dialog-input:focus { border-color: rgba(215, 187, 142, .75); box-shadow: 0 0 0 3px rgba(189, 162, 117, .13); }
+.cig-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.cig-dialog-actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .055);
+  color: #e7e5e9;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  transition: transform .15s ease, background .15s ease, border-color .15s ease;
+}
+.cig-dialog-actions button:hover { transform: translateY(-1px); background: rgba(255, 255, 255, .1); }
+.cig-dialog-actions .cig-dialog-accept { border-color: rgba(189, 162, 117, .42); background: linear-gradient(135deg, #cfb487, #a98859); color: #18130b; }
+.cig-dialog-actions .cig-dialog-accept:hover { background: linear-gradient(135deg, #e0c69b, #bd9b6b); }
+.cig-dialog-actions .cig-dialog-accept.is-danger { border-color: rgba(232, 91, 91, .35); background: linear-gradient(135deg, #df6666, #b83c48); color: #fff; }
+.cig-dialog-actions .cig-dialog-accept.is-danger:hover { background: linear-gradient(135deg, #ed7878, #ca4a55); }
+@keyframes cig-dialog-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cig-dialog-rise-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (max-width: 520px) {
+  .cig-dialog-overlay { padding: 14px; }
+  .cig-dialog { padding: 22px 18px 18px; border-radius: 18px; }
+  .cig-dialog-actions button { flex: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cig-dialog-overlay, .cig-dialog { animation: none; }
+  .cig-dialog-actions button { transition: none; }
+}

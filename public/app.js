@@ -1245,7 +1245,7 @@ async function renderRealsFeed(app, initialId = null) {
       list.addEventListener('click', async event => {
         const editButton = event.target.closest('.video-comment-edit');
         if (editButton) {
-          const nextContent = prompt('Yorumu düzenle', editButton.dataset.content);
+          const nextContent = await CigCigDialogs.prompt('Yorumunu güncelle', editButton.dataset.content, { title: 'Yorumu düzenle', multiline: true });
           if (nextContent === null) return;
           try {
             const updated = await api(commentBase + '/comments/' + editButton.dataset.id, { method: 'PUT', body: JSON.stringify({ content: nextContent.trim() }) });
@@ -1269,7 +1269,7 @@ async function renderRealsFeed(app, initialId = null) {
         const likeButton = event.target.closest('.video-comment-like');
         const deleteButton = event.target.closest('.video-comment-delete');
         if (deleteButton) {
-          if (!confirm('Bu yorum silinsin mi?')) return;
+          if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
           try { await api(commentBase + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' }); deleteButton.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
           return;
         }
@@ -2478,7 +2478,7 @@ async function renderNewspaperList(app) {
     }
     const deleteButton = event.target.closest('[data-newspaper-delete]');
     if (deleteButton) {
-      if (!confirm('Bu gazete sayı arşivden silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu gazete sayı arşivden silinsin mi?')) return;
       deleteButton.disabled = true;
       try {
         await api(`/newspapers/${encodeURIComponent(deleteButton.dataset.newspaperDelete)}`, { method: 'DELETE' });
@@ -2730,7 +2730,7 @@ async function renderNewspaperDetail(app, newspaperId) {
   $('#newspaper-detail-share')?.addEventListener('click', () => shareNewspaper(newspaper));
   $('#newspaper-detail-forward')?.addEventListener('click', () => showForwardNewspaperModal(newspaper));
   $('#newspaper-detail-delete')?.addEventListener('click', async event => {
-    if (!confirm('Bu gazete sayı arşivden silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu gazete sayı arşivden silinsin mi?')) return;
     event.currentTarget.disabled = true;
     try {
       await api(`/newspapers/${encodeURIComponent(safeId)}`, { method: 'DELETE' });
@@ -2771,7 +2771,7 @@ async function renderNewspaperDetail(app, newspaperId) {
     }
     const deleteButton = event.target.closest('[data-newspaper-comment-delete]');
     if (deleteButton) {
-      if (!confirm('Yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Yorum silinsin mi?')) return;
       deleteButton.disabled = true;
       try {
         await api(`/newspapers/${encodeURIComponent(safeId)}/comments/${encodeURIComponent(deleteButton.dataset.newspaperCommentDelete)}`, { method: 'DELETE' });
@@ -2788,7 +2788,7 @@ async function shareNewspaper(newspaper) {
     else if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(url);
       toast('Gazete bağlantısı kopyalandı.');
-    } else window.prompt('Gazete bağlantısını kopyalayın:', url);
+    } else await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Gazete bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' });
   } catch (error) {
     if (error.name !== 'AbortError') toast(error.message || 'Gazete paylaşılamadı.', 'error');
     return;
@@ -4165,7 +4165,7 @@ async function renderPoemDetail(app, slug) {
   if (isOwner) {
     $('#edit-poem-btn').addEventListener('click', () => showNewPoemModal(poem));
     $('#del-poem-btn').addEventListener('click', async () => {
-      if (!confirm('Şiiri silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Şiiri silmek istediğinize emin misiniz?')) return;
       try {
         await api('/poem/' + slug, { method: 'DELETE' });
         toast('Şiir silindi');
@@ -4200,10 +4200,10 @@ async function renderPoemDetail(app, slug) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  $('#poem-share-btn')?.addEventListener('click', () => {
+  $('#poem-share-btn')?.addEventListener('click', async () => {
     const url = location.href;
     if (navigator.clipboard) { navigator.clipboard.writeText(url); toast('Link kopyalandı!'); }
-    else { window.prompt('Linki kopyalayın:', url); }
+    else { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Paylaşım bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
 
   let commentReplyTarget = null;
@@ -4266,7 +4266,7 @@ async function renderPoemDetail(app, slug) {
 
     const del = e.target.closest('.del-comment');
     if (del) {
-      if (!confirm('Yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Yorum silinsin mi?')) return;
       try {
         await api('/poem/' + slug + '/comments/' + del.dataset.id, { method: 'DELETE' });
         del.closest('.comment-node')?.remove();
@@ -4639,7 +4639,7 @@ async function renderForumDetail(app, slug) {
   if (isOwner) {
     $('#edit-forum-btn').addEventListener('click', () => showNewForumModal(forum));
     $('#del-forum-btn').addEventListener('click', async () => {
-      if (!confirm('Konuyu silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Konuyu silmek istediğinize emin misiniz?')) return;
       try { await api('/forum/' + slug, { method: 'DELETE' }); toast('Konu silindi'); navigate('/forum'); } catch (e) { toast(e.message, 'error'); }
     });
   }
@@ -4662,10 +4662,10 @@ async function renderForumDetail(app, slug) {
     } catch (error) { toast(error.message, 'error'); }
   });
 
-  $('#share-btn').addEventListener('click', () => {
+  $('#share-btn').addEventListener('click', async () => {
     const url = location.href;
     if (navigator.clipboard) { navigator.clipboard.writeText(url); toast('Link kopyalandı!'); }
-    else { window.prompt('Linki kopyalayın:', url); }
+    else { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Paylaşım bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
 
   $('#forward-forum-btn')?.addEventListener('click', () => showForwardForumModal(forum));
@@ -4735,7 +4735,7 @@ async function renderForumDetail(app, slug) {
     }
     const del = e.target.closest('.del-comment');
     if (del) {
-      if (!confirm('Yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Yorum silinsin mi?')) return;
       const id = del.dataset.id;
       try {
         await api('/forum/' + slug + '/comments/' + id, { method: 'DELETE' });
@@ -5223,7 +5223,7 @@ async function renderBookDetail(app, slug) {
   if (isOwner) {
     $('#edit-book-btn').addEventListener('click', () => showNewBookModal(book));
     $('#del-book-btn').addEventListener('click', async () => {
-      if (!confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
       try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
     });
     $('#add-page-btn').addEventListener('click', () => showAddPageModal(slug, chapters));
@@ -5231,7 +5231,7 @@ async function renderBookDetail(app, slug) {
     document.querySelectorAll('.del-chapter').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm('Bölümü silmek istediğinize emin misiniz?')) return;
+        if (!await CigCigDialogs.confirm('Bölümü silmek istediğinize emin misiniz?')) return;
         try { await api(`/book/${slug}/chapter/${btn.dataset.id}`, { method: 'DELETE' }); toast('Bölüm silindi'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
       });
     });
@@ -5630,7 +5630,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
       });
     });
     $('#del-page-btn').addEventListener('click', async () => {
-      if (!confirm('Sayfa silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Sayfa silinsin mi?')) return;
       try { await api(`/book/${bookSlug}/page/${pageSlug}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate('/kitap/' + bookSlug); } catch (e) { toast(e.message, 'error'); }
     });
   }
@@ -6068,7 +6068,7 @@ async function renderGroupDetail(app, slug) {
       const payload = { name, description: $('#channel-description-input').value.trim(), visibility: $('#channel-visibility-input').value, can_view_history: $('#channel-history-input').checked, can_write: $('#channel-write-input').checked, moderators_can_manage: $('#channel-mod-manage-input').checked, moderators_can_write: $('#channel-mod-write-input').checked };
       try { const saved = await api(editing ? `/group/${slug}/channel/${channel.id}` : `/group/${slug}/channels`, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) }); if (editing) channels = channels.map(item => Number(item.id) === Number(saved.id) ? { ...item, ...saved } : item); else channels.push(saved); activeChannel = saved; hideModal(); renderChannels(); toast(editing ? 'Kanal güncellendi.' : 'Kanal oluşturuldu.'); } catch (error) { $('#channel-form-error').textContent = error.message; }
     };
-    $('#channel-delete-btn')?.addEventListener('click', async () => { if (!confirm('Bu kanal ve mesajları silinsin mi?')) return; try { await api(`/group/${slug}/channel/${channel.id}`, { method: 'DELETE' }); channels = channels.filter(item => Number(item.id) !== Number(channel.id)); activeChannel = channels[0] || null; hideModal(); renderChannels(); toast('Kanal silindi.'); } catch (error) { $('#channel-form-error').textContent = error.message; } });
+    $('#channel-delete-btn')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu kanal ve mesajları silinsin mi?')) return; try { await api(`/group/${slug}/channel/${channel.id}`, { method: 'DELETE' }); channels = channels.filter(item => Number(item.id) !== Number(channel.id)); activeChannel = channels[0] || null; hideModal(); renderChannels(); toast('Kanal silindi.'); } catch (error) { $('#channel-form-error').textContent = error.message; } });
   };
   channelList?.addEventListener('click', event => { const manage = event.target.closest('[data-channel-manage]'); const item = event.target.closest('.group-channel-item'); if (manage) { event.stopPropagation(); showChannelModal(channels.find(channel => Number(channel.id) === Number(manage.dataset.channelManage))); return; } if (item) { activeChannel = channels.find(channel => Number(channel.id) === Number(item.dataset.channelId)) || activeChannel; channelWorkspace.classList.remove('channels-open'); renderChannels(); } });
   $('#channel-mobile-btn')?.addEventListener('click', () => channelWorkspace.classList.toggle('channels-open'));
@@ -6727,7 +6727,7 @@ async function renderGroupDetail(app, slug) {
       } catch (e) { $('#gs-error').textContent = e.message; }
     });
     $('#gs-delete').addEventListener('click', async () => {
-      if (!confirm('Grubu silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Grubu silmek istediğinize emin misiniz?')) return;
       try { await api('/group/' + slug, { method: 'DELETE' }); toast('Grup silindi'); hideModal(); navigate('/gruplar'); } catch (e) { toast(e.message, 'error'); }
     });
   });
@@ -6766,14 +6766,14 @@ async function renderGroupDetail(app, slug) {
         });
       });
       document.querySelector('.member-kick-btn')?.addEventListener('click', async () => {
-        if (!confirm(`${member.nickname || member.username} (@${member.username}) gruptan atılsın mı?`)) return;
+        if (!await CigCigDialogs.confirm(`${member.nickname || member.username} (@${member.username}) gruptan atılsın mı?`)) return;
         try { await api(`/group/${slug}/kick/${targetId}`, { method: 'POST' }); hideModal(); toast('Üye gruptan atıldı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
       document.querySelector('.member-ban-btn')?.addEventListener('click', async () => {
-        const reason = prompt(`${member.nickname || member.username} (@${member.username}) için grup yasaklama nedeni:`);
+        const reason = await CigCigDialogs.prompt(`${member.nickname || member.username} (@${member.username}) için grup yasaklama nedeni:`, '', { title: 'Grup yasağını gerekçelendir' });
         if (reason === null || !reason.trim()) return;
-        if (!confirm(`${member.nickname || member.username} (@${member.username}) bu gruptan yasaklansın mı?`)) return;
+        if (!await CigCigDialogs.confirm(`${member.nickname || member.username} (@${member.username}) bu gruptan yasaklansın mı?`)) return;
         try { await api(`/group/${slug}/ban/${targetId}`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) }); hideModal(); toast('Üye bu gruptan yasaklandı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
@@ -6781,7 +6781,7 @@ async function renderGroupDetail(app, slug) {
     }
     if (banBtn && isOwner) {
       const uid = banBtn.dataset.uid;
-      if (!confirm('Üyeyi gruptan at?')) return;
+      if (!await CigCigDialogs.confirm('Üyeyi gruptan at?')) return;
       try { await api(`/group/${slug}/ban/${uid}`, { method: 'POST' }); toast('Üye atıldı'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
     }
     if (modBtn && isOwner) {
@@ -7256,7 +7256,7 @@ async function renderVideoDetail(app, slug) {
   $('#video-copy-btn')?.addEventListener('click', async () => {
     const url = `${location.origin}/video/${encodeURIComponent(video.slug)}`;
     try { await navigator.clipboard.writeText(url); toast('Video bağlantısı kopyalandı'); }
-    catch { prompt('Video bağlantısı', url); }
+    catch { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Video bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
   $('#video-save-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
@@ -7312,7 +7312,7 @@ async function renderVideoDetail(app, slug) {
   }
 
   $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
-  $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
+  $('#video-delete-btn')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
 
   $('#video-comment-submit')?.addEventListener('click', async () => {
     const content = $('#video-comment-input').value.trim();
@@ -7346,7 +7346,7 @@ async function renderVideoDetail(app, slug) {
     if (editBtn) {
       const id = editBtn.dataset.id;
       const current = editBtn.dataset.content;
-      const newText = prompt('Düzenle', current);
+      const newText = await CigCigDialogs.prompt('Yorumunu güncelle', current, { title: 'Yorumu düzenle', multiline: true });
       if (newText === null) return;
       try {
         const updated = await api('/video/' + slug + '/comments/' + id, { method: 'PUT', body: JSON.stringify({ content: newText.trim() }) });
@@ -7364,7 +7364,7 @@ async function renderVideoDetail(app, slug) {
     }
     const deleteBtn = e.target.closest('.video-comment-delete');
     if (deleteBtn) {
-      if (!confirm('Bu yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
       try { await api('/video/' + slug + '/comments/' + deleteBtn.dataset.id, { method: 'DELETE' }); deleteBtn.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
     }
   });
@@ -7787,7 +7787,7 @@ async function renderProfile(app, username) {
                   throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
                 }
               } else if (action === 'block-user') {
-                if (!confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
+                if (!await CigCigDialogs.confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
                 await api('/block/' + encodeURIComponent(username), { method: 'POST' });
                 toast('Kullanıcı engellendi');
               } else if (action === 'unblock-user') {
@@ -8615,7 +8615,7 @@ async function renderSettingsSection(section) {
       const confirmed = $('#delete-confirm-cb').checked;
       if (!pw) { msg.textContent = 'Şifrenizi girin'; return; }
       if (!confirmed) { msg.textContent = 'Onay kutusunu işaretleyin'; return; }
-      if (!confirm('Emin misiniz? Hesabınız ve içerikleriniz gizlenecek, 10 gün içinde kalıcı silinecek.')) return;
+      if (!await CigCigDialogs.confirm('Emin misiniz? Hesabınız ve içerikleriniz gizlenecek, 10 gün içinde kalıcı silinecek.')) return;
       const btn = $('#delete-account-btn');
       btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div>';
       try {
@@ -10657,12 +10657,12 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       toast(mode === 'all' ? 'Sohbet iki taraftan temizlendi' : 'Sohbet sadece sizden temizlendi');
     } catch (e) { toast(e.message, 'error'); }
   };
-  document.getElementById('dm-opt-clear-me')?.addEventListener('click', () => {
-    if (confirm('Sohbet yalnızca sizden temizlensin mi?')) clearConversation('me');
+  document.getElementById('dm-opt-clear-me')?.addEventListener('click', async () => {
+    if (await CigCigDialogs.confirm('Sohbet yalnızca sizden temizlensin mi?')) clearConversation('me');
   });
-  document.getElementById('dm-opt-clear-all')?.addEventListener('click', () => {
-    if (!confirm('Bu sohbet tüm mesajlarıyla iki taraftan da temizlensin mi?')) return;
-    if (!confirm('Son kez soruyorum: Karşı taraftaki mesajlar da kalıcı olarak silinsin mi?')) return;
+  document.getElementById('dm-opt-clear-all')?.addEventListener('click', async () => {
+    if (!await CigCigDialogs.confirm('Bu sohbet tüm mesajlarıyla iki taraftan da temizlensin mi?')) return;
+    if (!await CigCigDialogs.confirm('Son kez soruyorum: Karşı taraftaki mesajlar da kalıcı olarak silinsin mi?')) return;
     clearConversation('all');
   });
 }
@@ -10970,7 +10970,7 @@ async function renderVmbFiles(app) {
     if (file) showVmbFileModal(file, () => renderVmbFiles(app));
   }));
   $$('.vmb-delete-file').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu dosya ve içindeki tüm klasörler silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu dosya ve içindeki tüm klasörler silinsin mi?')) return;
     try { await api(`/vmb/files/${encodeURIComponent(button.dataset.slug)}`, { method: 'DELETE' }); toast('Dosya silindi'); renderVmbFiles(app); } catch (error) { toast(error.message, 'error'); }
   }));
 }
@@ -11005,7 +11005,7 @@ async function renderVmbFile(app, slug) {
     if (folder) showVmbFolderModal(file.id, null, folder, () => renderVmbFile(app, slug));
   }));
   $$('.vmb-delete-folder').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
     try { await api(`/vmb/folders/${button.dataset.id}`, { method: 'DELETE' }); toast('Klasör silindi'); renderVmbFile(app, slug); } catch (error) { toast(error.message, 'error'); }
   }));
 }
@@ -11037,7 +11037,7 @@ async function renderVmbFolder(app, folderId) {
     if (child) showVmbFolderModal(folder.file_id, folder.id, child, () => renderVmbFolder(app, folderId));
   }));
   $$('.vmb-delete-folder').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
     try { await api(`/vmb/folders/${button.dataset.id}`, { method: 'DELETE' }); toast('Klasör silindi'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
   }));
   $$('.vmb-edit-page').forEach(button => button.addEventListener('click', () => {
@@ -11045,12 +11045,12 @@ async function renderVmbFolder(app, folderId) {
     if (page) showVmbPageModal(folder.id, page, () => renderVmbFolder(app, folderId));
   }));
   $$('.vmb-delete-page').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu sayfa silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu sayfa silinsin mi?')) return;
     try { await api(`/vmb/folder/${folder.id}/page/${encodeURIComponent(button.dataset.slug)}`, { method: 'DELETE' }); toast('Sayfa silindi'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
   }));
   $$('.vmb-asset-delete').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault(); event.stopPropagation();
-    if (!confirm('Bu arşiv dosyası kaldırılsın mı?')) return;
+    if (!await CigCigDialogs.confirm('Bu arşiv dosyası kaldırılsın mı?')) return;
     try { await api(`/vmb/assets/${button.dataset.id}`, { method: 'DELETE' }); toast('Dosya kaldırıldı'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
   }));
 }
@@ -11078,7 +11078,7 @@ async function renderVmbPageReader(app, folderId, pageSlug) {
   $('#vmb-font-inc').addEventListener('click', () => { const current = parseInt(content.style.fontSize) || fontSize; if (current < 26) { content.style.fontSize = `${current + 1}px`; $('#vmb-font-label').textContent = `${current + 1}px`; localStorage.setItem('ebook-font-size', current + 1); } });
   $('#vmb-reader-edit')?.addEventListener('click', () => showVmbPageModal(page.folder_id, page, () => renderVmbPageReader(app, folderId, pageSlug)));
   $('#vmb-reader-delete')?.addEventListener('click', async () => {
-    if (!confirm('Bu sayfa silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu sayfa silinsin mi?')) return;
     try { await api(`/vmb/folder/${page.folder_id}/page/${encodeURIComponent(page.slug)}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate(`/vmb/dosyalar/${page.file_slug}/klasor/${page.folder_id}`); } catch (error) { toast(error.message, 'error'); }
   });
 }
@@ -11226,11 +11226,11 @@ async function renderFriends(app) {
       if (remove) {
         const isOutgoing = remove.title === 'İsteği İptal Et';
         const msg = isOutgoing ? 'Arkadaşlık isteğini iptal et?' : 'Arkadaşlıktan çıkart?';
-        if (!confirm(msg)) return;
+        if (!await CigCigDialogs.confirm(msg)) return;
         try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (err) { toast(err.message,'error'); }
       }
       if (block) {
-        if (!confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
+        if (!await CigCigDialogs.confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
         try { await api(`/block/${encodeURIComponent(block.dataset.username)}`, { method: 'POST' }); renderFriends(app); } catch (err) { toast(err.message,'error'); }
       }
       if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (err) { toast(err.message,'error'); } }
@@ -11842,7 +11842,7 @@ function renderListeningRoomMini() {
 }
 
 async function leaveListeningRoom() {
-  if (!listeningRoom || !confirm('Ortak dinleyişten çıkmak istiyor musun?')) return;
+  if (!listeningRoom || !await CigCigDialogs.confirm('Ortak dinleyişten çıkmak istiyor musun?')) return;
   await api(`/listening-rooms/${listeningRoom.public_id}/leave`, { method: 'POST' }).catch(() => {});
   clearInterval(listeningRoomPoll); listeningRoomPoll = null; listeningRoom = null;
   document.getElementById('listening-room-mini')?.remove();
@@ -12400,7 +12400,7 @@ async function renderMusicDetail(app, slug) {
   const deleteBtn = document.getElementById('song-delete-btn');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
+      if (!await CigCigDialogs.confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
       try {
         await api('/songs/' + song.id, { method: 'DELETE' });
         toast('Şarkı silindi');
@@ -12992,7 +12992,7 @@ async function loadStoriesBar(container) {
         $('#story-share')?.addEventListener('click', () => shareStory(story));
         $('#story-viewers')?.addEventListener('click', () => showStoryViewers(story));
         $('#story-edit')?.addEventListener('click', () => showStoryEditModal(story, render));
-        $('#story-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; try { await api('/stories/' + storyKey, { method: 'DELETE' }); hideModal(); toast('Hikaye silindi'); loadStoriesBar(container); } catch (error) { toast(error.message, 'error'); } });
+        $('#story-delete')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu hikaye silinsin mi?')) return; try { await api('/stories/' + storyKey, { method: 'DELETE' }); hideModal(); toast('Hikaye silindi'); loadStoriesBar(container); } catch (error) { toast(error.message, 'error'); } });
         $('#story-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + storyKey + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; render(); } catch (error) { toast(error.message, 'error'); } });
         if (story.song_audio_url) {
           activeStoryAudio = trackMediaAudio(new Audio(story.song_audio_url));
@@ -13396,7 +13396,7 @@ async function renderStoryRoute(app, storyId) {
     });
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
-    $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
+    $('#story-route-delete')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
     if (story.song_audio_url) {
       activeStoryAudio = trackMediaAudio(new Audio(story.song_audio_url));
       const routeAudio = activeStoryAudio;
@@ -13501,7 +13501,7 @@ function bindPhotoFeed(feed) {
     }));
     box.querySelectorAll('.photo-comment-delete').forEach(button => button.addEventListener('click', async event => {
       event.preventDefault(); event.stopPropagation();
-      if (!confirm('Bu yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
       try { await api('/photos/comments/' + button.dataset.commentId, { method: 'DELETE' }); await renderComments(c, box); } catch (error) { toast(error.message || 'Yorum silinemedi', 'error'); }
     }));
   };
@@ -13531,7 +13531,7 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-delete').forEach(x => x.onclick = async e => {
     const c = x.closest('[data-photo-id]');
     if (!c) return;
-    if (confirm('Fotoğraf silinsin mi?')) {
+    if (await CigCigDialogs.confirm('Fotoğraf silinsin mi?')) {
       await api('/photos/' + c.dataset.photoId, { method: 'DELETE' });
       c.remove();
     }
@@ -14010,7 +14010,7 @@ async function renderMyPlaylists(app) {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const pl = playlistById.get(String(btn.dataset.id));
-          if (!pl || !confirm(`"${pl.name}" playlistini silmek istediğinize emin misiniz?`)) return;
+          if (!pl || !await CigCigDialogs.confirm(`"${pl.name}" playlistini silmek istediğinize emin misiniz?`)) return;
           try {
             await api('/playlists/' + btn.dataset.id, { method: 'DELETE' });
             toast('Playlist silindi');
@@ -14252,7 +14252,7 @@ async function renderPlaylistDetail(app, plId) {
     // Şarkı kaldır
     app.querySelectorAll('.pl-remove-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
+        if (!await CigCigDialogs.confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
         try {
           await api('/playlists/' + plId + '/songs/' + btn.dataset.id, { method: 'DELETE' });
           toast('Şarkı listeden çıkarıldı');
