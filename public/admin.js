@@ -752,11 +752,23 @@ async function renderJournalists(main) {
     <section class="journalist-admin-assign card">
       <div class="journalist-admin-section-heading"><span class="journalist-admin-section-icon"><i class="fas fa-user-plus"></i></span><div><h2>Yeni gazeteci ekle</h2><p>Kayıtlı kullanıcılardan birini gazeteci olarak yetkilendirin.</p></div></div>
       <div class="journalist-admin-picker">
-        <label for="journalist-user-search">Kullanıcı ara</label>
-        <input id="journalist-user-search" type="search" placeholder="Kullanıcı adı veya görünen ad..." autocomplete="off" />
-        <select id="journalist-user-select" size="6" aria-label="Gazeteci olarak eklenecek kullanıcı"></select>
-        <button type="button" class="btn btn-primary" id="journalist-assign-btn"><i class="fas fa-user-check"></i> Seçili kullanıcıyı gazeteci yap</button>
-        <div id="journalist-admin-error" class="form-error" role="alert"></div>
+        <div class="journalist-picker-main">
+          <label class="journalist-picker-label" for="journalist-user-search">Gazeteci olacak kullanıcıyı bulun</label>
+          <div class="journalist-picker-search">
+            <i class="fas fa-search" aria-hidden="true"></i>
+            <input id="journalist-user-search" type="search" placeholder="İsim veya @kullanıcı adı yazın..." autocomplete="off" />
+            <button type="button" id="journalist-search-clear" aria-label="Aramayı temizle" title="Aramayı temizle"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="journalist-picker-results-heading"><strong id="journalist-results-title">Son eklenen üyeler</strong><span id="journalist-results-count"></span></div>
+          <div class="journalist-picker-results" id="journalist-user-results" role="listbox" aria-label="Kullanıcı arama sonuçları"></div>
+        </div>
+        <aside class="journalist-picker-confirm">
+          <span class="journalist-picker-confirm-kicker"><i class="fas fa-shield-check"></i> YETKİLENDİRME</span>
+          <div id="journalist-selected-user" class="journalist-picker-selected is-empty"><i class="fas fa-user-check"></i><span>Listeden bir kullanıcı seçin. Seçiminiz burada görünecek.</span></div>
+          <button type="button" class="btn btn-primary" id="journalist-assign-btn" disabled><i class="fas fa-user-plus"></i> Gazeteci olarak ekle</button>
+          <small class="journalist-picker-note">Gazeteci rozeti otomatik verilir ve yetki kaldırıldığında otomatik silinir.</small>
+          <div id="journalist-admin-error" class="form-error" role="alert"></div>
+        </aside>
       </div>
     </section>
     <section class="journalist-admin-list-section">
@@ -773,20 +785,56 @@ async function renderJournalists(main) {
     </section>`;
 
   const search = $('#journalist-user-search');
-  const select = $('#journalist-user-select');
+  const results = $('#journalist-user-results');
+  const resultTitle = $('#journalist-results-title');
+  const resultCount = $('#journalist-results-count');
+  const selectedUserCard = $('#journalist-selected-user');
+  const assignButton = $('#journalist-assign-btn');
+  let selectedUser = null;
   const renderCandidates = () => {
     const q = search.value.trim().toLocaleLowerCase('tr-TR');
     const matches = candidates.filter(user =>
       `${user.username || ''} ${user.nickname || ''}`.toLocaleLowerCase('tr-TR').includes(q)
-    ).slice(0, 100);
-    select.innerHTML = matches.map(user =>
-      `<option value="${escHtml(user.id)}">${escHtml(user.nickname || user.username)} · @${escHtml(user.username)}</option>`
-    ).join('');
+    );
+    const visibleUsers = matches.slice(0, 8);
+    resultTitle.textContent = q ? 'Arama sonuçları' : 'Son eklenen üyeler';
+    resultCount.textContent = matches.length > 8 ? `İlk 8 / ${matches.length}` : `${matches.length} kullanıcı`;
+    results.innerHTML = visibleUsers.length ? visibleUsers.map(user => {
+      const isSelected = selectedUser && String(selectedUser.id) === String(user.id);
+      const hasAvatar = user.avatar && !user.avatar_removed;
+      return `<button type="button" class="journalist-picker-result${isSelected ? ' is-selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" data-user-id="${escHtml(user.id)}">
+        <span class="journalist-picker-result-avatar">${hasAvatar ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
+        <span class="journalist-picker-result-copy"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+        <span class="journalist-picker-result-action">${isSelected ? '<i class="fas fa-check"></i> Seçildi' : '<i class="fas fa-plus"></i> Seç'}</span>
+      </button>`;
+    }).join('') : '<div class="journalist-picker-no-results"><i class="fas fa-user-slash"></i><strong>Kullanıcı bulunamadı</strong><span>Farklı bir isim veya kullanıcı adı deneyin.</span></div>';
+    selectedUserCard.classList.toggle('is-empty', !selectedUser);
+    selectedUserCard.innerHTML = selectedUser
+      ? `<span class="journalist-picker-selected-avatar">${selectedUser.avatar && !selectedUser.avatar_removed ? `<img src="${escHtml(selectedUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><span class="journalist-picker-selected-copy"><small>SEÇİLEN KULLANICI</small><strong>${escHtml(selectedUser.nickname || selectedUser.username)}</strong><span>@${escHtml(selectedUser.username)}</span></span><button type="button" class="journalist-picker-change" id="journalist-selection-clear">Değiştir</button>`
+      : '<i class="fas fa-user-check"></i><span>Listeden bir kullanıcı seçin. Seçiminiz burada görünecek.</span>';
+    assignButton.disabled = !selectedUser;
+    results.querySelectorAll('[data-user-id]').forEach(button => {
+      button.addEventListener('click', () => {
+        selectedUser = candidates.find(user => String(user.id) === button.dataset.userId) || null;
+        $('#journalist-admin-error').textContent = '';
+        renderCandidates();
+      });
+    });
+    $('#journalist-selection-clear')?.addEventListener('click', () => {
+      selectedUser = null;
+      renderCandidates();
+      search.focus();
+    });
   };
   renderCandidates();
   search.addEventListener('input', renderCandidates);
-  $('#journalist-assign-btn').addEventListener('click', async event => {
-    const userId = select.value;
+  $('#journalist-search-clear').addEventListener('click', () => {
+    search.value = '';
+    renderCandidates();
+    search.focus();
+  });
+  assignButton.addEventListener('click', async event => {
+    const userId = selectedUser?.id;
     const message = $('#journalist-admin-error');
     if (!userId) { message.textContent = 'Önce kullanıcı seçin.'; return; }
     event.currentTarget.disabled = true;

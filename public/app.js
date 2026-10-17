@@ -8110,7 +8110,7 @@ function renderRegister(app) {
       </div>
       <div class="form-group">
         <label>Doğum tarihi</label>
-        <input type="date" id="reg-birth-date" max="${new Date(new Date().setFullYear(new Date().getFullYear() - 15)).toISOString().slice(0, 10)}" />
+        <input type="date" id="reg-birth-date" min="1900-01-01" max="${new Date(new Date().setFullYear(new Date().getFullYear() - 15)).toISOString().slice(0, 10)}" />
         <div class="form-hint">15 yaş altı kabul edilmez (¬‿¬) hııhıı</div>
         <div class="form-hint">Doğum tarihi bir daha değiştirilemez.</div>
       </div>
@@ -8252,6 +8252,7 @@ function renderRegister(app) {
       if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
     });
     if (!username || !nickname || !email || !password || !birth_date) { $('#reg-error').textContent = 'Kullanıcı adı, takma ad ve diğer alanları doldurun'; return; }
+    if (birth_date < '1900-01-01') { $('#reg-error').textContent = 'Doğum tarihi 1 Ocak 1900 veya sonrası olmalıdır'; return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#reg-error').textContent = 'Geçerli bir e-posta adresi girin'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
     const today = new Date();

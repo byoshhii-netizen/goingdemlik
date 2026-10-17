@@ -1429,7 +1429,11 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (twoFactorMethod === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta doğrulama servisi yapılandırılmamış' });
     if (twoFactorMethod === 'question' && (!two_factor_question || normalizeSecurityAnswer(two_factor_answer).length < 2)) return res.status(400).json({ error: 'Güvenlik sorusu ve cevabı zorunlu' });
     if (!birth_date || !/^\d{4}-\d{2}-\d{2}$/.test(birth_date)) return res.status(400).json({ error: 'Doğum tarihi zorunlu' });
+    if (birth_date < '1900-01-01') return res.status(400).json({ error: 'Doğum tarihi 1 Ocak 1900 veya sonrası olmalıdır' });
     const birth = new Date(`${birth_date}T00:00:00Z`);
+    if (!Number.isFinite(birth.getTime()) || birth.toISOString().slice(0, 10) !== birth_date) {
+      return res.status(400).json({ error: 'Geçerli bir doğum tarihi girin' });
+    }
     const today = new Date();
     let age = today.getUTCFullYear() - birth.getUTCFullYear();
     const monthDiff = today.getUTCMonth() - birth.getUTCMonth();

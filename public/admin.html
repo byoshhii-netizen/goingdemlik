@@ -694,12 +694,52 @@
     .journalist-admin-section-icon { display:grid; place-items:center; width:38px; height:38px; flex:0 0 38px; border-radius:11px; color:var(--red2); background:rgba(189,162,117,.12); }
     .journalist-admin-section-heading h2,.journalist-admin-list-heading h2 { margin:0 0 4px; font:700 16px var(--font2); }
     .journalist-admin-section-heading p { color:var(--text2); font-size:11px; }
-    .journalist-admin-picker { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:end; gap:10px; }
-    .journalist-admin-picker label { grid-column:1; margin:0; }
-    .journalist-admin-picker input { grid-column:1; }
-    .journalist-admin-picker select { grid-column:2; grid-row:1 / span 2; height:74px; }
-    .journalist-admin-picker .btn { grid-column:3; grid-row:1 / span 2; height:38px; white-space:nowrap; }
-    .journalist-admin-picker select option { padding:5px; }
+    .journalist-admin-picker { display:grid; grid-template-columns:minmax(0,1.5fr) minmax(240px,.8fr); gap:18px; align-items:stretch; }
+    .journalist-picker-main { min-width:0; }
+    .journalist-picker-label { display:block; margin:0 0 7px; color:var(--text2); font-size:11px; font-weight:700; text-transform:none; letter-spacing:0; }
+    .journalist-picker-search { display:flex; align-items:center; gap:10px; height:45px; padding:0 12px; border:1px solid rgba(255,255,255,.1); border-radius:11px; background:#09090c; transition:border-color .18s,box-shadow .18s; }
+    .journalist-picker-search:focus-within { border-color:rgba(189,162,117,.62); box-shadow:0 0 0 3px rgba(189,162,117,.1); }
+    .journalist-picker-search > i { color:var(--red2); font-size:13px; }
+    .journalist-picker-search input { min-width:0; height:100%; flex:1; padding:0; border:0; outline:0; color:var(--text); background:transparent; font-size:12px; box-shadow:none; }
+    .journalist-picker-search input:focus { border:0; outline:0; box-shadow:none; }
+    .journalist-picker-search > button { display:grid; place-items:center; width:28px; height:28px; border:0; border-radius:8px; color:var(--text3); background:transparent; cursor:pointer; }
+    .journalist-picker-search > button:hover { color:var(--text); background:rgba(255,255,255,.07); }
+    .journalist-picker-results-heading { display:flex; justify-content:space-between; gap:10px; margin:14px 2px 7px; color:var(--text); font-size:11px; }
+    .journalist-picker-results-heading > span { color:var(--text3); font-size:10px; }
+    .journalist-picker-results { display:grid; gap:6px; max-height:290px; overflow:auto; padding:2px 4px 2px 1px; }
+    .journalist-picker-result { display:flex; align-items:center; gap:10px; width:100%; min-width:0; padding:9px 10px; border:1px solid rgba(255,255,255,.055); border-radius:10px; color:var(--text); background:rgba(255,255,255,.025); text-align:left; cursor:pointer; transition:background .16s,border-color .16s,transform .16s; }
+    .journalist-picker-result:hover { transform:translateY(-1px); border-color:rgba(189,162,117,.3); background:rgba(189,162,117,.06); }
+    .journalist-picker-result.is-selected { border-color:rgba(189,162,117,.42); background:rgba(189,162,117,.09); }
+    .journalist-picker-result-avatar,.journalist-picker-selected-avatar { display:grid; flex:0 0 38px; place-items:center; width:38px; height:38px; overflow:hidden; border:1px solid rgba(189,162,117,.24); border-radius:50%; color:var(--red2); background:#1b1a17; font-size:13px; }
+    .journalist-picker-result-avatar img,.journalist-picker-selected-avatar img { width:100%; height:100%; object-fit:cover; }
+    .journalist-picker-result-copy { display:grid; flex:1; min-width:0; gap:3px; }
+    .journalist-picker-result-copy strong,.journalist-picker-result-copy small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .journalist-picker-result-copy strong { font-size:12px; font-weight:700; }
+    .journalist-picker-result-copy small { color:var(--text3); font-size:10px; }
+    .journalist-picker-result-action { display:flex; align-items:center; gap:5px; flex:0 0 auto; color:var(--red2); font-size:10px; font-weight:700; }
+    .journalist-picker-result-action i { font-size:10px; }
+    .journalist-picker-no-results { display:grid; justify-items:center; gap:6px; padding:24px 14px; border:1px dashed rgba(255,255,255,.09); border-radius:10px; color:var(--text3); font-size:10px; text-align:center; }
+    .journalist-picker-no-results > i { margin-bottom:2px; color:var(--red2); font-size:19px; }
+    .journalist-picker-no-results strong { color:var(--text2); font-size:12px; }
+    .journalist-picker-confirm { display:flex; flex-direction:column; align-items:stretch; gap:11px; padding:15px; border:1px solid rgba(189,162,117,.2); border-radius:13px; background:radial-gradient(ellipse at 100% 0,rgba(189,162,117,.1),transparent 50%),rgba(5,5,7,.5); }
+    .journalist-picker-confirm-kicker { color:var(--red2); font-size:9px; font-weight:800; letter-spacing:1px; }
+    .journalist-picker-confirm-kicker i { margin-right:5px; }
+    .journalist-picker-selected { display:flex; align-items:center; gap:10px; min-height:59px; padding:10px; border:1px solid rgba(255,255,255,.075); border-radius:10px; background:rgba(255,255,255,.025); }
+    .journalist-picker-selected.is-empty { color:var(--text3); font-size:10px; line-height:1.5; }
+    .journalist-picker-selected.is-empty > i { flex:0 0 auto; color:var(--red2); font-size:17px; }
+    .journalist-picker-selected-avatar { width:38px; height:38px; flex-basis:38px; }
+    .journalist-picker-selected-copy { display:grid; flex:1; min-width:0; gap:3px; }
+    .journalist-picker-selected-copy small { color:var(--red2); font-size:8px; font-weight:800; letter-spacing:.8px; }
+    .journalist-picker-selected-copy strong,.journalist-picker-selected-copy > span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .journalist-picker-selected-copy strong { color:var(--text); font-size:12px; }
+    .journalist-picker-selected-copy > span { color:var(--text3); font-size:10px; }
+    .journalist-picker-change { flex:0 0 auto; padding:6px 8px; border:1px solid var(--border); border-radius:7px; color:var(--text2); background:transparent; font-size:9px; cursor:pointer; }
+    .journalist-picker-change:hover { border-color:var(--red); color:var(--red2); }
+    .journalist-picker-confirm > .btn { justify-content:center; min-height:41px; white-space:nowrap; }
+    .journalist-picker-confirm > .btn:disabled { opacity:.45; cursor:not-allowed; }
+    .journalist-picker-note { color:var(--text3); font-size:10px; line-height:1.5; }
+    .journalist-picker-confirm .form-error { min-height:0; }
+    .journalist-picker-confirm .form-error:empty { display:none; }
     .journalist-admin-list-section { padding:18px; border:1px solid var(--border); border-radius:14px; background:var(--bg2); }
     .journalist-admin-list-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:13px; }
     .journalist-admin-list-heading > span { color:var(--text3); font-size:11px; }
@@ -722,10 +762,8 @@
       .journalist-admin-hero-icon { width:44px; height:44px; flex-basis:44px; }
       .journalist-admin-hero h1 { font-size:19px; }
       .journalist-admin-total { min-width:67px; padding:8px; }
-      .journalist-admin-picker { grid-template-columns:1fr; }
-      .journalist-admin-picker label,.journalist-admin-picker input,.journalist-admin-picker select,.journalist-admin-picker .btn { grid-column:1; grid-row:auto; }
-      .journalist-admin-picker select { height:100px; }
-      .journalist-admin-picker .btn { width:100%; justify-content:center; }
+      .journalist-admin-picker { grid-template-columns:1fr; gap:13px; }
+      .journalist-picker-results { max-height:245px; }
       .journalist-admin-card { flex-wrap:wrap; }
       .journalist-admin-active { display:none; }
       .journalist-remove-btn { margin-left:auto; }
@@ -858,6 +896,6 @@ function applyThemeColor(hex) {
   } catch(e) {}
 })();
 </script>
-<script src="admin.js?v=20261024-journalist-admin"></script>
+<script src="admin.js?v=20261017-journalist-picker-v2"></script>
 </body>
 </html>
