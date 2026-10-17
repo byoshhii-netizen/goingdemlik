@@ -25,7 +25,10 @@ let activePhotoAudio = null;
 let photoAudioObserver = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
-let siteAuthRequired = false;
+const journalistDirectory = new Map();
+let dmSearchUnlockCode = '';
+let dmIconUnlockCode = '';
+let dmSearchUnlockedConvs = [];
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 const MEDIA_VOLUME_KEY = 'cigcig_volume';
@@ -215,7 +218,7 @@ function toast(msg, type = 'success', duration = 3500) {
 function showModal(title, bodyHTML, modalClass = '') {
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -228,7 +231,7 @@ function hideModal() {
   window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal');
 }
 
 function attachPasswordToggle(inputEl, toggleBtnEl, iconEl) {
@@ -796,8 +799,19 @@ function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
-  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  const journalist = journalistDirectory.get(String(u.username || '').toLocaleLowerCase('tr-TR'));
+  const journalistSince = journalist?.assigned_at;
+  const journalistMark = journalist && journalistSince && journalist.show_journalist_icon !== 0
+    ? ` <button type="button" class="journalist-name-mark" aria-label="Gazetecilik bilgisi" title="Gazeteci bilgisi" data-journalist-since="${escHtml(journalistSince)}" onclick="event.preventDefault();event.stopPropagation();showJournalistSince(this.dataset.journalistSince)"><i class="fas fa-newspaper"></i></button>`
+    : '';
+  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>${journalistMark}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
+
+window.showJournalistSince = function (assignedAt) {
+  const date = new Date(assignedAt);
+  if (Number.isNaN(date.getTime())) return;
+  showModal('Gazetecilik bilgisi', `<div class="journalist-tenure-modal"><span class="journalist-tenure-icon"><i class="fas fa-newspaper"></i></span><strong>Bu kullanıcı gazeteci.</strong><p>${date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} tarihinden beri CigCig gazetecisi.</p></div>`);
+};
 
 function avatarImg(u, cls = 'avatar-sm') {
   if (u && u.avatar && !u.avatar_removed) return `<img src="${escHtml(u.avatar)}" class="${cls}" alt="" />`;
@@ -999,12 +1013,6 @@ function renderRoute(fullPath) {
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
 
-  const isAuthRoute = path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path);
-  if (siteAuthRequired && !currentUser && !isAuthRoute) {
-    const returnTo = path + (queryStr ? '?' + queryStr : '');
-    return navigate('/giris?returnTo=' + encodeURIComponent(returnTo), false);
-  }
-
   if (path === '/') {
     if (firstVisitAuthEnabled && !currentUser && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
       localStorage.setItem('cigcig_first_visit_auth_seen', '1');
@@ -1012,6 +1020,8 @@ function renderRoute(fullPath) {
     }
     return renderHome(app);
   }
+  if (path === '/gazeteler') return renderNewspaperList(app);
+  if (path.startsWith('/gazete/')) return renderNewspaperDetail(app, path.slice('/gazete/'.length));
   if (path === '/arama') return renderSearch(app, queryStr || '');
   if (path === '/forum' || path === '/konular') {
     // query string'i de geçir
@@ -1744,6 +1754,11 @@ function updateNavUI() {
   const mobAuth = $('#mobile-menu-auth');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
+  const isJournalist = !!currentUser && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+  ['#nav-new-newspaper', '#mob-new-newspaper'].forEach(selector => {
+    const button = $(selector);
+    if (button) button.style.display = isJournalist ? '' : 'none';
+  });
 
   if (currentUser) {
     authEl.classList.add('hidden');
@@ -1984,6 +1999,12 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
   openNotifDropdown();
 });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
+$('#nav-new-newspaper')?.addEventListener('click', () => {
+  $('#new-dropdown')?.classList.add('hidden');
+  if (!currentUser) return navigate('/giris');
+  if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) return toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+  showNewspaperUploadModal();
+});
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); });
 $('#nav-new-poem')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
@@ -2073,6 +2094,10 @@ $('#mob-poems-nav')?.addEventListener('click', () => {
   closeMobileBooksMenu();
   navigate('/siirler');
 });
+$('#mob-newspapers-nav')?.addEventListener('click', () => {
+  closeMobileBooksMenu();
+  navigate('/gazeteler');
+});
 $('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler'));
 
 document.addEventListener('click', e => {
@@ -2102,7 +2127,8 @@ document.addEventListener('click', e => {
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
   const mobNewReals = e.target.closest('#mob-new-reals');
-  if (mobNewForum || mobNewPoem || mobNewBook || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic) closeMobileCreateMenu();
+  const mobNewNewspaper = e.target.closest('#mob-new-newspaper');
+  if (mobNewForum || mobNewPoem || mobNewBook || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic || mobNewNewspaper) closeMobileCreateMenu();
   if (mobNewForum) { if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
   if (mobNewPoem) { if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
   if (mobNewBook) { navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
@@ -2111,6 +2137,11 @@ document.addEventListener('click', e => {
   if (mobNewVideo) { if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
   if (mobNewReals) { if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else navigate('/giris'); }
   if (mobNewMusic) { if (currentUser) navigate('/sarki-yukle'); }
+  if (mobNewNewspaper) {
+    if (!currentUser) navigate('/giris');
+    else if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+    else showNewspaperUploadModal();
+  }
 });
 
 async function renderHome(app) {
@@ -2314,6 +2345,849 @@ async function renderHome(app) {
       await sectionMap[section]();
     }
   }
+}
+
+function formatNewspaperDate(dateValue, options = { day: 'numeric', month: 'long', year: 'numeric' }) {
+  const date = new Date(`${String(dateValue || '').slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('tr-TR', options);
+}
+
+function newspaperCardHTML(newspaper) {
+  const profile = profileRoute(newspaper.username);
+  const isOwner = currentUser && Number(currentUser.id) === Number(newspaper.journalist_id);
+  return `<article class="newspaper-card">
+    <a href="/gazete/${encodeURIComponent(newspaper.id)}" data-link class="newspaper-card-masthead">
+      <span class="newspaper-masthead-mark"><i class="fas fa-newspaper"></i></span>
+      <span class="newspaper-masthead-copy"><strong>${escHtml(newspaper.newspaper_name)}</strong><small>CIGCIG GAZETE ARŞİVİ</small></span>
+      <span class="newspaper-issue-date"><small>GAZETE TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date, { day: '2-digit', month: 'long', year: 'numeric' }))}</strong></span>
+    </a>
+    <a href="/gazete/${encodeURIComponent(newspaper.id)}" data-link class="newspaper-sheet-link" aria-label="${escHtml(newspaper.newspaper_name)} gazetesini aç">
+      <img class="newspaper-sheet" src="${escHtml(newspaper.image_url)}" alt="${escHtml(newspaper.newspaper_name)} — ${escHtml(formatNewspaperDate(newspaper.newspaper_date))}" loading="lazy" />
+      <span class="newspaper-sheet-open"><i class="fas fa-expand"></i> Gazeteyi incele</span>
+    </a>
+    <div class="newspaper-card-footer">
+      <a class="newspaper-byline" href="${profile}" data-link>
+        ${avatarImg(newspaper, 'newspaper-author-avatar')}
+        <span><small>YAYIMLAYAN GAZETECİ</small><strong>${userDisplayName(newspaper)}</strong></span>
+      </a>
+      ${isOwner ? `<button type="button" class="newspaper-delete-button" data-newspaper-delete="${escHtml(newspaper.id)}" aria-label="Gazeteyi sil"><i class="fas fa-trash"></i></button>` : ''}
+      <div class="newspaper-actions">
+        <button type="button" class="newspaper-action-button${newspaper.liked ? ' is-liked' : ''}" data-newspaper-like="${escHtml(newspaper.id)}" aria-label="Gazeteyi beğen">
+          <i class="${newspaper.liked ? 'fas' : 'far'} fa-heart"></i><span data-newspaper-like-count>${Number(newspaper.like_count) || 0}</span>
+        </button>
+        <a class="newspaper-action-button" href="/gazete/${encodeURIComponent(newspaper.id)}#yorumlar" data-link aria-label="Yorumları gör">
+          <i class="far fa-comment"></i><span>${Number(newspaper.comment_count) || 0}</span>
+        </a>
+        <button type="button" class="newspaper-action-button" data-newspaper-share="${escHtml(newspaper.id)}" aria-label="Gazeteyi paylaş">
+          <i class="fas fa-share-nodes"></i><span>Paylaş</span>
+        </button>
+        ${currentUser ? `<button type="button" class="newspaper-action-button newspaper-forward-button" data-newspaper-forward="${escHtml(newspaper.id)}" aria-label="Gazeteyi ilet"><i class="fas fa-paper-plane"></i><span>İlet</span></button>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+async function renderNewspaperList(app) {
+  document.title = 'Gazeteler – ' + siteName;
+  updatePageMeta('Gazeteler – ' + siteName, 'CigCig gazetecilerinin yayımladığı gazeteleri keşfet.', '');
+  const isJournalist = currentUser && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+  app.innerHTML = `
+    <div class="container page newspaper-page">
+      <section class="newspaper-hero">
+        <div class="newspaper-hero-copy"><span class="newspaper-eyebrow"><i class="fas fa-circle"></i> CIGCIG BASIN ARŞİVİ</span><h1>Gazeteler</h1><p>Farklı sesler, gerçek haberler ve her sayıdan yeni bir hikâye.</p><div class="newspaper-hero-rule"><span></span><i class="fas fa-star"></i><span></span></div></div>
+        <div class="newspaper-hero-art" aria-hidden="true"><span class="newspaper-hero-orbit newspaper-hero-orbit-one"></span><span class="newspaper-hero-orbit newspaper-hero-orbit-two"></span><i class="fas fa-newspaper"></i><span class="newspaper-hero-art-label">BASIN<br />ÖZGÜRDÜR</span></div>
+        <div class="newspaper-hero-bottom"><span><i class="fas fa-book-open"></i> Her sayı kendi hikâyesini anlatır</span>${isJournalist ? '<button type="button" class="btn btn-primary newspaper-publish-button" id="newspaper-publish"><i class="fas fa-plus"></i> Yeni gazete yayımla</button>' : '<span class="newspaper-hero-note">Yalnızca CigCig gazetecileri yayın yapabilir.</span>'}</div>
+      </section>
+      <div class="newspaper-feed-heading"><div><span class="newspaper-eyebrow">ARŞİVDEN SEÇKİLER</span><h2>Yayımlanan sayılar</h2></div><span class="newspaper-feed-count" id="newspaper-feed-count"></span></div>
+      <div class="newspaper-grid" id="newspaper-grid"><div class="loading-center"><div class="spinner"></div></div></div>
+    </div>`;
+  $('#newspaper-publish')?.addEventListener('click', showNewspaperUploadModal);
+  const grid = $('#newspaper-grid');
+  try {
+    const newspapers = await api('/newspapers');
+    if (!grid) return;
+    $('#newspaper-feed-count').textContent = `${newspapers.length} ${newspapers.length === 1 ? 'sayı' : 'sayı'}`;
+    grid.innerHTML = newspapers.length
+      ? newspapers.map(newspaperCardHTML).join('')
+      : '<div class="newspaper-empty"><span class="newspaper-empty-icon"><i class="fas fa-newspaper"></i></span><strong>Arşivde henüz gazete yok</strong><span>Gazeteciler ilk sayılarını paylaştığında burada görebileceksiniz.</span></div>';
+  } catch (error) {
+    if (grid) grid.innerHTML = `<div class="newspaper-empty newspaper-error"><span class="newspaper-empty-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Gazeteler yüklenemedi</strong><span>${escHtml(error.message || 'Bağlantınızı kontrol edip tekrar deneyin.')}</span><button type="button" class="btn btn-outline btn-sm" id="newspaper-retry">Tekrar dene</button></div>`;
+    $('#newspaper-retry')?.addEventListener('click', () => renderNewspaperList(app));
+  }
+
+  grid?.addEventListener('click', async event => {
+    const likeButton = event.target.closest('[data-newspaper-like]');
+    if (likeButton) {
+      if (!currentUser) return navigate('/giris');
+      likeButton.disabled = true;
+      try {
+        const result = await api(`/newspapers/${encodeURIComponent(likeButton.dataset.newspaperLike)}/like`, { method: 'POST' });
+        likeButton.classList.toggle('is-liked', result.liked);
+        likeButton.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+        likeButton.querySelector('[data-newspaper-like-count]').textContent = String(result.like_count);
+      } catch (error) { toast(error.message || 'Gazete beğenilemedi.', 'error'); }
+      finally { likeButton.disabled = false; }
+      return;
+    }
+    const shareButton = event.target.closest('[data-newspaper-share]');
+    if (shareButton) {
+      const newspaper = newspapers.find(item => String(item.id) === shareButton.dataset.newspaperShare);
+      if (newspaper) await shareNewspaper(newspaper);
+      return;
+    }
+    const forwardButton = event.target.closest('[data-newspaper-forward]');
+    if (forwardButton) {
+      const newspaper = newspapers.find(item => String(item.id) === forwardButton.dataset.newspaperForward);
+      if (newspaper) await showForwardNewspaperModal(newspaper);
+      return;
+    }
+    const deleteButton = event.target.closest('[data-newspaper-delete]');
+    if (deleteButton) {
+      if (!confirm('Bu gazete sayı arşivden silinsin mi?')) return;
+      deleteButton.disabled = true;
+      try {
+        await api(`/newspapers/${encodeURIComponent(deleteButton.dataset.newspaperDelete)}`, { method: 'DELETE' });
+        toast('Gazete arşivden kaldırıldı.');
+        renderNewspaperList(app);
+      } catch (error) {
+        toast(error.message || 'Gazete silinemedi.', 'error');
+        deleteButton.disabled = false;
+      }
+    }
+  });
+}
+
+function newspaperCommentHTML(comment, newspaper) {
+  const canDelete = currentUser && (Number(currentUser.id) === Number(comment.user_id) || currentUser.is_admin);
+  return `<article class="newspaper-comment" data-newspaper-comment="${escHtml(comment.id)}">
+    ${avatarImg(comment, 'newspaper-comment-avatar')}
+    <div class="newspaper-comment-main">
+      <div class="newspaper-comment-top"><a href="${profileRoute(comment.username)}" data-link>${userDisplayName(comment)}</a><time>${escHtml(timeAgo(comment.created_at))}</time></div>
+      <p>${renderContent(comment.content)}</p>
+      <div class="newspaper-comment-actions">
+        <button type="button" class="newspaper-comment-like${comment.liked ? ' is-liked' : ''}" data-newspaper-comment-like="${escHtml(comment.id)}"><i class="${comment.liked ? 'fas' : 'far'} fa-heart"></i><span>${Number(comment.like_count) || 0}</span></button>
+        ${canDelete ? `<button type="button" class="newspaper-comment-delete" data-newspaper-comment-delete="${escHtml(comment.id)}" data-newspaper-id="${escHtml(newspaper.id)}">Sil</button>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+async function renderNewspaperDetail(app, newspaperId) {
+  const safeId = String(newspaperId || '').split(/[?#]/)[0];
+  if (!/^\d+$/.test(safeId)) {
+    app.innerHTML = '<div class="container page"><div class="newspaper-empty"><strong>Gazete bulunamadı</strong><a href="/gazeteler" data-link class="btn btn-outline btn-sm">Gazete arşivine dön</a></div></div>';
+    return;
+  }
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let newspaper;
+  let comments;
+  try {
+    [newspaper, comments] = await Promise.all([
+      api(`/newspapers/${encodeURIComponent(safeId)}`),
+      api(`/newspapers/${encodeURIComponent(safeId)}/comments`),
+    ]);
+  } catch (error) {
+    app.innerHTML = `<div class="container page"><div class="newspaper-empty newspaper-error"><span class="newspaper-empty-icon"><i class="fas fa-newspaper"></i></span><strong>Gazete açılamadı</strong><span>${escHtml(error.message || 'Bu sayı bulunamadı.')}</span><a href="/gazeteler" data-link class="btn btn-outline btn-sm">Gazete arşivine dön</a></div></div>`;
+    return;
+  }
+  const isOwner = currentUser && Number(currentUser.id) === Number(newspaper.journalist_id);
+  document.title = `${newspaper.newspaper_name} – Gazeteler – ${siteName}`;
+  updatePageMeta(`${newspaper.newspaper_name} – ${formatNewspaperDate(newspaper.newspaper_date)}`, `${newspaper.newspaper_name} gazetesinin ${formatNewspaperDate(newspaper.newspaper_date)} tarihli sayısı.`, newspaper.image_url);
+  app.innerHTML = `
+    <div class="container page newspaper-detail-page">
+      <a href="/gazeteler" data-link class="newspaper-back-link"><i class="fas fa-arrow-left"></i> Tüm gazeteler</a>
+      <article class="newspaper-detail-card">
+        <header class="newspaper-detail-masthead">
+          <div class="newspaper-detail-brand"><span class="newspaper-detail-brand-icon"><i class="fas fa-newspaper"></i></span><span><small>CIGCIG BASIN ARŞİVİ</small><strong>${escHtml(newspaper.newspaper_name)}</strong></span></div>
+          <div class="newspaper-detail-date"><small>YAYIN TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date))}</strong><span>Sayı #${escHtml(newspaper.id)}</span></div>
+        </header>
+        <div class="newspaper-detail-rule"><span></span><i class="fas fa-star"></i><span></span></div>
+        <div class="newspaper-detail-sheet-wrap"><img class="newspaper-detail-sheet" src="${escHtml(newspaper.image_url)}" alt="${escHtml(newspaper.newspaper_name)} — ${escHtml(formatNewspaperDate(newspaper.newspaper_date))}" /></div>
+        <footer class="newspaper-detail-byline">
+          <a href="${profileRoute(newspaper.username)}" data-link class="newspaper-byline">
+            ${avatarImg(newspaper, 'newspaper-author-avatar')}
+            <span><small>BU SAYIYI YAYIMLAYAN GAZETECİ</small><strong>${userDisplayName(newspaper)}</strong></span>
+          </a>
+          ${isOwner ? `<button type="button" class="newspaper-delete-button" id="newspaper-detail-delete"><i class="fas fa-trash"></i> Sayıyı sil</button>` : ''}
+        </footer>
+        <div class="newspaper-detail-actions">
+          <button type="button" class="newspaper-action-button${newspaper.liked ? ' is-liked' : ''}" id="newspaper-detail-like"><i class="${newspaper.liked ? 'fas' : 'far'} fa-heart"></i><span>${Number(newspaper.like_count) || 0}</span><small>Beğen</small></button>
+          <button type="button" class="newspaper-action-button" id="newspaper-detail-share"><i class="fas fa-share-nodes"></i><span>${Number(newspaper.share_count) || 0}</span><small>Paylaş</small></button>
+          ${currentUser ? `<button type="button" class="newspaper-action-button" id="newspaper-detail-forward"><i class="fas fa-paper-plane"></i><span>İlet</span><small>Mesaj olarak gönder</small></button>` : ''}
+          <a href="#yorumlar" class="newspaper-action-button"><i class="far fa-comment"></i><span>${Number(newspaper.comment_count) || 0}</span><small>Yorumlar</small></a>
+        </div>
+      </article>
+      <section class="newspaper-comments-card" id="yorumlar">
+        <header class="newspaper-comments-heading"><span class="newspaper-comments-icon"><i class="fas fa-comments"></i></span><div><span class="newspaper-eyebrow">OKUR MEKTUPLARI</span><h2>Gazete üzerine konuş</h2></div><span class="newspaper-comments-total">${comments.length}</span></header>
+        ${currentUser ? `<form class="newspaper-comment-form" id="newspaper-comment-form">${avatarImg(currentUser, 'newspaper-comment-avatar')}<textarea id="newspaper-comment-input" maxlength="2000" rows="2" placeholder="Bu sayı hakkında ne düşünüyorsun?"></textarea><button type="submit" class="btn btn-primary" aria-label="Yorum gönder"><i class="fas fa-paper-plane"></i></button></form>` : '<p class="newspaper-comment-login">Yorum yapmak için <a href="/giris" data-link>giriş yapın</a>.</p>'}
+        <div class="newspaper-comments-list" id="newspaper-comments-list">${comments.length ? comments.map(comment => newspaperCommentHTML(comment, newspaper)).join('') : '<div class="newspaper-comments-empty"><i class="far fa-comment-dots"></i><span>Henüz yorum yok. İlk okur mektubunu sen yaz.</span></div>'}</div>
+      </section>
+    </div>`;
+
+  $('#newspaper-detail-like')?.addEventListener('click', async event => {
+    if (!currentUser) return navigate('/giris');
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await api(`/newspapers/${encodeURIComponent(safeId)}/like`, { method: 'POST' });
+      button.classList.toggle('is-liked', result.liked);
+      button.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+      button.querySelector('span').textContent = String(result.like_count);
+    } catch (error) { toast(error.message || 'Beğeni kaydedilemedi.', 'error'); }
+    finally { button.disabled = false; }
+  });
+  $('#newspaper-detail-share')?.addEventListener('click', () => shareNewspaper(newspaper));
+  $('#newspaper-detail-forward')?.addEventListener('click', () => showForwardNewspaperModal(newspaper));
+  $('#newspaper-detail-delete')?.addEventListener('click', async event => {
+    if (!confirm('Bu gazete sayı arşivden silinsin mi?')) return;
+    event.currentTarget.disabled = true;
+    try {
+      await api(`/newspapers/${encodeURIComponent(safeId)}`, { method: 'DELETE' });
+      toast('Gazete arşivden kaldırıldı.');
+      navigate('/gazeteler');
+    } catch (error) { toast(error.message || 'Gazete silinemedi.', 'error'); event.currentTarget.disabled = false; }
+  });
+
+  const commentForm = $('#newspaper-comment-form');
+  commentForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const input = $('#newspaper-comment-input');
+    const content = input.value.trim();
+    if (!content) return;
+    const button = commentForm.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await api(`/newspapers/${encodeURIComponent(safeId)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+      renderNewspaperDetail(app, safeId);
+    } catch (error) {
+      toast(error.message || 'Yorum gönderilemedi.', 'error');
+      button.disabled = false;
+    }
+  });
+  $('#newspaper-comments-list')?.addEventListener('click', async event => {
+    const likeButton = event.target.closest('[data-newspaper-comment-like]');
+    if (likeButton) {
+      if (!currentUser) return navigate('/giris');
+      likeButton.disabled = true;
+      try {
+        const result = await api(`/newspapers/${encodeURIComponent(safeId)}/comments/${encodeURIComponent(likeButton.dataset.newspaperCommentLike)}/like`, { method: 'POST' });
+        likeButton.classList.toggle('is-liked', result.liked);
+        likeButton.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+        likeButton.querySelector('span').textContent = String(result.like_count);
+      } catch (error) { toast(error.message || 'Yorum beğenilemedi.', 'error'); }
+      finally { likeButton.disabled = false; }
+      return;
+    }
+    const deleteButton = event.target.closest('[data-newspaper-comment-delete]');
+    if (deleteButton) {
+      if (!confirm('Yorum silinsin mi?')) return;
+      deleteButton.disabled = true;
+      try {
+        await api(`/newspapers/${encodeURIComponent(safeId)}/comments/${encodeURIComponent(deleteButton.dataset.newspaperCommentDelete)}`, { method: 'DELETE' });
+        renderNewspaperDetail(app, safeId);
+      } catch (error) { toast(error.message || 'Yorum silinemedi.', 'error'); deleteButton.disabled = false; }
+    }
+  });
+}
+
+async function shareNewspaper(newspaper) {
+  const url = `${location.origin}/gazete/${encodeURIComponent(newspaper.id)}`;
+  try {
+    if (navigator.share) await navigator.share({ title: newspaper.newspaper_name, text: `${newspaper.newspaper_name} · ${formatNewspaperDate(newspaper.newspaper_date)}`, url });
+    else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast('Gazete bağlantısı kopyalandı.');
+    } else window.prompt('Gazete bağlantısını kopyalayın:', url);
+  } catch (error) {
+    if (error.name !== 'AbortError') toast(error.message || 'Gazete paylaşılamadı.', 'error');
+    return;
+  }
+  try {
+    await api(`/newspapers/${encodeURIComponent(newspaper.id)}/share`, { method: 'POST' });
+  } catch (error) {
+    toast(`Gazete paylaşıldı ancak sayaç güncellenemedi: ${error.message || 'Sunucu hatası'}`, 'error');
+  }
+}
+
+function showNewspaperUploadModal() {
+  if (!currentUser) return navigate('/giris');
+  if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) {
+    return toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+  }
+  showModal('Gazeteni yayımla', `
+    <div class="newspaper-publish-choices">
+      <button type="button" class="newspaper-publish-choice" id="newspaper-create-choice">
+        <span class="newspaper-publish-choice-icon"><i class="fas fa-pen-ruler"></i></span>
+        <strong>Sıfırdan gazete oluştur</strong>
+        <small>A4 sayfada manşetini, metinlerini, fotoğraflarını ve gazete markanı tasarla.</small>
+        <span class="newspaper-publish-choice-cta">Tasarım editörünü aç <i class="fas fa-arrow-right"></i></span>
+      </button>
+      <button type="button" class="newspaper-publish-choice" id="newspaper-photo-choice">
+        <span class="newspaper-publish-choice-icon"><i class="fas fa-image"></i></span>
+        <strong>Hazır gazete görseli yükle</strong>
+        <small>Daha önce hazırladığın gazete sayfasını görsel olarak yükleyip yayımla.</small>
+        <span class="newspaper-publish-choice-cta">Görsel seç <i class="fas fa-arrow-right"></i></span>
+      </button>
+    </div>`);
+  $('#newspaper-create-choice')?.addEventListener('click', showNewspaperComposer);
+  $('#newspaper-photo-choice')?.addEventListener('click', showNewspaperPhotoUploadModal);
+}
+
+function showNewspaperPhotoUploadModal() {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  showModal('Yeni gazete yayımla', `
+    <form class="newspaper-upload-form" id="newspaper-upload-form">
+      <div class="newspaper-upload-banner"><span><i class="fas fa-feather-pointed"></i></span><div><strong>Yeni bir sayı arşive giriyor</strong><small>Gazete görselini, sayı adını ve basım tarihini ekleyin.</small></div></div>
+      <label class="newspaper-upload-field"><span>Gazete adı</span><input id="newspaper-name-input" name="newspaper_name" maxlength="100" required placeholder="Örn. CigCig Günlük" autocomplete="off" /></label>
+      <label class="newspaper-upload-field"><span>Gazete tarihi</span><input id="newspaper-date-input" name="newspaper_date" type="date" value="${today}" required /></label>
+      <label class="newspaper-upload-file" for="newspaper-image-input"><span class="newspaper-upload-file-icon"><i class="fas fa-cloud-arrow-up"></i></span><strong>Gazete görselini seç</strong><small>Dikey sayfa önerilir · JPG, PNG veya WebP · En fazla 25 MB</small><input id="newspaper-image-input" name="image" type="file" accept="image/*" required /></label>
+      <img class="newspaper-upload-preview hidden" id="newspaper-image-preview" alt="Gazete önizlemesi" />
+      <div id="newspaper-upload-error" class="form-error" role="alert"></div>
+      <button type="submit" class="btn btn-primary newspaper-upload-submit" id="newspaper-upload-submit"><i class="fas fa-paper-plane"></i> Gazeteyi yayımla</button>
+    </form>`);
+  const imageInput = $('#newspaper-image-input');
+  imageInput?.addEventListener('change', () => {
+    const file = imageInput.files?.[0];
+    const preview = $('#newspaper-image-preview');
+    if (!file || !preview) { preview?.classList.add('hidden'); return; }
+    if (!file.type.startsWith('image/')) {
+      $('#newspaper-upload-error').textContent = 'Lütfen bir gazete görseli seçin.';
+      imageInput.value = '';
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      $('#newspaper-upload-error').textContent = 'Görsel en fazla 25 MB olabilir.';
+      imageInput.value = '';
+      return;
+    }
+    $('#newspaper-upload-error').textContent = '';
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove('hidden');
+  });
+  $('#newspaper-upload-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const file = imageInput?.files?.[0];
+    if (!file) { $('#newspaper-upload-error').textContent = 'Gazete görseli seçin.'; return; }
+    const button = $('#newspaper-upload-submit');
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yükleniyor…';
+    try {
+      const form = new FormData();
+      form.append('newspaper_name', $('#newspaper-name-input').value.trim());
+      form.append('newspaper_date', $('#newspaper-date-input').value);
+      form.append('image', file);
+      await apiForm('/newspapers', form);
+      URL.revokeObjectURL($('#newspaper-image-preview')?.src || '');
+      hideModal();
+      navigate('/gazeteler');
+      toast('Gazeten arşivde yayımlandı.');
+    } catch (error) {
+      $('#newspaper-upload-error').textContent = error.message || 'Gazete yayımlanamadı.';
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-paper-plane"></i> Gazeteyi yayımla';
+    }
+  });
+}
+
+function newspaperReadImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Görsel okunamadı.'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('Bu görsel açılamadı.'));
+      image.onload = () => resolve({ src: String(reader.result), image });
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function showNewspaperComposer() {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const editorState = {
+    items: [],
+    selectedId: null,
+    mastheadImages: { left: null, right: null },
+    masthead: { brand: 'MÜDAFAA', subtitle: 'GAZETESİ', leftQuote: '“Hakikatin sesi, milletin gazetesi...”', rightQuote: '“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”', author: 'M. Kemal Atatürk', height: 42, brandSize: 40 },
+  };
+  showModal('A4 gazete tasarım editörü', `
+    <form class="newspaper-composer" id="newspaper-composer">
+      <div class="newspaper-composer-topbar">
+        <label><span>Sayı / gazete adı</span><input id="newspaper-name-input" maxlength="100" required placeholder="Örn. 17 Ekim Sabah Baskısı" /></label>
+        <label><span>Gazete tarihi</span><input id="newspaper-date-input" type="date" value="${today}" required /></label>
+        <div class="newspaper-composer-hint"><i class="fas fa-ruler-combined"></i> A4 · 210 × 297 mm</div>
+      </div>
+      <section class="newspaper-brand-panel">
+        <div class="newspaper-brand-heading"><span><i class="fas fa-stamp"></i></span><div><strong>Gazete markası</strong><small>Her sayının üstünde basılacak masthead</small></div></div>
+        <div class="newspaper-brand-fields">
+          <label><span>Marka adı</span><input data-masthead="brand" value="MÜDAFAA" maxlength="32" /></label>
+          <label><span>Alt başlık</span><input data-masthead="subtitle" value="GAZETESİ" maxlength="45" /></label>
+          <label><span>Sol alıntı</span><input data-masthead="leftQuote" value="“Hakikatin sesi, milletin gazetesi...”" maxlength="90" /></label>
+          <label><span>Sağ alıntı</span><input data-masthead="rightQuote" value="“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”" maxlength="120" /></label>
+          <label><span>Sağ alıntı imzası</span><input data-masthead="author" value="M. Kemal Atatürk" maxlength="45" /></label>
+          <label><span>Marka yazı boyutu · pt</span><input data-masthead="brandSize" type="number" min="18" max="90" value="40" /></label>
+          <label><span>Masthead yüksekliği · mm</span><input data-masthead="height" type="number" min="28" max="70" value="42" /></label>
+          <label class="newspaper-brand-image-field"><span>Sol görsel / amblem</span><input type="file" accept="image/*" data-masthead-image="left" /></label>
+          <label class="newspaper-brand-image-field"><span>Sağ görsel / bayrak</span><input type="file" accept="image/*" data-masthead-image="right" /></label>
+        </div>
+      </section>
+      <div class="newspaper-editor-workspace">
+        <aside class="newspaper-editor-tools">
+          <div class="newspaper-editor-tools-title"><i class="fas fa-layer-group"></i> Sayfa öğeleri</div>
+          <div class="newspaper-editor-add-tools">
+            <button type="button" data-add-newspaper-item="heading"><i class="fas fa-heading"></i><span>Başlık ekle</span></button>
+            <button type="button" data-add-newspaper-item="text"><i class="fas fa-align-left"></i><span>Metin ekle</span></button>
+            <button type="button" data-add-newspaper-item="image"><i class="fas fa-image"></i><span>Fotoğraf ekle</span></button>
+            <button type="button" data-add-newspaper-item="line"><i class="fas fa-minus"></i><span>Çizgi çek</span></button>
+          </div>
+          <input id="newspaper-item-image-input" type="file" accept="image/*" hidden />
+          <div class="newspaper-editor-selection" id="newspaper-editor-selection"><div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div></div>
+          <p class="newspaper-editor-tip"><i class="fas fa-hand-pointer"></i> Öğeleri sayfada sürükleyerek taşı. Köşesinden çekerek yeniden boyutlandır.</p>
+          <div id="newspaper-compose-error" class="form-error" role="alert"></div>
+          <button type="submit" class="btn btn-primary newspaper-composer-publish" id="newspaper-compose-submit"><i class="fas fa-paper-plane"></i> Gazeteyi yayımla</button>
+        </aside>
+        <div class="newspaper-editor-stage-wrap">
+          <div class="newspaper-editor-scale-note"><span>ÖNİZLEME</span><span>Sayfada sürükleyerek düzenle</span></div>
+          <div class="newspaper-editor-sheet" id="newspaper-editor-sheet">
+            <header class="newspaper-editor-masthead" id="newspaper-editor-masthead">
+              <div class="newspaper-masthead-side newspaper-masthead-left">
+                <img class="newspaper-masthead-art hidden" data-masthead-art="left" alt="" />
+                <i class="newspaper-masthead-default-left fas fa-landmark" data-masthead-default="left" aria-hidden="true"></i>
+                <p data-masthead-preview="leftQuote"></p>
+              </div>
+              <div class="newspaper-masthead-center"><strong data-masthead-preview="brand"></strong><span data-masthead-preview="subtitle"></span></div>
+              <div class="newspaper-masthead-side newspaper-masthead-right">
+                <p data-masthead-preview="rightQuote"></p>
+                <img class="newspaper-masthead-art hidden" data-masthead-art="right" alt="" />
+                <span class="newspaper-masthead-default-flag" data-masthead-default="right" aria-hidden="true"><i class="fas fa-star"></i></span>
+                <small data-masthead-preview="author"></small>
+              </div>
+            </header>
+            <div class="newspaper-editor-issue-strip" id="newspaper-editor-issue-strip"><span data-newspaper-issue-date></span><strong data-newspaper-issue-name></strong></div>
+            <div class="newspaper-editor-page-rule"></div>
+            <div class="newspaper-editor-items" id="newspaper-editor-items"></div>
+          </div>
+        </div>
+      </div>
+    </form>`, 'newspaper-editor-modal');
+
+  const sheet = $('#newspaper-editor-sheet');
+  const itemsLayer = $('#newspaper-editor-items');
+  const selectionPanel = $('#newspaper-editor-selection');
+  let nextItemId = 1;
+
+  const drawMasthead = () => {
+    editorState.masthead.height = Math.min(70, Math.max(28, Number(editorState.masthead.height) || 42));
+    editorState.masthead.brandSize = Math.min(90, Math.max(18, Number(editorState.masthead.brandSize) || 40));
+    Object.entries(editorState.masthead).forEach(([key, value]) => {
+      const preview = document.querySelector(`[data-masthead-preview="${key}"]`);
+      if (preview) preview.textContent = value;
+    });
+    const brand = $('[data-masthead-preview="brand"]');
+    const mastheadHeightPx = editorState.masthead.height / 210 * sheet.clientWidth;
+    if (brand) brand.style.fontSize = `${Math.min(editorState.masthead.brandSize * 96 / 72 * sheet.clientWidth / 794, mastheadHeightPx * .39)}px`;
+    const masthead = $('#newspaper-editor-masthead');
+    if (masthead) masthead.style.height = `${editorState.masthead.height / 297 * 100}%`;
+    const strip = $('#newspaper-editor-issue-strip');
+    if (strip) strip.style.top = `${(editorState.masthead.height + 2.3) / 297 * 100}%`;
+    const rule = $('.newspaper-editor-page-rule');
+    if (rule) rule.style.top = `${(editorState.masthead.height + 1.7) / 297 * 100}%`;
+    const issueName = $('#newspaper-name-input')?.value.trim() || 'GAZETE SAYISI';
+    const issueDate = formatNewspaperDate($('#newspaper-date-input')?.value || '', { day: '2-digit', month: 'long', year: 'numeric' });
+    $('[data-newspaper-issue-name]')?.replaceChildren(document.createTextNode(issueName));
+    $('[data-newspaper-issue-date]')?.replaceChildren(document.createTextNode(issueDate));
+    editorState.items.forEach(item => {
+      item.y = Math.max(editorState.masthead.height + 7, item.y);
+      item.y = Math.min(297 - item.h, item.y);
+    });
+    ['left', 'right'].forEach(side => {
+      const image = document.querySelector(`[data-masthead-art="${side}"]`);
+      const fallback = document.querySelector(`[data-masthead-default="${side}"]`);
+      const asset = editorState.mastheadImages[side];
+      if (image) {
+        image.classList.toggle('hidden', !asset);
+        image.src = asset?.src || '';
+      }
+      fallback?.classList.toggle('hidden', !!asset);
+    });
+  };
+  const renderItems = () => {
+    itemsLayer.innerHTML = editorState.items.map(item => {
+      const selected = item.id === editorState.selectedId;
+      const content = item.type === 'image'
+        ? `<img src="${item.asset.src}" alt="" draggable="false" />`
+        : item.type === 'line' ? '<span class="newspaper-editor-line"></span>' : `<span>${escHtml(item.content)}</span>`;
+      const fontSize = item.size * 96 / 72 * sheet.clientWidth / 794;
+      return `<div class="newspaper-editor-item newspaper-editor-item-${item.type}${selected ? ' is-selected' : ''}" data-newspaper-item="${item.id}" style="left:${item.x / 210 * 100}%;top:${item.y / 297 * 100}%;width:${item.w / 210 * 100}%;height:${item.h / 297 * 100}%;color:${escHtml(item.color)};font-family:${escHtml(item.font)};font-size:${fontSize}px">
+        ${content}${selected ? '<button type="button" class="newspaper-editor-resize" aria-label="Öğeyi yeniden boyutlandır"></button>' : ''}
+      </div>`;
+    }).join('');
+    renderSelection();
+  };
+  const renderSelection = () => {
+    const item = editorState.items.find(candidate => candidate.id === editorState.selectedId);
+    if (!item) {
+      selectionPanel.innerHTML = '<div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div>';
+      return;
+    }
+    selectionPanel.innerHTML = `
+      <div class="newspaper-editor-inspector-heading"><strong>${item.type === 'heading' ? 'Başlık' : item.type === 'text' ? 'Metin' : item.type === 'image' ? 'Fotoğraf' : 'Çizgi'} özellikleri</strong><button type="button" id="newspaper-item-delete" aria-label="Öğeyi sil"><i class="fas fa-trash"></i></button></div>
+      ${item.type === 'heading' || item.type === 'text' ? `<label><span>İçerik</span><textarea data-item-property="content" rows="3">${escHtml(item.content)}</textarea></label>
+        <label><span>Yazı karakteri</span><select data-item-property="font"><option value="Georgia" ${item.font === 'Georgia' ? 'selected' : ''}>Georgia — gazete serif</option><option value="'Times New Roman'" ${item.font === "'Times New Roman'" ? 'selected' : ''}>Times New Roman</option><option value="Arial" ${item.font === 'Arial' ? 'selected' : ''}>Arial</option><option value="'Courier New'" ${item.font === "'Courier New'" ? 'selected' : ''}>Courier</option></select></label>
+        <label><span>Yazı boyutu · pt</span><input data-item-property="size" type="number" min="8" max="96" value="${item.size}" /></label>
+        <label><span>Yazı rengi</span><input data-item-property="color" type="color" value="${item.color}" /></label>` : ''}
+      <div class="newspaper-editor-dimensions"><label><span>Genişlik · mm</span><input data-item-property="w" type="number" min="8" max="200" step="1" value="${Math.round(item.w)}" /></label><label><span>Yükseklik · mm</span><input data-item-property="h" type="number" min="4" max="280" step="1" value="${Math.round(item.h)}" /></label></div>`;
+    selectionPanel.querySelectorAll('[data-item-property]').forEach(input => {
+      const update = () => {
+        const keepFocus = document.activeElement === input;
+        const selectionStart = input.selectionStart;
+        const selectionEnd = input.selectionEnd;
+        const property = input.dataset.itemProperty;
+        if (property === 'content' || property === 'font' || property === 'color') item[property] = input.value;
+        else if (property === 'size') item.size = Math.min(96, Math.max(8, Number(input.value) || 8));
+        else if (property === 'w') item.w = Math.min(210 - item.x, Math.max(8, Number(input.value) || 8));
+        else if (property === 'h') item.h = Math.min(297 - item.y, Math.max(4, Number(input.value) || 4));
+        renderItems();
+        const refreshed = selectionPanel.querySelector(`[data-item-property="${property}"]`);
+        if (refreshed && keepFocus) {
+          refreshed.focus();
+          if (typeof selectionStart === 'number' && typeof selectionEnd === 'number') refreshed.setSelectionRange(selectionStart, selectionEnd);
+        }
+      };
+      input.addEventListener(input.type === 'color' || input.tagName === 'SELECT' ? 'change' : 'input', update);
+    });
+    $('#newspaper-item-delete')?.addEventListener('click', () => {
+      editorState.items = editorState.items.filter(candidate => candidate.id !== item.id);
+      editorState.selectedId = null;
+      renderItems();
+    });
+  };
+  const addItem = (type, asset = null) => {
+    const item = {
+      id: nextItemId++, type, x: 14, y: 58 + editorState.items.length * 27,
+      w: type === 'line' ? 180 : type === 'image' ? 82 : 145,
+      h: type === 'heading' ? 18 : type === 'text' ? 34 : type === 'image' ? 65 : 1,
+      content: type === 'heading' ? 'HABER BAŞLIĞI' : type === 'text' ? 'Haber metnini buraya yazın.' : '',
+      font: 'Georgia', size: type === 'heading' ? 24 : 12, color: '#1f1d19', asset,
+    };
+    item.y = Math.min(item.y, 297 - item.h - 4);
+    editorState.items.push(item);
+    editorState.selectedId = item.id;
+    renderItems();
+    selectionPanel.querySelector('[data-item-property="content"]')?.focus();
+  };
+  const getPosition = event => {
+    const bounds = sheet.getBoundingClientRect();
+    return { x: (event.clientX - bounds.left) / bounds.width * 210, y: (event.clientY - bounds.top) / bounds.width * 210 };
+  };
+  const publish = async event => {
+    event.preventDefault();
+    const button = $('#newspaper-compose-submit');
+    const error = $('#newspaper-compose-error');
+    if (!editorState.items.length) { error.textContent = 'Gazetene en az bir başlık, metin, fotoğraf veya çizgi ekle.'; return; }
+    const name = $('#newspaper-name-input').value.trim();
+    const date = $('#newspaper-date-input').value;
+    if (!name || !date) { error.textContent = 'Gazete adı ve tarihi gerekli.'; return; }
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> A4 sayfa hazırlanıyor…';
+    error.textContent = '';
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1240;
+      canvas.height = 1754;
+      const context = canvas.getContext('2d');
+      const scale = canvas.width / 210;
+      context.fillStyle = '#faf8f0';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = 'rgba(105,88,60,.025)';
+      for (let y = 0; y < canvas.height; y += 5) context.fillRect(0, y, canvas.width, 1);
+      const mm = value => value * scale;
+      const mastheadHeight = mm(Number(editorState.masthead.height));
+      const padding = mm(5);
+      const sideWidth = canvas.width * .25;
+      const drawImageContain = (image, x, y, width, height) => {
+        if (!image?.naturalWidth) return;
+        const imageScale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+        const drawWidth = image.naturalWidth * imageScale;
+        const drawHeight = image.naturalHeight * imageScale;
+        context.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+      };
+      const wrapText = (text, maxWidth) => {
+        const lines = [];
+        String(text || '').split('\n').forEach(paragraph => {
+          let line = '';
+          paragraph.split(/\s+/).forEach(word => {
+            const next = line ? `${line} ${word}` : word;
+            if (line && context.measureText(next).width > maxWidth) { lines.push(line); line = word; }
+            else line = next;
+          });
+          lines.push(line);
+        });
+        return lines;
+      };
+      const drawSideText = (text, x, y, maxWidth, font, align = 'left', color = '#24221f') => {
+        context.font = font;
+        context.fillStyle = color;
+        context.textAlign = align;
+        const lines = wrapText(text, maxWidth);
+        const lineHeight = parseFloat(font.match(/(\d+(?:\.\d+)?)px/)?.[1] || '12') * 1.12;
+        lines.forEach((line, index) => context.fillText(line, x, y + index * lineHeight));
+      };
+      context.strokeStyle = '#24221f';
+      context.lineWidth = Math.max(1, mm(.22));
+      context.strokeRect(padding, padding, canvas.width - padding * 2, mastheadHeight - padding);
+      const leftArt = { x: padding * 2, y: padding * 1.5, width: sideWidth * .45, height: mastheadHeight - padding * 2.5 };
+      const rightArt = { x: canvas.width - sideWidth * .45 - padding * 2, y: padding * 1.5, width: sideWidth * .45, height: mastheadHeight - padding * 2.5 };
+      if (editorState.mastheadImages.left) drawImageContain(editorState.mastheadImages.left.image, leftArt.x, leftArt.y, leftArt.width, leftArt.height);
+      else {
+        context.fillStyle = '#282721';
+        context.fillRect(leftArt.x + leftArt.width * .18, leftArt.y + leftArt.height * .78, leftArt.width * .68, leftArt.height * .1);
+        context.beginPath();
+        context.moveTo(leftArt.x + leftArt.width * .22, leftArt.y + leftArt.height * .78);
+        context.lineTo(leftArt.x + leftArt.width * .5, leftArt.y + leftArt.height * .17);
+        context.lineTo(leftArt.x + leftArt.width * .8, leftArt.y + leftArt.height * .78);
+        context.closePath();
+        context.fill();
+        context.fillRect(leftArt.x + leftArt.width * .44, leftArt.y + leftArt.height * .28, leftArt.width * .12, leftArt.height * .5);
+      }
+      if (editorState.mastheadImages.right) drawImageContain(editorState.mastheadImages.right.image, rightArt.x, rightArt.y, rightArt.width, rightArt.height);
+      else {
+        const flagWidth = rightArt.width * .78;
+        const flagHeight = Math.min(rightArt.height * .56, flagWidth * .68);
+        const flagX = rightArt.x + (rightArt.width - flagWidth) / 2;
+        const flagY = rightArt.y + (rightArt.height - flagHeight) / 2;
+        const radius = flagHeight * .32;
+        context.fillStyle = '#c93435';
+        context.fillRect(flagX, flagY, flagWidth, flagHeight);
+        context.fillStyle = '#fff';
+        context.beginPath();
+        context.arc(flagX + flagWidth * .39, flagY + flagHeight / 2, radius, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = '#c93435';
+        context.beginPath();
+        context.arc(flagX + flagWidth * .45, flagY + flagHeight / 2, radius * .78, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = '#fff';
+        context.font = `${radius * .78}px Arial`;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText('★', flagX + flagWidth * .58, flagY + flagHeight / 2);
+      }
+      const centerX = canvas.width / 2;
+      const centerWidth = canvas.width - sideWidth * 2;
+      const brandSize = Math.min(mm(Number(editorState.masthead.brandSize) * 25.4 / 72), mastheadHeight * .39);
+      context.textAlign = 'center';
+      context.fillStyle = '#111111';
+      context.font = `900 ${brandSize}px Georgia, "Times New Roman", serif`;
+      context.fillText(editorState.masthead.brand, centerX, mastheadHeight * .61, centerWidth - padding * 2);
+      context.font = `700 ${mm(7)}px Georgia, "Times New Roman", serif`;
+      context.letterSpacing = `${mm(2)}px`;
+      context.fillText(editorState.masthead.subtitle, centerX, mastheadHeight * .84, centerWidth - padding * 2);
+      context.letterSpacing = '0px';
+      const quoteFont = `italic ${mm(3.3)}px Georgia, "Times New Roman", serif`;
+      drawSideText(editorState.masthead.leftQuote, padding * 2 + sideWidth * .48, mastheadHeight * .4, sideWidth * .42 - padding, quoteFont);
+      drawSideText(editorState.masthead.rightQuote, canvas.width - sideWidth * .48 - padding * 2, mastheadHeight * .38, sideWidth * .42 - padding, quoteFont, 'right');
+      drawSideText(editorState.masthead.author, canvas.width - sideWidth * .48 - padding * 2, mastheadHeight * .79, sideWidth * .42 - padding, `italic ${mm(2.8)}px Georgia, "Times New Roman", serif`, 'right');
+      context.beginPath();
+      context.moveTo(padding, mastheadHeight);
+      context.lineTo(canvas.width - padding, mastheadHeight);
+      context.lineWidth = mm(.4);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(padding, mastheadHeight + mm(1.2));
+      context.lineTo(canvas.width - padding, mastheadHeight + mm(1.2));
+      context.lineWidth = mm(.15);
+      context.stroke();
+      context.textBaseline = 'middle';
+      context.textAlign = 'left';
+      context.fillStyle = '#39352f';
+      context.font = `700 ${mm(2.5)}px Georgia, "Times New Roman", serif`;
+      context.fillText(formatNewspaperDate(date, { day: '2-digit', month: 'long', year: 'numeric' }), padding * 1.5, mastheadHeight + mm(4.2));
+      context.textAlign = 'right';
+      context.fillText(name, canvas.width - padding * 1.5, mastheadHeight + mm(4.2), canvas.width * .65);
+
+      for (const item of editorState.items) {
+        const x = mm(item.x), y = mm(item.y), width = mm(item.w), height = mm(item.h);
+        context.save();
+        context.fillStyle = item.color;
+        if (item.type === 'line') {
+          context.fillRect(x, y + Math.max(mm(.2), height / 2), width, Math.max(mm(.25), height));
+        } else if (item.type === 'image') {
+          drawImageContain(item.asset.image, x, y, width, height);
+        } else {
+          const fontSize = item.size * 96 / 72 * scale;
+          context.font = `${item.type === 'heading' ? '700' : '400'} ${fontSize}px ${item.font}`;
+          context.textAlign = 'left';
+          context.textBaseline = 'top';
+          const lineHeight = fontSize * (item.type === 'heading' ? 1.12 : 1.35);
+          context.beginPath();
+          context.rect(x, y, width, height);
+          context.clip();
+          wrapText(item.content, width).forEach((line, index) => context.fillText(line, x, y + index * lineHeight, width));
+        }
+        context.restore();
+      }
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
+      if (!blob) throw new Error('Gazete görseli oluşturulamadı.');
+      if (blob.size > 25 * 1024 * 1024) throw new Error('Oluşturulan gazete 25 MB sınırını aştı.');
+      const form = new FormData();
+      form.append('newspaper_name', name);
+      form.append('newspaper_date', date);
+      form.append('image', new File([blob], 'a4-gazete.jpg', { type: 'image/jpeg' }));
+      await apiForm('/newspapers', form);
+      hideModal();
+      navigate('/gazeteler');
+      toast('A4 gazeten arşivde yayımlandı.');
+    } catch (publishError) {
+      error.textContent = publishError.message || 'Gazete yayımlanamadı.';
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-paper-plane"></i> Gazeteyi yayımla';
+    }
+  };
+
+  document.querySelectorAll('[data-masthead]').forEach(input => {
+    const update = () => {
+      const key = input.dataset.masthead;
+      editorState.masthead[key] = input.type === 'number' ? Number(input.value) : input.value;
+      drawMasthead();
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+  });
+  ['#newspaper-name-input', '#newspaper-date-input'].forEach(selector => {
+    $(selector)?.addEventListener('input', drawMasthead);
+    $(selector)?.addEventListener('change', drawMasthead);
+  });
+  document.querySelectorAll('[data-masthead-image]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
+        $('#newspaper-compose-error').textContent = 'Masthead görseli en fazla 10 MB olmalıdır.';
+        input.value = '';
+        return;
+      }
+      try {
+        editorState.mastheadImages[input.dataset.mastheadImage] = await newspaperReadImage(file);
+        drawMasthead();
+      } catch (error) { $('#newspaper-compose-error').textContent = error.message; }
+    });
+  });
+  document.querySelectorAll('[data-add-newspaper-item]').forEach(button => button.addEventListener('click', () => {
+    const type = button.dataset.addNewspaperItem;
+    if (type === 'image') { $('#newspaper-item-image-input').click(); return; }
+    addItem(type);
+  }));
+  $('#newspaper-item-image-input')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
+      $('#newspaper-compose-error').textContent = 'Sayfa görseli en fazla 10 MB olmalıdır.';
+      return;
+    }
+    try {
+      $('#newspaper-compose-error').textContent = '';
+      addItem('image', await newspaperReadImage(file));
+    } catch (error) { $('#newspaper-compose-error').textContent = error.message; }
+  });
+  itemsLayer.addEventListener('pointerdown', event => {
+    const element = event.target.closest('[data-newspaper-item]');
+    if (!element) return;
+    const item = editorState.items.find(candidate => candidate.id === Number(element.dataset.newspaperItem));
+    if (!item) return;
+    editorState.selectedId = item.id;
+    renderItems();
+    event.preventDefault();
+    const selected = itemsLayer.querySelector(`[data-newspaper-item="${item.id}"]`);
+    const resizing = event.target.closest('.newspaper-editor-resize');
+    const start = getPosition(event);
+    const origin = { x: item.x, y: item.y, w: item.w, h: item.h };
+    selected.setPointerCapture(event.pointerId);
+    const move = moveEvent => {
+      const position = getPosition(moveEvent);
+      if (resizing) {
+        item.w = Math.min(210 - origin.x, Math.max(8, origin.w + position.x - start.x));
+        item.h = Math.min(297 - origin.y, Math.max(4, origin.h + position.y - start.y));
+      } else {
+        item.x = Math.max(0, Math.min(210 - item.w, origin.x + position.x - start.x));
+        item.y = Math.max(editorState.masthead.height + 3, Math.min(297 - item.h, origin.y + position.y - start.y));
+      }
+      const updated = itemsLayer.querySelector(`[data-newspaper-item="${item.id}"]`);
+      if (updated) {
+        updated.style.left = `${item.x / 210 * 100}%`;
+        updated.style.top = `${item.y / 297 * 100}%`;
+        updated.style.width = `${item.w / 210 * 100}%`;
+        updated.style.height = `${item.h / 297 * 100}%`;
+      }
+    };
+    const finish = () => {
+      selected.removeEventListener('pointermove', move);
+      selected.removeEventListener('pointerup', finish);
+      selected.removeEventListener('pointercancel', finish);
+      renderItems();
+    };
+    selected.addEventListener('pointermove', move);
+    selected.addEventListener('pointerup', finish);
+    selected.addEventListener('pointercancel', finish);
+  });
+  $('#newspaper-composer')?.addEventListener('submit', publish);
+  const mastheadResizeObserver = new ResizeObserver(() => {
+    if (!sheet.isConnected) mastheadResizeObserver.disconnect();
+    else drawMasthead();
+  });
+  mastheadResizeObserver.observe(sheet);
+  drawMasthead();
+  renderItems();
+}
+
+async function showForwardNewspaperModal(newspaper) {
+  if (!currentUser) return navigate('/giris');
+  let conversations;
+  try { conversations = await api('/conversations'); }
+  catch (error) {
+    return showModal('Gazeteyi ilet', `<div class="newspaper-forward-error"><i class="fas fa-triangle-exclamation"></i><strong>Mesajlaşmalar yüklenemedi</strong><span>${escHtml(error.message || 'Tekrar deneyin.')}</span></div>`);
+  }
+  const listHTML = conversations.length
+    ? conversations.map(conversation => `<button type="button" class="newspaper-forward-user" data-username="${escHtml(conversation.other_username)}">${avatarImg(conversation, 'avatar-sm')}<span><strong>${escHtml(conversation.other_nickname || conversation.other_username)}</strong><small>@${escHtml(conversation.other_username)}</small></span><i class="fas fa-arrow-up-right-from-square"></i></button>`).join('')
+    : '<div class="newspaper-forward-empty">Henüz mesajlaşmanız yok. Kullanıcı adını yazarak yine de iletebilirsiniz.</div>';
+  showModal('Gazeteyi ilet', `
+    <div class="newspaper-forward-preview"><i class="fas fa-newspaper"></i><span><strong>${escHtml(newspaper.newspaper_name)}</strong><small>${escHtml(formatNewspaperDate(newspaper.newspaper_date))}</small></span></div>
+    <input id="newspaper-forward-search" class="newspaper-forward-search" type="search" placeholder="Mesajlaştığın kişileri filtrele..." />
+    <div id="newspaper-forward-list" class="newspaper-forward-list">${listHTML}</div>
+    <div class="newspaper-forward-send"><input id="newspaper-forward-username" type="text" placeholder="Kullanıcı adı" autocomplete="off" /><button type="button" class="btn btn-primary" id="newspaper-forward-send"><i class="fas fa-paper-plane"></i> İlet</button></div>
+    <div id="newspaper-forward-error" class="form-error"></div>`);
+  $('#newspaper-forward-search')?.addEventListener('input', event => {
+    const query = event.target.value.toLocaleLowerCase('tr-TR');
+    $$('#newspaper-forward-list .newspaper-forward-user').forEach(button => {
+      button.style.display = button.dataset.username.toLocaleLowerCase('tr-TR').includes(query) ? '' : 'none';
+    });
+  });
+  $$('#newspaper-forward-list .newspaper-forward-user').forEach(button => button.addEventListener('click', () => {
+    $('#newspaper-forward-username').value = button.dataset.username;
+  }));
+  $('#newspaper-forward-send')?.addEventListener('click', async event => {
+    const username = $('#newspaper-forward-username').value.trim();
+    const errorEl = $('#newspaper-forward-error');
+    if (!username) { errorEl.textContent = 'İleteceğiniz kullanıcıyı seçin veya kullanıcı adını yazın.'; return; }
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ shared_newspaper_id: newspaper.id }),
+      });
+      hideModal();
+      toast('Gazete iletildi.');
+      navigate('/mesajlar/' + encodeURIComponent(username));
+    } catch (error) {
+      errorEl.textContent = error.message || 'Gazete iletilemedi.';
+      button.disabled = false;
+    }
+  });
 }
 
 
@@ -5835,7 +6709,7 @@ async function renderBadges(app) {
     return;
   }
 
-  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', vmb: 'Topluluk rozeti' };
+  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti' };
   const badgeRows = badges.length ? badges.map(badge => {
     const isLockedAdminBadge = badge.key === 'admin';
     return `
@@ -5892,6 +6766,10 @@ async function renderBadges(app) {
         if (status) status.textContent = toggle.checked ? 'Profilde görünüyor' : 'Profilde gizli';
         toggle.parentElement.title = toggle.checked ? 'Profilde gizle' : 'Profilde göster';
         if (key === 'level') currentUser.show_level_badge = toggle.checked ? 1 : 0;
+        if (key === 'journalist') {
+          const journalist = journalistDirectory.get(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+          if (journalist) journalist.show_journalist_icon = toggle.checked ? 1 : 0;
+        }
         toast(toggle.checked ? 'Rozet profilinde gösteriliyor' : 'Rozet profilden gizlendi');
       } catch (e) {
         toggle.checked = previous;
@@ -7691,7 +8569,6 @@ async function init() {
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
-    siteAuthRequired = ps.auth_required === '1';
     const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
     if (Number.isInteger(configuredPhotoClip) && configuredPhotoClip >= 1 && configuredPhotoClip <= 300) {
       photoSongClipSeconds = configuredPhotoClip;
@@ -7722,6 +8599,16 @@ async function init() {
       footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
     }
   } catch {}
+  try {
+    const journalists = await api('/journalists');
+    journalistDirectory.clear();
+    journalists.forEach(journalist => {
+      journalistDirectory.set(String(journalist.username || '').toLocaleLowerCase('tr-TR'), journalist);
+    });
+  } catch (error) {
+    console.warn('Gazeteci listesi yüklenemedi:', error.message);
+  }
+  updateNavUI();
   loadAnnouncements();
   renderRoute(location.pathname + location.search);
   if (currentUser) {
@@ -7948,9 +8835,6 @@ async function showForwardPhotoModal(photoId) {
 
 // ===== MESAJLAR SAYFASI =====
 let dmLockSettings = { search_unlock_enabled: false, icon_unlock_enabled: true, has_search_code: false };
-let dmSearchUnlockCode = '';
-let dmIconUnlockCode = '';
-let dmSearchUnlockedConvs = [];
 
 function updateConversationMuteState(conversation, hours) {
   const isUser1 = String(conversation.user1_id) === String(currentUser.id);
@@ -8807,6 +9691,12 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                     ${m.story_media_url ? `<img src="${escHtml(m.story_media_url)}" alt="" />` : ''}
                     <div><b>${escHtml(m.story_username || 'Hikaye')}</b><small>Hikaye yanıtı</small></div>
                   </div>`
+               : ''}
+             ${m.shared_newspaper_id
+               ? `<a class="dm-shared-newspaper" href="/gazete/${encodeURIComponent(m.shared_newspaper_id)}" data-link>
+                    ${m.newspaper_image ? `<img src="${escHtml(m.newspaper_image)}" alt="" />` : '<span class="dm-shared-newspaper-icon"><i class="fas fa-newspaper"></i></span>'}
+                    <span><strong>${escHtml(m.newspaper_name || 'Gazete')}</strong><small>${m.newspaper_date ? escHtml(formatNewspaperDate(m.newspaper_date)) : 'Gazeteler →'}</small></span>
+                  </a>`
                : ''}
              ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
            </div>`}

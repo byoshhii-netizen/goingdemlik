@@ -397,6 +397,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
+    journalists: renderJournalists,
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
@@ -726,6 +727,93 @@ async function renderUserDirectory(main) {
   $('#user-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
     renderUsersTable(users.filter(u => u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.ip||'').includes(q)));
+  });
+}
+
+async function renderJournalists(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  let users;
+  let journalists;
+  try {
+    [users, journalists] = await Promise.all([adminApi('/users'), adminApi('/journalists')]);
+  } catch (error) {
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)">${escHtml(error.message || 'Gazeteciler yüklenemedi.')}</div></div>`;
+    return;
+  }
+
+  const journalistIds = new Set(journalists.map(item => String(item.user_id)));
+  const candidates = users.filter(user => !journalistIds.has(String(user.id)) && !user.is_deleted);
+  main.innerHTML = `
+    <section class="journalist-admin-hero">
+      <span class="journalist-admin-hero-icon"><i class="fas fa-newspaper"></i></span>
+      <div><span class="journalist-admin-kicker">CIGCIG BASIN</span><h1>Gazeteci yönetimi</h1><p>Güvenilir gazetecileri belirleyin. Gazetecilik rozeti otomatik verilir ve görev sona erdiğinde kaldırılır.</p></div>
+      <span class="journalist-admin-total"><strong>${journalists.length}</strong><small>aktif gazeteci</small></span>
+    </section>
+    <section class="journalist-admin-assign card">
+      <div class="journalist-admin-section-heading"><span class="journalist-admin-section-icon"><i class="fas fa-user-plus"></i></span><div><h2>Yeni gazeteci ekle</h2><p>Kayıtlı kullanıcılardan birini gazeteci olarak yetkilendirin.</p></div></div>
+      <div class="journalist-admin-picker">
+        <label for="journalist-user-search">Kullanıcı ara</label>
+        <input id="journalist-user-search" type="search" placeholder="Kullanıcı adı veya görünen ad..." autocomplete="off" />
+        <select id="journalist-user-select" size="6" aria-label="Gazeteci olarak eklenecek kullanıcı"></select>
+        <button type="button" class="btn btn-primary" id="journalist-assign-btn"><i class="fas fa-user-check"></i> Seçili kullanıcıyı gazeteci yap</button>
+        <div id="journalist-admin-error" class="form-error" role="alert"></div>
+      </div>
+    </section>
+    <section class="journalist-admin-list-section">
+      <div class="journalist-admin-list-heading"><div><span class="journalist-admin-kicker">YAYIN EKİBİ</span><h2>Gazeteciler</h2></div><span>${journalists.length} kişi</span></div>
+      <div class="journalist-admin-list" id="journalist-admin-list">
+        ${journalists.length ? journalists.map(journalist => `
+          <article class="journalist-admin-card">
+            <span class="journalist-admin-avatar">${journalist.avatar && !journalist.avatar_removed ? `<img src="${escHtml(journalist.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
+            <span class="journalist-admin-person"><strong>${escHtml(journalist.nickname || journalist.username)}</strong><small>@${escHtml(journalist.username)} · ${new Date(journalist.assigned_at).toLocaleDateString('tr-TR')} tarihinden beri</small></span>
+            <span class="journalist-admin-active"><i class="fas fa-circle"></i> Aktif</span>
+            <button type="button" class="btn btn-ghost btn-sm journalist-remove-btn" data-id="${escHtml(journalist.user_id)}" aria-label="${escHtml(journalist.username)} gazeteciliğini kaldır"><i class="fas fa-user-minus"></i><span>Kaldır</span></button>
+          </article>`).join('') : '<div class="journalist-admin-empty"><i class="fas fa-newspaper"></i><strong>Henüz gazeteci yok</strong><span>İlk gazeteciyi yukarıdan ekleyebilirsiniz.</span></div>'}
+      </div>
+    </section>`;
+
+  const search = $('#journalist-user-search');
+  const select = $('#journalist-user-select');
+  const renderCandidates = () => {
+    const q = search.value.trim().toLocaleLowerCase('tr-TR');
+    const matches = candidates.filter(user =>
+      `${user.username || ''} ${user.nickname || ''}`.toLocaleLowerCase('tr-TR').includes(q)
+    ).slice(0, 100);
+    select.innerHTML = matches.map(user =>
+      `<option value="${escHtml(user.id)}">${escHtml(user.nickname || user.username)} · @${escHtml(user.username)}</option>`
+    ).join('');
+  };
+  renderCandidates();
+  search.addEventListener('input', renderCandidates);
+  $('#journalist-assign-btn').addEventListener('click', async event => {
+    const userId = select.value;
+    const message = $('#journalist-admin-error');
+    if (!userId) { message.textContent = 'Önce kullanıcı seçin.'; return; }
+    event.currentTarget.disabled = true;
+    message.textContent = '';
+    try {
+      await adminApi(`/journalists/${encodeURIComponent(userId)}`, { method: 'POST' });
+      toast('Gazeteci başarıyla eklendi.');
+      renderJournalists(main);
+    } catch (error) {
+      message.textContent = error.message || 'Gazeteci eklenemedi.';
+      event.currentTarget.disabled = false;
+    }
+  });
+  main.querySelectorAll('.journalist-remove-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const journalist = journalists.find(item => String(item.user_id) === button.dataset.id);
+      if (!journalist || !confirm(`@${journalist.username} kullanıcısının gazeteciliği kaldırılsın mı?`)) return;
+      button.disabled = true;
+      try {
+        await adminApi(`/journalists/${encodeURIComponent(button.dataset.id)}`, { method: 'DELETE' });
+        toast('Gazetecilik yetkisi kaldırıldı.');
+        renderJournalists(main);
+      } catch (error) {
+        toast(error.message || 'Gazetecilik kaldırılamadı.', 'error');
+        button.disabled = false;
+      }
+    });
   });
 }
 
@@ -3194,21 +3282,6 @@ async function renderSettings(main) {
           <div id="s-first-visit-auth-msg" class="form-error mt-4"></div>
         </div>
       </div>
-      <div class="card adm-feature-card">
-        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Kayıt Zorunluluğu</span><span class="adm-setting-status ${settings['auth_required']==='1'?'is-on':''}">${settings['auth_required']==='1'?'AÇIK':'KAPALI'}</span></div>
-        <div class="card-body">
-          <div class="adm-feature-copy">
-            <strong>Ana sayfa ve tüm site bölümleri için hesap iste</strong>
-            <p>Açıkken giriş yapmamış ziyaretçiler ana sayfaya, bölümlere veya doğrudan bir route'a erişemez; giriş ekranına yönlendirilir ve girişten sonra istedikleri sayfaya döner. Kapatıldığında içerikler herkese açılır; yorum, mesaj ve paylaşım gibi giriş gerektiren işlemler yine hesap ister.</p>
-          </div>
-          <label class="adm-toggle-row" for="s-auth-required">
-            <span><i class="fas fa-user-check"></i> Kayıt zorunluluğunu etkinleştir</span>
-            <span class="adm-toggle"><input type="checkbox" id="s-auth-required" ${settings['auth_required']==='1'?'checked':''}><span></span></span>
-          </label>
-          <button class="btn btn-primary" id="s-auth-required-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
-          <div id="s-auth-required-msg" class="form-error mt-4"></div>
-        </div>
-      </div>
       <div class="card adm-feature-card settings-wide">
         <div class="card-header"><span><i class="fas fa-table-columns" style="color:var(--red2);margin-right:8px"></i>Profil Sekmeleri</span></div>
         <div class="card-body">
@@ -3440,13 +3513,6 @@ async function renderSettings(main) {
     await saveSetting('protected_routes', JSON.stringify(routes), msg);
     await saveSetting('route_redirect', redirect, msg);
     msg.style.color = 'var(--green)'; msg.textContent = 'Route koruma ayarları kaydedildi';
-  });
-
-  document.getElementById('s-auth-required-save')?.addEventListener('click', async () => {
-    const msg = document.getElementById('s-auth-required-msg');
-    await saveSetting('auth_required', document.getElementById('s-auth-required').checked ? '1' : '0', msg);
-    msg.style.color = 'var(--green)';
-    msg.textContent = 'Siteye giriş zorunluluğu ayarı kaydedildi';
   });
 
   const profileTabOptions = [

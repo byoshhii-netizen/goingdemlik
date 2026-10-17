@@ -265,7 +265,6 @@ async function initDb() {
       ('route_protection_enabled', '0'),
       ('protected_routes', '["/admin","/yonetim","/yonetici","/yonet"]'),
       ('route_redirect', '/'),
-      ('auth_required', '0'),
       ('vmb_group_url', '/grup/vmb'),
       ('vmb_intro', 'Vecd ile Müdafaa Birliği: güven, dayanışma ve sorumluluk etrafında bir araya gelen özel topluluk.'),
       ('vmb_founder', 'VMB Kurucusu'),
@@ -273,6 +272,7 @@ async function initDb() {
       ('vmb_files', '[]'),
       ('photo_song_clip_seconds', '30')
     ON CONFLICT (key) DO NOTHING;
+    DELETE FROM settings WHERE key='auth_required';
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
     -- VMB dosya kütüphanesi: eski vmb_files ayarı geriye dönük olarak korunur.
@@ -427,6 +427,46 @@ async function initDb() {
       UNIQUE(comment_id, user_id),
       FOREIGN KEY(comment_id) REFERENCES forum_comments(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS journalists (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      assigned_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      assigned_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS newspapers (
+      id BIGSERIAL PRIMARY KEY,
+      journalist_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      newspaper_name TEXT NOT NULL,
+      newspaper_date DATE NOT NULL,
+      image_url TEXT NOT NULL,
+      journalist_since TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      share_count INTEGER NOT NULL DEFAULT 0
+    );
+    ALTER TABLE newspapers ADD COLUMN IF NOT EXISTS journalist_since TIMESTAMP;
+    CREATE INDEX IF NOT EXISTS idx_newspapers_date ON newspapers(newspaper_date DESC, created_at DESC);
+    CREATE TABLE IF NOT EXISTS newspaper_likes (
+      id BIGSERIAL PRIMARY KEY,
+      newspaper_id BIGINT NOT NULL REFERENCES newspapers(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(newspaper_id, user_id)
+    );
+    CREATE TABLE IF NOT EXISTS newspaper_comments (
+      id BIGSERIAL PRIMARY KEY,
+      newspaper_id BIGINT NOT NULL REFERENCES newspapers(id) ON DELETE CASCADE,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_newspaper_comments_issue ON newspaper_comments(newspaper_id, created_at);
+    CREATE TABLE IF NOT EXISTS newspaper_comment_likes (
+      id BIGSERIAL PRIMARY KEY,
+      comment_id BIGINT NOT NULL REFERENCES newspaper_comments(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(comment_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS poems (
@@ -904,6 +944,24 @@ async function initDb() {
     );
     ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
     ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
+    DO $$
+    DECLARE
+      pinned_data_type TEXT;
+    BEGIN
+      SELECT data_type INTO pinned_data_type
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'video_comments'
+        AND column_name = 'is_pinned';
+
+      IF pinned_data_type IS NOT NULL AND pinned_data_type <> 'boolean' THEN
+        ALTER TABLE video_comments
+          ALTER COLUMN is_pinned TYPE BOOLEAN
+          USING LOWER(TRIM(is_pinned::text)) IN ('1', 't', 'true', 'yes', 'on');
+        ALTER TABLE video_comments ALTER COLUMN is_pinned SET DEFAULT FALSE;
+        ALTER TABLE video_comments ALTER COLUMN is_pinned SET NOT NULL;
+      END IF;
+    END $$;
     CREATE TABLE IF NOT EXISTS photo_comment_likes (
       id BIGSERIAL PRIMARY KEY,
       comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
@@ -923,6 +981,7 @@ async function initDb() {
       shared_book_id BIGINT,
       shared_photo_id BIGINT,
       shared_story_id BIGINT,
+      shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL,
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
@@ -942,6 +1001,22 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_book_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL;
+    UPDATE dm_messages SET shared_newspaper_id=NULL
+      WHERE shared_newspaper_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM newspapers WHERE newspapers.id=dm_messages.shared_newspaper_id);
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname='dm_messages_shared_newspaper_id_fkey'
+          AND conrelid='dm_messages'::regclass
+      ) THEN
+        ALTER TABLE dm_messages
+          ADD CONSTRAINT dm_messages_shared_newspaper_id_fkey
+          FOREIGN KEY(shared_newspaper_id) REFERENCES newspapers(id) ON DELETE SET NULL;
+      END IF;
+    END $$;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;

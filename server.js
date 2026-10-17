@@ -381,7 +381,7 @@ function profileBadgeKey(type, id = '') {
 async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   if (!user?.id) return [];
 
-  const [customResult, preferenceResult, levelResult] = await Promise.all([
+  const [customResult, preferenceResult, levelResult, journalistResult] = await Promise.all([
     query(`
       SELECT b.id, b.name, b.icon, b.color, ub.assigned_at
       FROM user_badges ub
@@ -391,6 +391,7 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
     `, [user.id]),
     query('SELECT badge_key, is_active FROM user_badge_visibility WHERE user_id=$1', [user.id]),
     query('SELECT id, name, icon, color FROM levels WHERE id=$1', [user.level_id]),
+    query('SELECT assigned_at FROM journalists WHERE user_id=$1', [user.id]),
   ]);
 
   const preferences = new Map(preferenceResult.rows.map(row => [row.badge_key, Number(row.is_active) !== 0]));
@@ -436,6 +437,16 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   if (Number(user.is_plus) === 1) addBadge({ key: 'plus', type: 'plus', name: 'Plus', icon: 'fas fa-plus-circle', color: '#818cf8' });
   if (Number(user.is_admin) === 1) addBadge({ key: 'admin', type: 'admin', name: 'Yetkili', icon: 'fas fa-shield-halved', color: '#5865F2' });
   if (Number(user.is_artist) === 1) addBadge({ key: 'artist', type: 'artist', name: 'Artist', icon: 'fas fa-microphone-alt', color: '#a855f7' });
+  if (journalistResult.rows.length) {
+    addBadge({
+      key: 'journalist',
+      type: 'journalist',
+      name: 'Gazeteci',
+      icon: 'fas fa-newspaper',
+      color: '#d6b46a',
+      assigned_at: journalistResult.rows[0].assigned_at,
+    });
+  }
   if (hasVmbBadge(user)) {
     const isManager = hasVmbManagementBadge(user);
     addBadge({
@@ -1154,27 +1165,8 @@ app.use(async (req, res, next) => {
     path.extname(req.path)
   ) return next();
   try {
-    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect','auth_required')");
+    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect')");
     const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
-
-    const isLoginRoute = req.path === '/giris' ||
-      req.path === '/kayit' ||
-      /^\/[a-zA-Z0-9]{24}$/.test(req.path);
-    if (settings.auth_required === '1' && !isLoginRoute) {
-      const token = req.headers['authorization']?.replace('Bearer ', '') || getSessionCookie(req);
-      let authenticated = false;
-      if (token) {
-        const { rows: users } = await query(
-          'SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW() AND COALESCE(u.banned,0)=0 LIMIT 1',
-          [token]
-        );
-        authenticated = users.length > 0;
-      }
-      if (!authenticated) {
-        const returnTo = req.originalUrl || req.path;
-        return res.redirect('/giris?returnTo=' + encodeURIComponent(returnTo));
-      }
-    }
 
     let routes = [];
     try { routes = JSON.parse(settings.protected_routes || '[]'); } catch {}
@@ -2555,6 +2547,221 @@ app.get('/api/forums', async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/journalists', async (req, res) => {
+  const { rows } = await query(`
+    SELECT u.id, u.username, u.nickname, u.avatar, u.avatar_removed, j.assigned_at,
+      COALESCE(bv.is_active,1) AS show_journalist_icon
+    FROM journalists j
+    JOIN users u ON u.id=j.user_id AND COALESCE(u.is_deleted,0)=0
+    LEFT JOIN user_badge_visibility bv ON bv.user_id=u.id AND bv.badge_key='journalist'
+    ORDER BY j.assigned_at ASC
+  `);
+  res.json(rows);
+});
+
+app.get('/api/newspapers', optionalAuth, async (req, res) => {
+  const userId = req.user?.id || 0;
+  const { rows } = await query(`
+    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, n.share_count,
+      u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+      (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
+      (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
+      CASE WHEN $1::bigint=0 THEN FALSE
+        ELSE EXISTS(SELECT 1 FROM newspaper_likes nl WHERE nl.newspaper_id=n.id AND nl.user_id=$1)
+      END AS liked
+    FROM newspapers n
+    JOIN users u ON u.id=n.journalist_id AND COALESCE(u.is_deleted,0)=0
+    ORDER BY n.newspaper_date DESC, n.created_at DESC
+    LIMIT 100
+  `, [userId]);
+  res.json(rows);
+});
+
+app.get('/api/newspapers/:id', optionalAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const userId = req.user?.id || 0;
+  const { rows } = await query(`
+    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, n.share_count,
+      u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+      (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
+      (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
+      CASE WHEN $2::bigint=0 THEN FALSE
+        ELSE EXISTS(SELECT 1 FROM newspaper_likes nl WHERE nl.newspaper_id=n.id AND nl.user_id=$2)
+      END AS liked
+    FROM newspapers n
+    JOIN users u ON u.id=n.journalist_id AND COALESCE(u.is_deleted,0)=0
+    WHERE n.id=$1
+  `, [id, userId]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.post('/api/newspapers', authMiddleware, uploadLimiter, upload.single('image'), async (req, res) => {
+  const { rows: journalists } = await query('SELECT user_id FROM journalists WHERE user_id=$1', [req.user.id]);
+  if (!journalists.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
+  if (!req.file) return res.status(400).json({ error: 'Gazete görseli seçin.' });
+  if (!req.file.mimetype?.startsWith('image/')) return res.status(400).json({ error: 'Gazete yalnızca görsel olarak yüklenebilir.' });
+
+  const newspaperName = String(req.body.newspaper_name || '').trim();
+  const newspaperDate = String(req.body.newspaper_date || '').trim();
+  if (!newspaperName || newspaperName.length > 100) return res.status(400).json({ error: 'Gazete adı 1-100 karakter arasında olmalıdır.' });
+  const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(newspaperDate);
+  const year = dateParts ? Number(dateParts[1]) : 0;
+  const month = dateParts ? Number(dateParts[2]) : 0;
+  const day = dateParts ? Number(dateParts[3]) : 0;
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (!dateParts || year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) {
+    return res.status(400).json({ error: 'Geçerli bir gazete tarihi seçin.' });
+  }
+
+  try {
+    const imageUrl = await handleUpload(req.file);
+    const { rows } = await query(`
+      INSERT INTO newspapers (journalist_id,newspaper_name,newspaper_date,image_url,journalist_since)
+      SELECT $1,$2,$3,$4,assigned_at FROM journalists WHERE user_id=$1 RETURNING id
+    `, [req.user.id, newspaperName, newspaperDate, imageUrl]);
+    if (!rows.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
+    const { rows: newspaper } = await query(`
+      SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, n.share_count,
+        u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+        0::int AS like_count, 0::int AS comment_count, FALSE AS liked
+      FROM newspapers n JOIN users u ON u.id=n.journalist_id WHERE n.id=$1
+    `, [rows[0].id]);
+    res.status(201).json(newspaper[0]);
+  } catch (error) {
+    res.status(500).json({ error: `Gazete yüklenemedi: ${error.message}` });
+  }
+});
+
+app.delete('/api/newspapers/:id', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query('SELECT journalist_id FROM newspapers WHERE id=$1', [id]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  if (Number(rows[0].journalist_id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Bu gazeteyi silme yetkiniz yok.' });
+  }
+  await query('DELETE FROM newspapers WHERE id=$1', [id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/newspapers/:id/like', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [id]);
+  if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows: removed } = await query('DELETE FROM newspaper_likes WHERE newspaper_id=$1 AND user_id=$2 RETURNING id', [id, req.user.id]);
+  let liked = false;
+  if (!removed.length) {
+    const { rows: inserted } = await query(
+      'INSERT INTO newspaper_likes (newspaper_id,user_id) VALUES ($1,$2) ON CONFLICT (newspaper_id,user_id) DO NOTHING RETURNING id',
+      [id, req.user.id]
+    );
+    liked = inserted.length > 0;
+  }
+  const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM newspaper_likes WHERE newspaper_id=$1', [id]);
+  res.json({ liked, like_count: counts[0].like_count });
+});
+
+app.post('/api/newspapers/:id/share', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query('UPDATE newspapers SET share_count=share_count+1 WHERE id=$1 RETURNING share_count', [id]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  res.json({ share_count: rows[0].share_count });
+});
+
+app.get('/api/newspapers/:id/comments', optionalAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [id]);
+  if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query(`
+    SELECT c.id,c.newspaper_id,c.user_id,c.content,c.created_at,u.username,u.nickname,u.avatar,u.avatar_removed,
+      (SELECT COUNT(*)::int FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id) AS like_count,
+      CASE WHEN $2::bigint=0 THEN FALSE
+        ELSE EXISTS(SELECT 1 FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id AND cl.user_id=$2)
+      END AS liked
+    FROM newspaper_comments c LEFT JOIN users u ON u.id=c.user_id
+    WHERE c.newspaper_id=$1 ORDER BY c.created_at ASC
+  `, [id, req.user?.id || 0]);
+  res.json(rows);
+});
+
+app.post('/api/newspapers/:id/comments', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'comment')) return;
+  const id = Number(req.params.id);
+  const content = String(req.body?.content || '').trim();
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  if (!content || content.length > 2000) return res.status(400).json({ error: 'Yorum 1-2000 karakter arasında olmalıdır.' });
+  const { rows: newspapers } = await query('SELECT id,journalist_id FROM newspapers WHERE id=$1', [id]);
+  if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query(
+    'INSERT INTO newspaper_comments (newspaper_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,newspaper_id,user_id,content,created_at',
+    [id, req.user.id, content]
+  );
+  await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
+  await updateUserLevel(req.user.id);
+  if (Number(newspapers[0].journalist_id) !== Number(req.user.id)) {
+    await query(
+      'INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [newspapers[0].journalist_id, 'newspaper_comment', req.user.username, req.user.avatar || '', 'Gazetenize yorum geldi', `@${req.user.username} gazetenize yorum yaptı.`, `/gazete/${id}`]
+    );
+  }
+  res.status(201).json({
+    ...rows[0], username: req.user.username, nickname: req.user.nickname,
+    avatar: req.user.avatar, avatar_removed: req.user.avatar_removed, like_count: 0, liked: false,
+  });
+});
+
+app.delete('/api/newspapers/:id/comments/:commentId', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  const commentId = Number(req.params.commentId);
+  if (!Number.isSafeInteger(id) || !Number.isSafeInteger(commentId) || id < 1 || commentId < 1) {
+    return res.status(404).json({ error: 'Yorum bulunamadı' });
+  }
+  const { rows } = await query(
+    'SELECT c.id,c.user_id FROM newspaper_comments c WHERE c.id=$1 AND c.newspaper_id=$2',
+    [commentId, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  if (Number(rows[0].user_id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok.' });
+  }
+  await query('DELETE FROM newspaper_comments WHERE id=$1', [commentId]);
+  if (rows[0].user_id) {
+    await query('UPDATE users SET comment_count=GREATEST(0,comment_count-1) WHERE id=$1', [rows[0].user_id]);
+    await updateUserLevel(rows[0].user_id);
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/newspapers/:id/comments/:commentId/like', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  const commentId = Number(req.params.commentId);
+  if (!Number.isSafeInteger(id) || !Number.isSafeInteger(commentId) || id < 1 || commentId < 1) {
+    return res.status(404).json({ error: 'Yorum bulunamadı' });
+  }
+  const { rows: comments } = await query(
+    'SELECT id FROM newspaper_comments WHERE id=$1 AND newspaper_id=$2',
+    [commentId, id]
+  );
+  if (!comments.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const { rows: removed } = await query('DELETE FROM newspaper_comment_likes WHERE comment_id=$1 AND user_id=$2 RETURNING id', [commentId, req.user.id]);
+  let liked = false;
+  if (!removed.length) {
+    const { rows: inserted } = await query(
+      'INSERT INTO newspaper_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT (comment_id,user_id) DO NOTHING RETURNING id',
+      [commentId, req.user.id]
+    );
+    liked = inserted.length > 0;
+  }
+  const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM newspaper_comment_likes WHERE comment_id=$1', [commentId]);
+  res.json({ liked, like_count: counts[0].like_count });
+});
+
 app.get('/api/forum/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`
     SELECT f.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.level_id, u.is_admin,
@@ -3148,7 +3355,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [book.id]);
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -3156,6 +3363,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -3164,6 +3372,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
@@ -5286,6 +5495,38 @@ app.get('/api/admin/users', adminMiddleware, async (req, res) => {
   res.json(rows.map(u => ({ ...sanitizeUser(u), badges: Array.isArray(u.badges) ? u.badges : [] })));
 });
 
+app.get('/api/admin/journalists', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT j.user_id,j.assigned_at,u.username,u.nickname,u.avatar,u.avatar_removed
+    FROM journalists j JOIN users u ON u.id=j.user_id
+    WHERE COALESCE(u.is_deleted,0)=0
+    ORDER BY j.assigned_at DESC
+  `);
+  res.json(rows);
+});
+
+app.post('/api/admin/journalists/:userId', adminMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows: users } = await query('SELECT id FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0', [userId]);
+  if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  const { rows } = await query(`
+    INSERT INTO journalists (user_id,assigned_by) VALUES ($1,$2)
+    ON CONFLICT (user_id) DO NOTHING
+    RETURNING user_id,assigned_at
+  `, [userId, req.adminUser.userId || req.adminUser.id || null]);
+  if (!rows.length) return res.status(409).json({ error: 'Bu kullanıcı zaten gazeteci.' });
+  res.status(201).json(rows[0]);
+});
+
+app.delete('/api/admin/journalists/:userId', adminMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows } = await query('DELETE FROM journalists WHERE user_id=$1 RETURNING user_id', [userId]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazeteci bulunamadı.' });
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/invite-codes', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT ic.id, ic.code, ic.is_active, ic.created_at, ic.updated_at,
@@ -5832,7 +6073,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -6724,7 +6965,7 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
-    'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
+    'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
@@ -8034,7 +8275,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const { rows: msgs } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -8042,6 +8283,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
@@ -8051,6 +8293,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
@@ -8115,17 +8358,27 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, reply_to_id, image_url: bodyImageUrl } = req.body;
+  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id, image_url: bodyImageUrl } = req.body;
   content = content == null ? '' : String(content);
   let image_url = String(bodyImageUrl || '');
   if (req.file) {
     try { image_url = await handleUpload(req.file); } catch (e) {}
   }
   if (shared_photo_id && !content) content = ' ';
-  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (shared_newspaper_id !== undefined && shared_newspaper_id !== null && shared_newspaper_id !== '') {
+    const newspaperId = Number(shared_newspaper_id);
+    if (!Number.isSafeInteger(newspaperId) || newspaperId < 1) return res.status(400).json({ error: 'Geçersiz gazete.' });
+    const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [newspaperId]);
+    if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı.' });
+    shared_newspaper_id = newspaperId;
+    if (!content) content = ' ';
+  } else {
+    shared_newspaper_id = null;
+  }
+  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   if (shared_forum_id) {
@@ -8134,11 +8387,14 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   if (shared_book_id) {
     await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_book_id]);
   }
+  if (shared_newspaper_id) {
+    await query('UPDATE newspapers SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_newspaper_id]);
+  }
   if (content?.trim()) {
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -8146,6 +8402,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -8154,6 +8411,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1

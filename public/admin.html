@@ -680,6 +680,56 @@
     .admin-ad-panel-empty { padding:20px; text-align:center; color:var(--text3); font-size:12px; }
     .admin-ad-panel-empty i { display:block; font-size:22px; margin-bottom:8px; color:#f97316; }
     @media (max-width:700px) { .admin-ad-panel-form { align-items:stretch; flex-direction:column; } .admin-ad-panel-form .form-group { width:auto !important; } }
+    .journalist-admin-hero { display:flex; align-items:center; gap:17px; margin-bottom:18px; padding:22px; border:1px solid rgba(189,162,117,.25); border-radius:16px; background:radial-gradient(ellipse at 100% 0,rgba(189,162,117,.15),transparent 45%),linear-gradient(135deg,#171612,#101014); }
+    .journalist-admin-hero-icon { display:grid; flex:0 0 54px; place-items:center; width:54px; height:54px; border:1px solid rgba(189,162,117,.3); border-radius:16px; color:var(--red2); background:rgba(189,162,117,.1); font-size:22px; }
+    .journalist-admin-hero > div { min-width:0; flex:1; }
+    .journalist-admin-kicker { color:var(--red2); font-size:9px; font-weight:800; letter-spacing:.15em; }
+    .journalist-admin-hero h1 { margin:5px 0; font:700 23px var(--font2); }
+    .journalist-admin-hero p { max-width:600px; color:var(--text2); font-size:12px; line-height:1.5; }
+    .journalist-admin-total { display:grid; justify-items:center; gap:3px; min-width:92px; padding:12px; border:1px solid var(--border); border-radius:12px; background:rgba(0,0,0,.18); }
+    .journalist-admin-total strong { color:var(--red2); font:700 23px var(--font2); }
+    .journalist-admin-total small { color:var(--text2); font-size:9px; }
+    .journalist-admin-assign { margin-bottom:19px; padding:19px; }
+    .journalist-admin-section-heading { display:flex; align-items:center; gap:11px; margin-bottom:16px; }
+    .journalist-admin-section-icon { display:grid; place-items:center; width:38px; height:38px; flex:0 0 38px; border-radius:11px; color:var(--red2); background:rgba(189,162,117,.12); }
+    .journalist-admin-section-heading h2,.journalist-admin-list-heading h2 { margin:0 0 4px; font:700 16px var(--font2); }
+    .journalist-admin-section-heading p { color:var(--text2); font-size:11px; }
+    .journalist-admin-picker { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; align-items:end; gap:10px; }
+    .journalist-admin-picker label { grid-column:1; margin:0; }
+    .journalist-admin-picker input { grid-column:1; }
+    .journalist-admin-picker select { grid-column:2; grid-row:1 / span 2; height:74px; }
+    .journalist-admin-picker .btn { grid-column:3; grid-row:1 / span 2; height:38px; white-space:nowrap; }
+    .journalist-admin-picker select option { padding:5px; }
+    .journalist-admin-list-section { padding:18px; border:1px solid var(--border); border-radius:14px; background:var(--bg2); }
+    .journalist-admin-list-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:13px; }
+    .journalist-admin-list-heading > span { color:var(--text3); font-size:11px; }
+    .journalist-admin-list { display:grid; gap:8px; }
+    .journalist-admin-card { display:flex; align-items:center; gap:11px; min-width:0; padding:11px; border:1px solid var(--border); border-radius:12px; background:var(--bg3); }
+    .journalist-admin-avatar { display:grid; flex:0 0 40px; place-items:center; width:40px; height:40px; overflow:hidden; border:1px solid var(--border-red); border-radius:50%; color:var(--red2); background:var(--bg4); }
+    .journalist-admin-avatar img { width:100%; height:100%; object-fit:cover; }
+    .journalist-admin-person { min-width:0; flex:1; }
+    .journalist-admin-person strong,.journalist-admin-person small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .journalist-admin-person strong { color:var(--text); font-size:12px; }
+    .journalist-admin-person small { margin-top:4px; color:var(--text3); font-size:10px; }
+    .journalist-admin-active { display:flex; align-items:center; gap:6px; color:var(--green); font-size:10px; white-space:nowrap; }
+    .journalist-admin-active i { font-size:6px; }
+    .journalist-remove-btn { display:flex; align-items:center; gap:6px; color:#f28a91; white-space:nowrap; }
+    .journalist-admin-empty { display:grid; justify-items:center; gap:7px; padding:27px 15px; border:1px dashed var(--border); border-radius:11px; color:var(--text3); font-size:11px; text-align:center; }
+    .journalist-admin-empty > i { margin-bottom:3px; color:var(--red2); font-size:23px; }
+    .journalist-admin-empty strong { color:var(--text); font-size:13px; }
+    @media (max-width:700px) {
+      .journalist-admin-hero { align-items:flex-start; padding:16px; }
+      .journalist-admin-hero-icon { width:44px; height:44px; flex-basis:44px; }
+      .journalist-admin-hero h1 { font-size:19px; }
+      .journalist-admin-total { min-width:67px; padding:8px; }
+      .journalist-admin-picker { grid-template-columns:1fr; }
+      .journalist-admin-picker label,.journalist-admin-picker input,.journalist-admin-picker select,.journalist-admin-picker .btn { grid-column:1; grid-row:auto; }
+      .journalist-admin-picker select { height:100px; }
+      .journalist-admin-picker .btn { width:100%; justify-content:center; }
+      .journalist-admin-card { flex-wrap:wrap; }
+      .journalist-admin-active { display:none; }
+      .journalist-remove-btn { margin-left:auto; }
+    }
   </style>
 </head>
 <body>
@@ -724,6 +774,7 @@
       <div class="adm-section-label">GENEL</div>
       <div class="adm-nav-item active" data-section="dashboard"><div class="adm-nav-icon"><i class="fas fa-chart-line"></i></div> Dashboard</div>
       <div class="adm-nav-item" data-section="users"><div class="adm-nav-icon"><i class="fas fa-users"></i></div> Kullanıcılar</div>
+      <div class="adm-nav-item" data-section="journalists"><div class="adm-nav-icon"><i class="fas fa-newspaper"></i></div> Gazeteciler</div>
       <div class="adm-nav-item" data-section="account-deletions"><div class="adm-nav-icon"><i class="fas fa-user-clock"></i></div> Hesap Silme Talepleri</div>
       <div class="adm-nav-item" data-section="two-factor"><div class="adm-nav-icon"><i class="fas fa-shield-halved"></i></div> 2AD Yönetimi</div>
       <div class="adm-nav-item" data-section="badges"><div class="adm-nav-icon"><i class="fas fa-award"></i></div> Rozetler</div>
@@ -807,6 +858,6 @@ function applyThemeColor(hex) {
   } catch(e) {}
 })();
 </script>
-<script src="admin.js?v=20261019-book-reader-font"></script>
+<script src="admin.js?v=20261024-journalist-admin"></script>
 </body>
 </html>
