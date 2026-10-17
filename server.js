@@ -7955,10 +7955,13 @@ async function getListeningRoom(publicId, userId) {
 
 async function getListeningRoomState(roomId) {
   const [members, tracks, requests] = await Promise.all([
-    query(`SELECT m.user_id, m.role, m.joined_at, u.username, u.avatar, u.name_color
+    query(`SELECT m.user_id, m.role, m.joined_at, u.username, u.nickname, u.avatar, u.name_color
       FROM listening_room_members m JOIN users u ON u.id=m.user_id
       WHERE m.room_id=$1 ORDER BY m.joined_at`, [roomId]),
-    query(`SELECT t.*, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
+    query(`SELECT t.*, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url,
+        CASE WHEN t.state='playing' AND t.started_at IS NOT NULL
+          THEN t.position_seconds + EXTRACT(EPOCH FROM (NOW()-t.started_at))
+          ELSE t.position_seconds END AS current_position_seconds
       FROM listening_room_tracks t JOIN songs s ON s.id=t.song_id
       WHERE t.room_id=$1 AND t.state <> 'played' ORDER BY t.position, t.id`, [roomId]),
     query(`SELECT q.*, u.username AS requester_username, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
@@ -7999,8 +8002,21 @@ app.post('/api/listening-rooms', authMiddleware, async (req, res) => {
 app.get('/api/listening-rooms/:publicId', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
-  await query('UPDATE listening_room_members SET last_seen=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
-  res.json({ ...room, share_url: `/ortak-dinleyis/${room.public_id}`, state: await getListeningRoomState(room.id) });
+  const membership = await query('SELECT 1 FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+  const isMember = membership.rows.length > 0;
+  if (isMember) await query('UPDATE listening_room_members SET last_seen=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+  const state = await getListeningRoomState(room.id);
+  if (!isMember) {
+    state.members = [];
+    state.requests = [];
+    state.tracks = state.tracks.filter(track => ['playing', 'paused'].includes(track.state));
+  }
+  res.json({
+    ...room,
+    is_member: isMember,
+    share_url: `/ortak-dinleyis/${room.public_id}`,
+    state
+  });
 });
 
 app.post('/api/listening-rooms/:publicId/join', authMiddleware, async (req, res) => {
@@ -8008,13 +8024,13 @@ app.post('/api/listening-rooms/:publicId/join', authMiddleware, async (req, res)
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
   await query(`INSERT INTO listening_room_members(room_id,user_id,role) VALUES($1,$2,'listener')
     ON CONFLICT(room_id,user_id) DO UPDATE SET last_seen=NOW()`, [room.id, req.user.id]);
-  res.json({ ok: true, room: { ...room, share_url: `/ortak-dinleyis/${room.public_id}` }, state: await getListeningRoomState(room.id) });
+  res.json({ ok: true, room: { ...room, share_url: `/ortak-dinleyis/${room.public_id}` }, is_member: true, state: await getListeningRoomState(room.id) });
 });
 
 app.post('/api/listening-rooms/:publicId/leave', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı' });
-  if (room.owner_id === req.user.id) await query('UPDATE listening_rooms SET is_active=0,updated_at=NOW() WHERE id=$1', [room.id]);
+  if (String(room.owner_id) === String(req.user.id)) await query('UPDATE listening_rooms SET is_active=0,updated_at=NOW() WHERE id=$1', [room.id]);
   else await query('DELETE FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
   res.json({ ok: true });
 });
@@ -8063,6 +8079,7 @@ app.post('/api/listening-rooms/:publicId/tracks/bulk', authMiddleware, async (re
 app.post('/api/listening-rooms/:publicId/requests', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
+  if (String(room.owner_id) === String(req.user.id)) return res.status(400).json({ error: 'Dinleyiş sahibi şarkıyı doğrudan değiştirebilir' });
   if (!room.allow_requests) return res.status(403).json({ error: 'Bu dinleyişte şarkı isteği kapalı' });
   const isMember = await query('SELECT 1 FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
   if (!isMember.rows.length) return res.status(403).json({ error: 'Önce dinleyişe katılmalısınız' });
@@ -8084,10 +8101,34 @@ app.post('/api/listening-rooms/:publicId/requests/:requestId', authMiddleware, a
     await query("UPDATE listening_room_requests SET status='rejected' WHERE id=$1", [request.id]);
     return res.json({ ok: true, state: await getListeningRoomState(room.id) });
   }
-  const { rows: positionRows } = await query('SELECT COALESCE(MAX(position),-1)+1 AS position FROM listening_room_tracks WHERE room_id=$1', [room.id]);
-  await query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state)
-    VALUES($1,$2,$3,$4,'queued')`, [room.id, request.song_id, request.requester_id, positionRows[0].position]);
-  await query("UPDATE listening_room_requests SET status='accepted' WHERE id=$1", [request.id]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: claimedRequests } = await client.query(`UPDATE listening_room_requests
+      SET status='accepted' WHERE id=$1 AND room_id=$2 AND status='pending' RETURNING id`, [request.id, room.id]);
+    if (!claimedRequests.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'İstek artık beklemede değil' });
+    }
+    const { rows: currentRows } = await client.query(`SELECT position FROM listening_room_tracks
+      WHERE room_id=$1 AND state IN ('playing','paused') ORDER BY id DESC LIMIT 1`, [room.id]);
+    const currentPosition = currentRows.length ? Number(currentRows[0].position) : -1;
+    const nextPosition = currentPosition + 1;
+    await client.query(`WITH queued AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY position,id) AS queue_order
+        FROM listening_room_tracks WHERE room_id=$1 AND state='queued'
+      )
+      UPDATE listening_room_tracks t SET position=$2 + 1 + queued.queue_order
+      FROM queued WHERE t.id=queued.id`, [room.id, currentPosition]);
+    await client.query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state)
+      VALUES($1,$2,$3,$4,'queued')`, [room.id, request.song_id, request.requester_id, nextPosition]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
   res.json({ ok: true, state: await getListeningRoomState(room.id) });
 });
 
@@ -8098,17 +8139,30 @@ app.post('/api/listening-rooms/:publicId/control', authMiddleware, async (req, r
   if (action === 'play') {
     const song = await getSongForListening(req.body?.song_id);
     if (!song) return res.status(404).json({ error: 'Şarkı bulunamadı' });
-    await query("UPDATE listening_room_tracks SET state='played' WHERE room_id=$1 AND state='playing'", [room.id]);
+    await query("UPDATE listening_room_tracks SET state='played' WHERE room_id=$1 AND state IN ('playing','paused')", [room.id]);
     const { rows: positionRows } = await query('SELECT COALESCE(MAX(position),-1)+1 AS position FROM listening_room_tracks WHERE room_id=$1', [room.id]);
     await query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state,started_at)
       VALUES($1,$2,$3,$4,'playing',NOW())`, [room.id, song.id, req.user.id, positionRows[0].position]);
-  } else if (action === 'pause' || action === 'resume') {
-    const { rows } = await query("SELECT id, started_at FROM listening_room_tracks WHERE room_id=$1 AND state='playing' ORDER BY id DESC LIMIT 1", [room.id]);
-    if (rows[0]) await query('UPDATE listening_room_tracks SET state=$1 WHERE id=$2', [action === 'pause' ? 'paused' : 'playing', rows[0].id]);
+  } else if (action === 'pause') {
+    await query(`UPDATE listening_room_tracks SET
+      position_seconds=position_seconds + CASE WHEN started_at IS NOT NULL THEN EXTRACT(EPOCH FROM (NOW()-started_at)) ELSE 0 END,
+      started_at=NULL,state='paused'
+      WHERE room_id=$1 AND state='playing'`, [room.id]);
+  } else if (action === 'resume') {
+    await query(`UPDATE listening_room_tracks SET state='playing',started_at=NOW()
+      WHERE room_id=$1 AND state='paused'`, [room.id]);
+  } else if (action === 'seek') {
+    const position = Number(req.body?.position_seconds);
+    if (!Number.isFinite(position) || position < 0 || position > 86400) {
+      return res.status(400).json({ error: 'Geçersiz şarkı konumu' });
+    }
+    await query(`UPDATE listening_room_tracks SET position_seconds=$1,
+      started_at=CASE WHEN state='playing' THEN NOW() ELSE NULL END
+      WHERE room_id=$2 AND state IN ('playing','paused')`, [position, room.id]);
   } else if (action === 'skip') {
     await query("UPDATE listening_room_tracks SET state='played' WHERE room_id=$1 AND state IN ('playing','paused')", [room.id]);
     const { rows: next } = await query("SELECT id FROM listening_room_tracks WHERE room_id=$1 AND state='queued' ORDER BY position,id LIMIT 1", [room.id]);
-    if (next[0]) await query("UPDATE listening_room_tracks SET state='playing',started_at=NOW() WHERE id=$1", [next[0].id]);
+    if (next[0]) await query("UPDATE listening_room_tracks SET state='playing',started_at=NOW(),position_seconds=0 WHERE id=$1", [next[0].id]);
   } else return res.status(400).json({ error: 'Geçersiz ortak dinleyiş işlemi' });
   await query('UPDATE listening_rooms SET updated_at=NOW() WHERE id=$1', [room.id]);
   res.json({ ok: true, state: await getListeningRoomState(room.id) });

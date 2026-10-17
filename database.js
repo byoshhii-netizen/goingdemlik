@@ -1769,9 +1769,11 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
       added_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       position INTEGER NOT NULL DEFAULT 0,
       state TEXT NOT NULL DEFAULT 'queued',
+      position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
       started_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE listening_room_tracks ADD COLUMN IF NOT EXISTS position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_listening_room_tracks ON listening_room_tracks(room_id, position, id);
 
     CREATE TABLE IF NOT EXISTS listening_room_requests (
