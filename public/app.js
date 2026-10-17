@@ -3460,8 +3460,9 @@ async function showNewspaperComposer(draftId = null) {
     inspector.querySelectorAll('[data-item-property]').forEach(input => {
       input.addEventListener(input.type === 'color' || input.tagName === 'SELECT' ? 'change' : 'input', () => {
         const keepFocus = document.activeElement === input;
-        const selectionStart = input.tagName === 'TEXTAREA' || input.type === 'text' ? input.selectionStart : null;
-        const selectionEnd = input.tagName === 'TEXTAREA' || input.type === 'text' ? input.selectionEnd : null;
+        const supportsTextSelection = input.tagName === 'TEXTAREA' || input.type === 'text';
+        const selectionStart = supportsTextSelection ? input.selectionStart : null;
+        const selectionEnd = supportsTextSelection ? input.selectionEnd : null;
         const property = input.dataset.itemProperty;
         if (['content', 'font', 'color', 'direction'].includes(property)) item[property] = input.value;
         else if (property === 'size') item.size = Math.max(8, Math.min(96, Number(input.value) || 8));
