@@ -955,6 +955,7 @@ async function initDb() {
         AND column_name = 'is_pinned';
 
       IF pinned_data_type IS NOT NULL AND pinned_data_type <> 'boolean' THEN
+        ALTER TABLE video_comments ALTER COLUMN is_pinned DROP DEFAULT;
         ALTER TABLE video_comments
           ALTER COLUMN is_pinned TYPE BOOLEAN
           USING LOWER(TRIM(is_pinned::text)) IN ('1', 't', 'true', 'yes', 'on');
