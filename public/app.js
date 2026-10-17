@@ -762,9 +762,9 @@ function profileRoute(username) {
 function redVerificationIconHTML(enabled, verifiedAt) {
   if (Number(enabled) !== 1) return '';
   const dateAttributes = verifiedAt
-    ? ` data-red-verified-at="${escHtml(verifiedAt)}" role="button" tabindex="0" aria-label="Kırmızı Tik veriliş tarihi"`
+    ? ` data-red-verified-at="${escHtml(verifiedAt)}" role="button" tabindex="0" aria-label="Doğrulanmış hesap veriliş tarihi"`
     : '';
-  return `<span class="red-verification-tick"${dateAttributes} title="Kırmızı Tik"><i class="fas fa-circle-check" aria-hidden="true"></i></span>`;
+  return `<span class="red-verification-tick"${dateAttributes} title="Doğrulanmış hesap"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></span>`;
 }
 
 function profileRedVerificationIconHTML(badges) {
@@ -1260,10 +1260,7 @@ async function renderRealsFeed(app, initialId = null) {
   }
   async function openRealsComments(video, isAd = false) {
     const commentBase = isAd ? '/reals-ads/' + encodeURIComponent(video.id) : '/video/' + encodeURIComponent(video.id);
-    const activeVideo = items[idx]?.querySelector('video');
-    const wasPlaying = activeVideo && !activeVideo.paused;
     const previousScrollTop = listEl.scrollTop;
-    if (activeVideo) activeVideo.pause();
     const oldSheet = document.getElementById('reals-comments-sheet');
     oldSheet?.remove();
     const sheet = document.createElement('div');
@@ -1279,7 +1276,6 @@ async function renderRealsFeed(app, initialId = null) {
       sheet.remove();
       listEl.scrollTop = previousScrollTop;
       requestAnimationFrame(() => { listEl.scrollTop = previousScrollTop; });
-      if (wasPlaying && location.pathname === '/reals') activeVideo?.play().catch(() => {});
     };
     sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
     sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
@@ -1394,6 +1390,8 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="reals-video-box">
         <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
+        <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
+        <div class="reals-progress-wrap"><input class="reals-progress" type="range" min="0" max="1000" value="0" aria-label="Video konumu" /></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1431,20 +1429,70 @@ async function renderRealsFeed(app, initialId = null) {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
       let clickTimer = null;
+      let lastTouchTapAt = 0;
+      let suppressClickUntil = 0;
+      const progress = it.querySelector('.reals-progress');
+      const updateProgressFill = () => {
+        if (progress) progress.style.setProperty('--reals-progress', `${(Number(progress.value) / 10).toFixed(2)}%`);
+      };
+      const seekToProgress = () => {
+        if (!Number.isFinite(vid.duration) || vid.duration <= 0) return;
+        updateProgressFill();
+        vid.currentTime = (Number(progress.value) / 1000) * vid.duration;
+      };
+      const syncProgress = () => {
+        if (!progress || !Number.isFinite(vid.duration) || vid.duration <= 0) return;
+        if (!progress.matches(':active')) progress.value = String(Math.round((vid.currentTime / vid.duration) * 1000));
+        updateProgressFill();
+      };
+      progress?.addEventListener('pointerdown', event => event.stopPropagation());
+      progress?.addEventListener('click', event => event.stopPropagation());
+      progress?.addEventListener('input', seekToProgress);
+      progress?.addEventListener('change', seekToProgress);
+      vid.addEventListener('loadedmetadata', syncProgress);
+      vid.addEventListener('durationchange', syncProgress);
+      vid.addEventListener('timeupdate', syncProgress);
+      const likeFromDoubleTap = () => {
+        const likeButton = it.querySelector('.like-btn');
+        if (!likeButton) return;
+        it.classList.remove('reals-heart-animate');
+        void it.offsetWidth;
+        it.classList.add('reals-heart-animate');
+        if (!likeButton.classList.contains('active') && !likeButton.disabled) likeButton.click();
+      };
       it.addEventListener('click', event => {
-        if (event.target.closest('button,a')) return;
+        if (Date.now() < suppressClickUntil) { event.preventDefault(); return; }
+        if (event.target.closest('button,a,input,.reals-progress-wrap')) return;
         if (it.classList.contains('reals-ad-item')) return;
+        if (event.detail > 1) {
+          clearTimeout(clickTimer);
+          suppressClickUntil = Date.now() + 400;
+          likeFromDoubleTap();
+          return;
+        }
         clearTimeout(clickTimer);
         clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
+      });
+      it.addEventListener('pointerup', event => {
+        if (event.pointerType !== 'touch' || event.target.closest('button,a,input,.reals-progress-wrap') || it.classList.contains('reals-ad-item')) return;
+        const now = Date.now();
+        if (now - lastTouchTapAt <= 320) {
+          clearTimeout(clickTimer);
+          suppressClickUntil = now + 450;
+          likeFromDoubleTap();
+          lastTouchTapAt = 0;
+        } else {
+          lastTouchTapAt = now;
+        }
       });
       it.querySelector('.reals-play-overlay')?.addEventListener('click', event => {
         event.stopPropagation();
         if (vid.paused) vid.play().catch(() => {}); else vid.pause();
       });
       it.addEventListener('dblclick', event => {
-        if (event.target.closest('button,a')) return;
+        if (Date.now() < suppressClickUntil || event.target.closest('button,a,input,.reals-progress-wrap')) return;
         clearTimeout(clickTimer);
-        it.querySelector('.like-btn')?.click();
+        likeFromDoubleTap();
       });
       vid.addEventListener('play', () => {
         const icon = it.querySelector('.reals-play-overlay i');
@@ -7493,16 +7541,16 @@ async function renderBadges(app) {
     return;
   }
 
-  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti', red_verified: 'Profil rozeti' };
+  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti', red_verified: 'Görsel profil işareti' };
   const badgeRows = badges.length ? badges.map(badge => {
     const isLockedAdminBadge = badge.key === 'admin';
     return `
     <div class="badge-setting-row" data-badge-key="${escHtml(badge.key)}">
       <div class="badge-setting-icon" style="color:${escHtml(badge.color || '#6b7280')};background:${escHtml(badge.color || '#6b7280')}18;border-color:${escHtml(badge.color || '#6b7280')}44">
-        <i class="${escHtml(badge.icon || 'fas fa-award')}"></i>
+        ${badge.type === 'red_verified' ? '<img class="badge-setting-verification-image" src="/gobolog.png" alt="" />' : `<i class="${escHtml(badge.icon || 'fas fa-award')}"></i>`}
       </div>
       <div class="badge-setting-copy">
-        <strong>${escHtml(badge.name)}</strong>
+        <strong>${badge.type === 'red_verified' ? 'Doğrulanmış hesap' : escHtml(badge.name)}</strong>
         <small>${typeLabels[badge.type] || 'Rozet'} · <span class="badge-setting-status">${isLockedAdminBadge ? 'Zorunlu · Profilde görünüyor' : (badge.is_active ? 'Profilde görünüyor' : 'Profilde gizli')}</span></small>
       </div>
       <label class="badge-visibility-toggle${isLockedAdminBadge ? ' is-locked' : ''}" title="${isLockedAdminBadge ? 'Yetkili rozeti zorunludur' : (badge.is_active ? 'Profilde gizle' : 'Profilde göster')}">
