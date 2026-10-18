@@ -534,7 +534,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   overflow: hidden;
   animation: fadeDown 0.15s ease;
 }
+#dropdown-menu:not(.hidden) { transform-origin: top right; animation: accountMenuIn .2s cubic-bezier(.2,.8,.2,1) both; }
 @keyframes fadeDown { from { opacity:0; transform: translateY(-8px); } to { opacity:1; transform: translateY(0); } }
+@keyframes accountMenuIn { from { opacity:0; transform: translateY(-7px) scale(.96); } to { opacity:1; transform: translateY(0) scale(1); } }
 .dropdown-item {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;
@@ -5270,27 +5272,8 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
     max-height: 75dvh;
     overflow-x: hidden;
     overflow-y: auto;
-    transform-origin: calc(100% - 28px) 0;
-    transition: clip-path .28s cubic-bezier(.2,.8,.2,1), opacity .2s ease, transform .2s ease, max-height .28s ease, padding .2s ease;
-    clip-path: circle(150vmax at calc(100% - 28px) 0);
-    opacity: 1;
-    transform: scale(1);
-    visibility: visible;
-    pointer-events: auto;
   }
-  .mobile-menu.hidden {
-    display: flex !important;
-    max-height: 0;
-    overflow: hidden;
-    padding-top: 0;
-    padding-bottom: 0;
-    border-bottom-color: transparent;
-    clip-path: circle(0 at calc(100% - 28px) 0);
-    opacity: 0;
-    transform: scale(.98);
-    visibility: hidden;
-    pointer-events: none;
-  }
+  .mobile-menu.hidden { display: none !important; }
   .dm-conv-item { box-sizing: border-box; min-height: 68px; }
   .dm-conv-item > .dm-story-avatar-link,
   .dm-conv-item > .dm-conv-avatar-link,
@@ -5301,7 +5284,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mobile-menu { transition: none; }
+  #dropdown-menu:not(.hidden) { animation-duration: .01ms !important; }
 }
 
 @media (max-width: 420px) {
