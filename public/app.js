@@ -1041,6 +1041,7 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit');
   const leavingSongDetail = !path.startsWith('/muzik/');
   const detailAudio = document.getElementById('detail-audio');
   if (leavingSongDetail && detailAudio && currentAudio === detailAudio && detailAudio.musicResume?.type === 'song') {

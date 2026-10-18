@@ -1796,6 +1796,13 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .auth-link { color: var(--accent-red2); }
 .auth-link:hover { text-decoration: underline; }
 .auth-footer { text-align: center; margin-top: 20px; font-size: 14px; color: var(--text-secondary); }
+body.auth-route #navbar,
+body.auth-route #mobile-bottom-bar,
+body.auth-route #site-footer { display:none !important; }
+body.auth-route .auth-page { min-height:100vh; min-height:100dvh; }
+@media (max-width:768px) {
+  body.auth-route { padding-bottom:0 !important; }
+}
 @media (max-width: 560px) { .auth-page { padding: 28px 12px; align-items: flex-start; } .auth-card--enhanced { padding: 32px 20px 24px; } .auth-title { font-size: 25px; } .register-profile-photo { align-items: flex-start; } .register-avatar-preview { width: 64px; height: 64px; flex-basis: 64px; } }
 
 /* ===== PROFILE ===== */
