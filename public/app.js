@@ -2526,11 +2526,7 @@ async function renderHome(app) {
     videolar: renderVideosSection
   };
 
-  for (const section of sections) {
-    if (sectionMap[section]) {
-      await sectionMap[section]();
-    }
-  }
+  await Promise.all(sections.map(section => sectionMap[section]?.()));
 }
 
 function formatNewspaperDate(dateValue, options = { day: 'numeric', month: 'long', year: 'numeric' }) {
@@ -7659,25 +7655,30 @@ async function renderProfile(app, username) {
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
-  const profileSpotify = await getSpotifyNowPlaying(user.username);
+  const isOwn = currentUser && currentUser.id === user.id;
+  const [profileSpotify, settings, loadedFollowState] = await Promise.all([
+    getSpotifyNowPlaying(user.username),
+    fetch('/api/settings/public').then(response => response.json()).catch(() => null),
+    !isOwn && currentUser
+      ? api('/users/' + encodeURIComponent(user.username || username) + '/follow-status').catch(() => null)
+      : Promise.resolve(null)
+  ]);
   let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges'];
   let combinedContentCount = false;
-  try {
-    const settings = await fetch('/api/settings/public').then(response => response.json());
+  if (settings) {
     combinedContentCount = settings.content_count_combined === '1';
-    const configured = JSON.parse(settings.profile_tabs || '[]');
-    if (Array.isArray(configured)) {
-      const configuredWithoutVideos = configured.filter(tab => tab !== 'videos');
-      profileTabOrder = [...configuredWithoutVideos, ...profileTabOrder.filter(tab => !configuredWithoutVideos.includes(tab))];
-    }
-  } catch {}
-  const isOwn = currentUser && currentUser.id === user.id;
+    try {
+      const configured = JSON.parse(settings.profile_tabs || '[]');
+      if (Array.isArray(configured)) {
+        const configuredWithoutVideos = configured.filter(tab => tab !== 'videos');
+        profileTabOrder = [...configuredWithoutVideos, ...profileTabOrder.filter(tab => !configuredWithoutVideos.includes(tab))];
+      }
+    } catch {}
+  }
   let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true };
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
-  if (!isOwn && currentUser) {
-    try { followState = await api('/users/' + encodeURIComponent(profileUsername) + '/follow-status'); } catch {}
-  }
+  if (loadedFollowState) followState = loadedFollowState;
   const bindFollowButton = () => {
     const button = document.getElementById('profile-follow-btn');
     if (!button) return;
