@@ -1800,9 +1800,9 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 
 /* ===== PROFILE ===== */
 .profile-header {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
   padding: 32px;
   margin-bottom: 32px;
   display: flex; gap: 24px; align-items: flex-start;
@@ -5501,7 +5501,12 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
     padding-left:0 !important;
     padding-right:0 !important;
   }
-  body.home-page .home-media-section { margin-inline:-12px; }
+  body.home-page .home-media-section {
+    width:calc(100% + 24px);
+    max-width:none;
+    margin-inline:-12px;
+    box-sizing:border-box;
+  }
   body.home-page #home-stories-bar .stories-strip {
     width:100%;
     margin:0 0 10px;
@@ -5515,6 +5520,11 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
     max-width:none;
     margin:0;
     gap:0;
+  }
+  .photos-page .photo-detail-shell {
+    width:100%;
+    max-width:none;
+    margin:0;
   }
   .photos-feed .photo-card {
     margin:0;

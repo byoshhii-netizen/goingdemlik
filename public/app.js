@@ -14362,7 +14362,7 @@ function bindPhotoFeed(feed) {
 async function renderPhotoDetail(app, photoId) {
   try {
     const photo = await api('/photos/' + encodeURIComponent(photoId));
-    app.innerHTML = `<div class="container page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
+    app.innerHTML = `<div class="container page photos-page"><button class="btn btn-ghost btn-sm" onclick="history.back()"><i class="fas fa-arrow-left"></i> Geri</button><div class="photo-detail-shell">${photoCardHTML(photo)}</div></div>`;
     const shell = app.querySelector('.photo-detail-shell');
     bindPhotoFeed(shell);
     setupPhotoAudio(shell);
