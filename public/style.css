@@ -5494,6 +5494,13 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
   body { padding-bottom:calc(60px + env(safe-area-inset-bottom)); }
   #toast-container { bottom:calc(72px + env(safe-area-inset-bottom)); }
 
+  .container.page.photos-page {
+    box-sizing:border-box;
+    width:100%;
+    max-width:none;
+    padding-left:0 !important;
+    padding-right:0 !important;
+  }
   body.home-page .home-media-section { margin-inline:-12px; }
   body.home-page #home-stories-bar .stories-strip {
     width:100%;
@@ -5506,12 +5513,8 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
   .photos-feed {
     width:100%;
     max-width:none;
-    margin:0 auto;
+    margin:0;
     gap:0;
-  }
-  body:not(.home-page) .container.page > .photos-feed {
-    width:calc(100% + 24px);
-    margin-inline:-12px;
   }
   .photos-feed .photo-card {
     margin:0;

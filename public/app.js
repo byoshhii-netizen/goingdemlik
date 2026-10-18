@@ -14201,7 +14201,7 @@ async function renderStoryRoute(app, storyId) {
 
 async function renderPhotos(app) {
   document.title = 'Medya – ' + siteName;
-  app.innerHTML = `<div class="container page"><div id="stories-bar"></div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
+  app.innerHTML = `<div class="container page photos-page"><div id="stories-bar"></div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null), loadStoriesBar($('#stories-bar'))]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
