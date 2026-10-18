@@ -9430,12 +9430,22 @@ async function init() {
   $('#new-dropdown')?.classList.add('hidden');
   closeMobileCreateMenu();
   if (location.pathname === '/') {
+    updateNavUI();
     loadAnnouncements();
     renderRoute(location.pathname + location.search);
   }
   await initAuth();
+  updateNavUI();
+  if (location.pathname !== '/' || currentUser) {
+    loadAnnouncements();
+    renderRoute(location.pathname + location.search);
+  }
+  const settingsController = new AbortController();
+  const settingsTimeout = setTimeout(() => settingsController.abort(), 8000);
   try {
-    const ps = await fetch('/api/public-settings').then(r => r.json());
+    const response = await fetch('/api/public-settings', { signal: settingsController.signal });
+    if (!response.ok) throw new Error(`Genel ayarlar yüklenemedi (${response.status}).`);
+    const ps = await response.json();
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
@@ -9468,7 +9478,15 @@ async function init() {
     if (footer) {
       footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
     }
-  } catch {}
+    if (firstVisitAuthEnabled && !currentUser && location.pathname === '/' && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
+      localStorage.setItem('cigcig_first_visit_auth_seen', '1');
+      navigate('/giris', false);
+    }
+  } catch (error) {
+    console.warn('Genel ayarlar yüklenemedi; varsayılan ayarlarla devam ediliyor:', error.message);
+  } finally {
+    clearTimeout(settingsTimeout);
+  }
   try {
     const journalists = await api('/journalists');
     journalistDirectory.clear();
@@ -9479,7 +9497,6 @@ async function init() {
     console.warn('Gazeteci listesi yüklenemedi:', error.message);
   }
   updateNavUI();
-  renderRoute(location.pathname + location.search);
   if (currentUser) {
     checkUnreadMessages();
     setInterval(() => { if (currentUser) checkUnreadMessages(); }, 15000);
