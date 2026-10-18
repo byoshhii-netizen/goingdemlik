@@ -195,7 +195,7 @@
     }
 
     /* MAIN AREA */
-    .adm-main { flex: 1; padding: 28px 32px; overflow-x: hidden; max-width: 100%; }
+    .adm-main { flex: 1; min-width: 0; padding: 28px 32px; overflow-x: hidden; max-width: 100%; }
 
     /* STAT CARDS */
     .adm-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
@@ -254,6 +254,23 @@
     .route-log-arrow { color:var(--text3); }
     .route-log-redirect { color:#86efac; word-break:break-all; }
     .route-log-meta { margin-top:8px; color:var(--text3); font-size:11px; }
+    .quick-register-log-row { display:flex; align-items:flex-start; gap:14px; padding:16px; border-bottom:1px solid var(--border); }
+    .quick-register-log-row:last-child { border-bottom:0; }
+    .quick-register-log-avatar { width:52px; height:52px; flex:0 0 52px; border-radius:50%; object-fit:cover; background:var(--bg4); }
+    .quick-register-log-avatar--empty { display:grid; place-items:center; color:var(--text3); }
+    .quick-register-log-content { min-width:0; flex:1; }
+    .quick-register-log-heading, .quick-register-log-meta { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; }
+    .quick-register-log-heading { color:var(--text); font-size:13px; }
+    .quick-register-log-heading > span:nth-child(2) { color:var(--red2); }
+    .quick-register-log-status { padding:3px 8px; border-radius:999px; background:rgba(189,162,117,.12); color:var(--red2); font-size:10px; }
+    .quick-register-log-meta { margin-top:8px; color:var(--text3); font-size:11px; }
+    .quick-register-log-meta span { overflow-wrap:anywhere; }
+    .quick-register-log-meta i { margin-right:5px; color:var(--red2); }
+    .quick-register-log-settings { margin-top:8px; color:var(--text2); font-size:11px; line-height:1.6; overflow-wrap:anywhere; }
+    .quick-register-log-device { margin-top:6px; color:var(--text3); font-size:11px; }
+    .quick-register-log-device summary { cursor:pointer; }
+    .quick-register-log-device span { display:block; margin-top:5px; overflow-wrap:anywhere; }
+    @media (max-width:560px) { .quick-register-log-row { gap:10px; padding:12px; } .quick-register-log-avatar { width:42px; height:42px; flex-basis:42px; } .quick-register-log-heading { gap:6px 10px; } }
     .adm-toggle { width: 44px; height: 24px; position: relative; flex: 0 0 auto; }
     .adm-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
     .adm-toggle > span { position: absolute; inset: 0; border-radius: 999px; background: var(--bg4); border: 1px solid var(--border); transition: .2s; }
@@ -329,6 +346,11 @@
     /* TABLE */
     .table-wrap { overflow-x: auto; border-radius: 0 0 14px 14px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .admin-users-table-wrap { width: 100%; max-width: 100%; overscroll-behavior-x: contain; }
+    .admin-users-table { min-width: 1500px; }
+    .admin-users-table thead th:last-child { position: sticky; right: 0; z-index: 2; min-width: 250px; background: var(--bg4); box-shadow: -8px 0 12px rgba(0,0,0,.18); }
+    .admin-users-table #users-tbody td:last-child { position: sticky; right: 0; z-index: 1; min-width: 250px; background: var(--bg3); box-shadow: -8px 0 12px rgba(0,0,0,.18); }
+    .admin-users-table #users-tbody tr:hover td:last-child { background: var(--bg3); }
     th { text-align: left; padding: 10px 14px; color: var(--text3); font-weight: 600; border-bottom: 1px solid var(--border); font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; background: var(--bg4); }
     td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
     tr:hover td { background: rgba(255,255,255,0.02); }
@@ -813,6 +835,7 @@
       <div class="adm-section-label">GENEL</div>
       <div class="adm-nav-item active" data-section="dashboard"><div class="adm-nav-icon"><i class="fas fa-chart-line"></i></div> Dashboard</div>
       <div class="adm-nav-item" data-section="users"><div class="adm-nav-icon"><i class="fas fa-users"></i></div> Kullanıcılar</div>
+      <div class="adm-nav-item" data-section="quick-registration-logs"><div class="adm-nav-icon"><i class="fas fa-wand-magic-sparkles"></i></div> Hızlı Kayıt Logları</div>
       <div class="adm-nav-item" data-section="journalists"><div class="adm-nav-icon"><i class="fas fa-newspaper"></i></div> Gazeteciler</div>
       <div class="adm-nav-item" data-section="newspaper-settings"><div class="adm-nav-icon"><i class="fas fa-pen-to-square"></i></div> Gazete Ayarları</div>
       <div class="adm-nav-item" data-section="account-deletions"><div class="adm-nav-icon"><i class="fas fa-user-clock"></i></div> Hesap Silme Talepleri</div>
@@ -899,6 +922,6 @@ function applyThemeColor(hex) {
 })();
 </script>
 <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-<script src="admin.js?v=20261017-native-dialogs"></script>
+<script src="admin.js?v=20261019-quick-registration-logs"></script>
 </body>
 </html>

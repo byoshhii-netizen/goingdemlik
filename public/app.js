@@ -220,6 +220,7 @@ function toast(msg, type = 'success', duration = 2200) {
 }
 
 function showModal(title, bodyHTML, modalClass = '') {
+  managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
   $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal');
@@ -7134,7 +7135,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
         </div>
         <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
-        <div class="form-group"><label>Reals müziği</label><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><div id="video-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="video-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="video-song-preview-audio" preload="none" style="display:none"></audio><div class="song-start-control"><label for="video-song-start">Şarkıda başlayacağı an</label><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled /><div class="media-time-row"><span>Başlangıç noktası</span><b id="video-song-time">0:00</b></div></div></div>
+        <div class="form-group" id="video-song-field"><label>Reals müziği</label><small class="text-muted" id="video-song-limit-hint">3 dakikayı aşan videolara müzik eklenemez.</small><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><div id="video-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="video-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="video-song-preview-audio" preload="none" style="display:none"></audio><div class="song-start-control"><label for="video-song-start">Şarkıda başlayacağı an</label><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled /><div class="media-time-row"><span>Başlangıç noktası</span><b id="video-song-time">0:00</b></div></div></div>
         <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
         <div class="social-compose-options">
           <label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label>
@@ -7150,6 +7151,10 @@ async function showNewVideoModal(existing = null, forceReals = false) {
 
   const videoInput = $('#video-file');
   const bannerInput = $('#video-banner-file');
+  const videoFrame = $('.social-compose-video-frame');
+  const videoFilter = $('#video-filter');
+  const videoSongField = $('#video-song-field');
+  let videoDurationSeconds = Number(existing?.duration_seconds) || 0;
   let selectedVideoSong = null;
   const videoSongPreview = $('#video-song-preview-audio');
   const videoSongPreviewButton = $('#video-song-preview');
@@ -7157,12 +7162,55 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
   const getVideoDuration = file => new Promise((resolve, reject) => { const probe = document.createElement('video'); probe.preload = 'metadata'; probe.onloadedmetadata = () => { URL.revokeObjectURL(probe.src); resolve(probe.duration); }; probe.onerror = () => reject(new Error('Video süresi okunamadı')); probe.src = URL.createObjectURL(file); });
+  const syncVideoComposer = () => {
+    const isReals = forceReals || $('#video-is-reals')?.checked;
+    videoFrame?.classList.toggle('is-landscape', !isReals);
+    document.querySelectorAll('#video-upload-preview, .social-compose-existing-preview').forEach(video => {
+      video.style.filter = mediaFilterCss(videoFilter?.value);
+      video.classList.toggle('is-landscape-preview', !isReals);
+    });
+    const longVideo = videoDurationSeconds > 180 && !isReals;
+    if (videoSongField) {
+      videoSongField.hidden = longVideo;
+      $('#video-song-limit-hint').textContent = longVideo
+        ? 'Uzun videolarda müzik kullanılamaz.'
+        : '3 dakikayı aşan videolara müzik eklenemez.';
+    }
+    if (longVideo) {
+      selectedVideoSong = null;
+      $('#video-song').value = '';
+      videoSongPreview?.pause();
+      videoSongPreview?.removeAttribute('src');
+      videoSongPreviewButton.disabled = true;
+      $('#video-song-player').hidden = true;
+      videoSongStart.value = '0';
+    }
+  };
+  const syncVideoDuration = video => {
+    if (Number.isFinite(video?.duration)) {
+      videoDurationSeconds = Math.max(0, Math.ceil(video.duration));
+      syncVideoComposer();
+    }
+  };
+  document.querySelectorAll('#video-upload-preview, .social-compose-existing-preview').forEach(video => {
+    video.addEventListener('loadedmetadata', () => syncVideoDuration(video));
+    if (video.readyState >= 1) syncVideoDuration(video);
+  });
+  $('#video-is-reals')?.addEventListener('change', syncVideoComposer);
+  videoFilter?.addEventListener('change', syncVideoComposer);
+  syncVideoComposer();
 
   videoInput?.addEventListener('change', async () => {
     const file = videoInput.files[0];
     if (!file) return;
     const uploadPreview = $('#video-upload-preview');
-    if (uploadPreview) { uploadPreview.src = URL.createObjectURL(file); uploadPreview.style.display = 'block'; $('#video-preview-empty')?.classList.add('hidden'); document.querySelector('.social-compose-existing-preview')?.remove(); }
+    if (uploadPreview) {
+      uploadPreview.src = URL.createObjectURL(file);
+      uploadPreview.style.display = 'block';
+      $('#video-preview-empty')?.classList.add('hidden');
+      document.querySelector('.social-compose-existing-preview')?.remove();
+      uploadPreview.addEventListener('loadedmetadata', () => syncVideoDuration(uploadPreview), { once: true });
+    }
     if (bannerInput?.files?.length) return;
     try {
       const generated = await generateVideoPoster(file);
@@ -7270,7 +7318,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       title, description, location: $('#video-location').value.trim(), sound_name: $('#video-sound').value.trim(),
       allow_comments: $('#video-comments').checked, show_likes: $('#video-likes').checked, is_reals: $('#video-is-reals').checked,
       song_id: $('#video-song').value || null, song_start_seconds: $('#video-song-start').value || 0,
-      media_filter: $('#video-filter').value
+      media_filter: $('#video-filter').value, duration_seconds: videoDurationSeconds
     };
     submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
     const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
@@ -7335,7 +7383,8 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         is_reals: isReals,
         song_id: uploadFields.song_id,
         song_start_seconds: uploadFields.song_start_seconds,
-        media_filter: uploadFields.media_filter
+        media_filter: uploadFields.media_filter,
+        duration_seconds: uploadFields.duration_seconds
       };
       if (existing) {
         await api('/video/' + existing.slug, { method: 'PUT', body: JSON.stringify(payload) });
@@ -9029,6 +9078,8 @@ function renderRegister(app) {
     : '/';
   const inviteCode = String(new URLSearchParams(location.search).get('invite') || '').trim().toUpperCase();
   let selectedRegisterAvatar = null;
+  let quickRegistrationId = '';
+  let quickAvatarUrl = '';
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
@@ -9037,6 +9088,8 @@ function renderRegister(app) {
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
       ${inviteCode ? `<div class="register-invite-notice"><i class="fas fa-ticket"></i><span>Davet kodu <strong>${escHtml(inviteCode)}</strong> ile kayıt oluyorsun.</span></div>` : ''}
+      <button type="button" class="quick-register-button" id="reg-quick-btn"><span class="quick-register-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Hızlı kayıt bilgilerini hazırla</strong><small>Kullanıcı adın, takma adın, doğum tarihin ve kedi fotoğrafın otomatik seçilsin</small></span><i class="fas fa-arrow-right quick-register-arrow"></i></button>
+      <p class="quick-register-hint">E-posta ve şifreni sen gir; profil fotoğrafını istersen kaldır. Hızlı kayıt IP ve zaman bilgisiyle kaydedilir, şifren asla loglanmaz. KVKK onayı yine gereklidir.</p>
       <div class="register-profile-photo">
         <div class="register-avatar-preview" id="reg-avatar-preview"><i class="fas fa-user"></i></div>
         <div class="register-profile-copy">
@@ -9159,6 +9212,51 @@ function renderRegister(app) {
     else { pw.type = 'password'; icon.className = 'fas fa-eye'; }
   });
 
+  const quickRegisterButton = $('#reg-quick-btn');
+  quickRegisterButton.addEventListener('click', async () => {
+    quickRegisterButton.disabled = true;
+    quickRegisterButton.classList.add('is-loading');
+    quickRegisterButton.classList.remove('is-ready');
+    quickRegisterButton.querySelector('strong').textContent = 'Bilgiler hazırlanıyor…';
+    $('#reg-error').textContent = '';
+    try {
+      const suggestion = await api('/auth/quick-registration', { method: 'POST', body: JSON.stringify({}) });
+      quickRegistrationId = suggestion.request_id;
+      quickAvatarUrl = suggestion.avatar_url;
+      $('#reg-username').value = suggestion.username;
+      $('#reg-nickname').value = suggestion.nickname;
+      $('#reg-birth-date').value = suggestion.birth_date;
+      $('#reg-private').checked = false;
+      document.querySelector('input[name="reg-tags"][value="everyone"]').checked = true;
+      selectedRegisterAvatar = null;
+      $('#reg-avatar').value = '';
+      $('#reg-avatar-preview').innerHTML = `<img src="${escHtml(quickAvatarUrl)}" alt="Otomatik seçilen kedi profil fotoğrafı" referrerpolicy="no-referrer" />`;
+      $('#reg-avatar-name').textContent = 'Otomatik seçilen kedi fotoğrafı';
+      $('#reg-quick-avatar-remove')?.remove();
+      const removeAvatarButton = document.createElement('button');
+      removeAvatarButton.type = 'button';
+      removeAvatarButton.id = 'reg-quick-avatar-remove';
+      removeAvatarButton.className = 'btn btn-ghost btn-sm quick-register-remove-avatar';
+      removeAvatarButton.textContent = 'Profil fotoğrafını kaldır';
+      removeAvatarButton.addEventListener('click', () => {
+        quickAvatarUrl = '';
+        $('#reg-avatar-preview').innerHTML = '<i class="fas fa-user"></i>';
+        $('#reg-avatar-name').textContent = 'Profil fotoğrafı kaldırıldı';
+        removeAvatarButton.remove();
+      });
+      $('#reg-avatar-name').after(removeAvatarButton);
+      quickRegisterButton.classList.remove('is-loading');
+      quickRegisterButton.classList.add('is-ready');
+      quickRegisterButton.querySelector('strong').textContent = 'Bilgiler hazır — düzenleyebilirsin';
+    } catch (error) {
+      $('#reg-error').textContent = error.message;
+      quickRegisterButton.querySelector('strong').textContent = 'Hızlı kayıt bilgilerini hazırla';
+    } finally {
+      quickRegisterButton.disabled = false;
+      quickRegisterButton.classList.remove('is-loading');
+    }
+  });
+
   $('#reg-2fa-method').addEventListener('change', () => {
     $('#reg-question-fields').style.display = $('#reg-2fa-method').value === 'question' ? 'block' : 'none';
   });
@@ -9167,11 +9265,14 @@ function renderRegister(app) {
     const file = e.target.files[0];
     const preview = $('#reg-avatar-preview');
     const name = $('#reg-avatar-name');
+    $('#reg-quick-avatar-remove')?.remove();
     if (!file) {
+      quickAvatarUrl = '';
       preview.innerHTML = '<i class="fas fa-user"></i>';
       name.textContent = 'JPG, PNG, WEBP veya GIF · en fazla 5 MB';
       return;
     }
+    quickAvatarUrl = '';
     if (file.size > 5 * 1024 * 1024) {
       e.target.value = '';
       name.textContent = 'Fotoğraf 5 MB\'dan küçük olmalı';
@@ -9228,6 +9329,10 @@ function renderRegister(app) {
       const two_factor_question = $('#reg-2fa-question').value;
       const two_factor_answer = $('#reg-2fa-answer').value;
       Object.entries({ username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, invite_code: inviteCode, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      if (quickRegistrationId) {
+        formData.append('quick_registration_id', quickRegistrationId);
+        formData.append('quick_avatar_url', quickAvatarUrl);
+      }
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
       if (data.email_verification_required) {
@@ -10878,7 +10983,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                   </div>`
                : ''}
              ${m.shared_photo_id
-               ? `<div class="dm-shared-forum" onclick="navigate('/fotograflar')"><img src="${escHtml(m.photo_url||'')}" style="width:100%;height:120px;object-fit:cover" /><div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.photo_title||m.photo_caption||'Fotoğraf')}</div><div style="font-size:11px;color:var(--accent-red2)">Fotoğraf →</div></div></div>`
+               ? `<div class="dm-shared-forum" onclick="navigate('/foto/${encodeURIComponent(m.shared_photo_id)}')"><img src="${escHtml(m.photo_url||'')}" style="width:100%;height:120px;object-fit:cover" /><div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.photo_title||m.photo_caption||'Fotoğraf')}</div><div style="font-size:11px;color:var(--accent-red2)">Fotoğraf →</div></div></div>`
                : ''}
              ${m.shared_video_id
                ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
@@ -14413,7 +14518,7 @@ function bindPhotoFeed(feed) {
     api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/view', { method: 'POST' }).catch(() => {});
   });
   const sharePhoto = async c => {
-    const url = location.origin + '/fotograflar#foto-' + c.dataset.photoId;
+    const url = location.origin + '/foto/' + encodeURIComponent(c.dataset.photoId);
     const data = { title: 'CigCig fotoğrafı', text: 'Bu fotoğrafa göz at', url };
     if (navigator.share) await navigator.share(data);
     else {
@@ -14645,6 +14750,11 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
 
   if (!disableAutoplay) {
     photoAudioObserver = new IntersectionObserver(entries => {
+      const modal = $('#modal-overlay');
+      if (modal && !modal.classList.contains('hidden')) {
+        stop();
+        return;
+      }
       entries.forEach(entry => { entry.target._photoVisibility = entry.isIntersecting ? entry.intersectionRatio : 0; });
       visibleCard = [...feed.querySelectorAll('[data-photo-id]')]
         .filter(card => card._photoVisibility >= 0.35 && card.querySelector('.photo-song'))

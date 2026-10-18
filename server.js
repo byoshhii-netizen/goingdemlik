@@ -1525,9 +1525,104 @@ async function trackInviteRegistration(code, user, ip) {
   return rows.length > 0;
 }
 
+function quickRegisterUsernamePart(value) {
+  return String(value).toLocaleLowerCase('tr-TR')
+    .replace(/[ç]/g, 'c').replace(/[ğ]/g, 'g').replace(/[ı]/g, 'i')
+    .replace(/[ö]/g, 'o').replace(/[ş]/g, 's').replace(/[ü]/g, 'u')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+async function createQuickRegistrationSuggestion(req, res) {
+  try {
+    const [namesResponse, firstImageResponse] = await Promise.all([
+      fetch('https://randomuser.me/api/?nat=tr&results=30&inc=name&noinfo', {
+        signal: AbortSignal.timeout(7000),
+        headers: { Accept: 'application/json' }
+      }),
+      fetch(`https://cataas.com/cat?json=true&request=${randomUUID()}`, {
+        signal: AbortSignal.timeout(7000),
+        headers: { Accept: 'application/json' }
+      })
+    ]);
+    if (!namesResponse.ok) throw new Error(`Türkçe isim servisi HTTP ${namesResponse.status} yanıtı verdi`);
+    const namesData = await namesResponse.json();
+    const sourceNames = (Array.isArray(namesData?.results) ? namesData.results : [])
+      .map(person => ({
+        firstName: String(person?.name?.first || '').trim(),
+        surname: String(person?.name?.last || '').trim()
+      }))
+      .filter(({ firstName, surname }) =>
+        firstName.length > 0 && firstName.length <= 20 && surname.length > 0 && surname.length <= 20 &&
+        /^[\p{L}\p{M}'’ -]+$/u.test(firstName) && /^[\p{L}\p{M}'’ -]+$/u.test(surname) &&
+        `${firstName} ${surname}`.length <= 32
+      );
+    if (!sourceNames.length) throw new Error('Türkçe isim servisi kullanılabilir isim döndürmedi');
+
+    let suggestion = null;
+    const startIndex = crypto.randomInt(sourceNames.length);
+    for (let attempt = 0; attempt < sourceNames.length && !suggestion; attempt++) {
+      const { firstName, surname } = sourceNames[(startIndex + attempt) % sourceNames.length];
+      const nickname = `${firstName} ${surname}`;
+      const baseUsername = `${quickRegisterUsernamePart(firstName)}_${quickRegisterUsernamePart(surname)}`;
+      const username = attempt < 10
+        ? baseUsername
+        : `${baseUsername.slice(0, 24)}_${crypto.randomInt(1000, 100000)}`;
+      const { rows } = await query(
+        `SELECT 1 FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
+         UNION ALL
+         SELECT 1 FROM quick_registration_logs WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
+         LIMIT 1`,
+        [username, nickname]
+      );
+      if (!rows.length) suggestion = { username, nickname };
+    }
+    if (!suggestion) return res.status(503).json({ error: 'Şu anda benzersiz bir kullanıcı adı üretilemedi. Tekrar deneyin.' });
+
+    let avatarUrl = '';
+    for (let attempt = 0; attempt < 5 && !avatarUrl; attempt++) {
+      const response = attempt === 0 ? firstImageResponse : await fetch(`https://cataas.com/cat?json=true&request=${randomUUID()}`, {
+        signal: AbortSignal.timeout(7000),
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) throw new Error(`Kedi görseli servisi HTTP ${response.status} yanıtı verdi`);
+      const image = await response.json();
+      const imageId = String(image?._id || image?.id || '');
+      if (!/^[a-zA-Z0-9_-]{8,80}$/.test(imageId)) throw new Error('Kedi görseli servisinden geçerli görsel kimliği alınamadı');
+      const candidateUrl = `https://cataas.com/cat/${encodeURIComponent(imageId)}?width=512&height=512&fit=cover`;
+      const { rows } = await query(
+        'SELECT 1 FROM users WHERE avatar=$1 UNION ALL SELECT 1 FROM quick_registration_logs WHERE avatar_url=$1 OR selected_avatar_url=$1 LIMIT 1',
+        [candidateUrl]
+      );
+      if (!rows.length) avatarUrl = candidateUrl;
+    }
+    if (!avatarUrl) return res.status(503).json({ error: 'Benzersiz profil görseli bulunamadı. Tekrar deneyin.' });
+
+    const age = crypto.randomInt(18, 46);
+    const birth = new Date();
+    birth.setUTCHours(0, 0, 0, 0);
+    birth.setUTCFullYear(birth.getUTCFullYear() - age);
+    birth.setUTCDate(birth.getUTCDate() - crypto.randomInt(0, 365));
+    const birthDate = birth.toISOString().slice(0, 10);
+    const requestId = randomUUID();
+    await query(
+      `INSERT INTO quick_registration_logs
+       (id,ip,user_agent,username,nickname,birth_date,avatar_url,selected_avatar_url)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$7)`,
+      [requestId, getIp(req), String(req.headers['user-agent'] || '').slice(0, 1000), suggestion.username, suggestion.nickname, birthDate, avatarUrl]
+    );
+    res.json({ request_id: requestId, ...suggestion, birth_date: birthDate, avatar_url: avatarUrl });
+  } catch (error) {
+    console.error('Hızlı kayıt önerisi oluşturulamadı:', error.message);
+    res.status(503).json({ error: 'Hızlı kayıt bilgileri şu anda oluşturulamadı. Lütfen tekrar deneyin.' });
+  }
+}
+
+app.post('/api/auth/quick-registration', createQuickRegistrationSuggestion);
+
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
     const { username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const quickRegistrationId = String(req.body.quick_registration_id || '').trim();
     const inviteCode = String(req.body.invite_code || '').trim().toUpperCase();
     const usernameValue = String(username || '').trim();
     const nicknameValue = String(nickname || '').trim().replace(/\s+/g, ' ');
@@ -1537,6 +1632,16 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
     try { if (typeof parsedProfileVisibility === 'string') parsedProfileVisibility = JSON.parse(parsedProfileVisibility); } catch { parsedProfileVisibility = null; }
     if (!usernameValue || !nicknameValue || !emailAddress || !password) return res.status(400).json({ error: 'Kullanıcı adı, takma ad, e-posta ve şifre zorunlu' });
+    let quickRegistration = null;
+    if (quickRegistrationId) {
+      if (!/^[0-9a-f-]{36}$/i.test(quickRegistrationId)) return res.status(400).json({ error: 'Hızlı kayıt oturumu geçersiz.' });
+      const { rows } = await query(
+        "SELECT * FROM quick_registration_logs WHERE id=$1 AND ip=$2 AND status='started'",
+        [quickRegistrationId, getIp(req)]
+      );
+      if (!rows.length) return res.status(400).json({ error: 'Hızlı kayıt oturumu bulunamadı veya süresi doldu. Bilgileri yeniden oluşturun.' });
+      quickRegistration = rows[0];
+    }
     if (!isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (/\s/.test(usernameValue)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
@@ -1586,12 +1691,35 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
     let avatar = '';
     if (req.file) avatar = await handleUpload(req.file);
+    else if (quickRegistration) {
+      const selectedAvatarUrl = String(req.body.quick_avatar_url || '').trim();
+      if (selectedAvatarUrl && selectedAvatarUrl !== quickRegistration.avatar_url) {
+        return res.status(400).json({ error: 'Hızlı kayıt profil görseli geçerli değil.' });
+      }
+      avatar = selectedAvatarUrl;
+    }
     const registrationCode = twoFactorMethod === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
     const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
       'INSERT INTO users (username,nickname,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *',
       [usernameValue, nicknameValue, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
+    if (quickRegistration) {
+      const quickLogValues = [
+        usernameValue, nicknameValue, emailAddress, birth_date, validTagPermission, is_private ? 1 : 0,
+        JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []),
+        JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1,
+        show_level_progress === 'false' ? 0 : 1, twoFactorMethod, avatar, user.id,
+        registrationCode ? 'email_verification_pending' : 'completed', quickRegistrationId
+      ];
+      await query(
+        `UPDATE quick_registration_logs SET username=$1,nickname=$2,email=$3,birth_date=$4,
+         tag_permission=$5,is_private=$6,homepage_sections=$7::jsonb,profile_visibility=$8::jsonb,
+         show_level_badge=$9,show_level_progress=$10,two_factor_method=$11,selected_avatar_url=$12,
+         user_id=$13,status=$14,completed_at=NOW() WHERE id=$15`,
+        quickLogValues
+      );
+    }
     if (registrationCode) {
       const challenge = createChallengeToken();
       try {
@@ -6228,6 +6356,19 @@ app.get('/api/admin/logs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/admin/quick-registration-logs', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Hızlı kayıt logları yalnızca ana admin içindir' });
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 500);
+  const { rows } = await query(
+    `SELECT id,ip,user_agent,status,username,nickname,email,birth_date,tag_permission,
+            is_private,homepage_sections,profile_visibility,show_level_badge,show_level_progress,
+            two_factor_method,avatar_url,selected_avatar_url,user_id,created_at,completed_at
+     FROM quick_registration_logs ORDER BY created_at DESC LIMIT $1`,
+    [limit]
+  );
+  res.json(rows);
+});
+
 app.get('/api/admin/route-logs', adminMiddleware, async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 500, 1000);
   const { rows } = await query("SELECT id, actor, target, detail, ip, user_agent, device, operating_system, country, city, created_at FROM system_logs WHERE action='restricted_route_attempt' ORDER BY created_at DESC LIMIT $1", [limit]);
@@ -8913,13 +9054,13 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   const isUser1 = String(conversation.user1_id) === String(uid);
   if (isUser1 ? conversation.hidden_by_user1 : conversation.hidden_by_user2) return res.json({ ok: true });
   const otherUserId = isUser1 ? conversation.user2_id : conversation.user1_id;
-  await query('UPDATE dm_messages SET read_at=NOW() WHERE conversation_id=$1 AND sender_id=$2 AND read_at IS NULL',
-    [conversation.id, other.id]);
   const { rows: latestRead } = await query(
-    'SELECT COALESCE(MAX(id),0) AS message_id FROM dm_messages WHERE conversation_id=$1 AND sender_id=$2 AND deleted_for_all=0',
-    [conversation.id, other.id]
+    'SELECT COALESCE(MAX(id),0) AS message_id FROM dm_messages WHERE conversation_id=$1 AND deleted_for_all=0',
+    [conversation.id]
   );
   const readThroughMessageId = Number(latestRead[0]?.message_id || 0);
+  await query('UPDATE dm_messages SET read_at=NOW() WHERE conversation_id=$1 AND sender_id=$2 AND read_at IS NULL AND id<=$3',
+    [conversation.id, other.id, readThroughMessageId]);
   const readColumn = isUser1 ? 'read_until_user1' : 'read_until_user2';
   await query(`UPDATE dm_conversations SET ${readColumn}=GREATEST(COALESCE(${readColumn},0),$1) WHERE id=$2`,
     [readThroughMessageId, conversation.id]);
@@ -9997,11 +10138,15 @@ app.get('/api/video/:slug', optionalAuth, async (req, res) => {
 app.post('/api/videos', authMiddleware, async (req, res) => {
   const { title, description, video_url, banner_image, location, sound_name, song_id, song_start_seconds, media_filter, allow_comments, show_likes, is_reals } = req.body;
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
+  const durationSeconds = Math.ceil(Number(req.body.duration_seconds) || 0);
+  if (durationSeconds < 0 || durationSeconds > 86400) return res.status(400).json({ error: 'Video süresi geçersiz.' });
+  if (is_reals && durationSeconds > 180) return res.status(400).json({ error: 'Reals videoları en fazla 3 dakika olabilir.' });
+  if (!is_reals && song_id && durationSeconds > 180) return res.status(400).json({ error: '3 dakikayı aşan videolara müzik eklenemez.' });
   const provisionalSlug = makeVideoSlug(title, randomUUID());
   const safeSongId = song_id ? Number(song_id) : null;
   const safeStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
-  const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,song_id,song_start_seconds,media_filter,allow_comments,show_likes,is_reals,slug)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', safeSongId, safeStart, normalizeMediaFilter(media_filter), allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0, provisionalSlug]);
+  const { rows } = await query(`INSERT INTO videos (user_id,title,description,video_url,thumbnail_url,location,sound_name,song_id,song_start_seconds,media_filter,allow_comments,show_likes,is_reals,slug,duration_seconds)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`, [req.user.id, title.trim(), description || '', video_url, banner_image || '', location || '', sound_name || '', safeSongId, safeStart, normalizeMediaFilter(media_filter), allow_comments === false ? 0 : 1, show_likes === false ? 0 : 1, is_reals ? 1 : 0, provisionalSlug, durationSeconds]);
   const slug = makeVideoSlug(title, rows[0].id);
   await query('UPDATE videos SET slug=$1 WHERE id=$2', [slug, rows[0].id]);
   res.json({ slug, id: rows[0].id });
@@ -10012,8 +10157,14 @@ app.put('/api/video/:slug', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu videoyu düzenleme yetkiniz yok' });
   const b = req.body;
-  await query(`UPDATE videos SET title=$1,description=$2,video_url=$3,thumbnail_url=$4,location=$5,sound_name=$6,song_id=$7,song_start_seconds=$8,media_filter=$9,allow_comments=$10,show_likes=$11,is_reals=$12 WHERE id=$13`,
-    [b.title?.trim() || rows[0].title, b.description ?? rows[0].description, b.video_url || rows[0].video_url, b.banner_image ?? rows[0].thumbnail_url, b.location ?? rows[0].location, b.sound_name ?? rows[0].sound_name, b.song_id ? Number(b.song_id) : null, Math.max(0, parseInt(b.song_start_seconds, 10) || 0), normalizeMediaFilter(b.media_filter ?? rows[0].media_filter), b.allow_comments === undefined ? rows[0].allow_comments : (b.allow_comments ? 1 : 0), b.show_likes === undefined ? rows[0].show_likes : (b.show_likes ? 1 : 0), b.is_reals === undefined ? rows[0].is_reals : (b.is_reals ? 1 : 0), rows[0].id]);
+  const durationSeconds = Math.ceil(Number(b.duration_seconds ?? rows[0].duration_seconds) || 0);
+  const isReals = b.is_reals === undefined ? Boolean(rows[0].is_reals) : Boolean(b.is_reals);
+  const songId = b.song_id ? Number(b.song_id) : null;
+  if (durationSeconds < 0 || durationSeconds > 86400) return res.status(400).json({ error: 'Video süresi geçersiz.' });
+  if (isReals && durationSeconds > 180) return res.status(400).json({ error: 'Reals videoları en fazla 3 dakika olabilir.' });
+  if (!isReals && songId && durationSeconds > 180) return res.status(400).json({ error: '3 dakikayı aşan videolara müzik eklenemez.' });
+  await query(`UPDATE videos SET title=$1,description=$2,video_url=$3,thumbnail_url=$4,location=$5,sound_name=$6,song_id=$7,song_start_seconds=$8,media_filter=$9,allow_comments=$10,show_likes=$11,is_reals=$12,duration_seconds=$13 WHERE id=$14`,
+    [b.title?.trim() || rows[0].title, b.description ?? rows[0].description, b.video_url || rows[0].video_url, b.banner_image ?? rows[0].thumbnail_url, b.location ?? rows[0].location, b.sound_name ?? rows[0].sound_name, songId, Math.max(0, parseInt(b.song_start_seconds, 10) || 0), normalizeMediaFilter(b.media_filter ?? rows[0].media_filter), b.allow_comments === undefined ? rows[0].allow_comments : (b.allow_comments ? 1 : 0), b.show_likes === undefined ? rows[0].show_likes : (b.show_likes ? 1 : 0), isReals ? 1 : 0, durationSeconds, rows[0].id]);
   res.json({ ok: true });
 });
 

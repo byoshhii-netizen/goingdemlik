@@ -878,6 +878,31 @@ async function initDb() {
     ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';
     ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS city TEXT DEFAULT '';
 
+    CREATE TABLE IF NOT EXISTS quick_registration_logs (
+      id UUID PRIMARY KEY,
+      ip TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'started',
+      username TEXT NOT NULL DEFAULT '',
+      nickname TEXT NOT NULL DEFAULT '',
+      email TEXT NOT NULL DEFAULT '',
+      birth_date DATE,
+      tag_permission TEXT NOT NULL DEFAULT 'everyone',
+      is_private INTEGER NOT NULL DEFAULT 0,
+      homepage_sections JSONB NOT NULL DEFAULT '[]'::jsonb,
+      profile_visibility JSONB NOT NULL DEFAULT '{}'::jsonb,
+      show_level_badge INTEGER NOT NULL DEFAULT 1,
+      show_level_progress INTEGER NOT NULL DEFAULT 1,
+      two_factor_method TEXT NOT NULL DEFAULT 'none',
+      avatar_url TEXT NOT NULL DEFAULT '',
+      selected_avatar_url TEXT NOT NULL DEFAULT '',
+      user_id BIGINT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      completed_at TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_quick_registration_logs_created_at
+      ON quick_registration_logs(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS friendships (
       id BIGSERIAL PRIMARY KEY,
       requester_id BIGINT NOT NULL,
@@ -964,6 +989,7 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
     );
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS sound_name TEXT DEFAULT '';
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;

@@ -396,7 +396,7 @@ function loadSection(section) {
   const main = $('#admin-main');
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
-    dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
+    dashboard: renderDashboard, users: renderUsers, 'quick-registration-logs': renderQuickRegistrationLogs, 'two-factor': renderTwoFactorUsers,
     journalists: renderJournalists, 'newspaper-settings': renderNewspaperSettings,
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
@@ -716,9 +716,9 @@ async function renderUserDirectory(main) {
       <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="user-search" placeholder="Kullanıcı, e-posta, IP ara..." style="min-width:240px" /></div>
     </div>
     <div class="card">
-      <div class="table-wrap">
-       <table>
-          <thead><tr><th>ID</th><th>Kullanıcı</th><th>Rozetler</th><th>E-posta</th><th>2AD</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
+      <div class="table-wrap admin-users-table-wrap">
+       <table class="admin-users-table">
+          <thead><tr><th>ID</th><th>Kullanıcı</th><th>Rozetler</th><th>Kırmızı Tik</th><th>E-posta</th><th>2AD</th><th>Doğum tarihi</th><th>Seviye</th><th>İstatistik</th><th>IP</th><th>Kayıt</th><th>Durum</th><th>İşlem</th></tr></thead>
           <tbody id="users-tbody"></tbody>
         </table>
       </div>
@@ -2774,6 +2774,53 @@ async function renderLogs(main) {
         <span style="flex:1">${escHtml(l.action)}${l.target?' <span style="color:var(--text3)">→ '+escHtml(l.target)+'</span>':''}</span>
         <span style="color:var(--text3);font-size:11px;white-space:nowrap">${timeAgo(l.created_at)}</span>
       </div>`).join('') : '<div style="padding:32px;text-align:center;color:var(--text3)">Sonuç bulunamadı</div>';
+  });
+}
+
+async function renderQuickRegistrationLogs(main) {
+  let logs = [];
+  try {
+    logs = await adminApi('/quick-registration-logs?limit=500');
+  } catch (error) {
+    main.innerHTML = `<p style="color:var(--red2);padding:20px">${escHtml(error.message)}</p>`;
+    return;
+  }
+  const formatSettings = log => {
+    const visibility = log.profile_visibility && typeof log.profile_visibility === 'object' ? log.profile_visibility : {};
+    const sections = Array.isArray(log.homepage_sections) ? log.homepage_sections : [];
+    return [
+      `Etiket: ${log.tag_permission === 'everyone' ? 'Herkes' : log.tag_permission === 'friends' ? 'Arkadaşlar' : 'Hiç kimse'}`,
+      `Gizli hesap: ${log.is_private ? 'Evet' : 'Hayır'}`,
+      `Ana sayfa bölümleri: ${sections.length ? sections.join(', ') : 'Yok'}`,
+      `Profil görünürlüğü: ${Object.entries(visibility).filter(([, enabled]) => enabled).map(([key]) => key).join(', ') || 'Varsayılan / seçilmedi'}`,
+      `Seviye rozeti: ${log.show_level_badge ? 'Açık' : 'Kapalı'}`,
+      `Seviye ilerlemesi: ${log.show_level_progress ? 'Açık' : 'Kapalı'}`,
+      `2 aşamalı doğrulama: ${log.two_factor_method || 'none'}`
+    ].join(' · ');
+  };
+  const render = rows => rows.length ? rows.map(log => {
+    const avatar = String(log.selected_avatar_url || log.avatar_url || '');
+    const avatarSrc = /^https:\/\/cataas\.com\/cat\/[a-zA-Z0-9_-]+(?:\?[^\s"'<>]*)?$/.test(avatar) || /^\/uploads\/[a-zA-Z0-9_.-]+$/.test(avatar) ? avatar : '';
+    const status = {
+      started: 'Başladı',
+      email_verification_pending: 'E-posta doğrulaması bekliyor',
+      completed: 'Tamamlandı'
+    }[log.status] || log.status || '—';
+    return `<article class="quick-register-log-row">
+      ${avatarSrc ? `<img class="quick-register-log-avatar" src="${escHtml(avatarSrc)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<div class="quick-register-log-avatar quick-register-log-avatar--empty"><i class="fas fa-user"></i></div>'}
+      <div class="quick-register-log-content">
+        <div class="quick-register-log-heading"><strong>${escHtml(log.nickname || 'İsim yok')}</strong><span>@${escHtml(log.username || '—')}</span><span class="quick-register-log-status">${escHtml(status)}</span></div>
+        <div class="quick-register-log-meta"><span><i class="fas fa-envelope"></i>${escHtml(log.email || 'E-posta bekleniyor')}</span><span><i class="fas fa-network-wired"></i>${escHtml(log.ip || '—')}</span><span><i class="fas fa-cake-candles"></i>${escHtml(log.birth_date ? String(log.birth_date).slice(0, 10) : '—')}</span><span><i class="fas fa-clock"></i>${formatDate(log.created_at)}${log.completed_at ? ` · ${formatDate(log.completed_at)}` : ''}</span><span><i class="fas fa-id-badge"></i>${escHtml(log.user_id || 'Hesap oluşturulmadı')}</span></div>
+        <div class="quick-register-log-settings">${escHtml(formatSettings(log))}</div>
+        <details class="quick-register-log-device"><summary>Tarayıcı bilgisi</summary><span>${escHtml(log.user_agent || '—')}</span></details>
+      </div>
+    </article>`;
+  }).join('') : '<div style="padding:36px;text-align:center;color:var(--text3)">Hızlı kayıt logu bulunamadı</div>';
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-wand-magic-sparkles"></i></div> Hızlı Kayıt Logları <span style="font-size:13px;font-weight:400;color:var(--text2)">(${logs.length})</span></div><div class="adm-search"><i class="fas fa-search"></i><input type="search" id="quick-registration-log-search" placeholder="İsim, e-posta, IP veya durum ara..." style="min-width:260px"></div></div><div class="card" id="quick-registration-logs-list">${render(logs)}</div>`;
+  $('#quick-registration-log-search').addEventListener('input', event => {
+    const search = event.target.value.trim().toLocaleLowerCase('tr-TR');
+    const filtered = logs.filter(log => JSON.stringify(log).toLocaleLowerCase('tr-TR').includes(search));
+    $('#quick-registration-logs-list').innerHTML = render(filtered);
   });
 }
 
