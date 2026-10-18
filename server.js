@@ -1063,7 +1063,7 @@ app.get('/robots.txt', (req, res) => {
 });
 
 app.get('/sitemap.xml', async (req, res) => {
-  const [forums, books, bookPages, groups, users, songs, photos] = await Promise.all([
+  const [forums, books, bookPages, groups, users, songs, photos, videos, reals, poems, newspapers] = await Promise.all([
     query(`SELECT f.slug, f.title, f.banner_image, f.updated_at FROM forums f LEFT JOIN users u ON u.id=f.user_id
       WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
@@ -1086,6 +1086,26 @@ app.get('/sitemap.xml', async (req, res) => {
       LEFT JOIN users u ON u.id=p.user_id
       WHERE COALESCE(u.is_private,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
       ORDER BY p.created_at DESC LIMIT 10000`).then(r => r.rows),
+    query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
+      FROM videos v JOIN users u ON u.id=v.user_id
+      WHERE v.is_reals=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='video' AND cs.content_id=v.id)
+      ORDER BY v.created_at DESC LIMIT 2000`).then(r => r.rows),
+    query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
+      FROM videos v JOIN users u ON u.id=v.user_id
+      WHERE v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)
+      ORDER BY v.created_at DESC LIMIT 2000`).then(r => r.rows),
+    query(`SELECT p.slug, p.title, p.updated_at, p.created_at
+      FROM poems p JOIN users u ON u.id=p.user_id
+      WHERE COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)
+      ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC LIMIT 2000`).then(r => r.rows),
+    query(`SELECT n.id, n.newspaper_date, n.created_at
+      FROM newspapers n JOIN users u ON u.id=n.journalist_id
+      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)
+      ORDER BY n.newspaper_date DESC, n.created_at DESC LIMIT 2000`).then(r => r.rows),
   ]);
   const now = new Date().toISOString();
   const staticUrls = [
@@ -1094,6 +1114,10 @@ app.get('/sitemap.xml', async (req, res) => {
     { url: '/kitaplar',  priority: '0.8', changefreq: 'daily'  },
     { url: '/gruplar',   priority: '0.7', changefreq: 'daily'  },
     { url: '/muzikler',  priority: '0.7', changefreq: 'daily'  },
+    { url: '/video',     priority: '0.8', changefreq: 'daily'  },
+    { url: '/reals',     priority: '0.8', changefreq: 'daily'  },
+    { url: '/siirler',   priority: '0.7', changefreq: 'daily'  },
+    { url: '/gazeteler', priority: '0.6', changefreq: 'daily'  },
   ].map(u => `  <url><loc>${SITE_URL}${u.url}</loc><lastmod>${now}</lastmod><changefreq>${u.changefreq}</changefreq><priority>${u.priority}</priority></url>`).join('\n');
 
   const forumUrls = forums.map(f => {
@@ -1136,6 +1160,33 @@ app.get('/sitemap.xml', async (req, res) => {
     return `  <url><loc>${SITE_URL}/foto/${escapeHtml(p.id)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.5</priority>\n    <image:image><image:loc>${escapeHtml(p.url)}</image:loc><image:title>${escapeHtml(imageTitle)}</image:title></image:image>\n  </url>`;
   }).join('\n');
 
+  const videoUrls = videos.map(video => {
+    const slug = video.slug || video.id;
+    const mod = video.created_at ? `\n    <lastmod>${new Date(video.created_at).toISOString()}</lastmod>` : '';
+    const imgTag = video.thumbnail_url
+      ? `\n    <image:image><image:loc>${escapeHtml(video.thumbnail_url)}</image:loc><image:title>${escapeHtml(video.title || 'CigCig videosu')}</image:title></image:image>`
+      : '';
+    return `  <url><loc>${SITE_URL}/video/${escapeHtml(slug)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.7</priority>${imgTag}\n  </url>`;
+  }).join('\n');
+
+  const realsUrls = reals.map(real => {
+    const mod = real.created_at ? `\n    <lastmod>${new Date(real.created_at).toISOString()}</lastmod>` : '';
+    const imgTag = real.thumbnail_url
+      ? `\n    <image:image><image:loc>${escapeHtml(real.thumbnail_url)}</image:loc><image:title>${escapeHtml(real.title || 'CigCig Reals')}</image:title></image:image>`
+      : '';
+    return `  <url><loc>${SITE_URL}/reals/${escapeHtml(real.id)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.7</priority>${imgTag}\n  </url>`;
+  }).join('\n');
+
+  const poemUrls = poems.map(poem => {
+    const mod = poem.updated_at || poem.created_at ? `\n    <lastmod>${new Date(poem.updated_at || poem.created_at).toISOString()}</lastmod>` : '';
+    return `  <url><loc>${SITE_URL}/siir/${escapeHtml(poem.slug)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.6</priority>\n  </url>`;
+  }).join('\n');
+
+  const newspaperUrls = newspapers.map(newspaper => {
+    const mod = newspaper.created_at ? `\n    <lastmod>${new Date(newspaper.created_at).toISOString()}</lastmod>` : '';
+    return `  <url><loc>${SITE_URL}/gazete/${escapeHtml(newspaper.id)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.5</priority>\n  </url>`;
+  }).join('\n');
+
   res.type('application/xml');
   res.set('Cache-Control', 'public, max-age=3600'); // 1 saat cache — sık değişmiyor
   res.send([
@@ -1150,6 +1201,10 @@ app.get('/sitemap.xml', async (req, res) => {
     profileUrls,
     songUrls,
     photoUrls,
+    videoUrls,
+    realsUrls,
+    poemUrls,
+    newspaperUrls,
     '</urlset>'
   ].join('\n'));
 });
@@ -2587,6 +2642,7 @@ app.get('/api/forums', async (req, res) => {
   const { tag } = req.query;
   let baseQuery = `
     SELECT f.*, u.username, u.nickname, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      u.is_red_verified, u.red_verified_at,
       u.title as user_title, u.location as user_location,
       (SELECT COUNT(*) FROM forum_likes WHERE forum_id=f.id) as like_count,
       (SELECT COUNT(*) FROM forum_comments WHERE forum_id=f.id) as comment_count,
@@ -2630,7 +2686,7 @@ app.get('/api/newspapers', optionalAuth, async (req, res) => {
   const userId = req.user?.id || 0;
   const { rows } = await query(`
     SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
-      u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+      u.username, u.nickname, u.avatar, u.avatar_removed, u.is_red_verified, u.red_verified_at, n.journalist_since,
       (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
       (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
       CASE WHEN $1::bigint=0 THEN FALSE
@@ -2657,7 +2713,7 @@ app.get('/api/newspapers/:id', optionalAuth, async (req, res) => {
   const userId = req.user?.id || 0;
   const { rows } = await query(`
     SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
-      u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+      u.username, u.nickname, u.avatar, u.avatar_removed, u.is_red_verified, u.red_verified_at, n.journalist_since,
       (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
       (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
       CASE WHEN $2::bigint=0 THEN FALSE
@@ -2753,7 +2809,7 @@ app.get('/api/newspapers/:id/comments', optionalAuth, async (req, res) => {
   const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [id]);
   if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
   const { rows } = await query(`
-    SELECT c.id,c.newspaper_id,c.user_id,c.content,c.created_at,u.username,u.nickname,u.avatar,u.avatar_removed,
+    SELECT c.id,c.newspaper_id,c.user_id,c.content,c.created_at,u.username,u.nickname,u.avatar,u.avatar_removed,u.is_red_verified,u.red_verified_at,
       (SELECT COUNT(*)::int FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id) AS like_count,
       CASE WHEN $2::bigint=0 THEN FALSE
         ELSE EXISTS(SELECT 1 FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id AND cl.user_id=$2)
@@ -2786,7 +2842,9 @@ app.post('/api/newspapers/:id/comments', authMiddleware, async (req, res) => {
   }
   res.status(201).json({
     ...rows[0], username: req.user.username, nickname: req.user.nickname,
-    avatar: req.user.avatar, avatar_removed: req.user.avatar_removed, like_count: 0, liked: false,
+    avatar: req.user.avatar, avatar_removed: req.user.avatar_removed,
+    is_red_verified: req.user.is_red_verified, red_verified_at: req.user.red_verified_at,
+    like_count: 0, liked: false,
   });
 });
 
@@ -2838,7 +2896,8 @@ app.post('/api/newspapers/:id/comments/:commentId/like', authMiddleware, async (
 
 app.get('/api/forum/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`
-    SELECT f.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.level_id, u.is_admin,
+    SELECT f.*, u.username, u.nickname, u.avatar, u.name_color, u.is_vip, u.is_plus, u.level_id, u.is_admin,
+      u.is_red_verified, u.red_verified_at,
       u.title as user_title, u.location as user_location,
       (SELECT COUNT(*) FROM forum_likes WHERE forum_id=f.id) as like_count,
       (SELECT COUNT(*) FROM forum_comments WHERE forum_id=f.id) as comment_count,
@@ -2964,7 +3023,8 @@ app.get('/api/forum/:slug/comments', optionalAuth, async (req, res) => {
   const { rows: fRows } = await query('SELECT id FROM forums WHERE slug=$1', [req.params.slug]);
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const { rows } = await query(`
-    SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+    SELECT fc.*, u.username, u.nickname, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+      u.is_red_verified, u.red_verified_at,
       parent.username AS parent_username,
       (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) as like_count,
       EXISTS(SELECT 1 FROM forum_comment_likes fcl WHERE fcl.comment_id=fc.id AND fcl.user_id=$2) AS liked
@@ -3008,7 +3068,8 @@ app.post('/api/forum/:slug/comments', authMiddleware, async (req, res) => {
   await updateUserLevel(req.user.id);
   // @mention bildirimleri
   await parseMentionsAndNotify(content, req.user, 'comment_mention', '/forum/' + req.params.slug, forum.title).catch(() => {});
-  const { rows: cRows } = await query(`SELECT fc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+  const { rows: cRows } = await query(`SELECT fc.*, u.username, u.nickname, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+      u.is_red_verified, u.red_verified_at,
     parent.username AS parent_username,
     (SELECT COUNT(*) FROM forum_comment_likes WHERE comment_id=fc.id) AS like_count,
     false AS liked
@@ -3051,6 +3112,7 @@ app.get('/api/poems', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
   const { rows } = await query(`
     SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      u.is_red_verified, u.red_verified_at,
       u.title as user_title, u.location as user_location,
       (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
       (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count,
@@ -3066,6 +3128,7 @@ app.get('/api/poem/:slug', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
   const { rows } = await query(`
     SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      u.is_red_verified, u.red_verified_at,
       u.title as user_title, u.location as user_location,
       (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
       (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count,
@@ -3097,6 +3160,7 @@ app.post('/api/poems', authMiddleware, async (req, res) => {
   await query('UPDATE poems SET slug=$1 WHERE id=$2', [realSlug, poemId]);
   const { rows: poemRows } = await query(`
     SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      u.is_red_verified, u.red_verified_at,
       u.title as user_title, u.location as user_location,
       0 as like_count,
       0 as comment_count,
@@ -3124,6 +3188,7 @@ app.put('/api/poem/:slug', authMiddleware, async (req, res) => {
     [title.slice(0, 180), content.slice(0, 12000), isHidden, newSlug, poem.id]);
   const { rows: poemRows } = await query(`
     SELECT p.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
+      u.is_red_verified, u.red_verified_at,
       u.title as user_title, u.location as user_location,
       (SELECT COUNT(*) FROM poem_likes WHERE poem_id=p.id) as like_count,
       (SELECT COUNT(*) FROM poem_comments WHERE poem_id=p.id) as comment_count,
@@ -3184,6 +3249,7 @@ app.get('/api/poem/:slug/comments', optionalAuth, async (req, res) => {
   }
   const { rows } = await query(`
     SELECT pc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+      u.is_red_verified, u.red_verified_at,
       parent.username AS parent_username,
       (SELECT COUNT(*) FROM poem_comment_likes WHERE comment_id=pc.id) as like_count,
       EXISTS(SELECT 1 FROM poem_comment_likes fcl WHERE fcl.comment_id=pc.id AND fcl.user_id=$2) AS liked
@@ -3215,6 +3281,7 @@ app.post('/api/poem/:slug/comments', authMiddleware, async (req, res) => {
   const { rows } = await query('INSERT INTO poem_comments (poem_id,user_id,parent_comment_id,content) VALUES ($1,$2,$3,$4) RETURNING id', [poem.id, req.user.id, parentCommentId, content.trim()]);
   const { rows: cRows } = await query(`
     SELECT pc.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin, u.level_id,
+      u.is_red_verified, u.red_verified_at,
       parent.username AS parent_username,
       (SELECT COUNT(*) FROM poem_comment_likes WHERE comment_id=pc.id) AS like_count,
       false AS liked
@@ -3280,7 +3347,7 @@ async function canAccessBook(book, userId) {
 
 app.get('/api/books', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
-  const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color,
+  const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color, u.is_red_verified, u.red_verified_at,
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
     FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0
     WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
@@ -3294,7 +3361,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
-  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
+  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color, u.is_red_verified, u.red_verified_at FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const isOwner = req.user?.id == book.user_id;
@@ -3308,7 +3375,7 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   const likeCount = parseInt(likeCountRows[0]?.c || 0);
   const liked = req.user?.id ? Boolean((await query('SELECT 1 FROM book_likes WHERE book_id=$1 AND user_id=$2 LIMIT 1', [book.id, req.user.id])).rows.length) : false;
   const { rows: commentRows } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_red_verified, u.red_verified_at
     FROM book_comments bc JOIN users u ON bc.user_id=u.id
     WHERE bc.book_id=$1 ORDER BY bc.created_at ASC
   `, [book.id]);
@@ -3324,7 +3391,7 @@ app.get('/api/book/:slug/comments', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const { rows } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_red_verified, u.red_verified_at
     FROM book_comments bc JOIN users u ON bc.user_id=u.id
     WHERE bc.book_id=$1 ORDER BY bc.created_at ASC
   `, [book.id]);
@@ -3342,7 +3409,7 @@ app.post('/api/book/:slug/comments', authMiddleware, async (req, res) => {
   `, [book.id, req.user.id, content]);
   await query('UPDATE books SET comment_count=COALESCE(comment_count,0)+1 WHERE id=$1', [book.id]);
   const { rows: full } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_red_verified, u.red_verified_at
     FROM book_comments bc JOIN users u ON bc.user_id=u.id WHERE bc.id=$1
   `, [inserted[0].id]);
   res.json(full[0]);
@@ -3362,7 +3429,7 @@ app.put('/api/book/:slug/comments/:id', authMiddleware, async (req, res) => {
     RETURNING id, book_id, user_id, content, created_at, edited_at
   `, [content, commentRows[0].id]);
   const { rows: full } = await query(`
-    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color
+    SELECT bc.id, bc.content, bc.created_at, bc.edited_at, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_red_verified, u.red_verified_at
     FROM book_comments bc JOIN users u ON bc.user_id=u.id WHERE bc.id=$1
   `, [updated[0].id]);
   res.json(full[0]);
@@ -4758,7 +4825,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
   await ensurePhotoInteractionSchema();
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
-  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
+  const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
@@ -4777,7 +4844,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   const { rows } = await query(
     `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds,
     s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
-      p.created_at, p.user_id, u.username, u.avatar, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
+      p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
@@ -4854,7 +4921,7 @@ function randomStoryPublicId() {
 app.get('/api/stories', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
-      u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+      u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
@@ -4872,7 +4939,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
 app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
-  u.username,u.avatar,u.avatar_removed,u.is_private,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
+  u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
       (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
@@ -5142,7 +5209,7 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
     const userId = req.user ? req.user.id : 0;
     const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
     if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-    const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar,
+    const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at,
       (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
       EXISTS(SELECT 1 FROM photo_comment_likes pcl2 WHERE pcl2.comment_id=pc.id AND pcl2.user_id=$2) AS liked
       FROM photo_comments pc JOIN users u ON u.id=pc.user_id AND COALESCE(u.is_deleted,0)=0 WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC`, [photoId, userId]);
@@ -5169,7 +5236,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
     if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
       await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
     }
-    const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.avatar FROM photo_comments pc JOIN users u ON u.id=pc.user_id AND COALESCE(u.is_deleted,0)=0 WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
+    const c = await query('SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at FROM photo_comments pc JOIN users u ON u.id=pc.user_id AND COALESCE(u.is_deleted,0)=0 WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC', [photoId]);
     res.json(c.rows[c.rows.length - 1]);
   } catch (error) {
     console.error('Photo comment failed:', error);
@@ -7362,6 +7429,183 @@ function injectMeta(title, desc, url, imageUrl, extraMeta, bodyHtml) {
   // Yedek: regex ile herhangi bir title tag'ını değiştir
   return injectCrawlableBody(html.replace(/<title>[^<]*<\/title>/, meta), bodyHtml);
 }
+
+app.get(['/video', '/videolar'], async (req, res) => {
+  const { rows: videos } = await query(`SELECT v.slug, v.id, v.title, v.description, v.thumbnail_url, v.created_at, u.username
+    FROM videos v JOIN users u ON u.id=v.user_id
+    WHERE v.is_reals=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='video' AND cs.content_id=v.id)
+    ORDER BY v.created_at DESC LIMIT 100`);
+  const content = videos.length
+    ? `<div class="seo-content-grid">${videos.map(video => `<article class="seo-content-card">
+        <a href="/video/${escapeHtml(video.slug || video.id)}">${serverImage(video.thumbnail_url, video.title || 'CigCig videosu', 'seo-content-image')}</a>
+        <div class="seo-content-card-body">
+          <h2><a href="/video/${escapeHtml(video.slug || video.id)}">${escapeHtml(video.title || 'Başlıksız video')}</a></h2>
+          <p>${escapeHtml(String(video.description || '').replace(/\s+/g, ' ').slice(0, 220))}</p>
+          <div class="seo-content-meta">${serverProfileLink(video.username)}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz herkese açık video bulunmuyor.</p>';
+  const description = 'CigCig video platformunda topluluğun paylaştığı herkese açık videoları keşfet.';
+  const body = serverPageBody('CİGCİG VİDEO PLATFORMU', 'Videolar', description, content);
+  res.send(injectMeta('CigCig Video Platformu – Videolar', description, `${SITE_URL}/video`, '', '', body));
+});
+
+app.get('/reals', async (req, res) => {
+  const { rows: reals } = await query(`SELECT v.id, v.title, v.description, v.thumbnail_url, v.created_at, u.username
+    FROM videos v JOIN users u ON u.id=v.user_id
+    WHERE v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)
+    ORDER BY v.created_at DESC LIMIT 100`);
+  const content = reals.length
+    ? `<div class="seo-content-grid">${reals.map(real => `<article class="seo-content-card">
+        <a href="/reals/${escapeHtml(real.id)}">${serverImage(real.thumbnail_url, real.title || 'CigCig Reals videosu', 'seo-content-image')}</a>
+        <div class="seo-content-card-body">
+          <h2><a href="/reals/${escapeHtml(real.id)}">${escapeHtml(real.title || 'CigCig Reals videosu')}</a></h2>
+          <p>${escapeHtml(String(real.description || '').replace(/\s+/g, ' ').slice(0, 220))}</p>
+          <div class="seo-content-meta">${serverProfileLink(real.username)}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz herkese açık Reals videosu bulunmuyor.</p>';
+  const description = 'CigCig Reals: topluluğun herkese açık kısa videolarını keşfet ve izle.';
+  res.send(injectMeta('CigCig Reals – Kısa Videolar', description, `${SITE_URL}/reals`, '', '',
+    serverPageBody('CİGCİG REALS', 'Reals kısa videoları', description, content)));
+});
+
+app.get('/reals/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  const { rows } = await query(`SELECT v.id, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, u.username
+    FROM videos v JOIN users u ON u.id=v.user_id
+    WHERE v.id=$1 AND v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)`, [id]);
+  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  const real = rows[0];
+  const title = real.title || 'CigCig Reals videosu';
+  const description = String(real.description || `${title} — CigCig Reals kısa videosu.`).replace(/\s+/g, ' ').slice(0, 160);
+  const url = `${SITE_URL}/reals/${real.id}`;
+  const body = serverPageBody('CİGCİG REALS', title, description, `<article class="seo-article">
+    ${real.thumbnail_url ? serverImage(real.thumbnail_url, title, 'seo-hero-image') : ''}
+    ${real.video_url ? `<video controls preload="metadata" playsinline${real.thumbnail_url ? ` poster="${escapeHtml(real.thumbnail_url)}"` : ''}><source src="${escapeHtml(real.video_url)}" /></video>` : ''}
+    ${real.description ? `<div class="seo-article-text">${escapeHtml(real.description)}</div>` : ''}
+    <div class="seo-content-meta">Paylaşan: ${serverProfileLink(real.username)}</div>
+  </article>`);
+  const schema = safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description, thumbnailUrl: real.thumbnail_url ? [real.thumbnail_url] : undefined,
+    contentUrl: real.video_url, uploadDate: real.created_at, url, publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig.png` } }
+  });
+  res.send(injectMeta(`${title} – CigCig Reals`, description, url, real.thumbnail_url, `<script type="application/ld+json">${schema}</script>`, body));
+});
+
+app.get('/video/:slug', async (req, res) => {
+  const { rows } = await query(`SELECT v.id, v.slug, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, u.username
+    FROM videos v JOIN users u ON u.id=v.user_id
+    WHERE (v.slug=$1 OR v.id::text=$1) AND v.is_reals=0
+      AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='video' AND cs.content_id=v.id)
+    LIMIT 1`, [req.params.slug]);
+  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  const video = rows[0];
+  const title = video.title || 'CigCig videosu';
+  const description = String(video.description || `${title} — CigCig video platformında.`).replace(/\s+/g, ' ').slice(0, 160);
+  const url = `${SITE_URL}/video/${video.slug || video.id}`;
+  const body = serverPageBody('CİGCİG VİDEO PLATFORMU', title, description, `<article class="seo-article">
+    ${video.thumbnail_url ? serverImage(video.thumbnail_url, title, 'seo-hero-image') : ''}
+    ${video.video_url ? `<video controls preload="metadata" playsinline${video.thumbnail_url ? ` poster="${escapeHtml(video.thumbnail_url)}"` : ''}><source src="${escapeHtml(video.video_url)}" /></video>` : ''}
+    ${video.description ? `<div class="seo-article-text">${escapeHtml(video.description)}</div>` : ''}
+    <div class="seo-content-meta">Paylaşan: ${serverProfileLink(video.username)}</div>
+  </article>`);
+  const schema = safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description,
+    thumbnailUrl: video.thumbnail_url ? [video.thumbnail_url] : undefined,
+    contentUrl: video.video_url, uploadDate: video.created_at, url,
+    publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig.png` } }
+  });
+  res.send(injectMeta(`${title} – CigCig Video`, description, url, video.thumbnail_url, `<script type="application/ld+json">${schema}</script>`, body));
+});
+
+app.get('/siirler', async (req, res) => {
+  const { rows: poems } = await query(`SELECT p.slug, p.title, p.content, p.created_at, u.username
+    FROM poems p JOIN users u ON u.id=p.user_id
+    WHERE COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)
+    ORDER BY p.created_at DESC LIMIT 100`);
+  const content = poems.length
+    ? `<div class="seo-content-grid">${poems.map(poem => `<article class="seo-content-card">
+        <div class="seo-content-card-body">
+          <h2><a href="/siir/${escapeHtml(poem.slug)}">${escapeHtml(poem.title)}</a></h2>
+          <p>${escapeHtml(String(poem.content || '').replace(/\s+/g, ' ').slice(0, 220))}</p>
+          <div class="seo-content-meta">${serverProfileLink(poem.username)}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz herkese açık şiir bulunmuyor.</p>';
+  const description = 'CigCig topluluğunun paylaştığı şiirleri başlık ve içerikleriyle keşfet.';
+  res.send(injectMeta('Şiirler – CigCig', description, `${SITE_URL}/siirler`, '', '',
+    serverPageBody('CİGCİG ŞİİRLERİ', 'Şiirler', description, content)));
+});
+
+app.get('/siir/:slug', async (req, res) => {
+  const { rows } = await query(`SELECT p.slug, p.title, p.content, p.created_at, p.updated_at, u.username
+    FROM poems p JOIN users u ON u.id=p.user_id
+    WHERE p.slug=$1 AND COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)`, [req.params.slug]);
+  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  const poem = rows[0];
+  const description = String(poem.content || poem.title).replace(/\s+/g, ' ').slice(0, 160);
+  const url = `${SITE_URL}/siir/${poem.slug}`;
+  const body = serverPageBody('CİGCİG ŞİİRLERİ', poem.title, description, `<article class="seo-article">
+    <div class="seo-article-text">${escapeHtml(poem.content || '').replace(/\n/g, '<br>')}</div>
+    <div class="seo-content-meta">Şair: ${serverProfileLink(poem.username)}</div>
+  </article>`);
+  res.send(injectMeta(`${poem.title} – Şiir | CigCig`, description, url, '', `<script type="application/ld+json">${safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'CreativeWork', name: poem.title, text: String(poem.content || '').slice(0, 5000),
+    datePublished: poem.created_at, dateModified: poem.updated_at || poem.created_at, url,
+    author: poem.username ? { '@type': 'Person', name: poem.username } : undefined, inLanguage: 'tr'
+  })}</script>`, body));
+});
+
+app.get('/gazeteler', async (req, res) => {
+  const { rows: newspapers } = await query(`SELECT n.id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, u.username
+    FROM newspapers n JOIN users u ON u.id=n.journalist_id
+    WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)
+    ORDER BY n.newspaper_date DESC, n.created_at DESC LIMIT 100`);
+  const content = newspapers.length
+    ? `<div class="seo-content-grid">${newspapers.map(item => `<article class="seo-content-card">
+        <a href="/gazete/${escapeHtml(item.id)}">${serverImage(item.image_url, `${item.newspaper_name} CigCig basın arşivi`, 'seo-content-image')}</a>
+        <div class="seo-content-card-body">
+          <h2><a href="/gazete/${escapeHtml(item.id)}">${escapeHtml(item.newspaper_name)}</a></h2>
+          <p>${escapeHtml(item.newspaper_date ? new Date(item.newspaper_date).toLocaleDateString('tr-TR') : '')}</p>
+          <div class="seo-content-meta">${serverProfileLink(item.username)}</div>
+        </div>
+      </article>`).join('')}</div>`
+    : '<p class="seo-empty">Henüz yayınlanmış gazete sayısı bulunmuyor.</p>';
+  const description = 'CigCig basın arşivi: topluluk gazetelerinin herkese açık sayılarını keşfet.';
+  res.send(injectMeta('CigCig Basın Arşivi – Gazeteler', description, `${SITE_URL}/gazeteler`, '', '',
+    serverPageBody('CİGCİG BASIN ARŞİVİ', 'Gazeteler', description, content)));
+});
+
+app.get('/gazete/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  const { rows } = await query(`SELECT n.id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, u.username
+    FROM newspapers n JOIN users u ON u.id=n.journalist_id
+    WHERE n.id=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)`, [id]);
+  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  const newspaper = rows[0];
+  const title = `${newspaper.newspaper_name} – CigCig Basın Arşivi`;
+  const description = `${newspaper.newspaper_name} gazetesinin ${newspaper.newspaper_date ? new Date(newspaper.newspaper_date).toLocaleDateString('tr-TR') : ''} tarihli sayısı.`;
+  const url = `${SITE_URL}/gazete/${newspaper.id}`;
+  const body = serverPageBody('CİGCİG BASIN ARŞİVİ', newspaper.newspaper_name, description, `<article class="seo-article">
+    ${serverImage(newspaper.image_url, `${newspaper.newspaper_name} gazete sayısı`, 'seo-hero-image')}
+    <div class="seo-content-meta">Yayımlayan: ${serverProfileLink(newspaper.username)}</div>
+  </article>`);
+  res.send(injectMeta(title, description, url, newspaper.image_url, `<script type="application/ld+json">${safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'ImageObject', name: newspaper.newspaper_name,
+    contentUrl: newspaper.image_url, uploadDate: newspaper.created_at, description, url
+  })}</script>`, body));
+});
 
 app.get('/giris', (req, res) => res.send(injectMeta('Giriş – CigCig', 'CigCig hesabına giriş yap.', `${SITE_URL}/giris`, '')));
 app.get('/kayit', (req, res) => res.send(injectMeta('Kayıt Ol – CigCig', 'CigCig\'e ücretsiz kaydol.', `${SITE_URL}/kayit`, '')));
@@ -9687,7 +9931,7 @@ function makeVideoSlug(title, id) {
   return seed.slice(-10) || randomUUID().replace(/-/g, '').slice(0, 10);
 }
 
-const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed, u.is_private,
+const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.nickname, u.avatar, u.avatar_removed, u.is_private, u.is_red_verified, u.red_verified_at,
   s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
@@ -9793,7 +10037,7 @@ app.get('/api/video/:slug/saved', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
-  const { rows } = await query(`SELECT c.*,u.username,u.avatar,u.avatar_removed,
+  const { rows } = await query(`SELECT c.*,u.username,u.nickname,u.avatar,u.avatar_removed,u.is_red_verified,u.red_verified_at,
     (SELECT COUNT(*) FROM video_comment_likes vcl WHERE vcl.comment_id=c.id) AS like_count,
     EXISTS(SELECT 1 FROM video_comment_likes vcl2 WHERE vcl2.comment_id=c.id AND vcl2.user_id=$2) AS liked
     FROM video_comments c JOIN videos v ON v.id=c.video_id JOIN users u ON u.id=c.user_id AND COALESCE(u.is_deleted,0)=0

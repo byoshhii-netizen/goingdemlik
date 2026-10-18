@@ -801,6 +801,9 @@ document.addEventListener('keydown', event => {
 
 function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
+  $('#mobile-toggle')?.setAttribute('aria-expanded', 'false');
+  $('#mobile-toggle')?.setAttribute('aria-label', 'Menüyü aç');
+  $('#mobile-toggle i')?.classList.replace('fa-xmark', 'fa-bars');
 }
 
 function closeMobileCreateMenu() {
@@ -835,13 +838,16 @@ function openMobileCreateMenu() {
 function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
+  const redVerified = Number(u.is_red_verified) === 1
+    || (currentUser?.username === u.username && Number(currentUser.is_red_verified) === 1);
+  const redVerification = redVerificationIconHTML(redVerified ? 1 : 0, u.red_verified_at);
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
   const journalist = journalistDirectory.get(String(u.username || '').toLocaleLowerCase('tr-TR'));
   const journalistSince = journalist?.assigned_at;
   const journalistMark = journalist && journalistSince && journalist.show_journalist_icon !== 0
     ? ` <button type="button" class="journalist-name-mark" aria-label="Gazetecilik bilgisi" title="Gazeteci bilgisi" data-journalist-since="${escHtml(journalistSince)}" onclick="event.preventDefault();event.stopPropagation();showJournalistSince(this.dataset.journalistSince)"><i class="fas fa-newspaper"></i></button>`
     : '';
-  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>${journalistMark}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}${redVerification}</strong><small>@${escHtml(u.username)}</small></span>${journalistMark}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
 
 window.showJournalistSince = function (assignedAt) {
@@ -2203,7 +2209,13 @@ $('#logout-btn')?.addEventListener('click', () => {
 });
 
 $('#mobile-toggle').addEventListener('click', () => {
-  $('#mobile-menu').classList.toggle('hidden');
+  const menu = $('#mobile-menu');
+  const isOpening = menu.classList.contains('hidden');
+  menu.classList.toggle('hidden', !isOpening);
+  $('#mobile-toggle').setAttribute('aria-expanded', String(isOpening));
+  $('#mobile-toggle').setAttribute('aria-label', isOpening ? 'Menüyü kapat' : 'Menüyü aç');
+  $('#mobile-toggle i').classList.toggle('fa-bars', !isOpening);
+  $('#mobile-toggle i').classList.toggle('fa-xmark', isOpening);
 });
 
 $('#mobile-new-toggle')?.addEventListener('click', e => {
@@ -2531,7 +2543,7 @@ function newspaperCardHTML(newspaper) {
   return `<article class="newspaper-card">
     <a href="/gazete/${encodeURIComponent(newspaper.id)}" data-link class="newspaper-card-masthead">
       <span class="newspaper-masthead-mark"><i class="fas fa-newspaper"></i></span>
-      <span class="newspaper-masthead-copy"><strong>${escHtml(newspaper.newspaper_name)}</strong><small>CIGCIG GAZETE ARŞİVİ</small></span>
+      <span class="newspaper-masthead-copy"><strong>${escHtml(newspaper.newspaper_name)}</strong><small>CigCig</small></span>
       <span class="newspaper-issue-date"><small>GAZETE TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date, { day: '2-digit', month: 'long', year: 'numeric' }))}</strong></span>
     </a>
     <a href="/gazete/${encodeURIComponent(newspaper.id)}" data-link class="newspaper-sheet-link" aria-label="${escHtml(newspaper.newspaper_name)} gazetesini aç">
@@ -2567,9 +2579,9 @@ async function renderNewspaperList(app) {
   app.innerHTML = `
     <div class="container page newspaper-page">
       <section class="newspaper-hero">
-        <div class="newspaper-hero-copy"><span class="newspaper-eyebrow"><i class="fas fa-circle"></i> CIGCIG BASIN ARŞİVİ</span><h1>Gazeteler</h1><p>Farklı sesler, gerçek haberler ve her sayıdan yeni bir hikâye.</p><div class="newspaper-hero-rule"><span></span><i class="fas fa-star"></i><span></span></div></div>
-        <div class="newspaper-hero-art" aria-hidden="true"><span class="newspaper-hero-orbit newspaper-hero-orbit-one"></span><span class="newspaper-hero-orbit newspaper-hero-orbit-two"></span><i class="fas fa-newspaper"></i><span class="newspaper-hero-art-label">BASIN<br />ÖZGÜRDÜR</span></div>
-        <div class="newspaper-hero-bottom"><span><i class="fas fa-book-open"></i> Her sayı kendi hikâyesini anlatır</span>${isJournalist ? '<button type="button" class="btn btn-primary newspaper-publish-button" id="newspaper-publish"><i class="fas fa-plus"></i> Yeni gazete yayımla</button>' : '<span class="newspaper-hero-note">Yalnızca CigCig gazetecileri yayın yapabilir.</span>'}</div>
+        <div class="newspaper-hero-copy"><span class="newspaper-eyebrow"><i class="fas fa-circle"></i> CigCig</span><h1>Gazeteler</h1><p>CigCig'de yayımlanan gazeteleri keşfet.</p><div class="newspaper-hero-rule"><span></span><i class="fas fa-star"></i><span></span></div></div>
+        <div class="newspaper-hero-art" aria-hidden="true"><span class="newspaper-hero-orbit newspaper-hero-orbit-one"></span><span class="newspaper-hero-orbit newspaper-hero-orbit-two"></span><i class="fas fa-newspaper"></i></div>
+        <div class="newspaper-hero-bottom">${isJournalist ? '<button type="button" class="btn btn-primary newspaper-publish-button" id="newspaper-publish"><i class="fas fa-plus"></i> Yeni gazete yayımla</button>' : '<span class="newspaper-hero-note">Yalnızca CigCig gazetecileri yayın yapabilir.</span>'}</div>
       </section>
       <div class="newspaper-feed-heading"><div><span class="newspaper-eyebrow">ARŞİVDEN SEÇKİLER</span><h2>Yayımlanan sayılar</h2></div><span class="newspaper-feed-count" id="newspaper-feed-count"></span></div>
       <div class="newspaper-grid" id="newspaper-grid"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -2819,7 +2831,7 @@ async function renderNewspaperDetail(app, newspaperId) {
       <a href="/gazeteler" data-link class="newspaper-back-link"><i class="fas fa-arrow-left"></i> Tüm gazeteler</a>
       <article class="newspaper-detail-card">
         <header class="newspaper-detail-masthead">
-          <div class="newspaper-detail-brand"><span class="newspaper-detail-brand-icon"><i class="fas fa-newspaper"></i></span><span><small>CIGCIG BASIN ARŞİVİ</small><strong>${escHtml(newspaper.newspaper_name)}</strong></span></div>
+          <div class="newspaper-detail-brand"><span class="newspaper-detail-brand-icon"><i class="fas fa-newspaper"></i></span><span><small>CigCig</small><strong>${escHtml(newspaper.newspaper_name)}</strong></span></div>
           <div class="newspaper-detail-date"><small>YAYIN TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date))}</strong><span>Sayı #${escHtml(newspaper.id)}</span></div>
         </header>
         <div class="newspaper-detail-rule"><span></span><i class="fas fa-star"></i><span></span></div>
@@ -6987,7 +6999,7 @@ function videoCardHTML(v) {
     <div class="video-card-body">
       <div class="video-card-title">${escHtml(v.title)}</div>
       <div class="video-card-meta">
-        <span>${escHtml(v.username || 'Silinmiş kullanıcı')}</span>
+        <span>${v.username ? userDisplayName(v) : 'Silinmiş kullanıcı'}</span>
         <span>•</span>
         <span>${v.views || 0} izlenme</span>
       </div>
@@ -12526,7 +12538,8 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
 
   const inListeningRoom = !!listeningRoom;
   const canControlListeningRoom = !inListeningRoom || listeningRoom.isOwner;
-  const autoShuffleActive = playerAutoShuffle ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
+  const autoShuffleActive = 'gplayer-mode-btn active';
+  const autoShuffleTitle = playerAutoShuffle ? 'Karışık çal açık' : 'Sıralı çal';
   const repeatActive = playerRepeatOne ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
 
   player.innerHTML = `
@@ -12540,8 +12553,8 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
       </div>
       <div class="gplayer-controls">
         ${currentUser && !inListeningRoom ? '<button class="gplayer-mode-btn" id="gp-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
-        ${!inListeningRoom ? `<button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i></button>
-        <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı'}" aria-label="Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}"><i class="fas fa-shuffle"></i></button>` : ''}
+        ${!inListeningRoom ? `<button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Sırayı karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i><span class="gplayer-mode-label">Karıştır</span></button>
+        <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${autoShuffleTitle}" aria-label="${autoShuffleTitle}"><i class="fas fa-${playerAutoShuffle ? 'shuffle' : 'list-ol'}"></i><span class="gplayer-mode-label">${playerAutoShuffle ? 'Karışık çal' : 'Sıralı çal'}</span></button>` : ''}
         <button class="gplayer-btn" id="gp-prev" type="button" title="Önceki şarkı" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-step-backward"></i></button>
         <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="${options.autoplay === false ? 'Devam et' : 'Duraklat'}" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-${options.autoplay === false ? 'play' : 'pause'}"></i></button>
         <button class="gplayer-btn" id="gp-next" type="button" title="Sonraki şarkı" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-step-forward"></i></button>
@@ -12743,9 +12756,12 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
     playerAutoShuffle = !playerAutoShuffle;
     localStorage.setItem(MUSIC_AUTO_SHUFFLE_KEY, playerAutoShuffle ? '1' : '0');
     const button = event.currentTarget;
-    button.classList.toggle('active', playerAutoShuffle);
-    button.title = playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı';
-    button.setAttribute('aria-label', `Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}`);
+    button.classList.add('active');
+    const modeTitle = playerAutoShuffle ? 'Karışık çal açık' : 'Sıralı çal';
+    button.title = modeTitle;
+    button.setAttribute('aria-label', modeTitle);
+    button.querySelector('i').className = `fas fa-${playerAutoShuffle ? 'shuffle' : 'list-ol'}`;
+    button.querySelector('.gplayer-mode-label').textContent = modeTitle;
   });
 
   // Tekrar modunu aç/kapat ve tercihi yenilemeler arasında koru.
@@ -13622,7 +13638,7 @@ async function loadStoriesBar(container) {
     stories.forEach(story => {
       const key = String(story.user_id);
       let group = groupsByUser.get(key);
-      if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, avatar_removed: story.avatar_removed, stories: [] }; groupsByUser.set(key, group); }
+      if (!group) { group = { user_id: story.user_id, username: story.username, avatar: story.avatar, avatar_removed: story.avatar_removed, is_red_verified: story.is_red_verified, red_verified_at: story.red_verified_at, stories: [] }; groupsByUser.set(key, group); }
       group.stories.push(story);
     });
     const groupedStories = [...groupsByUser.values()];
@@ -13637,7 +13653,7 @@ async function loadStoriesBar(container) {
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
     const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
     const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}</small></button>`).join('')}</div></div>`;
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}${redVerificationIconHTML(group.is_red_verified, group.red_verified_at)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
       const group = groupedStories[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
@@ -13976,7 +13992,7 @@ async function renderStoryRoute(app, storyId) {
           <div class="story-route-progress" aria-label="Hikaye ilerlemesi">${(currentGroup?.stories || [story]).map((item, index) => `<span class="${index < Math.max(0, currentGroupIndex) ? 'complete' : ''}"><i ${index === Math.max(0, currentGroupIndex) ? 'id="story-route-progress-fill"' : ''}></i></span>`).join('')}</div>
           <header class="story-route-head">
             ${hasUsableAvatar(story) ? `<img src="${escHtml(story.avatar)}" alt="" />` : '<span class="story-route-avatar"><i class="fas fa-user"></i></span>'}
-            <span class="story-route-identity"><b>${escHtml(story.username)}</b><small>${timeAgo(story.created_at)}</small></span>
+            <span class="story-route-identity"><b>${escHtml(story.username)}${redVerificationIconHTML(story.is_red_verified, story.red_verified_at)}</b><small>${timeAgo(story.created_at)}</small></span>
             <span class="story-route-count">${currentGroupIndex + 1}/${currentGroup?.stories.length || 1}</span>
             <button type="button" class="story-route-icon" id="story-route-share" aria-label="Hikayeyi paylaş" title="Paylaş"><i class="fas fa-paper-plane"></i></button>
             ${story.is_owner ? `<button type="button" class="story-route-icon" id="story-route-viewers" aria-label="Hikayeyi görenler" title="${story.total_views || 0} görüntülenme"><i class="far fa-eye"></i></button><button type="button" class="story-route-icon" id="story-route-edit" aria-label="Hikayeyi düzenle" title="Düzenle"><i class="fas fa-ellipsis"></i></button>` : ''}
@@ -14190,7 +14206,9 @@ async function renderPhotos(app) {
   const feed = document.getElementById('photos-feed');
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null)]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
-function photoCardHTML(p) { return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${escHtml(p.username)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${p.song_artist}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`; }
+function photoCardHTML(p) {
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`;
+}
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
@@ -14208,7 +14226,7 @@ function bindPhotoFeed(feed) {
 
   const renderComments = async (c, box) => {
     const cs = await api('/photos/' + c.dataset.photoId + '/comments');
-    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.username)}</b> ${escHtml(v.content)}</p><div class="photo-comment-actions"><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button>${currentUser && (currentUser.id === v.user_id || currentUser.id === c.dataset.ownerId) ? `<button type="button" class="btn btn-ghost btn-sm photo-comment-delete" data-comment-id="${v.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<form class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz" maxlength="2000" autocomplete="off"/><button type="submit" class="btn btn-primary btn-sm photo-comment-send">Gönder</button></form>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
+    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.nickname || v.username)}${redVerificationIconHTML(v.is_red_verified, v.red_verified_at)}</b> ${escHtml(v.content)}</p><div class="photo-comment-actions"><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button>${currentUser && (currentUser.id === v.user_id || currentUser.id === c.dataset.ownerId) ? `<button type="button" class="btn btn-ghost btn-sm photo-comment-delete" data-comment-id="${v.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<form class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz" maxlength="2000" autocomplete="off"/><button type="submit" class="btn btn-primary btn-sm photo-comment-send">Gönder</button></form>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
     box.querySelector('.photo-comment-form')?.addEventListener('submit', async event => {
       event.preventDefault();
       const input = box.querySelector('input');

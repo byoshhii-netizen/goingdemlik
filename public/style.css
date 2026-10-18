@@ -4410,6 +4410,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .gplayer-mode-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.08); }
 .gplayer-mode-btn:not(.active) { opacity: .5; }
 .gplayer-mode-btn.active { color: var(--accent-red2); opacity: 1; }
+.gplayer-mode-label { display: none; }
 
 @media (max-width: 600px) {
   .gplayer-mode-btn { display: none; }
@@ -5224,7 +5225,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 
 @media (max-width: 768px) {
   #global-music-player:not(.music-ad-player) .gplayer-inner {
-    grid-template-columns: minmax(0, 1fr) 36px 32px;
+    grid-template-columns: minmax(0, 1fr) 152px 32px;
     grid-template-rows: 38px 16px;
     grid-template-areas: "info controls close" "progress progress progress";
     gap: 3px 7px;
@@ -5237,8 +5238,14 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
     gap: 8px;
   }
   #global-music-player:not(.music-ad-player) .gplayer-info > div { flex: 1; min-width: 0; }
-  #global-music-player:not(.music-ad-player) .gplayer-controls { grid-area: controls; justify-content: center; gap: 0; }
-  #global-music-player:not(.music-ad-player) .gplayer-controls > :not(#gp-play) { display: none !important; }
+  #global-music-player:not(.music-ad-player) .gplayer-controls { grid-area: controls; justify-content: center; gap: 1px; }
+  #global-music-player:not(.music-ad-player) .gplayer-controls > :not(#gp-play):not(#gp-shuffle):not(#gp-auto-shuffle) { display: none !important; }
+  #global-music-player:not(.music-ad-player) .gplayer-controls #gp-shuffle,
+  #global-music-player:not(.music-ad-player) .gplayer-controls #gp-auto-shuffle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 32px; padding: 0; font-size: 12px; }
+  #global-music-player:not(.music-ad-player) .gplayer-controls #gp-shuffle,
+  #global-music-player:not(.music-ad-player) .gplayer-controls #gp-auto-shuffle { flex: 0 0 auto; width: auto; gap: 4px; padding: 0 5px; font-size: 9px; white-space: nowrap; opacity: 1; }
+  #global-music-player:not(.music-ad-player) .gplayer-mode-label { display: inline; }
+  #global-music-player:not(.music-ad-player) .gplayer-controls #gp-play { flex: 0 0 32px; width: 32px; height: 32px; }
   #global-music-player:not(.music-ad-player) .gplayer-progress-wrap { grid-area: progress; min-width: 0; gap: 5px; }
   #global-music-player:not(.music-ad-player) .gplayer-close { position: static; grid-area: close; justify-self: center; width: 32px; height: 32px; margin: 0; padding: 4px; }
   #global-music-player:not(.music-ad-player) .gplayer-lyrics-toggle,
@@ -5246,6 +5253,48 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   #global-music-player:not(.music-ad-player) .gplayer-title,
   #global-music-player:not(.music-ad-player) .gplayer-artist { max-width: 100%; }
   #global-music-player .gplayer-time { min-width: 28px; font-size: 9px; }
+}
+
+@media (max-width: 768px) {
+  .mobile-menu {
+    position: relative;
+    z-index: 20;
+    max-height: 75vh;
+    max-height: 75dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    transform-origin: calc(100% - 28px) 0;
+    transition: clip-path .28s cubic-bezier(.2,.8,.2,1), opacity .2s ease, transform .2s ease, max-height .28s ease, padding .2s ease;
+    clip-path: circle(150vmax at calc(100% - 28px) 0);
+    opacity: 1;
+    transform: scale(1);
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .mobile-menu.hidden {
+    display: flex !important;
+    max-height: 0;
+    overflow: hidden;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-bottom-color: transparent;
+    clip-path: circle(0 at calc(100% - 28px) 0);
+    opacity: 0;
+    transform: scale(.98);
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .dm-conv-item { box-sizing: border-box; min-height: 68px; }
+  .dm-conv-item > .dm-story-avatar-link,
+  .dm-conv-item > .dm-conv-avatar-link,
+  .dm-conv-item > .dm-group-avatar { flex-shrink: 0; }
+  .dm-conv-info { flex: 1 1 0; min-width: 0; }
+  .dm-conv-name-row, .dm-conv-name { min-width: 0; }
+  .friend-card > .avatar-md { width: 40px; height: 40px; flex: 0 0 40px; object-fit: cover; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-menu { transition: none; }
 }
 
 @media (max-width: 420px) {
