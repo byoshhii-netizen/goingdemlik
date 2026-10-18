@@ -14226,7 +14226,7 @@ function bindPhotoFeed(feed) {
 
   const renderComments = async (c, box) => {
     const cs = await api('/photos/' + c.dataset.photoId + '/comments');
-    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.nickname || v.username)}${redVerificationIconHTML(v.is_red_verified, v.red_verified_at)}</b> ${escHtml(v.content)}</p><div class="photo-comment-actions"><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button>${currentUser && (currentUser.id === v.user_id || currentUser.id === c.dataset.ownerId) ? `<button type="button" class="btn btn-ghost btn-sm photo-comment-delete" data-comment-id="${v.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>${currentUser ? '<form class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz" maxlength="2000" autocomplete="off"/><button type="submit" class="btn btn-primary btn-sm photo-comment-send">Gönder</button></form>' : '<small>Yorum yapmak için giriş yapın.</small>'}`;
+    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.nickname || v.username)}${redVerificationIconHTML(v.is_red_verified, v.red_verified_at)}</b> ${escHtml(v.content)}</p><div class="photo-comment-actions"><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button>${currentUser && (currentUser.id === v.user_id || currentUser.id === c.dataset.ownerId) ? `<button type="button" class="btn btn-ghost btn-sm photo-comment-delete" data-comment-id="${v.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>    ${currentUser ? '<form class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz" maxlength="2000" autocomplete="off"/><button type="submit" class="btn btn-primary btn-sm photo-comment-send">Gönder</button></form>' : '<small>Yorum yapmak için <a href="/giris?returnTo=%2Ffotograflar" data-link>giriş yapın</a>.</small>'}`;
     box.querySelector('.photo-comment-form')?.addEventListener('submit', async event => {
       event.preventDefault();
       const input = box.querySelector('input');
@@ -14241,7 +14241,7 @@ function bindPhotoFeed(feed) {
     box.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
       event.preventDefault();
       event.stopPropagation();
-      if (!currentUser) return toast('Yorum beğenmek için giriş yapın.', 'error');
+      if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
       try {
         const result = await api('/photos/comments/' + button.dataset.commentId + '/like', { method: 'POST' });
         const count = button.querySelector('span');
@@ -14261,7 +14261,7 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault();
     event.stopPropagation();
-    if (!currentUser) return toast('Yorum beğenmek için giriş yapın.', 'error');
+    if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
     try {
       const result = await api('/photos/comments/' + button.dataset.commentId + '/like', { method: 'POST' });
       const count = button.querySelector('span');
@@ -14319,7 +14319,7 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-like').forEach(x => x.onclick = async e => {
     e.preventDefault();
     e.stopPropagation();
-    if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error');
+    if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
     if (x.disabled) return;
     const c = x.closest('[data-photo-id]');
     if (!c) return;
