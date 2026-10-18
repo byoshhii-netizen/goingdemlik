@@ -80,7 +80,7 @@ body[data-theme="gold"] {
 }
 
 .photo-add-btn { width: 40px; height: 40px; padding: 0; justify-content: center; border-radius: 50%; font-size: 17px; }
-.photo-native-link { display: block; cursor: zoom-in; }
+.photo-native-link { display: block; cursor: pointer; -webkit-touch-callout: none; user-select: none; }
 .photo-like-burst { position: absolute; left: 50%; top: 45%; z-index: 3; color: #ff3040; font-size: 76px; line-height: 1; pointer-events: none; transform: translate(-50%, -50%) scale(.4); text-shadow: 0 4px 20px rgba(255,48,64,.45); animation: photoLikeBurst .8s cubic-bezier(.2,.8,.25,1) forwards; }
 .forward-modal { display: grid; gap: 10px; }
 .forward-modal-intro { display: flex; align-items: center; gap: 9px; color: var(--text-secondary); font-size: 13px; }

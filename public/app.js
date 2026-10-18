@@ -14206,7 +14206,7 @@ async function renderPhotos(app) {
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null), loadStoriesBar($('#stories-bar'))]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
 function photoCardHTML(p) {
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><a href="/foto/${p.id}" data-link class="photo-native-link"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}"/></a>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`;
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`;
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
 function bindPhotoFeed(feed) {
@@ -14340,12 +14340,27 @@ function bindPhotoFeed(feed) {
     } catch (error) { toast(error.message || 'Beğeni gönderilemedi', 'error'); }
     finally { x.disabled = false; }
   });
-  feed.querySelectorAll('.photo-media-wrap').forEach(media => media.addEventListener('dblclick', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!currentUser || event.target.closest('button')) return;
-    media.closest('[data-photo-id]')?.querySelector('.photo-like')?.click();
-  }));
+  feed.querySelectorAll('.photo-native-link').forEach(imageLink => {
+    let openTimer;
+    imageLink.addEventListener('contextmenu', event => event.preventDefault());
+    imageLink.addEventListener('dragstart', event => event.preventDefault());
+    imageLink.addEventListener('click', event => {
+      if (event.target.closest('button')) return;
+      if (event.detail > 1) {
+        clearTimeout(openTimer);
+        return;
+      }
+      clearTimeout(openTimer);
+      openTimer = setTimeout(() => navigate('/foto/' + encodeURIComponent(imageLink.dataset.photoOpen)), 280);
+    });
+    imageLink.closest('.photo-media-wrap')?.addEventListener('dblclick', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearTimeout(openTimer);
+      if (!currentUser || event.target.closest('button')) return;
+      imageLink.closest('[data-photo-id]')?.querySelector('.photo-like')?.click();
+    });
+  });
 
   feed.querySelectorAll('.photo-song').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault(); event.stopPropagation();
