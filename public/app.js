@@ -9627,7 +9627,6 @@ function installSiteImageUrls() {
 
 installHoverDescriptions();
 installSiteImageUrls();
-init();
 
 // ===== VIDEO İLET MODAL =====
 async function showForwardVideoModal(video) {
@@ -15511,3 +15510,5 @@ async function renderMyOrders(app) {
     a.addEventListener('click', e => { e.preventDefault(); navigate(a.getAttribute('href')); });
   });
 }
+
+init();
