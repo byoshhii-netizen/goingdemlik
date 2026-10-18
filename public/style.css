@@ -5504,10 +5504,10 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
   body.home-page #home-stories-bar .stories-scroll { gap:13px; }
 
   .photos-feed {
-    width:100vw;
+    width:100%;
     max-width:none;
-    margin-left:calc(50% - 50vw);
-    gap:0;
+    margin:0 auto;
+    gap:12px;
   }
   .photos-feed .photo-card {
     margin:0;
