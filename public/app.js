@@ -2312,17 +2312,25 @@ document.addEventListener('click', e => {
 async function renderHome(app) {
   document.title = siteName + ' – Topluluk Platformu';
   updatePageMeta(siteName + ' – Topluluk Platformu', 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.', '');
-  app.innerHTML = '<div class="container page"><div id="home-sections"></div></div>';
+  app.innerHTML = '<div class="container page"><div id="home-sections"><div class="loading-center" role="status"><div class="spinner"></div><span>Ana sayfa yükleniyor...</span></div></div></div>';
 
-  let settings;
+  let settings = {};
+  let settingsError = null;
+  const settingsController = new AbortController();
+  const settingsTimeout = setTimeout(() => settingsController.abort(), 8000);
   try {
-    const response = await fetch('/api/settings/public');
+    const response = await fetch('/api/settings/public', { signal: settingsController.signal });
     if (!response.ok) throw new Error('Ana sayfa ayarları yüklenemedi.');
     settings = await response.json();
   } catch (error) {
-    $('#home-sections').innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message || 'Ana sayfa ayarları yüklenemedi.')}</p></div>`;
-    return;
+    settingsError = error;
+    console.warn('Ana sayfa ayarları yüklenemedi; varsayılan bölümler gösteriliyor:', error.message);
+  } finally {
+    clearTimeout(settingsTimeout);
   }
+  $('#home-sections').innerHTML = settingsError
+    ? '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Ana sayfa ayarları yüklenemedi; varsayılan bölümler gösteriliyor.</p></div>'
+    : '';
   const raw = settings.homepage_sections;
   let sections = window.normalizeHomepageSections ? window.normalizeHomepageSections(raw) : (() => {
     let parsed = raw;
@@ -9421,6 +9429,10 @@ async function checkUnreadMessages() {
 async function init() {
   $('#new-dropdown')?.classList.add('hidden');
   closeMobileCreateMenu();
+  if (location.pathname === '/') {
+    loadAnnouncements();
+    renderRoute(location.pathname + location.search);
+  }
   await initAuth();
   try {
     const ps = await fetch('/api/public-settings').then(r => r.json());
@@ -9467,7 +9479,6 @@ async function init() {
     console.warn('Gazeteci listesi yüklenemedi:', error.message);
   }
   updateNavUI();
-  loadAnnouncements();
   renderRoute(location.pathname + location.search);
   if (currentUser) {
     checkUnreadMessages();
