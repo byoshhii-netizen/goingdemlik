@@ -4349,7 +4349,11 @@ async function getDmThemeForUser(conversation, userId) {
   const themeKey = hasNewerLocalTheme
     ? ownTheme.theme_key
     : (conversation.shared_theme_key || ownTheme?.theme_key || settings[0]?.default_theme_key || 'default');
-  return { theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default', shared: Boolean(conversation.shared_theme_key) };
+  return {
+    theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default',
+    shared: Boolean(conversation.shared_theme_key),
+    has_personal_theme: Boolean(ownTheme)
+  };
 }
 
 app.get('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
@@ -8576,6 +8580,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
+      CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user2,0) ELSE COALESCE(c.read_until_user1,0) END AS other_read_until,
       COALESCE(presence.is_online, FALSE) as other_is_online,
       presence.last_active as other_last_active,
       (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
@@ -8902,14 +8907,30 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   const other = target[0];
   const uid = req.user.id;
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
-  const { rows: convRows } = await query('SELECT id,user1_id,hidden_by_user1,hidden_by_user2 FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
+  const { rows: convRows } = await query('SELECT id,user1_id,user2_id,hidden_by_user1,hidden_by_user2 FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) return res.json({ ok: true });
-  const isUser1 = convRows[0].user1_id == uid;
-  if (isUser1 ? convRows[0].hidden_by_user1 : convRows[0].hidden_by_user2) return res.json({ ok: true });
-  // Karşı tarafın mesajlarını okundu yap
+  const conversation = convRows[0];
+  const isUser1 = String(conversation.user1_id) === String(uid);
+  if (isUser1 ? conversation.hidden_by_user1 : conversation.hidden_by_user2) return res.json({ ok: true });
+  const otherUserId = isUser1 ? conversation.user2_id : conversation.user1_id;
   await query('UPDATE dm_messages SET read_at=NOW() WHERE conversation_id=$1 AND sender_id=$2 AND read_at IS NULL',
-    [convRows[0].id, other.id]);
-  res.json({ ok: true });
+    [conversation.id, other.id]);
+  const { rows: latestRead } = await query(
+    'SELECT COALESCE(MAX(id),0) AS message_id FROM dm_messages WHERE conversation_id=$1 AND sender_id=$2 AND deleted_for_all=0',
+    [conversation.id, other.id]
+  );
+  const readThroughMessageId = Number(latestRead[0]?.message_id || 0);
+  const readColumn = isUser1 ? 'read_until_user1' : 'read_until_user2';
+  await query(`UPDATE dm_conversations SET ${readColumn}=GREATEST(COALESCE(${readColumn},0),$1) WHERE id=$2`,
+    [readThroughMessageId, conversation.id]);
+  if (readThroughMessageId > 0) {
+    io.to(`user:${otherUserId}`).emit('dm:read', {
+      conversationId: conversation.id,
+      readerId: uid,
+      readThroughMessageId
+    });
+  }
+  res.json({ ok: true, conversationId: conversation.id, readThroughMessageId });
 });
 
 app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,username,is_private FROM users WHERE username=$1', [req.params.username]);
