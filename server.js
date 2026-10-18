@@ -1525,13 +1525,6 @@ async function trackInviteRegistration(code, user, ip) {
   return rows.length > 0;
 }
 
-function quickRegisterUsernamePart(value) {
-  return String(value).toLocaleLowerCase('tr-TR')
-    .replace(/[ç]/g, 'c').replace(/[ğ]/g, 'g').replace(/[ı]/g, 'i')
-    .replace(/[ö]/g, 'o').replace(/[ş]/g, 's').replace(/[ü]/g, 'u')
-    .replace(/[^a-z0-9]/g, '');
-}
-
 async function createQuickRegistrationSuggestion(req, res) {
   try {
     const [namesResponse, firstImageResponse] = await Promise.all([
@@ -1563,10 +1556,7 @@ async function createQuickRegistrationSuggestion(req, res) {
     for (let attempt = 0; attempt < sourceNames.length && !suggestion; attempt++) {
       const { firstName, surname } = sourceNames[(startIndex + attempt) % sourceNames.length];
       const nickname = `${firstName} ${surname}`;
-      const baseUsername = `${quickRegisterUsernamePart(firstName)}_${quickRegisterUsernamePart(surname)}`;
-      const username = attempt < 10
-        ? baseUsername
-        : `${baseUsername.slice(0, 24)}_${crypto.randomInt(1000, 100000)}`;
+      const username = `uye_${crypto.randomBytes(5).toString('hex')}`;
       const { rows } = await query(
         `SELECT 1 FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
          UNION ALL

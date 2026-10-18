@@ -8951,7 +8951,7 @@ function renderLogin(app) {
     ? requestedPath
     : '/';
   document.title = 'Giriş Yap - ' + siteName;
-  app.innerHTML = `<div class="auth-page">
+  app.innerHTML = `<div class="auth-page auth-page--login">
     <div class="auth-card auth-card--enhanced card card-body">
       <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
       <div class="auth-site-wordmark">CigCig</div>

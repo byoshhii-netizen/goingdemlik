@@ -1817,7 +1817,7 @@ body.auth-route .auth-page { min-height:100vh; min-height:100dvh; }
 @media (max-width:768px) {
   body.auth-route { padding-bottom:0 !important; }
 }
-@media (max-width: 560px) { .auth-page { padding: 28px 12px; align-items: flex-start; } .auth-card--enhanced { padding: 32px 20px 24px; } .auth-title { font-size: 25px; } .register-profile-photo { align-items: flex-start; } .register-avatar-preview { width: 64px; height: 64px; flex-basis: 64px; } }
+@media (max-width: 560px) { .auth-page { padding: 28px 12px; align-items: flex-start; } .auth-page--login { align-items: center; padding-top: 20px; padding-bottom: 20px; } .auth-card--enhanced { padding: 32px 20px 24px; } .auth-title { font-size: 25px; } .register-profile-photo { align-items: flex-start; } .register-avatar-preview { width: 64px; height: 64px; flex-basis: 64px; } }
 
 /* ===== PROFILE ===== */
 .profile-header {
