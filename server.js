@@ -381,7 +381,7 @@ function profileBadgeKey(type, id = '') {
 async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   if (!user?.id) return [];
 
-  const [customResult, preferenceResult, levelResult] = await Promise.all([
+  const [customResult, preferenceResult, levelResult, journalistResult] = await Promise.all([
     query(`
       SELECT b.id, b.name, b.icon, b.color, ub.assigned_at
       FROM user_badges ub
@@ -391,6 +391,7 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
     `, [user.id]),
     query('SELECT badge_key, is_active FROM user_badge_visibility WHERE user_id=$1', [user.id]),
     query('SELECT id, name, icon, color FROM levels WHERE id=$1', [user.level_id]),
+    query('SELECT assigned_at FROM journalists WHERE user_id=$1', [user.id]),
   ]);
 
   const preferences = new Map(preferenceResult.rows.map(row => [row.badge_key, Number(row.is_active) !== 0]));
@@ -434,8 +435,28 @@ async function getUserProfileBadges(user, { includeInactive = false } = {}) {
   if (level) addBadge({ key: 'level', type: 'level', name: level.name, icon: level.icon || 'fas fa-star', color: level.color || '#dc2626' });
   if (Number(user.is_vip) === 1) addBadge({ key: 'vip', type: 'vip', name: 'VIP', icon: 'fas fa-gem', color: '#fbbf24' });
   if (Number(user.is_plus) === 1) addBadge({ key: 'plus', type: 'plus', name: 'Plus', icon: 'fas fa-plus-circle', color: '#818cf8' });
+  if (Number(user.is_red_verified) === 1) {
+    addBadge({
+      key: 'red_verified',
+      type: 'red_verified',
+      name: 'Kırmızı Tik',
+      icon: 'fas fa-check',
+      color: '#ef3340',
+      assigned_at: user.red_verified_at,
+    });
+  }
   if (Number(user.is_admin) === 1) addBadge({ key: 'admin', type: 'admin', name: 'Yetkili', icon: 'fas fa-shield-halved', color: '#5865F2' });
   if (Number(user.is_artist) === 1) addBadge({ key: 'artist', type: 'artist', name: 'Artist', icon: 'fas fa-microphone-alt', color: '#a855f7' });
+  if (journalistResult.rows.length) {
+    addBadge({
+      key: 'journalist',
+      type: 'journalist',
+      name: 'Gazeteci',
+      icon: 'fas fa-newspaper',
+      color: '#d6b46a',
+      assigned_at: journalistResult.rows[0].assigned_at,
+    });
+  }
   if (hasVmbBadge(user)) {
     const isManager = hasVmbManagementBadge(user);
     addBadge({
@@ -519,6 +540,59 @@ io.use(async (socket, next) => {
 
 io.on('connection', socket => {
   socket.join(`user:${socket.data.user.id}`);
+  socket.data.dmTypingConversations = new Map();
+  socket.data.dmTypingQueue = Promise.resolve();
+  const processDmTyping = async payload => {
+    const conversationId = Number(payload?.conversationId);
+    if (!Number.isSafeInteger(conversationId) || conversationId < 1) return;
+    const userId = socket.data.user.id;
+    const typingConversations = socket.data.dmTypingConversations;
+    const active = payload?.active === true;
+    let otherUserId = typingConversations.get(conversationId);
+    if (active && !otherUserId) {
+      try {
+        const { rows } = await query(`SELECT CASE WHEN c.user1_id=$1 THEN c.user2_id ELSE c.user1_id END AS other_user_id
+          FROM dm_conversations c
+          WHERE c.id=$2 AND (c.user1_id=$1 OR c.user2_id=$1)
+            AND CASE WHEN c.user1_id=$1 THEN COALESCE(c.hidden_by_user1,0)=0 ELSE COALESCE(c.hidden_by_user2,0)=0 END
+            AND NOT EXISTS (
+              SELECT 1 FROM blocks b
+              WHERE (b.blocker_id=c.user1_id AND b.blocked_id=c.user2_id)
+                 OR (b.blocker_id=c.user2_id AND b.blocked_id=c.user1_id)
+            )
+          LIMIT 1`, [userId, conversationId]);
+        otherUserId = rows[0]?.other_user_id;
+        if (!otherUserId) return;
+        typingConversations.set(conversationId, otherUserId);
+      } catch (error) {
+        console.error('[dm:typing] Konuşma doğrulanamadı:', error.message);
+        return;
+      }
+    } else if (!active && !otherUserId) {
+      return;
+    }
+    if (!active) typingConversations.delete(conversationId);
+    io.to(`user:${otherUserId}`).emit('dm:typing', {
+      conversationId,
+      senderId: userId,
+      active
+    });
+  };
+  socket.on('dm:typing', payload => {
+    socket.data.dmTypingQueue = socket.data.dmTypingQueue
+      .then(() => processDmTyping(payload))
+      .catch(error => console.error('[dm:typing] Yazıyor bildirimi gönderilemedi:', error.message));
+  });
+  socket.on('disconnect', () => {
+    for (const [conversationId, otherUserId] of socket.data.dmTypingConversations) {
+      io.to(`user:${otherUserId}`).emit('dm:typing', {
+        conversationId,
+        senderId: socket.data.user.id,
+        active: false
+      });
+    }
+    socket.data.dmTypingConversations.clear();
+  });
 });
 
 function emitDirectMessage(conversationId, sender, recipient, message) {
@@ -1154,27 +1228,8 @@ app.use(async (req, res, next) => {
     path.extname(req.path)
   ) return next();
   try {
-    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect','auth_required')");
+    const { rows } = await query("SELECT key, value FROM settings WHERE key IN ('route_protection_enabled','protected_routes','route_redirect')");
     const settings = Object.fromEntries(rows.map(item => [item.key, item.value]));
-
-    const isLoginRoute = req.path === '/giris' ||
-      req.path === '/kayit' ||
-      /^\/[a-zA-Z0-9]{24}$/.test(req.path);
-    if (settings.auth_required === '1' && !isLoginRoute) {
-      const token = req.headers['authorization']?.replace('Bearer ', '') || getSessionCookie(req);
-      let authenticated = false;
-      if (token) {
-        const { rows: users } = await query(
-          'SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW() AND COALESCE(u.banned,0)=0 LIMIT 1',
-          [token]
-        );
-        authenticated = users.length > 0;
-      }
-      if (!authenticated) {
-        const returnTo = req.originalUrl || req.path;
-        return res.redirect('/giris?returnTo=' + encodeURIComponent(returnTo));
-      }
-    }
 
     let routes = [];
     try { routes = JSON.parse(settings.protected_routes || '[]'); } catch {}
@@ -1437,7 +1492,11 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (twoFactorMethod === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta doğrulama servisi yapılandırılmamış' });
     if (twoFactorMethod === 'question' && (!two_factor_question || normalizeSecurityAnswer(two_factor_answer).length < 2)) return res.status(400).json({ error: 'Güvenlik sorusu ve cevabı zorunlu' });
     if (!birth_date || !/^\d{4}-\d{2}-\d{2}$/.test(birth_date)) return res.status(400).json({ error: 'Doğum tarihi zorunlu' });
+    if (birth_date < '1900-01-01') return res.status(400).json({ error: 'Doğum tarihi 1 Ocak 1900 veya sonrası olmalıdır' });
     const birth = new Date(`${birth_date}T00:00:00Z`);
+    if (!Number.isFinite(birth.getTime()) || birth.toISOString().slice(0, 10) !== birth_date) {
+      return res.status(400).json({ error: 'Geçerli bir doğum tarihi girin' });
+    }
     const today = new Date();
     let age = today.getUTCFullYear() - birth.getUTCFullYear();
     const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
@@ -2555,6 +2614,228 @@ app.get('/api/forums', async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/journalists', async (req, res) => {
+  const { rows } = await query(`
+    SELECT u.id, u.username, u.nickname, u.avatar, u.avatar_removed, j.assigned_at,
+      COALESCE(bv.is_active,1) AS show_journalist_icon
+    FROM journalists j
+    JOIN users u ON u.id=j.user_id AND COALESCE(u.is_deleted,0)=0
+    LEFT JOIN user_badge_visibility bv ON bv.user_id=u.id AND bv.badge_key='journalist'
+    ORDER BY j.assigned_at ASC
+  `);
+  res.json(rows);
+});
+
+app.get('/api/newspapers', optionalAuth, async (req, res) => {
+  const userId = req.user?.id || 0;
+  const { rows } = await query(`
+    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
+      u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+      (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
+      (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
+      CASE WHEN $1::bigint=0 THEN FALSE
+        ELSE EXISTS(SELECT 1 FROM newspaper_likes nl WHERE nl.newspaper_id=n.id AND nl.user_id=$1)
+      END AS liked
+    FROM newspapers n
+    JOIN users u ON u.id=n.journalist_id AND COALESCE(u.is_deleted,0)=0
+    ORDER BY n.newspaper_date DESC, n.created_at DESC
+    LIMIT 100
+  `, [userId]);
+  res.json(rows);
+});
+
+app.get('/api/newspapers/next-issue-number', authMiddleware, async (req, res) => {
+  const { rows: journalists } = await query('SELECT user_id FROM journalists WHERE user_id=$1', [req.user.id]);
+  if (!journalists.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
+  const { rows } = await query('SELECT COALESCE(MAX(issue_number), 0)::bigint + 1 AS issue_number FROM newspapers');
+  res.json({ issue_number: Number(rows[0].issue_number) });
+});
+
+app.get('/api/newspapers/:id', optionalAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const userId = req.user?.id || 0;
+  const { rows } = await query(`
+    SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
+      u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+      (SELECT COUNT(*)::int FROM newspaper_likes nl WHERE nl.newspaper_id=n.id) AS like_count,
+      (SELECT COUNT(*)::int FROM newspaper_comments nc WHERE nc.newspaper_id=n.id) AS comment_count,
+      CASE WHEN $2::bigint=0 THEN FALSE
+        ELSE EXISTS(SELECT 1 FROM newspaper_likes nl WHERE nl.newspaper_id=n.id AND nl.user_id=$2)
+      END AS liked
+    FROM newspapers n
+    JOIN users u ON u.id=n.journalist_id AND COALESCE(u.is_deleted,0)=0
+    WHERE n.id=$1
+  `, [id, userId]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  res.json(rows[0]);
+});
+
+app.post('/api/newspapers', authMiddleware, uploadLimiter, upload.single('image'), async (req, res) => {
+  const { rows: journalists } = await query('SELECT user_id FROM journalists WHERE user_id=$1', [req.user.id]);
+  if (!journalists.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
+  if (!req.file) return res.status(400).json({ error: 'Gazete görseli seçin.' });
+  if (!req.file.mimetype?.startsWith('image/')) return res.status(400).json({ error: 'Gazete yalnızca görsel olarak yüklenebilir.' });
+
+  const newspaperName = String(req.body.newspaper_name || '').trim();
+  const newspaperDate = String(req.body.newspaper_date || '').trim();
+  if (!newspaperName || newspaperName.length > 100) return res.status(400).json({ error: 'Gazete adı 1-100 karakter arasında olmalıdır.' });
+  const dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(newspaperDate);
+  const year = dateParts ? Number(dateParts[1]) : 0;
+  const month = dateParts ? Number(dateParts[2]) : 0;
+  const day = dateParts ? Number(dateParts[3]) : 0;
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (!dateParts || year < 1 || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) {
+    return res.status(400).json({ error: 'Geçerli bir gazete tarihi seçin.' });
+  }
+
+  try {
+    const imageUrl = await handleUpload(req.file);
+    const { rows } = await query(`
+      INSERT INTO newspapers (journalist_id,newspaper_name,newspaper_date,image_url,journalist_since)
+      SELECT $1,$2,$3,$4,assigned_at FROM journalists WHERE user_id=$1 RETURNING id, issue_number
+    `, [req.user.id, newspaperName, newspaperDate, imageUrl]);
+    if (!rows.length) return res.status(403).json({ error: 'Gazete yayımlamak için gazeteci olmanız gerekir.' });
+    const { rows: newspaper } = await query(`
+      SELECT n.id, n.journalist_id, n.newspaper_name, n.newspaper_date, n.issue_number, n.image_url, n.created_at, n.share_count,
+        u.username, u.nickname, u.avatar, u.avatar_removed, n.journalist_since,
+        0::int AS like_count, 0::int AS comment_count, FALSE AS liked
+      FROM newspapers n JOIN users u ON u.id=n.journalist_id WHERE n.id=$1
+    `, [rows[0].id]);
+    res.status(201).json(newspaper[0]);
+  } catch (error) {
+    res.status(500).json({ error: `Gazete yüklenemedi: ${error.message}` });
+  }
+});
+
+app.delete('/api/newspapers/:id', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query('SELECT journalist_id FROM newspapers WHERE id=$1', [id]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  if (Number(rows[0].journalist_id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Bu gazeteyi silme yetkiniz yok.' });
+  }
+  await query('DELETE FROM newspapers WHERE id=$1', [id]);
+  res.json({ ok: true });
+});
+
+app.post('/api/newspapers/:id/like', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [id]);
+  if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows: removed } = await query('DELETE FROM newspaper_likes WHERE newspaper_id=$1 AND user_id=$2 RETURNING id', [id, req.user.id]);
+  let liked = false;
+  if (!removed.length) {
+    const { rows: inserted } = await query(
+      'INSERT INTO newspaper_likes (newspaper_id,user_id) VALUES ($1,$2) ON CONFLICT (newspaper_id,user_id) DO NOTHING RETURNING id',
+      [id, req.user.id]
+    );
+    liked = inserted.length > 0;
+  }
+  const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM newspaper_likes WHERE newspaper_id=$1', [id]);
+  res.json({ liked, like_count: counts[0].like_count });
+});
+
+app.post('/api/newspapers/:id/share', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query('UPDATE newspapers SET share_count=share_count+1 WHERE id=$1 RETURNING share_count', [id]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  res.json({ share_count: rows[0].share_count });
+});
+
+app.get('/api/newspapers/:id/comments', optionalAuth, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [id]);
+  if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query(`
+    SELECT c.id,c.newspaper_id,c.user_id,c.content,c.created_at,u.username,u.nickname,u.avatar,u.avatar_removed,
+      (SELECT COUNT(*)::int FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id) AS like_count,
+      CASE WHEN $2::bigint=0 THEN FALSE
+        ELSE EXISTS(SELECT 1 FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id AND cl.user_id=$2)
+      END AS liked
+    FROM newspaper_comments c LEFT JOIN users u ON u.id=c.user_id
+    WHERE c.newspaper_id=$1 ORDER BY c.created_at ASC
+  `, [id, req.user?.id || 0]);
+  res.json(rows);
+});
+
+app.post('/api/newspapers/:id/comments', authMiddleware, async (req, res) => {
+  if (await denyIfRestricted(req, res, 'comment')) return;
+  const id = Number(req.params.id);
+  const content = String(req.body?.content || '').trim();
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  if (!content || content.length > 2000) return res.status(400).json({ error: 'Yorum 1-2000 karakter arasında olmalıdır.' });
+  const { rows: newspapers } = await query('SELECT id,journalist_id FROM newspapers WHERE id=$1', [id]);
+  if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  const { rows } = await query(
+    'INSERT INTO newspaper_comments (newspaper_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,newspaper_id,user_id,content,created_at',
+    [id, req.user.id, content]
+  );
+  await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
+  await updateUserLevel(req.user.id);
+  if (Number(newspapers[0].journalist_id) !== Number(req.user.id)) {
+    await query(
+      'INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [newspapers[0].journalist_id, 'newspaper_comment', req.user.username, req.user.avatar || '', 'Gazetenize yorum geldi', `@${req.user.username} gazetenize yorum yaptı.`, `/gazete/${id}`]
+    );
+  }
+  res.status(201).json({
+    ...rows[0], username: req.user.username, nickname: req.user.nickname,
+    avatar: req.user.avatar, avatar_removed: req.user.avatar_removed, like_count: 0, liked: false,
+  });
+});
+
+app.delete('/api/newspapers/:id/comments/:commentId', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  const commentId = Number(req.params.commentId);
+  if (!Number.isSafeInteger(id) || !Number.isSafeInteger(commentId) || id < 1 || commentId < 1) {
+    return res.status(404).json({ error: 'Yorum bulunamadı' });
+  }
+  const { rows } = await query(
+    'SELECT c.id,c.user_id FROM newspaper_comments c WHERE c.id=$1 AND c.newspaper_id=$2',
+    [commentId, id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  if (Number(rows[0].user_id) !== Number(req.user.id) && !req.user.is_admin) {
+    return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok.' });
+  }
+  await query('DELETE FROM newspaper_comments WHERE id=$1', [commentId]);
+  if (rows[0].user_id) {
+    await query('UPDATE users SET comment_count=GREATEST(0,comment_count-1) WHERE id=$1', [rows[0].user_id]);
+    await updateUserLevel(rows[0].user_id);
+  }
+  res.json({ ok: true });
+});
+
+app.post('/api/newspapers/:id/comments/:commentId/like', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  const commentId = Number(req.params.commentId);
+  if (!Number.isSafeInteger(id) || !Number.isSafeInteger(commentId) || id < 1 || commentId < 1) {
+    return res.status(404).json({ error: 'Yorum bulunamadı' });
+  }
+  const { rows: comments } = await query(
+    'SELECT id FROM newspaper_comments WHERE id=$1 AND newspaper_id=$2',
+    [commentId, id]
+  );
+  if (!comments.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
+  const { rows: removed } = await query('DELETE FROM newspaper_comment_likes WHERE comment_id=$1 AND user_id=$2 RETURNING id', [commentId, req.user.id]);
+  let liked = false;
+  if (!removed.length) {
+    const { rows: inserted } = await query(
+      'INSERT INTO newspaper_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT (comment_id,user_id) DO NOTHING RETURNING id',
+      [commentId, req.user.id]
+    );
+    liked = inserted.length > 0;
+  }
+  const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM newspaper_comment_likes WHERE comment_id=$1', [commentId]);
+  res.json({ liked, like_count: counts[0].like_count });
+});
+
 app.get('/api/forum/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`
     SELECT f.*, u.username, u.avatar, u.name_color, u.is_vip, u.is_plus, u.level_id, u.is_admin,
@@ -3129,9 +3410,8 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
-  if (other.is_private && other.id !== uid) {
-    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
-    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  if (Number(other.is_private) === 1 && other.id !== uid && !(await hasPrivateDmAccess(uid, other.id))) {
+    return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar veya daha önce size mesaj gönderenler yazabilir.' });
   }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
@@ -3148,14 +3428,15 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
   await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [book.id]);
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -3164,6 +3445,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
@@ -3987,6 +4269,38 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
   res.json(rows);
 });
 
+const DM_THEME_KEYS = new Set(['default', 'sunset', 'ocean', 'rose', 'forest', 'lavender']);
+
+async function getDmThemeForUser(conversation, userId) {
+  const [{ rows: settings }, { rows: localTheme }] = await Promise.all([
+    query('SELECT default_theme_key FROM dm_user_settings WHERE user_id=$1', [userId]),
+    query('SELECT theme_key,updated_at FROM dm_conversation_user_themes WHERE conversation_id=$1 AND user_id=$2', [conversation.id, userId])
+  ]);
+  const ownTheme = localTheme[0];
+  const hasNewerLocalTheme = ownTheme && (!conversation.shared_theme_key ||
+    new Date(ownTheme.updated_at).getTime() > new Date(conversation.shared_theme_updated_at || 0).getTime());
+  const themeKey = hasNewerLocalTheme
+    ? ownTheme.theme_key
+    : (conversation.shared_theme_key || ownTheme?.theme_key || settings[0]?.default_theme_key || 'default');
+  return { theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default', shared: Boolean(conversation.shared_theme_key) };
+}
+
+app.get('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
+  const { rows } = await query('SELECT default_theme_key FROM dm_user_settings WHERE user_id=$1', [req.user.id]);
+  const themeKey = rows[0]?.default_theme_key || 'default';
+  res.json({ default_theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default' });
+});
+
+app.put('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
+  const themeKey = String(req.body?.default_theme_key || '');
+  if (!DM_THEME_KEYS.has(themeKey)) return res.status(400).json({ error: 'Geçersiz mesaj teması.' });
+  await query(`INSERT INTO dm_user_settings(user_id,default_theme_key,updated_at)
+    VALUES($1,$2,NOW())
+    ON CONFLICT(user_id) DO UPDATE SET default_theme_key=EXCLUDED.default_theme_key,updated_at=NOW()`,
+  [req.user.id, themeKey]);
+  res.json({ ok: true, default_theme_key: themeKey });
+});
+
 app.get('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
   const { rows } = await query(
     'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash FROM dm_user_settings WHERE user_id=$1',
@@ -4564,7 +4878,8 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
       (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
       CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
-    WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
+    WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW()
+      AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = rows[0];
   if (story.user_id !== viewerId && story.is_private && !(await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [viewerId, story.user_id])).rows.length) {
@@ -5286,6 +5601,91 @@ app.get('/api/admin/users', adminMiddleware, async (req, res) => {
   res.json(rows.map(u => ({ ...sanitizeUser(u), badges: Array.isArray(u.badges) ? u.badges : [] })));
 });
 
+app.put('/api/admin/users/:userId/red-tick', adminMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const enabled = req.body?.enabled;
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Rozet durumu geçerli değil.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: users } = await client.query(
+      'SELECT id,is_red_verified,red_verified_at FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0 FOR UPDATE',
+      [userId]
+    );
+    if (!users.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+    }
+    const wasEnabled = Number(users[0].is_red_verified) === 1;
+    if (wasEnabled !== enabled) {
+      await client.query(
+        'UPDATE users SET is_red_verified=$1,red_verified_at=CASE WHEN $1=1 THEN NOW() ELSE NULL END WHERE id=$2',
+        [enabled ? 1 : 0, userId]
+      );
+      await client.query(
+        'INSERT INTO red_verification_events(user_id,action,performed_by) VALUES($1,$2,$3)',
+        [userId, enabled ? 'granted' : 'revoked', req.adminUser?.username || 'admin']
+      );
+    }
+    await client.query('COMMIT');
+    const { rows: current } = await query(
+      'SELECT is_red_verified,red_verified_at FROM users WHERE id=$1',
+      [userId]
+    );
+    res.json({ ok: true, ...current[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/admin/users/:userId/red-tick/history', adminMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows: users } = await query('SELECT id FROM users WHERE id=$1', [userId]);
+  if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  const { rows } = await query(
+    'SELECT action,performed_by,created_at FROM red_verification_events WHERE user_id=$1 ORDER BY created_at DESC,id DESC',
+    [userId]
+  );
+  res.json(rows);
+});
+
+app.get('/api/admin/journalists', adminMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT j.user_id,j.assigned_at,u.username,u.nickname,u.avatar,u.avatar_removed
+    FROM journalists j JOIN users u ON u.id=j.user_id
+    WHERE COALESCE(u.is_deleted,0)=0
+    ORDER BY j.assigned_at DESC
+  `);
+  res.json(rows);
+});
+
+app.post('/api/admin/journalists/:userId', adminMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows: users } = await query('SELECT id FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0', [userId]);
+  if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  const { rows } = await query(`
+    INSERT INTO journalists (user_id,assigned_by) VALUES ($1,$2)
+    ON CONFLICT (user_id) DO NOTHING
+    RETURNING user_id,assigned_at
+  `, [userId, req.adminUser.userId || req.adminUser.id || null]);
+  if (!rows.length) return res.status(409).json({ error: 'Bu kullanıcı zaten gazeteci.' });
+  res.status(201).json(rows[0]);
+});
+
+app.delete('/api/admin/journalists/:userId', adminMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows } = await query('DELETE FROM journalists WHERE user_id=$1 RETURNING user_id', [userId]);
+  if (!rows.length) return res.status(404).json({ error: 'Gazeteci bulunamadı.' });
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/invite-codes', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT ic.id, ic.code, ic.is_active, ic.created_at, ic.updated_at,
@@ -5781,6 +6181,22 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
+  const newspaperTextLimits = {
+    newspaper_left_quote: 180,
+    newspaper_right_quote: 260,
+    newspaper_author: 80,
+    newspaper_flag_url: 2048,
+    newspaper_background_url: 2048
+  };
+  if (Object.hasOwn(newspaperTextLimits, key)) {
+    value = String(value || '').trim();
+    if (value.length > newspaperTextLimits[key]) {
+      return res.status(400).json({ error: 'Gazete ayarı izin verilen uzunluğu aşıyor' });
+    }
+    if (key.endsWith('_url') && value && !/^https?:\/\/\S+$/i.test(value)) {
+      return res.status(400).json({ error: 'Gazete görseli için geçerli bir HTTPS/HTTP adresi girin' });
+    }
+  }
   if (key === 'admin_password' && String(value || '').length < 12) {
     return res.status(400).json({ error: 'Admin şifresi en az 12 karakter olmalı' });
   }
@@ -5801,6 +6217,18 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
   res.json({ ok: true });
+});
+
+app.post('/api/admin/upload-newspaper-asset', adminMiddleware, upload.single('image'), async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Gazete görsellerini yalnızca ana admin değiştirebilir' });
+  if (!req.file || !req.file.mimetype?.startsWith('image/')) {
+    return res.status(400).json({ error: 'Gazete için bir görsel dosyası seçin' });
+  }
+  try {
+    res.json({ url: await handleUpload(req.file) });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Gazete görseli yüklenemedi' });
+  }
 });
 
 app.post('/api/admin/upload-call-ringtone', adminMiddleware, upload.single('ringtone'), async (req, res) => {
@@ -5832,7 +6260,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'auth_required', 'photo_song_clip_seconds'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -6724,8 +7152,9 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
-    'first_visit_auth','auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
-    'photo_song_clip_seconds'
+    'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
+    'photo_song_clip_seconds','newspaper_left_quote','newspaper_right_quote','newspaper_author',
+    'newspaper_flag_url','newspaper_background_url'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
@@ -7438,11 +7867,14 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
     SELECT f.id, f.created_at, f.status, f.requester_id, f.addressee_id,
       CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END AS other_id,
       u.username AS other_username, u.nickname AS other_nickname, u.avatar AS other_avatar, u.avatar_removed AS other_avatar_removed,
-      u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted
+      u.name_color AS other_name_color, COALESCE(u.is_deleted,0) AS other_is_deleted,
+      COALESCE(u.is_red_verified,0) AS other_is_red_verified, u.red_verified_at AS other_red_verified_at
     FROM friendships f
     JOIN users u ON u.id=CASE WHEN f.requester_id=$1 THEN f.addressee_id ELSE f.requester_id END
     WHERE (f.requester_id=$1 OR f.addressee_id=$1)
       AND (f.status='pending' OR f.status='accepted')
+    ORDER BY CASE WHEN f.status='pending' AND f.requester_id<>$1 AND COALESCE(u.is_red_verified,0)=1 THEN 0 ELSE 1 END,
+      f.created_at DESC
   `, [uid]);
   res.json(rows);
 });
@@ -7576,10 +8008,13 @@ async function getListeningRoom(publicId, userId) {
 
 async function getListeningRoomState(roomId) {
   const [members, tracks, requests] = await Promise.all([
-    query(`SELECT m.user_id, m.role, m.joined_at, u.username, u.avatar, u.name_color
+    query(`SELECT m.user_id, m.role, m.joined_at, u.username, u.nickname, u.avatar, u.name_color
       FROM listening_room_members m JOIN users u ON u.id=m.user_id
       WHERE m.room_id=$1 ORDER BY m.joined_at`, [roomId]),
-    query(`SELECT t.*, s.public_id AS song_public_id, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
+    query(`SELECT t.*, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url,
+        CASE WHEN t.state='playing' AND t.started_at IS NOT NULL
+          THEN t.position_seconds + EXTRACT(EPOCH FROM (NOW()-t.started_at))
+          ELSE t.position_seconds END AS current_position_seconds
       FROM listening_room_tracks t JOIN songs s ON s.id=t.song_id
       WHERE t.room_id=$1 AND t.state <> 'played' ORDER BY t.position, t.id`, [roomId]),
     query(`SELECT q.*, u.username AS requester_username, s.slug, s.title, s.artist_name, s.audio_url, s.cover_url
@@ -7591,18 +8026,50 @@ async function getListeningRoomState(roomId) {
 
 app.post('/api/listening-rooms', authMiddleware, async (req, res) => {
   const title = String(req.body?.title || 'Ortak dinleyiş').trim().slice(0, 80) || 'Ortak dinleyiş';
+  const requestedSongId = req.body?.song_id;
+  const initialSong = requestedSongId == null ? null : await getSongForListening(requestedSongId);
+  if (requestedSongId != null && !initialSong) return res.status(404).json({ error: 'Şarkı bulunamadı veya ortak dinleyişte kullanılamıyor' });
   const publicId = createListeningRoomId();
-  const { rows } = await query(`INSERT INTO listening_rooms(public_id,owner_id,title)
-    VALUES($1,$2,$3) RETURNING *`, [publicId, req.user.id, title]);
-  await query(`INSERT INTO listening_room_members(room_id,user_id,role) VALUES($1,$2,'owner')`, [rows[0].id, req.user.id]);
-  res.status(201).json({ ...rows[0], share_url: `/ortak-dinleyis/${publicId}`, state: await getListeningRoomState(rows[0].id) });
+  const client = await pool.connect();
+  let room;
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(`INSERT INTO listening_rooms(public_id,owner_id,title)
+      VALUES($1,$2,$3) RETURNING *`, [publicId, req.user.id, title]);
+    room = rows[0];
+    await client.query(`INSERT INTO listening_room_members(room_id,user_id,role) VALUES($1,$2,'owner')`, [room.id, req.user.id]);
+    if (initialSong) {
+      await client.query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state,started_at)
+        VALUES($1,$2,$3,0,'playing',NOW())`, [room.id, initialSong.id, req.user.id]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  res.status(201).json({ ...room, share_url: `/ortak-dinleyis/${publicId}`, state: await getListeningRoomState(room.id) });
 });
 
 app.get('/api/listening-rooms/:publicId', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
-  await query('UPDATE listening_room_members SET last_seen=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
-  res.json({ ...room, share_url: `/ortak-dinleyis/${room.public_id}`, state: await getListeningRoomState(room.id) });
+  const membership = await query('SELECT 1 FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+  const isMember = membership.rows.length > 0;
+  if (isMember) await query('UPDATE listening_room_members SET last_seen=NOW() WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+  const state = await getListeningRoomState(room.id);
+  if (!isMember) {
+    state.members = [];
+    state.requests = [];
+    state.tracks = state.tracks.filter(track => ['playing', 'paused'].includes(track.state));
+  }
+  res.json({
+    ...room,
+    is_member: isMember,
+    share_url: `/ortak-dinleyis/${room.public_id}`,
+    state
+  });
 });
 
 app.post('/api/listening-rooms/:publicId/join', authMiddleware, async (req, res) => {
@@ -7610,13 +8077,13 @@ app.post('/api/listening-rooms/:publicId/join', authMiddleware, async (req, res)
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
   await query(`INSERT INTO listening_room_members(room_id,user_id,role) VALUES($1,$2,'listener')
     ON CONFLICT(room_id,user_id) DO UPDATE SET last_seen=NOW()`, [room.id, req.user.id]);
-  res.json({ ok: true, room: { ...room, share_url: `/ortak-dinleyis/${room.public_id}` }, state: await getListeningRoomState(room.id) });
+  res.json({ ok: true, room: { ...room, share_url: `/ortak-dinleyis/${room.public_id}` }, is_member: true, state: await getListeningRoomState(room.id) });
 });
 
 app.post('/api/listening-rooms/:publicId/leave', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı' });
-  if (room.owner_id === req.user.id) await query('UPDATE listening_rooms SET is_active=0,updated_at=NOW() WHERE id=$1', [room.id]);
+  if (String(room.owner_id) === String(req.user.id)) await query('UPDATE listening_rooms SET is_active=0,updated_at=NOW() WHERE id=$1', [room.id]);
   else await query('DELETE FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
   res.json({ ok: true });
 });
@@ -7665,6 +8132,7 @@ app.post('/api/listening-rooms/:publicId/tracks/bulk', authMiddleware, async (re
 app.post('/api/listening-rooms/:publicId/requests', authMiddleware, async (req, res) => {
   const room = await getListeningRoom(req.params.publicId, req.user.id);
   if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı veya bu dinleyişe erişiminiz yok' });
+  if (String(room.owner_id) === String(req.user.id)) return res.status(400).json({ error: 'Dinleyiş sahibi şarkıyı doğrudan değiştirebilir' });
   if (!room.allow_requests) return res.status(403).json({ error: 'Bu dinleyişte şarkı isteği kapalı' });
   const isMember = await query('SELECT 1 FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
   if (!isMember.rows.length) return res.status(403).json({ error: 'Önce dinleyişe katılmalısınız' });
@@ -7686,10 +8154,34 @@ app.post('/api/listening-rooms/:publicId/requests/:requestId', authMiddleware, a
     await query("UPDATE listening_room_requests SET status='rejected' WHERE id=$1", [request.id]);
     return res.json({ ok: true, state: await getListeningRoomState(room.id) });
   }
-  const { rows: positionRows } = await query('SELECT COALESCE(MAX(position),-1)+1 AS position FROM listening_room_tracks WHERE room_id=$1', [room.id]);
-  await query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state)
-    VALUES($1,$2,$3,$4,'queued')`, [room.id, request.song_id, request.requester_id, positionRows[0].position]);
-  await query("UPDATE listening_room_requests SET status='accepted' WHERE id=$1", [request.id]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: claimedRequests } = await client.query(`UPDATE listening_room_requests
+      SET status='accepted' WHERE id=$1 AND room_id=$2 AND status='pending' RETURNING id`, [request.id, room.id]);
+    if (!claimedRequests.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'İstek artık beklemede değil' });
+    }
+    const { rows: currentRows } = await client.query(`SELECT position FROM listening_room_tracks
+      WHERE room_id=$1 AND state IN ('playing','paused') ORDER BY id DESC LIMIT 1`, [room.id]);
+    const currentPosition = currentRows.length ? Number(currentRows[0].position) : -1;
+    const nextPosition = currentPosition + 1;
+    await client.query(`WITH queued AS (
+        SELECT id, ROW_NUMBER() OVER (ORDER BY position,id) AS queue_order
+        FROM listening_room_tracks WHERE room_id=$1 AND state='queued'
+      )
+      UPDATE listening_room_tracks t SET position=$2 + 1 + queued.queue_order
+      FROM queued WHERE t.id=queued.id`, [room.id, currentPosition]);
+    await client.query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state)
+      VALUES($1,$2,$3,$4,'queued')`, [room.id, request.song_id, request.requester_id, nextPosition]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
   res.json({ ok: true, state: await getListeningRoomState(room.id) });
 });
 
@@ -7700,17 +8192,30 @@ app.post('/api/listening-rooms/:publicId/control', authMiddleware, async (req, r
   if (action === 'play') {
     const song = await getSongForListening(req.body?.song_id);
     if (!song) return res.status(404).json({ error: 'Şarkı bulunamadı' });
-    await query("UPDATE listening_room_tracks SET state='played' WHERE room_id=$1 AND state='playing'", [room.id]);
+    await query("UPDATE listening_room_tracks SET state='played' WHERE room_id=$1 AND state IN ('playing','paused')", [room.id]);
     const { rows: positionRows } = await query('SELECT COALESCE(MAX(position),-1)+1 AS position FROM listening_room_tracks WHERE room_id=$1', [room.id]);
     await query(`INSERT INTO listening_room_tracks(room_id,song_id,added_by,position,state,started_at)
       VALUES($1,$2,$3,$4,'playing',NOW())`, [room.id, song.id, req.user.id, positionRows[0].position]);
-  } else if (action === 'pause' || action === 'resume') {
-    const { rows } = await query("SELECT id, started_at FROM listening_room_tracks WHERE room_id=$1 AND state='playing' ORDER BY id DESC LIMIT 1", [room.id]);
-    if (rows[0]) await query('UPDATE listening_room_tracks SET state=$1 WHERE id=$2', [action === 'pause' ? 'paused' : 'playing', rows[0].id]);
+  } else if (action === 'pause') {
+    await query(`UPDATE listening_room_tracks SET
+      position_seconds=position_seconds + CASE WHEN started_at IS NOT NULL THEN EXTRACT(EPOCH FROM (NOW()-started_at)) ELSE 0 END,
+      started_at=NULL,state='paused'
+      WHERE room_id=$1 AND state='playing'`, [room.id]);
+  } else if (action === 'resume') {
+    await query(`UPDATE listening_room_tracks SET state='playing',started_at=NOW()
+      WHERE room_id=$1 AND state='paused'`, [room.id]);
+  } else if (action === 'seek') {
+    const position = Number(req.body?.position_seconds);
+    if (!Number.isFinite(position) || position < 0 || position > 86400) {
+      return res.status(400).json({ error: 'Geçersiz şarkı konumu' });
+    }
+    await query(`UPDATE listening_room_tracks SET position_seconds=$1,
+      started_at=CASE WHEN state='playing' THEN NOW() ELSE NULL END
+      WHERE room_id=$2 AND state IN ('playing','paused')`, [position, room.id]);
   } else if (action === 'skip') {
     await query("UPDATE listening_room_tracks SET state='played' WHERE room_id=$1 AND state IN ('playing','paused')", [room.id]);
     const { rows: next } = await query("SELECT id FROM listening_room_tracks WHERE room_id=$1 AND state='queued' ORDER BY position,id LIMIT 1", [room.id]);
-    if (next[0]) await query("UPDATE listening_room_tracks SET state='playing',started_at=NOW() WHERE id=$1", [next[0].id]);
+    if (next[0]) await query("UPDATE listening_room_tracks SET state='playing',started_at=NOW(),position_seconds=0 WHERE id=$1", [next[0].id]);
   } else return res.status(400).json({ error: 'Geçersiz ortak dinleyiş işlemi' });
   await query('UPDATE listening_rooms SET updated_at=NOW() WHERE id=$1', [room.id]);
   res.json({ ok: true, state: await getListeningRoomState(room.id) });
@@ -7816,6 +8321,11 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
     SELECT c.*,
+      CASE WHEN ct.theme_key IS NOT NULL AND
+        (COALESCE(c.shared_theme_key,'')='' OR c.shared_theme_updated_at IS NULL OR ct.updated_at>c.shared_theme_updated_at)
+        THEN ct.theme_key
+        ELSE COALESCE(NULLIF(c.shared_theme_key,''),ct.theme_key,dus.default_theme_key,'default')
+      END AS theme_key,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.nickname ELSE u1.nickname END as other_nickname,
       CASE WHEN c.user1_id=$1 THEN u2.avatar ELSE u1.avatar END as other_avatar,
@@ -7836,6 +8346,8 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
     JOIN users u2 ON c.user2_id=u2.id
+    LEFT JOIN dm_conversation_user_themes ct ON ct.conversation_id=c.id AND ct.user_id=$1
+    LEFT JOIN dm_user_settings dus ON dus.user_id=$1
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
         MAX(last_heartbeat) as last_active
@@ -7992,6 +8504,24 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
   res.json({ count: parseInt(rows[0].c) });
 });
 
+async function hasPrivateDmAccess(userId, targetId) {
+  const { rows: friendship } = await query(
+    "SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'",
+    [userId, targetId]
+  );
+  if (friendship.length) return true;
+  const user1Id = Math.min(userId, targetId);
+  const user2Id = Math.max(userId, targetId);
+  const { rows: incoming } = await query(`
+    SELECT 1 FROM dm_conversations c
+    JOIN dm_messages m ON m.conversation_id=c.id
+    WHERE c.user1_id=$1 AND c.user2_id=$2
+      AND m.sender_id=$3 AND m.deleted_for_all=0
+    LIMIT 1
+  `, [user1Id, user2Id, targetId]);
+  return incoming.length > 0;
+}
+
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: target } = await query(`
     SELECT u.id,u.username,u.nickname,u.avatar,u.avatar_removed,u.name_color,u.is_private,
@@ -8010,8 +8540,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const other = target[0];
   const uid = req.user.id;
   if (other.is_private && other.id !== uid) {
-    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
-    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+    if (!(await hasPrivateDmAccess(uid, other.id))) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar veya daha önce size mesaj gönderenler yazabilir.' });
   }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
@@ -8034,7 +8563,10 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const { rows: msgs } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
+    SELECT     m.id, m.conversation_id, m.sender_id, m.content,
+    CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '' ELSE m.image_url END AS image_url,
+    CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
+    m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -8042,6 +8574,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
@@ -8051,6 +8584,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
@@ -8072,7 +8606,49 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     }
   }
 
-  res.json({ conv, other, messages: msgs, isHidden, hasPassword: !!hiddenPass });
+  const dmTheme = await getDmThemeForUser(conv, uid);
+  conv.theme_key = dmTheme.theme_key;
+  conv.theme_shared = dmTheme.shared;
+  res.json({ conv, other, messages: msgs, isHidden, hasPassword: !!hiddenPass, theme: dmTheme });
+});
+
+app.put('/api/conversation/:username/theme', authMiddleware, async (req, res) => {
+  const { rows: targets } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
+  if (!targets.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const other = targets[0];
+  if (Number(other.is_private) === 1 && other.id !== req.user.id &&
+      !(await hasPrivateDmAccess(req.user.id, other.id))) {
+    return res.status(403).json({ error: 'Bu konuşmanın temasını değiştirme yetkiniz yok.' });
+  }
+  const user1Id = Math.min(req.user.id, other.id);
+  const user2Id = Math.max(req.user.id, other.id);
+  const { rows: conversations } = await query(
+    'SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2',
+    [user1Id, user2Id]
+  );
+  if (!conversations.length) return res.status(404).json({ error: 'Konuşma bulunamadı.' });
+  const themeKey = String(req.body?.theme_key || '');
+  if (!DM_THEME_KEYS.has(themeKey)) return res.status(400).json({ error: 'Geçersiz mesaj teması.' });
+  const conversation = conversations[0];
+  await query(`INSERT INTO dm_conversation_user_themes(conversation_id,user_id,theme_key,updated_at)
+    VALUES($1,$2,$3,NOW())
+    ON CONFLICT(conversation_id,user_id) DO UPDATE SET theme_key=EXCLUDED.theme_key,updated_at=NOW()`,
+  [conversation.id, req.user.id, themeKey]);
+  if (req.body?.apply_to_other === true) {
+    await query(`UPDATE dm_conversations SET shared_theme_key=$1,shared_theme_updated_by=$2,
+      shared_theme_updated_at=NOW() WHERE id=$3`, [themeKey, req.user.id, conversation.id]);
+  } else {
+    await query(`UPDATE dm_conversations SET shared_theme_key='',shared_theme_updated_by=NULL,
+      shared_theme_updated_at=NULL WHERE id=$1`, [conversation.id]);
+  }
+  const { rows: updatedConversation } = await query('SELECT * FROM dm_conversations WHERE id=$1', [conversation.id]);
+  const [userTheme, otherTheme] = await Promise.all([
+    getDmThemeForUser(updatedConversation[0], req.user.id),
+    getDmThemeForUser(updatedConversation[0], other.id)
+  ]);
+  io.to(`user:${req.user.id}`).emit('dm:theme', { conversationId: conversation.id, themeKey: userTheme.theme_key });
+  io.to(`user:${other.id}`).emit('dm:theme', { conversationId: conversation.id, themeKey: otherTheme.theme_key });
+  res.json({ ok: true, theme: userTheme });
 });
 
 // Mesajları okundu işaretle
@@ -8099,9 +8675,9 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   const uid = req.user.id;
   const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
   if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
-  if (other.is_private && other.id !== uid) {
-    const { rows: friendship } = await query("SELECT id FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'", [uid, other.id]);
-    if (!friendship.length) return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar mesaj gönderebilir' });
+  if (Number(other.is_private) === 1 && other.id !== uid &&
+      !(await hasPrivateDmAccess(uid, other.id))) {
+    return res.status(403).json({ error: 'Gizli hesaplara yalnızca arkadaşlar veya daha önce size mesaj gönderenler yazabilir.' });
   }
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
@@ -8115,17 +8691,39 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, reply_to_id, image_url: bodyImageUrl } = req.body;
+  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id, image_url: bodyImageUrl } = req.body;
   content = content == null ? '' : String(content);
-  let image_url = String(bodyImageUrl || '');
+  const requestedImageUrls = Array.isArray(req.body?.image_urls)
+    ? req.body.image_urls.map(url => String(url || '').trim()).filter(Boolean)
+    : bodyImageUrl ? [String(bodyImageUrl).trim()] : [];
+  if (requestedImageUrls.length > 10) return res.status(400).json({ error: 'Bir mesajda en fazla 10 fotoğraf gönderebilirsiniz.' });
+  if (requestedImageUrls.some(url => url.length > 2048)) return res.status(400).json({ error: 'Fotoğraf adresi geçersiz.' });
+  const imageUrls = [...requestedImageUrls];
+  let image_url = imageUrls[0] || '';
+  const imageViewLimit = Number(req.body?.image_view_limit ?? 0);
+  if (![0, 1, 2, 3].includes(imageViewLimit)) return res.status(400).json({ error: 'Fotoğraf görüntüleme seçeneği geçersiz.' });
   if (req.file) {
-    try { image_url = await handleUpload(req.file); } catch (e) {}
+    try {
+      image_url = await handleUpload(req.file);
+      imageUrls.unshift(image_url);
+    } catch (e) { return res.status(500).json({ error: 'Fotoğraf yüklenemedi: ' + e.message }); }
   }
+  if (imageViewLimit > 0 && !imageUrls.length) return res.status(400).json({ error: 'Sınırlı görüntülemeli mesaj için fotoğraf gerekli.' });
   if (shared_photo_id && !content) content = ' ';
-  if (!content.trim() && !image_url && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (shared_newspaper_id !== undefined && shared_newspaper_id !== null && shared_newspaper_id !== '') {
+    const newspaperId = Number(shared_newspaper_id);
+    if (!Number.isSafeInteger(newspaperId) || newspaperId < 1) return res.status(400).json({ error: 'Geçersiz gazete.' });
+    const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [newspaperId]);
+    if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı.' });
+    shared_newspaper_id = newspaperId;
+    if (!content) content = ' ';
+  } else {
+    shared_newspaper_id = null;
+  }
+  if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, reply_to_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *',
-    [conv.id, uid, content||'', image_url, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
+    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   if (shared_forum_id) {
@@ -8134,11 +8732,14 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   if (shared_book_id) {
     await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_book_id]);
   }
+  if (shared_newspaper_id) {
+    await query('UPDATE newspapers SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_newspaper_id]);
+  }
   if (content?.trim()) {
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -8146,6 +8747,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
       b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
+      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -8154,13 +8756,45 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     LEFT JOIN photos p ON m.shared_photo_id=p.id
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
+    LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
   `, [msgRows[0].id]);
   const sentMessage = full[0];
-  emitDirectMessage(conv.id, req.user, other, sentMessage);
+  emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '', image_urls: [] } : sentMessage);
   res.json(sentMessage);
+});
+
+app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddleware, async (req, res) => {
+  const messageId = Number(req.params.messageId);
+  if (!Number.isSafeInteger(messageId) || messageId < 1) return res.status(400).json({ error: 'Geçersiz mesaj.' });
+  const { rows } = await query(`
+    SELECT m.id,m.conversation_id,m.sender_id,m.image_url,m.image_urls,m.image_view_limit,m.image_view_count,
+      c.user1_id,c.user2_id
+    FROM dm_messages m JOIN dm_conversations c ON c.id=m.conversation_id
+    JOIN users other ON other.username=$3
+    WHERE m.id=$1 AND m.deleted_for_all=0
+      AND ((c.user1_id=$2 AND c.user2_id=other.id) OR (c.user2_id=$2 AND c.user1_id=other.id))
+    LIMIT 1
+  `, [messageId, req.user.id, req.params.username]);
+  const message = rows[0];
+  if (!message) return res.status(404).json({ error: 'Fotoğraf bulunamadı.' });
+  if (String(message.sender_id) === String(req.user.id)) return res.status(403).json({ error: 'Gönderdiğiniz fotoğrafı bu şekilde açamazsınız.' });
+  if (![1, 2, 3].includes(Number(message.image_view_limit))) return res.status(400).json({ error: 'Bu fotoğraf sınırlı görüntülemeli değil.' });
+  const { rows: updated } = await query(`UPDATE dm_messages
+    SET image_view_count=image_view_count+1
+    WHERE id=$1 AND image_view_count<image_view_limit
+    RETURNING image_url,image_urls,image_view_limit,image_view_count`, [messageId]);
+  if (!updated.length) return res.status(410).json({ error: 'Bu fotoğraf için görüntüleme sayısı doldu.' });
+  res.json({
+    image_url: updated[0].image_url,
+    image_urls: Array.isArray(updated[0].image_urls) && updated[0].image_urls.length
+      ? updated[0].image_urls
+      : (updated[0].image_url ? [updated[0].image_url] : []),
+    image_view_limit: Number(updated[0].image_view_limit),
+    image_view_count: Number(updated[0].image_view_count)
+  });
 });
 
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
@@ -8250,6 +8884,50 @@ app.post('/api/conversation/:username/set-password', authMiddleware, async (req,
     await query('UPDATE dm_conversations SET hidden_pass_user2=$1 WHERE id=$2', [passHash, conv.id]);
   }
   res.json({ ok: true });
+});
+
+app.put('/api/messages/:id', authMiddleware, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası' });
+  const content = typeof req.body?.content === 'string' ? req.body.content.trim() : null;
+  if (content === null) return res.status(400).json({ error: 'Mesaj metni gerekli' });
+  if (content.length > 5000) return res.status(400).json({ error: 'Mesaj en fazla 5000 karakter olabilir' });
+
+  const { rows } = await query('SELECT * FROM dm_messages WHERE id=$1', [req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: 'Mesaj bulunamadı' });
+  const msg = rows[0];
+  if (msg.sender_id != req.user.id) return res.status(403).json({ error: 'Sadece kendi mesajınızı düzenleyebilirsiniz' });
+  if (msg.deleted_for_all || msg.deleted_by_sender) return res.status(400).json({ error: 'Silinmiş mesaj düzenlenemez' });
+  if (!String(msg.content || '').trim()) return res.status(400).json({ error: 'Metin içermeyen mesaj düzenlenemez' });
+  if (!content && !msg.image_url && !msg.shared_forum_id && !msg.shared_video_id && !msg.shared_book_id && !msg.shared_photo_id && !msg.shared_story_id && !msg.shared_newspaper_id) {
+    return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  }
+
+  const { rows: updated } = await query(
+    `UPDATE dm_messages
+     SET content=$1, edited_at=NOW()
+     WHERE id=$2 AND sender_id=$3
+       AND created_at >= NOW() - INTERVAL '3 hours'
+       AND COALESCE(deleted_for_all,0)=0 AND COALESCE(deleted_by_sender,0)=0
+     RETURNING *`,
+    [content, msg.id, req.user.id]
+  );
+  if (!updated.length) return res.status(403).json({ error: 'Mesajlar yalnızca gönderildikten sonraki 3 saat içinde düzenlenebilir' });
+  const { rows: participants } = await query(
+    `SELECT c.user1_id, c.user2_id, user1.username AS user1_username, user2.username AS user2_username
+     FROM dm_conversations c
+     JOIN users user1 ON user1.id=c.user1_id
+     JOIN users user2 ON user2.id=c.user2_id
+     WHERE c.id=$1`,
+    [msg.conversation_id]
+  );
+  if (participants.length) {
+    const conversation = participants[0];
+    io.to([`user:${conversation.user1_id}`, `user:${conversation.user2_id}`]).emit('dm:message-edited', {
+      usernames: [conversation.user1_username, conversation.user2_username],
+      message: updated[0],
+    });
+  }
+  res.json(updated[0]);
 });
 
 app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
@@ -8474,7 +9152,7 @@ app.post('/api/shop/checkout', authMiddleware, async (req, res) => {
     const { product_id, music_ad_code } = req.body || {};
     if (!product_id) return res.status(400).json({ error: 'Ürün ID gerekli' });
 
-    const { rows: prods } = await query('SELECT * FROM store_products WHERE id=$1 AND visible=1', [product_id]);
+    const { rows: prods } = await query('SELECT * FROM store_products WHERE id=$1 AND visible=1 AND purchase_enabled=1', [product_id]);
     if (!prods.length) return res.status(404).json({ error: 'Ürün bulunamadı' });
     const product = prods[0];
     if (product.type === 'ad_boost') {
@@ -8833,6 +9511,24 @@ app.get('/api/shop/my-orders', authMiddleware, async (req, res) => {
 // ===== MÜZİK SES REKLAMLARI =====
 function newMusicAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 function isAdFreeUser(user) { return !!(user && (user.is_vip || user.is_plus)); }
+const MUSIC_AD_SETTINGS_DEFAULTS = { mode: 'interval', interval: 2, random_frequency: 'medium' };
+async function getMusicAdSettings() {
+  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1::text[])", [
+    ['music_ad_mode', 'music_ad_interval', 'music_ad_random_frequency']
+  ]);
+  const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  return {
+    mode: values.music_ad_mode === 'random' ? 'random' : MUSIC_AD_SETTINGS_DEFAULTS.mode,
+    interval: Math.min(20, Math.max(1, parseInt(values.music_ad_interval, 10) || MUSIC_AD_SETTINGS_DEFAULTS.interval)),
+    random_frequency: ['rare', 'medium', 'frequent'].includes(values.music_ad_random_frequency)
+      ? values.music_ad_random_frequency
+      : MUSIC_AD_SETTINGS_DEFAULTS.random_frequency
+  };
+}
+function shouldShowRandomMusicAd(frequency) {
+  const odds = { rare: 0.15, medium: 0.3, frequent: 0.5 };
+  return Math.random() < (odds[frequency] || odds.medium);
+}
 async function pickMusicAd() {
   const { rows } = await query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
     FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT 1`);
@@ -8840,7 +9536,12 @@ async function pickMusicAd() {
 }
 
 app.get('/api/music-ads/guest', async (req, res) => {
-  try { res.json({ ad: await pickMusicAd() }); }
+  try { res.json({ ad: await pickMusicAd(), settings: await getMusicAdSettings() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/music-ads/settings', async (req, res) => {
+  try { res.json(await getMusicAdSettings()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -8852,21 +9553,110 @@ app.get('/api/music-ads/pending', authMiddleware, async (req, res) => {
     res.json({ ad: rows[0] || null });
   } catch (e) { res.status(500).json({ error:e.message }); }
 });
-app.post('/api/music-ads/song-finished', authMiddleware, async (req, res) => {
+
+app.post('/api/music-listens/start', authMiddleware, async (req, res) => {
   try {
-    if (isAdFreeUser(req.user)) return res.json({ ad:null, songs_until_ad:null });
-    const state = (await query('SELECT * FROM music_ad_states WHERE user_id=$1', [req.user.id])).rows[0];
-    if (state?.pending_ad_id) {
-      const { rows } = await query('SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total FROM music_ads a WHERE a.id=$1 AND a.active=1', [state.pending_ad_id]);
-      return res.json({ ad:rows[0] || null, songs_until_ad:0 });
+    const songId = Number(req.body?.song_id);
+    if (!Number.isSafeInteger(songId) || songId < 1) return res.status(400).json({ error: 'Geçerli bir şarkı gerekli.' });
+    const song = (await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [songId])).rows[0];
+    if (!song) return res.status(404).json({ error: 'Müzik bulunamadı.' });
+    if (isAdFreeUser(req.user)) return res.json({ session_id: null, ad: null });
+    const priorListen = (await query('SELECT 1 FROM music_ad_listens WHERE user_id=$1 AND song_id=$2 AND listening_date=CURRENT_DATE', [req.user.id, songId])).rows[0];
+    if (priorListen) return res.json({ session_id: null, ad: null });
+    const previousSession = (await query(`SELECT id FROM music_listen_sessions
+      WHERE user_id=$1 AND song_id=$2 AND listening_date=CURRENT_DATE AND counted_at IS NULL
+      ORDER BY created_at DESC LIMIT 1`, [req.user.id, songId])).rows[0];
+    const sessionId = previousSession?.id || randomUUID();
+    if (!previousSession) {
+      const position = Number(req.body?.position);
+      await query(`INSERT INTO music_listen_sessions (id,user_id,song_id,last_position_seconds)
+        VALUES ($1,$2,$3,$4)`, [sessionId, req.user.id, songId, Number.isFinite(position) ? Math.max(0, Math.min(position, 86400)) : 0]);
     }
-    const completed = (state?.completed_song_count || 0) + 1;
-    const ad = completed >= 2 ? await pickMusicAd() : null;
-    await query(`INSERT INTO music_ad_states (user_id,completed_song_count,pending_ad_id,updated_at) VALUES ($1,$2,$3,NOW())
-      ON CONFLICT (user_id) DO UPDATE SET completed_song_count=EXCLUDED.completed_song_count,pending_ad_id=EXCLUDED.pending_ad_id,updated_at=NOW()`,
-      [req.user.id, ad ? 0 : completed, ad?.id || null]);
-    res.json({ ad, songs_until_ad:ad ? 0 : 2-completed });
+    res.json({ session_id: sessionId, ad: null });
   } catch (e) { res.status(500).json({ error:e.message }); }
+});
+
+app.post('/api/music-listens/:sessionId/heartbeat', authMiddleware, async (req, res) => {
+  let client;
+  try {
+    client = await pool.connect();
+    if (isAdFreeUser(req.user)) return res.json({ ad: null });
+    const position = Number(req.body?.position);
+    if (!Number.isFinite(position) || position < 0 || position > 86400) {
+      return res.status(400).json({ error: 'Geçersiz oynatma konumu.' });
+    }
+    await client.query('BEGIN');
+    const sessionResult = await client.query(`SELECT * FROM music_listen_sessions
+      WHERE id=$1 AND user_id=$2 AND listening_date=CURRENT_DATE FOR UPDATE`, [req.params.sessionId, req.user.id]);
+    const session = sessionResult.rows[0];
+    if (!session) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Dinleme oturumu bulunamadı.' });
+    }
+    if (session.counted_at) {
+      await client.query('COMMIT');
+      return res.json({ ad: null });
+    }
+    const elapsedResult = await client.query(`SELECT LEAST(30, GREATEST(0, EXTRACT(EPOCH FROM (NOW() - $1::timestamp)))) AS seconds`,
+      [session.last_ping_at]);
+    const elapsed = Number(elapsedResult.rows[0]?.seconds || 0);
+    const positionDelta = position - Number(session.last_position_seconds || 0);
+    const isPlaying = req.body?.playing === true;
+    const listenedSeconds = Number(session.listened_seconds || 0) +
+      (isPlaying && elapsed >= 0.5 && positionDelta > 0 && positionDelta <= elapsed * 1.75 + 1.5
+        ? Math.min(elapsed, positionDelta)
+        : 0);
+    const listenResult = await client.query(`UPDATE music_listen_sessions
+      SET last_position_seconds=$1,listened_seconds=$2,last_ping_at=NOW()
+      WHERE id=$3 RETURNING *`, [position, listenedSeconds, req.params.sessionId]);
+    let ad = null;
+    if (listenedSeconds >= 20) {
+      const recorded = await client.query(`INSERT INTO music_ad_listens (user_id,song_id,listening_date,listened_seconds)
+        VALUES ($1,$2,CURRENT_DATE,$3) ON CONFLICT DO NOTHING RETURNING song_id`,
+        [req.user.id, session.song_id, listenedSeconds]);
+      if (recorded.rows.length) {
+        await client.query(`INSERT INTO music_ad_states (user_id,completed_song_count,listening_date,updated_at)
+          VALUES ($1,1,CURRENT_DATE,NOW())
+          ON CONFLICT (user_id) DO UPDATE SET
+            completed_song_count=CASE WHEN music_ad_states.listening_date=CURRENT_DATE THEN music_ad_states.completed_song_count+1 ELSE 1 END,
+            listening_date=CURRENT_DATE,updated_at=NOW()`, [req.user.id]);
+        const state = (await client.query('SELECT * FROM music_ad_states WHERE user_id=$1 FOR UPDATE', [req.user.id])).rows[0];
+        if (state.pending_ad_id) {
+          ad = (await client.query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
+            FROM music_ads a WHERE a.id=$1 AND a.active=1`, [state.pending_ad_id])).rows[0] || null;
+        } else {
+          const settingRows = (await client.query("SELECT key,value FROM settings WHERE key = ANY($1::text[])", [
+            ['music_ad_mode', 'music_ad_interval', 'music_ad_random_frequency']
+          ])).rows;
+          const settingValues = Object.fromEntries(settingRows.map(row => [row.key, row.value]));
+          const settings = {
+            mode: settingValues.music_ad_mode === 'random' ? 'random' : MUSIC_AD_SETTINGS_DEFAULTS.mode,
+            interval: Math.min(20, Math.max(1, parseInt(settingValues.music_ad_interval, 10) || MUSIC_AD_SETTINGS_DEFAULTS.interval)),
+            random_frequency: ['rare', 'medium', 'frequent'].includes(settingValues.music_ad_random_frequency)
+              ? settingValues.music_ad_random_frequency
+              : MUSIC_AD_SETTINGS_DEFAULTS.random_frequency
+          };
+          const due = settings.mode === 'random'
+            ? shouldShowRandomMusicAd(settings.random_frequency)
+            : Number(state.completed_song_count) >= settings.interval;
+          if (due) {
+            ad = (await client.query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
+              FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT 1`)).rows[0] || null;
+            if (ad) await client.query(`UPDATE music_ad_states SET pending_ad_id=$1,completed_song_count=0,updated_at=NOW() WHERE user_id=$2`,
+              [ad.id, req.user.id]);
+          }
+        }
+      }
+      await client.query('UPDATE music_listen_sessions SET counted_at=NOW() WHERE id=$1', [req.params.sessionId]);
+    }
+    await client.query('COMMIT');
+    res.json({ ad, listened_seconds: Number(listenResult.rows[0]?.listened_seconds || 0), counted: listenedSeconds >= 20 });
+  } catch (e) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error:e.message });
+  } finally {
+    client?.release();
+  }
 });
 app.post('/api/music-ads/:id/start', authMiddleware, async (req, res) => {
   try {
@@ -9095,6 +9885,30 @@ app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
 
 app.get('/api/admin/music-ads', adminMiddleware, async (req,res) => {
   const { rows } = await query('SELECT * FROM music_ads ORDER BY boost_points DESC,priority DESC,created_at DESC'); res.json(rows);
+});
+app.get('/api/admin/music-ad-settings', adminMiddleware, async (req,res) => {
+  try { res.json(await getMusicAdSettings()); }
+  catch (e) { res.status(500).json({ error:e.message }); }
+});
+app.put('/api/admin/music-ad-settings', adminMiddleware, async (req,res) => {
+  const { mode, interval, random_frequency: randomFrequency } = req.body || {};
+  const safeInterval = Number(interval);
+  if (!['interval', 'random'].includes(mode) || !Number.isInteger(safeInterval) || safeInterval < 1 || safeInterval > 20 ||
+      !['rare', 'medium', 'frequent'].includes(randomFrequency)) {
+    return res.status(400).json({ error: 'Reklam sıklığı ayarları geçersiz.' });
+  }
+  try {
+    const values = [
+      ['music_ad_mode', mode],
+      ['music_ad_interval', String(safeInterval)],
+      ['music_ad_random_frequency', randomFrequency]
+    ];
+    for (const [key, value] of values) {
+      await query(`INSERT INTO settings (key,value) VALUES ($1,$2)
+        ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, [key, value]);
+    }
+    res.json(await getMusicAdSettings());
+  } catch (e) { res.status(500).json({ error:e.message }); }
 });
 app.post('/api/admin/music-ads', adminMiddleware, upload.fields([{name:'audio',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
   try {

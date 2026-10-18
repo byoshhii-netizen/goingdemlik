@@ -98,7 +98,7 @@
       <div class="content-block" style="padding:20px 0 0;border-bottom:0"><h4><i class="fa fa-clock-rotate-left" style="color:var(--gold)"></i> Son 100 hareket</h4><div>${activity}</div></div>
       <div class="modal-actions"><button class="danger-btn" id="cancel-membership"><i class="fa fa-user-minus"></i> Üyeliği iptal et</button><button class="soft-btn" type="button" onclick="document.querySelector('#modal-root .modal-close').click()">Kapat</button></div>`);
     $('#cancel-membership').onclick = async () => {
-      if (!confirm(`${m.username} kullanıcısının VMB üyeliği iptal edilsin mi?`)) return;
+      if (!await CigCigDialogs.confirm(`${m.username} kullanıcısının VMB üyeliği iptal edilsin mi?`)) return;
       try { await api(`/users/${m.id}/membership`, { method:'PUT', body:JSON.stringify({ active:false }) }); closeModal(); toast('VMB üyeliği iptal edildi'); renderMembers(); refreshOverview(); } catch (error) { showError(error); }
     };
   }
@@ -185,7 +185,7 @@
     });
   }
   async function deleteResource(path, message, done) {
-    if (!confirm(message)) return;
+    if (!await CigCigDialogs.confirm(message)) return;
     try { await api(path, { method:'DELETE' }); toast('Silindi'); await done(); refreshOverview(); } catch (error) { showError(error); }
   }
   function showError(error) { toast(error?.message || 'Bir hata oluştu', true); }

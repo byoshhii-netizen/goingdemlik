@@ -2,6 +2,10 @@ let currentUser = null;
 let currentToken = localStorage.getItem('token');
 let realtimeSocket = null;
 let realtimeSocketToken = null;
+let dmTypingTimer = null;
+let dmTypingConversationId = null;
+let dmTypingActive = false;
+let dmPeerTypingTimer = null;
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
@@ -25,7 +29,10 @@ let activePhotoAudio = null;
 let photoAudioObserver = null;
 let siteName = 'CigCig';
 let firstVisitAuthEnabled = false;
-let siteAuthRequired = false;
+const journalistDirectory = new Map();
+let dmSearchUnlockCode = '';
+let dmIconUnlockCode = '';
+let dmSearchUnlockedConvs = [];
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 const MEDIA_VOLUME_KEY = 'cigcig_volume';
@@ -215,7 +222,7 @@ function toast(msg, type = 'success', duration = 3500) {
 function showModal(title, bodyHTML, modalClass = '') {
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -228,7 +235,7 @@ function hideModal() {
   window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal');
 }
 
 function attachPasswordToggle(inputEl, toggleBtnEl, iconEl) {
@@ -752,12 +759,45 @@ function profileRoute(username) {
   return '/profil/' + encodeURIComponent(routeKey);
 }
 
+function redVerificationIconHTML(enabled, verifiedAt) {
+  if (Number(enabled) !== 1) return '';
+  const dateAttributes = verifiedAt
+    ? ` data-red-verified-at="${escHtml(verifiedAt)}" role="button" tabindex="0" aria-label="Doğrulanmış hesap veriliş tarihi"`
+    : '';
+  return `<span class="red-verification-tick"${dateAttributes} title="Doğrulanmış hesap"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></span>`;
+}
+
+function profileRedVerificationIconHTML(badges) {
+  const badge = Array.isArray(badges) ? badges.find(item => item.type === 'red_verified' && item.is_active !== false) : null;
+  return badge ? redVerificationIconHTML(1, badge.assigned_at) : '';
+}
+
 function profileBadgeHTML(badge, compact = false) {
   if (!badge) return '';
+  if (badge.type === 'red_verified') return redVerificationIconHTML(badge.is_active === false ? 0 : 1, badge.assigned_at);
   const color = escHtml(badge.color || '#6b7280');
   const icon = String(badge.icon || '').trim();
-  return `<span class="profile-badge${compact ? ' profile-badge-compact' : ''}" style="color:${color};border-color:${color}55;background:${color}15" title="${escHtml(badge.name || 'Rozet')}">${icon ? `<i class="${escHtml(icon)}"></i> ` : ''}${escHtml(badge.name || 'Rozet')}</span>`;
+  const verificationDate = badge.type === 'red_verified' && badge.assigned_at
+    ? ` data-red-verified-at="${escHtml(badge.assigned_at)}" role="button" tabindex="0"`
+    : '';
+  return `<span class="profile-badge${compact ? ' profile-badge-compact' : ''}" style="color:${color};border-color:${color}55;background:${color}15"${verificationDate} title="${escHtml(badge.name || 'Rozet')}">${icon ? `<i class="${escHtml(icon)}"></i> ` : ''}${escHtml(badge.name || 'Rozet')}</span>`;
 }
+
+document.addEventListener('click', event => {
+  const badge = event.target.closest?.('[data-red-verified-at]');
+  if (!badge) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const date = new Date(badge.dataset.redVerifiedAt);
+  const formatted = Number.isNaN(date.getTime()) ? badge.dataset.redVerifiedAt : date.toLocaleString('tr-TR');
+  showModal('Kırmızı Tik', `<p>Bu kişi ${escHtml(formatted)} tarihinde kırmızı tik sahibi oldu.</p>`);
+});
+document.addEventListener('keydown', event => {
+  const badge = event.target.closest?.('[data-red-verified-at]');
+  if (!badge || (event.key !== 'Enter' && event.key !== ' ')) return;
+  event.preventDefault();
+  badge.click();
+});
 
 function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
@@ -796,8 +836,19 @@ function userDisplayName(u) {
   if (!u) return 'Silindi';
   const color = (u.is_vip || u.is_plus) && u.show_level_color !== 0 && u.name_color ? `style="color:${escHtml(u.name_color)}"` : '';
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
-  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  const journalist = journalistDirectory.get(String(u.username || '').toLocaleLowerCase('tr-TR'));
+  const journalistSince = journalist?.assigned_at;
+  const journalistMark = journalist && journalistSince && journalist.show_journalist_icon !== 0
+    ? ` <button type="button" class="journalist-name-mark" aria-label="Gazetecilik bilgisi" title="Gazeteci bilgisi" data-journalist-since="${escHtml(journalistSince)}" onclick="event.preventDefault();event.stopPropagation();showJournalistSince(this.dataset.journalistSince)"><i class="fas fa-newspaper"></i></button>`
+    : '';
+  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}</strong><small>@${escHtml(u.username)}</small></span>${journalistMark}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
+
+window.showJournalistSince = function (assignedAt) {
+  const date = new Date(assignedAt);
+  if (Number.isNaN(date.getTime())) return;
+  showModal('Gazetecilik bilgisi', `<div class="journalist-tenure-modal"><span class="journalist-tenure-icon"><i class="fas fa-newspaper"></i></span><strong>Bu kullanıcı gazeteci.</strong><p>${date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} tarihinden beri CigCig gazetecisi.</p></div>`);
+};
 
 function avatarImg(u, cls = 'avatar-sm') {
   if (u && u.avatar && !u.avatar_removed) return `<img src="${escHtml(u.avatar)}" class="${cls}" alt="" />`;
@@ -963,6 +1014,9 @@ document.addEventListener('click', e => {
   const a = e.target.closest('[data-link]');
   if (a && a.tagName === 'A') {
     e.preventDefault();
+    if (a.id === 'mbb-music' && currentAudio?.musicResume?.type === 'song' && currentAudio.musicResume.slug) {
+      return navigate('/muzik/' + encodeURIComponent(currentAudio.musicResume.slug));
+    }
     navigate(a.getAttribute('href'));
   }
 });
@@ -981,6 +1035,18 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  const leavingSongDetail = !path.startsWith('/muzik/');
+  const detailAudio = document.getElementById('detail-audio');
+  if (leavingSongDetail && detailAudio && currentAudio === detailAudio && detailAudio.musicResume?.type === 'song') {
+    const resume = detailAudio.musicResume;
+    const queueState = getMusicQueueState(resume.song);
+    openMiniPlayer(resume.audio_url, resume.slug, resume.song, queueState.queue, queueState.index, {
+      startAt: detailAudio.currentTime,
+      autoplay: !detailAudio.paused,
+      countPlay: false
+    });
+  }
+  document.body.classList.toggle('song-detail-route', path.startsWith('/muzik/'));
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
   const isGroupChatRoute = path.startsWith('/grup/') && path.split('/').filter(Boolean).length > 1;
   document.body.classList.toggle('story-page', path.startsWith('/hikaye/'));
@@ -999,12 +1065,6 @@ function renderRoute(fullPath) {
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
 
-  const isAuthRoute = path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path);
-  if (siteAuthRequired && !currentUser && !isAuthRoute) {
-    const returnTo = path + (queryStr ? '?' + queryStr : '');
-    return navigate('/giris?returnTo=' + encodeURIComponent(returnTo), false);
-  }
-
   if (path === '/') {
     if (firstVisitAuthEnabled && !currentUser && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
       localStorage.setItem('cigcig_first_visit_auth_seen', '1');
@@ -1012,6 +1072,8 @@ function renderRoute(fullPath) {
     }
     return renderHome(app);
   }
+  if (path === '/gazeteler') return renderNewspaperList(app);
+  if (path.startsWith('/gazete/')) return renderNewspaperDetail(app, path.slice('/gazete/'.length));
   if (path === '/arama') return renderSearch(app, queryStr || '');
   if (path === '/forum' || path === '/konular') {
     // query string'i de geçir
@@ -1198,10 +1260,7 @@ async function renderRealsFeed(app, initialId = null) {
   }
   async function openRealsComments(video, isAd = false) {
     const commentBase = isAd ? '/reals-ads/' + encodeURIComponent(video.id) : '/video/' + encodeURIComponent(video.id);
-    const activeVideo = items[idx]?.querySelector('video');
-    const wasPlaying = activeVideo && !activeVideo.paused;
     const previousScrollTop = listEl.scrollTop;
-    if (activeVideo) activeVideo.pause();
     const oldSheet = document.getElementById('reals-comments-sheet');
     oldSheet?.remove();
     const sheet = document.createElement('div');
@@ -1217,7 +1276,6 @@ async function renderRealsFeed(app, initialId = null) {
       sheet.remove();
       listEl.scrollTop = previousScrollTop;
       requestAnimationFrame(() => { listEl.scrollTop = previousScrollTop; });
-      if (wasPlaying && location.pathname === '/reals') activeVideo?.play().catch(() => {});
     };
     sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
     sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
@@ -1235,7 +1293,7 @@ async function renderRealsFeed(app, initialId = null) {
       list.addEventListener('click', async event => {
         const editButton = event.target.closest('.video-comment-edit');
         if (editButton) {
-          const nextContent = prompt('Yorumu düzenle', editButton.dataset.content);
+          const nextContent = await CigCigDialogs.prompt('Yorumunu güncelle', editButton.dataset.content, { title: 'Yorumu düzenle', multiline: true });
           if (nextContent === null) return;
           try {
             const updated = await api(commentBase + '/comments/' + editButton.dataset.id, { method: 'PUT', body: JSON.stringify({ content: nextContent.trim() }) });
@@ -1259,7 +1317,7 @@ async function renderRealsFeed(app, initialId = null) {
         const likeButton = event.target.closest('.video-comment-like');
         const deleteButton = event.target.closest('.video-comment-delete');
         if (deleteButton) {
-          if (!confirm('Bu yorum silinsin mi?')) return;
+          if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
           try { await api(commentBase + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' }); deleteButton.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
           return;
         }
@@ -1332,6 +1390,8 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="reals-video-box">
         <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
+        <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
+        <div class="reals-progress-wrap"><input class="reals-progress" type="range" min="0" max="1000" value="0" aria-label="Video konumu" /></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1369,20 +1429,70 @@ async function renderRealsFeed(app, initialId = null) {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
       let clickTimer = null;
+      let lastTouchTapAt = 0;
+      let suppressClickUntil = 0;
+      const progress = it.querySelector('.reals-progress');
+      const updateProgressFill = () => {
+        if (progress) progress.style.setProperty('--reals-progress', `${(Number(progress.value) / 10).toFixed(2)}%`);
+      };
+      const seekToProgress = () => {
+        if (!Number.isFinite(vid.duration) || vid.duration <= 0) return;
+        updateProgressFill();
+        vid.currentTime = (Number(progress.value) / 1000) * vid.duration;
+      };
+      const syncProgress = () => {
+        if (!progress || !Number.isFinite(vid.duration) || vid.duration <= 0) return;
+        if (!progress.matches(':active')) progress.value = String(Math.round((vid.currentTime / vid.duration) * 1000));
+        updateProgressFill();
+      };
+      progress?.addEventListener('pointerdown', event => event.stopPropagation());
+      progress?.addEventListener('click', event => event.stopPropagation());
+      progress?.addEventListener('input', seekToProgress);
+      progress?.addEventListener('change', seekToProgress);
+      vid.addEventListener('loadedmetadata', syncProgress);
+      vid.addEventListener('durationchange', syncProgress);
+      vid.addEventListener('timeupdate', syncProgress);
+      const likeFromDoubleTap = () => {
+        const likeButton = it.querySelector('.like-btn');
+        if (!likeButton) return;
+        it.classList.remove('reals-heart-animate');
+        void it.offsetWidth;
+        it.classList.add('reals-heart-animate');
+        if (!likeButton.classList.contains('active') && !likeButton.disabled) likeButton.click();
+      };
       it.addEventListener('click', event => {
-        if (event.target.closest('button,a')) return;
+        if (Date.now() < suppressClickUntil) { event.preventDefault(); return; }
+        if (event.target.closest('button,a,input,.reals-progress-wrap')) return;
         if (it.classList.contains('reals-ad-item')) return;
+        if (event.detail > 1) {
+          clearTimeout(clickTimer);
+          suppressClickUntil = Date.now() + 400;
+          likeFromDoubleTap();
+          return;
+        }
         clearTimeout(clickTimer);
         clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
+      });
+      it.addEventListener('pointerup', event => {
+        if (event.pointerType !== 'touch' || event.target.closest('button,a,input,.reals-progress-wrap') || it.classList.contains('reals-ad-item')) return;
+        const now = Date.now();
+        if (now - lastTouchTapAt <= 320) {
+          clearTimeout(clickTimer);
+          suppressClickUntil = now + 450;
+          likeFromDoubleTap();
+          lastTouchTapAt = 0;
+        } else {
+          lastTouchTapAt = now;
+        }
       });
       it.querySelector('.reals-play-overlay')?.addEventListener('click', event => {
         event.stopPropagation();
         if (vid.paused) vid.play().catch(() => {}); else vid.pause();
       });
       it.addEventListener('dblclick', event => {
-        if (event.target.closest('button,a')) return;
+        if (Date.now() < suppressClickUntil || event.target.closest('button,a,input,.reals-progress-wrap')) return;
         clearTimeout(clickTimer);
-        it.querySelector('.like-btn')?.click();
+        likeFromDoubleTap();
       });
       vid.addEventListener('play', () => {
         const icon = it.querySelector('.reals-play-overlay i');
@@ -1604,6 +1714,13 @@ function syncRealtimeSocket() {
   realtimeSocketToken = currentToken;
   realtimeSocket = window.io({ auth: { token: currentToken } });
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
+  realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
+  realtimeSocket.on('dm:typing', handleRealtimeDmTyping);
+  realtimeSocket.on('dm:theme', event => {
+    if (!event?.conversationId || !event.themeKey) return;
+    const chat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(event.conversationId))}"]`);
+    chat?.setAttribute('data-dm-theme', event.themeKey);
+  });
   realtimeSocket.on('group:message', event => {
     if (event?.slug && activeGroupMessageRefresh) {
       activeGroupMessageRefresh(event);
@@ -1621,6 +1738,30 @@ function syncRealtimeSocket() {
   realtimeSocket.on('connect_error', error => {
     console.warn('Gerçek zamanlı mesaj bağlantısı kurulamadı:', error.message);
   });
+}
+
+async function stopLocalDmTyping() {
+  if (dmTypingTimer) clearTimeout(dmTypingTimer);
+  dmTypingTimer = null;
+  if (dmTypingActive && dmTypingConversationId) {
+    realtimeSocket?.emit('dm:typing', { conversationId: dmTypingConversationId, active: false });
+  }
+  dmTypingActive = false;
+  dmTypingConversationId = null;
+}
+
+function handleRealtimeDmTyping(event) {
+  if (!event?.conversationId || String(event.senderId) === String(currentUser?.id)) return;
+  const chat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(event.conversationId))}"]`);
+  const indicator = chat?.querySelector('.dm-chat-typing');
+  if (!indicator) return;
+  if (dmPeerTypingTimer) clearTimeout(dmPeerTypingTimer);
+  dmPeerTypingTimer = null;
+  indicator.hidden = !event.active;
+  if (event.active) dmPeerTypingTimer = setTimeout(() => {
+    indicator.hidden = true;
+    dmPeerTypingTimer = null;
+  }, 4500);
 }
 
 async function refreshFriendsRoute(tab) {
@@ -1678,6 +1819,40 @@ async function handleRealtimeDirectMessage(event) {
     }
   }
   checkUnreadMessages();
+}
+
+function handleRealtimeDirectMessageEdit(event) {
+  if (!currentUser || !Array.isArray(event?.usernames) || !event.message) return;
+  const peerUsername = event.usernames.find(username => String(username).toLowerCase() !== String(currentUser.username).toLowerCase());
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const currentChatUsername = pathParts[0] === 'mesajlar' && pathParts.length > 1
+    ? decodeURIComponent(pathParts[1])
+    : '';
+  if (!peerUsername || currentChatUsername.toLowerCase() !== String(peerUsername).toLowerCase()) return;
+
+  const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(event.message.id))}"]`);
+  const bubble = row?.querySelector('.dm-msg-bubble:not(.dm-deleted)');
+  if (!row || !bubble) return;
+
+  const content = String(event.message.content || '');
+  row.dataset.content = content;
+  let text = bubble.querySelector(':scope > span');
+  if (content) {
+    if (!text) {
+      text = document.createElement('span');
+      bubble.appendChild(text);
+    }
+    text.innerHTML = renderContent(content);
+  } else {
+    text?.remove();
+  }
+  bubble.classList.add('is-edited');
+  if (!bubble.querySelector('.dm-msg-edited-mark')) {
+    const marker = document.createElement('i');
+    marker.className = 'fas fa-pen dm-msg-edited-mark';
+    marker.title = 'Düzenlendi';
+    bubble.appendChild(marker);
+  }
 }
 
 function createPresenceClientId() {
@@ -1744,6 +1919,11 @@ function updateNavUI() {
   const mobAuth = $('#mobile-menu-auth');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
+  const isJournalist = !!currentUser && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+  ['#nav-new-newspaper', '#mob-new-newspaper'].forEach(selector => {
+    const button = $(selector);
+    if (button) button.style.display = isJournalist ? '' : 'none';
+  });
 
   if (currentUser) {
     authEl.classList.add('hidden');
@@ -1984,6 +2164,12 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
   openNotifDropdown();
 });
 $('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
+$('#nav-new-newspaper')?.addEventListener('click', () => {
+  $('#new-dropdown')?.classList.add('hidden');
+  if (!currentUser) return navigate('/giris');
+  if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) return toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+  showNewspaperUploadModal();
+});
 $('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); });
 $('#nav-new-poem')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
@@ -2073,6 +2259,10 @@ $('#mob-poems-nav')?.addEventListener('click', () => {
   closeMobileBooksMenu();
   navigate('/siirler');
 });
+$('#mob-newspapers-nav')?.addEventListener('click', () => {
+  closeMobileBooksMenu();
+  navigate('/gazeteler');
+});
 $('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler'));
 
 document.addEventListener('click', e => {
@@ -2102,7 +2292,8 @@ document.addEventListener('click', e => {
   const mobNewVideo = e.target.closest('#mob-new-video');
   const mobNewMusic = e.target.closest('#mob-new-music');
   const mobNewReals = e.target.closest('#mob-new-reals');
-  if (mobNewForum || mobNewPoem || mobNewBook || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic) closeMobileCreateMenu();
+  const mobNewNewspaper = e.target.closest('#mob-new-newspaper');
+  if (mobNewForum || mobNewPoem || mobNewBook || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic || mobNewNewspaper) closeMobileCreateMenu();
   if (mobNewForum) { if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
   if (mobNewPoem) { if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
   if (mobNewBook) { navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
@@ -2111,6 +2302,11 @@ document.addEventListener('click', e => {
   if (mobNewVideo) { if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
   if (mobNewReals) { if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else navigate('/giris'); }
   if (mobNewMusic) { if (currentUser) navigate('/sarki-yukle'); }
+  if (mobNewNewspaper) {
+    if (!currentUser) navigate('/giris');
+    else if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+    else showNewspaperUploadModal();
+  }
 });
 
 async function renderHome(app) {
@@ -2314,6 +2510,1511 @@ async function renderHome(app) {
       await sectionMap[section]();
     }
   }
+}
+
+function formatNewspaperDate(dateValue, options = { day: 'numeric', month: 'long', year: 'numeric' }) {
+  const date = new Date(`${String(dateValue || '').slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('tr-TR', options);
+}
+
+function newspaperCardHTML(newspaper) {
+  const profile = profileRoute(newspaper.username);
+  const isOwner = currentUser && Number(currentUser.id) === Number(newspaper.journalist_id);
+  return `<article class="newspaper-card">
+    <a href="/gazete/${encodeURIComponent(newspaper.id)}" data-link class="newspaper-card-masthead">
+      <span class="newspaper-masthead-mark"><i class="fas fa-newspaper"></i></span>
+      <span class="newspaper-masthead-copy"><strong>${escHtml(newspaper.newspaper_name)}</strong><small>CIGCIG GAZETE ARŞİVİ</small></span>
+      <span class="newspaper-issue-date"><small>GAZETE TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date, { day: '2-digit', month: 'long', year: 'numeric' }))}</strong></span>
+    </a>
+    <a href="/gazete/${encodeURIComponent(newspaper.id)}" data-link class="newspaper-sheet-link" aria-label="${escHtml(newspaper.newspaper_name)} gazetesini aç">
+      <img class="newspaper-sheet" src="${escHtml(newspaper.image_url)}" alt="${escHtml(newspaper.newspaper_name)} — ${escHtml(formatNewspaperDate(newspaper.newspaper_date))}" loading="lazy" />
+      <span class="newspaper-sheet-open"><i class="fas fa-expand"></i> Gazeteyi incele</span>
+    </a>
+    <div class="newspaper-card-footer">
+      <a class="newspaper-byline" href="${profile}" data-link>
+        ${avatarImg(newspaper, 'newspaper-author-avatar')}
+        <span><small>YAYIMLAYAN GAZETECİ</small><strong>${userDisplayName(newspaper)}</strong></span>
+      </a>
+      ${isOwner ? `<button type="button" class="newspaper-delete-button" data-newspaper-delete="${escHtml(newspaper.id)}" aria-label="Gazeteyi sil"><i class="fas fa-trash"></i></button>` : ''}
+      <div class="newspaper-actions">
+        <button type="button" class="newspaper-action-button${newspaper.liked ? ' is-liked' : ''}" data-newspaper-like="${escHtml(newspaper.id)}" aria-label="Gazeteyi beğen">
+          <i class="${newspaper.liked ? 'fas' : 'far'} fa-heart"></i><span data-newspaper-like-count>${Number(newspaper.like_count) || 0}</span>
+        </button>
+        <a class="newspaper-action-button" href="/gazete/${encodeURIComponent(newspaper.id)}#yorumlar" data-link aria-label="Yorumları gör">
+          <i class="far fa-comment"></i><span>${Number(newspaper.comment_count) || 0}</span>
+        </a>
+        <button type="button" class="newspaper-action-button" data-newspaper-share="${escHtml(newspaper.id)}" aria-label="Gazeteyi paylaş">
+          <i class="fas fa-share-nodes"></i><span>Paylaş</span>
+        </button>
+        ${currentUser ? `<button type="button" class="newspaper-action-button newspaper-forward-button" data-newspaper-forward="${escHtml(newspaper.id)}" aria-label="Gazeteyi ilet"><i class="fas fa-paper-plane"></i><span>İlet</span></button>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+async function renderNewspaperList(app) {
+  document.title = 'Gazeteler – ' + siteName;
+  updatePageMeta('Gazeteler – ' + siteName, 'CigCig gazetecilerinin yayımladığı gazeteleri keşfet.', '');
+  const isJournalist = currentUser && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+  app.innerHTML = `
+    <div class="container page newspaper-page">
+      <section class="newspaper-hero">
+        <div class="newspaper-hero-copy"><span class="newspaper-eyebrow"><i class="fas fa-circle"></i> CIGCIG BASIN ARŞİVİ</span><h1>Gazeteler</h1><p>Farklı sesler, gerçek haberler ve her sayıdan yeni bir hikâye.</p><div class="newspaper-hero-rule"><span></span><i class="fas fa-star"></i><span></span></div></div>
+        <div class="newspaper-hero-art" aria-hidden="true"><span class="newspaper-hero-orbit newspaper-hero-orbit-one"></span><span class="newspaper-hero-orbit newspaper-hero-orbit-two"></span><i class="fas fa-newspaper"></i><span class="newspaper-hero-art-label">BASIN<br />ÖZGÜRDÜR</span></div>
+        <div class="newspaper-hero-bottom"><span><i class="fas fa-book-open"></i> Her sayı kendi hikâyesini anlatır</span>${isJournalist ? '<button type="button" class="btn btn-primary newspaper-publish-button" id="newspaper-publish"><i class="fas fa-plus"></i> Yeni gazete yayımla</button>' : '<span class="newspaper-hero-note">Yalnızca CigCig gazetecileri yayın yapabilir.</span>'}</div>
+      </section>
+      <div class="newspaper-feed-heading"><div><span class="newspaper-eyebrow">ARŞİVDEN SEÇKİLER</span><h2>Yayımlanan sayılar</h2></div><span class="newspaper-feed-count" id="newspaper-feed-count"></span></div>
+      <div class="newspaper-grid" id="newspaper-grid"><div class="loading-center"><div class="spinner"></div></div></div>
+    </div>`;
+  $('#newspaper-publish')?.addEventListener('click', showNewspaperUploadModal);
+  const grid = $('#newspaper-grid');
+  try {
+    const newspapers = await api('/newspapers');
+    if (!grid) return;
+    $('#newspaper-feed-count').textContent = `${newspapers.length} ${newspapers.length === 1 ? 'sayı' : 'sayı'}`;
+    grid.innerHTML = newspapers.length
+      ? newspapers.map(newspaperCardHTML).join('')
+      : '<div class="newspaper-empty"><span class="newspaper-empty-icon"><i class="fas fa-newspaper"></i></span><strong>Arşivde henüz gazete yok</strong><span>Gazeteciler ilk sayılarını paylaştığında burada görebileceksiniz.</span></div>';
+  } catch (error) {
+    if (grid) grid.innerHTML = `<div class="newspaper-empty newspaper-error"><span class="newspaper-empty-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Gazeteler yüklenemedi</strong><span>${escHtml(error.message || 'Bağlantınızı kontrol edip tekrar deneyin.')}</span><button type="button" class="btn btn-outline btn-sm" id="newspaper-retry">Tekrar dene</button></div>`;
+    $('#newspaper-retry')?.addEventListener('click', () => renderNewspaperList(app));
+  }
+
+  grid?.addEventListener('click', async event => {
+    const likeButton = event.target.closest('[data-newspaper-like]');
+    if (likeButton) {
+      if (!currentUser) return navigate('/giris');
+      likeButton.disabled = true;
+      try {
+        const result = await api(`/newspapers/${encodeURIComponent(likeButton.dataset.newspaperLike)}/like`, { method: 'POST' });
+        likeButton.classList.toggle('is-liked', result.liked);
+        likeButton.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+        likeButton.querySelector('[data-newspaper-like-count]').textContent = String(result.like_count);
+      } catch (error) { toast(error.message || 'Gazete beğenilemedi.', 'error'); }
+      finally { likeButton.disabled = false; }
+      return;
+    }
+    const shareButton = event.target.closest('[data-newspaper-share]');
+    if (shareButton) {
+      const newspaper = newspapers.find(item => String(item.id) === shareButton.dataset.newspaperShare);
+      if (newspaper) await shareNewspaper(newspaper);
+      return;
+    }
+    const forwardButton = event.target.closest('[data-newspaper-forward]');
+    if (forwardButton) {
+      const newspaper = newspapers.find(item => String(item.id) === forwardButton.dataset.newspaperForward);
+      if (newspaper) await showForwardNewspaperModal(newspaper);
+      return;
+    }
+    const deleteButton = event.target.closest('[data-newspaper-delete]');
+    if (deleteButton) {
+      if (!await CigCigDialogs.confirm('Bu gazete sayı arşivden silinsin mi?')) return;
+      deleteButton.disabled = true;
+      try {
+        await api(`/newspapers/${encodeURIComponent(deleteButton.dataset.newspaperDelete)}`, { method: 'DELETE' });
+        toast('Gazete arşivden kaldırıldı.');
+        renderNewspaperList(app);
+      } catch (error) {
+        toast(error.message || 'Gazete silinemedi.', 'error');
+        deleteButton.disabled = false;
+      }
+    }
+  });
+}
+
+function newspaperCommentHTML(comment, newspaper) {
+  const canDelete = currentUser && (Number(currentUser.id) === Number(comment.user_id) || currentUser.is_admin);
+  return `<article class="newspaper-comment" data-newspaper-comment="${escHtml(comment.id)}">
+    ${avatarImg(comment, 'newspaper-comment-avatar')}
+    <div class="newspaper-comment-main">
+      <div class="newspaper-comment-top"><a href="${profileRoute(comment.username)}" data-link>${userDisplayName(comment)}</a><time>${escHtml(timeAgo(comment.created_at))}</time></div>
+      <p>${renderContent(comment.content)}</p>
+      <div class="newspaper-comment-actions">
+        <button type="button" class="newspaper-comment-like${comment.liked ? ' is-liked' : ''}" data-newspaper-comment-like="${escHtml(comment.id)}"><i class="${comment.liked ? 'fas' : 'far'} fa-heart"></i><span>${Number(comment.like_count) || 0}</span></button>
+        ${canDelete ? `<button type="button" class="newspaper-comment-delete" data-newspaper-comment-delete="${escHtml(comment.id)}" data-newspaper-id="${escHtml(newspaper.id)}">Sil</button>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+function showNewspaperViewer(imageUrl, imageAlt) {
+  const existingViewer = document.querySelector('.newspaper-viewer');
+  existingViewer?.querySelector('.newspaper-viewer-close')?.click();
+  const returnFocus = document.activeElement;
+
+  const viewer = document.createElement('div');
+  viewer.className = 'newspaper-viewer';
+  viewer.setAttribute('role', 'dialog');
+  viewer.setAttribute('aria-modal', 'true');
+  viewer.setAttribute('aria-label', 'Gazete yakınlaştırılmış görünümü');
+  viewer.innerHTML = `
+    <header class="newspaper-viewer-toolbar">
+      <span class="newspaper-viewer-title"><i class="fas fa-newspaper"></i><span>Gazete okuyucu</span></span>
+      <div class="newspaper-viewer-controls" aria-label="Yakınlaştırma kontrolleri">
+        <button type="button" data-viewer-zoom="-1" aria-label="Uzaklaştır"><i class="fas fa-minus"></i></button>
+        <span class="newspaper-viewer-zoom" aria-live="polite">100%</span>
+        <button type="button" data-viewer-zoom="1" aria-label="Yakınlaştır"><i class="fas fa-plus"></i></button>
+        <button type="button" data-viewer-fit aria-label="Sayfayı sığdır"><i class="fas fa-compress"></i></button>
+        <button type="button" class="newspaper-viewer-close" aria-label="Kapat"><i class="fas fa-xmark"></i></button>
+      </div>
+    </header>
+    <div class="newspaper-viewer-stage">
+      <img class="newspaper-viewer-image" src="${escHtml(imageUrl)}" alt="${escHtml(imageAlt)}" draggable="false" />
+      <span class="newspaper-viewer-hint">İki parmakla yakınlaştırın · Büyütülmüş sayfayı sürükleyin</span>
+    </div>`;
+
+  const stage = viewer.querySelector('.newspaper-viewer-stage');
+  const image = viewer.querySelector('.newspaper-viewer-image');
+  const zoomLabel = viewer.querySelector('.newspaper-viewer-zoom');
+  const previousOverflow = document.documentElement.style.overflow;
+  const pointers = new Map();
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let dragStart = null;
+  let pinchStart = null;
+
+  const clampOffset = () => {
+    const maxX = Math.max(0, (image.clientWidth * scale - stage.clientWidth) / 2);
+    const maxY = Math.max(0, (image.clientHeight * scale - stage.clientHeight) / 2);
+    offsetX = Math.max(-maxX, Math.min(maxX, offsetX));
+    offsetY = Math.max(-maxY, Math.min(maxY, offsetY));
+  };
+  const render = () => {
+    clampOffset();
+    image.style.transform = `translate3d(${offsetX}px,${offsetY}px,0) scale(${scale})`;
+    zoomLabel.textContent = `${Math.round(scale * 100)}%`;
+    stage.classList.toggle('is-zoomed', scale > 1);
+  };
+  const setScale = nextScale => {
+    scale = Math.max(1, Math.min(5, nextScale));
+    if (scale === 1) offsetX = offsetY = 0;
+    render();
+  };
+  const getPointerCenter = () => {
+    const points = [...pointers.values()];
+    return points.length > 1
+      ? { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }
+      : points[0];
+  };
+  const getPointerDistance = () => {
+    const points = [...pointers.values()];
+    return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+  };
+  const close = () => {
+    viewer.remove();
+    document.documentElement.style.overflow = previousOverflow;
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('resize', render);
+    returnFocus?.focus();
+  };
+  const onKeyDown = event => {
+    if (event.key === 'Escape') close();
+    else if (event.key === '+' || event.key === '=') setScale(scale + 0.5);
+    else if (event.key === '-') setScale(scale - 0.5);
+    else if (event.key === '0') setScale(1);
+  };
+
+  viewer.querySelector('.newspaper-viewer-close').addEventListener('click', close);
+  viewer.querySelector('[data-viewer-fit]').addEventListener('click', () => setScale(1));
+  viewer.querySelectorAll('[data-viewer-zoom]').forEach(button => {
+    button.addEventListener('click', () => setScale(scale + Number(button.dataset.viewerZoom) * 0.5));
+  });
+  viewer.addEventListener('click', event => {
+    if (event.target === viewer) close();
+  });
+  stage.addEventListener('wheel', event => {
+    event.preventDefault();
+    setScale(scale + (event.deltaY < 0 ? 0.25 : -0.25));
+  }, { passive: false });
+  stage.addEventListener('pointerdown', event => {
+    if (event.target.closest('button')) return;
+    stage.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size === 1) {
+      dragStart = { x: event.clientX - offsetX, y: event.clientY - offsetY };
+      pinchStart = null;
+    } else {
+      const center = getPointerCenter();
+      const stageRect = stage.getBoundingClientRect();
+      pinchStart = {
+        distance: getPointerDistance(),
+        scale,
+        focusX: (center.x - stageRect.left - stage.clientWidth / 2 - offsetX) / scale,
+        focusY: (center.y - stageRect.top - stage.clientHeight / 2 - offsetY) / scale,
+      };
+      dragStart = null;
+    }
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!pointers.has(event.pointerId)) return;
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointers.size > 1 && pinchStart) {
+      const center = getPointerCenter();
+      const stageRect = stage.getBoundingClientRect();
+      scale = Math.max(1, Math.min(5, pinchStart.scale * getPointerDistance() / Math.max(1, pinchStart.distance)));
+      offsetX = center.x - stageRect.left - stage.clientWidth / 2 - pinchStart.focusX * scale;
+      offsetY = center.y - stageRect.top - stage.clientHeight / 2 - pinchStart.focusY * scale;
+      if (scale === 1) offsetX = offsetY = 0;
+      render();
+    } else if (dragStart && scale > 1) {
+      offsetX = event.clientX - dragStart.x;
+      offsetY = event.clientY - dragStart.y;
+      render();
+    }
+  });
+  const finishPointer = event => {
+    pointers.delete(event.pointerId);
+    if (pointers.size === 1) {
+      const remaining = getPointerCenter();
+      dragStart = { x: remaining.x - offsetX, y: remaining.y - offsetY };
+      pinchStart = null;
+    } else if (pointers.size === 0) {
+      dragStart = null;
+      pinchStart = null;
+    }
+  };
+  stage.addEventListener('pointerup', finishPointer);
+  stage.addEventListener('pointercancel', finishPointer);
+  image.addEventListener('load', render, { once: true });
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('resize', render);
+  document.documentElement.style.overflow = 'hidden';
+  document.body.appendChild(viewer);
+  render();
+  viewer.querySelector('.newspaper-viewer-close').focus();
+}
+
+async function renderNewspaperDetail(app, newspaperId) {
+  const safeId = String(newspaperId || '').split(/[?#]/)[0];
+  if (!/^\d+$/.test(safeId)) {
+    app.innerHTML = '<div class="container page"><div class="newspaper-empty"><strong>Gazete bulunamadı</strong><a href="/gazeteler" data-link class="btn btn-outline btn-sm">Gazete arşivine dön</a></div></div>';
+    return;
+  }
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  let newspaper;
+  let comments;
+  try {
+    [newspaper, comments] = await Promise.all([
+      api(`/newspapers/${encodeURIComponent(safeId)}`),
+      api(`/newspapers/${encodeURIComponent(safeId)}/comments`),
+    ]);
+  } catch (error) {
+    app.innerHTML = `<div class="container page"><div class="newspaper-empty newspaper-error"><span class="newspaper-empty-icon"><i class="fas fa-newspaper"></i></span><strong>Gazete açılamadı</strong><span>${escHtml(error.message || 'Bu sayı bulunamadı.')}</span><a href="/gazeteler" data-link class="btn btn-outline btn-sm">Gazete arşivine dön</a></div></div>`;
+    return;
+  }
+  const isOwner = currentUser && Number(currentUser.id) === Number(newspaper.journalist_id);
+  document.title = `${newspaper.newspaper_name} – Gazeteler – ${siteName}`;
+  updatePageMeta(`${newspaper.newspaper_name} – ${formatNewspaperDate(newspaper.newspaper_date)}`, `${newspaper.newspaper_name} gazetesinin ${formatNewspaperDate(newspaper.newspaper_date)} tarihli sayısı.`, newspaper.image_url);
+  app.innerHTML = `
+    <div class="container page newspaper-detail-page">
+      <a href="/gazeteler" data-link class="newspaper-back-link"><i class="fas fa-arrow-left"></i> Tüm gazeteler</a>
+      <article class="newspaper-detail-card">
+        <header class="newspaper-detail-masthead">
+          <div class="newspaper-detail-brand"><span class="newspaper-detail-brand-icon"><i class="fas fa-newspaper"></i></span><span><small>CIGCIG BASIN ARŞİVİ</small><strong>${escHtml(newspaper.newspaper_name)}</strong></span></div>
+          <div class="newspaper-detail-date"><small>YAYIN TARİHİ</small><strong>${escHtml(formatNewspaperDate(newspaper.newspaper_date))}</strong><span>Sayı #${escHtml(newspaper.id)}</span></div>
+        </header>
+        <div class="newspaper-detail-rule"><span></span><i class="fas fa-star"></i><span></span></div>
+        <div class="newspaper-detail-sheet-wrap">
+          <button type="button" class="newspaper-detail-sheet-button" aria-label="Gazeteyi büyüt ve oku">
+            <img class="newspaper-detail-sheet" src="${escHtml(newspaper.image_url)}" alt="${escHtml(newspaper.newspaper_name)} — ${escHtml(formatNewspaperDate(newspaper.newspaper_date))}" />
+            <span class="newspaper-detail-zoom-hint"><i class="fas fa-magnifying-glass-plus"></i> Dokun ve yaklaştır</span>
+          </button>
+        </div>
+        <footer class="newspaper-detail-byline">
+          <a href="${profileRoute(newspaper.username)}" data-link class="newspaper-byline">
+            ${avatarImg(newspaper, 'newspaper-author-avatar')}
+            <span><small>BU SAYIYI YAYIMLAYAN GAZETECİ</small><strong>${userDisplayName(newspaper)}</strong></span>
+          </a>
+          ${isOwner ? `<button type="button" class="newspaper-delete-button" id="newspaper-detail-delete"><i class="fas fa-trash"></i> Sayıyı sil</button>` : ''}
+        </footer>
+        <div class="newspaper-detail-actions">
+          <button type="button" class="newspaper-action-button${newspaper.liked ? ' is-liked' : ''}" id="newspaper-detail-like"><i class="${newspaper.liked ? 'fas' : 'far'} fa-heart"></i><span>${Number(newspaper.like_count) || 0}</span><small>Beğen</small></button>
+          <button type="button" class="newspaper-action-button" id="newspaper-detail-share"><i class="fas fa-share-nodes"></i><span>${Number(newspaper.share_count) || 0}</span><small>Paylaş</small></button>
+          ${currentUser ? `<button type="button" class="newspaper-action-button" id="newspaper-detail-forward"><i class="fas fa-paper-plane"></i><span>İlet</span><small>Mesaj olarak gönder</small></button>` : ''}
+          <a href="#yorumlar" class="newspaper-action-button"><i class="far fa-comment"></i><span>${Number(newspaper.comment_count) || 0}</span><small>Yorumlar</small></a>
+        </div>
+      </article>
+      <section class="newspaper-comments-card" id="yorumlar">
+        <header class="newspaper-comments-heading"><span class="newspaper-comments-icon"><i class="fas fa-comments"></i></span><div><span class="newspaper-eyebrow">OKUR MEKTUPLARI</span><h2>Gazete üzerine konuş</h2></div><span class="newspaper-comments-total">${comments.length}</span></header>
+        ${currentUser ? `<form class="newspaper-comment-form" id="newspaper-comment-form">${avatarImg(currentUser, 'newspaper-comment-avatar')}<textarea id="newspaper-comment-input" maxlength="2000" rows="2" placeholder="Bu sayı hakkında ne düşünüyorsun?"></textarea><button type="submit" class="btn btn-primary" aria-label="Yorum gönder"><i class="fas fa-paper-plane"></i></button></form>` : '<p class="newspaper-comment-login">Yorum yapmak için <a href="/giris" data-link>giriş yapın</a>.</p>'}
+        <div class="newspaper-comments-list" id="newspaper-comments-list">${comments.length ? comments.map(comment => newspaperCommentHTML(comment, newspaper)).join('') : '<div class="newspaper-comments-empty"><i class="far fa-comment-dots"></i><span>Henüz yorum yok. İlk okur mektubunu sen yaz.</span></div>'}</div>
+      </section>
+    </div>`;
+
+  $('.newspaper-detail-sheet-button')?.addEventListener('click', () => {
+    showNewspaperViewer(newspaper.image_url, `${newspaper.newspaper_name} — ${formatNewspaperDate(newspaper.newspaper_date)}`);
+  });
+  $('#newspaper-detail-like')?.addEventListener('click', async event => {
+    if (!currentUser) return navigate('/giris');
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await api(`/newspapers/${encodeURIComponent(safeId)}/like`, { method: 'POST' });
+      button.classList.toggle('is-liked', result.liked);
+      button.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+      button.querySelector('span').textContent = String(result.like_count);
+    } catch (error) { toast(error.message || 'Beğeni kaydedilemedi.', 'error'); }
+    finally { button.disabled = false; }
+  });
+  $('#newspaper-detail-share')?.addEventListener('click', () => shareNewspaper(newspaper));
+  $('#newspaper-detail-forward')?.addEventListener('click', () => showForwardNewspaperModal(newspaper));
+  $('#newspaper-detail-delete')?.addEventListener('click', async event => {
+    if (!await CigCigDialogs.confirm('Bu gazete sayı arşivden silinsin mi?')) return;
+    event.currentTarget.disabled = true;
+    try {
+      await api(`/newspapers/${encodeURIComponent(safeId)}`, { method: 'DELETE' });
+      toast('Gazete arşivden kaldırıldı.');
+      navigate('/gazeteler');
+    } catch (error) { toast(error.message || 'Gazete silinemedi.', 'error'); event.currentTarget.disabled = false; }
+  });
+
+  const commentForm = $('#newspaper-comment-form');
+  commentForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const input = $('#newspaper-comment-input');
+    const content = input.value.trim();
+    if (!content) return;
+    const button = commentForm.querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await api(`/newspapers/${encodeURIComponent(safeId)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+      renderNewspaperDetail(app, safeId);
+    } catch (error) {
+      toast(error.message || 'Yorum gönderilemedi.', 'error');
+      button.disabled = false;
+    }
+  });
+  $('#newspaper-comments-list')?.addEventListener('click', async event => {
+    const likeButton = event.target.closest('[data-newspaper-comment-like]');
+    if (likeButton) {
+      if (!currentUser) return navigate('/giris');
+      likeButton.disabled = true;
+      try {
+        const result = await api(`/newspapers/${encodeURIComponent(safeId)}/comments/${encodeURIComponent(likeButton.dataset.newspaperCommentLike)}/like`, { method: 'POST' });
+        likeButton.classList.toggle('is-liked', result.liked);
+        likeButton.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+        likeButton.querySelector('span').textContent = String(result.like_count);
+      } catch (error) { toast(error.message || 'Yorum beğenilemedi.', 'error'); }
+      finally { likeButton.disabled = false; }
+      return;
+    }
+    const deleteButton = event.target.closest('[data-newspaper-comment-delete]');
+    if (deleteButton) {
+      if (!await CigCigDialogs.confirm('Yorum silinsin mi?')) return;
+      deleteButton.disabled = true;
+      try {
+        await api(`/newspapers/${encodeURIComponent(safeId)}/comments/${encodeURIComponent(deleteButton.dataset.newspaperCommentDelete)}`, { method: 'DELETE' });
+        renderNewspaperDetail(app, safeId);
+      } catch (error) { toast(error.message || 'Yorum silinemedi.', 'error'); deleteButton.disabled = false; }
+    }
+  });
+}
+
+async function shareNewspaper(newspaper) {
+  const url = `${location.origin}/gazete/${encodeURIComponent(newspaper.id)}`;
+  try {
+    if (navigator.share) await navigator.share({ title: newspaper.newspaper_name, text: `${newspaper.newspaper_name} · ${formatNewspaperDate(newspaper.newspaper_date)}`, url });
+    else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast('Gazete bağlantısı kopyalandı.');
+    } else await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Gazete bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' });
+  } catch (error) {
+    if (error.name !== 'AbortError') toast(error.message || 'Gazete paylaşılamadı.', 'error');
+    return;
+  }
+  try {
+    await api(`/newspapers/${encodeURIComponent(newspaper.id)}/share`, { method: 'POST' });
+  } catch (error) {
+    toast(`Gazete paylaşıldı ancak sayaç güncellenemedi: ${error.message || 'Sunucu hatası'}`, 'error');
+  }
+}
+
+function showNewspaperUploadModal() {
+  if (!currentUser) return navigate('/giris');
+  if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) {
+    return toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+  }
+  showModal('Gazeteni yayımla', `
+    <div class="newspaper-publish-choices">
+      <button type="button" class="newspaper-publish-choice" id="newspaper-create-choice">
+        <span class="newspaper-publish-choice-icon"><i class="fas fa-pen-ruler"></i></span>
+        <strong>Sıfırdan gazete oluştur</strong>
+        <small>A4 sayfada manşetini, metinlerini, fotoğraflarını ve gazete markanı tasarla.</small>
+        <span class="newspaper-publish-choice-cta">Tasarım editörünü aç <i class="fas fa-arrow-right"></i></span>
+      </button>
+      <button type="button" class="newspaper-publish-choice" id="newspaper-photo-choice">
+        <span class="newspaper-publish-choice-icon"><i class="fas fa-image"></i></span>
+        <strong>Hazır gazete görseli yükle</strong>
+        <small>Daha önce hazırladığın gazete sayfasını görsel olarak yükleyip yayımla.</small>
+        <span class="newspaper-publish-choice-cta">Görsel seç <i class="fas fa-arrow-right"></i></span>
+      </button>
+    </div>`);
+  $('#newspaper-create-choice')?.addEventListener('click', () => showNewspaperComposer());
+  $('#newspaper-photo-choice')?.addEventListener('click', showNewspaperPhotoUploadModal);
+}
+
+function showNewspaperPhotoUploadModal() {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  showModal('Yeni gazete yayımla', `
+    <form class="newspaper-upload-form" id="newspaper-upload-form">
+      <div class="newspaper-upload-banner"><span><i class="fas fa-feather-pointed"></i></span><div><strong>Yeni bir sayı arşive giriyor</strong><small>Gazete görselini, sayı adını ve basım tarihini ekleyin.</small></div></div>
+      <label class="newspaper-upload-field"><span>Gazete adı</span><input id="newspaper-name-input" name="newspaper_name" maxlength="100" required value="CigCig Gazetesi" autocomplete="off" /></label>
+      <label class="newspaper-upload-field"><span>Gazete tarihi</span><input id="newspaper-date-input" name="newspaper_date" type="date" value="${today}" required /></label>
+      <label class="newspaper-upload-file" for="newspaper-image-input"><span class="newspaper-upload-file-icon"><i class="fas fa-cloud-arrow-up"></i></span><strong>Gazete görselini seç</strong><small>Dikey sayfa önerilir · JPG, PNG veya WebP · En fazla 25 MB</small><input id="newspaper-image-input" name="image" type="file" accept="image/*" required /></label>
+      <img class="newspaper-upload-preview hidden" id="newspaper-image-preview" alt="Gazete önizlemesi" />
+      <div id="newspaper-upload-error" class="form-error" role="alert"></div>
+      <button type="submit" class="btn btn-primary newspaper-upload-submit" id="newspaper-upload-submit"><i class="fas fa-paper-plane"></i> Gazeteyi yayımla</button>
+    </form>`);
+  const imageInput = $('#newspaper-image-input');
+  imageInput?.addEventListener('change', () => {
+    const file = imageInput.files?.[0];
+    const preview = $('#newspaper-image-preview');
+    if (!file || !preview) { preview?.classList.add('hidden'); return; }
+    if (!file.type.startsWith('image/')) {
+      $('#newspaper-upload-error').textContent = 'Lütfen bir gazete görseli seçin.';
+      imageInput.value = '';
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) {
+      $('#newspaper-upload-error').textContent = 'Görsel en fazla 25 MB olabilir.';
+      imageInput.value = '';
+      return;
+    }
+    $('#newspaper-upload-error').textContent = '';
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove('hidden');
+  });
+  $('#newspaper-upload-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const file = imageInput?.files?.[0];
+    if (!file) { $('#newspaper-upload-error').textContent = 'Gazete görseli seçin.'; return; }
+    const button = $('#newspaper-upload-submit');
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Yükleniyor…';
+    try {
+      const form = new FormData();
+      form.append('newspaper_name', $('#newspaper-name-input').value.trim());
+      form.append('newspaper_date', $('#newspaper-date-input').value);
+      form.append('image', file);
+      await apiForm('/newspapers', form);
+      URL.revokeObjectURL($('#newspaper-image-preview')?.src || '');
+      hideModal();
+      navigate('/gazeteler');
+      toast('Gazeten arşivde yayımlandı.');
+    } catch (error) {
+      $('#newspaper-upload-error').textContent = error.message || 'Gazete yayımlanamadı.';
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-paper-plane"></i> Gazeteyi yayımla';
+    }
+  });
+}
+
+function newspaperReadImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Görsel okunamadı.'));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error('Bu görsel açılamadı.'));
+      image.onload = () => {
+        const maxSide = 1800;
+        const ratio = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * ratio));
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * ratio));
+        const context = canvas.getContext('2d');
+        if (!context) return reject(new Error('Görsel hazırlanamadı.'));
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const src = canvas.toDataURL('image/jpeg', .86);
+        const compressed = new Image();
+        compressed.onerror = () => reject(new Error('Sıkıştırılmış görsel açılamadı.'));
+        compressed.onload = () => resolve({ src, image: compressed });
+        compressed.src = src;
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function showNewspaperComposerLegacy() {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const editorState = {
+    items: [],
+    selectedId: null,
+    mastheadImages: { left: null, right: null },
+    masthead: { brand: 'MÜDAFAA', subtitle: 'GAZETESİ', leftQuote: '“Hakikatin sesi, milletin gazetesi...”', rightQuote: '“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”', author: 'M. Kemal Atatürk', height: 42, brandSize: 40 },
+  };
+  showModal('A4 gazete tasarım editörü', `
+    <form class="newspaper-composer" id="newspaper-composer">
+      <div class="newspaper-composer-topbar">
+        <label><span>Sayı / gazete adı</span><input id="newspaper-name-input" maxlength="100" required placeholder="Örn. 17 Ekim Sabah Baskısı" /></label>
+        <label><span>Gazete tarihi</span><input id="newspaper-date-input" type="date" value="${today}" required /></label>
+        <div class="newspaper-composer-hint"><i class="fas fa-ruler-combined"></i> A4 · 210 × 297 mm</div>
+      </div>
+      <section class="newspaper-brand-panel">
+        <div class="newspaper-brand-heading"><span><i class="fas fa-stamp"></i></span><div><strong>Gazete markası</strong><small>Her sayının üstünde basılacak masthead</small></div></div>
+        <div class="newspaper-brand-fields">
+          <label><span>Marka adı</span><input data-masthead="brand" value="MÜDAFAA" maxlength="32" /></label>
+          <label><span>Alt başlık</span><input data-masthead="subtitle" value="GAZETESİ" maxlength="45" /></label>
+          <label><span>Sol alıntı</span><input data-masthead="leftQuote" value="“Hakikatin sesi, milletin gazetesi...”" maxlength="90" /></label>
+          <label><span>Sağ alıntı</span><input data-masthead="rightQuote" value="“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”" maxlength="120" /></label>
+          <label><span>Sağ alıntı imzası</span><input data-masthead="author" value="M. Kemal Atatürk" maxlength="45" /></label>
+          <label><span>Marka yazı boyutu · pt</span><input data-masthead="brandSize" type="number" min="18" max="90" value="40" /></label>
+          <label><span>Masthead yüksekliği · mm</span><input data-masthead="height" type="number" min="28" max="70" value="42" /></label>
+          <label class="newspaper-brand-image-field"><span>Sol görsel / amblem</span><input type="file" accept="image/*" data-masthead-image="left" /></label>
+          <label class="newspaper-brand-image-field"><span>Sağ görsel / bayrak</span><input type="file" accept="image/*" data-masthead-image="right" /></label>
+        </div>
+      </section>
+      <div class="newspaper-editor-workspace">
+        <aside class="newspaper-editor-tools">
+          <div class="newspaper-editor-tools-title"><i class="fas fa-layer-group"></i> Sayfa öğeleri</div>
+          <div class="newspaper-editor-add-tools">
+            <button type="button" data-add-newspaper-item="heading"><i class="fas fa-heading"></i><span>Başlık ekle</span></button>
+            <button type="button" data-add-newspaper-item="text"><i class="fas fa-align-left"></i><span>Metin ekle</span></button>
+            <button type="button" data-add-newspaper-item="image"><i class="fas fa-image"></i><span>Fotoğraf ekle</span></button>
+            <button type="button" data-add-newspaper-item="line"><i class="fas fa-minus"></i><span>Çizgi çek</span></button>
+          </div>
+          <input id="newspaper-item-image-input" type="file" accept="image/*" hidden />
+          <div class="newspaper-editor-selection" id="newspaper-editor-selection"><div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div></div>
+          <p class="newspaper-editor-tip"><i class="fas fa-hand-pointer"></i> Öğeleri sayfada sürükleyerek taşı. Köşesinden çekerek yeniden boyutlandır.</p>
+          <div id="newspaper-compose-error" class="form-error" role="alert"></div>
+          <button type="submit" class="btn btn-primary newspaper-composer-publish" id="newspaper-compose-submit"><i class="fas fa-paper-plane"></i> Gazeteyi yayımla</button>
+        </aside>
+        <div class="newspaper-editor-stage-wrap">
+          <div class="newspaper-editor-scale-note"><span>ÖNİZLEME</span><span>Sayfada sürükleyerek düzenle</span></div>
+          <div class="newspaper-editor-sheet" id="newspaper-editor-sheet">
+            <header class="newspaper-editor-masthead" id="newspaper-editor-masthead">
+              <div class="newspaper-masthead-side newspaper-masthead-left">
+                <img class="newspaper-masthead-art hidden" data-masthead-art="left" alt="" />
+                <i class="newspaper-masthead-default-left fas fa-landmark" data-masthead-default="left" aria-hidden="true"></i>
+                <p data-masthead-preview="leftQuote"></p>
+              </div>
+              <div class="newspaper-masthead-center"><strong data-masthead-preview="brand"></strong><span data-masthead-preview="subtitle"></span></div>
+              <div class="newspaper-masthead-side newspaper-masthead-right">
+                <p data-masthead-preview="rightQuote"></p>
+                <img class="newspaper-masthead-art hidden" data-masthead-art="right" alt="" />
+                <span class="newspaper-masthead-default-flag" data-masthead-default="right" aria-hidden="true"><i class="fas fa-star"></i></span>
+                <small data-masthead-preview="author"></small>
+              </div>
+            </header>
+            <div class="newspaper-editor-issue-strip" id="newspaper-editor-issue-strip"><span data-newspaper-issue-date></span><strong data-newspaper-issue-name></strong></div>
+            <div class="newspaper-editor-page-rule"></div>
+            <div class="newspaper-editor-items" id="newspaper-editor-items"></div>
+          </div>
+        </div>
+      </div>
+    </form>`, 'newspaper-editor-modal');
+
+  const sheet = $('#newspaper-editor-sheet');
+  const itemsLayer = $('#newspaper-editor-items');
+  const selectionPanel = $('#newspaper-editor-selection');
+  let nextItemId = 1;
+
+  const drawMasthead = () => {
+    editorState.masthead.height = Math.min(70, Math.max(28, Number(editorState.masthead.height) || 42));
+    editorState.masthead.brandSize = Math.min(90, Math.max(18, Number(editorState.masthead.brandSize) || 40));
+    Object.entries(editorState.masthead).forEach(([key, value]) => {
+      const preview = document.querySelector(`[data-masthead-preview="${key}"]`);
+      if (preview) preview.textContent = value;
+    });
+    const brand = $('[data-masthead-preview="brand"]');
+    const mastheadHeightPx = editorState.masthead.height / 210 * sheet.clientWidth;
+    if (brand) brand.style.fontSize = `${Math.min(editorState.masthead.brandSize * 96 / 72 * sheet.clientWidth / 794, mastheadHeightPx * .39)}px`;
+    const masthead = $('#newspaper-editor-masthead');
+    if (masthead) masthead.style.height = `${editorState.masthead.height / 297 * 100}%`;
+    const strip = $('#newspaper-editor-issue-strip');
+    if (strip) strip.style.top = `${(editorState.masthead.height + 2.3) / 297 * 100}%`;
+    const rule = $('.newspaper-editor-page-rule');
+    if (rule) rule.style.top = `${(editorState.masthead.height + 1.7) / 297 * 100}%`;
+    const issueName = $('#newspaper-name-input')?.value.trim() || 'GAZETE SAYISI';
+    const issueDate = formatNewspaperDate($('#newspaper-date-input')?.value || '', { day: '2-digit', month: 'long', year: 'numeric' });
+    $('[data-newspaper-issue-name]')?.replaceChildren(document.createTextNode(issueName));
+    $('[data-newspaper-issue-date]')?.replaceChildren(document.createTextNode(issueDate));
+    editorState.items.forEach(item => {
+      item.y = Math.max(editorState.masthead.height + 7, item.y);
+      item.y = Math.min(297 - item.h, item.y);
+    });
+    ['left', 'right'].forEach(side => {
+      const image = document.querySelector(`[data-masthead-art="${side}"]`);
+      const fallback = document.querySelector(`[data-masthead-default="${side}"]`);
+      const asset = editorState.mastheadImages[side];
+      if (image) {
+        image.classList.toggle('hidden', !asset);
+        image.src = asset?.src || '';
+      }
+      fallback?.classList.toggle('hidden', !!asset);
+    });
+  };
+  const renderItems = () => {
+    itemsLayer.innerHTML = editorState.items.map(item => {
+      const selected = item.id === editorState.selectedId;
+      const content = item.type === 'image'
+        ? `<img src="${item.asset.src}" alt="" draggable="false" />`
+        : item.type === 'line' ? '<span class="newspaper-editor-line"></span>' : `<span>${escHtml(item.content)}</span>`;
+      const fontSize = item.size * 96 / 72 * sheet.clientWidth / 794;
+      return `<div class="newspaper-editor-item newspaper-editor-item-${item.type}${selected ? ' is-selected' : ''}" data-newspaper-item="${item.id}" style="left:${item.x / 210 * 100}%;top:${item.y / 297 * 100}%;width:${item.w / 210 * 100}%;height:${item.h / 297 * 100}%;color:${escHtml(item.color)};font-family:${escHtml(item.font)};font-size:${fontSize}px">
+        ${content}${selected ? '<button type="button" class="newspaper-editor-resize" aria-label="Öğeyi yeniden boyutlandır"></button>' : ''}
+      </div>`;
+    }).join('');
+    renderSelection();
+  };
+  const renderSelection = () => {
+    const item = editorState.items.find(candidate => candidate.id === editorState.selectedId);
+    if (!item) {
+      selectionPanel.innerHTML = '<div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div>';
+      return;
+    }
+    selectionPanel.innerHTML = `
+      <div class="newspaper-editor-inspector-heading"><strong>${item.type === 'heading' ? 'Başlık' : item.type === 'text' ? 'Metin' : item.type === 'image' ? 'Fotoğraf' : 'Çizgi'} özellikleri</strong><button type="button" id="newspaper-item-delete" aria-label="Öğeyi sil"><i class="fas fa-trash"></i></button></div>
+      ${item.type === 'heading' || item.type === 'text' ? `<label><span>İçerik</span><textarea data-item-property="content" rows="3">${escHtml(item.content)}</textarea></label>
+        <label><span>Yazı karakteri</span><select data-item-property="font"><option value="Georgia" ${item.font === 'Georgia' ? 'selected' : ''}>Georgia — gazete serif</option><option value="'Times New Roman'" ${item.font === "'Times New Roman'" ? 'selected' : ''}>Times New Roman</option><option value="Arial" ${item.font === 'Arial' ? 'selected' : ''}>Arial</option><option value="'Courier New'" ${item.font === "'Courier New'" ? 'selected' : ''}>Courier</option></select></label>
+        <label><span>Yazı boyutu · pt</span><input data-item-property="size" type="number" min="8" max="96" value="${item.size}" /></label>
+        <label><span>Yazı rengi</span><input data-item-property="color" type="color" value="${item.color}" /></label>` : ''}
+      <div class="newspaper-editor-dimensions"><label><span>Genişlik · mm</span><input data-item-property="w" type="number" min="8" max="200" step="1" value="${Math.round(item.w)}" /></label><label><span>Yükseklik · mm</span><input data-item-property="h" type="number" min="4" max="280" step="1" value="${Math.round(item.h)}" /></label></div>`;
+    selectionPanel.querySelectorAll('[data-item-property]').forEach(input => {
+      const update = () => {
+        const keepFocus = document.activeElement === input;
+        const selectionStart = input.selectionStart;
+        const selectionEnd = input.selectionEnd;
+        const property = input.dataset.itemProperty;
+        if (property === 'content' || property === 'font' || property === 'color') item[property] = input.value;
+        else if (property === 'size') item.size = Math.min(96, Math.max(8, Number(input.value) || 8));
+        else if (property === 'w') item.w = Math.min(210 - item.x, Math.max(8, Number(input.value) || 8));
+        else if (property === 'h') item.h = Math.min(297 - item.y, Math.max(4, Number(input.value) || 4));
+        renderItems();
+        const refreshed = selectionPanel.querySelector(`[data-item-property="${property}"]`);
+        if (refreshed && keepFocus) {
+          refreshed.focus();
+          if (typeof selectionStart === 'number' && typeof selectionEnd === 'number') refreshed.setSelectionRange(selectionStart, selectionEnd);
+        }
+      };
+      input.addEventListener(input.type === 'color' || input.tagName === 'SELECT' ? 'change' : 'input', update);
+    });
+    $('#newspaper-item-delete')?.addEventListener('click', () => {
+      editorState.items = editorState.items.filter(candidate => candidate.id !== item.id);
+      editorState.selectedId = null;
+      renderItems();
+    });
+  };
+  const addItem = (type, asset = null) => {
+    const item = {
+      id: nextItemId++, type, x: 14, y: 58 + editorState.items.length * 27,
+      w: type === 'line' ? 180 : type === 'image' ? 82 : 145,
+      h: type === 'heading' ? 18 : type === 'text' ? 34 : type === 'image' ? 65 : 1,
+      content: type === 'heading' ? 'HABER BAŞLIĞI' : type === 'text' ? 'Haber metnini buraya yazın.' : '',
+      font: 'Georgia', size: type === 'heading' ? 24 : 12, color: '#1f1d19', asset,
+    };
+    item.y = Math.min(item.y, 297 - item.h - 4);
+    editorState.items.push(item);
+    editorState.selectedId = item.id;
+    renderItems();
+    selectionPanel.querySelector('[data-item-property="content"]')?.focus();
+  };
+  const getPosition = event => {
+    const bounds = sheet.getBoundingClientRect();
+    return { x: (event.clientX - bounds.left) / bounds.width * 210, y: (event.clientY - bounds.top) / bounds.width * 210 };
+  };
+  const publish = async event => {
+    event.preventDefault();
+    const button = $('#newspaper-compose-submit');
+    const error = $('#newspaper-compose-error');
+    if (!editorState.items.length) { error.textContent = 'Gazetene en az bir başlık, metin, fotoğraf veya çizgi ekle.'; return; }
+    const name = $('#newspaper-name-input').value.trim();
+    const date = $('#newspaper-date-input').value;
+    if (!name || !date) { error.textContent = 'Gazete adı ve tarihi gerekli.'; return; }
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> A4 sayfa hazırlanıyor…';
+    error.textContent = '';
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1240;
+      canvas.height = 1754;
+      const context = canvas.getContext('2d');
+      const scale = canvas.width / 210;
+      context.fillStyle = '#faf8f0';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = 'rgba(105,88,60,.025)';
+      for (let y = 0; y < canvas.height; y += 5) context.fillRect(0, y, canvas.width, 1);
+      const mm = value => value * scale;
+      const mastheadHeight = mm(Number(editorState.masthead.height));
+      const padding = mm(5);
+      const sideWidth = canvas.width * .25;
+      const drawImageContain = (image, x, y, width, height) => {
+        if (!image?.naturalWidth) return;
+        const imageScale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+        const drawWidth = image.naturalWidth * imageScale;
+        const drawHeight = image.naturalHeight * imageScale;
+        context.drawImage(image, x + (width - drawWidth) / 2, y + (height - drawHeight) / 2, drawWidth, drawHeight);
+      };
+      const wrapText = (text, maxWidth) => {
+        const lines = [];
+        String(text || '').split('\n').forEach(paragraph => {
+          let line = '';
+          paragraph.split(/\s+/).forEach(word => {
+            const next = line ? `${line} ${word}` : word;
+            if (line && context.measureText(next).width > maxWidth) { lines.push(line); line = word; }
+            else line = next;
+          });
+          lines.push(line);
+        });
+        return lines;
+      };
+      const drawSideText = (text, x, y, maxWidth, font, align = 'left', color = '#24221f') => {
+        context.font = font;
+        context.fillStyle = color;
+        context.textAlign = align;
+        const lines = wrapText(text, maxWidth);
+        const lineHeight = parseFloat(font.match(/(\d+(?:\.\d+)?)px/)?.[1] || '12') * 1.12;
+        lines.forEach((line, index) => context.fillText(line, x, y + index * lineHeight));
+      };
+      context.strokeStyle = '#24221f';
+      context.lineWidth = Math.max(1, mm(.22));
+      context.strokeRect(padding, padding, canvas.width - padding * 2, mastheadHeight - padding);
+      const leftArt = { x: padding * 2, y: padding * 1.5, width: sideWidth * .45, height: mastheadHeight - padding * 2.5 };
+      const rightArt = { x: canvas.width - sideWidth * .45 - padding * 2, y: padding * 1.5, width: sideWidth * .45, height: mastheadHeight - padding * 2.5 };
+      if (editorState.mastheadImages.left) drawImageContain(editorState.mastheadImages.left.image, leftArt.x, leftArt.y, leftArt.width, leftArt.height);
+      else {
+        context.fillStyle = '#282721';
+        context.fillRect(leftArt.x + leftArt.width * .18, leftArt.y + leftArt.height * .78, leftArt.width * .68, leftArt.height * .1);
+        context.beginPath();
+        context.moveTo(leftArt.x + leftArt.width * .22, leftArt.y + leftArt.height * .78);
+        context.lineTo(leftArt.x + leftArt.width * .5, leftArt.y + leftArt.height * .17);
+        context.lineTo(leftArt.x + leftArt.width * .8, leftArt.y + leftArt.height * .78);
+        context.closePath();
+        context.fill();
+        context.fillRect(leftArt.x + leftArt.width * .44, leftArt.y + leftArt.height * .28, leftArt.width * .12, leftArt.height * .5);
+      }
+      if (editorState.mastheadImages.right) drawImageContain(editorState.mastheadImages.right.image, rightArt.x, rightArt.y, rightArt.width, rightArt.height);
+      else {
+        const flagWidth = rightArt.width * .78;
+        const flagHeight = Math.min(rightArt.height * .56, flagWidth * .68);
+        const flagX = rightArt.x + (rightArt.width - flagWidth) / 2;
+        const flagY = rightArt.y + (rightArt.height - flagHeight) / 2;
+        const radius = flagHeight * .32;
+        context.fillStyle = '#c93435';
+        context.fillRect(flagX, flagY, flagWidth, flagHeight);
+        context.fillStyle = '#fff';
+        context.beginPath();
+        context.arc(flagX + flagWidth * .39, flagY + flagHeight / 2, radius, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = '#c93435';
+        context.beginPath();
+        context.arc(flagX + flagWidth * .45, flagY + flagHeight / 2, radius * .78, 0, Math.PI * 2);
+        context.fill();
+        context.fillStyle = '#fff';
+        context.font = `${radius * .78}px Arial`;
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillText('★', flagX + flagWidth * .58, flagY + flagHeight / 2);
+      }
+      const centerX = canvas.width / 2;
+      const centerWidth = canvas.width - sideWidth * 2;
+      const brandSize = Math.min(mm(Number(editorState.masthead.brandSize) * 25.4 / 72), mastheadHeight * .39);
+      context.textAlign = 'center';
+      context.fillStyle = '#111111';
+      context.font = `900 ${brandSize}px Georgia, "Times New Roman", serif`;
+      context.fillText(editorState.masthead.brand, centerX, mastheadHeight * .61, centerWidth - padding * 2);
+      context.font = `700 ${mm(7)}px Georgia, "Times New Roman", serif`;
+      context.letterSpacing = `${mm(2)}px`;
+      context.fillText(editorState.masthead.subtitle, centerX, mastheadHeight * .84, centerWidth - padding * 2);
+      context.letterSpacing = '0px';
+      const quoteFont = `italic ${mm(3.3)}px Georgia, "Times New Roman", serif`;
+      drawSideText(editorState.masthead.leftQuote, padding * 2 + sideWidth * .48, mastheadHeight * .4, sideWidth * .42 - padding, quoteFont);
+      drawSideText(editorState.masthead.rightQuote, canvas.width - sideWidth * .48 - padding * 2, mastheadHeight * .38, sideWidth * .42 - padding, quoteFont, 'right');
+      drawSideText(editorState.masthead.author, canvas.width - sideWidth * .48 - padding * 2, mastheadHeight * .79, sideWidth * .42 - padding, `italic ${mm(2.8)}px Georgia, "Times New Roman", serif`, 'right');
+      context.beginPath();
+      context.moveTo(padding, mastheadHeight);
+      context.lineTo(canvas.width - padding, mastheadHeight);
+      context.lineWidth = mm(.4);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(padding, mastheadHeight + mm(1.2));
+      context.lineTo(canvas.width - padding, mastheadHeight + mm(1.2));
+      context.lineWidth = mm(.15);
+      context.stroke();
+      context.textBaseline = 'middle';
+      context.textAlign = 'left';
+      context.fillStyle = '#39352f';
+      context.font = `700 ${mm(2.5)}px Georgia, "Times New Roman", serif`;
+      context.fillText(formatNewspaperDate(date, { day: '2-digit', month: 'long', year: 'numeric' }), padding * 1.5, mastheadHeight + mm(4.2));
+      context.textAlign = 'right';
+      context.fillText(name, canvas.width - padding * 1.5, mastheadHeight + mm(4.2), canvas.width * .65);
+
+      for (const item of editorState.items) {
+        const x = mm(item.x), y = mm(item.y), width = mm(item.w), height = mm(item.h);
+        context.save();
+        context.fillStyle = item.color;
+        if (item.type === 'line') {
+          context.fillRect(x, y + Math.max(mm(.2), height / 2), width, Math.max(mm(.25), height));
+        } else if (item.type === 'image') {
+          drawImageContain(item.asset.image, x, y, width, height);
+        } else {
+          const fontSize = item.size * 96 / 72 * scale;
+          context.font = `${item.type === 'heading' ? '700' : '400'} ${fontSize}px ${item.font}`;
+          context.textAlign = 'left';
+          context.textBaseline = 'top';
+          const lineHeight = fontSize * (item.type === 'heading' ? 1.12 : 1.35);
+          context.beginPath();
+          context.rect(x, y, width, height);
+          context.clip();
+          wrapText(item.content, width).forEach((line, index) => context.fillText(line, x, y + index * lineHeight, width));
+        }
+        context.restore();
+      }
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
+      if (!blob) throw new Error('Gazete görseli oluşturulamadı.');
+      if (blob.size > 25 * 1024 * 1024) throw new Error('Oluşturulan gazete 25 MB sınırını aştı.');
+      const form = new FormData();
+      form.append('newspaper_name', name);
+      form.append('newspaper_date', date);
+      form.append('image', new File([blob], 'a4-gazete.jpg', { type: 'image/jpeg' }));
+      await apiForm('/newspapers', form);
+      hideModal();
+      navigate('/gazeteler');
+      toast('A4 gazeten arşivde yayımlandı.');
+    } catch (publishError) {
+      error.textContent = publishError.message || 'Gazete yayımlanamadı.';
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-paper-plane"></i> Gazeteyi yayımla';
+    }
+  };
+
+  document.querySelectorAll('[data-masthead]').forEach(input => {
+    const update = () => {
+      const key = input.dataset.masthead;
+      editorState.masthead[key] = input.type === 'number' ? Number(input.value) : input.value;
+      drawMasthead();
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+  });
+  ['#newspaper-name-input', '#newspaper-date-input'].forEach(selector => {
+    $(selector)?.addEventListener('input', drawMasthead);
+    $(selector)?.addEventListener('change', drawMasthead);
+  });
+  document.querySelectorAll('[data-masthead-image]').forEach(input => {
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
+        $('#newspaper-compose-error').textContent = 'Masthead görseli en fazla 10 MB olmalıdır.';
+        input.value = '';
+        return;
+      }
+      try {
+        editorState.mastheadImages[input.dataset.mastheadImage] = await newspaperReadImage(file);
+        drawMasthead();
+      } catch (error) { $('#newspaper-compose-error').textContent = error.message; }
+    });
+  });
+  document.querySelectorAll('[data-add-newspaper-item]').forEach(button => button.addEventListener('click', () => {
+    const type = button.dataset.addNewspaperItem;
+    if (type === 'image') { $('#newspaper-item-image-input').click(); return; }
+    addItem(type);
+  }));
+  $('#newspaper-item-image-input')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
+      $('#newspaper-compose-error').textContent = 'Sayfa görseli en fazla 10 MB olmalıdır.';
+      return;
+    }
+    try {
+      $('#newspaper-compose-error').textContent = '';
+      addItem('image', await newspaperReadImage(file));
+    } catch (error) { $('#newspaper-compose-error').textContent = error.message; }
+  });
+  itemsLayer.addEventListener('pointerdown', event => {
+    const element = event.target.closest('[data-newspaper-item]');
+    if (!element) return;
+    const item = editorState.items.find(candidate => candidate.id === Number(element.dataset.newspaperItem));
+    if (!item) return;
+    editorState.selectedId = item.id;
+    renderItems();
+    event.preventDefault();
+    const selected = itemsLayer.querySelector(`[data-newspaper-item="${item.id}"]`);
+    const resizing = event.target.closest('.newspaper-editor-resize');
+    const start = getPosition(event);
+    const origin = { x: item.x, y: item.y, w: item.w, h: item.h };
+    selected.setPointerCapture(event.pointerId);
+    const move = moveEvent => {
+      const position = getPosition(moveEvent);
+      if (resizing) {
+        item.w = Math.min(210 - origin.x, Math.max(8, origin.w + position.x - start.x));
+        item.h = Math.min(297 - origin.y, Math.max(4, origin.h + position.y - start.y));
+      } else {
+        item.x = Math.max(0, Math.min(210 - item.w, origin.x + position.x - start.x));
+        item.y = Math.max(editorState.masthead.height + 3, Math.min(297 - item.h, origin.y + position.y - start.y));
+      }
+      const updated = itemsLayer.querySelector(`[data-newspaper-item="${item.id}"]`);
+      if (updated) {
+        updated.style.left = `${item.x / 210 * 100}%`;
+        updated.style.top = `${item.y / 297 * 100}%`;
+        updated.style.width = `${item.w / 210 * 100}%`;
+        updated.style.height = `${item.h / 297 * 100}%`;
+      }
+    };
+    const finish = () => {
+      selected.removeEventListener('pointermove', move);
+      selected.removeEventListener('pointerup', finish);
+      selected.removeEventListener('pointercancel', finish);
+      renderItems();
+    };
+    selected.addEventListener('pointermove', move);
+    selected.addEventListener('pointerup', finish);
+    selected.addEventListener('pointercancel', finish);
+  });
+  $('#newspaper-composer')?.addEventListener('submit', publish);
+  const mastheadResizeObserver = new ResizeObserver(() => {
+    if (!sheet.isConnected) mastheadResizeObserver.disconnect();
+    else drawMasthead();
+  });
+  mastheadResizeObserver.observe(sheet);
+  drawMasthead();
+  renderItems();
+}
+
+function openNewspaperDraftDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('Bu tarayıcı gazete taslaklarını saklayamıyor.'));
+    const request = indexedDB.open('cigcig-newspaper-drafts', 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('owners', { keyPath: 'owner' });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(new Error(`Gazete taslak deposu açılamadı: ${request.error?.message || 'bilinmeyen hata'}`));
+  });
+}
+
+async function getNewspaperDrafts() {
+  const db = await openNewspaperDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('owners', 'readonly');
+    const request = transaction.objectStore('owners').get(String(currentUser?.id || 'unknown'));
+    request.onsuccess = () => resolve(Array.isArray(request.result?.drafts) ? request.result.drafts : []);
+    request.onerror = () => reject(new Error(`Gazete taslakları okunamadı: ${request.error?.message || 'bilinmeyen hata'}`));
+    transaction.oncomplete = () => db.close();
+    transaction.onerror = () => { db.close(); reject(new Error('Gazete taslakları okunamadı.')); };
+  });
+}
+
+async function setNewspaperDrafts(drafts) {
+  const db = await openNewspaperDraftDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('owners', 'readwrite');
+    transaction.objectStore('owners').put({ owner: String(currentUser?.id || 'unknown'), drafts });
+    transaction.oncomplete = () => { db.close(); resolve(); };
+    transaction.onerror = () => { db.close(); reject(new Error(`Taslak cihazda saklanamadı: ${transaction.error?.message || 'bilinmeyen hata'}`)); };
+    transaction.onabort = () => { db.close(); reject(new Error('Taslak kaydı iptal edildi.')); };
+  });
+}
+
+function loadNewspaperImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => resolve({ src, image });
+    image.onerror = () => reject(new Error('Gazete görseli yüklenemedi veya dış kaynaktan kullanımına izin verilmiyor.'));
+    image.src = src;
+  });
+}
+
+async function showNewspaperComposer(draftId = null) {
+  let drafts;
+  try { drafts = await getNewspaperDrafts(); }
+  catch (error) {
+    showModal('Gazete taslakları', `<div class="form-error">${escHtml(error.message)}</div>`);
+    return;
+  }
+  if (!draftId && drafts.length) {
+    showModal('Gazete taslakları', `
+      <div class="newspaper-draft-intro"><i class="fas fa-cloud-arrow-down"></i><span>Kaydedilmiş taslağına devam et veya yeni bir gazete oluştur.</span></div>
+      <div class="newspaper-draft-list">${drafts.sort((a, b) => b.updatedAt - a.updatedAt).map(draft => `
+        <div class="newspaper-draft-card">
+          <button type="button" class="newspaper-draft-resume" data-draft-id="${escHtml(draft.id)}"><i class="fas fa-file-pen"></i><span><strong>${escHtml(draft.name || 'Adsız gazete')}</strong><small>${escHtml(draft.date || '')} · ${new Date(draft.updatedAt).toLocaleString('tr-TR')}</small></span><i class="fas fa-arrow-right"></i></button>
+          <button type="button" class="newspaper-draft-delete" data-delete-draft-id="${escHtml(draft.id)}" aria-label="Taslağı sil"><i class="fas fa-trash"></i></button>
+        </div>`).join('')}</div>
+      <button type="button" class="btn btn-primary" id="newspaper-new-from-drafts"><i class="fas fa-plus"></i> Yeni gazete oluştur</button>`);
+    $$('.newspaper-draft-resume').forEach(button => button.addEventListener('click', () => showNewspaperComposer(button.dataset.draftId)));
+    $$('.newspaper-draft-delete').forEach(button => button.addEventListener('click', async () => {
+      try {
+        await setNewspaperDrafts((await getNewspaperDrafts()).filter(draft => draft.id !== button.dataset.deleteDraftId));
+        button.closest('.newspaper-draft-card').remove();
+        if (!(await getNewspaperDrafts()).length) showNewspaperComposer('new');
+      } catch (error) { toast(error.message); }
+    }));
+    $('#newspaper-new-from-drafts')?.addEventListener('click', () => showNewspaperComposer('new'));
+    return;
+  }
+  let settings;
+  let issueNumber;
+  try {
+    [settings, issueNumber] = await Promise.all([api('/settings/public'), api('/newspapers/next-issue-number')]);
+  } catch (error) {
+    showModal('Gazete editörü açılamadı', `<div class="form-error">${escHtml(error.message || 'Gazete ayarları yüklenemedi.')}</div>`);
+    return;
+  }
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const state = {
+    items: [], selectedId: null, mastheadImages: { left: null },
+    masthead: { brand: 'CigCig', subtitle: 'GAZETESİ', height: 42, brandSize: 40 }
+  };
+  const draft = draftId && draftId !== 'new' ? drafts.find(item => item.id === draftId) : null;
+  if (draft) {
+    try {
+      const saved = draft.state || {};
+      state.items = await Promise.all((saved.items || []).map(async item => ({
+        ...item, asset: item.asset?.src ? await loadNewspaperImage(item.asset.src) : null
+      })));
+      state.masthead = { ...state.masthead, ...saved.masthead };
+      if (saved.mastheadImages?.left?.src) state.mastheadImages.left = await loadNewspaperImage(saved.mastheadImages.left.src);
+    } catch (error) {
+      showModal('Taslak açılamadı', `<div class="form-error">${escHtml(error.message)}</div>`);
+      return;
+    }
+  }
+  let flag = null;
+  let background = null;
+  try {
+    if (settings.newspaper_flag_url) flag = await loadNewspaperImage(settings.newspaper_flag_url);
+    if (settings.newspaper_background_url) background = await loadNewspaperImage(settings.newspaper_background_url);
+  } catch (error) {
+    showModal('Gazete görseli açılamadı', `<div class="form-error">${escHtml(error.message)}</div>`);
+    return;
+  }
+  const leftQuote = settings.newspaper_left_quote || '“Hakikatin sesi, milletin gazetesi...”';
+  const rightQuote = settings.newspaper_right_quote || '“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”';
+  const author = settings.newspaper_author || 'M. Kemal Atatürk';
+  showModal('A4 gazete tasarım editörü', `
+    <form class="newspaper-composer" id="newspaper-composer">
+      <div class="newspaper-composer-topbar">
+        <label><span>Sayı / gazete adı</span><input id="newspaper-name-input" maxlength="100" required placeholder="CigCig Gazetesi" /></label>
+        <label><span>Gazete tarihi</span><input id="newspaper-date-input" type="date" value="${today}" required /></label>
+        <div class="newspaper-composer-hint"><i class="fas fa-ruler-combined"></i> A4 · 210 × 297 mm</div>
+      </div>
+      <section class="newspaper-brand-panel">
+        <div class="newspaper-brand-heading"><span><i class="fas fa-stamp"></i></span><div><strong>Gazete markası</strong><small>Atatürk alıntısı, imzası ve bayrak yalnızca admin tarafından değiştirilir</small></div></div>
+        <div class="newspaper-brand-fields">
+          <label><span>Marka adı</span><input data-masthead="brand" value="${escHtml(state.masthead.brand)}" maxlength="32" /></label>
+          <label><span>Alt başlık</span><input data-masthead="subtitle" value="${escHtml(state.masthead.subtitle)}" maxlength="45" /></label>
+          <label><span>Marka yazı boyutu · pt</span><input data-masthead="brandSize" type="number" min="18" max="90" value="${state.masthead.brandSize}" /></label>
+          <label><span>Masthead yüksekliği · mm</span><input data-masthead="height" type="number" min="28" max="70" value="${state.masthead.height}" /></label>
+          <label class="newspaper-brand-image-field"><span>Sol görsel / amblem</span><input type="file" accept="image/*" data-masthead-image="left" /></label>
+        </div>
+      </section>
+      <div class="newspaper-editor-workspace">
+        <aside class="newspaper-editor-tools">
+          <div class="newspaper-editor-tools-title"><i class="fas fa-layer-group"></i> Sayfa öğeleri</div>
+          <div class="newspaper-editor-add-tools">
+            <button type="button" data-add-newspaper-item="heading"><i class="fas fa-heading"></i><span>Başlık ekle</span></button>
+            <button type="button" data-add-newspaper-item="text"><i class="fas fa-align-left"></i><span>Metin ekle</span></button>
+            <button type="button" data-add-newspaper-item="image"><i class="fas fa-image"></i><span>Fotoğraf ekle</span></button>
+            <button type="button" data-add-newspaper-item="line"><i class="fas fa-minus"></i><span>Çizgi çek</span></button>
+          </div>
+          <input id="newspaper-item-image-input" type="file" accept="image/*" hidden />
+          <div class="newspaper-editor-selection" id="newspaper-editor-selection"><div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div></div>
+          <p class="newspaper-editor-tip"><i class="fas fa-hand-pointer"></i> Taşı, köşelerden ölçülendir veya üstteki tutamaçla döndür. Düzenlemeler otomatik taslak olur.</p>
+          <div id="newspaper-compose-error" class="form-error" role="alert"></div>
+          <button type="button" class="btn btn-outline newspaper-composer-save-exit" id="newspaper-save-exit"><i class="fas fa-floppy-disk"></i> Taslağı kaydet ve çık</button>
+          <button type="submit" class="btn btn-primary newspaper-composer-publish" id="newspaper-compose-submit"><i class="fas fa-paper-plane"></i> Gazeteyi yayımla</button>
+        </aside>
+        <div class="newspaper-editor-stage-wrap">
+          <div class="newspaper-editor-scale-note"><span>ÖNİZLEME</span><span>Yayınlanacak A4 ile birebir</span></div>
+          <div class="newspaper-editor-sheet" id="newspaper-editor-sheet"><canvas class="newspaper-editor-canvas" id="newspaper-editor-canvas" width="2100" height="2970" aria-label="A4 gazete canlı önizlemesi"></canvas><div class="newspaper-editor-items" id="newspaper-editor-items"></div></div>
+        </div>
+      </div>
+    </form>`, 'newspaper-editor-modal');
+
+  const sheet = $('#newspaper-editor-sheet');
+  const canvas = $('#newspaper-editor-canvas');
+  const ctx = canvas.getContext('2d');
+  const layer = $('#newspaper-editor-items');
+  const inspector = $('#newspaper-editor-selection');
+  const nameInput = $('#newspaper-name-input');
+  const dateInput = $('#newspaper-date-input');
+  const errorEl = $('#newspaper-compose-error');
+  let nextItemId = Math.max(0, ...state.items.map(item => Number(item.id) || 0)) + 1;
+  let activeDraftId = draft?.id || null;
+  let saveTimer;
+  let suppressCloseSave = false;
+  nameInput.value = draft?.name || 'CigCig Gazetesi';
+  dateInput.value = draft?.date || today;
+  if (!ctx) { errorEl.textContent = 'Gazete önizlemesi başlatılamadı.'; return; }
+
+  const wrapText = (text, width) => {
+    const lines = [];
+    String(text || '').split('\n').forEach(paragraph => {
+      let line = '';
+      paragraph.split(/\s+/).forEach(word => {
+        const next = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(next).width > width) { lines.push(line); line = word; }
+        else line = next;
+      });
+      lines.push(line);
+    });
+    return lines;
+  };
+  const drawImageContain = (asset, x, y, width, height) => {
+    if (!asset?.image?.naturalWidth) return;
+    const ratio = Math.min(width / asset.image.naturalWidth, height / asset.image.naturalHeight);
+    const w = asset.image.naturalWidth * ratio;
+    const h = asset.image.naturalHeight * ratio;
+    ctx.drawImage(asset.image, x + (width - w) / 2, y + (height - h) / 2, w, h);
+  };
+  const drawPage = () => {
+    ctx.setTransform(canvas.width / 210, 0, 0, canvas.width / 210, 0, 0);
+    ctx.clearRect(0, 0, 210, 297);
+    ctx.fillStyle = '#faf8f0';
+    ctx.fillRect(0, 0, 210, 297);
+    if (background) {
+      const ratio = Math.max(210 / background.image.naturalWidth, 297 / background.image.naturalHeight);
+      const w = background.image.naturalWidth * ratio;
+      const h = background.image.naturalHeight * ratio;
+      ctx.drawImage(background.image, (210 - w) / 2, (297 - h) / 2, w, h);
+      ctx.fillStyle = 'rgba(250,248,240,.12)';
+      ctx.fillRect(0, 0, 210, 297);
+    } else {
+      ctx.fillStyle = 'rgba(70,55,30,.045)';
+      for (let i = 0; i < 700; i++) ctx.fillRect((i * 97) % 210, (i * 193) % 297, .16, .16);
+    }
+    const height = state.masthead.height;
+    ctx.strokeStyle = '#26221c';
+    ctx.lineWidth = .22;
+    ctx.strokeRect(5, 5, 200, height - 5);
+    const artHeight = height - 12;
+    drawImageContain(state.mastheadImages.left, 7, 8, 13, artHeight);
+    if (!state.mastheadImages.left) {
+      ctx.fillStyle = '#282721';
+      ctx.fillRect(8, 8 + artHeight * .78, 11, 1.4);
+      ctx.beginPath();
+      ctx.moveTo(8, 8 + artHeight * .78); ctx.lineTo(13.5, 8 + artHeight * .15); ctx.lineTo(20, 8 + artHeight * .78);
+      ctx.closePath(); ctx.fill(); ctx.fillRect(12.5, 8 + artHeight * .3, 2, artHeight * .47);
+    }
+    if (flag) drawImageContain(flag, 190, 8, 13, artHeight);
+    else {
+      ctx.fillStyle = '#c93435'; ctx.fillRect(190, 8 + artHeight * .28, 13, artHeight * .43);
+      const radius = Math.min(artHeight * .15, 1.65);
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(195, 8 + artHeight * .495, radius, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c93435'; ctx.beginPath(); ctx.arc(195.7, 8 + artHeight * .495, radius * .77, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '2px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★', 198.2, 8 + artHeight * .495);
+    }
+    ctx.fillStyle = '#28251f'; ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+    ctx.font = 'italic 2.5px Georgia, "Times New Roman", serif';
+    wrapText(leftQuote, 22).forEach((line, index) => ctx.fillText(line, 21.5, height * .34 + index * 3.1));
+    ctx.textAlign = 'right'; ctx.font = 'italic 2.35px Georgia, "Times New Roman", serif';
+    wrapText(rightQuote, 22).slice(0, 3).forEach((line, index) => ctx.fillText(line, 188.5, height * .23 + index * 2.8));
+    ctx.font = 'italic 2.1px Georgia, "Times New Roman", serif'; ctx.fillText(author, 188.5, height * .78);
+    ctx.textAlign = 'center'; ctx.fillStyle = '#111';
+    ctx.font = `900 ${Math.min(state.masthead.brandSize * 25.4 / 72, height * .39)}px Georgia, "Times New Roman", serif`;
+    ctx.fillText(state.masthead.brand, 105, height * .26, 112);
+    ctx.font = '700 3.4px Georgia, "Times New Roman", serif'; ctx.fillText(state.masthead.subtitle, 105, height * .71, 112);
+    ctx.beginPath(); ctx.moveTo(5, height); ctx.lineTo(205, height); ctx.lineWidth = .4; ctx.stroke();
+    const stripY = height + 2.4;
+    ctx.beginPath(); ctx.moveTo(5, stripY + 3.2); ctx.lineTo(205, stripY + 3.2); ctx.lineWidth = .16; ctx.stroke();
+    ctx.fillStyle = '#39352f'; ctx.font = '700 2.5px Georgia, "Times New Roman", serif'; ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';     ctx.fillText(nameInput.value.trim() || 'CigCig Gazetesi', 7, stripY + 1.6, 52);
+    ctx.textAlign = 'center';
+    ctx.fillText(formatNewspaperDate(dateInput.value, { day: '2-digit', month: 'long', year: 'numeric' }), 105, stripY + 1.6, 86);
+    ctx.textAlign = 'right'; ctx.fillText(`SAYI ${Number(issueNumber.issue_number) || 1}`, 203, stripY + 1.6, 24);
+    for (const item of state.items) {
+      ctx.save();
+      ctx.translate(item.x + item.w / 2, item.y + item.h / 2);
+      ctx.rotate((Number(item.rotation) || 0) * Math.PI / 180);
+      ctx.translate(-item.w / 2, -item.h / 2);
+      ctx.fillStyle = item.color || '#1f1d19';
+      if (item.type === 'line') {
+        ctx.fillRect(item.direction === 'vertical' ? item.w / 2 - .15 : 0, item.direction === 'vertical' ? 0 : item.h / 2 - .15, item.direction === 'vertical' ? .3 : item.w, item.direction === 'vertical' ? item.h : .3);
+      } else if (item.type === 'image') drawImageContain(item.asset, 0, 0, item.w, item.h);
+      else {
+        const size = item.size * 25.4 / 72;
+        ctx.font = `${item.type === 'heading' ? '700' : '400'} ${size}px ${item.font || 'Georgia'}`;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.beginPath(); ctx.rect(0, 0, item.w, item.h); ctx.clip();
+        wrapText(item.content, item.w).forEach((line, index) => ctx.fillText(line, 0, index * size * (item.type === 'heading' ? 1.12 : 1.35), item.w));
+      }
+      ctx.restore();
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+  };
+  const saveDraft = async () => {
+    try {
+      activeDraftId ||= globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const saved = {
+        id: activeDraftId, name: nameInput.value.trim() || 'Adsız gazete', date: dateInput.value, updatedAt: Date.now(),
+        state: {
+          items: state.items.map(item => ({ ...item, asset: item.asset ? { src: item.asset.src } : null })),
+          masthead: state.masthead,
+          mastheadImages: { left: state.mastheadImages.left ? { src: state.mastheadImages.left.src } : null }
+        }
+      };
+      await setNewspaperDrafts([saved, ...(await getNewspaperDrafts()).filter(item => item.id !== activeDraftId)]);
+      errorEl.textContent = '';
+      return true;
+    } catch (error) {
+      errorEl.textContent = error.message;
+      if ($('#modal-overlay')?.classList.contains('hidden')) toast(error.message, 'error');
+      return false;
+    }
+  };
+  const queueSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveDraft, 350);
+  };
+  const renderInspector = () => {
+    const item = state.items.find(candidate => candidate.id === state.selectedId);
+    if (!item) {
+      inspector.innerHTML = '<div class="newspaper-editor-no-selection"><i class="fas fa-arrow-pointer"></i><span>Düzenlemek için sayfada bir öğe seçin.</span></div>';
+      return;
+    }
+    inspector.innerHTML = `
+      <div class="newspaper-editor-inspector-heading"><strong>${item.type === 'heading' ? 'Başlık' : item.type === 'text' ? 'Metin' : item.type === 'image' ? 'Fotoğraf' : 'Çizgi'} özellikleri</strong><button type="button" id="newspaper-item-delete" aria-label="Öğeyi sil"><i class="fas fa-trash"></i></button></div>
+      ${item.type === 'heading' || item.type === 'text' ? `<label><span>İçerik</span><textarea data-item-property="content" rows="3">${escHtml(item.content)}</textarea></label><label><span>Yazı karakteri</span><select data-item-property="font"><option value="Georgia" ${item.font === 'Georgia' ? 'selected' : ''}>Georgia — gazete serif</option><option value="'Times New Roman'" ${item.font === "'Times New Roman'" ? 'selected' : ''}>Times New Roman</option><option value="Arial" ${item.font === 'Arial' ? 'selected' : ''}>Arial</option><option value="'Courier New'" ${item.font === "'Courier New'" ? 'selected' : ''}>Courier</option></select></label><label><span>Yazı boyutu · pt</span><input data-item-property="size" type="number" min="8" max="96" value="${item.size}" /></label><label><span>Yazı rengi</span><input data-item-property="color" type="color" value="${item.color}" /></label>` : ''}
+      ${item.type === 'line' ? `<label><span>Çizgi yönü</span><select data-item-property="direction"><option value="horizontal" ${item.direction !== 'vertical' ? 'selected' : ''}>Yatay</option><option value="vertical" ${item.direction === 'vertical' ? 'selected' : ''}>Dikey</option></select></label>` : ''}
+      <div class="newspaper-editor-dimensions"><label><span>Genişlik · mm</span><input data-item-property="w" type="number" min="4" max="200" value="${Math.round(item.w)}" /></label><label><span>Yükseklik · mm</span><input data-item-property="h" type="number" min="4" max="280" value="${Math.round(item.h)}" /></label></div>
+      <label><span>Döndürme · °</span><input data-item-property="rotation" type="number" min="-180" max="180" value="${Math.round(item.rotation || 0)}" /></label>`;
+    inspector.querySelectorAll('[data-item-property]').forEach(input => {
+      input.addEventListener(input.type === 'color' || input.tagName === 'SELECT' ? 'change' : 'input', () => {
+        const keepFocus = document.activeElement === input;
+        const supportsTextSelection = input.tagName === 'TEXTAREA' || input.type === 'text';
+        const selectionStart = supportsTextSelection ? input.selectionStart : null;
+        const selectionEnd = supportsTextSelection ? input.selectionEnd : null;
+        const property = input.dataset.itemProperty;
+        if (['content', 'font', 'color', 'direction'].includes(property)) item[property] = input.value;
+        else if (property === 'size') item.size = Math.max(8, Math.min(96, Number(input.value) || 8));
+        else if (property === 'w') item.w = Math.max(4, Math.min(210 - item.x, Number(input.value) || 4));
+        else if (property === 'h') item.h = Math.max(4, Math.min(297 - item.y, Number(input.value) || 4));
+        else if (property === 'rotation') item.rotation = Math.max(-180, Math.min(180, Number(input.value) || 0));
+        renderItems();
+        const updated = inspector.querySelector(`[data-item-property="${property}"]`);
+        if (updated && keepFocus) {
+          updated.focus();
+          if (typeof selectionStart === 'number' && typeof selectionEnd === 'number') {
+            updated.setSelectionRange(selectionStart, selectionEnd);
+          }
+        }
+      });
+    });
+    $('#newspaper-item-delete')?.addEventListener('click', () => {
+      state.items = state.items.filter(candidate => candidate.id !== item.id);
+      state.selectedId = null;
+      renderItems();
+    });
+  };
+  const renderItems = () => {
+    layer.innerHTML = state.items.map(item => `<div class="newspaper-editor-item${item.id === state.selectedId ? ' is-selected' : ''}" data-newspaper-item="${item.id}" style="left:${item.x / 210 * 100}%;top:${item.y / 297 * 100}%;width:${item.w / 210 * 100}%;height:${item.h / 297 * 100}%;transform:rotate(${Number(item.rotation) || 0}deg)">${item.id === state.selectedId ? '<button type="button" class="newspaper-editor-rotate" aria-label="Döndür"></button><button type="button" class="newspaper-editor-resize resize-nw" data-resize-corner="nw" aria-label="Sol üstten boyutlandır"></button><button type="button" class="newspaper-editor-resize resize-ne" data-resize-corner="ne" aria-label="Sağ üstten boyutlandır"></button><button type="button" class="newspaper-editor-resize resize-sw" data-resize-corner="sw" aria-label="Sol alttan boyutlandır"></button><button type="button" class="newspaper-editor-resize resize-se" data-resize-corner="se" aria-label="Sağ alttan boyutlandır"></button>' : ''}</div>`).join('');
+    renderInspector();
+    drawPage();
+    queueSave();
+  };
+  const addItem = (type, asset = null) => {
+    const item = {
+      id: nextItemId++, type, x: 14, y: Math.min(297 - 10, Math.max(state.masthead.height + 9, 58 + state.items.length * 27)),
+      w: type === 'line' ? 180 : type === 'image' ? 82 : 145,
+      h: type === 'heading' ? 18 : type === 'text' ? 34 : type === 'image' ? 65 : 5,
+      content: type === 'heading' ? 'HABER BAŞLIĞI' : type === 'text' ? 'Haber metnini buraya yazın.' : '',
+      font: 'Georgia', size: type === 'heading' ? 24 : 12, color: '#1f1d19', asset,
+      direction: 'horizontal', rotation: 0
+    };
+    state.items.push(item);
+    state.selectedId = item.id;
+    renderItems();
+    inspector.querySelector('[data-item-property="content"]')?.focus();
+  };
+  const getPosition = event => {
+    const rect = sheet.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) / rect.width * 210, y: (event.clientY - rect.top) / rect.height * 297 };
+  };
+  const publish = async event => {
+    event.preventDefault();
+    const button = $('#newspaper-compose-submit');
+    if (!state.items.length) { errorEl.textContent = 'Gazetene en az bir başlık, metin, fotoğraf veya çizgi ekle.'; return; }
+    if (!nameInput.value.trim() || !dateInput.value) { errorEl.textContent = 'Gazete adı ve tarihi gerekli.'; return; }
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> A4 sayfa hazırlanıyor…';
+    try {
+      drawPage();
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', .94));
+      if (!blob) throw new Error('Gazete görseli oluşturulamadı.');
+      if (blob.size > 25 * 1024 * 1024) throw new Error('Oluşturulan gazete 25 MB sınırını aştı.');
+      const form = new FormData();
+      form.append('newspaper_name', nameInput.value.trim());
+      form.append('newspaper_date', dateInput.value);
+      form.append('image', new File([blob], 'a4-gazete.jpg', { type: 'image/jpeg' }));
+      await apiForm('/newspapers', form);
+      suppressCloseSave = true;
+      if (activeDraftId) {
+        try { await setNewspaperDrafts((await getNewspaperDrafts()).filter(item => item.id !== activeDraftId)); }
+        catch (error) { toast(`Gazete yayımlandı ancak taslak temizlenemedi: ${error.message}`); }
+      }
+      hideModal();
+      navigate('/gazeteler');
+      toast('A4 gazeten arşivde yayımlandı.');
+    } catch (error) {
+      errorEl.textContent = error.message || 'Gazete yayımlanamadı.';
+      button.disabled = false;
+      button.innerHTML = '<i class="fas fa-paper-plane"></i> Gazeteyi yayımla';
+    }
+  };
+  document.querySelectorAll('[data-masthead]').forEach(input => {
+    const update = () => {
+      const key = input.dataset.masthead;
+      state.masthead[key] = input.type === 'number' ? Math.max(key === 'height' ? 28 : 18, Math.min(key === 'height' ? 70 : 90, Number(input.value) || 40)) : input.value;
+      if (key === 'height') {
+        state.items.forEach(item => {
+          item.y = Math.min(297 - item.h, Math.max(state.masthead.height + 7, item.y));
+        });
+      }
+      drawPage();
+      queueSave();
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+  });
+  [nameInput, dateInput].forEach(input => input.addEventListener('input', () => { drawPage(); queueSave(); }));
+  document.querySelector('[data-masthead-image]')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) { errorEl.textContent = 'Amblem görseli en fazla 10 MB olmalıdır.'; return; }
+    try { state.mastheadImages.left = await newspaperReadImage(file); drawPage(); queueSave(); }
+    catch (error) { errorEl.textContent = error.message; }
+  });
+  document.querySelectorAll('[data-add-newspaper-item]').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.addNewspaperItem === 'image') $('#newspaper-item-image-input').click();
+    else addItem(button.dataset.addNewspaperItem);
+  }));
+  $('#newspaper-item-image-input')?.addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) { errorEl.textContent = 'Sayfa görseli en fazla 10 MB olmalıdır.'; event.target.value = ''; return; }
+    try { addItem('image', await newspaperReadImage(file)); }
+    catch (error) { errorEl.textContent = error.message; }
+  });
+  layer.addEventListener('pointerdown', event => {
+    const element = event.target.closest('[data-newspaper-item]');
+    const item = state.items.find(candidate => candidate.id === Number(element?.dataset.newspaperItem));
+    if (!item) return;
+    state.selectedId = item.id;
+    renderItems();
+    event.preventDefault();
+    const selected = layer.querySelector(`[data-newspaper-item="${item.id}"]`);
+    const handle = event.target.closest('.newspaper-editor-resize, .newspaper-editor-rotate');
+    const corner = handle?.dataset.resizeCorner;
+    const rotating = handle?.classList.contains('newspaper-editor-rotate');
+    const start = getPosition(event);
+    const original = { x: item.x, y: item.y, w: item.w, h: item.h, rotation: item.rotation || 0 };
+    const center = { x: item.x + item.w / 2, y: item.y + item.h / 2 };
+    const startAngle = Math.atan2(start.y - center.y, start.x - center.x) * 180 / Math.PI;
+    selected.setPointerCapture(event.pointerId);
+    const move = moveEvent => {
+      const position = getPosition(moveEvent);
+      if (rotating) {
+        const angle = Math.atan2(position.y - center.y, position.x - center.x) * 180 / Math.PI;
+        item.rotation = Math.max(-180, Math.min(180, original.rotation + angle - startAngle));
+      } else if (corner) {
+        const dx = position.x - start.x;
+        const dy = position.y - start.y;
+        const left = corner.includes('w'), top = corner.includes('n');
+        item.w = Math.min(left ? original.x + original.w : 210 - original.x, Math.max(4, original.w + (left ? -dx : dx)));
+        item.h = Math.min(top ? original.y + original.h : 297 - original.y, Math.max(4, original.h + (top ? -dy : dy)));
+        item.x = left ? original.x + original.w - item.w : original.x;
+        item.y = top ? original.y + original.h - item.h : original.y;
+      } else {
+        item.x = Math.max(0, Math.min(210 - item.w, original.x + position.x - start.x));
+        item.y = Math.max(state.masthead.height + 7, Math.min(297 - item.h, original.y + position.y - start.y));
+      }
+      selected.style.left = `${item.x / 210 * 100}%`;
+      selected.style.top = `${item.y / 297 * 100}%`;
+      selected.style.width = `${item.w / 210 * 100}%`;
+      selected.style.height = `${item.h / 297 * 100}%`;
+      selected.style.transform = `rotate(${item.rotation}deg)`;
+      drawPage();
+    };
+    const finish = () => {
+      selected.removeEventListener('pointermove', move);
+      selected.removeEventListener('pointerup', finish);
+      selected.removeEventListener('pointercancel', finish);
+      renderItems();
+    };
+    selected.addEventListener('pointermove', move);
+    selected.addEventListener('pointerup', finish);
+    selected.addEventListener('pointercancel', finish);
+  });
+  $('#newspaper-composer')?.addEventListener('submit', publish);
+  $('#newspaper-save-exit')?.addEventListener('click', async () => {
+    clearTimeout(saveTimer);
+    if (!await saveDraft()) return;
+    suppressCloseSave = true;
+    hideModal();
+    toast('Taslağın kaydedildi. Gazeteler bölümünden devam edebilirsin.');
+  });
+  const closeObserver = new MutationObserver(() => {
+    const modalClosed = $('#modal-overlay')?.classList.contains('hidden');
+    if (sheet.isConnected && !modalClosed) return;
+    closeObserver.disconnect();
+    clearTimeout(saveTimer);
+    if (!suppressCloseSave) saveDraft();
+  });
+  closeObserver.observe(document.body, { childList: true, subtree: true });
+  closeObserver.observe($('#modal-overlay'), { attributes: true, attributeFilter: ['class'] });
+  const resizeObserver = new ResizeObserver(() => {
+    if (!sheet.isConnected) resizeObserver.disconnect();
+    else drawPage();
+  });
+  resizeObserver.observe(sheet);
+  drawPage();
+  renderItems();
+}
+
+async function showForwardNewspaperModal(newspaper) {
+  if (!currentUser) return navigate('/giris');
+  let conversations;
+  try { conversations = await api('/conversations'); }
+  catch (error) {
+    return showModal('Gazeteyi ilet', `<div class="newspaper-forward-error"><i class="fas fa-triangle-exclamation"></i><strong>Mesajlaşmalar yüklenemedi</strong><span>${escHtml(error.message || 'Tekrar deneyin.')}</span></div>`);
+  }
+  const listHTML = conversations.length
+    ? conversations.map(conversation => `<button type="button" class="newspaper-forward-user" data-username="${escHtml(conversation.other_username)}">${avatarImg(conversation, 'avatar-sm')}<span><strong>${escHtml(conversation.other_nickname || conversation.other_username)}</strong><small>@${escHtml(conversation.other_username)}</small></span><i class="fas fa-arrow-up-right-from-square"></i></button>`).join('')
+    : '<div class="newspaper-forward-empty">Henüz mesajlaşmanız yok. Kullanıcı adını yazarak yine de iletebilirsiniz.</div>';
+  showModal('Gazeteyi ilet', `
+    <div class="newspaper-forward-preview"><i class="fas fa-newspaper"></i><span><strong>${escHtml(newspaper.newspaper_name)}</strong><small>${escHtml(formatNewspaperDate(newspaper.newspaper_date))}</small></span></div>
+    <input id="newspaper-forward-search" class="newspaper-forward-search" type="search" placeholder="Mesajlaştığın kişileri filtrele..." />
+    <div id="newspaper-forward-list" class="newspaper-forward-list">${listHTML}</div>
+    <div class="newspaper-forward-send"><input id="newspaper-forward-username" type="text" placeholder="Kullanıcı adı" autocomplete="off" /><button type="button" class="btn btn-primary" id="newspaper-forward-send"><i class="fas fa-paper-plane"></i> İlet</button></div>
+    <div id="newspaper-forward-error" class="form-error"></div>`);
+  $('#newspaper-forward-search')?.addEventListener('input', event => {
+    const query = event.target.value.toLocaleLowerCase('tr-TR');
+    $$('#newspaper-forward-list .newspaper-forward-user').forEach(button => {
+      button.style.display = button.dataset.username.toLocaleLowerCase('tr-TR').includes(query) ? '' : 'none';
+    });
+  });
+  $$('#newspaper-forward-list .newspaper-forward-user').forEach(button => button.addEventListener('click', () => {
+    $('#newspaper-forward-username').value = button.dataset.username;
+  }));
+  $('#newspaper-forward-send')?.addEventListener('click', async event => {
+    const username = $('#newspaper-forward-username').value.trim();
+    const errorEl = $('#newspaper-forward-error');
+    if (!username) { errorEl.textContent = 'İleteceğiniz kullanıcıyı seçin veya kullanıcı adını yazın.'; return; }
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ shared_newspaper_id: newspaper.id }),
+      });
+      hideModal();
+      toast('Gazete iletildi.');
+      navigate('/mesajlar/' + encodeURIComponent(username));
+    } catch (error) {
+      errorEl.textContent = error.message || 'Gazete iletilemedi.';
+      button.disabled = false;
+    }
+  });
 }
 
 
@@ -2594,7 +4295,7 @@ async function renderPoemDetail(app, slug) {
   if (isOwner) {
     $('#edit-poem-btn').addEventListener('click', () => showNewPoemModal(poem));
     $('#del-poem-btn').addEventListener('click', async () => {
-      if (!confirm('Şiiri silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Şiiri silmek istediğinize emin misiniz?')) return;
       try {
         await api('/poem/' + slug, { method: 'DELETE' });
         toast('Şiir silindi');
@@ -2629,10 +4330,10 @@ async function renderPoemDetail(app, slug) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  $('#poem-share-btn')?.addEventListener('click', () => {
+  $('#poem-share-btn')?.addEventListener('click', async () => {
     const url = location.href;
     if (navigator.clipboard) { navigator.clipboard.writeText(url); toast('Link kopyalandı!'); }
-    else { window.prompt('Linki kopyalayın:', url); }
+    else { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Paylaşım bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
 
   let commentReplyTarget = null;
@@ -2695,7 +4396,7 @@ async function renderPoemDetail(app, slug) {
 
     const del = e.target.closest('.del-comment');
     if (del) {
-      if (!confirm('Yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Yorum silinsin mi?')) return;
       try {
         await api('/poem/' + slug + '/comments/' + del.dataset.id, { method: 'DELETE' });
         del.closest('.comment-node')?.remove();
@@ -3068,7 +4769,7 @@ async function renderForumDetail(app, slug) {
   if (isOwner) {
     $('#edit-forum-btn').addEventListener('click', () => showNewForumModal(forum));
     $('#del-forum-btn').addEventListener('click', async () => {
-      if (!confirm('Konuyu silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Konuyu silmek istediğinize emin misiniz?')) return;
       try { await api('/forum/' + slug, { method: 'DELETE' }); toast('Konu silindi'); navigate('/forum'); } catch (e) { toast(e.message, 'error'); }
     });
   }
@@ -3091,10 +4792,10 @@ async function renderForumDetail(app, slug) {
     } catch (error) { toast(error.message, 'error'); }
   });
 
-  $('#share-btn').addEventListener('click', () => {
+  $('#share-btn').addEventListener('click', async () => {
     const url = location.href;
     if (navigator.clipboard) { navigator.clipboard.writeText(url); toast('Link kopyalandı!'); }
-    else { window.prompt('Linki kopyalayın:', url); }
+    else { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Paylaşım bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
 
   $('#forward-forum-btn')?.addEventListener('click', () => showForwardForumModal(forum));
@@ -3164,7 +4865,7 @@ async function renderForumDetail(app, slug) {
     }
     const del = e.target.closest('.del-comment');
     if (del) {
-      if (!confirm('Yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Yorum silinsin mi?')) return;
       const id = del.dataset.id;
       try {
         await api('/forum/' + slug + '/comments/' + id, { method: 'DELETE' });
@@ -3652,7 +5353,7 @@ async function renderBookDetail(app, slug) {
   if (isOwner) {
     $('#edit-book-btn').addEventListener('click', () => showNewBookModal(book));
     $('#del-book-btn').addEventListener('click', async () => {
-      if (!confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
       try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
     });
     $('#add-page-btn').addEventListener('click', () => showAddPageModal(slug, chapters));
@@ -3660,7 +5361,7 @@ async function renderBookDetail(app, slug) {
     document.querySelectorAll('.del-chapter').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm('Bölümü silmek istediğinize emin misiniz?')) return;
+        if (!await CigCigDialogs.confirm('Bölümü silmek istediğinize emin misiniz?')) return;
         try { await api(`/book/${slug}/chapter/${btn.dataset.id}`, { method: 'DELETE' }); toast('Bölüm silindi'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
       });
     });
@@ -4059,7 +5760,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
       });
     });
     $('#del-page-btn').addEventListener('click', async () => {
-      if (!confirm('Sayfa silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Sayfa silinsin mi?')) return;
       try { await api(`/book/${bookSlug}/page/${pageSlug}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate('/kitap/' + bookSlug); } catch (e) { toast(e.message, 'error'); }
     });
   }
@@ -4068,18 +5769,23 @@ async function renderPageReader(app, bookSlug, pageSlug) {
 async function renderGroupList(app) {
   document.title = 'Gruplar - ' + siteName;
   app.innerHTML = `
-    <div class="container page">
-      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div><div class="page-title">Gruplar</div><div class="page-subtitle">Topluluğa katıl</div></div>
-        ${currentUser ? `<button class="btn btn-primary group-create-button" id="new-group-btn" aria-label="Yeni grup oluştur"><i class="fas fa-plus"></i><span>Yeni Grup</span></button>` : ''}
-      </div>
-      <div id="join-invite-section" style="margin-bottom:16px">
-        ${currentUser ? `<div style="display:flex;gap:8px;max-width:400px">
-          <input id="invite-code-input" type="text" placeholder="Davet kodu ile katıl..." />
-          <button class="btn btn-outline" id="join-invite-btn">Katıl</button>
+    <div class="container page group-list-page">
+      <header class="group-list-hero">
+        <div class="group-list-heading">
+          <span class="group-list-eyebrow"><i class="fas fa-users"></i> CİGCİG TOPLULUKLARI</span>
+          <h1>Gruplar</h1>
+          <p>İlgi alanlarına katıl, birlikte sohbet et.</p>
+        </div>
+        ${currentUser ? `<button class="btn btn-primary group-create-button" id="new-group-btn"><i class="fas fa-plus"></i><span>Grup oluştur</span></button>` : ''}
+      </header>
+      <div class="group-list-tools">
+        <div class="search-bar group-list-search"><i class="fas fa-search"></i><input type="text" id="group-search" placeholder="Gruplarda ara..." /></div>
+        ${currentUser ? `<div id="join-invite-section" class="group-list-invite">
+          <i class="fas fa-ticket"></i>
+          <input id="invite-code-input" type="text" placeholder="Davet kodu" aria-label="Davet kodu ile katıl" />
+          <button class="btn btn-outline" id="join-invite-btn">Koda katıl</button>
         </div>` : ''}
       </div>
-      <div class="search-bar" style="margin-bottom:24px"><i class="fas fa-search"></i><input type="text" id="group-search" placeholder="Grup ara (isim veya açıklama)..." /></div>
       <div id="groups-grid" class="groups-grid"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
 
@@ -4497,7 +6203,7 @@ async function renderGroupDetail(app, slug) {
       const payload = { name, description: $('#channel-description-input').value.trim(), visibility: $('#channel-visibility-input').value, can_view_history: $('#channel-history-input').checked, can_write: $('#channel-write-input').checked, moderators_can_manage: $('#channel-mod-manage-input').checked, moderators_can_write: $('#channel-mod-write-input').checked };
       try { const saved = await api(editing ? `/group/${slug}/channel/${channel.id}` : `/group/${slug}/channels`, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) }); if (editing) channels = channels.map(item => Number(item.id) === Number(saved.id) ? { ...item, ...saved } : item); else channels.push(saved); activeChannel = saved; hideModal(); renderChannels(); toast(editing ? 'Kanal güncellendi.' : 'Kanal oluşturuldu.'); } catch (error) { $('#channel-form-error').textContent = error.message; }
     };
-    $('#channel-delete-btn')?.addEventListener('click', async () => { if (!confirm('Bu kanal ve mesajları silinsin mi?')) return; try { await api(`/group/${slug}/channel/${channel.id}`, { method: 'DELETE' }); channels = channels.filter(item => Number(item.id) !== Number(channel.id)); activeChannel = channels[0] || null; hideModal(); renderChannels(); toast('Kanal silindi.'); } catch (error) { $('#channel-form-error').textContent = error.message; } });
+    $('#channel-delete-btn')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu kanal ve mesajları silinsin mi?')) return; try { await api(`/group/${slug}/channel/${channel.id}`, { method: 'DELETE' }); channels = channels.filter(item => Number(item.id) !== Number(channel.id)); activeChannel = channels[0] || null; hideModal(); renderChannels(); toast('Kanal silindi.'); } catch (error) { $('#channel-form-error').textContent = error.message; } });
   };
   channelList?.addEventListener('click', event => { const manage = event.target.closest('[data-channel-manage]'); const item = event.target.closest('.group-channel-item'); if (manage) { event.stopPropagation(); showChannelModal(channels.find(channel => Number(channel.id) === Number(manage.dataset.channelManage))); return; } if (item) { activeChannel = channels.find(channel => Number(channel.id) === Number(item.dataset.channelId)) || activeChannel; channelWorkspace.classList.remove('channels-open'); renderChannels(); } });
   $('#channel-mobile-btn')?.addEventListener('click', () => channelWorkspace.classList.toggle('channels-open'));
@@ -5156,7 +6862,7 @@ async function renderGroupDetail(app, slug) {
       } catch (e) { $('#gs-error').textContent = e.message; }
     });
     $('#gs-delete').addEventListener('click', async () => {
-      if (!confirm('Grubu silmek istediğinize emin misiniz?')) return;
+      if (!await CigCigDialogs.confirm('Grubu silmek istediğinize emin misiniz?')) return;
       try { await api('/group/' + slug, { method: 'DELETE' }); toast('Grup silindi'); hideModal(); navigate('/gruplar'); } catch (e) { toast(e.message, 'error'); }
     });
   });
@@ -5195,14 +6901,14 @@ async function renderGroupDetail(app, slug) {
         });
       });
       document.querySelector('.member-kick-btn')?.addEventListener('click', async () => {
-        if (!confirm(`${member.nickname || member.username} (@${member.username}) gruptan atılsın mı?`)) return;
+        if (!await CigCigDialogs.confirm(`${member.nickname || member.username} (@${member.username}) gruptan atılsın mı?`)) return;
         try { await api(`/group/${slug}/kick/${targetId}`, { method: 'POST' }); hideModal(); toast('Üye gruptan atıldı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
       document.querySelector('.member-ban-btn')?.addEventListener('click', async () => {
-        const reason = prompt(`${member.nickname || member.username} (@${member.username}) için grup yasaklama nedeni:`);
+        const reason = await CigCigDialogs.prompt(`${member.nickname || member.username} (@${member.username}) için grup yasaklama nedeni:`, '', { title: 'Grup yasağını gerekçelendir' });
         if (reason === null || !reason.trim()) return;
-        if (!confirm(`${member.nickname || member.username} (@${member.username}) bu gruptan yasaklansın mı?`)) return;
+        if (!await CigCigDialogs.confirm(`${member.nickname || member.username} (@${member.username}) bu gruptan yasaklansın mı?`)) return;
         try { await api(`/group/${slug}/ban/${targetId}`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) }); hideModal(); toast('Üye bu gruptan yasaklandı'); renderRoute(location.pathname); }
         catch (error) { if (actionError) actionError.textContent = error.message; }
       });
@@ -5210,7 +6916,7 @@ async function renderGroupDetail(app, slug) {
     }
     if (banBtn && isOwner) {
       const uid = banBtn.dataset.uid;
-      if (!confirm('Üyeyi gruptan at?')) return;
+      if (!await CigCigDialogs.confirm('Üyeyi gruptan at?')) return;
       try { await api(`/group/${slug}/ban/${uid}`, { method: 'POST' }); toast('Üye atıldı'); renderRoute(location.pathname); } catch (e) { toast(e.message, 'error'); }
     }
     if (modBtn && isOwner) {
@@ -5685,7 +7391,7 @@ async function renderVideoDetail(app, slug) {
   $('#video-copy-btn')?.addEventListener('click', async () => {
     const url = `${location.origin}/video/${encodeURIComponent(video.slug)}`;
     try { await navigator.clipboard.writeText(url); toast('Video bağlantısı kopyalandı'); }
-    catch { prompt('Video bağlantısı', url); }
+    catch { await CigCigDialogs.prompt('Bağlantıyı kopyalamak için seçin.', url, { title: 'Video bağlantısı', readOnly: true, selectOnOpen: true, acceptText: 'Kapat' }); }
   });
   $('#video-save-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
@@ -5741,7 +7447,7 @@ async function renderVideoDetail(app, slug) {
   }
 
   $('#video-edit-btn')?.addEventListener('click', () => showNewVideoModal(video));
-  $('#video-delete-btn')?.addEventListener('click', async () => { if (!confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
+  $('#video-delete-btn')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Silinsin mi?')) return; try { await api('/video/' + slug, { method: 'DELETE' }); toast('Video silindi'); navigate('/videolar'); } catch(e){toast(e.message,'error');} });
 
   $('#video-comment-submit')?.addEventListener('click', async () => {
     const content = $('#video-comment-input').value.trim();
@@ -5775,7 +7481,7 @@ async function renderVideoDetail(app, slug) {
     if (editBtn) {
       const id = editBtn.dataset.id;
       const current = editBtn.dataset.content;
-      const newText = prompt('Düzenle', current);
+      const newText = await CigCigDialogs.prompt('Yorumunu güncelle', current, { title: 'Yorumu düzenle', multiline: true });
       if (newText === null) return;
       try {
         const updated = await api('/video/' + slug + '/comments/' + id, { method: 'PUT', body: JSON.stringify({ content: newText.trim() }) });
@@ -5793,7 +7499,7 @@ async function renderVideoDetail(app, slug) {
     }
     const deleteBtn = e.target.closest('.video-comment-delete');
     if (deleteBtn) {
-      if (!confirm('Bu yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
       try { await api('/video/' + slug + '/comments/' + deleteBtn.dataset.id, { method: 'DELETE' }); deleteBtn.closest('.comment')?.remove(); } catch (error) { toast(error.message, 'error'); }
     }
   });
@@ -5835,16 +7541,16 @@ async function renderBadges(app) {
     return;
   }
 
-  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', vmb: 'Topluluk rozeti' };
+  const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti', red_verified: 'Görsel profil işareti' };
   const badgeRows = badges.length ? badges.map(badge => {
     const isLockedAdminBadge = badge.key === 'admin';
     return `
     <div class="badge-setting-row" data-badge-key="${escHtml(badge.key)}">
       <div class="badge-setting-icon" style="color:${escHtml(badge.color || '#6b7280')};background:${escHtml(badge.color || '#6b7280')}18;border-color:${escHtml(badge.color || '#6b7280')}44">
-        <i class="${escHtml(badge.icon || 'fas fa-award')}"></i>
+        ${badge.type === 'red_verified' ? '<img class="badge-setting-verification-image" src="/gobolog.png" alt="" />' : `<i class="${escHtml(badge.icon || 'fas fa-award')}"></i>`}
       </div>
       <div class="badge-setting-copy">
-        <strong>${escHtml(badge.name)}</strong>
+        <strong>${badge.type === 'red_verified' ? 'Doğrulanmış hesap' : escHtml(badge.name)}</strong>
         <small>${typeLabels[badge.type] || 'Rozet'} · <span class="badge-setting-status">${isLockedAdminBadge ? 'Zorunlu · Profilde görünüyor' : (badge.is_active ? 'Profilde görünüyor' : 'Profilde gizli')}</span></small>
       </div>
       <label class="badge-visibility-toggle${isLockedAdminBadge ? ' is-locked' : ''}" title="${isLockedAdminBadge ? 'Yetkili rozeti zorunludur' : (badge.is_active ? 'Profilde gizle' : 'Profilde göster')}">
@@ -5870,7 +7576,7 @@ async function renderBadges(app) {
       <div class="card badges-settings-card">
         <div class="card-header"><span><i class="fas fa-sliders"></i> Rozet görünürlüğü</span><span class="badge-count">${badges.length} rozet</span></div>
         <div class="card-body">
-      <p class="settings-help">Rozeti pasif yaptığında sadece profilindeki rozet satırından gizlenir; rozet hesabından silinmez. <strong>Yetkili rozeti hesap güvenliği nedeniyle zorunludur ve gizlenemez.</strong></p>
+      <p class="settings-help">Rozeti pasif yaptığında profilinde ve adının yanında gösterilmez; rozet hesabından silinmez. <strong>Yetkili rozeti hesap güvenliği nedeniyle zorunludur ve gizlenemez.</strong></p>
           <div class="badge-settings-list">${badgeRows}</div>
         </div>
       </div>
@@ -5892,6 +7598,10 @@ async function renderBadges(app) {
         if (status) status.textContent = toggle.checked ? 'Profilde görünüyor' : 'Profilde gizli';
         toggle.parentElement.title = toggle.checked ? 'Profilde gizle' : 'Profilde göster';
         if (key === 'level') currentUser.show_level_badge = toggle.checked ? 1 : 0;
+        if (key === 'journalist') {
+          const journalist = journalistDirectory.get(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+          if (journalist) journalist.show_journalist_icon = toggle.checked ? 1 : 0;
+        }
         toast(toggle.checked ? 'Rozet profilinde gösteriliyor' : 'Rozet profilden gizlendi');
       } catch (e) {
         toggle.checked = previous;
@@ -5974,8 +7684,8 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
-       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span></div>
-       ${Array.isArray(data.badges) && data.badges.length ? `<div class="profile-badges-row">${data.badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
+       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}</strong><small>@${escHtml(user.username)}</small></span></div>
+       ${Array.isArray(data.badges) && data.badges.some(badge => badge.type !== 'red_verified') ? `<div class="profile-badges-row">${data.badges.filter(badge => badge.type !== 'red_verified').map(badge => profileBadgeHTML(badge)).join('')}</div>` : ''}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
@@ -6034,7 +7744,8 @@ async function renderProfile(app, username) {
   }
 
   const links = (() => { try { return JSON.parse(user.links || '[]'); } catch { return []; } })();
-  const badgesHTML = badges.length ? `<div class="profile-badges-row">${badges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : '';
+  const displayBadges = badges.filter(badge => badge.type !== 'red_verified');
+  const badgesHTML = displayBadges.length ? `<div class="profile-badges-row">${displayBadges.map(badge => profileBadgeHTML(badge)).join('')}</div>` : '';
   const badgesPanelHTML = badges.length
     ? `<div class="profile-badges-panel">${badges.map(badge => `<div class="profile-badge-card">${profileBadgeHTML(badge)}<small>${badge.type === 'level' ? 'Seviye rozeti' : badge.type === 'admin' ? 'Yetkili rozeti' : 'Profil rozeti'}</small></div>`).join('')}</div>`
     : '<div class="empty-state"><i class="fas fa-award"></i><p>Bu profilde gösterilen rozet yok.</p></div>';
@@ -6046,7 +7757,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}</strong><small>@${escHtml(user.username)}</small></span>
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
@@ -6212,7 +7923,7 @@ async function renderProfile(app, username) {
                   throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
                 }
               } else if (action === 'block-user') {
-                if (!confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
+                if (!await CigCigDialogs.confirm('@' + username + ' kullanıcısını engellemek istiyor musun?')) return;
                 await api('/block/' + encodeURIComponent(username), { method: 'POST' });
                 toast('Kullanıcı engellendi');
               } else if (action === 'unblock-user') {
@@ -6626,6 +8337,13 @@ async function renderSettingsSection(section) {
     });
 
   } else if (section === 'appearance') {
+    let defaultDmTheme = 'default';
+    try {
+      const themeSettings = await api('/me/dm-theme-settings');
+      defaultDmTheme = themeSettings.default_theme_key || 'default';
+    } catch (error) {
+      toast(error.message, 'error');
+    }
     el.innerHTML = `
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
@@ -6633,6 +8351,14 @@ async function renderSettingsSection(section) {
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
+          <div class="form-group">
+            <label for="s-dm-default-theme">Varsayılan mesaj teması</label>
+            <select id="s-dm-default-theme">
+              ${dmThemeOptionsHTML(defaultDmTheme)}
+            </select>
+            <div class="form-hint">Yalnızca senin mesaj görünümünü değiştirir.</div>
+            <button class="btn btn-outline btn-sm" id="save-dm-default-theme" type="button">Mesaj temasını kaydet</button>
+          </div>
           <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
@@ -6650,6 +8376,15 @@ async function renderSettingsSection(section) {
         currentUser = updated; updateNavUI();
         toast('Görünüm güncellendi');
       } catch (e) { $('#appear-msg').textContent = e.message; }
+    });
+    $('#save-dm-default-theme').addEventListener('click', async () => {
+      try {
+        await api('/me/dm-theme-settings', {
+          method: 'PUT',
+          body: JSON.stringify({ default_theme_key: $('#s-dm-default-theme').value })
+        });
+        toast('Varsayılan mesaj teması kaydedildi');
+      } catch (error) { toast(error.message, 'error'); }
     });
   } else if (section === 'account-status') {
     const isPrivate = !!currentUser.is_private;
@@ -7040,7 +8775,7 @@ async function renderSettingsSection(section) {
       const confirmed = $('#delete-confirm-cb').checked;
       if (!pw) { msg.textContent = 'Şifrenizi girin'; return; }
       if (!confirmed) { msg.textContent = 'Onay kutusunu işaretleyin'; return; }
-      if (!confirm('Emin misiniz? Hesabınız ve içerikleriniz gizlenecek, 10 gün içinde kalıcı silinecek.')) return;
+      if (!await CigCigDialogs.confirm('Emin misiniz? Hesabınız ve içerikleriniz gizlenecek, 10 gün içinde kalıcı silinecek.')) return;
       const btn = $('#delete-account-btn');
       btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div>';
       try {
@@ -7232,7 +8967,7 @@ function renderRegister(app) {
       </div>
       <div class="form-group">
         <label>Doğum tarihi</label>
-        <input type="date" id="reg-birth-date" max="${new Date(new Date().setFullYear(new Date().getFullYear() - 15)).toISOString().slice(0, 10)}" />
+        <input type="date" id="reg-birth-date" min="1900-01-01" max="${new Date(new Date().setFullYear(new Date().getFullYear() - 15)).toISOString().slice(0, 10)}" />
         <div class="form-hint">15 yaş altı kabul edilmez (¬‿¬) hııhıı</div>
         <div class="form-hint">Doğum tarihi bir daha değiştirilemez.</div>
       </div>
@@ -7374,6 +9109,7 @@ function renderRegister(app) {
       if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
     });
     if (!username || !nickname || !email || !password || !birth_date) { $('#reg-error').textContent = 'Kullanıcı adı, takma ad ve diğer alanları doldurun'; return; }
+    if (birth_date < '1900-01-01') { $('#reg-error').textContent = 'Doğum tarihi 1 Ocak 1900 veya sonrası olmalıdır'; return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#reg-error').textContent = 'Geçerli bir e-posta adresi girin'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
     const today = new Date();
@@ -7691,7 +9427,6 @@ async function init() {
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     firstVisitAuthEnabled = ps.first_visit_auth === '1';
-    siteAuthRequired = ps.auth_required === '1';
     const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
     if (Number.isInteger(configuredPhotoClip) && configuredPhotoClip >= 1 && configuredPhotoClip <= 300) {
       photoSongClipSeconds = configuredPhotoClip;
@@ -7722,6 +9457,16 @@ async function init() {
       footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
     }
   } catch {}
+  try {
+    const journalists = await api('/journalists');
+    journalistDirectory.clear();
+    journalists.forEach(journalist => {
+      journalistDirectory.set(String(journalist.username || '').toLocaleLowerCase('tr-TR'), journalist);
+    });
+  } catch (error) {
+    console.warn('Gazeteci listesi yüklenemedi:', error.message);
+  }
+  updateNavUI();
   loadAnnouncements();
   renderRoute(location.pathname + location.search);
   if (currentUser) {
@@ -7948,9 +9693,6 @@ async function showForwardPhotoModal(photoId) {
 
 // ===== MESAJLAR SAYFASI =====
 let dmLockSettings = { search_unlock_enabled: false, icon_unlock_enabled: true, has_search_code: false };
-let dmSearchUnlockCode = '';
-let dmIconUnlockCode = '';
-let dmSearchUnlockedConvs = [];
 
 function updateConversationMuteState(conversation, hours) {
   const isUser1 = String(conversation.user1_id) === String(currentUser.id);
@@ -8065,6 +9807,11 @@ async function renderMessages(app, targetUsername) {
           if (nextMuted && !muteIcon) item.querySelector('.dm-conv-name-row')?.insertAdjacentHTML('beforeend', '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>');
           if (!nextMuted) muteIcon?.remove();
           item.classList.toggle('dm-conv-muted', nextMuted);
+        }, conversation?.theme_key || 'default', Boolean(conversation?.shared_theme_key), theme => {
+          if (conversation) {
+            conversation.theme_key = theme.theme_key;
+            conversation.shared_theme_key = theme.shared ? theme.theme_key : '';
+          }
         });
       }
     });
@@ -8293,6 +10040,8 @@ let dmPresencePollTimer = null;
 async function renderDMChat(username) {
   // Önceki poll'u temizle
   if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
+  stopLocalDmTyping();
+  if (dmPeerTypingTimer) { clearTimeout(dmPeerTypingTimer); dmPeerTypingTimer = null; }
 
   const mainEl = document.getElementById('dm-main');
   if (!mainEl) return;
@@ -8317,11 +10066,10 @@ async function renderDMChat(username) {
   }
 
   const { conv, other, messages, isHidden, hasPassword } = data;
-  const otherSpotify = await getSpotifyNowPlaying(other.username);
 
   // Kilitli konuşma
   if (isHidden) {
-    mainEl.innerHTML = `<div class="dm-chat">
+    mainEl.innerHTML = `<div class="dm-chat" data-dm-theme="${escHtml(conv.theme_key || 'default')}">
       <div class="dm-chat-header">
         <div class="dm-chat-header-left">
           <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
@@ -8368,10 +10116,12 @@ async function renderDMChat(username) {
   dmSelectedIds = new Set();
   dmSelectionMode = false;
   let replyToId = null;
-  let pendingImg = null;
+  const maxDmImages = 10;
+  let pendingImgs = [];
   const isSelfConversation = currentUser && (String(other.id) === String(currentUser.id) || String(other.username).toLowerCase() === String(currentUser.username).toLowerCase());
+  const otherSpotifyPromise = getSpotifyNowPlaying(other.username);
 
-  mainEl.innerHTML = `<div class="dm-chat">
+  mainEl.innerHTML = `<div class="dm-chat" data-conversation-id="${escHtml(conv.id)}" data-dm-theme="${escHtml(conv.theme_key || 'default')}">
     <!-- Header -->
     <div class="dm-chat-header">
       <div class="dm-chat-header-left">
@@ -8387,7 +10137,8 @@ async function renderDMChat(username) {
             <strong>${escHtml(other.nickname || other.username)}</strong>
           </a>
           <span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>
-          ${spotifyNowPlayingMarkup(otherSpotify, true)}
+          <span class="dm-chat-typing" hidden aria-live="polite">Yazıyor<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
+          <span id="dm-chat-now-playing"></span>
         </div>
       </div>
       <div class="dm-chat-header-right">
@@ -8418,17 +10169,29 @@ async function renderDMChat(username) {
     <!-- Input bar -->
     <div class="dm-input-bar">
       <div class="dm-input-wrap">
-        <button class="dm-input-img-btn" id="dm-img-btn" type="button" title="Fotoğraf ekle"><i class="fas fa-image"></i></button>
-        <input type="file" id="dm-img-input" accept="image/*" style="display:none" />
-        <div class="dm-img-preview-wrap" id="dm-img-preview-wrap">
-          <img id="dm-img-thumb" />
-          <button class="dm-img-clear" onclick="window.__dmClearImg && window.__dmClearImg()" type="button">✕</button>
+        <button class="dm-input-img-btn" id="dm-img-btn" type="button" title="Galeriden fotoğraf seç (en fazla 10)"><i class="fas fa-image"></i></button>
+        <input type="file" id="dm-img-input" accept="image/*" multiple style="display:none" />
+        <div class="dm-image-view-limit-wrap" id="dm-image-view-limit-wrap" hidden>
+          <label for="dm-image-view-limit">Görüntüleme</label>
+          <select id="dm-image-view-limit">
+            <option value="0">Normal</option>
+            <option value="1">1 kez</option>
+            <option value="2">2 kez</option>
+            <option value="3">3 kez</option>
+          </select>
         </div>
+        <div class="dm-img-preview-wrap" id="dm-img-preview-wrap" hidden></div>
+        <span class="dm-img-upload-status" id="dm-img-upload-status" aria-live="polite"></span>
         <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
       </div>
       <button class="dm-send-btn" id="dm-send-btn" type="button"><i class="fas fa-paper-plane"></i></button>
     </div>
   </div>`;
+
+  otherSpotifyPromise.then(spotify => {
+    const slot = document.getElementById('dm-chat-now-playing');
+    if (slot && spotify) slot.innerHTML = spotifyNowPlayingMarkup(spotify, true);
+  });
 
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
@@ -8452,10 +10215,30 @@ async function renderDMChat(username) {
   };
 
   // Image management
+  const renderDmImagePreview = () => {
+    const preview = document.getElementById('dm-img-preview-wrap');
+    const viewLimitWrap = document.getElementById('dm-image-view-limit-wrap');
+    const inputWrap = document.querySelector('.dm-input-wrap');
+    if (!preview) return;
+    preview.hidden = pendingImgs.length === 0;
+    inputWrap?.classList.toggle('dm-has-images', pendingImgs.length > 0);
+    if (viewLimitWrap) viewLimitWrap.hidden = pendingImgs.length === 0;
+    preview.innerHTML = pendingImgs.map((item, index) => `<span class="dm-img-preview-item">
+      <img src="${escHtml(item.previewUrl)}" alt="Seçilen fotoğraf ${index + 1}" />
+      <button class="dm-img-clear" data-remove-dm-image="${index}" type="button" aria-label="${index + 1}. fotoğrafı kaldır">×</button>
+    </span>`).join('');
+    preview.querySelectorAll('[data-remove-dm-image]').forEach(button => button.addEventListener('click', () => {
+      const [removed] = pendingImgs.splice(Number(button.dataset.removeDmImage), 1);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      renderDmImagePreview();
+    }));
+  };
   window.__dmClearImg = () => {
-    pendingImg = null;
-    const pw = document.getElementById('dm-img-preview-wrap');
-    if (pw) pw.style.display = 'none';
+    pendingImgs.forEach(item => URL.revokeObjectURL(item.previewUrl));
+    pendingImgs = [];
+    renderDmImagePreview();
+    const viewLimit = document.getElementById('dm-image-view-limit');
+    if (viewLimit) viewLimit.value = '0';
     const inp = document.getElementById('dm-img-input');
     if (inp) inp.value = '';
   };
@@ -8464,15 +10247,20 @@ async function renderDMChat(username) {
     document.getElementById('dm-img-input')?.click();
   });
   document.getElementById('dm-img-input')?.addEventListener('change', e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    pendingImg = file;
-    const pw = document.getElementById('dm-img-preview-wrap');
-    const thumb = document.getElementById('dm-img-thumb');
-    if (pw && thumb) {
-      const reader = new FileReader();
-      reader.onload = ev => { thumb.src = ev.target.result; pw.style.display = 'block'; };
-      reader.readAsDataURL(file);
+    const selectedFiles = Array.from(e.target.files || []);
+    const validFiles = selectedFiles.filter(file => file.type.startsWith('image/'));
+    const availableSlots = maxDmImages - pendingImgs.length;
+    if (validFiles.length > availableSlots) toast(`Bir mesajda en fazla ${maxDmImages} fotoğraf seçebilirsin.`, 'error');
+    if (validFiles.length !== selectedFiles.length) toast('Yalnızca fotoğraf dosyaları eklenebilir.', 'error');
+    pendingImgs.push(...validFiles.slice(0, Math.max(0, availableSlots)).map(file => ({
+      file,
+      previewUrl: URL.createObjectURL(file)
+    })));
+    renderDmImagePreview();
+    e.target.value = '';
+    if (selectedFiles.length) {
+      const inputEl = document.getElementById('dm-input');
+      inputEl?.focus();
     }
   });
 
@@ -8482,6 +10270,19 @@ async function renderDMChat(username) {
     textareaEl.addEventListener('input', () => {
       textareaEl.style.height = 'auto';
       textareaEl.style.height = Math.min(textareaEl.scrollHeight, 120) + 'px';
+      if (dmTypingTimer) clearTimeout(dmTypingTimer);
+      const conversationId = document.querySelector('.dm-chat')?.dataset.conversationId;
+      if (textareaEl.value.trim() && conversationId && !isSelfConversation) {
+        if (!dmTypingActive || dmTypingConversationId !== conversationId) {
+          stopLocalDmTyping();
+          dmTypingConversationId = conversationId;
+          dmTypingActive = true;
+          realtimeSocket?.emit('dm:typing', { conversationId, active: true });
+        }
+        dmTypingTimer = setTimeout(stopLocalDmTyping, 1800);
+      } else {
+        stopLocalDmTyping();
+      }
     });
   }
 
@@ -8489,24 +10290,28 @@ async function renderDMChat(username) {
   const sendDmMessage = async () => {
     const inputEl = document.getElementById('dm-input');
     const content = inputEl?.value;
-    if ((!content || !content.trim()) && !pendingImg) return;
+    if ((!content || !content.trim()) && !pendingImgs.length) return;
+    stopLocalDmTyping();
+    const imageViewLimit = pendingImgs.length ? Number(document.getElementById('dm-image-view-limit')?.value || 0) : 0;
     const sendBtn = document.getElementById('dm-send-btn');
     if (sendBtn) sendBtn.disabled = true;
 
     try {
-      let imageUrl = null;
-      if (pendingImg) {
+      const imageUrls = [];
+      const uploadStatus = document.getElementById('dm-img-upload-status');
+      for (const [index, item] of pendingImgs.entries()) {
         const fd = new FormData();
-        fd.append('image', pendingImg);
+        fd.append('image', item.file);
+        if (uploadStatus) uploadStatus.textContent = `Fotoğraf yükleniyor ${index + 1}/${pendingImgs.length}`;
         const uploadRes = await apiForm('/upload-image', fd);
-        imageUrl = uploadRes.url;
-        window.__dmClearImg();
+        imageUrls.push(uploadRes.url);
       }
-      const payload = { content: content || '', reply_to_id: replyToId };
-      if (imageUrl) payload.image_url = imageUrl;
+      const payload = { content: content || '', reply_to_id: replyToId, image_view_limit: imageViewLimit, image_urls: imageUrls };
       const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
         method: 'POST', body: JSON.stringify(payload)
       });
+      window.__dmClearImg();
+      if (uploadStatus) uploadStatus.textContent = '';
       if (inputEl) { inputEl.value = ''; inputEl.style.height = 'auto'; }
       window.__dmClearReply?.();
       const el = document.getElementById('dm-messages');
@@ -8517,7 +10322,11 @@ async function renderDMChat(username) {
       }
       lastPollMsgId = Number(msg.id);
     } catch (e) { toast(e.message, 'error'); }
-    finally { if (sendBtn) sendBtn.disabled = false; }
+    finally {
+      const uploadStatus = document.getElementById('dm-img-upload-status');
+      if (uploadStatus) uploadStatus.textContent = '';
+      if (sendBtn) sendBtn.disabled = false;
+    }
   };
 
   document.getElementById('dm-send-btn')?.addEventListener('click', sendDmMessage);
@@ -8527,7 +10336,43 @@ async function renderDMChat(username) {
 
   // Msg menu button clicks
   let lastPollMsgId = messages.length > 0 ? Number(messages[messages.length - 1].id) : 0;
-  document.getElementById('dm-messages')?.addEventListener('click', e => {
+  document.getElementById('dm-messages')?.addEventListener('click', async e => {
+    const limitedPhotoButton = e.target.closest('.dm-ephemeral-open');
+    if (limitedPhotoButton) {
+      e.preventDefault();
+      if (limitedPhotoButton.disabled) return;
+      limitedPhotoButton.disabled = true;
+      const messageId = limitedPhotoButton.dataset.messageId;
+      try {
+        const viewed = await api(`/conversation/${encodeURIComponent(username)}/messages/${encodeURIComponent(messageId)}/view-image`, { method: 'POST' });
+        const row = limitedPhotoButton.closest('.dm-msg-wrap');
+        const count = Number(viewed.image_view_count);
+        const limit = Number(viewed.image_view_limit);
+        if (count >= limit) {
+          limitedPhotoButton.outerHTML = '<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>';
+        } else {
+          limitedPhotoButton.dataset.viewCount = String(count);
+          limitedPhotoButton.innerHTML = `<i class="fas fa-eye"></i> Fotoğrafı aç (${limit - count} görüntüleme kaldı)`;
+          limitedPhotoButton.disabled = false;
+        }
+        if (row) row.dataset.imageViewCount = String(count);
+        showDmImageViewer(viewed.image_urls?.length ? viewed.image_urls : viewed.image_url, true);
+      } catch (error) {
+        if (error.status === 410) {
+          limitedPhotoButton.outerHTML = '<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>';
+        } else {
+          limitedPhotoButton.disabled = false;
+          toast(error.message, 'error');
+        }
+      }
+      return;
+    }
+    const messageImage = e.target.closest('.dm-message-image');
+    if (messageImage) {
+      e.preventDefault();
+      showDmImageViewer(messageImage.dataset.dmImageUrl || messageImage.src);
+      return;
+    }
     const menuBtn = e.target.closest('.dm-msg-menu-btn');
     if (menuBtn) {
       const msgId = menuBtn.dataset.id;
@@ -8554,6 +10399,12 @@ async function renderDMChat(username) {
       updateDmSelActions();
     }
   });
+  document.getElementById('dm-messages')?.addEventListener('contextmenu', event => {
+    if (event.target.closest('.dm-message-image, .dm-ephemeral-open')) event.preventDefault();
+  });
+  document.getElementById('dm-messages')?.addEventListener('dragstart', event => {
+    if (event.target.closest('.dm-message-image')) event.preventDefault();
+  });
 
   // Options
   document.getElementById('dm-options-btn')?.addEventListener('click', e => {
@@ -8568,6 +10419,10 @@ async function renderDMChat(username) {
       if (nextMuted && item && !muteIcon) item.querySelector('.dm-conv-name-row')?.insertAdjacentHTML('beforeend', '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>');
       if (!nextMuted) muteIcon?.remove();
       item?.classList.toggle('dm-conv-muted', nextMuted);
+    }, conv.theme_key || 'default', Boolean(conv.theme_shared), theme => {
+      conv.theme_key = theme.theme_key;
+      conv.theme_shared = theme.shared;
+      conv.shared_theme_key = theme.shared ? theme.theme_key : '';
     });
   });
 
@@ -8730,6 +10585,18 @@ function dmMessagesHTML(messages, myId) {
   }).join('');
 }
 
+function dmMessageImageUrls(message) {
+  let urls = message?.image_urls;
+  if (typeof urls === 'string') {
+    try { urls = JSON.parse(urls); } catch { urls = []; }
+  }
+  const validUrls = Array.isArray(urls) ? urls.filter(url => typeof url === 'string' && url.trim()) : [];
+  if (!validUrls.length && typeof message?.image_url === 'string' && message.image_url.trim()) {
+    validUrls.push(message.image_url);
+  }
+  return validUrls;
+}
+
 function appendDMMessage(container, message, myId, selMode) {
   const previousElement = container.lastElementChild?.matches('.dm-msg-wrap')
     ? container.lastElementChild
@@ -8738,6 +10605,21 @@ function appendDMMessage(container, message, myId, selMode) {
     ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt }
     : null;
   container.insertAdjacentHTML('beforeend', dmMessageHTML(message, myId, selMode, previousMessage));
+}
+
+function showDmImageViewer(imageUrls, ephemeral = false) {
+  const urls = (Array.isArray(imageUrls) ? imageUrls : [imageUrls]).filter(Boolean);
+  if (!urls.length) return;
+  showModal(ephemeral ? 'Fotoğraf' : 'Fotoğrafı Görüntüle', `
+    <div class="dm-ephemeral-view${urls.length > 1 ? ' dm-image-viewer-multiple' : ''}">
+      ${urls.map((url, index) => `<div class="dm-image-viewer-item"><img class="${ephemeral ? 'dm-image-view dm-ephemeral-image' : 'dm-image-view'}" src="${escHtml(url)}" alt="${urls.length > 1 ? `Mesaj fotoğrafı ${index + 1}` : 'Mesaj fotoğrafı'}" draggable="false" />${ephemeral ? `<span class="dm-ephemeral-watermark">@${escHtml(currentUser?.username || 'CigCig')} · CigCig</span>` : ''}</div>`).join('')}
+    </div>
+    ${ephemeral ? '<p class="form-hint">Bu fotoğraflar için sınırlı görüntüleme hakkı kullanıldı.</p>' : ''}
+  `);
+  document.querySelectorAll('.dm-image-view').forEach(image => {
+    image.addEventListener('contextmenu', event => event.preventDefault());
+    image.addEventListener('dragstart', event => event.preventDefault());
+  });
 }
 
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
@@ -8750,13 +10632,14 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
   const messageTime = Date.parse(m.created_at);
   const previousTime = Date.parse(previousMessage?.created_at);
+  const imageUrls = dmMessageImageUrls(m);
   const isContinued = previousMessage
     && String(previousMessage.sender_id) === String(m.sender_id)
     && Number.isFinite(messageTime)
     && Number.isFinite(previousTime)
     && Math.abs(messageTime - previousTime) <= 60_000;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -8777,10 +10660,16 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
         : ''}
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
-        : `<div class="dm-msg-bubble">
-             ${m.image_url
-               ? `<img src="${escHtml(m.image_url)}" class="dm-message-image" alt="" onerror="this.remove()" onclick="window.open('${escHtml(m.image_url)}','_blank')" />`
-               : ''}
+        : `<div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
+             ${Number(m.image_view_limit) > 0 && !isOwn
+               ? Number(m.image_view_count) >= Number(m.image_view_limit)
+                 ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
+                 : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}"><i class="fas fa-eye"></i> Sınırlı görüntülemeli fotoğrafı aç</button>`
+               : imageUrls.length === 1
+                 ? `<img src="${escHtml(imageUrls[0])}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(imageUrls[0])}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
+                 : imageUrls.length > 1
+                   ? `<div class="dm-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<img src="${escHtml(url)}" class="dm-message-image" alt="Mesaj fotoğrafı ${index + 1}" data-dm-image-url="${escHtml(url)}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`).join('')}</div>`
+                   : ''}
              ${m.shared_forum_id
                ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
                     ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
@@ -8808,7 +10697,14 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                     <div><b>${escHtml(m.story_username || 'Hikaye')}</b><small>Hikaye yanıtı</small></div>
                   </div>`
                : ''}
+             ${m.shared_newspaper_id
+               ? `<a class="dm-shared-newspaper" href="/gazete/${encodeURIComponent(m.shared_newspaper_id)}" data-link>
+                    ${m.newspaper_image ? `<img src="${escHtml(m.newspaper_image)}" alt="" />` : '<span class="dm-shared-newspaper-icon"><i class="fas fa-newspaper"></i></span>'}
+                    <span><strong>${escHtml(m.newspaper_name || 'Gazete')}</strong><small>${m.newspaper_date ? escHtml(formatNewspaperDate(m.newspaper_date)) : 'Gazeteler →'}</small></span>
+                  </a>`
+               : ''}
              ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
+             ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}
            </div>`}
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
@@ -8835,15 +10731,23 @@ document.addEventListener('mouseout', e => {
 
 function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   document.getElementById('dm-msg-ctx')?.remove();
+  const messageRow = [...document.querySelectorAll('.dm-msg-wrap')].find(row => row.dataset.id === String(msgId));
+  const createdAt = Date.parse(messageRow?.dataset.createdAt || '');
+  const messageAge = Date.now() - createdAt;
+  const canEdit = isOwn
+    && Boolean(messageRow?.dataset.content?.trim())
+    && !messageRow?.querySelector('.dm-deleted')
+    && Number.isFinite(createdAt)
+    && messageAge <= 3 * 60 * 60 * 1000
+    && messageAge >= -5 * 60 * 1000;
   const rect = btn.getBoundingClientRect();
   const menu = document.createElement('div');
   menu.id = 'dm-msg-ctx';
-  const leftPos = Math.max(8, rect.left - 160);
-  const topPos = Math.min(rect.bottom + 4, window.innerHeight - 160);
-  menu.style.cssText = `position:fixed;left:${leftPos}px;top:${topPos}px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden`;
+  menu.style.cssText = 'position:fixed;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden';
   const items = [
     { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
+    ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
     ...(isOwn ? [{ label: '<i class="fas fa-trash-alt fa-fw"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
   ];
@@ -8865,6 +10769,43 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
         if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
       } else if (item.action === 'select') {
         enterDmSelection(msgId);
+      } else if (item.action === 'edit') {
+        showModal('Mesajı düzenle', `
+          <div class="form-group">
+            <label for="edit-dm-message">Mesaj metni</label>
+            <textarea id="edit-dm-message" rows="5" maxlength="5000">${escHtml(messageRow.dataset.content)}</textarea>
+          </div>
+          <button type="button" class="btn btn-primary" id="save-dm-message-edit" style="width:100%">Kaydet</button>
+          <div id="edit-dm-message-error" class="form-error mt-4"></div>`);
+        const input = document.getElementById('edit-dm-message');
+        const saveButton = document.getElementById('save-dm-message-edit');
+        const errorMessage = document.getElementById('edit-dm-message-error');
+        input?.focus();
+        input?.setSelectionRange(input.value.length, input.value.length);
+        saveButton?.addEventListener('click', async () => {
+          const content = input.value.trim();
+          if (!content) {
+            if (errorMessage) errorMessage.textContent = 'Mesaj boş olamaz.';
+            return;
+          }
+          saveButton.disabled = true;
+          try {
+            const updated = await api(`/messages/${encodeURIComponent(msgId)}`, {
+              method: 'PUT',
+              body: JSON.stringify({ content }),
+            });
+            handleRealtimeDirectMessageEdit({
+              usernames: [currentUser.username, username],
+              message: updated,
+            });
+          } catch (error) {
+            if (errorMessage) errorMessage.textContent = error.message || 'Mesaj düzenlenemedi.';
+            saveButton.disabled = false;
+            return;
+          }
+          if (document.getElementById('edit-dm-message') === input) hideModal();
+          toast('Mesaj düzenlendi.');
+        });
       } else if (item.action === 'delete-me') {
         try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'me' }) }); renderDMChat(username); }
         catch (e) { toast(e.message, 'error'); }
@@ -8876,6 +10817,8 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     menu.appendChild(el);
   });
   document.body.appendChild(menu);
+  menu.style.left = `${Math.max(8, Math.min(rect.left - menu.offsetWidth + rect.width, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
 }
 
@@ -8925,9 +10868,34 @@ function showGroupInboxOptionsMenu(slug, name, isMuted, onMuteChange) {
   });
 }
 
-function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () => {}) {
+const DM_THEME_LABELS = {
+  default: 'Varsayılan',
+  sunset: 'Gün Batımı',
+  ocean: 'Okyanus',
+  rose: 'Gül',
+  forest: 'Orman',
+  lavender: 'Lavanta'
+};
+
+function dmThemeOptionsHTML(selectedTheme = 'default', buttons = false) {
+  const options = Object.entries(DM_THEME_LABELS);
+  if (buttons) return options.map(([key, label]) => `<button type="button" class="dm-theme-option" data-theme-key="${key}" aria-pressed="${key === selectedTheme}"><span class="dm-theme-swatch" style="--dm-theme-swatch:${({
+    default: 'linear-gradient(135deg,#334155,#64748b)', sunset: 'linear-gradient(135deg,#f97316,#be123c)',
+    ocean: 'linear-gradient(135deg,#0284c7,#1d4ed8)', rose: 'linear-gradient(135deg,#e11d48,#be185d)',
+    forest: 'linear-gradient(135deg,#15803d,#065f46)', lavender: 'linear-gradient(135deg,#7c3aed,#6d28d9)'
+  })[key]}"></span>${label}</button>`).join('');
+  return options.map(([key, label]) => `<option value="${key}" ${key === selectedTheme ? 'selected' : ''}>${label}</option>`).join('');
+}
+
+function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () => {}, themeKey = 'default', themeShared = false, onThemeChange = () => {}) {
   showModal('Konuşma Seçenekleri', `
     <div class="dm-options-content">
+      <div class="dm-options-section">
+        <h4>Konuşma teması</h4>
+        <div class="dm-theme-options">${dmThemeOptionsHTML(themeKey, true)}</div>
+        <label class="dm-theme-share"><input type="checkbox" id="dm-theme-share" ${themeShared ? 'checked' : ''} /> Temayı karşı tarafa da uygula</label>
+        <button type="button" class="btn btn-primary" id="dm-theme-save" style="width:100%;margin-top:10px">Temayı uygula</button>
+      </div>
       <div class="dm-options-section">
         ${isMuted
           ? '<button class="btn btn-outline" id="dm-opt-unmute"><i class="fas fa-bell"></i> Sesi Aç</button>'
@@ -8942,6 +10910,34 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       <p class="dm-options-note"><i class="fas fa-circle-info"></i> “Herkesten temizle” işlemi geri alınamaz ve konuşmadaki mesajları iki taraftan kaldırır.</p>
     </div>
   `);
+  let selectedTheme = DM_THEME_LABELS[themeKey] ? themeKey : 'default';
+  document.querySelectorAll('.dm-theme-option').forEach(button => {
+    button.addEventListener('click', () => {
+      selectedTheme = button.dataset.themeKey;
+      document.querySelectorAll('.dm-theme-option').forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+    });
+  });
+  document.getElementById('dm-theme-save')?.addEventListener('click', async () => {
+    const saveButton = document.getElementById('dm-theme-save');
+    if (saveButton) saveButton.disabled = true;
+    try {
+      const result = await api(`/conversation/${encodeURIComponent(username)}/theme`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          theme_key: selectedTheme,
+          apply_to_other: document.getElementById('dm-theme-share')?.checked === true
+        })
+      });
+      const activeChat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(convId))}"]`);
+      activeChat?.setAttribute('data-dm-theme', result.theme.theme_key);
+      onThemeChange(result.theme);
+      hideModal();
+      toast('Konuşma teması güncellendi');
+    } catch (error) {
+      toast(error.message, 'error');
+      if (saveButton) saveButton.disabled = false;
+    }
+  });
   document.getElementById('dm-opt-mute')?.addEventListener('click', () => {
     showMuteDurationPicker('Mesaj bildirimlerini sessize al', async hours => {
       try {
@@ -9021,12 +11017,12 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       toast(mode === 'all' ? 'Sohbet iki taraftan temizlendi' : 'Sohbet sadece sizden temizlendi');
     } catch (e) { toast(e.message, 'error'); }
   };
-  document.getElementById('dm-opt-clear-me')?.addEventListener('click', () => {
-    if (confirm('Sohbet yalnızca sizden temizlensin mi?')) clearConversation('me');
+  document.getElementById('dm-opt-clear-me')?.addEventListener('click', async () => {
+    if (await CigCigDialogs.confirm('Sohbet yalnızca sizden temizlensin mi?')) clearConversation('me');
   });
-  document.getElementById('dm-opt-clear-all')?.addEventListener('click', () => {
-    if (!confirm('Bu sohbet tüm mesajlarıyla iki taraftan da temizlensin mi?')) return;
-    if (!confirm('Son kez soruyorum: Karşı taraftaki mesajlar da kalıcı olarak silinsin mi?')) return;
+  document.getElementById('dm-opt-clear-all')?.addEventListener('click', async () => {
+    if (!await CigCigDialogs.confirm('Bu sohbet tüm mesajlarıyla iki taraftan da temizlensin mi?')) return;
+    if (!await CigCigDialogs.confirm('Son kez soruyorum: Karşı taraftaki mesajlar da kalıcı olarak silinsin mi?')) return;
     clearConversation('all');
   });
 }
@@ -9334,7 +11330,7 @@ async function renderVmbFiles(app) {
     if (file) showVmbFileModal(file, () => renderVmbFiles(app));
   }));
   $$('.vmb-delete-file').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu dosya ve içindeki tüm klasörler silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu dosya ve içindeki tüm klasörler silinsin mi?')) return;
     try { await api(`/vmb/files/${encodeURIComponent(button.dataset.slug)}`, { method: 'DELETE' }); toast('Dosya silindi'); renderVmbFiles(app); } catch (error) { toast(error.message, 'error'); }
   }));
 }
@@ -9369,7 +11365,7 @@ async function renderVmbFile(app, slug) {
     if (folder) showVmbFolderModal(file.id, null, folder, () => renderVmbFile(app, slug));
   }));
   $$('.vmb-delete-folder').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
     try { await api(`/vmb/folders/${button.dataset.id}`, { method: 'DELETE' }); toast('Klasör silindi'); renderVmbFile(app, slug); } catch (error) { toast(error.message, 'error'); }
   }));
 }
@@ -9401,7 +11397,7 @@ async function renderVmbFolder(app, folderId) {
     if (child) showVmbFolderModal(folder.file_id, folder.id, child, () => renderVmbFolder(app, folderId));
   }));
   $$('.vmb-delete-folder').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu klasör ve içindeki tüm içerik silinsin mi?')) return;
     try { await api(`/vmb/folders/${button.dataset.id}`, { method: 'DELETE' }); toast('Klasör silindi'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
   }));
   $$('.vmb-edit-page').forEach(button => button.addEventListener('click', () => {
@@ -9409,12 +11405,12 @@ async function renderVmbFolder(app, folderId) {
     if (page) showVmbPageModal(folder.id, page, () => renderVmbFolder(app, folderId));
   }));
   $$('.vmb-delete-page').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Bu sayfa silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu sayfa silinsin mi?')) return;
     try { await api(`/vmb/folder/${folder.id}/page/${encodeURIComponent(button.dataset.slug)}`, { method: 'DELETE' }); toast('Sayfa silindi'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
   }));
   $$('.vmb-asset-delete').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault(); event.stopPropagation();
-    if (!confirm('Bu arşiv dosyası kaldırılsın mı?')) return;
+    if (!await CigCigDialogs.confirm('Bu arşiv dosyası kaldırılsın mı?')) return;
     try { await api(`/vmb/assets/${button.dataset.id}`, { method: 'DELETE' }); toast('Dosya kaldırıldı'); renderVmbFolder(app, folderId); } catch (error) { toast(error.message, 'error'); }
   }));
 }
@@ -9442,7 +11438,7 @@ async function renderVmbPageReader(app, folderId, pageSlug) {
   $('#vmb-font-inc').addEventListener('click', () => { const current = parseInt(content.style.fontSize) || fontSize; if (current < 26) { content.style.fontSize = `${current + 1}px`; $('#vmb-font-label').textContent = `${current + 1}px`; localStorage.setItem('ebook-font-size', current + 1); } });
   $('#vmb-reader-edit')?.addEventListener('click', () => showVmbPageModal(page.folder_id, page, () => renderVmbPageReader(app, folderId, pageSlug)));
   $('#vmb-reader-delete')?.addEventListener('click', async () => {
-    if (!confirm('Bu sayfa silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu sayfa silinsin mi?')) return;
     try { await api(`/vmb/folder/${page.folder_id}/page/${encodeURIComponent(page.slug)}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate(`/vmb/dosyalar/${page.file_slug}/klasor/${page.folder_id}`); } catch (error) { toast(error.message, 'error'); }
   });
 }
@@ -9590,11 +11586,11 @@ async function renderFriends(app) {
       if (remove) {
         const isOutgoing = remove.title === 'İsteği İptal Et';
         const msg = isOutgoing ? 'Arkadaşlık isteğini iptal et?' : 'Arkadaşlıktan çıkart?';
-        if (!confirm(msg)) return;
+        if (!await CigCigDialogs.confirm(msg)) return;
         try { await api(`/friends/${remove.dataset.id}`, { method: 'DELETE' }); renderFriends(app); } catch (err) { toast(err.message,'error'); }
       }
       if (block) {
-        if (!confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
+        if (!await CigCigDialogs.confirm(`@${block.dataset.username} kullanıcısını engellemek istediğine emin misin? Mevcut arkadaşlık da silinecek.`)) return;
         try { await api(`/block/${encodeURIComponent(block.dataset.username)}`, { method: 'POST' }); renderFriends(app); } catch (err) { toast(err.message,'error'); }
       }
       if (unblock) { try { await api(`/block/${unblock.dataset.username}`, { method: 'DELETE' }); renderFriends(app); } catch (err) { toast(err.message,'error'); } }
@@ -9627,7 +11623,7 @@ function friendItemHTML(f, type, myId) {
   return `<div class="card card-body friend-card" data-type="${type}" data-username="${escHtml(other_username)}" style="margin-bottom:8px;display:flex;align-items:center;gap:10px;${type === 'accepted' ? 'cursor:pointer;' : ''}">
     ${other_avatar ? `<img src="${escHtml(other_avatar)}" class="avatar-md" />` : `<div class="avatar-md avatar-placeholder"><i class="fas fa-user"></i></div>`}
     <div style="flex:1">
-      <a href="${profileRoute(other_username)}" data-link class="user-identity" style="font-weight:600;font-size:14px;color:var(--text-primary)"><strong>${escHtml(other_nickname)}</strong><small>@${escHtml(other_username)}</small></a>
+      <a href="${profileRoute(other_username)}" data-link class="user-identity" style="font-weight:600;font-size:14px;color:var(--text-primary)"><strong>${escHtml(other_nickname)} ${redVerificationIconHTML(f.other_is_red_verified, f.other_red_verified_at)}</strong><small>@${escHtml(other_username)}</small></a>
       ${type === 'outgoing' ? `<div style="font-size:11px;color:var(--text-muted)"><i class="fas fa-clock"></i> Beklemede</div>` : ''}
       ${type === 'incoming' ? `<div style="font-size:11px;color:var(--accent-red2)"><i class="fas fa-user-plus"></i> Arkadaşlık isteği gönderdi</div>` : ''}
     </div>
@@ -9898,13 +11894,16 @@ let currentSlug = null;
 // Playlist queue state
 let currentQueue = [];         // [{id, slug, title, artist_name, cover_url, audio_url}, ...]
 let currentQueueIndex = -1;
+function getMusicQueueState(song) {
+  const index = currentQueue.findIndex(track => track.slug === song?.slug);
+  return index >= 0 ? { queue: currentQueue, index } : { queue: song ? [song] : [], index: 0 };
+}
 const MUSIC_AUTO_SHUFFLE_KEY = 'cigcig_music_auto_shuffle';
 const MUSIC_REPEAT_ONE_KEY = 'cigcig_music_repeat_one';
 const MUSIC_RESUME_KEY = 'cigcig_music_resume';
 let playerAutoShuffle = localStorage.getItem(MUSIC_AUTO_SHUFFLE_KEY) === '1';
 let playerRepeatOne = localStorage.getItem(MUSIC_REPEAT_ONE_KEY) === '1';
 let musicAdBypass = false;
-let guestMusicSongCount = 0;
 let listeningRoom = null;
 let listeningRoomPoll = null;
 let listeningInternalOpen = false;
@@ -9937,10 +11936,19 @@ function saveMusicPlayback(audio, force = false) {
 }
 
 function bindMusicPlaybackPersistence(audio) {
+  if (audio.musicPlaybackPersistenceBound) return;
+  audio.musicPlaybackPersistenceBound = true;
   audio.addEventListener('timeupdate', () => saveMusicPlayback(audio));
   audio.addEventListener('pause', () => saveMusicPlayback(audio, true));
   audio.addEventListener('play', () => saveMusicPlayback(audio, true));
   audio.addEventListener('ended', clearSavedMusicPlayback);
+}
+
+function stopMusicAdTracking(audio) {
+  if (audio?.musicAdTracking?.timer) {
+    clearInterval(audio.musicAdTracking.timer);
+    audio.musicAdTracking.timer = null;
+  }
 }
 
 function restoreSavedMusicPlayback(songs = []) {
@@ -9966,14 +11974,134 @@ function restoreSavedMusicPlayback(songs = []) {
   });
 }
 
-async function playGuestMusicAdIfDue(onComplete) {
-  guestMusicSongCount += 1;
-  if (guestMusicSongCount < 2) return false;
-  const result = await api('/music-ads/guest').catch(() => null);
-  if (!result?.ad) return false;
-  guestMusicSongCount = 0;
-  playMusicAd(result.ad, onComplete);
-  return true;
+const MUSIC_AD_LISTEN_THRESHOLD_SECONDS = 20;
+const MUSIC_AD_HEARTBEAT_MS = 10000;
+const GUEST_MUSIC_AD_STATE_KEY = 'cigcig_guest_music_ad_state';
+
+function readGuestMusicAdState() {
+  const today = new Date().toLocaleDateString('sv-SE');
+  try {
+    const saved = JSON.parse(localStorage.getItem(GUEST_MUSIC_AD_STATE_KEY) || '{}');
+    if (saved.date === today && Array.isArray(saved.listenedSongs)) return saved;
+  } catch (error) {
+    console.warn('Misafir müzik reklam durumu okunamadı:', error);
+  }
+  return { date: today, listenedSongs: [], countSinceAd: 0 };
+}
+
+async function countGuestMusicListen(song, onComplete) {
+  const state = readGuestMusicAdState();
+  const songKey = String(song.id || song.slug || '');
+  if (!songKey || state.listenedSongs.includes(songKey)) return;
+  state.listenedSongs.push(songKey);
+  state.countSinceAd += 1;
+  const { settings, ad } = await api('/music-ads/guest');
+  const due = settings.mode === 'random'
+    ? Math.random() < ({ rare: 0.15, medium: 0.3, frequent: 0.5 }[settings.random_frequency] || 0.3)
+    : state.countSinceAd >= settings.interval;
+  if (due && ad) {
+    state.countSinceAd = 0;
+    localStorage.setItem(GUEST_MUSIC_AD_STATE_KEY, JSON.stringify(state));
+    playMusicAd(ad, onComplete);
+    return;
+  }
+  localStorage.setItem(GUEST_MUSIC_AD_STATE_KEY, JSON.stringify(state));
+}
+
+function bindMusicAdTracking(audio, song) {
+  if (!audio || !song || song.is_music_ad) return;
+  if (audio.musicAdTracking?.songId === String(song.id || song.slug)) return;
+  if (audio.musicAdTracking?.timer) clearInterval(audio.musicAdTracking.timer);
+  const tracking = {
+    songId: String(song.id || song.slug),
+    sessionId: null,
+    completed: false,
+    startPromise: null,
+    guestListenedSeconds: 0,
+    guestLastAt: Date.now(),
+    guestLastPosition: Number(audio.currentTime) || 0,
+    guestCounted: false
+  };
+  audio.musicAdTracking = tracking;
+
+  const resumeAfterAd = () => {
+    if (document.body.classList.contains('song-detail-route') && document.getElementById('detail-audio') === audio) {
+      currentAudio = audio;
+      currentSlug = song.slug;
+      const player = document.getElementById('global-music-player');
+      player?.classList.remove('music-ad-player');
+      if (player) player.style.display = 'none';
+      audio.play().catch(() => {});
+      const playButton = document.getElementById('detail-play-btn');
+      if (playButton) playButton.innerHTML = '<i class="fas fa-pause"></i>';
+      return;
+    }
+    stopMusicAdTracking(audio);
+    const queueState = getMusicQueueState(song);
+    openMiniPlayer(song.audio_url, song.slug, song, queueState.queue, queueState.index, {
+      startAt: audio.currentTime,
+      countPlay: false,
+      skipPendingAd: true
+    });
+  };
+
+  const startSession = async () => {
+    if (!currentUser || tracking.sessionId || tracking.completed || tracking.startPromise || audio.paused) return;
+    tracking.startPromise = api('/music-listens/start', {
+      method: 'POST',
+      body: JSON.stringify({ song_id: song.id, position: audio.currentTime })
+    }).then(result => {
+      tracking.sessionId = result.session_id;
+      tracking.completed = !result.session_id;
+    })
+      .catch(error => console.warn('Müzik dinleme oturumu başlatılamadı:', error.message))
+      .finally(() => { tracking.startPromise = null; });
+    await tracking.startPromise;
+  };
+
+  const heartbeat = async () => {
+    if (!currentUser || audio.paused || !tracking.sessionId || currentAudio !== audio) return;
+    try {
+      const result = await api(`/music-listens/${encodeURIComponent(tracking.sessionId)}/heartbeat`, {
+        method: 'POST',
+        body: JSON.stringify({ position: audio.currentTime, playing: !audio.paused })
+      });
+      if (result.counted) {
+        tracking.completed = true;
+        tracking.sessionId = null;
+      }
+      if (result.ad) {
+        audio.pause();
+        playMusicAd(result.ad, resumeAfterAd);
+      }
+    } catch (error) {
+      tracking.sessionId = null;
+      console.warn('Müzik dinlemesi doğrulanamadı:', error.message);
+    }
+  };
+
+  audio.addEventListener('playing', startSession);
+  if (currentUser && !currentUser.is_vip && !currentUser.is_plus && !listeningRoomAdsDisabled()) {
+    tracking.timer = setInterval(() => { startSession().then(heartbeat); }, MUSIC_AD_HEARTBEAT_MS);
+    startSession();
+  } else if (!currentUser) {
+    audio.addEventListener('timeupdate', () => {
+      if (tracking.guestCounted || audio.paused) return;
+      const now = Date.now();
+      const position = Number(audio.currentTime) || 0;
+      const elapsed = Math.min(2, Math.max(0, (now - tracking.guestLastAt) / 1000));
+      const delta = position - tracking.guestLastPosition;
+      if (elapsed >= 0.1 && delta > 0 && delta <= elapsed * 1.75 + 0.5) {
+        tracking.guestListenedSeconds += Math.min(elapsed, delta);
+      }
+      tracking.guestLastAt = now;
+      tracking.guestLastPosition = position;
+      if (tracking.guestListenedSeconds >= MUSIC_AD_LISTEN_THRESHOLD_SECONDS) {
+        tracking.guestCounted = true;
+        countGuestMusicListen(song, resumeAfterAd).catch(error => console.warn('Misafir dinlemesi kaydedilemedi:', error.message));
+      }
+    });
+  }
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -10091,7 +12219,7 @@ async function renderListeningRoom(app, publicId) {
   if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent('/ortak-dinleyis/' + publicId));
   try {
     const room = await api('/listening-rooms/' + encodeURIComponent(publicId));
-    listeningRoom = { ...room, isOwner: String(room.owner_id) === String(currentUser.id) };
+    listeningRoom = { ...room, isMember: !!room.is_member, isOwner: String(room.owner_id) === String(currentUser.id) };
     renderListeningRoomView(app);
     startListeningRoomPolling();
   } catch (error) { app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-lock"></i><p>${escHtml(error.message)}</p></div></div>`; }
@@ -10103,10 +12231,13 @@ function startListeningRoomPolling() {
     if (!listeningRoom) return;
     try {
       const room = await api('/listening-rooms/' + encodeURIComponent(listeningRoom.public_id));
-      listeningRoom = { ...listeningRoom, ...room };
-      renderListeningRoomMini();
+      const wasMember = listeningRoom.isMember;
+      listeningRoom = { ...listeningRoom, ...room, isMember: !!room.is_member };
+      if (listeningRoom.isMember) renderListeningRoomMini();
+      else document.getElementById('listening-room-mini')?.remove();
       syncListeningAudio();
-      renderListeningRoomView(document.getElementById('app'), true);
+      const app = document.getElementById('app');
+      if (app?.querySelector('.listening-room-page')) renderListeningRoomView(app, wasMember === listeningRoom.isMember);
     } catch {}
   }, 1000);
 }
@@ -10115,15 +12246,28 @@ function currentListeningTrack() { return listeningRoom?.state?.tracks?.find(tra
 function listeningRoomAdsDisabled() { return !!(listeningRoom && Number(listeningRoom.owner_is_plus) === 1); }
 
 function syncListeningAudio() {
+  if (!listeningRoom?.isMember) {
+    if (currentAudio?.dataset?.listeningTrackId) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    return;
+  }
   const track = currentListeningTrack();
-  if (!track) return;
+  if (!track) {
+    if (currentAudio?.dataset?.listeningTrackId) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+    return;
+  }
   if (!currentAudio || currentAudio.dataset.listeningTrackId !== String(track.id)) {
     listeningInternalOpen = true;
     openMiniPlayer(track.audio_url, track.slug, { ...track, is_music_ad: true });
     listeningInternalOpen = false;
     if (currentAudio) currentAudio.dataset.listeningTrackId = String(track.id);
   }
-  const elapsed = track.started_at ? Math.max(0, (Date.now() - new Date(track.started_at).getTime()) / 1000) : 0;
+  const elapsed = Math.max(0, Number(track.current_position_seconds) || 0);
   if (currentAudio && Number.isFinite(currentAudio.duration) && Math.abs(currentAudio.currentTime - elapsed) > 0.8) currentAudio.currentTime = Math.min(elapsed, currentAudio.duration);
   if (currentAudio && track.state === 'paused') currentAudio.pause();
   if (currentAudio && track.state === 'playing' && currentAudio.paused) currentAudio.play().catch(() => {});
@@ -10137,10 +12281,9 @@ async function createListeningRoomFromSong(song) {
   }
   let createdRoom = null;
   try {
-    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: `${song.title || 'Şarkı'} ortak dinleyişi` }) });
+    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: `${song.title || 'Şarkı'} ortak dinleyişi`, song_id: songId }) });
     createdRoom = room;
-    listeningRoom = { ...room, isOwner: true };
-    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: songId }) });
+    listeningRoom = { ...room, isMember: true, isOwner: true };
     await refreshListeningRoom();
     toast('Ortak dinleyiş hazır. Linki paylaşabilirsin.');
   } catch (error) {
@@ -10161,9 +12304,8 @@ async function createListeningRoomFromQueue(queue) {
     return;
   }
   try {
-    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi' }) });
-    listeningRoom = { ...room, isOwner: true };
-    await api(`/listening-rooms/${room.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'play', song_id: Number(firstSong.id) }) });
+    const room = await api('/listening-rooms', { method: 'POST', body: JSON.stringify({ title: 'Ortak playlist dinleyişi', song_id: Number(firstSong.id) }) });
+    listeningRoom = { ...room, isMember: true, isOwner: true };
     const remainingIds = validQueue.slice(1).map(song => Number(song.id)).filter(Number.isSafeInteger);
     if (remainingIds.length) await api(`/listening-rooms/${room.public_id}/tracks/bulk`, { method: 'POST', body: JSON.stringify({ song_ids: remainingIds }) });
     await refreshListeningRoom();
@@ -10174,43 +12316,119 @@ async function createListeningRoomFromQueue(queue) {
 async function refreshListeningRoom() {
   if (!listeningRoom) return;
   const room = await api('/listening-rooms/' + encodeURIComponent(listeningRoom.public_id));
-  listeningRoom = { ...listeningRoom, ...room };
-  renderListeningRoomMini();
+  listeningRoom = { ...listeningRoom, ...room, isMember: !!room.is_member };
+  if (listeningRoom.isMember) renderListeningRoomMini();
+  else document.getElementById('listening-room-mini')?.remove();
   syncListeningAudio();
-  renderListeningRoomView(document.getElementById('app'), true);
+  const app = document.getElementById('app');
+  if (app?.querySelector('.listening-room-page')) renderListeningRoomView(app);
 }
 
 function renderListeningRoomView(app, quiet = false) {
   if (!app || !listeningRoom) return;
   const state = listeningRoom.state || { members: [], tracks: [], requests: [] };
   const track = currentListeningTrack();
-  if (!quiet || !app.querySelector('.listening-room-page')) app.innerHTML = `<div class="container page listening-room-page"><div class="listening-room-heading"><div><span class="eyebrow"><i class="fas fa-tower-broadcast"></i> CANLI ORTAK DİNLEYİŞ</span><h1>${escHtml(listeningRoom.title)}</h1><p><a href="${profileRoute(listeningRoom.owner_username)}" data-link>${escHtml(listeningRoom.owner_username)}</a> yönetiyor · ${state.members.length} kişi</p></div><button class="btn btn-outline" id="listening-share"><i class="fas fa-link"></i> Ortak linki paylaş</button></div><div class="listening-room-grid"><section class="listening-room-panel"><h2><i class="fas fa-wave-square"></i> Şimdi dinleniyor</h2><div id="listening-current">${track ? `<strong>${escHtml(track.title)}</strong><span>${escHtml(track.artist_name)}</span>` : 'Sırada şarkı bekleniyor.'}</div>${listeningRoom.isOwner ? `<button class="btn btn-outline btn-sm" id="listening-skip"><i class="fas fa-forward"></i> Sıradakini çal</button><div id="listening-requests"></div>` : '<p class="listening-hint">Başka bir müzik açarsan sahibine istek gönderilir.</p>'}</section><section class="listening-room-panel"><h2><i class="fas fa-users"></i> Dinleyiştekiler</h2><div class="listening-members" id="listening-members"></div><button class="btn btn-danger btn-sm" id="listening-leave"><i class="fas fa-right-from-bracket"></i> Çıkış</button></section></div></div>`;
-  const members = document.getElementById('listening-members'); if (members) members.innerHTML = state.members.map(member => `<a class="listening-member" href="${profileRoute(member.username)}" data-link><i class="fas fa-user-circle"></i><span class="user-identity"><strong>${escHtml(member.nickname || member.username)}</strong><small>@${escHtml(member.username)}</small></span>${member.role === 'owner' ? '<b>SAHİP</b>' : ''}</a>`).join('');
-  const requests = document.getElementById('listening-requests'); if (requests) requests.innerHTML = state.requests.map(item => `<div class="listening-request"><span>${escHtml(item.title)}<small>${escHtml(item.requester_username)}</small></span><button class="btn btn-primary btn-xs" data-request="accept" data-id="${item.id}"><i class="fas fa-check"></i></button><button class="btn btn-outline btn-xs" data-request="reject" data-id="${item.id}"><i class="fas fa-xmark"></i></button></div>`).join('');
-  if (!quiet) {
-    document.getElementById('listening-share')?.addEventListener('click', async () => { await navigator.clipboard?.writeText(location.origin + listeningRoom.share_url); toast('Ortak link kopyalandı'); });
-    document.getElementById('listening-leave')?.addEventListener('click', leaveListeningRoom);
-    document.getElementById('listening-skip')?.addEventListener('click', () => api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'skip' }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error')));
+  if (!quiet || !app.querySelector('.listening-room-page')) {
+    const joinedContent = listeningRoom.isMember
+      ? `<div class="listening-room-grid">
+          <section class="listening-room-panel listening-now-panel">
+            <div class="listening-panel-label"><i class="fas fa-wave-square"></i> CANLI ÇALAN</div>
+            <div class="listening-now-track" id="listening-current">${track ? `<div class="listening-track-art"><i class="fas fa-music"></i></div><div><strong>${escHtml(track.title)}</strong><span>${escHtml(track.artist_name)}</span></div>` : '<div class="listening-track-art"><i class="fas fa-music"></i></div><div><strong>Henüz şarkı yok</strong><span>Sıradaki şarkı bekleniyor.</span></div>'}</div>
+            ${listeningRoom.isOwner ? `<button class="btn btn-outline btn-sm" data-room-action="skip"><i class="fas fa-forward"></i> Sıradakini çal</button><div class="listening-requests-wrap"><h3>Şarkı istekleri</h3><div id="listening-requests"></div></div>` : '<p class="listening-hint"><i class="fas fa-circle-info"></i> Müziklerden şarkı seçerek istek gönderebilirsin. Şarkıyı sıraya yönetici ekler.</p>'}
+          </section>
+          <section class="listening-room-panel listening-people-panel">
+            <div class="listening-panel-label"><i class="fas fa-users"></i> DİNLEYİŞTEKİLER <span>${state.members.length}</span></div>
+            <div class="listening-members" id="listening-members"></div>
+            <button class="btn btn-danger btn-sm" data-room-action="leave"><i class="fas fa-right-from-bracket"></i> Dinleyişten çık</button>
+          </section>
+        </div>`
+      : `<section class="listening-room-panel listening-invite-card">
+          <div class="listening-invite-icon"><i class="fas fa-headphones"></i></div>
+          <h2>Bu ortak dinleyişe katıl</h2>
+          <p>Katılmadan dinleyişe dahil olmaz ve katılımcı listesinde görünmezsin.</p>
+          <button class="btn btn-primary" data-room-action="join"><i class="fas fa-right-to-bracket"></i> Dinleyişe katıl</button>
+        </section>`;
+    app.innerHTML = `<div class="container page listening-room-page">
+      <div class="listening-room-heading">
+        <div><span class="eyebrow"><i class="fas fa-tower-broadcast"></i> CANLI ORTAK DİNLEYİŞ</span><h1>${escHtml(listeningRoom.title)}</h1><p><a href="${profileRoute(listeningRoom.owner_username)}" data-link>${escHtml(listeningRoom.owner_username)}</a> yönetiyor${listeningRoom.isMember ? ` · ${state.members.length} kişi dinliyor` : ''}</p></div>
+        <button class="btn btn-outline" data-room-action="share"><i class="fas fa-link"></i> Ortak linki paylaş</button>
+      </div>
+      ${listeningRoom.isMember ? joinedContent : `<div class="listening-room-preview">${track ? `<div class="listening-preview-track"><i class="fas fa-compact-disc"></i><span><small>ŞU AN ÇALIYOR</small><strong>${escHtml(track.title)}</strong><em>${escHtml(track.artist_name)}</em></span></div>` : '<p class="listening-hint">Bu odada henüz bir şarkı çalmıyor.</p>'}${joinedContent}</div>`}
+    </div>`;
   }
-  requests?.querySelectorAll('[data-request]').forEach(button => button.addEventListener('click', () => api(`/listening-rooms/${listeningRoom.public_id}/requests/${button.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: button.dataset.request }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'))));
+  const current = document.getElementById('listening-current');
+  if (current && quiet) current.innerHTML = track
+    ? `<div class="listening-track-art"><i class="fas fa-music"></i></div><div><strong>${escHtml(track.title)}</strong><span>${escHtml(track.artist_name)}</span></div>`
+    : '<div class="listening-track-art"><i class="fas fa-music"></i></div><div><strong>Henüz şarkı yok</strong><span>Sıradaki şarkı bekleniyor.</span></div>';
+  const members = document.getElementById('listening-members');
+  if (members) members.innerHTML = state.members.map(member => `<a class="listening-member" href="${profileRoute(member.username)}" data-link><i class="fas fa-user-circle"></i><span class="user-identity"><strong>${escHtml(member.nickname || member.username)}</strong><small>@${escHtml(member.username)}</small></span>${member.role === 'owner' ? '<b>YÖNETİCİ</b>' : ''}</a>`).join('');
+  const requests = document.getElementById('listening-requests');
+  if (requests) requests.innerHTML = state.requests.length
+    ? state.requests.map(item => `<div class="listening-request"><span>${escHtml(item.title)}<small>@${escHtml(item.requester_username)}</small></span><button class="btn btn-primary btn-xs" data-request="accept" data-id="${item.id}" aria-label="İsteği sıraya ekle"><i class="fas fa-check"></i></button><button class="btn btn-outline btn-xs" data-request="reject" data-id="${item.id}" aria-label="İsteği reddet"><i class="fas fa-xmark"></i></button></div>`).join('')
+    : '<p class="listening-empty-requests">Bekleyen istek yok.</p>';
+  if (!app.dataset.listeningRoomBound) {
+    app.dataset.listeningRoomBound = '1';
+    app.addEventListener('click', async event => {
+      const requestButton = event.target.closest('[data-request]');
+      const actionButton = event.target.closest('[data-room-action]');
+      try {
+        if (requestButton && listeningRoom?.isOwner) {
+          await api(`/listening-rooms/${listeningRoom.public_id}/requests/${requestButton.dataset.id}`, {
+            method: 'POST',
+            body: JSON.stringify({ action: requestButton.dataset.request })
+          });
+          await refreshListeningRoom();
+        } else if (actionButton) {
+          const action = actionButton.dataset.roomAction;
+          if (action === 'join') {
+            const result = await api(`/listening-rooms/${listeningRoom.public_id}/join`, { method: 'POST' });
+            listeningRoom = { ...listeningRoom, ...result.room, state: result.state, isMember: true };
+            renderListeningRoomMini();
+            syncListeningAudio();
+            renderListeningRoomView(app);
+          } else if (action === 'share') {
+            await navigator.clipboard.writeText(location.origin + listeningRoom.share_url);
+            toast('Ortak link kopyalandı');
+          } else if (action === 'skip' && listeningRoom.isOwner) {
+            await api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'skip' }) });
+            await refreshListeningRoom();
+          } else if (action === 'leave') {
+            await leaveListeningRoom();
+          }
+        }
+      } catch (error) {
+        toast(error.message || 'Ortak dinleyiş işlemi başarısız oldu.', 'error');
+      }
+    });
+  }
 }
 
 function renderListeningRoomMini() {
-  if (!listeningRoom) return;
+  if (!listeningRoom?.isMember) {
+    document.getElementById('listening-room-mini')?.remove();
+    return;
+  }
   let mini = document.getElementById('listening-room-mini');
   if (!mini) { mini = document.createElement('div'); mini.id = 'listening-room-mini'; document.body.appendChild(mini); }
   const track = currentListeningTrack();
   mini.innerHTML = `<button id="listening-mini-open"><i class="fas fa-tower-broadcast"></i><span><b>${escHtml(track?.title || listeningRoom.title)}</b><small>${listeningRoom.state?.members?.length || 0} kişi dinliyor</small></span></button><button id="listening-mini-exit" title="Ortak dinleyişten çık"><i class="fas fa-xmark"></i></button>`;
-  mini.querySelector('#listening-mini-open').onclick = () => renderListeningRoomView(document.getElementById('app'));
+  mini.querySelector('#listening-mini-open').onclick = () => navigate(`/ortak-dinleyis/${listeningRoom.public_id}`);
   mini.querySelector('#listening-mini-exit').onclick = leaveListeningRoom;
 }
 
 async function leaveListeningRoom() {
-  if (!listeningRoom || !confirm('Ortak dinleyişten çıkmak istiyor musun?')) return;
-  await api(`/listening-rooms/${listeningRoom.public_id}/leave`, { method: 'POST' }).catch(() => {});
+  if (!listeningRoom || !await CigCigDialogs.confirm('Ortak dinleyişten çıkmak istiyor musun?')) return;
+  const wasViewingRoom = !!document.getElementById('app')?.querySelector('.listening-room-page');
+  try {
+    await api(`/listening-rooms/${listeningRoom.public_id}/leave`, { method: 'POST' });
+  } catch (error) {
+    toast(error.message || 'Dinleyişten çıkılamadı.', 'error');
+    return;
+  }
   clearInterval(listeningRoomPoll); listeningRoomPoll = null; listeningRoom = null;
   document.getElementById('listening-room-mini')?.remove();
   if (currentAudio?.dataset?.listeningTrackId) { currentAudio.pause(); currentAudio = null; }
+  if (wasViewingRoom) navigate('/muzikler');
 }
 
 function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
@@ -10224,8 +12442,14 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   }
   // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
   if (!options.skipPendingAd && currentUser && !listeningRoomAdsDisabled() && !musicAdBypass && !song?.is_music_ad) {
+    const previousAudio = currentAudio;
     api('/music-ads/pending').then(result => {
-      if (result?.ad) return playMusicAd(result.ad, () => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true }); musicAdBypass = false; });
+      if (result?.ad) return playMusicAd(result.ad, () => {
+        stopMusicAdTracking(previousAudio);
+        musicAdBypass = true;
+        openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true });
+        musicAdBypass = false;
+      });
       musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true }); musicAdBypass = false;
     }).catch(() => { musicAdBypass = true; openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true }); musicAdBypass = false; });
     return;
@@ -10247,7 +12471,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
     document.body.appendChild(player);
   }
   player.classList.remove('music-ad-player');
-  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  if (currentAudio) { stopMusicAdTracking(currentAudio); currentAudio.pause(); currentAudio = null; }
   document.querySelectorAll('.music-play-mini').forEach(b => b.innerHTML = '<i class="fas fa-play"></i>');
   const audio = trackMediaAudio(new Audio(audioUrl));
   currentAudio = audio; currentSlug = slug;
@@ -10267,11 +12491,14 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   };
   bindMusicPlaybackPersistence(audio);
   if (options.countPlay !== false) fetch('/api/songs/' + slug + '/play', { method: 'POST' }).catch(() => {});
+  let listeningSeekDragging = false;
 
   const title = song?.title || '', artist = song?.artist_name || '', cover = song?.cover_url || '';
   let miniLyrics = getTimedLyrics(song);
   let miniLyricsText = String(song?.lyrics || '');
 
+  const inListeningRoom = !!listeningRoom;
+  const canControlListeningRoom = !inListeningRoom || listeningRoom.isOwner;
   const autoShuffleActive = playerAutoShuffle ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
   const repeatActive = playerRepeatOne ? 'gplayer-mode-btn active' : 'gplayer-mode-btn';
 
@@ -10285,13 +12512,13 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
         </div>
       </div>
       <div class="gplayer-controls">
-        ${currentUser ? '<button class="gplayer-mode-btn" id="gp-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
-        <button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i></button>
-        <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı'}" aria-label="Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}"><i class="fas fa-shuffle"></i></button>
-        <button class="gplayer-btn" id="gp-prev" type="button" title="Önceki şarkı"><i class="fas fa-step-backward"></i></button>
-        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="${options.autoplay === false ? 'Devam et' : 'Duraklat'}"><i class="fas fa-${options.autoplay === false ? 'play' : 'pause'}"></i></button>
-        <button class="gplayer-btn" id="gp-next" type="button" title="Sonraki şarkı"><i class="fas fa-step-forward"></i></button>
-        <button class="${repeatActive}" id="gp-repeat" type="button" title="${playerRepeatOne ? 'Şarkıyı tekrarla açık' : 'Şarkıyı tekrarla kapalı'}" aria-label="Şarkıyı tekrarla ${playerRepeatOne ? 'açık' : 'kapalı'}"><i class="fas fa-redo-alt"></i></button>
+        ${currentUser && !inListeningRoom ? '<button class="gplayer-mode-btn" id="gp-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
+        ${!inListeningRoom ? `<button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i></button>
+        <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${playerAutoShuffle ? 'Karışık çal açık' : 'Karışık çal kapalı'}" aria-label="Otomatik karışık çalma ${playerAutoShuffle ? 'açık' : 'kapalı'}"><i class="fas fa-shuffle"></i></button>` : ''}
+        <button class="gplayer-btn" id="gp-prev" type="button" title="Önceki şarkı" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-step-backward"></i></button>
+        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="${options.autoplay === false ? 'Devam et' : 'Duraklat'}" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-${options.autoplay === false ? 'play' : 'pause'}"></i></button>
+        <button class="gplayer-btn" id="gp-next" type="button" title="Sonraki şarkı" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-step-forward"></i></button>
+        ${!inListeningRoom ? `<button class="${repeatActive}" id="gp-repeat" type="button" title="${playerRepeatOne ? 'Şarkıyı tekrarla açık' : 'Şarkıyı tekrarla kapalı'}" aria-label="Şarkıyı tekrarla ${playerRepeatOne ? 'açık' : 'kapalı'}"><i class="fas fa-redo-alt"></i></button>` : ''}
       </div>
       <div class="gplayer-progress-wrap">
         <span class="gplayer-time" id="gp-cur">0:00</span>
@@ -10299,7 +12526,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
           <div class="gplayer-bar-bg">
             <div class="gplayer-bar-fill" id="gp-fill" style="width:0%"></div>
           </div>
-          <input type="range" class="gplayer-seek" id="gp-seek" min="0" max="100" value="0" step="0.1" />
+          <input type="range" class="gplayer-seek" id="gp-seek" min="0" max="100" value="0" step="0.1" ${canControlListeningRoom ? '' : 'disabled'} />
         </div>
         <span class="gplayer-time" id="gp-dur">0:00</span>
       </div>
@@ -10308,7 +12535,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
         <input type="range" class="gplayer-vol-slider" id="gp-vol" min="0" max="100" value="80" step="1" title="Ses seviyesi" />
       </div>
       <button class="gplayer-btn gplayer-lyrics-toggle" id="gp-lyrics-toggle" type="button" title="Şarkı sözlerini aç" aria-label="Şarkı sözlerini aç" disabled><i class="fas fa-align-left"></i></button>
-      <button class="gplayer-close" id="gp-close" type="button" title="Oynatıcıyı kapat" aria-label="Oynatıcıyı kapat"><i class="fas fa-times"></i></button>
+      ${inListeningRoom ? '' : '<button class="gplayer-close" id="gp-close" type="button" title="Oynatıcıyı kapat" aria-label="Oynatıcıyı kapat"><i class="fas fa-times"></i></button>'}
     </div>
     <div class="gplayer-lyrics-panel" id="gp-lyrics-panel">
       <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
@@ -10353,7 +12580,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   audio.addEventListener('timeupdate', () => {
     const pct = audio.duration ? (audio.currentTime/audio.duration)*100 : 0;
     const fill = document.getElementById('gp-fill'); if(fill) fill.style.width = pct+'%';
-    const seek = document.getElementById('gp-seek'); if(seek) seek.value = pct;
+    const seek = document.getElementById('gp-seek'); if(seek && !listeningSeekDragging) seek.value = pct;
     const cur = document.getElementById('gp-cur'); if(cur) cur.textContent = fmtTime(audio.currentTime);
     if (lyricsPanel?.classList.contains('open')) updateLyricsHighlight(document.getElementById('gp-lyrics-content'), audio.currentTime);
   });
@@ -10388,12 +12615,6 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
         }
       }
     };
-    if (!song?.is_music_ad && !listeningRoomAdsDisabled()) {
-      if (currentUser) {
-        const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
-        if (result?.ad) return playMusicAd(result.ad, continueQueue);
-      } else if (await playGuestMusicAdIfDue(continueQueue)) return;
-    }
     continueQueue();
     /*
     if (playerRepeatOne) {
@@ -10428,27 +12649,51 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
       document.getElementById('gp-play').title = 'Devam et';
     }
   });
-  document.getElementById('gp-seek').addEventListener('input', e => {
+  const globalSeek = document.getElementById('gp-seek');
+  globalSeek.addEventListener('input', e => {
+    if (listeningRoom) {
+      listeningSeekDragging = !!listeningRoom.isOwner;
+      return;
+    }
     if (audio.duration) audio.currentTime = (parseFloat(e.target.value)/100)*audio.duration;
     saveMusicPlayback(audio, true);
   });
-  document.getElementById('gp-close').addEventListener('click', () => {
-    audio.pause(); currentAudio=null; currentQueue=[]; currentQueueIndex=-1; player.style.display='none';
-    if (listeningRoom) renderListeningRoomMini();
+  globalSeek.addEventListener('change', e => {
+    if (!listeningRoom || !listeningRoom.isOwner || !audio.duration) {
+      listeningSeekDragging = false;
+      return;
+    }
+    const position = (parseFloat(e.target.value) / 100) * audio.duration;
+    listeningSeekDragging = false;
+    api(`/listening-rooms/${listeningRoom.public_id}/control`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'seek', position_seconds: position })
+    }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
+  });
+  document.getElementById('gp-close')?.addEventListener('click', () => {
+    stopMusicAdTracking(audio); audio.pause(); currentAudio=null; currentQueue=[]; currentQueueIndex=-1; player.style.display='none';
   });
 
   // Önceki / sonraki
   document.getElementById('gp-prev').addEventListener('click', () => {
+    if (listeningRoom) {
+      if (listeningRoom.isOwner) api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'skip' }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
+      return;
+    }
     const prev = getNextQueueIndex(-1);
     if (prev !== null) { const s = currentQueue[prev]; currentQueueIndex = prev; openMiniPlayer(s.audio_url, s.slug, s); }
   });
   document.getElementById('gp-next').addEventListener('click', () => {
+    if (listeningRoom) {
+      if (listeningRoom.isOwner) api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action: 'skip' }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
+      return;
+    }
     const next = getNextQueueIndex(1);
     if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
   });
 
   // Karıştır: çalma kuyruğunu bir kez yeniden sırala.
-  document.getElementById('gp-shuffle').addEventListener('click', () => {
+  document.getElementById('gp-shuffle')?.addEventListener('click', () => {
     if (shuffleCurrentQueue()) {
       toast('Sıradaki şarkılar karıştırıldı');
       return;
@@ -10467,7 +12712,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   });
 
   // Otomatik karışık çalma tercihi yenilemeler arasında saklanır.
-  document.getElementById('gp-auto-shuffle').addEventListener('click', event => {
+  document.getElementById('gp-auto-shuffle')?.addEventListener('click', event => {
     playerAutoShuffle = !playerAutoShuffle;
     localStorage.setItem(MUSIC_AUTO_SHUFFLE_KEY, playerAutoShuffle ? '1' : '0');
     const button = event.currentTarget;
@@ -10477,7 +12722,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   });
 
   // Tekrar modunu aç/kapat ve tercihi yenilemeler arasında koru.
-  document.getElementById('gp-repeat').addEventListener('click', () => {
+  document.getElementById('gp-repeat')?.addEventListener('click', () => {
     playerRepeatOne = !playerRepeatOne;
     localStorage.setItem(MUSIC_REPEAT_ONE_KEY, playerRepeatOne ? '1' : '0');
     document.getElementById('gp-repeat').classList.toggle('active', playerRepeatOne);
@@ -10518,6 +12763,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   const detailPlay = document.getElementById('detail-play-btn');
   if (detailPlay) detailPlay.innerHTML = '<i class="fas fa-pause"></i> Durdur';
 
+  bindMusicAdTracking(audio, song);
   if (options.autoplay !== false) audio.play().catch(() => {});
 }
 
@@ -10568,13 +12814,14 @@ async function renderMusicDetail(app, slug) {
                 <span class="sdp-time" id="dp-cur">0:00</span>
                 <div class="sdp-bar-bg">
                   <div class="sdp-bar-fill" id="dp-fill"></div>
-                  <input type="range" class="sdp-seek" id="dp-seek" min="0" max="100" value="0" step="0.1" />
+                  <input type="range" class="sdp-seek" id="dp-seek" min="0" max="100" value="0" step="0.1" ${listeningRoom && !listeningRoom.isOwner ? 'disabled' : ''} />
                 </div>
                 <span class="sdp-time" id="dp-dur">0:00</span>
               </div>
               <div class="sdp-vol-wrap">
-                <button id="detail-vol-btn" class="sdp-vol-btn" title="Ses"><i class="fas fa-volume-up"></i></button>
-                <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" />
+                <button id="detail-vol-btn" class="sdp-vol-btn" type="button" title="Sesi kapat" aria-label="Sesi kapat"><i class="fas fa-volume-up"></i></button>
+                <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" aria-label="Ses seviyesi" />
+                <output id="detail-vol-value" class="sdp-vol-value" for="detail-vol">80%</output>
               </div>
               ${currentUser ? '<button class="sdp-together-btn" id="detail-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
             </div>
@@ -10624,7 +12871,22 @@ async function renderMusicDetail(app, slug) {
     </div>
   `;
 
-  const audio = document.getElementById('detail-audio');
+  const detailAudioPlaceholder = document.getElementById('detail-audio');
+  const resumedAudio = currentAudio?.musicResume?.type === 'song' && currentAudio.musicResume.slug === song.slug
+    ? currentAudio
+    : null;
+  if (resumedAudio) {
+    detailAudioPlaceholder.replaceWith(resumedAudio);
+    resumedAudio.id = 'detail-audio';
+    resumedAudio.style.display = 'none';
+  } else if (currentAudio && currentAudio !== detailAudioPlaceholder) {
+    stopMusicAdTracking(currentAudio);
+    currentAudio.pause();
+  }
+  const audio = trackMediaAudio(resumedAudio || detailAudioPlaceholder);
+  currentAudio = audio;
+  currentSlug = song.slug;
+  const savedVol = getMediaVolume();
   const playBtn = document.getElementById('detail-play-btn');
   const fill = document.getElementById('dp-fill');
   const seek = document.getElementById('dp-seek');
@@ -10638,8 +12900,8 @@ async function renderMusicDetail(app, slug) {
     && [originalAudioUrl, remasteredAudioUrl].includes(savedPlayback.audio_url)
     ? savedPlayback
     : null;
-  if (savedDetailPlayback) audio.src = savedDetailPlayback.audio_url;
-  let activeVariant = savedDetailPlayback?.audio_url === remasteredAudioUrl ? 'remastered' : 'original';
+  if (!resumedAudio && savedDetailPlayback) audio.src = savedDetailPlayback.audio_url;
+  let activeVariant = audio.src === remasteredAudioUrl || savedDetailPlayback?.audio_url === remasteredAudioUrl ? 'remastered' : 'original';
   audio.musicResume = {
     type: 'song',
     slug: song.slug,
@@ -10655,6 +12917,8 @@ async function renderMusicDetail(app, slug) {
     }
   };
   bindMusicPlaybackPersistence(audio);
+  bindMusicAdTracking(audio, song);
+  if (playBtn && !audio.paused) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
   const remasteredToggle = document.getElementById('song-remastered-toggle');
   if (remasteredToggle && activeVariant === 'remastered') {
     remasteredToggle.innerHTML = '<i class="fas fa-music"></i> Orijinal versiyonu dinle';
@@ -10662,6 +12926,7 @@ async function renderMusicDetail(app, slug) {
 
   function fmt(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
+  let detailSeekDragging = false;
   audio.addEventListener('loadedmetadata', () => {
     if (durEl) durEl.textContent = fmt(audio.duration);
     const startAt = Number(savedDetailPlayback?.currentTime) || 0;
@@ -10672,16 +12937,12 @@ async function renderMusicDetail(app, slug) {
     audio.musicResume.song.audio_url = audio.musicResume.audio_url;
     const pct = audio.duration ? (audio.currentTime/audio.duration)*100 : 0;
     if(fill) fill.style.width = pct + '%';
-    if(seek) seek.value = pct;
+    if(seek && !detailSeekDragging) seek.value = pct;
     if(curEl) curEl.textContent = fmt(audio.currentTime);
     if (timedLyrics.length) updateLyricsHighlight(document.getElementById('detail-lyrics'), audio.currentTime);
   });
-  audio.addEventListener('ended', async () => {
+  audio.addEventListener('ended', () => {
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
-    if (currentUser) {
-      const result = await api('/music-ads/song-finished', { method:'POST' }).catch(() => null);
-      if (result?.ad) playMusicAd(result.ad);
-    } else if (await playGuestMusicAdIfDue(() => {})) return;
   });
 
   let halfCounted = false;
@@ -10712,7 +12973,14 @@ async function renderMusicDetail(app, slug) {
     if (audio.paused) {
       if (currentUser) {
         const pending = await api('/music-ads/pending').catch(() => null);
-        if (!listeningRoomAdsDisabled() && pending?.ad) return playMusicAd(pending.ad, () => { audio.play().catch(() => {}); playBtn.innerHTML = '<i class="fas fa-pause"></i>'; });
+        if (!listeningRoomAdsDisabled() && pending?.ad) return playMusicAd(pending.ad, () => {
+          currentAudio = audio;
+          currentSlug = song.slug;
+          document.getElementById('global-music-player')?.classList.remove('music-ad-player');
+          document.getElementById('global-music-player').style.display = 'none';
+          audio.play().catch(() => {});
+          playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+        });
       }
       audio.play();
       playBtn.innerHTML = '<i class="fas fa-pause"></i>';
@@ -10730,33 +12998,60 @@ async function renderMusicDetail(app, slug) {
   });
 
   seek?.addEventListener('input', e => {
+    if (listeningRoom) {
+      detailSeekDragging = !!listeningRoom.isOwner;
+      return;
+    }
     if (audio.duration) audio.currentTime = (parseFloat(e.target.value) / 100) * audio.duration;
     saveMusicPlayback(audio, true);
   });
+  seek?.addEventListener('change', e => {
+    if (!listeningRoom?.isOwner || !audio.duration) {
+      detailSeekDragging = false;
+      return;
+    }
+    const position = (parseFloat(e.target.value) / 100) * audio.duration;
+    detailSeekDragging = false;
+    api(`/listening-rooms/${listeningRoom.public_id}/control`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'seek', position_seconds: position })
+    }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
+  });
 
-  const savedVol = getMediaVolume();
   const detailVolSlider = document.getElementById('detail-vol');
   const detailVolBtn = document.getElementById('detail-vol-btn');
+  const detailVolValue = document.getElementById('detail-vol-value');
+  let lastAudibleVolume = savedVol > 0 ? savedVol : 0.8;
+  const updateVolumeControl = volume => {
+    const percentage = Math.round(volume * 100);
+    if (detailVolSlider) {
+      detailVolSlider.value = String(percentage);
+      detailVolSlider.style.setProperty('--volume-fill', `${percentage}%`);
+      detailVolSlider.setAttribute('aria-valuetext', `${percentage}%`);
+    }
+    if (detailVolValue) detailVolValue.value = `${percentage}%`;
+    if (detailVolBtn) {
+      const icon = percentage === 0 ? 'fa-volume-xmark' : percentage < 50 ? 'fa-volume-low' : 'fa-volume-high';
+      detailVolBtn.innerHTML = `<i class="fas ${icon}"></i>`;
+      detailVolBtn.title = percentage === 0 ? 'Sesi aç' : 'Sesi kapat';
+      detailVolBtn.setAttribute('aria-label', percentage === 0 ? 'Sesi aç' : 'Sesi kapat');
+      detailVolBtn.setAttribute('aria-pressed', String(percentage === 0));
+    }
+  };
   if (detailVolSlider) {
-    detailVolSlider.value = Math.round(savedVol * 100);
-    const updateVolIcon = (v) => {
-      if (!detailVolBtn) return;
-      detailVolBtn.innerHTML = v === 0 ? '<i class="fas fa-volume-mute"></i>' : v < 50 ? '<i class="fas fa-volume-down"></i>' : '<i class="fas fa-volume-up"></i>';
-    };
-    updateVolIcon(Math.round(savedVol * 100));
+    updateVolumeControl(savedVol);
     detailVolSlider.addEventListener('input', e => {
-      const v = parseInt(e.target.value);
-      setMediaVolume(v / 100);
-      updateVolIcon(v);
+      const volume = Number(e.target.value) / 100;
+      audio.volume = volume;
+      setMediaVolume(volume);
+      if (volume > 0) lastAudibleVolume = volume;
+      updateVolumeControl(volume);
     });
     detailVolBtn?.addEventListener('click', () => {
-      if (audio.volume > 0) {
-        setMediaVolume(0); detailVolSlider.value = 0;
-        if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-mute"></i>';
-      } else {
-        setMediaVolume(0.8); detailVolSlider.value = 80;
-        if (detailVolBtn) detailVolBtn.innerHTML = '<i class="fas fa-volume-up"></i>';
-      }
+      const volume = audio.volume > 0 ? 0 : lastAudibleVolume;
+      audio.volume = volume;
+      setMediaVolume(volume);
+      updateVolumeControl(volume);
     });
   }
 
@@ -10764,7 +13059,7 @@ async function renderMusicDetail(app, slug) {
   const deleteBtn = document.getElementById('song-delete-btn');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
+      if (!await CigCigDialogs.confirm('Bu şarkıyı silmek istediğinden emin misin?')) return;
       try {
         await api('/songs/' + song.id, { method: 'DELETE' });
         toast('Şarkı silindi');
@@ -11356,7 +13651,7 @@ async function loadStoriesBar(container) {
         $('#story-share')?.addEventListener('click', () => shareStory(story));
         $('#story-viewers')?.addEventListener('click', () => showStoryViewers(story));
         $('#story-edit')?.addEventListener('click', () => showStoryEditModal(story, render));
-        $('#story-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; try { await api('/stories/' + storyKey, { method: 'DELETE' }); hideModal(); toast('Hikaye silindi'); loadStoriesBar(container); } catch (error) { toast(error.message, 'error'); } });
+        $('#story-delete')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu hikaye silinsin mi?')) return; try { await api('/stories/' + storyKey, { method: 'DELETE' }); hideModal(); toast('Hikaye silindi'); loadStoriesBar(container); } catch (error) { toast(error.message, 'error'); } });
         $('#story-like')?.addEventListener('click', async () => { if (!currentUser) return toast('Beğenmek için giriş yapın.', 'error'); try { const result = await api('/stories/' + storyKey + '/like', { method: 'POST' }); story.liked = result.liked; story.like_count = result.like_count; render(); } catch (error) { toast(error.message, 'error'); } });
         if (story.song_audio_url) {
           activeStoryAudio = trackMediaAudio(new Audio(story.song_audio_url));
@@ -11412,7 +13707,7 @@ function showStoryUploadModal() {
       <div class="social-compose-preview-frame social-compose-story-frame">
         <div id="story-media-preview" class="story-media-preview" hidden></div>
         <div class="social-compose-preview-empty" id="story-preview-empty"><i class="fas fa-circle-plus"></i><strong>Hikayeni oluştur</strong><span>Fotoğrafını veya videonu buraya ekle</span></div>
-        <label class="social-compose-pick"><i class="fas fa-plus"></i> Fotoğraf veya video seç<input id="story-media" type="file" accept="image/*,video/*" /></label>
+        <label class="social-compose-pick"><i class="fas fa-plus"></i> 1-3 fotoğraf veya bir video seç<input id="story-media" type="file" accept="image/*,video/*" multiple /></label>
       </div>
       <div class="social-compose-upload-hint"><i class="fas fa-clock"></i><span>Hikayen seçtiğin süre boyunca yayında kalır.</span></div>
     </section>
@@ -11429,21 +13724,40 @@ function showStoryUploadModal() {
       <button class="btn btn-primary social-compose-submit" id="story-save"><i class="fas fa-paper-plane"></i> Hikayeni paylaş</button>
     </section>
   </div>`, 'social-compose-modal');
-  let songs = [], selectedSong = null, selectedStoryFile = pendingStoryFile;
+  let songs = [], selectedSong = null, selectedStoryFiles = pendingStoryFile ? [pendingStoryFile] : [];
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
-  const renderMediaPreview = file => {
-    if (!file) return;
-    const url = URL.createObjectURL(file);
+  let storyPreviewUrls = [];
+  const renderMediaPreview = files => {
+    storyPreviewUrls.forEach(URL.revokeObjectURL);
+    storyPreviewUrls = [];
+    if (!files.length) return;
     preview.hidden = false;
     $('#story-preview-empty')?.classList.add('hidden');
-    preview.innerHTML = file.type.startsWith('video/')
-      ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss($('#story-media-filter').value)}"></video>`
-      : `<img src="${url}" alt="Seçilen hikaye önizlemesi" />`;
+    const previews = files.map(file => {
+      const url = URL.createObjectURL(file);
+      storyPreviewUrls.push(url);
+      return file.type.startsWith('video/')
+        ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss($('#story-media-filter').value)}"></video>`
+        : `<img src="${url}" alt="Seçilen hikaye fotoğrafı" draggable="false" style="filter:${mediaFilterCss($('#story-media-filter').value)}" />`;
+    }).join('');
+    preview.innerHTML = files.length > 1 ? `<div class="story-media-preview-grid">${previews}</div>` : previews;
   };
   mediaInput.onchange = () => {
-    const file = mediaInput.files[0];
-    if (!file) return;
-    if (file.type.startsWith('image/')) {
+    const files = [...mediaInput.files];
+    if (!files.length) return;
+    if (files.length > 3) {
+      $('#story-error').textContent = 'En fazla 3 fotoğrafı birlikte paylaşabilirsin.';
+      mediaInput.value = '';
+      return;
+    }
+    const videos = files.filter(file => file.type.startsWith('video/'));
+    const images = files.filter(file => file.type.startsWith('image/'));
+    if ((videos.length && (videos.length !== 1 || files.length !== 1)) || (!videos.length && images.length !== files.length)) {
+      $('#story-error').textContent = 'Bir video ya da en fazla 3 fotoğraf seçebilirsin.';
+      mediaInput.value = '';
+      return;
+    }
+    if (files.length === 1 && files[0].type.startsWith('image/')) {
       window.__storyUploadDraft = {
         caption: $('#story-caption').value,
         duration: $('#story-duration').value,
@@ -11459,11 +13773,11 @@ function showStoryUploadModal() {
       }});
       return;
     }
-    selectedStoryFile = file;
-    renderMediaPreview(file);
+    selectedStoryFiles = files;
+    renderMediaPreview(files);
   };
-  $('#story-media-filter').onchange = () => { if (selectedStoryFile?.type.startsWith('video/')) renderMediaPreview(selectedStoryFile); };
-  if (pendingStoryFile) renderMediaPreview(pendingStoryFile);
+  $('#story-media-filter').onchange = () => { if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles); };
+  if (pendingStoryFile) renderMediaPreview([pendingStoryFile]);
   if (savedDraft) {
     $('#story-caption').value = savedDraft.caption || '';
     $('#story-duration').value = savedDraft.duration || '24';
@@ -11526,25 +13840,54 @@ function showStoryUploadModal() {
   };
   $('#story-save').addEventListener('click', async event => {
     const submitButton = event.currentTarget;
-    const file = selectedStoryFile || $('#story-media').files[0];
-    if (!file) { $('#story-error').textContent = 'Dosya seçin'; return; }
-    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) { $('#story-error').textContent = 'Sadece fotoğraf veya video yükleyebilirsiniz.'; return; }
-    if (file.size > 500 * 1024 * 1024) { $('#story-error').textContent = 'Dosya boyutu 500 MB sınırını geçemez.'; return; }
-    submitButton.disabled = true;
-    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
-    const form = new FormData(); form.append('media', file); form.append('caption', $('#story-caption').value.trim()); form.append('duration_hours', $('#story-duration').value); form.append('media_filter', $('#story-media-filter').value); if (selectedSong) { form.append('song_id', selectedSong.id); form.append('song_start_seconds', $('#story-song-start').value || 0); }
-    try {
-      if (file.type.startsWith('video/')) {
-        const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type, content_length: file.size }) });
-        const response = await fetch(signed.upload_url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-        if (!response.ok) throw new Error('Hikaye videosu R2’ye yüklenemedi.');
-        await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption: $('#story-caption').value.trim(), duration_hours: $('#story-duration').value, media_filter: $('#story-media-filter').value, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0 }) });
-      } else {
-        await apiFormWithTimeout('/stories', form);
+      const files = selectedStoryFiles.length ? selectedStoryFiles : [...mediaInput.files];
+      if (!files.length) { $('#story-error').textContent = 'Dosya seçin'; return; }
+      if (files.length > 3 || files.some(file => !file.type.startsWith('image/') && !file.type.startsWith('video/'))) { $('#story-error').textContent = 'Bir video ya da en fazla 3 fotoğraf seçebilirsiniz.'; return; }
+      if (files.some(file => file.size > 500 * 1024 * 1024)) { $('#story-error').textContent = 'Dosya boyutu 500 MB sınırını geçemez.'; return; }
+      if (files.some(file => file.type.startsWith('video/')) && files.length !== 1) { $('#story-error').textContent = 'Videoları tek başına paylaşabilirsiniz.'; return; }
+      submitButton.disabled = true;
+      submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
+      const caption = $('#story-caption').value.trim();
+      const duration = $('#story-duration').value;
+      const filter = $('#story-media-filter').value;
+      let postedCount = 0;
+      try {
+        const file = files[0];
+        if (file.type.startsWith('video/')) {
+          const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type, content_length: file.size }) });
+          const response = await fetch(signed.upload_url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+          if (!response.ok) throw new Error('Hikaye videosu R2’ye yüklenemedi.');
+          await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption, duration_hours: duration, media_filter: filter, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0 }) });
+          postedCount = 1;
+        } else {
+          for (const imageFile of files) {
+            const form = new FormData();
+            form.append('media', imageFile);
+            form.append('caption', caption);
+            form.append('duration_hours', duration);
+            form.append('media_filter', filter);
+            if (selectedSong) {
+              form.append('song_id', selectedSong.id);
+              form.append('song_start_seconds', $('#story-song-start').value || 0);
+            }
+            await apiFormWithTimeout('/stories', form);
+            postedCount++;
+          }
+        }
+        storyPreviewUrls.forEach(URL.revokeObjectURL);
+        hideModal();
+        toast(postedCount > 1 ? `${postedCount} hikaye paylaşıldı.` : 'Hikaye paylaşıldı');
+        document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
       }
-      hideModal(); toast('Hikaye paylaşıldı'); document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
-    }
-    catch (error) { submitButton.disabled = false; submitButton.innerHTML = 'Paylaş'; $('#story-error').textContent = error.message || 'Hikaye yüklenemedi.'; }
+      catch (error) {
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Paylaş';
+        if (postedCount && postedCount < files.length) {
+          selectedStoryFiles = files.slice(postedCount);
+          renderMediaPreview(selectedStoryFiles);
+        }
+        $('#story-error').textContent = postedCount ? `${postedCount}/${files.length} hikaye paylaşıldı. Kalanlar yüklenemedi: ${error.message || 'Hata'}` : error.message || 'Hikaye yüklenemedi.';
+      }
   });
 }
 
@@ -11760,7 +14103,7 @@ async function renderStoryRoute(app, storyId) {
     });
     $('#story-route-viewers')?.addEventListener('click', () => showStoryViewers(story));
     $('#story-route-edit')?.addEventListener('click', () => showStoryEditModal(story, () => renderStoryRoute(app, storyId)));
-    $('#story-route-delete')?.addEventListener('click', async () => { if (!confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
+    $('#story-route-delete')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu hikaye silinsin mi?')) return; await api('/stories/' + (story.public_id || story.id), { method: 'DELETE' }); toast('Hikaye silindi'); navigate('/fotograflar'); });
     if (story.song_audio_url) {
       activeStoryAudio = trackMediaAudio(new Audio(story.song_audio_url));
       const routeAudio = activeStoryAudio;
@@ -11789,7 +14132,7 @@ async function renderStoryRoute(app, storyId) {
       });
       routeVideo.addEventListener('ended', () => navigateToStory(nextStory));
     } else {
-      const storyDuration = 6000;
+      const storyDuration = 10000;
       const startedAt = Date.now();
       storyRouteTimer = setInterval(() => {
         const elapsed = Date.now() - startedAt;
@@ -11865,7 +14208,7 @@ function bindPhotoFeed(feed) {
     }));
     box.querySelectorAll('.photo-comment-delete').forEach(button => button.addEventListener('click', async event => {
       event.preventDefault(); event.stopPropagation();
-      if (!confirm('Bu yorum silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
       try { await api('/photos/comments/' + button.dataset.commentId, { method: 'DELETE' }); await renderComments(c, box); } catch (error) { toast(error.message || 'Yorum silinemedi', 'error'); }
     }));
   };
@@ -11895,7 +14238,7 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-delete').forEach(x => x.onclick = async e => {
     const c = x.closest('[data-photo-id]');
     if (!c) return;
-    if (confirm('Fotoğraf silinsin mi?')) {
+    if (await CigCigDialogs.confirm('Fotoğraf silinsin mi?')) {
       await api('/photos/' + c.dataset.photoId, { method: 'DELETE' });
       c.remove();
     }
@@ -12374,7 +14717,7 @@ async function renderMyPlaylists(app) {
         btn.addEventListener('click', async (e) => {
           e.stopPropagation();
           const pl = playlistById.get(String(btn.dataset.id));
-          if (!pl || !confirm(`"${pl.name}" playlistini silmek istediğinize emin misiniz?`)) return;
+          if (!pl || !await CigCigDialogs.confirm(`"${pl.name}" playlistini silmek istediğinize emin misiniz?`)) return;
           try {
             await api('/playlists/' + btn.dataset.id, { method: 'DELETE' });
             toast('Playlist silindi');
@@ -12616,7 +14959,7 @@ async function renderPlaylistDetail(app, plId) {
     // Şarkı kaldır
     app.querySelectorAll('.pl-remove-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
+        if (!await CigCigDialogs.confirm('Bu şarkıyı playlistten çıkarmak istediğinize emin misiniz?')) return;
         try {
           await api('/playlists/' + plId + '/songs/' + btn.dataset.id, { method: 'DELETE' });
           toast('Şarkı listeden çıkarıldı');
@@ -12799,6 +15142,7 @@ async function renderStore(app) {
     vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
     plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
     admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
+    red_tick: { icon: 'fas fa-check', color: '#ef3340', label: 'Kırmızı Tik', gradient: 'linear-gradient(135deg,#ef3340,#b91c1c)' },
   };
 
   function daysLeft(expiresAt) {
@@ -12824,9 +15168,9 @@ async function renderStore(app) {
         <div class="store-card-type">${escHtml(p.name)}</div>
         <div class="store-card-price-row">
           ${hasSale ? `<span class="store-price-old">${parseFloat(p.original_price).toFixed(2)} ₺</span>` : ''}
-          <span class="store-price-new">${parseFloat(p.price).toFixed(2)} ₺</span>
+          <span class="store-price-new">${Number(p.purchase_enabled) === 1 ? `${parseFloat(p.price).toFixed(2)} ₺` : 'Satın alım kapalı'}</span>
         </div>
-        <div class="store-card-duration"><i class="fas fa-clock"></i> ${p.duration_days} günlük üyelik</div>
+        <div class="store-card-duration"><i class="fas ${p.type === 'red_tick' ? 'fa-shield-check' : 'fa-clock'}"></i> ${p.type === 'red_tick' ? 'Yalnızca yönetici verebilir' : `${p.duration_days} günlük üyelik`}</div>
       </div>
       <div class="store-card-body">
         ${p.description ? `<p class="store-card-desc">${escHtml(p.description)}</p>` : ''}
@@ -12835,6 +15179,10 @@ async function renderStore(app) {
           <div class="store-active-badge"><i class="fas fa-check-circle"></i> Aktif Üyeliğin Var</div>
           <div class="store-active-info"><i class="fas fa-calendar-alt"></i> ${daysLeft(activeSub.expires_at)} gün kaldı · ${new Date(activeSub.expires_at).toLocaleDateString('tr-TR')} bitiyor</div>
           <button class="btn btn-outline store-buy-btn" style="width:100%;margin-top:12px;opacity:0.6;cursor:default" disabled>Aktif Üyelik</button>
+        ` : Number(p.purchase_enabled) !== 1 ? `
+          <button class="btn btn-outline store-buy-btn" style="width:100%;margin-top:12px;opacity:.65;cursor:not-allowed" disabled>
+            <i class="fas fa-lock"></i> Şu anda satın alınamıyor
+          </button>
         ` : currentUser ? `
           <button class="btn btn-primary store-buy-btn" data-product-id="${p.id}" style="width:100%;margin-top:12px;background:${cfg.gradient};border:none">
             <i class="fas fa-shopping-cart"></i> Satın Al

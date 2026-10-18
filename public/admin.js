@@ -238,7 +238,7 @@ async function renderBadges(main) {
       if (badge) openBadgeAssigner(badge);
     }
     if (deleteButton) {
-      if (!confirm('Bu rozet ve tüm kullanıcı atamaları silinsin mi?')) return;
+      if (!await CigCigDialogs.confirm('Bu rozet ve tüm kullanıcı atamaları silinsin mi?')) return;
       try {
         await adminApi('/badges/' + deleteButton.dataset.id, { method: 'DELETE' });
         toast('Rozet silindi');
@@ -397,6 +397,7 @@ function loadSection(section) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'two-factor': renderTwoFactorUsers,
+    journalists: renderJournalists, 'newspaper-settings': renderNewspaperSettings,
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
@@ -464,7 +465,7 @@ async function renderAccountDeletions(main) {
   tbody?.addEventListener('click', async event => {
     const button = event.target.closest('.cancel-account-delete');
     if (!button) return;
-    if (!confirm(`${button.dataset.username} kullanıcısının hesap silme talebi iptal edilsin mi?`)) return;
+    if (!await CigCigDialogs.confirm(`${button.dataset.username} kullanıcısının hesap silme talebi iptal edilsin mi?`)) return;
     button.disabled = true;
     try {
       await adminApi(`/account-deletions/${button.dataset.id}/cancel`, { method: 'POST' });
@@ -484,14 +485,14 @@ async function renderAdminStories(main) {
   main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => { try { const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers'); showModal('Hikaye görüntüleyenleri', viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${viewer.username ? escHtml(viewer.username) : '<i class="fas fa-user-secret"></i> Misafir'}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)} · IP: ${escHtml(viewer.ip || 'Bilinmiyor')}</small></span></div>`).join('')}</div>` : '<div class="empty-state">Henüz görüntüleyen yok.</div>'); } catch (error) { toast(error.message, 'error'); } });
   main.querySelectorAll('.story-admin-edit').forEach(button => button.onclick = async () => { const story = stories.find(item => String(item.public_id || item.id) === button.dataset.id); if (!story) return; showModal('Hikayeyi düzenle', `<div class="form-group"><label>Açıklama</label><textarea id="adm-story-caption">${escHtml(story.caption || '')}</textarea></div><div class="form-group"><label>Süre (saat)</label><input id="adm-story-duration" type="number" min="1" max="720" step="1" value="${Number(story.duration_hours) || 24}" /><small style="display:block;margin-top:5px;color:var(--text-muted)">1-720 saat arasında istediğin süreyi yazabilirsin.</small></div><button class="btn btn-primary" id="adm-story-save">Kaydet</button>`); $('#adm-story-save').onclick = async () => { const duration = Number($('#adm-story-duration').value); if (!Number.isInteger(duration) || duration < 1 || duration > 720) return toast('Süre 1-720 saat arasında tam sayı olmalı.', 'error'); try { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ caption: $('#adm-story-caption').value, duration_hours: duration }) }); hideModal(); toast('Hikaye güncellendi'); renderAdminStories(main); } catch (error) { toast(error.message, 'error'); } }; });
   main.querySelectorAll('.story-admin-suspend').forEach(button => button.onclick = async () => { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_suspended: button.dataset.suspended !== '1' }) }); toast(button.dataset.suspended === '1' ? 'Hikaye aktifleştirildi' : 'Hikaye askıya alındı'); renderAdminStories(main); });
-  main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => { if (!confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return; await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' }); toast('Hikaye silindi'); renderAdminStories(main); });
+  main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => { if (!await CigCigDialogs.confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return; await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' }); toast('Hikaye silindi'); renderAdminStories(main); });
 }
 
 // ===== HOMEPAGE SECTIONS =====
 async function renderAdminPhotos(main) {
   const photos = await adminApi('/photos');
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Medya</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
-  main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
+  main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(await CigCigDialogs.confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
 }
 async function renderAdSubmissions(main) {
   const ads = await adminApi('/ad-submissions');
@@ -729,6 +730,141 @@ async function renderUserDirectory(main) {
   });
 }
 
+async function renderJournalists(main) {
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  let users;
+  let journalists;
+  try {
+    [users, journalists] = await Promise.all([adminApi('/users'), adminApi('/journalists')]);
+  } catch (error) {
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)">${escHtml(error.message || 'Gazeteciler yüklenemedi.')}</div></div>`;
+    return;
+  }
+
+  const journalistIds = new Set(journalists.map(item => String(item.user_id)));
+  const candidates = users.filter(user => !journalistIds.has(String(user.id)) && !user.is_deleted);
+  main.innerHTML = `
+    <section class="journalist-admin-hero">
+      <span class="journalist-admin-hero-icon"><i class="fas fa-newspaper"></i></span>
+      <div><span class="journalist-admin-kicker">CIGCIG BASIN</span><h1>Gazeteci yönetimi</h1><p>Güvenilir gazetecileri belirleyin. Gazetecilik rozeti otomatik verilir ve görev sona erdiğinde kaldırılır.</p></div>
+      <span class="journalist-admin-total"><strong>${journalists.length}</strong><small>aktif gazeteci</small></span>
+    </section>
+    <section class="journalist-admin-assign card">
+      <div class="journalist-admin-section-heading"><span class="journalist-admin-section-icon"><i class="fas fa-user-plus"></i></span><div><h2>Yeni gazeteci ekle</h2><p>Kayıtlı kullanıcılardan birini gazeteci olarak yetkilendirin.</p></div></div>
+      <div class="journalist-admin-picker">
+        <div class="journalist-picker-main">
+          <label class="journalist-picker-label" for="journalist-user-search">Gazeteci olacak kullanıcıyı bulun</label>
+          <div class="journalist-picker-search">
+            <i class="fas fa-search" aria-hidden="true"></i>
+            <input id="journalist-user-search" type="search" placeholder="İsim veya @kullanıcı adı yazın..." autocomplete="off" />
+            <button type="button" id="journalist-search-clear" aria-label="Aramayı temizle" title="Aramayı temizle"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="journalist-picker-results-heading"><strong id="journalist-results-title">Son eklenen üyeler</strong><span id="journalist-results-count"></span></div>
+          <div class="journalist-picker-results" id="journalist-user-results" role="listbox" aria-label="Kullanıcı arama sonuçları"></div>
+        </div>
+        <aside class="journalist-picker-confirm">
+          <span class="journalist-picker-confirm-kicker"><i class="fas fa-shield-check"></i> YETKİLENDİRME</span>
+          <div id="journalist-selected-user" class="journalist-picker-selected is-empty"><i class="fas fa-user-check"></i><span>Listeden bir kullanıcı seçin. Seçiminiz burada görünecek.</span></div>
+          <button type="button" class="btn btn-primary" id="journalist-assign-btn" disabled><i class="fas fa-user-plus"></i> Gazeteci olarak ekle</button>
+          <small class="journalist-picker-note">Gazeteci rozeti otomatik verilir ve yetki kaldırıldığında otomatik silinir.</small>
+          <div id="journalist-admin-error" class="form-error" role="alert"></div>
+        </aside>
+      </div>
+    </section>
+    <section class="journalist-admin-list-section">
+      <div class="journalist-admin-list-heading"><div><span class="journalist-admin-kicker">YAYIN EKİBİ</span><h2>Gazeteciler</h2></div><span>${journalists.length} kişi</span></div>
+      <div class="journalist-admin-list" id="journalist-admin-list">
+        ${journalists.length ? journalists.map(journalist => `
+          <article class="journalist-admin-card">
+            <span class="journalist-admin-avatar">${journalist.avatar && !journalist.avatar_removed ? `<img src="${escHtml(journalist.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
+            <span class="journalist-admin-person"><strong>${escHtml(journalist.nickname || journalist.username)}</strong><small>@${escHtml(journalist.username)} · ${new Date(journalist.assigned_at).toLocaleDateString('tr-TR')} tarihinden beri</small></span>
+            <span class="journalist-admin-active"><i class="fas fa-circle"></i> Aktif</span>
+            <button type="button" class="btn btn-ghost btn-sm journalist-remove-btn" data-id="${escHtml(journalist.user_id)}" aria-label="${escHtml(journalist.username)} gazeteciliğini kaldır"><i class="fas fa-user-minus"></i><span>Kaldır</span></button>
+          </article>`).join('') : '<div class="journalist-admin-empty"><i class="fas fa-newspaper"></i><strong>Henüz gazeteci yok</strong><span>İlk gazeteciyi yukarıdan ekleyebilirsiniz.</span></div>'}
+      </div>
+    </section>`;
+
+  const search = $('#journalist-user-search');
+  const results = $('#journalist-user-results');
+  const resultTitle = $('#journalist-results-title');
+  const resultCount = $('#journalist-results-count');
+  const selectedUserCard = $('#journalist-selected-user');
+  const assignButton = $('#journalist-assign-btn');
+  let selectedUser = null;
+  const renderCandidates = () => {
+    const q = search.value.trim().toLocaleLowerCase('tr-TR');
+    const matches = candidates.filter(user =>
+      `${user.username || ''} ${user.nickname || ''}`.toLocaleLowerCase('tr-TR').includes(q)
+    );
+    const visibleUsers = matches.slice(0, 8);
+    resultTitle.textContent = q ? 'Arama sonuçları' : 'Son eklenen üyeler';
+    resultCount.textContent = matches.length > 8 ? `İlk 8 / ${matches.length}` : `${matches.length} kullanıcı`;
+    results.innerHTML = visibleUsers.length ? visibleUsers.map(user => {
+      const isSelected = selectedUser && String(selectedUser.id) === String(user.id);
+      const hasAvatar = user.avatar && !user.avatar_removed;
+      return `<button type="button" class="journalist-picker-result${isSelected ? ' is-selected' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" data-user-id="${escHtml(user.id)}">
+        <span class="journalist-picker-result-avatar">${hasAvatar ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
+        <span class="journalist-picker-result-copy"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+        <span class="journalist-picker-result-action">${isSelected ? '<i class="fas fa-check"></i> Seçildi' : '<i class="fas fa-plus"></i> Seç'}</span>
+      </button>`;
+    }).join('') : '<div class="journalist-picker-no-results"><i class="fas fa-user-slash"></i><strong>Kullanıcı bulunamadı</strong><span>Farklı bir isim veya kullanıcı adı deneyin.</span></div>';
+    selectedUserCard.classList.toggle('is-empty', !selectedUser);
+    selectedUserCard.innerHTML = selectedUser
+      ? `<span class="journalist-picker-selected-avatar">${selectedUser.avatar && !selectedUser.avatar_removed ? `<img src="${escHtml(selectedUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span><span class="journalist-picker-selected-copy"><small>SEÇİLEN KULLANICI</small><strong>${escHtml(selectedUser.nickname || selectedUser.username)}</strong><span>@${escHtml(selectedUser.username)}</span></span><button type="button" class="journalist-picker-change" id="journalist-selection-clear">Değiştir</button>`
+      : '<i class="fas fa-user-check"></i><span>Listeden bir kullanıcı seçin. Seçiminiz burada görünecek.</span>';
+    assignButton.disabled = !selectedUser;
+    results.querySelectorAll('[data-user-id]').forEach(button => {
+      button.addEventListener('click', () => {
+        selectedUser = candidates.find(user => String(user.id) === button.dataset.userId) || null;
+        $('#journalist-admin-error').textContent = '';
+        renderCandidates();
+      });
+    });
+    $('#journalist-selection-clear')?.addEventListener('click', () => {
+      selectedUser = null;
+      renderCandidates();
+      search.focus();
+    });
+  };
+  renderCandidates();
+  search.addEventListener('input', renderCandidates);
+  $('#journalist-search-clear').addEventListener('click', () => {
+    search.value = '';
+    renderCandidates();
+    search.focus();
+  });
+  assignButton.addEventListener('click', async event => {
+    const userId = selectedUser?.id;
+    const message = $('#journalist-admin-error');
+    if (!userId) { message.textContent = 'Önce kullanıcı seçin.'; return; }
+    event.currentTarget.disabled = true;
+    message.textContent = '';
+    try {
+      await adminApi(`/journalists/${encodeURIComponent(userId)}`, { method: 'POST' });
+      toast('Gazeteci başarıyla eklendi.');
+      renderJournalists(main);
+    } catch (error) {
+      message.textContent = error.message || 'Gazeteci eklenemedi.';
+      event.currentTarget.disabled = false;
+    }
+  });
+  main.querySelectorAll('.journalist-remove-btn').forEach(button => {
+    button.addEventListener('click', async () => {
+      const journalist = journalists.find(item => String(item.user_id) === button.dataset.id);
+      if (!journalist || !await CigCigDialogs.confirm(`@${journalist.username} kullanıcısının gazeteciliği kaldırılsın mı?`)) return;
+      button.disabled = true;
+      try {
+        await adminApi(`/journalists/${encodeURIComponent(button.dataset.id)}`, { method: 'DELETE' });
+        toast('Gazetecilik yetkisi kaldırıldı.');
+        renderJournalists(main);
+      } catch (error) {
+        toast(error.message || 'Gazetecilik kaldırılamadı.', 'error');
+        button.disabled = false;
+      }
+    });
+  });
+}
+
 async function renderInviteCodes(content) {
   content.innerHTML = `
     <section class="invite-manager-hero">
@@ -822,7 +958,7 @@ async function renderInviteCodes(content) {
     }
     if (edit) showEditInviteModal(edit.dataset.id, edit.dataset.code, edit.dataset.active === '1', renderList);
     if (remove) {
-      if (!confirm('Bu davet bağlantısı listeden kaldırılsın mı? Bağlantı devre dışı kalır ve kod tekrar kullanılamaz.')) return;
+      if (!await CigCigDialogs.confirm('Bu davet bağlantısı listeden kaldırılsın mı? Bağlantı devre dışı kalır ve kod tekrar kullanılamaz.')) return;
       remove.disabled = true;
       try {
         await adminApi('/invite-codes/' + remove.dataset.id, { method: 'DELETE' });
@@ -877,7 +1013,7 @@ function showEditInviteModal(id, code, active, onSaved) {
 
 function renderUsersTable(users) {
   const tbody = $('#users-tbody'); if (!tbody) return;
-  if (!users.length) { tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
   tbody.innerHTML = users.map(u => `<tr>
     <td style="color:var(--text3);font-size:11px">#${u.id}</td>
     <td>
@@ -885,11 +1021,12 @@ function renderUsersTable(users) {
         ${u.avatar ? `<img src="${escHtml(u.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover" />` : `<div style="width:28px;height:28px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:11px"><i class="fas fa-user"></i></div>`}
         <div>
           <div style="font-weight:600;font-size:13px">${escHtml(u.username)}</div>
-          <div style="font-size:10px;color:var(--text3)">${u.is_admin ? '<span style="color:#7c87f5"><i class="fas fa-shield"></i> Admin</span>' : ''} ${u.is_vip ? '<span style="color:#facc15">VIP</span>' : ''} ${u.is_plus ? '<span style="color:#a855f7">Plus</span>' : ''}</div>
+          <div style="font-size:10px;color:var(--text3)">${u.is_admin ? '<span style="color:#7c87f5"><i class="fas fa-shield"></i> Admin</span>' : ''} ${u.is_vip ? '<span style="color:#facc15">VIP</span>' : ''} ${u.is_plus ? '<span style="color:#a855f7">Plus</span>' : ''} ${Number(u.is_red_verified) === 1 ? '<span style="color:#ef3340"><i class="fas fa-check-circle"></i> Kırmızı Tik</span>' : ''}</div>
         </div>
       </div>
     </td>
     <td><button class="btn btn-outline btn-xs user-badges-btn" data-id="${u.id}" title="Kullanıcının rozetlerini görüntüle"><i class="fas fa-award"></i> Rozetler${userBadgeList(u).length ? ` <span class="user-badges-count">${userBadgeList(u).length}</span>` : ''}</button></td>
+    <td><button class="btn btn-outline btn-xs user-red-tick-btn" data-id="${u.id}" title="Kırmızı Tik yönetimi"><i class="fas fa-check-circle" style="color:#ef3340"></i> Kırmızı Tik</button></td>
     <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
     <td><span class="badge ${u.two_factor_method && u.two_factor_method !== 'none' ? 'badge-green' : 'badge-gray'}"><i class="fas ${u.two_factor_method === 'email' ? 'fa-envelope' : u.two_factor_method === 'question' ? 'fa-circle-question' : 'fa-minus'}"></i> ${u.two_factor_method === 'email' ? 'E-posta' : u.two_factor_method === 'question' ? 'Soru' : 'Kapalı'}</span></td>
     <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
@@ -926,17 +1063,69 @@ function renderUsersTable(users) {
     const restrict = e.target.closest('.restrict-user-btn');
     const twoFactor = e.target.closest('.user-2fa-btn');
     const badges = e.target.closest('.user-badges-btn');
+    const redTick = e.target.closest('.user-red-tick-btn');
     const adPanel = e.target.closest('.ad-panel-user-btn');
     if (edit) { const u = users.find(x => x.id == edit.dataset.id); if (u) showEditUserModal(u); }
     if (ban) showBanModal(ban.dataset.id);
-    if (unban) { if (!confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
-    if (del) { if (!confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
+    if (unban) { if (!await CigCigDialogs.confirm('Ban kaldırılsın mı?')) return; try { await adminApi('/user/'+unban.dataset.id+'/unban',{method:'POST'}); toast('Ban kaldırıldı'); loadSection('users'); } catch(e){toast(e.message,'error');} }
+    if (del) { if (!await CigCigDialogs.confirm('Kullanıcı kalıcı silinsin mi?')) return; try { await adminApi('/user/'+del.dataset.id,{method:'DELETE'}); toast('Silindi'); loadSection('users'); } catch(e){toast(e.message,'error');} }
     if (perm) { const u = users.find(x => x.id == perm.dataset.id); if (u) showPermModal(u); }
     if (restrict) { const u = users.find(x => x.id == restrict.dataset.id); if (u) showRestrictionModal(u); }
     if (twoFactor) { const u = users.find(x => x.id == twoFactor.dataset.id); if (u) showAdminTwoFactorModal(u); }
     if (badges) { const u = users.find(x => x.id == badges.dataset.id); if (u) openUserBadgesModal(u); }
+    if (redTick) { const u = users.find(x => x.id == redTick.dataset.id); if (u) openRedTickModal(u); }
     if (adPanel) { const u = users.find(x => x.id == adPanel.dataset.id); if (u) showAdminAdPanelModal(u); }
   };
+}
+
+async function openRedTickModal(user) {
+  let history = [];
+  try {
+    history = await adminApi(`/users/${user.id}/red-tick/history`);
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+  const render = () => {
+    const active = Number(user.is_red_verified) === 1;
+    showModal(`Kırmızı Tik · ${user.username}`, `
+      <div class="form-group">
+        <p>${active
+          ? `Aktif · Verilme tarihi: ${user.red_verified_at ? new Date(user.red_verified_at).toLocaleString('tr-TR') : 'bilinmiyor'}`
+          : 'Bu kullanıcının aktif Kırmızı Tik rozeti yok.'}</p>
+        <button class="btn ${active ? 'btn-danger' : 'btn-primary'}" id="red-tick-toggle">
+          <i class="fas ${active ? 'fa-rotate-left' : 'fa-check-circle'}"></i>
+          ${active ? 'Kırmızı Tik’i geri al' : 'Kırmızı Tik ver'}
+        </button>
+      </div>
+      <div class="form-group">
+        <label>Atanma ve geri alma geçmişi</label>
+        <div class="user-red-tick-history">
+          ${history.length ? history.map(event => `<div><span>${event.action === 'granted' ? 'Tik verildi' : 'Tik geri alındı'}</span><small>${new Date(event.created_at).toLocaleString('tr-TR')} · ${escHtml(event.performed_by || 'admin')}</small></div>`).join('') : '<small>Henüz geçmiş kaydı yok.</small>'}
+        </div>
+      </div>
+    `);
+    $('#red-tick-toggle')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        const result = await adminApi(`/users/${user.id}/red-tick`, {
+          method: 'PUT',
+          body: JSON.stringify({ enabled: !active })
+        });
+        user.is_red_verified = result.is_red_verified;
+        user.red_verified_at = result.red_verified_at;
+        history = await adminApi(`/users/${user.id}/red-tick/history`);
+        render();
+        toast(active ? 'Kırmızı Tik geri alındı.' : 'Kırmızı Tik verildi.');
+        loadSection('users');
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message, 'error');
+      }
+    });
+  };
+  render();
 }
 
 async function showAdminTwoFactorModal(user) {
@@ -1102,7 +1291,7 @@ async function showAdminAdPanelModal(user) {
   list.addEventListener('click', async event => {
     const button = event.target.closest('.admin-ad-panel-remove');
     if (!button) return;
-    if (!confirm('Bu reklam paneli kullanıcının profilinden kaldırılsın mı?')) return;
+    if (!await CigCigDialogs.confirm('Bu reklam paneli kullanıcının profilinden kaldırılsın mı?')) return;
     button.disabled = true;
     try {
       await adminApi('/user/' + user.id + '/ad-panels/' + button.dataset.assignmentId, { method: 'DELETE' });
@@ -1248,7 +1437,7 @@ async function renderForums(main) {
     });
     tbody.querySelectorAll('.del-forum-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu konuyu silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu konuyu silmek istediğine emin misin?')) return;
         try { await adminApi('/forum/'+btn.dataset.id, {method:'DELETE'}); toast('Konu silindi'); forums = forums.filter(f=>f.id!=btn.dataset.id); renderTable(forums); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -1412,7 +1601,7 @@ async function renderPoems(main) {
 
     tbody.querySelectorAll('.del-poem-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu şiiri silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu şiiri silmek istediğine emin misin?')) return;
         try {
           await adminApi('/poem/' + btn.dataset.id, { method: 'DELETE' });
           toast('Şiir silindi');
@@ -1482,7 +1671,7 @@ async function renderBooks(main) {
     </tr>`).join('');
     tbody.querySelectorAll('.del-book-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu kitabı silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu kitabı silmek istediğine emin misin?')) return;
         try { await adminApi('/book/'+btn.dataset.id, {method:'DELETE'}); toast('Kitap silindi'); books = books.filter(b=>b.id!=btn.dataset.id); renderTable(books); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -1626,18 +1815,18 @@ async function renderGroups(main) {
     }));
     tbody.querySelectorAll('.group-status-btn').forEach(btn => btn.addEventListener('click', async () => {
       if (btn.dataset.status === 'active') { await updateGroupStatus(btn.dataset.id, 'active', ''); return; }
-      const reason = prompt('Askıya alma nedeni:');
+      const reason = await CigCigDialogs.prompt('Bu grubun neden askıya alındığını belirtin.', '', { title: 'Askıya alma nedeni' });
       if (reason === null) return;
       await updateGroupStatus(btn.dataset.id, 'suspended', reason);
     }));
     tbody.querySelectorAll('.group-ban-btn').forEach(btn => btn.addEventListener('click', async () => {
-      const reason = prompt('Grubu yasaklama nedeni:');
+      const reason = await CigCigDialogs.prompt('Bu grubun neden yasaklandığını belirtin.', '', { title: 'Yasaklama nedeni' });
       if (reason === null) return;
       await updateGroupStatus(btn.dataset.id, 'banned', reason);
     }));
     tbody.querySelectorAll('.del-group-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu grubu silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu grubu silmek istediğine emin misin?')) return;
         try { await adminApi('/group/'+btn.dataset.id, {method:'DELETE'}); toast('Grup silindi'); groups = groups.filter(g=>g.id!=btn.dataset.id); renderTable(groups); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -1698,7 +1887,7 @@ async function renderVideos(main) {
       if (video) showVideoEditModal(video);
     }));
     tbody.querySelectorAll('.delete-video-btn').forEach(btn => btn.addEventListener('click', async () => {
-      if (!confirm('Bu videoyu silmek istediğine emin misin?')) return;
+      if (!await CigCigDialogs.confirm('Bu videoyu silmek istediğine emin misin?')) return;
       try { await adminApi('/video/' + btn.dataset.id, { method:'DELETE' }); toast('Video silindi'); videos = videos.filter(v => v.id != btn.dataset.id); renderTable(videos); }
       catch (e) { toast(e.message,'error'); }
     }));
@@ -1754,15 +1943,49 @@ function showVideoEditModal(video) {
 
 // ===== MÜZİK REKLAMLARI =====
 async function renderMusicAds(main) {
-  let ads = [];
-  try { ads = await adminApi('/music-ads'); } catch (e) { main.innerHTML = `<p style="padding:20px;color:var(--red2)">${escHtml(e.message)}</p>`; return; }
+  let ads = [], settings;
+  try {
+    [ads, settings] = await Promise.all([adminApi('/music-ads'), adminApi('/music-ad-settings')]);
+  } catch (e) { main.innerHTML = `<p style="padding:20px;color:var(--red2)">${escHtml(e.message)}</p>`; return; }
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-headphones"></i></div> Müzik Reklamları</div><button class="btn btn-primary" id="ma-new"><i class="fas fa-plus"></i> Reklam Ekle</button></div>
+    <div class="card" style="margin-bottom:18px"><div class="card-body"><h3 style="margin:0 0 6px">Reklam sıklığı</h3><p style="margin:0 0 16px;color:var(--text-muted)">Dinleme en az 20 saniye doğrulanınca şarkı sayısına göre veya rastgele reklam gösterilir. Aynı şarkı günde bir kez sayılır.</p>
+      <div class="form-row"><div class="form-group"><label for="ma-frequency-mode">Yayın yöntemi</label><select id="ma-frequency-mode"><option value="interval" ${settings.mode === 'interval' ? 'selected' : ''}>Her belirli sayıda şarkıda</option><option value="random" ${settings.mode === 'random' ? 'selected' : ''}>Rastgele</option></select></div>
+      <div class="form-group" id="ma-interval-wrap"><label for="ma-interval">Kaç şarkıda bir?</label><input id="ma-interval" type="number" min="1" max="20" value="${settings.interval}" /></div>
+      <div class="form-group" id="ma-random-wrap"><label for="ma-random-frequency">Rastgele reklam sıklığı</label><select id="ma-random-frequency"><option value="rare" ${settings.random_frequency === 'rare' ? 'selected' : ''}>Nadir — her uygun şarkıda %15</option><option value="medium" ${settings.random_frequency === 'medium' ? 'selected' : ''}>Orta — her uygun şarkıda %30</option><option value="frequent" ${settings.random_frequency === 'frequent' ? 'selected' : ''}>Sık — her uygun şarkıda %50</option></select></div></div>
+      <button class="btn btn-outline" id="ma-settings-save"><i class="fas fa-save"></i> Sıklık ayarını kaydet</button><span id="ma-settings-status" style="margin-left:10px"></span>
+    </div></div>
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Panel ID</th><th>Başlık</th><th>Öncelik</th><th>Boost</th><th>Dinlenme</th><th>Tıklama</th><th>Durum</th><th></th></tr></thead><tbody>
       ${ads.length ? ads.map(a => `<tr><td><code>${escHtml(a.portal_code)}</code></td><td>${escHtml(a.title)}</td><td>${a.priority}</td><td>${a.boost_points}</td><td>${a.play_count}</td><td>${a.click_count}</td><td>${a.active ? 'Aktif' : 'Pasif'}</td><td><button class="btn btn-outline btn-xs ma-edit" data-id="${a.id}">Düzenle</button> <button class="btn btn-danger btn-xs ma-delete" data-id="${a.id}">Sil</button></td></tr>`).join('') : '<tr><td colspan="8" style="text-align:center;padding:28px">Henüz ses reklamı yok.</td></tr>'}
     </tbody></table></div></div>`;
+  const updateFrequencyFields = () => {
+    const randomMode = $('#ma-frequency-mode').value === 'random';
+    $('#ma-interval-wrap').style.display = randomMode ? 'none' : '';
+    $('#ma-random-wrap').style.display = randomMode ? '' : 'none';
+  };
+  $('#ma-frequency-mode')?.addEventListener('change', updateFrequencyFields);
+  updateFrequencyFields();
+  $('#ma-settings-save')?.addEventListener('click', async event => {
+    const button = event.currentTarget, status = $('#ma-settings-status');
+    button.disabled = true;
+    status.textContent = 'Kaydediliyor…';
+    try {
+      await adminApi('/music-ad-settings', { method: 'PUT', body: JSON.stringify({
+        mode: $('#ma-frequency-mode').value,
+        interval: Number($('#ma-interval').value),
+        random_frequency: $('#ma-random-frequency').value
+      }) });
+      status.style.color = '';
+      status.textContent = 'Kaydedildi';
+    } catch (error) {
+      status.textContent = error.message;
+      status.style.color = 'var(--red2)';
+    } finally {
+      button.disabled = false;
+    }
+  });
   $('#ma-new')?.addEventListener('click', () => showMusicAdModal());
   main.querySelectorAll('.ma-edit').forEach(btn => btn.addEventListener('click', () => showMusicAdModal(ads.find(a => String(a.id) === btn.dataset.id))));
-  main.querySelectorAll('.ma-delete').forEach(btn => btn.addEventListener('click', async () => { if (!confirm('Reklam silinsin mi?')) return; try { await adminApi('/music-ads/'+btn.dataset.id,{method:'DELETE'}); renderMusicAds(main); } catch(e) { toast(e.message,'error'); } }));
+  main.querySelectorAll('.ma-delete').forEach(btn => btn.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Reklam silinsin mi?')) return; try { await adminApi('/music-ads/'+btn.dataset.id,{method:'DELETE'}); renderMusicAds(main); } catch(e) { toast(e.message,'error'); } }));
 }
 function showMusicAdModal(ad = null) {
   showModal(ad ? 'Ses Reklamını Düzenle' : 'Yeni Ses Reklamı', `<div class="form-group"><label>Reklam başlığı</label><input id="ma-title" value="${escHtml(ad?.title||'')}" /></div>
@@ -1807,7 +2030,7 @@ async function renderRealsAds(main) {
   $('#ra-new')?.addEventListener('click', () => showRealsAdModal());
   main.querySelectorAll('.ra-edit').forEach(btn => btn.addEventListener('click', () => showRealsAdModal(ads.find(ad => String(ad.id) === btn.dataset.id))));
   main.querySelectorAll('.ra-delete').forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('Bu Reals reklamı silinsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Bu Reals reklamı silinsin mi?')) return;
     try { await adminApi('/reals-ads/' + btn.dataset.id, { method: 'DELETE' }); toast('Reals reklamı silindi'); renderRealsAds(main); } catch (e) { toast(e.message, 'error'); }
   }));
 }
@@ -1886,7 +2109,7 @@ async function renderVideoAds(main) {
       if (ad) showVideoAdModal(ad);
     }));
     tbody.querySelectorAll('.delete-ad-btn').forEach(btn => btn.addEventListener('click', async () => {
-      if (!confirm('Bu reklamı silmek istediğine emin misin?')) return;
+      if (!await CigCigDialogs.confirm('Bu reklamı silmek istediğine emin misin?')) return;
       try { await adminApi('/video-ads/' + btn.dataset.id, { method:'DELETE' }); toast('Reklam silindi'); ads = ads.filter(x => x.id != btn.dataset.id); renderTable(ads); }
       catch (e) { toast(e.message,'error'); }
     }));
@@ -2002,7 +2225,7 @@ async function renderArtists(main) {
     });
     tbody.querySelectorAll('.revoke-artist-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm(`${btn.dataset.name} kullanıcısının artist rozeti kaldırılsın mı?`)) return;
+        if (!await CigCigDialogs.confirm(`${btn.dataset.name} kullanıcısının artist rozeti kaldırılsın mı?`)) return;
         try {
           await adminApi('/artists/'+btn.dataset.id, { method:'PUT', body:JSON.stringify({ is_artist: 0 }) });
           toast('Artist rozeti kaldırıldı');
@@ -2088,7 +2311,7 @@ async function showArtistSongsModal(artistId, artistName) {
     });
     wrap.querySelectorAll('.song-unban-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Banı kaldırmak istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Banı kaldırmak istediğine emin misin?')) return;
         try {
           await adminApi('/songs/'+btn.dataset.id+'/unban', { method:'POST' });
           toast('Ban kaldırıldı');
@@ -2324,7 +2547,7 @@ async function renderLevels(main) {
     });
     tbody.querySelectorAll('.del-level-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu seviyeyi silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu seviyeyi silmek istediğine emin misin?')) return;
         try { await adminApi('/level/'+btn.dataset.id, {method:'DELETE'}); toast('Seviye silindi'); levels = levels.filter(l=>l.id!=btn.dataset.id); renderTable(); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -2480,7 +2703,7 @@ async function renderTags(main) {
     </tr>`).join('');
     tbody.querySelectorAll('.del-tag-btn:not([disabled])').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu etiketi silmek istediğine emin misin?')) return;
+        if (!await CigCigDialogs.confirm('Bu etiketi silmek istediğine emin misin?')) return;
         try { await adminApi('/tag/'+btn.dataset.id, {method:'DELETE'}); toast('Etiket silindi'); tags = tags.filter(t=>t.id!=btn.dataset.id); renderTable(); }
         catch (e) { toast(e.message, 'error'); }
       });
@@ -2730,7 +2953,7 @@ function renderAnnTable(anns) {
     const edit = e.target.closest('.ann-edit-btn');
     const del = e.target.closest('.ann-del-btn');
     if (edit) { const a = anns.find(x => x.id == edit.dataset.id); if (a) showAnnModal(a, anns); }
-    if (del) { if (!confirm('Duyuru silinsin mi?')) return; try { await adminApi('/announcements/'+del.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('announcements'); } catch(e){toast(e.message,'error');} }
+    if (del) { if (!await CigCigDialogs.confirm('Duyuru silinsin mi?')) return; try { await adminApi('/announcements/'+del.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('announcements'); } catch(e){toast(e.message,'error');} }
   });
 }
 
@@ -2895,13 +3118,13 @@ async function renderAdminSongs(main) {
       const ds = e.target.closest('.ds-btn');
       if (es) { const s = list.find(x => x.id == es.dataset.id); if (s) showSongEditModal(s); }
       if (sus) {
-        if (!confirm('Müzik askıya alınsın mı?')) return;
+        if (!await CigCigDialogs.confirm('Müzik askıya alınsın mı?')) return;
         try { await adminApi('/songs/'+sus.dataset.id, {method:'PUT', body:JSON.stringify({status:'suspended'})}); toast('Askıya alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
       if (unsus) {
         try { await adminApi('/songs/'+unsus.dataset.id, {method:'PUT', body:JSON.stringify({status:'active'})}); toast('Aktife alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
-      if (ds) { if (!confirm('Müzik kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
+      if (ds) { if (!await CigCigDialogs.confirm('Müzik kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
     });
   };
   render(songs);
@@ -3048,14 +3271,14 @@ async function renderArtistApps(main) {
       const approve = e.target.closest('.approve-app-btn');
       const reject = e.target.closest('.reject-app-btn');
       if (approve) {
-        if (!confirm('Başvuru onaylansın mı? Kullanıcıya artist rozeti verilecek.')) return;
+        if (!await CigCigDialogs.confirm('Başvuru onaylansın mı? Kullanıcıya artist rozeti verilecek.')) return;
         try {
           await adminApi('/artist-applications/'+approve.dataset.id+'/review', { method:'POST', body:JSON.stringify({status:'accepted'}) });
           toast('✓ Artist rozeti verildi!'); loadSection('artist-apps');
         } catch(e) { toast(e.message, 'error'); }
       }
       if (reject) {
-        if (!confirm('Başvuru reddedilsin mi?')) return;
+        if (!await CigCigDialogs.confirm('Başvuru reddedilsin mi?')) return;
         try {
           await adminApi('/artist-applications/'+reject.dataset.id+'/review', { method:'POST', body:JSON.stringify({status:'rejected'}) });
           toast('Başvuru reddedildi'); loadSection('artist-apps');
@@ -3063,6 +3286,96 @@ async function renderArtistApps(main) {
       }
     });
   }
+}
+
+async function renderNewspaperSettings(main) {
+  let settings;
+  try { settings = await adminApi('/settings'); }
+  catch (error) {
+    main.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(error.message || 'Gazete ayarları yüklenemedi.')}</p></div>`;
+    return;
+  }
+  main.innerHTML = `
+    <div class="settings-page">
+      <div class="settings-hero">
+        <div class="settings-hero-icon"><i class="fas fa-newspaper"></i></div>
+        <div><div class="settings-kicker">YAYIN YÖNETİMİ</div><h1>Gazete Ayarları</h1><p>Gazete editörünün ortak masthead görünümünü ve A4 sayfa zeminini yönetin.</p></div>
+        <div class="settings-hero-mark"><i class="fas fa-lock"></i><span>Ana admin</span></div>
+      </div>
+      <div class="settings-grid">
+        <div class="card settings-wide">
+          <div class="card-header"><span><i class="fas fa-quote-left" style="color:var(--red2);margin-right:8px"></i>Masthead ve sayfa zemini</span></div>
+          <div class="card-body">
+            <p style="font-size:12px;color:var(--text2);line-height:1.6;margin:0 0 16px">Bu değerleri yalnızca ana admin değiştirebilir. Atatürk alıntısı, imzası, bayrak ve arka plan; editör önizlemesinde ve yayımlanan A4 sayfada aynı şekilde kullanılır.</p>
+            <div class="form-group"><label>Sol alıntı</label><input id="s-newspaper-left-quote" maxlength="180" value="${escHtml(settings.newspaper_left_quote || '“Hakikatin sesi, milletin gazetesi...”')}" /></div>
+            <div class="form-group"><label>Sağ alıntı</label><textarea id="s-newspaper-right-quote" rows="2" maxlength="260">${escHtml(settings.newspaper_right_quote || '“Milletin istiklâlini yine milletin azim ve kararı kurtaracaktır.”')}</textarea></div>
+            <div class="form-group"><label>Alıntı imzası</label><input id="s-newspaper-author" maxlength="80" value="${escHtml(settings.newspaper_author || 'M. Kemal Atatürk')}" /></div>
+            <div class="form-group"><label>Bayrak görseli URL'si</label><input id="s-newspaper-flag-url" type="url" value="${escHtml(settings.newspaper_flag_url || '')}" placeholder="Görsel yükleyebilir veya HTTPS adresi girebilirsiniz" /></div>
+            <div class="form-group"><label>Bayrak görseli yükle</label><input id="s-newspaper-flag-file" type="file" accept="image/*" /></div>
+            <div class="form-group"><label>A4 sayfa arka planı URL'si</label><input id="s-newspaper-background-url" type="url" value="${escHtml(settings.newspaper_background_url || '')}" placeholder="Görsel yükleyebilir veya HTTPS adresi girebilirsiniz" /></div>
+            <div class="form-group"><label>A4 sayfa arka planı yükle</label><input id="s-newspaper-background-file" type="file" accept="image/*" /></div>
+            <button class="btn btn-primary" id="s-newspaper-branding-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Gazete ayarlarını kaydet</button>
+            <div id="s-newspaper-branding-msg" class="form-error mt-4" role="status"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  const message = document.getElementById('s-newspaper-branding-msg');
+  for (const [field, inputId] of [['flag', 's-newspaper-flag-url'], ['background', 's-newspaper-background-url']]) {
+    document.getElementById(`s-newspaper-${field}-file`)?.addEventListener('change', async event => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/') || file.size > 10 * 1024 * 1024) {
+        message.textContent = 'Gazete görselleri en fazla 10 MB olmalıdır.';
+        event.target.value = '';
+        return;
+      }
+      try {
+        message.style.color = 'var(--text2)';
+        message.textContent = 'Görsel yükleniyor…';
+        const form = new FormData();
+        form.append('image', file);
+        const response = await fetch('/api/admin/upload-newspaper-asset', {
+          method: 'POST', headers: { 'X-Admin-Token': adminToken }, body: form
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Gazete görseli yüklenemedi.');
+        document.getElementById(inputId).value = result.url;
+        message.textContent = 'Görsel yüklendi. Değişikliği uygulamak için ayarları kaydedin.';
+      } catch (error) {
+        message.style.color = 'var(--red2)';
+        message.textContent = error.message || 'Gazete görseli yüklenemedi.';
+      }
+    });
+  }
+  document.getElementById('s-newspaper-branding-save')?.addEventListener('click', async () => {
+    const values = [
+      ['newspaper_left_quote', document.getElementById('s-newspaper-left-quote').value.trim()],
+      ['newspaper_right_quote', document.getElementById('s-newspaper-right-quote').value.trim()],
+      ['newspaper_author', document.getElementById('s-newspaper-author').value.trim()],
+      ['newspaper_flag_url', document.getElementById('s-newspaper-flag-url').value.trim()],
+      ['newspaper_background_url', document.getElementById('s-newspaper-background-url').value.trim()]
+    ];
+    message.style.color = 'var(--red2)';
+    message.textContent = '';
+    for (const [key, value] of values) {
+      try {
+        const response = await fetch('/api/admin/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+          body: JSON.stringify({ key, value })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Gazete ayarı kaydedilemedi.');
+      } catch (error) {
+        message.textContent = error.message;
+        return;
+      }
+    }
+    message.style.color = 'var(--green)';
+    message.textContent = '✓ Gazete ayarları kaydedildi.';
+    toast('Gazete ayarları kaydedildi.');
+  });
 }
 
 // ===== SETTINGS =====
@@ -3192,21 +3505,6 @@ async function renderSettings(main) {
           </label>
           <button class="btn btn-primary" id="s-first-visit-auth-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
           <div id="s-first-visit-auth-msg" class="form-error mt-4"></div>
-        </div>
-      </div>
-      <div class="card adm-feature-card">
-        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--red2);margin-right:8px"></i>Kayıt Zorunluluğu</span><span class="adm-setting-status ${settings['auth_required']==='1'?'is-on':''}">${settings['auth_required']==='1'?'AÇIK':'KAPALI'}</span></div>
-        <div class="card-body">
-          <div class="adm-feature-copy">
-            <strong>Ana sayfa ve tüm site bölümleri için hesap iste</strong>
-            <p>Açıkken giriş yapmamış ziyaretçiler ana sayfaya, bölümlere veya doğrudan bir route'a erişemez; giriş ekranına yönlendirilir ve girişten sonra istedikleri sayfaya döner. Kapatıldığında içerikler herkese açılır; yorum, mesaj ve paylaşım gibi giriş gerektiren işlemler yine hesap ister.</p>
-          </div>
-          <label class="adm-toggle-row" for="s-auth-required">
-            <span><i class="fas fa-user-check"></i> Kayıt zorunluluğunu etkinleştir</span>
-            <span class="adm-toggle"><input type="checkbox" id="s-auth-required" ${settings['auth_required']==='1'?'checked':''}><span></span></span>
-          </label>
-          <button class="btn btn-primary" id="s-auth-required-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
-          <div id="s-auth-required-msg" class="form-error mt-4"></div>
         </div>
       </div>
       <div class="card adm-feature-card settings-wide">
@@ -3440,13 +3738,6 @@ async function renderSettings(main) {
     await saveSetting('protected_routes', JSON.stringify(routes), msg);
     await saveSetting('route_redirect', redirect, msg);
     msg.style.color = 'var(--green)'; msg.textContent = 'Route koruma ayarları kaydedildi';
-  });
-
-  document.getElementById('s-auth-required-save')?.addEventListener('click', async () => {
-    const msg = document.getElementById('s-auth-required-msg');
-    await saveSetting('auth_required', document.getElementById('s-auth-required').checked ? '1' : '0', msg);
-    msg.style.color = 'var(--green)';
-    msg.textContent = 'Siteye giriş zorunluluğu ayarı kaydedildi';
   });
 
   const profileTabOptions = [
@@ -3894,7 +4185,7 @@ async function renderShop(main) {
     // Sil
     container.querySelectorAll('.shop-del-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Bu ürün silinsin mi?')) return;
+        if (!await CigCigDialogs.confirm('Bu ürün silinsin mi?')) return;
         try {
           await adminApi('/shop/products/' + btn.dataset.id, { method: 'DELETE' });
           const idx = products.findIndex(p => String(p.id) === String(btn.dataset.id));
