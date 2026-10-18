@@ -1525,38 +1525,40 @@ async function trackInviteRegistration(code, user, ip) {
   return rows.length > 0;
 }
 
+const QUICK_REGISTER_ADJECTIVES = [
+  'Uykulu', 'Pofuduk', 'Gezgin', 'Meraklı', 'Neşeli', 'Dalgın', 'Sabırlı', 'Tembel',
+  'Kıpır Kıpır', 'Şaşkın', 'Keyifli', 'Sessiz', 'Gevrek', 'Minik', 'Yaramaz', 'Renkli',
+  'Tostçu', 'Miskin', 'Zıpır', 'Hayalperest', 'Çıtır', 'Şapşik', 'Kahvekolik', 'Pijamalı',
+  'Fırlama', 'Limonlu', 'Bulutlu', 'Çevik', 'Tatlı', 'Gizemli'
+];
+const QUICK_REGISTER_NOUNS = [
+  'Kavanoz', 'Mandalina', 'Penguen', 'Patates', 'Kaktüs', 'Simit', 'Tost', 'Martı',
+  'Çorap', 'Bulut', 'Kumanda', 'Turşu', 'Kestane', 'Panda', 'Fincan', 'Limon',
+  'Karpuz', 'Makarna', 'Kirpi', 'Balon', 'Salatalık', 'Tavşan', 'Paspas', 'Lahmacun',
+  'Badem', 'Tencere', 'Mıknatıs', 'Kedi', 'Terlik', 'Kurabiye', 'Fıstık', 'Bavul'
+];
+
+function quickRegisterUsernamePart(value) {
+  return String(value).toLocaleLowerCase('tr-TR')
+    .replace(/[ç]/g, 'c').replace(/[ğ]/g, 'g').replace(/[ı]/g, 'i')
+    .replace(/[ö]/g, 'o').replace(/[ş]/g, 's').replace(/[ü]/g, 'u')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 async function createQuickRegistrationSuggestion(req, res) {
   try {
-    const [namesResponse, firstImageResponse] = await Promise.all([
-      fetch('https://randomuser.me/api/?nat=tr&results=30&inc=name&noinfo', {
-        signal: AbortSignal.timeout(7000),
-        headers: { Accept: 'application/json' }
-      }),
-      fetch(`https://cataas.com/cat?json=true&request=${randomUUID()}`, {
-        signal: AbortSignal.timeout(7000),
-        headers: { Accept: 'application/json' }
-      })
-    ]);
-    if (!namesResponse.ok) throw new Error(`Türkçe isim servisi HTTP ${namesResponse.status} yanıtı verdi`);
-    const namesData = await namesResponse.json();
-    const sourceNames = (Array.isArray(namesData?.results) ? namesData.results : [])
-      .map(person => ({
-        firstName: String(person?.name?.first || '').trim(),
-        surname: String(person?.name?.last || '').trim()
-      }))
-      .filter(({ firstName, surname }) =>
-        firstName.length > 0 && firstName.length <= 20 && surname.length > 0 && surname.length <= 20 &&
-        /^[\p{L}\p{M}'’ -]+$/u.test(firstName) && /^[\p{L}\p{M}'’ -]+$/u.test(surname) &&
-        `${firstName} ${surname}`.length <= 32
-      );
-    if (!sourceNames.length) throw new Error('Türkçe isim servisi kullanılabilir isim döndürmedi');
+    const firstImageResponse = await fetch(`https://cataas.com/cat?json=true&request=${randomUUID()}`, {
+      signal: AbortSignal.timeout(7000),
+      headers: { Accept: 'application/json' }
+    });
 
     let suggestion = null;
-    const startIndex = crypto.randomInt(sourceNames.length);
-    for (let attempt = 0; attempt < sourceNames.length && !suggestion; attempt++) {
-      const { firstName, surname } = sourceNames[(startIndex + attempt) % sourceNames.length];
-      const nickname = `${firstName} ${surname}`;
-      const username = `uye_${crypto.randomBytes(5).toString('hex')}`;
+    for (let attempt = 0; attempt < 100 && !suggestion; attempt++) {
+      const adjective = QUICK_REGISTER_ADJECTIVES[crypto.randomInt(QUICK_REGISTER_ADJECTIVES.length)];
+      const noun = QUICK_REGISTER_NOUNS[crypto.randomInt(QUICK_REGISTER_NOUNS.length)];
+      const nickname = `${adjective} ${noun}`;
+      const baseUsername = `${quickRegisterUsernamePart(adjective)}_${quickRegisterUsernamePart(noun)}`;
+      const username = attempt < 50 ? baseUsername : `${baseUsername}_${crypto.randomInt(10, 100)}`;
       const { rows } = await query(
         `SELECT 1 FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
          UNION ALL
