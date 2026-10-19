@@ -1096,7 +1096,8 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
-  document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit');
+  document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path));
+  document.body.classList.toggle('forgot-password-route', isForgotPasswordRoute(path));
   const leavingSongDetail = !path.startsWith('/muzik/');
   const detailAudio = document.getElementById('detail-audio');
   if (leavingSongDetail && detailAudio && currentAudio === detailAudio && detailAudio.musicResume?.type === 'song') {
@@ -12309,6 +12310,7 @@ function getMusicQueueState(song) {
 const MUSIC_AUTO_SHUFFLE_KEY = 'cigcig_music_auto_shuffle';
 const MUSIC_REPEAT_ONE_KEY = 'cigcig_music_repeat_one';
 const MUSIC_RESUME_KEY = 'cigcig_music_resume';
+const MUSIC_RESUME_DISMISSED_KEY = 'cigcig_music_resume_dismissed';
 let playerAutoShuffle = localStorage.getItem(MUSIC_AUTO_SHUFFLE_KEY) === '1';
 let playerRepeatOne = localStorage.getItem(MUSIC_REPEAT_ONE_KEY) === '1';
 let musicAdBypass = false;
@@ -12386,6 +12388,10 @@ function stopMusicAdTracking(audio) {
 
 function restoreSavedMusicPlayback(songs = []) {
   if (!document.body.classList.contains('music-list-page') || currentAudio) return;
+  if (localStorage.getItem(MUSIC_RESUME_DISMISSED_KEY) === '1') {
+    clearSavedMusicPlayback();
+    return;
+  }
   const saved = readSavedMusicPlayback();
   if (!saved) return;
   if (saved.type === 'ad' && saved.ad?.audio_url && saved.ad.id) {
@@ -12403,6 +12409,7 @@ function restoreSavedMusicPlayback(songs = []) {
     autoplay: false,
     skipPendingAd: true,
     countPlay: false,
+    restore: true,
     startAt: Number(saved.currentTime) || 0
   });
 }
@@ -12887,6 +12894,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
     }
     return;
   }
+  if (!options.restore) localStorage.removeItem(MUSIC_RESUME_DISMISSED_KEY);
   // Zorunlu reklam önce kontrol edilir; yenileme veya şarkı değiştirme reklamı atlatmaz.
   if (!options.skipPendingAd && currentUser && !listeningRoomAdsDisabled() && !musicAdBypass && !song?.is_music_ad) {
     const previousAudio = currentAudio;
@@ -13126,6 +13134,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
     currentSlug = null;
     currentQueue = [];
     currentQueueIndex = -1;
+    localStorage.setItem(MUSIC_RESUME_DISMISSED_KEY, '1');
     clearSavedMusicPlayback();
     document.querySelectorAll('.music-play-mini').forEach(button => { button.innerHTML = '<i class="fas fa-play"></i>'; });
     player.style.display = 'none';

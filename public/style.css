@@ -1825,6 +1825,7 @@ body.auth-route #navbar,
 body.auth-route #mobile-bottom-bar,
 body.auth-route #site-footer { display:none !important; }
 body.auth-route .auth-page { min-height:100vh; min-height:100dvh; }
+body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; padding:16px 12px; align-items:flex-start; }
 @media (max-width:768px) {
   body.auth-route { padding-bottom:0 !important; }
 }
