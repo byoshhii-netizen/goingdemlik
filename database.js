@@ -955,9 +955,11 @@ async function initDb() {
       icon_unlock_enabled INTEGER NOT NULL DEFAULT 0,
       icon_code_hash TEXT DEFAULT '',
       default_theme_key TEXT NOT NULL DEFAULT 'default',
+      first_dm_theme_prompt_completed INTEGER NOT NULL DEFAULT 0,
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
     ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS default_theme_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS first_dm_theme_prompt_completed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_key TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;

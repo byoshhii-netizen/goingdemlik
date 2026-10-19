@@ -223,7 +223,7 @@ function showModal(title, bodyHTML, modalClass = '') {
   managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -236,7 +236,7 @@ function hideModal() {
   window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal');
 }
 
 function attachPasswordToggle(inputEl, toggleBtnEl, iconEl) {
@@ -9091,7 +9091,7 @@ function renderRegister(app) {
       <button type="button" class="quick-register-button" id="reg-quick-btn"><span class="quick-register-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Hızlı kayıt bilgilerini hazırla</strong><small>Kullanıcı adın, takma adın, doğum tarihin ve kedi fotoğrafın otomatik seçilsin</small></span><i class="fas fa-arrow-right quick-register-arrow"></i></button>
       <p class="quick-register-hint">E-posta ve şifreni sen gir; profil fotoğrafını istersen kaldır. Hızlı kayıt IP ve zaman bilgisiyle kaydedilir, şifren asla loglanmaz. KVKK onayı yine gereklidir.</p>
       <div class="register-profile-photo">
-        <div class="register-avatar-preview" id="reg-avatar-preview"><i class="fas fa-user"></i></div>
+        <div class="register-avatar-preview" id="reg-avatar-preview" role="button" tabindex="0" aria-disabled="true" aria-label="Profil fotoğrafı önizlemesi"><i class="fas fa-user"></i></div>
         <div class="register-profile-copy">
           <strong>Profil fotoğrafın</strong>
           <span>İstersen şimdi ekle, daha sonra da değiştirebilirsin.</span>
@@ -9213,6 +9213,13 @@ function renderRegister(app) {
   });
 
   const quickRegisterButton = $('#reg-quick-btn');
+  const setRegisterAvatarPreview = content => {
+    const preview = $('#reg-avatar-preview');
+    preview.innerHTML = content;
+    const hasImage = Boolean(preview.querySelector('img'));
+    preview.setAttribute('aria-disabled', String(!hasImage));
+    preview.setAttribute('aria-label', hasImage ? 'Profil fotoğrafını büyüt' : 'Profil fotoğrafı önizlemesi');
+  };
   quickRegisterButton.addEventListener('click', async () => {
     quickRegisterButton.disabled = true;
     quickRegisterButton.classList.add('is-loading');
@@ -9230,7 +9237,7 @@ function renderRegister(app) {
       document.querySelector('input[name="reg-tags"][value="everyone"]').checked = true;
       selectedRegisterAvatar = null;
       $('#reg-avatar').value = '';
-      $('#reg-avatar-preview').innerHTML = `<img src="${escHtml(quickAvatarUrl)}" alt="Otomatik seçilen kedi profil fotoğrafı" referrerpolicy="no-referrer" />`;
+      setRegisterAvatarPreview(`<img src="${escHtml(quickAvatarUrl)}" alt="Otomatik seçilen kedi profil fotoğrafı" referrerpolicy="no-referrer" />`);
       $('#reg-avatar-name').textContent = 'Otomatik seçilen kedi fotoğrafı';
       $('#reg-quick-avatar-remove')?.remove();
       const removeAvatarButton = document.createElement('button');
@@ -9240,7 +9247,7 @@ function renderRegister(app) {
       removeAvatarButton.textContent = 'Profil fotoğrafını kaldır';
       removeAvatarButton.addEventListener('click', () => {
         quickAvatarUrl = '';
-        $('#reg-avatar-preview').innerHTML = '<i class="fas fa-user"></i>';
+        setRegisterAvatarPreview('<i class="fas fa-user"></i>');
         $('#reg-avatar-name').textContent = 'Profil fotoğrafı kaldırıldı';
         removeAvatarButton.remove();
       });
@@ -9263,12 +9270,11 @@ function renderRegister(app) {
 
   $('#reg-avatar').addEventListener('change', e => {
     const file = e.target.files[0];
-    const preview = $('#reg-avatar-preview');
     const name = $('#reg-avatar-name');
     $('#reg-quick-avatar-remove')?.remove();
     if (!file) {
       quickAvatarUrl = '';
-      preview.innerHTML = '<i class="fas fa-user"></i>';
+      setRegisterAvatarPreview('<i class="fas fa-user"></i>');
       name.textContent = 'JPG, PNG, WEBP veya GIF · en fazla 5 MB';
       return;
     }
@@ -9280,9 +9286,27 @@ function renderRegister(app) {
     }
     openAvatarCrop(file, croppedFile => {
       selectedRegisterAvatar = croppedFile;
-      preview.innerHTML = `<img src="${URL.createObjectURL(croppedFile)}" alt="Profil fotoğrafı önizleme" />`;
+      setRegisterAvatarPreview(`<img src="${URL.createObjectURL(croppedFile)}" alt="Profil fotoğrafı önizleme" />`);
       name.textContent = 'Kırpılmış fotoğraf hazır';
     });
+  });
+
+  const openRegisterAvatarPreview = () => {
+    const image = $('#reg-avatar-preview img');
+    if (!image) return;
+    showModal('Profil fotoğrafı önizlemesi', `
+      <div class="register-avatar-viewer">
+        <div class="register-avatar-viewer-image"><img src="${escHtml(image.src)}" alt="Büyütülmüş profil fotoğrafı" referrerpolicy="no-referrer" /></div>
+        <p><i class="fas fa-magnifying-glass-plus"></i> Profil fotoğrafını büyük görünümde inceliyorsun.</p>
+      </div>
+    `, 'register-avatar-viewer-modal');
+  };
+  $('#reg-avatar-preview').addEventListener('click', openRegisterAvatarPreview);
+  $('#reg-avatar-preview').addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    if (!$('#reg-avatar-preview img')) return;
+    event.preventDefault();
+    openRegisterAvatarPreview();
   });
 
   $('#kvkk-btn').addEventListener('click', async () => {
@@ -10417,8 +10441,16 @@ async function renderDMChat(username) {
     const slot = document.getElementById('dm-chat-now-playing');
     if (slot && spotify) slot.innerHTML = spotifyNowPlayingMarkup(spotify, true);
   });
-  if (!isSelfConversation && messages.length === 0 && theme && !theme.has_personal_theme && !theme.shared) {
-    showFirstDmThemePrompt(username, conv, theme.theme_key);
+  if (!isSelfConversation) {
+    api('/me/dm-theme-settings').then(settings => {
+      const currentChat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(conv.id))}"]`);
+      if (currentChat && !settings.first_dm_theme_prompt_completed) {
+        showFirstDmThemePrompt(conv, settings.default_theme_key || theme?.theme_key || 'default', Boolean(theme?.has_personal_theme || theme?.shared));
+      }
+    }).catch(error => {
+      console.error('İlk mesaj teması ayarı alınamadı:', error.message);
+      toast('Mesaj teması ayarı alınamadı. Lütfen yeniden deneyin.', 'error');
+    });
   }
 
   // Mobile back
@@ -11177,15 +11209,15 @@ const DM_THEME_LABELS = {
   lavender: 'Lavanta'
 };
 
-function showFirstDmThemePrompt(username, conversation, currentTheme = 'default') {
+function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConversationOverride = false) {
   let selectedTheme = DM_THEME_LABELS[currentTheme] ? currentTheme : 'default';
-  showModal('İlk konuşmanız için bir tema seç', `
+  showModal('Mesaj teması seç', `
     <div class="dm-first-theme">
-      <div class="dm-first-theme-intro"><span class="dm-first-theme-icon"><i class="fas fa-palette"></i></span><p>Bu sohbetin görünümünü seç. Tema yalnızca senin ekranında uygulanır; istediğin zaman değiştirebilirsin.</p></div>
+      <div class="dm-first-theme-intro"><span class="dm-first-theme-icon"><i class="fas fa-palette"></i></span><p>Mesajlarının görünümünü seç. Bu tema tüm konuşmalarında varsayılan olacak; her sohbet için sonradan ayrı tema seçebilirsin.</p></div>
       <div class="dm-theme-options dm-first-theme-options">${dmThemeOptionsHTML(selectedTheme, true)}</div>
-      <button type="button" class="btn btn-primary dm-first-theme-continue" id="dm-first-theme-continue"><i class="fas fa-check"></i> Bu temayla devam et</button>
+      <button type="button" class="btn btn-primary dm-first-theme-continue" id="dm-first-theme-continue"><i class="fas fa-check"></i> Tüm mesajlarımda kullan</button>
     </div>
-  `);
+  `, 'dm-first-theme-modal');
   const options = document.querySelectorAll('.dm-first-theme .dm-theme-option');
   options.forEach(button => button.addEventListener('click', () => {
     selectedTheme = button.dataset.themeKey;
@@ -11195,13 +11227,18 @@ function showFirstDmThemePrompt(username, conversation, currentTheme = 'default'
     const button = event.currentTarget;
     button.disabled = true;
     try {
-      const result = await api(`/conversation/${encodeURIComponent(username)}/theme`, {
+      await api('/me/dm-theme-settings', {
         method: 'PUT',
-        body: JSON.stringify({ theme_key: selectedTheme, apply_to_other: false })
+        body: JSON.stringify({
+          default_theme_key: selectedTheme,
+          first_dm_theme_prompt_completed: true
+        })
       });
-      conversation.theme_key = result.theme.theme_key;
-      conversation.theme_shared = false;
-      document.querySelector('.dm-chat')?.setAttribute('data-dm-theme', result.theme.theme_key);
+      if (!hasConversationOverride) {
+        conversation.theme_key = selectedTheme;
+        document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(conversation.id))}"]`)
+          ?.setAttribute('data-dm-theme', selectedTheme);
+      }
       hideModal();
     } catch (error) {
       toast(error.message, 'error');

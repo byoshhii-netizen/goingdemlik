@@ -1537,6 +1537,12 @@ const QUICK_REGISTER_NOUNS = [
   'Karpuz', 'Makarna', 'Kirpi', 'Balon', 'Salatalık', 'Tavşan', 'Paspas', 'Lahmacun',
   'Badem', 'Tencere', 'Mıknatıs', 'Kedi', 'Terlik', 'Kurabiye', 'Fıstık', 'Bavul'
 ];
+const QUICK_REGISTER_SINGLE_NICKNAMES = [
+  'Mandalina', 'Penguen', 'Patates', 'Kaktüs', 'Simit', 'Martı', 'Çorap', 'Bulut',
+  'Turşu', 'Kestane', 'Panda', 'Fincan', 'Limon', 'Karpuz', 'Makarna', 'Kirpi',
+  'Balon', 'Tavşan', 'Paspas', 'Lahmacun', 'Badem', 'Tencere', 'Mıknatıs', 'Terlik',
+  'Kurabiye', 'Fıstık', 'Bavul', 'Zeytin', 'Pofuduk', 'Fırfır', 'Lokum', 'Mırmır'
+];
 
 function quickRegisterUsernamePart(value) {
   return String(value).toLocaleLowerCase('tr-TR')
@@ -1556,9 +1562,18 @@ async function createQuickRegistrationSuggestion(req, res) {
     for (let attempt = 0; attempt < 100 && !suggestion; attempt++) {
       const adjective = QUICK_REGISTER_ADJECTIVES[crypto.randomInt(QUICK_REGISTER_ADJECTIVES.length)];
       const noun = QUICK_REGISTER_NOUNS[crypto.randomInt(QUICK_REGISTER_NOUNS.length)];
-      const nickname = `${adjective} ${noun}`;
-      const baseUsername = `${quickRegisterUsernamePart(adjective)}_${quickRegisterUsernamePart(noun)}`;
-      const username = attempt < 50 ? baseUsername : `${baseUsername}_${crypto.randomInt(10, 100)}`;
+      const isSingleNickname = crypto.randomInt(2) === 0;
+      const nickname = isSingleNickname
+        ? QUICK_REGISTER_SINGLE_NICKNAMES[crypto.randomInt(QUICK_REGISTER_SINGLE_NICKNAMES.length)]
+        : `${adjective} ${noun}`;
+      const usernameWords = isSingleNickname
+        ? QUICK_REGISTER_NOUNS.filter(word => quickRegisterUsernamePart(word) !== quickRegisterUsernamePart(nickname))
+        : [noun];
+      const usernameWord = usernameWords[crypto.randomInt(usernameWords.length)];
+      const baseUsername = isSingleNickname
+        ? `${quickRegisterUsernamePart(nickname)}_${quickRegisterUsernamePart(usernameWord)}`
+        : `${quickRegisterUsernamePart(adjective)}_${quickRegisterUsernamePart(usernameWord)}`;
+      const username = baseUsername;
       const { rows } = await query(
         `SELECT 1 FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
          UNION ALL
@@ -4477,19 +4492,30 @@ async function getDmThemeForUser(conversation, userId) {
 }
 
 app.get('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT default_theme_key FROM dm_user_settings WHERE user_id=$1', [req.user.id]);
+  const { rows } = await query('SELECT default_theme_key,first_dm_theme_prompt_completed FROM dm_user_settings WHERE user_id=$1', [req.user.id]);
   const themeKey = rows[0]?.default_theme_key || 'default';
-  res.json({ default_theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default' });
+  res.json({
+    default_theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default',
+    first_dm_theme_prompt_completed: Number(rows[0]?.first_dm_theme_prompt_completed) === 1
+  });
 });
 
 app.put('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
   const themeKey = String(req.body?.default_theme_key || '');
   if (!DM_THEME_KEYS.has(themeKey)) return res.status(400).json({ error: 'Geçersiz mesaj teması.' });
-  await query(`INSERT INTO dm_user_settings(user_id,default_theme_key,updated_at)
-    VALUES($1,$2,NOW())
-    ON CONFLICT(user_id) DO UPDATE SET default_theme_key=EXCLUDED.default_theme_key,updated_at=NOW()`,
-  [req.user.id, themeKey]);
-  res.json({ ok: true, default_theme_key: themeKey });
+  const completeFirstPrompt = req.body?.first_dm_theme_prompt_completed === true;
+  const { rows } = await query(`INSERT INTO dm_user_settings(user_id,default_theme_key,first_dm_theme_prompt_completed,updated_at)
+    VALUES($1,$2,$3,NOW())
+    ON CONFLICT(user_id) DO UPDATE SET default_theme_key=EXCLUDED.default_theme_key,
+      first_dm_theme_prompt_completed=CASE WHEN $3=1 THEN 1 ELSE dm_user_settings.first_dm_theme_prompt_completed END,
+      updated_at=NOW()
+    RETURNING default_theme_key,first_dm_theme_prompt_completed`,
+  [req.user.id, themeKey, completeFirstPrompt ? 1 : 0]);
+  res.json({
+    ok: true,
+    default_theme_key: rows[0].default_theme_key,
+    first_dm_theme_prompt_completed: Number(rows[0].first_dm_theme_prompt_completed) === 1
+  });
 });
 
 app.get('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
