@@ -6487,8 +6487,6 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 .like-count-control { flex: 0 0 auto; gap: 7px; white-space: nowrap; }
 .like-count-control > span { font-variant-numeric: tabular-nums; }
 .quick-register-button { justify-content: center; text-align: center; }
-.quick-register-icon { overflow: hidden; background: transparent; }
-.quick-register-icon img { display: block; width: 42px; height: 42px; object-fit: contain; }
 .profile-avatar-remove-option input {
   display: block;
   width: 16px;

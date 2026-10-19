@@ -9232,7 +9232,7 @@ function renderRegister(app) {
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
       ${inviteCode ? `<div class="register-invite-notice"><i class="fas fa-ticket"></i><span>Davet kodu <strong>${escHtml(inviteCode)}</strong> ile kayıt oluyorsun.</span></div>` : ''}
-      <button type="button" class="quick-register-button" id="reg-quick-btn" aria-label="Hızlı kayıt ol"><span class="quick-register-icon"><img src="/cigcig.png?v=20261019-quick-register" alt="" draggable="false" /></span><strong>HIZLI KAYIT OL</strong></button>
+      <button type="button" class="quick-register-button" id="reg-quick-btn" aria-label="Hızlı kayıt ol"><span class="quick-register-icon"><i class="fas fa-user-plus" aria-hidden="true"></i></span><strong>HIZLI KAYIT OL</strong></button>
       <p class="quick-register-hint">E-posta ve şifreni sen gir; profil fotoğrafını istersen kaldır. Hızlı kayıt IP ve zaman bilgisiyle kaydedilir, şifren asla loglanmaz. KVKK onayı yine gereklidir.</p>
       <div class="register-profile-photo">
         <div class="register-avatar-preview" id="reg-avatar-preview" role="button" tabindex="0" aria-disabled="true" aria-label="Profil fotoğrafı önizlemesi"><i class="fas fa-user"></i></div>
