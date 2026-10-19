@@ -8014,7 +8014,7 @@ async function renderProfile(app, username) {
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
     try {
       const list = await api('/users/' + encodeURIComponent(profileUsername) + '/' + button.dataset.followList);
-      showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row"><span>${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
+      showModal(button.dataset.followList === 'followers' ? 'Takipçiler' : 'Takip edilenler', list.length ? `<div class="profile-followers-list">${list.map(item => `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row"><span class="profile-follow-avatar">${avatarImg(item)}</span><strong>${escHtml(item.username)}</strong></a>`).join('')}</div>` : '<div class="empty-state"><p>Henüz kimse yok.</p></div>');
     } catch (e) { toast(e.message, 'error'); }
   }));
 
@@ -13285,15 +13285,15 @@ async function renderMusicDetail(app, slug) {
               </div>
               ${currentUser ? '<button class="sdp-together-btn" id="detail-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
             </div>
-            ${song.remastered_audio_url ? `<button class="btn btn-outline btn-sm song-remastered-toggle" id="song-remastered-toggle"><i class="fas fa-wand-magic-sparkles"></i> Remastered versiyonu dinle</button>` : ''}
+            ${song.remastered_audio_url ? `<button class="song-remastered-toggle" id="song-remastered-toggle" type="button"><span class="song-remastered-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered</strong><small>Daha temiz ses sürümünü dinle</small></span><i class="fas fa-arrow-right song-remastered-arrow"></i></button>` : ''}
           </div>
 
           <div class="song-detail-actions-row">
             ${isUploader ? `
-              <button class="btn btn-outline btn-sm" id="song-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>
-              <button class="btn btn-outline btn-sm" id="song-remastered-btn"><i class="fas fa-wand-magic-sparkles"></i> Remastered ekle</button>
-              <button class="btn btn-outline btn-sm" id="song-recommend-btn"><i class="fas fa-headphones"></i> Dinleme önerisi ekle</button>
-              <button class="btn btn-sm" id="song-delete-btn" style="background:rgba(220,38,38,0.12);color:var(--accent-red2);border:1px solid rgba(220,38,38,0.25)"><i class="fas fa-trash"></i> Sil</button>
+              <button class="song-management-action" id="song-edit-btn" type="button"><span class="song-management-icon"><i class="fas fa-pen-to-square"></i></span><span><strong>Şarkıyı düzenle</strong><small>Bilgileri ve kapağı güncelle</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
+              <button class="song-management-action" id="song-remastered-btn" type="button"><span class="song-management-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered ekle</strong><small>Yeni ses sürümü yükle</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
+              <button class="song-management-action" id="song-recommend-btn" type="button"><span class="song-management-icon"><i class="fas fa-headphones"></i></span><span><strong>Dinleme önerisi ekle</strong><small>Bu parçaya benzer müzik öner</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
+              <button class="song-management-action song-management-action-danger" id="song-delete-btn" type="button"><span class="song-management-icon"><i class="fas fa-trash-can"></i></span><span><strong>Şarkıyı sil</strong><small>Bu paylaşımı kaldır</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
             ` : ''}
           </div>
 
@@ -13318,8 +13318,8 @@ async function renderMusicDetail(app, slug) {
 
       ${(song.recommendations || []).length ? `
         <section class="song-recommendations">
-          <div class="song-lyrics-title"><i class="fas fa-headphones"></i> Şunu da dinleyebilirsiniz</div>
-          <div class="song-recommendations-grid">${song.recommendations.map(item => `<a class="song-recommendation-card" href="/muzik/${escHtml(item.slug)}" data-link><div class="music-cover-wrap">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" class="music-cover" />` : `<div class="music-cover music-cover-ph"><i class="fas fa-music"></i></div>`}</div><span><b>${escHtml(item.title)}</b><small>${escHtml(item.artist_name)}</small></span></a>`).join('')}</div>
+          <div class="song-recommendations-heading"><span class="song-recommendations-icon"><i class="fas fa-headphones"></i></span><div><small>SANA ÖZEL SEÇİM</small><h2>Şunu da dinleyebilirsin</h2><p>Bu parçanın yanına yakışacak birkaç öneri.</p></div></div>
+          <div class="song-recommendations-grid">${song.recommendations.map((item, index) => `<a class="song-recommendation-card" href="/muzik/${escHtml(item.slug)}" data-link><span class="song-recommendation-index">${String(index + 1).padStart(2, '0')}</span><div class="song-recommendation-art">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" alt="" />` : `<span><i class="fas fa-music"></i></span>`}<span class="song-recommendation-play"><i class="fas fa-play"></i></span></div><span class="song-recommendation-copy"><b>${escHtml(item.title)}</b><small>${escHtml(item.artist_name)}</small></span><i class="fas fa-arrow-up-right-from-square song-recommendation-arrow"></i></a>`).join('')}</div>
         </section>` : ''}
 
       ${hasLyrics ? `
@@ -13380,9 +13380,16 @@ async function renderMusicDetail(app, slug) {
   bindMusicAdTracking(audio, song);
   if (playBtn && !audio.paused) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
   const remasteredToggle = document.getElementById('song-remastered-toggle');
-  if (remasteredToggle && activeVariant === 'remastered') {
-    remasteredToggle.innerHTML = '<i class="fas fa-music"></i> Orijinal versiyonu dinle';
-  }
+  const updateRemasteredToggle = () => {
+    if (!remasteredToggle) return;
+    const isRemastered = activeVariant === 'remastered';
+    remasteredToggle.classList.toggle('is-remastered', isRemastered);
+    remasteredToggle.setAttribute('aria-label', isRemastered ? 'Orijinal ses sürümüne geç' : 'Remastered ses sürümüne geç');
+    remasteredToggle.innerHTML = isRemastered
+      ? '<span class="song-remastered-icon"><i class="fas fa-music"></i></span><span><strong>Orijinal sürüm</strong><small>Standart ses sürümüne dön</small></span><i class="fas fa-arrow-right song-remastered-arrow"></i>'
+      : '<span class="song-remastered-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered</strong><small>Daha temiz ses sürümünü dinle</small></span><i class="fas fa-arrow-right song-remastered-arrow"></i>';
+  };
+  updateRemasteredToggle();
 
   function fmt(s) { const m=Math.floor(s/60); return m+':'+(Math.floor(s%60)+'').padStart(2,'0'); }
 
@@ -13414,9 +13421,7 @@ async function renderMusicDetail(app, slug) {
     audio.musicResume.audio_url = audio.src;
     audio.musicResume.song.audio_url = audio.src;
     halfCounted = false;
-    remasteredToggle.innerHTML = activeVariant === 'remastered'
-      ? '<i class="fas fa-music"></i> Orijinal versiyonu dinle'
-      : '<i class="fas fa-wand-magic-sparkles"></i> Remastered versiyonu dinle';
+    updateRemasteredToggle();
     playBtn.innerHTML = '<i class="fas fa-play"></i>';
   });
   playBtn.addEventListener('click', async () => {
