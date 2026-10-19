@@ -1846,7 +1846,7 @@ body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; pad
   .profile-info { width: 100%; }
 }
 .profile-avatar-wrap { position: relative; width: 100px; height: 100px; min-width: 100px; max-width: 100px; aspect-ratio: 1 / 1; flex: 0 0 100px; flex-shrink: 0; overflow: hidden; border-radius: 50%; }
-.profile-avatar { width: 100px !important; height: 100px !important; min-width: 100px; max-width: 100px; aspect-ratio: 1 / 1; display: block; border-radius: 50%; object-fit: cover !important; object-position: center; overflow: hidden; background: var(--bg-card2); border: 3px solid var(--border); }
+.profile-avatar { box-sizing: border-box; width: 100% !important; height: 100% !important; min-width: 0; max-width: none; aspect-ratio: 1 / 1; display: block; border-radius: 50%; object-fit: cover !important; object-position: center; overflow: hidden; background: var(--bg-card2); border: 3px solid var(--border); }
 .profile-avatar-placeholder { width: 100%; height: 100%; min-width: 0; max-width: none; aspect-ratio: 1 / 1; border-radius: 50%; background: var(--bg-card2); border: 3px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 40px; color: var(--text-muted); }
 .profile-info { flex: 1; min-width: 0; text-align: center; }
 .profile-info > * { max-width: 100%; }
@@ -4045,11 +4045,11 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
   .music-detail-cover, .music-detail-cover-ph { width: 140px !important; height: 140px !important; }
 
   /* Profil avatar küçült */
-  .profile-avatar, .profile-avatar-placeholder { width: 70px !important; height: 70px !important; font-size: 28px !important; }
+  .profile-avatar, .profile-avatar-placeholder { width: 100% !important; height: 100% !important; font-size: 28px !important; }
 
   /* Final media normalization: avatars remain circular instead of inheriting card dimensions. */
   .profile-avatar-wrap { width: 70px !important; height: 70px !important; min-width: 70px !important; max-width: 70px !important; aspect-ratio: 1 / 1 !important; }
-  .profile-avatar, .profile-avatar-placeholder { width: 70px !important; height: 70px !important; min-width: 70px !important; max-width: 70px !important; aspect-ratio: 1 / 1 !important; border-radius: 50% !important; object-fit: cover !important; overflow: hidden; }
+  .profile-avatar, .profile-avatar-placeholder { box-sizing: border-box; width: 100% !important; height: 100% !important; min-width: 0 !important; max-width: none !important; aspect-ratio: 1 / 1 !important; border-radius: 50% !important; object-fit: cover !important; overflow: hidden; }
   .profile-username { font-size: 16px !important; }
 
   /* Ebook nav butonlar yan yana sığsın */
