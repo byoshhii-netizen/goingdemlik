@@ -1670,6 +1670,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
     if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
     const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
+    const isPrivate = is_private === true || is_private === 1 || ['true', '1', 'on'].includes(String(is_private ?? '').trim().toLowerCase());
     let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true, followers_list: true, following_list: true };
     if (parsedProfileVisibility && typeof parsedProfileVisibility === 'object') {
       Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = parsedProfileVisibility[key] !== false; });
@@ -1709,11 +1710,11 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
       'INSERT INTO users (username,nickname,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *',
-      [usernameValue, nicknameValue, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, is_private ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      [usernameValue, nicknameValue, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, isPrivate ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
     const user = rows[0];
     if (quickRegistration) {
       const quickLogValues = [
-        usernameValue, nicknameValue, emailAddress, birth_date, validTagPermission, is_private ? 1 : 0,
+        usernameValue, nicknameValue, emailAddress, birth_date, validTagPermission, isPrivate ? 1 : 0,
         JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []),
         JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1,
         show_level_progress === 'false' ? 0 : 1, twoFactorMethod, avatar, user.id,

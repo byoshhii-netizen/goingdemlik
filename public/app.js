@@ -39,6 +39,8 @@ const MEDIA_VOLUME_KEY = 'cigcig_volume';
 const MEDIA_CLIP_SECONDS = 30;
 let photoSongClipSeconds = MEDIA_CLIP_SECONDS;
 const managedMediaAudio = new Set();
+let activePlaylistPreviewAudio = null;
+let activePlaylistPreviewButton = null;
 
 function getRecommendedSongs(songs) {
   const popular = [...songs]
@@ -220,6 +222,12 @@ function toast(msg, type = 'success', duration = 2200) {
 }
 
 function showModal(title, bodyHTML, modalClass = '') {
+  if (activePlaylistPreviewAudio) {
+    activePlaylistPreviewAudio.pause();
+    untrackMediaAudio(activePlaylistPreviewAudio);
+    activePlaylistPreviewAudio = null;
+    activePlaylistPreviewButton = null;
+  }
   managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
@@ -238,6 +246,52 @@ function hideModal() {
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
   $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal');
 }
+
+function descriptionPreviewHTML(description, className, maxLength = 150) {
+  const text = String(description || '');
+  if (!text) return '';
+  const preview = text.replace(/\s+/g, ' ').trim();
+  if (preview.length <= maxLength) return `<div class="${className}">${escHtml(text)}</div>`;
+  return `<button type="button" class="${className} description-preview" data-full-description="${escHtml(text)}" aria-label="Açıklamanın tamamını görüntüle">${escHtml(preview.slice(0, maxLength).trimEnd())}... <span>Devamını gör</span></button>`;
+}
+
+function showDescriptionModal(text, sourceElement = null) {
+  const realsVideo = sourceElement?.closest('.reals-item')?.querySelector('video');
+  if (realsVideo) {
+    const wasPlaying = !realsVideo.paused;
+    if (wasPlaying) realsVideo.pause();
+    window.__realsResumeVideo = () => {
+      if (wasPlaying && location.pathname === '/reals') realsVideo.play().catch(() => {});
+    };
+  }
+  showModal('Açıklama', `<div class="description-modal">
+    <div class="description-modal-heading"><span><i class="fas fa-align-left"></i></span><div><strong>Tam açıklama</strong><small>Paylaşımın tüm detayları</small></div></div>
+    <div class="description-modal-content">${escHtml(text)}</div>
+    <button type="button" class="btn btn-primary description-modal-close" id="description-modal-close">Kapat</button>
+  </div>`);
+  document.getElementById('description-modal-close')?.addEventListener('click', hideModal);
+}
+
+function showImagePreviewModal(url, title = 'Görsel önizlemesi') {
+  if (!url) return;
+  showModal(title, `<div class="media-preview-modal"><div><img src="${escHtml(url)}" alt="${escHtml(title)}" /></div></div>`);
+}
+
+document.addEventListener('click', event => {
+  const description = event.target.closest('[data-full-description]');
+  if (description) {
+    event.preventDefault();
+    event.stopPropagation();
+    showDescriptionModal(description.dataset.fullDescription || '', description);
+    return;
+  }
+  const imagePreview = event.target.closest('[data-image-preview]');
+  if (imagePreview) {
+    event.preventDefault();
+    event.stopPropagation();
+    showImagePreviewModal(imagePreview.dataset.imagePreview, imagePreview.dataset.imageTitle || 'Görsel önizlemesi');
+  }
+}, true);
 
 function attachPasswordToggle(inputEl, toggleBtnEl, iconEl) {
   if (!inputEl || !toggleBtnEl || !iconEl) return;
@@ -1384,7 +1438,7 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="reals-meta">
           <div class="reals-ad-byline"><span class="reals-ad-badge"><i class="fas fa-bullhorn"></i> REKLAM</span><span>Sponsorlu içerik</span></div>
           <a class="reals-ad-title-link" href="${escHtml(site)}" target="_blank" rel="noopener noreferrer" data-ad-click>${escHtml(r.title || '')}<i class="fas fa-arrow-up-right-from-square"></i></a>
-          ${r.description ? `<div class="reals-desc">${escHtml(r.description)}</div>` : ''}
+          ${descriptionPreviewHTML(r.description, 'reals-desc', 40)}
           <div class="reals-right-actions">
             ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn ad-like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
             ${r.allow_comments !== 0 ? `<button class="reals-action-btn comment-btn ad-comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>` : ''}
@@ -1399,7 +1453,6 @@ async function renderRealsFeed(app, initialId = null) {
         <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
-        <div class="reals-progress-wrap"><input class="reals-progress" type="range" min="0" max="1000" value="0" aria-label="Video konumu" /></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1407,7 +1460,7 @@ async function renderRealsFeed(app, initialId = null) {
           <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
-          <div class="reals-desc">${escHtml(r.description||'')}</div>
+          ${descriptionPreviewHTML(r.description, 'reals-desc', 40)}
           <div class="reals-right-actions">
             ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
             <button class="reals-action-btn comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>
@@ -1439,27 +1492,6 @@ async function renderRealsFeed(app, initialId = null) {
       let clickTimer = null;
       let lastTouchTapAt = 0;
       let suppressClickUntil = 0;
-      const progress = it.querySelector('.reals-progress');
-      const updateProgressFill = () => {
-        if (progress) progress.style.setProperty('--reals-progress', `${(Number(progress.value) / 10).toFixed(2)}%`);
-      };
-      const seekToProgress = () => {
-        if (!Number.isFinite(vid.duration) || vid.duration <= 0) return;
-        updateProgressFill();
-        vid.currentTime = (Number(progress.value) / 1000) * vid.duration;
-      };
-      const syncProgress = () => {
-        if (!progress || !Number.isFinite(vid.duration) || vid.duration <= 0) return;
-        if (!progress.matches(':active')) progress.value = String(Math.round((vid.currentTime / vid.duration) * 1000));
-        updateProgressFill();
-      };
-      progress?.addEventListener('pointerdown', event => event.stopPropagation());
-      progress?.addEventListener('click', event => event.stopPropagation());
-      progress?.addEventListener('input', seekToProgress);
-      progress?.addEventListener('change', seekToProgress);
-      vid.addEventListener('loadedmetadata', syncProgress);
-      vid.addEventListener('durationchange', syncProgress);
-      vid.addEventListener('timeupdate', syncProgress);
       const likeFromDoubleTap = () => {
         const likeButton = it.querySelector('.like-btn');
         if (!likeButton) return;
@@ -1470,7 +1502,7 @@ async function renderRealsFeed(app, initialId = null) {
       };
       it.addEventListener('click', event => {
         if (Date.now() < suppressClickUntil) { event.preventDefault(); return; }
-        if (event.target.closest('button,a,input,.reals-progress-wrap')) return;
+        if (event.target.closest('button,a,input')) return;
         if (it.classList.contains('reals-ad-item')) return;
         if (event.detail > 1) {
           clearTimeout(clickTimer);
@@ -1482,7 +1514,7 @@ async function renderRealsFeed(app, initialId = null) {
         clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
       });
       it.addEventListener('pointerup', event => {
-        if (event.pointerType !== 'touch' || event.target.closest('button,a,input,.reals-progress-wrap') || it.classList.contains('reals-ad-item')) return;
+        if (event.pointerType !== 'touch' || event.target.closest('button,a,input') || it.classList.contains('reals-ad-item')) return;
         const now = Date.now();
         if (now - lastTouchTapAt <= 320) {
           clearTimeout(clickTimer);
@@ -1498,7 +1530,7 @@ async function renderRealsFeed(app, initialId = null) {
         if (vid.paused) vid.play().catch(() => {}); else vid.pause();
       });
       it.addEventListener('dblclick', event => {
-        if (Date.now() < suppressClickUntil || event.target.closest('button,a,input,.reals-progress-wrap')) return;
+        if (Date.now() < suppressClickUntil || event.target.closest('button,a,input')) return;
         clearTimeout(clickTimer);
         likeFromDoubleTap();
       });
@@ -1576,13 +1608,6 @@ async function renderRealsFeed(app, initialId = null) {
     }));
     listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
       e.stopPropagation(); const it = btn.closest('.reals-item'); const video = getFeedItem(it); if (video && !video.isRealsAd) showForwardVideoModal(video);
-    }));
-    listEl.querySelectorAll('.reals-desc').forEach(desc => desc.addEventListener('click', e => {
-      e.stopPropagation(); const it = desc.closest('.reals-item'); const video = getFeedItem(it); const vid = it.querySelector('video');
-      if (!video) return; const wasPlaying = !vid.paused; if (wasPlaying) vid.pause();
-      window.__realsResumeVideo = () => { if (wasPlaying && location.pathname === '/reals') vid.play().catch(() => {}); };
-      showModal('Reals açıklaması', `<div class="reals-description-modal"><p>${escHtml(video.description || '')}</p><button class="btn btn-primary" id="reals-description-close">Kapat</button></div>`);
-      document.getElementById('reals-description-close')?.addEventListener('click', hideModal);
     }));
   }
 
@@ -1987,6 +2012,7 @@ function updateNavUI() {
     `;
     $('#mob-logout')?.addEventListener('click', async () => {
       try { await api('/auth/logout', { method: 'POST' }); } catch {}
+      stopMusicPlaybackForAccountChange();
       currentToken = null; currentUser = null;
       localStorage.removeItem('token');
       updateNavUI(); navigate('/'); toast('Çıkış yapıldı');
@@ -2279,6 +2305,7 @@ $('#logout-btn')?.addEventListener('click', () => {
     }
   }
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
+  stopMusicPlaybackForAccountChange();
   currentToken = null; currentUser = null;
   localStorage.removeItem('token');
   updateNavUI();
@@ -5939,7 +5966,7 @@ function groupCardHTML(g) {
     </div>
     <div class="group-info">
       <div class="group-name">${escHtml(g.name)}</div>
-      <div class="group-desc">${escHtml(g.description || '')}</div>
+      ${descriptionPreviewHTML(g.description, 'group-desc', 110)}
       <div class="group-meta">
         ${typeBadge}
         ${g.is_member ? '<span class="group-member-status"><i class="fas fa-check"></i> Üyesiniz</span>' : ''}
@@ -6154,7 +6181,7 @@ async function renderGroupDetail(app, slug) {
         <div class="group-hero-copy">
           <div class="group-hero-eyebrow">${group.logo_url ? `<img class="group-hero-logo" src="${escHtml(group.logo_url)}" alt="" />` : '<i class="fas fa-users"></i>'} TOPLULUK</div>
           <h1 class="group-hero-title">${escHtml(group.name)}</h1>
-          ${group.description ? `<p class="group-hero-desc">${escHtml(group.description)}</p>` : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
+          ${group.description ? descriptionPreviewHTML(group.description, 'group-hero-desc', 180) : '<p class="group-hero-desc">Grup üyeleriyle sohbet et ve paylaşımlarda bulun.</p>'}
         </div>
         <div class="group-hero-actions">
           ${!isMember && currentUser && isOpenGroup ? `<button class="btn btn-primary" id="join-btn"><i class="fas fa-plus"></i> Katıl</button>` : ''}
@@ -7067,7 +7094,6 @@ function memberItemHTML(m, isOwner, groupSlug) {
 }
 
 function videoCardHTML(v) {
-  const desc = v.description ? String(v.description).replace(/\n/g, ' ').substring(0, 100) : '';
   return `<div class="video-card" onclick="navigate('/video/${escHtml(v.slug)}')">
     <div class="video-thumb">
       ${v.banner_image ? `<img src="${escHtml(v.banner_image)}" alt="" />` : `<div class="video-thumb-placeholder"><i class="fas fa-video"></i></div>`}
@@ -7079,7 +7105,7 @@ function videoCardHTML(v) {
         <span>•</span>
         <span>${v.views || 0} izlenme</span>
       </div>
-      ${desc ? `<div class="video-card-desc">${escHtml(desc)}${desc.length >= 100 ? '...' : ''}</div>` : ''}
+      ${descriptionPreviewHTML(v.description, 'video-card-desc', 100)}
     </div>
   </div>`;
 }
@@ -7913,7 +7939,7 @@ async function renderProfile(app, username) {
         ${badgesHTML}
         ${spotifyNowPlayingMarkup(profileSpotify, false)}
         ${progressHTML}
-        ${user.bio ? `<div class="profile-bio" style="margin-top:10px">${escHtml(user.bio)}</div>` : ''}
+        ${user.bio ? descriptionPreviewHTML(user.bio, 'profile-bio', 160) : ''}
         ${links.length ? `<div class="profile-links">${links.map(l => {
           let url = (l.url||'').trim();
           if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
@@ -8930,6 +8956,7 @@ async function renderSettingsSection(section) {
       try {
         await api('/auth/request-delete', { method: 'POST', body: JSON.stringify({ password: pw }) });
         // Oturumu kapat
+        stopMusicPlaybackForAccountChange();
         currentToken = ''; currentUser = null;
         localStorage.removeItem('token');
         updateNavUI();
@@ -10442,10 +10469,25 @@ async function renderDMChat(username) {
     if (slot && spotify) slot.innerHTML = spotifyNowPlayingMarkup(spotify, true);
   });
   if (!isSelfConversation) {
-    api('/me/dm-theme-settings').then(settings => {
+    api('/me/dm-theme-settings').then(async settings => {
       const currentChat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(conv.id))}"]`);
       if (currentChat && !settings.first_dm_theme_prompt_completed) {
-        showFirstDmThemePrompt(conv, settings.default_theme_key || theme?.theme_key || 'default', Boolean(theme?.has_personal_theme || theme?.shared));
+        const defaultTheme = settings.default_theme_key || theme?.theme_key || 'default';
+        try {
+          await api('/me/dm-theme-settings', {
+            method: 'PUT',
+            body: JSON.stringify({
+              default_theme_key: defaultTheme,
+              first_dm_theme_prompt_completed: true
+            })
+          });
+        } catch (error) {
+          console.error('İlk mesaj teması gösterimi kaydedilemedi:', error.message);
+          toast('Mesaj teması tercihi kaydedilemedi. Seçimini kaydetmek için tekrar deneyebilirsin.', 'error');
+        }
+        if (document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(conv.id))}"]`)) {
+          showFirstDmThemePrompt(conv, defaultTheme, Boolean(theme?.has_personal_theme || theme?.shared));
+        }
       }
     }).catch(error => {
       console.error('İlk mesaj teması ayarı alınamadı:', error.message);
@@ -12277,7 +12319,12 @@ let listeningInternalOpen = false;
 function readSavedMusicPlayback() {
   try {
     const saved = JSON.parse(localStorage.getItem(MUSIC_RESUME_KEY) || 'null');
-    return saved && (saved.type === 'song' || saved.type === 'ad') ? saved : null;
+    if (!saved || (saved.type !== 'song' && saved.type !== 'ad')) return null;
+    if (String(saved.user_id ?? '') !== String(currentUser?.id ?? '')) {
+      clearSavedMusicPlayback();
+      return null;
+    }
+    return saved;
   } catch {
     localStorage.removeItem(MUSIC_RESUME_KEY);
     return null;
@@ -12288,6 +12335,25 @@ function clearSavedMusicPlayback() {
   localStorage.removeItem(MUSIC_RESUME_KEY);
 }
 
+function stopMusicPlaybackForAccountChange() {
+  if (currentAudio) {
+    stopMusicAdTracking(currentAudio);
+    currentAudio.musicResume = null;
+    currentAudio.pause();
+  }
+  currentAudio = null;
+  currentSlug = null;
+  currentQueue = [];
+  currentQueueIndex = -1;
+  clearSavedMusicPlayback();
+  document.querySelectorAll('.music-play-mini').forEach(button => { button.innerHTML = '<i class="fas fa-play"></i>'; });
+  const player = document.getElementById('global-music-player');
+  if (player) {
+    player.classList.remove('music-ad-player');
+    player.style.display = 'none';
+  }
+}
+
 function saveMusicPlayback(audio, force = false) {
   if (!audio?.musicResume || audio.dataset.listeningTrackId || audio.ended) return;
   const now = Date.now();
@@ -12295,6 +12361,7 @@ function saveMusicPlayback(audio, force = false) {
   audio.musicResume.lastSavedAt = now;
   localStorage.setItem(MUSIC_RESUME_KEY, JSON.stringify({
     ...audio.musicResume,
+    user_id: currentUser?.id ?? null,
     currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
     wasPlaying: !audio.paused,
     lastSavedAt: now
@@ -13052,7 +13119,16 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
     }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
   });
   document.getElementById('gp-close')?.addEventListener('click', () => {
-    stopMusicAdTracking(audio); audio.pause(); currentAudio=null; currentQueue=[]; currentQueueIndex=-1; player.style.display='none';
+    stopMusicAdTracking(audio);
+    audio.musicResume = null;
+    audio.pause();
+    currentAudio = null;
+    currentSlug = null;
+    currentQueue = [];
+    currentQueueIndex = -1;
+    clearSavedMusicPlayback();
+    document.querySelectorAll('.music-play-mini').forEach(button => { button.innerHTML = '<i class="fas fa-play"></i>'; });
+    player.style.display = 'none';
   });
 
   // Önceki / sonraki
@@ -14549,7 +14625,7 @@ async function renderPhotos(app) {
 function photoCardHTML(p) {
   return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`;
 }
-function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3><p>${escHtml(a.description||'')}</p></div></article>`; }
+function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
     api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/view', { method: 'POST' }).catch(() => {});
@@ -15094,7 +15170,7 @@ async function renderMyPlaylists(app) {
             <div class="pl-card-body">
               <div class="pl-card-name">${escHtml(pl.name)}</div>
               <div class="pl-card-meta"><span>${pl.song_count} şarkı</span><span class="pl-visibility ${pl.is_public ? 'is-public' : ''}"><i class="fas fa-${pl.is_public ? 'globe' : 'lock'}"></i> ${pl.is_public ? 'Herkese açık' : 'Gizli'}</span></div>
-              ${pl.description ? `<div class="pl-card-desc">${escHtml(pl.description)}</div>` : ''}
+              ${descriptionPreviewHTML(pl.description, 'pl-card-desc', 100)}
               <div class="pl-card-owner"><i class="fas fa-user"></i> ${escHtml(pl.owner_username || currentUser.username || 'Bilinmiyor')}</div>
             </div>
             <div class="pl-card-actions">
@@ -15169,6 +15245,7 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
         <i class="fas fa-camera pl-cover-camera"></i>
         <input type="file" id="plm-cover" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" hidden />
       </div>
+      ${coverPreviewUrl ? `<button type="button" class="btn btn-ghost btn-sm pl-cover-view" id="plm-cover-view"><i class="fas fa-magnifying-glass-plus"></i> Kapağı görüntüle</button>` : ''}
       ${coverPreviewUrl ? `<button type="button" class="pl-cover-remove" id="plm-cover-remove"><i class="fas fa-trash-alt"></i> Kapağı kaldır</button>` : ''}
 
       <div class="form-group pl-name-field">
@@ -15195,6 +15272,7 @@ function showCreatePlaylistModal(mode, plId, name, desc, isPublic = true, onSave
 
     const coverInput = document.getElementById('plm-cover');
     const coverPicker = document.getElementById('plm-cover-picker');
+    document.getElementById('plm-cover-view')?.addEventListener('click', () => showImagePreviewModal(coverPreviewUrl, 'Playlist kapağı'));
     coverPicker?.addEventListener('click', () => coverInput?.click());
     coverPicker?.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); coverInput?.click(); } });
     coverInput?.addEventListener('change', () => {
@@ -15285,7 +15363,7 @@ async function renderPlaylistDetail(app, plId) {
         <div class="pl-detail-copy">
           <div class="pl-detail-kicker"><span>PLAYLIST</span><span class="pl-detail-dot"></span><span>${playlist.is_public ? 'HERKESE AÇIK' : 'GİZLİ'}</span></div>
           <h1>${escHtml(playlist.name)}</h1>
-          ${playlist.description ? `<p>${escHtml(playlist.description)}</p>` : ''}
+          ${descriptionPreviewHTML(playlist.description, 'pl-detail-description', 180)}
           <div class="pl-detail-meta"><span><i class="fas fa-music"></i> ${songs.length} şarkı</span><span><i class="fas fa-${playlist.is_public ? 'globe' : 'lock'}"></i> ${playlist.is_public ? 'Herkese açık' : 'Gizli'}</span>${playlist.owner_username ? `<span><i class="fas fa-user"></i> <a href="${profileRoute(playlist.owner_username)}" data-link class="pl-owner-link">@${escHtml(playlist.owner_username)}</a></span>` : ''}</div>
         </div>
       </div>
@@ -15421,6 +15499,13 @@ function showAddSongsModal(plId, existingSongs, onAdded) {
   const loadSearch = async (q = '') => {
     const el = document.getElementById('plsearch-list');
     if (!el) return;
+    if (activePlaylistPreviewAudio) {
+      activePlaylistPreviewAudio.pause();
+      untrackMediaAudio(activePlaylistPreviewAudio);
+      if (activePlaylistPreviewButton) activePlaylistPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+      activePlaylistPreviewAudio = null;
+      activePlaylistPreviewButton = null;
+    }
     el.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
     try {
       const url = q ? `/songs?q=${encodeURIComponent(q)}` : '/songs';
@@ -15429,16 +15514,56 @@ function showAddSongsModal(plId, existingSongs, onAdded) {
       el.innerHTML = allSongs.map(s => `
         <div class="pl-search-row ${existingIds.has(String(s.id)) ? 'pl-search-row-added' : ''}" data-id="${s.id}">
           <div style="display:flex;align-items:center;gap:10px;flex:1">
-            ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover" />` : `<div style="width:36px;height:36px;border-radius:6px;background:var(--bg-card2);display:flex;align-items:center;justify-content:center"><i class="fas fa-music" style="font-size:12px;color:var(--text-muted)"></i></div>`}
+            ${s.cover_url ? `<button type="button" class="pl-search-cover-preview" data-image-preview="${escHtml(s.cover_url)}" data-image-title="${escHtml(s.title)} kapak görseli" aria-label="${escHtml(s.title)} kapak görselini görüntüle"><img src="${escHtml(s.cover_url)}" alt="" /></button>` : `<div class="pl-search-cover-placeholder"><i class="fas fa-music"></i></div>`}
             <div>
               <div style="font-size:14px;font-weight:600">${escHtml(s.title)}</div>
               <div style="font-size:12px;color:var(--text-muted)">${escHtml(s.artist_name)}</div>
             </div>
           </div>
+          ${s.audio_url ? `<button type="button" class="btn btn-ghost btn-sm pl-search-preview" data-audio-url="${escHtml(s.audio_url)}" title="Şarkıyı önizle" aria-label="${escHtml(s.title)} şarkısını önizle"><i class="fas fa-play"></i></button>` : ''}
           <button class="btn btn-sm ${existingIds.has(String(s.id)) ? 'btn-outline' : 'btn-primary'} pl-search-add" data-id="${s.id}" ${existingIds.has(String(s.id)) ? 'disabled' : ''}>
             ${existingIds.has(String(s.id)) ? '<i class="fas fa-check"></i>' : '<i class="fas fa-plus"></i>'}
           </button>
         </div>`).join('');
+      el.querySelectorAll('.pl-search-preview').forEach(button => {
+        button.addEventListener('click', async () => {
+          const audioUrl = button.dataset.audioUrl;
+          if (activePlaylistPreviewAudio && activePlaylistPreviewButton === button && !activePlaylistPreviewAudio.paused) {
+            activePlaylistPreviewAudio.pause();
+            button.innerHTML = '<i class="fas fa-play"></i>';
+            return;
+          }
+          if (activePlaylistPreviewAudio) {
+            activePlaylistPreviewAudio.pause();
+            untrackMediaAudio(activePlaylistPreviewAudio);
+            if (activePlaylistPreviewButton) activePlaylistPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+          }
+          const audio = trackMediaAudio(new Audio(audioUrl));
+          activePlaylistPreviewAudio = audio;
+          activePlaylistPreviewButton = button;
+          button.innerHTML = '<i class="fas fa-pause"></i>';
+          audio.addEventListener('ended', () => {
+            button.innerHTML = '<i class="fas fa-play"></i>';
+            untrackMediaAudio(audio);
+            if (activePlaylistPreviewAudio === audio) {
+              activePlaylistPreviewAudio = null;
+              activePlaylistPreviewButton = null;
+            }
+          }, { once: true });
+          try {
+            await audio.play();
+          } catch (error) {
+            console.warn('Şarkı önizlemesi başlatılamadı:', error);
+            toast('Şarkı önizlemesi başlatılamadı.', 'error');
+            button.innerHTML = '<i class="fas fa-play"></i>';
+            untrackMediaAudio(audio);
+            if (activePlaylistPreviewAudio === audio) {
+              activePlaylistPreviewAudio = null;
+              activePlaylistPreviewButton = null;
+            }
+          }
+        });
+      });
       el.querySelectorAll('.pl-search-add:not([disabled])').forEach(btn => {
         btn.addEventListener('click', async () => {
           const sid = btn.dataset.id;
@@ -15578,7 +15703,7 @@ async function renderStore(app) {
         <div class="store-card-duration"><i class="fas ${p.type === 'red_tick' ? 'fa-shield-check' : 'fa-clock'}"></i> ${p.type === 'red_tick' ? 'Yalnızca yönetici verebilir' : `${p.duration_days} günlük üyelik`}</div>
       </div>
       <div class="store-card-body">
-        ${p.description ? `<p class="store-card-desc">${escHtml(p.description)}</p>` : ''}
+        ${descriptionPreviewHTML(p.description, 'store-card-desc', 120)}
         ${features.length ? `<ul class="store-features">${features.map(f=>`<li><i class="fas fa-check-circle" style="color:${cfg.color}"></i> ${escHtml(f)}</li>`).join('')}</ul>` : ''}
         ${activeSub ? `
           <div class="store-active-badge"><i class="fas fa-check-circle"></i> Aktif Üyeliğin Var</div>
