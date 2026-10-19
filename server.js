@@ -601,7 +601,7 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
     messageId: message.id,
     senderId: sender.id,
     usernames: [sender.username, recipient.username],
-    preview: message.content || (message.image_url ? 'Fotoğraf' : 'Yeni mesaj')
+    preview: message.content || (message.image_url ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
   });
 }
 
@@ -3640,6 +3640,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
+      song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -3649,6 +3650,7 @@ app.post('/api/book/:slug/share', authMiddleware, async (req, res) => {
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
     LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
+    LEFT JOIN songs song ON m.shared_song_id=song.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
@@ -8975,8 +8977,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     SELECT     m.id, m.conversation_id, m.sender_id, m.content,
     CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '' ELSE m.image_url END AS image_url,
     CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
-    m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+    m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.shared_gif_url,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
@@ -8984,6 +8986,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
+      song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
@@ -8994,6 +8997,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
     LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
+    LEFT JOIN songs song ON m.shared_song_id=song.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
@@ -9093,6 +9097,45 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true, conversationId: conversation.id, readThroughMessageId });
 });
 
+app.get('/api/giphy/search', authMiddleware, async (req, res) => {
+  const apiKey = String(process.env.GIPHY_API_KEY || '').trim();
+  if (!apiKey) return res.status(503).json({ error: 'GIF araması şu anda yapılandırılmamış. Yönetici GIPHY_API_KEY eklemelidir.' });
+  const search = String(req.query.q || '').trim().slice(0, 80);
+  const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 4999);
+  const endpoint = new URL(search ? 'https://api.giphy.com/v1/gifs/search' : 'https://api.giphy.com/v1/gifs/trending');
+  endpoint.search = new URLSearchParams({
+    api_key: apiKey,
+    rating: 'g',
+    lang: 'tr',
+    limit: '24',
+    offset: String(offset),
+    ...(search ? { q: search } : {})
+  }).toString();
+  try {
+    const response = await fetch(endpoint, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) {
+      console.error('[giphy] GIF sağlayıcısı başarısız:', response.status);
+      return res.status(502).json({ error: 'GIF araması şu anda kullanılamıyor.' });
+    }
+    const payload = await response.json();
+    const gifs = (Array.isArray(payload.data) ? payload.data : []).flatMap(gif => {
+      const url = gif?.images?.fixed_width?.url || gif?.images?.original?.url || '';
+      const preview = gif?.images?.fixed_width_small?.url || gif?.images?.fixed_width?.url || url;
+      try {
+        const media = new URL(url);
+        const thumbnail = new URL(preview);
+        if (!gif?.id || media.protocol !== 'https:' || thumbnail.protocol !== 'https:'
+          || !media.hostname.endsWith('.giphy.com') || !thumbnail.hostname.endsWith('.giphy.com')) return [];
+      } catch { return []; }
+      return [{ id: String(gif.id), title: String(gif.title || 'GIF').slice(0, 120), url, preview }];
+    });
+    res.json({ gifs, next_offset: Number(payload.pagination?.offset || 0) + gifs.length });
+  } catch (error) {
+    console.error('[giphy] GIF araması başarısız:', error.message);
+    res.status(502).json({ error: 'GIF araması tamamlanamadı. Lütfen tekrar deneyin.' });
+  }
+});
+
 app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,username,is_private FROM users WHERE username=$1', [req.params.username]);
   if (await denyIfRestricted(req, res, 'message')) return;
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
@@ -9116,7 +9159,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else if (conv.user2_id == other.id && conv.hidden_by_user2) {
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
-  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id, image_url: bodyImageUrl } = req.body;
+  let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id, image_url: bodyImageUrl } = req.body;
   content = content == null ? '' : String(content);
   const requestedImageUrls = Array.isArray(req.body?.image_urls)
     ? req.body.image_urls.map(url => String(url || '').trim()).filter(Boolean)
@@ -9127,6 +9170,27 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   let image_url = imageUrls[0] || '';
   const imageViewLimit = Number(req.body?.image_view_limit ?? 0);
   if (![0, 1, 2, 3].includes(imageViewLimit)) return res.status(400).json({ error: 'Fotoğraf görüntüleme seçeneği geçersiz.' });
+  if (shared_song_id !== undefined && shared_song_id !== null && shared_song_id !== '') {
+    const songId = Number(shared_song_id);
+    if (!Number.isSafeInteger(songId) || songId < 1) return res.status(400).json({ error: 'Geçersiz müzik.' });
+    const { rows: songs } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [songId]);
+    if (!songs.length) return res.status(404).json({ error: 'Bu müzik bulunamadı veya kullanılamıyor.' });
+    shared_song_id = songId;
+  } else {
+    shared_song_id = null;
+  }
+  shared_gif_url = typeof shared_gif_url === 'string' ? shared_gif_url.trim() : '';
+  if (shared_gif_url) {
+    try {
+      const gifUrl = new URL(shared_gif_url);
+      if (gifUrl.protocol !== 'https:' || !gifUrl.hostname.endsWith('.giphy.com') || gifUrl.href.length > 2048) {
+        return res.status(400).json({ error: 'GIF adresi geçersiz.' });
+      }
+      shared_gif_url = gifUrl.href;
+    } catch {
+      return res.status(400).json({ error: 'GIF adresi geçersiz.' });
+    }
+  }
   if (req.file) {
     try {
       image_url = await handleUpload(req.file);
@@ -9145,10 +9209,10 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else {
     shared_newspaper_id = null;
   }
-  if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id && !shared_song_id && !shared_gif_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *',
-    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *',
+    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   if (shared_forum_id) {
@@ -9164,8 +9228,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.shared_gif_url,
+      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
       v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
@@ -9173,6 +9237,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
+      song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
       r.content as reply_content, ru.username as reply_username
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -9182,6 +9247,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     LEFT JOIN stories st ON m.shared_story_id=st.id
     LEFT JOIN users su ON st.user_id=su.id
     LEFT JOIN newspapers nw ON m.shared_newspaper_id=nw.id
+    LEFT JOIN songs song ON m.shared_song_id=song.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
@@ -9323,7 +9389,7 @@ app.put('/api/messages/:id', authMiddleware, async (req, res) => {
   if (msg.sender_id != req.user.id) return res.status(403).json({ error: 'Sadece kendi mesajınızı düzenleyebilirsiniz' });
   if (msg.deleted_for_all || msg.deleted_by_sender) return res.status(400).json({ error: 'Silinmiş mesaj düzenlenemez' });
   if (!String(msg.content || '').trim()) return res.status(400).json({ error: 'Metin içermeyen mesaj düzenlenemez' });
-  if (!content && !msg.image_url && !msg.shared_forum_id && !msg.shared_video_id && !msg.shared_book_id && !msg.shared_photo_id && !msg.shared_story_id && !msg.shared_newspaper_id) {
+  if (!content && !msg.image_url && !msg.shared_forum_id && !msg.shared_video_id && !msg.shared_book_id && !msg.shared_photo_id && !msg.shared_story_id && !msg.shared_newspaper_id && !msg.shared_song_id && !msg.shared_gif_url) {
     return res.status(400).json({ error: 'Mesaj boş olamaz' });
   }
 
@@ -9353,6 +9419,53 @@ app.put('/api/messages/:id', authMiddleware, async (req, res) => {
     });
   }
   res.json(updated[0]);
+});
+
+app.put('/api/messages/:id/music', authMiddleware, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası.' });
+  const songId = Number(req.body?.shared_song_id);
+  if (!Number.isSafeInteger(songId) || songId < 1) return res.status(400).json({ error: 'Bir müzik seçin.' });
+  const { rows: messageRows } = await query('SELECT * FROM dm_messages WHERE id=$1', [req.params.id]);
+  const message = messageRows[0];
+  if (!message) return res.status(404).json({ error: 'Mesaj bulunamadı.' });
+  if (String(message.sender_id) !== String(req.user.id)) return res.status(403).json({ error: 'Sadece kendi müzik mesajınızı düzenleyebilirsiniz.' });
+  if (message.deleted_for_all || message.deleted_by_sender) return res.status(400).json({ error: 'Silinmiş mesaj düzenlenemez.' });
+  const { rows: songs } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [songId]);
+  if (!songs.length) return res.status(404).json({ error: 'Bu müzik bulunamadı veya kullanılamıyor.' });
+  const { rows: updated } = await query(
+    `UPDATE dm_messages SET shared_song_id=$1, edited_at=NOW()
+     WHERE id=$2 AND sender_id=$3 AND shared_song_id IS NOT NULL
+       AND created_at >= NOW() - INTERVAL '3 hours'
+       AND COALESCE(deleted_for_all,0)=0 AND COALESCE(deleted_by_sender,0)=0
+     RETURNING *`,
+    [songId, message.id, req.user.id]
+  );
+  if (!updated.length) return res.status(403).json({ error: 'Müzik yalnızca gönderildikten sonraki 3 saat içinde değiştirilebilir.' });
+  const { rows: full } = await query(`
+    SELECT m.*,u.username AS sender_username,u.nickname AS sender_nickname,u.avatar AS sender_avatar,
+      u.avatar_removed AS sender_avatar_removed,u.name_color AS sender_name_color,
+      song.title AS song_title,song.artist_name AS song_artist,song.cover_url AS song_cover_url,song.audio_url AS song_audio_url
+    FROM dm_messages m
+    JOIN users u ON u.id=m.sender_id
+    LEFT JOIN songs song ON song.id=m.shared_song_id
+    WHERE m.id=$1
+  `, [message.id]);
+  const { rows: participants } = await query(
+    `SELECT c.user1_id,c.user2_id,u1.username AS user1_username,u2.username AS user2_username
+     FROM dm_conversations c
+     JOIN users u1 ON u1.id=c.user1_id
+     JOIN users u2 ON u2.id=c.user2_id
+     WHERE c.id=$1`,
+    [message.conversation_id]
+  );
+  if (participants.length) {
+    const conversation = participants[0];
+    io.to([`user:${conversation.user1_id}`, `user:${conversation.user2_id}`]).emit('dm:message-edited', {
+      usernames: [conversation.user1_username, conversation.user2_username],
+      message: { ...full[0], media_changed: true }
+    });
+  }
+  res.json(full[0]);
 });
 
 app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
@@ -9936,10 +10049,10 @@ app.get('/api/shop/my-orders', authMiddleware, async (req, res) => {
 // ===== MÜZİK SES REKLAMLARI =====
 function newMusicAdPortalCode() { return String(Math.floor(100000 + Math.random() * 900000)); }
 function isAdFreeUser(user) { return !!(user && (user.is_vip || user.is_plus)); }
-const MUSIC_AD_SETTINGS_DEFAULTS = { mode: 'interval', interval: 2, random_frequency: 'medium' };
+const MUSIC_AD_SETTINGS_DEFAULTS = { mode: 'interval', interval: 2, random_frequency: 'medium', ad_count: 1 };
 async function getMusicAdSettings() {
   const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1::text[])", [
-    ['music_ad_mode', 'music_ad_interval', 'music_ad_random_frequency']
+    ['music_ad_mode', 'music_ad_interval', 'music_ad_random_frequency', 'music_ad_count']
   ]);
   const values = Object.fromEntries(rows.map(row => [row.key, row.value]));
   return {
@@ -9947,21 +10060,21 @@ async function getMusicAdSettings() {
     interval: Math.min(20, Math.max(1, parseInt(values.music_ad_interval, 10) || MUSIC_AD_SETTINGS_DEFAULTS.interval)),
     random_frequency: ['rare', 'medium', 'frequent'].includes(values.music_ad_random_frequency)
       ? values.music_ad_random_frequency
-      : MUSIC_AD_SETTINGS_DEFAULTS.random_frequency
+      : MUSIC_AD_SETTINGS_DEFAULTS.random_frequency,
+    ad_count: Math.min(10, Math.max(1, parseInt(values.music_ad_count, 10) || MUSIC_AD_SETTINGS_DEFAULTS.ad_count))
   };
 }
 function shouldShowRandomMusicAd(frequency) {
   const odds = { rare: 0.15, medium: 0.3, frequent: 0.5 };
   return Math.random() < (odds[frequency] || odds.medium);
 }
-async function pickMusicAd() {
-  const { rows } = await query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
-    FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT 1`);
-  return rows[0] || null;
-}
-
 app.get('/api/music-ads/guest', async (req, res) => {
-  try { res.json({ ad: await pickMusicAd(), settings: await getMusicAdSettings() }); }
+  try {
+    const settings = await getMusicAdSettings();
+    const { rows: ads } = await query(`SELECT * FROM music_ads WHERE active=1
+      ORDER BY boost_points DESC, priority DESC, created_at ASC LIMIT $1`, [settings.ad_count]);
+    res.json({ ad: ads[0] || null, ads, settings });
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -10051,7 +10164,7 @@ app.post('/api/music-listens/:sessionId/heartbeat', authMiddleware, async (req, 
             FROM music_ads a WHERE a.id=$1 AND a.active=1`, [state.pending_ad_id])).rows[0] || null;
         } else {
           const settingRows = (await client.query("SELECT key,value FROM settings WHERE key = ANY($1::text[])", [
-            ['music_ad_mode', 'music_ad_interval', 'music_ad_random_frequency']
+            ['music_ad_mode', 'music_ad_interval', 'music_ad_random_frequency', 'music_ad_count']
           ])).rows;
           const settingValues = Object.fromEntries(settingRows.map(row => [row.key, row.value]));
           const settings = {
@@ -10059,16 +10172,21 @@ app.post('/api/music-listens/:sessionId/heartbeat', authMiddleware, async (req, 
             interval: Math.min(20, Math.max(1, parseInt(settingValues.music_ad_interval, 10) || MUSIC_AD_SETTINGS_DEFAULTS.interval)),
             random_frequency: ['rare', 'medium', 'frequent'].includes(settingValues.music_ad_random_frequency)
               ? settingValues.music_ad_random_frequency
-              : MUSIC_AD_SETTINGS_DEFAULTS.random_frequency
+              : MUSIC_AD_SETTINGS_DEFAULTS.random_frequency,
+            ad_count: Math.min(10, Math.max(1, parseInt(settingValues.music_ad_count, 10) || MUSIC_AD_SETTINGS_DEFAULTS.ad_count))
           };
           const due = settings.mode === 'random'
             ? shouldShowRandomMusicAd(settings.random_frequency)
             : Number(state.completed_song_count) >= settings.interval;
           if (due) {
-            ad = (await client.query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
-              FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT 1`)).rows[0] || null;
-            if (ad) await client.query(`UPDATE music_ad_states SET pending_ad_id=$1,completed_song_count=0,updated_at=NOW() WHERE user_id=$2`,
-              [ad.id, req.user.id]);
+            const selectedAds = (await client.query(`SELECT a.*, (SELECT COUNT(*) FROM music_ads WHERE active=1) AS ad_total
+              FROM music_ads a WHERE a.active=1 ORDER BY a.boost_points DESC, a.priority DESC, a.created_at ASC LIMIT $1`,
+            [settings.ad_count])).rows;
+            ad = selectedAds[0] || null;
+            if (ad) await client.query(`UPDATE music_ad_states
+              SET pending_ad_id=$1,pending_ad_ids=$2::jsonb,completed_song_count=0,updated_at=NOW()
+              WHERE user_id=$3`,
+            [ad.id, JSON.stringify(selectedAds.slice(1).map(item => item.id)), req.user.id]);
           }
         }
       }
@@ -10094,12 +10212,36 @@ app.post('/api/music-ads/:id/start', authMiddleware, async (req, res) => {
   } catch(e) { res.status(500).json({ error:e.message }); }
 });
 app.post('/api/music-ads/:id/complete', authMiddleware, async (req, res) => {
+  let client;
   try {
-    const { rows } = await query(`UPDATE music_ad_states SET pending_ad_id=NULL,ad_started_at=NULL,completed_song_count=0,updated_at=NOW()
-      WHERE user_id=$1 AND pending_ad_id=$2 RETURNING user_id`, [req.user.id,req.params.id]);
-    if (!rows.length && !isAdFreeUser(req.user)) return res.status(403).json({ error:'Reklam tamamlanamadı.' });
+    if (isAdFreeUser(req.user)) return res.json({ ok: true });
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const { rows: states } = await client.query(
+      'SELECT pending_ad_id,pending_ad_ids FROM music_ad_states WHERE user_id=$1 FOR UPDATE',
+      [req.user.id]
+    );
+    const state = states[0];
+    if (!state || String(state.pending_ad_id) !== String(req.params.id)) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error:'Reklam tamamlanamadı.' });
+    }
+    const queuedIds = Array.isArray(state.pending_ad_ids) ? state.pending_ad_ids : [];
+    const activeIds = queuedIds.length
+      ? (await client.query('SELECT id FROM music_ads WHERE id=ANY($1::bigint[]) AND active=1', [queuedIds])).rows
+        .map(row => String(row.id))
+      : [];
+    const nextId = activeIds[0] || null;
+    const nextQueue = nextId ? activeIds.slice(1) : [];
+    await client.query(`UPDATE music_ad_states SET pending_ad_id=$1,pending_ad_ids=$2::jsonb,
+      ad_started_at=NULL,completed_song_count=0,updated_at=NOW() WHERE user_id=$3`,
+    [nextId, JSON.stringify(nextQueue), req.user.id]);
+    await client.query('COMMIT');
     res.json({ ok:true });
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ error:e.message });
+  } finally { client?.release(); }
 });
 app.post('/api/music-ads/:id/click', async (req,res) => {
   try { await query('UPDATE music_ads SET click_count=click_count+1 WHERE id=$1 AND active=1',[req.params.id]); res.json({ok:true}); }
@@ -10326,9 +10468,11 @@ app.get('/api/admin/music-ad-settings', adminMiddleware, async (req,res) => {
   catch (e) { res.status(500).json({ error:e.message }); }
 });
 app.put('/api/admin/music-ad-settings', adminMiddleware, async (req,res) => {
-  const { mode, interval, random_frequency: randomFrequency } = req.body || {};
+  const { mode, interval, random_frequency: randomFrequency, ad_count: requestedAdCount } = req.body || {};
   const safeInterval = Number(interval);
+  const safeAdCount = Number(requestedAdCount);
   if (!['interval', 'random'].includes(mode) || !Number.isInteger(safeInterval) || safeInterval < 1 || safeInterval > 20 ||
+      !Number.isInteger(safeAdCount) || safeAdCount < 1 || safeAdCount > 10 ||
       !['rare', 'medium', 'frequent'].includes(randomFrequency)) {
     return res.status(400).json({ error: 'Reklam sıklığı ayarları geçersiz.' });
   }
@@ -10336,7 +10480,8 @@ app.put('/api/admin/music-ad-settings', adminMiddleware, async (req,res) => {
     const values = [
       ['music_ad_mode', mode],
       ['music_ad_interval', String(safeInterval)],
-      ['music_ad_random_frequency', randomFrequency]
+      ['music_ad_random_frequency', randomFrequency],
+      ['music_ad_count', String(safeAdCount)]
     ];
     for (const [key, value] of values) {
       await query(`INSERT INTO settings (key,value) VALUES ($1,$2)

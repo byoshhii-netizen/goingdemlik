@@ -235,7 +235,7 @@ function showModal(title, bodyHTML, modalClass = '') {
   managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -248,7 +248,7 @@ function hideModal() {
   window.__realsResumeVideo = null;
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -257,6 +257,11 @@ function descriptionPreviewHTML(description, className, maxLength = 150) {
   const preview = text.replace(/\s+/g, ' ').trim();
   if (preview.length <= maxLength) return `<div class="${className}">${escHtml(text)}</div>`;
   return `<button type="button" class="${className} description-preview" data-full-description="${escHtml(text)}" aria-label="Açıklamanın tamamını görüntüle">${escHtml(preview.slice(0, maxLength).trimEnd())}... <span>Devamını gör</span></button>`;
+}
+
+function formatCount(value) {
+  const count = Number(typeof value === 'string' ? value.replace(/[^\d]/g, '') : value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count).toLocaleString('tr-TR') : '0';
 }
 
 function showDescriptionModal(text, sourceElement = null) {
@@ -1872,6 +1877,18 @@ function handleRealtimeDirectMessageEdit(event) {
   if (!peerUsername || currentChatUsername.toLowerCase() !== String(peerUsername).toLowerCase()) return;
 
   const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(event.message.id))}"]`);
+  if (row && event.message.media_changed) {
+    if (window.__dmSharedSongButton && row.contains(window.__dmSharedSongButton)) {
+      window.__dmSharedSongAudio?.pause();
+      window.__dmSharedSongAudio = null;
+      window.__dmSharedSongButton = null;
+    }
+    const previous = row.previousElementSibling?.matches('.dm-msg-wrap')
+      ? { sender_id: row.previousElementSibling.dataset.senderId, created_at: row.previousElementSibling.dataset.createdAt }
+      : null;
+    row.outerHTML = dmMessageHTML(event.message, currentUser.id, dmSelectionMode, previous);
+    return;
+  }
   const bubble = row?.querySelector('.dm-msg-bubble:not(.dm-deleted)');
   if (!row || !bubble) return;
 
@@ -4254,7 +4271,7 @@ function poemCardHTML(poem) {
     <div class="poem-card-preview">${escHtml(preview.length > 220 ? preview.substring(0, 220) + '...' : preview)}</div>
     <div class="poem-card-meta">
       <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${poem.username ? userDisplayName(poem) : 'Silinmiş Kullanıcı'}</span>
-      <span class="forum-meta-item"><i class="fas fa-heart"></i>${poem.like_count || 0}</span>
+      <span class="forum-meta-item"><i class="fas fa-heart"></i>${formatCount(poem.like_count)}</span>
       <span class="forum-meta-item"><i class="fas fa-comment"></i>${poem.comment_count || 0}</span>
       <span class="forum-meta-item" title="${dateStr} ${timeStr}"><i class="fas fa-clock"></i>${dateStr}</span>
     </div>
@@ -4396,7 +4413,7 @@ async function renderPoemDetail(app, slug) {
       <div class="poem-detail-content">${poemTextHTML(poem.content)}</div>
       <div class="poem-actions">
         <button class="forum-action-btn like-count-control ${liked ? 'liked' : ''}" id="poem-like-btn" aria-label="${liked ? 'Beğeniyi kaldır' : 'Beğen'}">
-          <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="poem-like-count">${poem.like_count || 0}</span> Beğeni
+          <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="poem-like-count">${formatCount(poem.like_count)}</span> Beğeni
         </button>
         <button class="forum-action-btn" id="poem-share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
       </div>
@@ -4444,7 +4461,7 @@ async function renderPoemDetail(app, slug) {
       btn.classList.toggle('liked', liked);
       const icon = btn.querySelector('i');
       if (icon) icon.className = liked ? 'fas fa-heart' : 'far fa-heart';
-      count.textContent = String(result.like_count ?? (parseInt(count.textContent) || 0));
+      count.textContent = formatCount(result.like_count ?? count.textContent);
       btn.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Beğen');
       if (liked) {
         btn.classList.remove('like-pop');
@@ -4537,7 +4554,7 @@ async function renderPoemDetail(app, slug) {
       try {
         const r = await api('/poem/' + slug + '/comments/' + likeBtn.dataset.id + '/like', { method: 'POST' });
         const cnt = likeBtn.querySelector('.like-cnt');
-        cnt.textContent = parseInt(cnt.textContent) + (r.liked ? 1 : -1);
+        cnt.textContent = formatCount(r.like_count ?? (Number(cnt.textContent.replace(/[^\d]/g, '')) + (r.liked ? 1 : -1)));
         likeBtn.classList.toggle('liked', r.liked);
         const icon = likeBtn.querySelector('i');
         if (icon) icon.className = `${r.liked ? 'fas' : 'far'} fa-heart`;
@@ -4869,7 +4886,7 @@ async function renderForumDetail(app, slug) {
       })()}
       <div class="forum-actions">
         <button class="forum-action-btn like-count-control ${liked ? 'liked' : ''}" id="like-btn" aria-label="${liked ? 'Beğeniyi kaldır' : 'Beğen'}">
-          <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="like-count">${forum.like_count || 0}</span>
+          <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="like-count">${formatCount(forum.like_count)}</span>
         </button>
         <button class="forum-action-btn" id="share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
         ${currentUser ? `<button class="forum-action-btn" id="forward-forum-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
@@ -4909,7 +4926,7 @@ async function renderForumDetail(app, slug) {
       liked = r.liked;
       const btn = $('#like-btn'); const cnt = $('#like-count');
       btn.classList.toggle('liked', liked);
-      cnt.textContent = String(r.like_count ?? (parseInt(cnt.textContent) || 0));
+      cnt.textContent = formatCount(r.like_count ?? cnt.textContent);
       const icon = btn.querySelector('i');
       if (icon) icon.className = `${liked ? 'fas' : 'far'} fa-heart`;
       btn.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Beğen');
@@ -5010,7 +5027,7 @@ async function renderForumDetail(app, slug) {
       try {
         const r = await api(`/forum/${slug}/comments/${id}/like`, { method: 'POST' });
         const cnt = likeBtn.querySelector('.like-cnt');
-        cnt.textContent = parseInt(cnt.textContent) + (r.liked ? 1 : -1);
+        cnt.textContent = formatCount(r.like_count ?? (Number(cnt.textContent.replace(/[^\d]/g, '')) + (r.liked ? 1 : -1)));
         likeBtn.classList.toggle('liked', r.liked);
         const icon = likeBtn.querySelector('i');
         if (icon) icon.className = `${r.liked ? 'fas' : 'far'} fa-heart`;
@@ -5037,7 +5054,7 @@ function commentHTML(c) {
           ${canDel ? `<button class="btn btn-ghost btn-sm del-comment" data-id="${c.id}" title="Sil"><i class="fas fa-trash"></i></button>` : ''}
         </div>
         <button class="like-comment-btn forum-action-btn${c.liked ? ' liked' : ''}" data-id="${c.id}" title="${c.liked ? 'Beğenmeyi geri al' : 'Beğen'}">
-          <i class="${c.liked ? 'fas' : 'far'} fa-heart"></i> <span class="like-cnt">${c.like_count || 0}</span>
+          <i class="${c.liked ? 'fas' : 'far'} fa-heart"></i> <span class="like-cnt">${formatCount(c.like_count)}</span>
         </button>
       </div>
     </div>
@@ -5317,7 +5334,7 @@ async function renderBookDetail(app, slug) {
 
   const bookActionButtons = `
     <div class="book-detail-actions" style="margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm like-count-control ${book.liked ? 'liked' : ''}" id="book-like-btn" aria-label="${book.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${book.liked ? 'fas' : 'far'} fa-heart"></i> <span id="book-like-count" class="badge-count">${book.like_count || 0}</span></button>
+      <button class="btn btn-outline btn-sm like-count-control ${book.liked ? 'liked' : ''}" id="book-like-btn" aria-label="${book.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${book.liked ? 'fas' : 'far'} fa-heart"></i> <span id="book-like-count" class="badge-count">${formatCount(book.like_count)}</span></button>
       ${currentUser ? `<button class="btn btn-outline btn-sm" id="book-send-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
       <button class="btn btn-outline btn-sm" id="book-share-btn"><i class="fas fa-share-nodes"></i> Paylaş</button>
     </div>`;
@@ -5418,7 +5435,7 @@ async function renderBookDetail(app, slug) {
         }
       }
       if (btn && icon) icon.className = book.liked ? 'fas fa-heart' : 'far fa-heart';
-      if (count) count.textContent = String(book.like_count);
+      if (count)       count.textContent = formatCount(book.like_count);
     } catch (e) { toast(e.message, 'error'); }
   });
 
@@ -7918,7 +7935,7 @@ async function renderProfile(app, username) {
       overallPct = metrics.length > 0 ? Math.round(metrics.reduce((a, b) => a + b, 0) / metrics.length) : 100;
     }
 
-    progressHTML = `<div style="margin-top:10px">
+    progressHTML = `<div class="profile-progress">
       <div class="progress-bar"><div class="progress-fill" style="width:${overallPct}%"></div></div>
     </div>`;
   }
@@ -9120,7 +9137,7 @@ function renderRegister(app) {
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
       ${inviteCode ? `<div class="register-invite-notice"><i class="fas fa-ticket"></i><span>Davet kodu <strong>${escHtml(inviteCode)}</strong> ile kayıt oluyorsun.</span></div>` : ''}
-      <button type="button" class="quick-register-button" id="reg-quick-btn"><span class="quick-register-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Hızlı kayıt bilgilerini hazırla</strong><small>Kullanıcı adın, takma adın, doğum tarihin ve kedi fotoğrafın otomatik seçilsin</small></span><i class="fas fa-arrow-right quick-register-arrow"></i></button>
+      <button type="button" class="quick-register-button" id="reg-quick-btn" aria-label="Hızlı kayıt ol"><span class="quick-register-icon"><img src="/cigcig.png?v=20261019-quick-register" alt="" draggable="false" /></span><strong>HIZLI KAYIT OL</strong></button>
       <p class="quick-register-hint">E-posta ve şifreni sen gir; profil fotoğrafını istersen kaldır. Hızlı kayıt IP ve zaman bilgisiyle kaydedilir, şifren asla loglanmaz. KVKK onayı yine gereklidir.</p>
       <div class="register-profile-photo">
         <div class="register-avatar-preview" id="reg-avatar-preview" role="button" tabindex="0" aria-disabled="true" aria-label="Profil fotoğrafı önizlemesi"><i class="fas fa-user"></i></div>
@@ -9256,7 +9273,7 @@ function renderRegister(app) {
     quickRegisterButton.disabled = true;
     quickRegisterButton.classList.add('is-loading');
     quickRegisterButton.classList.remove('is-ready');
-    quickRegisterButton.querySelector('strong').textContent = 'Bilgiler hazırlanıyor…';
+    quickRegisterButton.setAttribute('aria-busy', 'true');
     $('#reg-error').textContent = '';
     try {
       const suggestion = await api('/auth/quick-registration', { method: 'POST', body: JSON.stringify({}) });
@@ -9286,13 +9303,12 @@ function renderRegister(app) {
       $('#reg-avatar-name').after(removeAvatarButton);
       quickRegisterButton.classList.remove('is-loading');
       quickRegisterButton.classList.add('is-ready');
-      quickRegisterButton.querySelector('strong').textContent = 'Bilgiler hazır — düzenleyebilirsin';
     } catch (error) {
       $('#reg-error').textContent = error.message;
-      quickRegisterButton.querySelector('strong').textContent = 'Hızlı kayıt bilgilerini hazırla';
     } finally {
       quickRegisterButton.disabled = false;
       quickRegisterButton.classList.remove('is-loading');
+      quickRegisterButton.removeAttribute('aria-busy');
     }
   });
 
@@ -10318,6 +10334,9 @@ let dmPollTimer = null;
 let dmPresencePollTimer = null;
 
 async function renderDMChat(username) {
+  window.__dmSharedSongAudio?.pause();
+  window.__dmSharedSongAudio = null;
+  window.__dmSharedSongButton = null;
   // Önceki poll'u temizle
   if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
   stopLocalDmTyping();
@@ -10449,17 +10468,27 @@ async function renderDMChat(username) {
 
     <!-- Input bar -->
     <div class="dm-input-bar">
+      <div class="dm-attach-slot">
+        <button class="dm-input-img-btn dm-attach-plus" id="dm-attach-btn" type="button" title="Ek seçenekler" aria-label="Ek seçenekler" aria-expanded="false"><i class="fas fa-plus"></i></button>
+        <div class="dm-attach-menu" id="dm-attach-menu" hidden>
+          <button type="button" data-dm-attach="photo"><i class="fas fa-image"></i><span>Fotoğraf</span></button>
+          <button type="button" data-dm-attach="camera"><i class="fas fa-camera"></i><span>Kamera</span></button>
+          <button type="button" data-dm-attach="gif"><i class="fas fa-photo-film"></i><span>GIF</span></button>
+          <button type="button" data-dm-attach="music"><i class="fas fa-music"></i><span>Müzik</span></button>
+        </div>
+      </div>
       <div class="dm-input-wrap">
-        <button class="dm-input-img-btn" id="dm-img-btn" type="button" title="Galeriden fotoğraf seç (en fazla 10)"><i class="fas fa-image"></i></button>
-        <input type="file" id="dm-img-input" accept="image/*" multiple style="display:none" />
+        <input type="file" id="dm-img-input" accept="image/*" multiple hidden />
         <div class="dm-image-view-limit-wrap" id="dm-image-view-limit-wrap" hidden>
-          <label for="dm-image-view-limit">Görüntüleme</label>
-          <select id="dm-image-view-limit">
-            <option value="0">Normal</option>
-            <option value="1">1 kez</option>
-            <option value="2">2 kez</option>
-            <option value="3">3 kez</option>
-          </select>
+          <span class="dm-image-limit-title"><i class="fas fa-eye"></i> Fotoğraf sınırı</span>
+          <div class="dm-image-limit-options" role="radiogroup" aria-label="Fotoğraf görüntüleme sınırı">
+            <button type="button" data-image-limit="0" class="is-active" aria-pressed="true">Sınırsız</button>
+            <button type="button" data-image-limit="1" aria-pressed="false">1 kez</button>
+            <button type="button" data-image-limit="2" aria-pressed="false">2 kez</button>
+            <button type="button" data-image-limit="3" aria-pressed="false">3 kez</button>
+          </div>
+          <small class="dm-image-limit-help">Sınır, bu mesajdaki tüm fotoğraflar için toplam açılma sayısıdır.</small>
+          <input type="hidden" id="dm-image-view-limit" value="0" />
         </div>
         <div class="dm-img-preview-wrap" id="dm-img-preview-wrap" hidden></div>
         <span class="dm-img-upload-status" id="dm-img-upload-status" aria-live="polite"></span>
@@ -10551,6 +10580,18 @@ async function renderDMChat(username) {
       renderDmImagePreview();
     }));
   };
+  const addDmImageFile = file => {
+    if (!file?.type?.startsWith('image/')) {
+      toast('Yalnızca fotoğraf dosyaları eklenebilir.', 'error');
+      return;
+    }
+    if (pendingImgs.length >= maxDmImages) {
+      toast(`Bir mesajda en fazla ${maxDmImages} fotoğraf gönderebilirsin.`, 'error');
+      return;
+    }
+    pendingImgs.push({ file, previewUrl: URL.createObjectURL(file) });
+    renderDmImagePreview();
+  };
   window.__dmClearImg = () => {
     pendingImgs.forEach(item => URL.revokeObjectURL(item.previewUrl));
     pendingImgs = [];
@@ -10561,26 +10602,26 @@ async function renderDMChat(username) {
     if (inp) inp.value = '';
   };
 
-  document.getElementById('dm-img-btn')?.addEventListener('click', () => {
-    document.getElementById('dm-img-input')?.click();
-  });
   document.getElementById('dm-img-input')?.addEventListener('change', e => {
     const selectedFiles = Array.from(e.target.files || []);
-    const validFiles = selectedFiles.filter(file => file.type.startsWith('image/'));
     const availableSlots = maxDmImages - pendingImgs.length;
-    if (validFiles.length > availableSlots) toast(`Bir mesajda en fazla ${maxDmImages} fotoğraf seçebilirsin.`, 'error');
-    if (validFiles.length !== selectedFiles.length) toast('Yalnızca fotoğraf dosyaları eklenebilir.', 'error');
-    pendingImgs.push(...validFiles.slice(0, Math.max(0, availableSlots)).map(file => ({
-      file,
-      previewUrl: URL.createObjectURL(file)
-    })));
-    renderDmImagePreview();
+    if (selectedFiles.length > availableSlots) toast(`Bir mesajda en fazla ${maxDmImages} fotoğraf gönderebilirsin.`, 'error');
+    selectedFiles.slice(0, Math.max(0, availableSlots)).forEach(addDmImageFile);
     e.target.value = '';
     if (selectedFiles.length) {
       const inputEl = document.getElementById('dm-input');
       inputEl?.focus();
     }
   });
+  document.querySelectorAll('[data-image-limit]').forEach(button => button.addEventListener('click', () => {
+    const limit = button.dataset.imageLimit;
+    document.getElementById('dm-image-view-limit').value = limit;
+    document.querySelectorAll('[data-image-limit]').forEach(option => {
+      const selected = option === button;
+      option.classList.toggle('is-active', selected);
+      option.setAttribute('aria-pressed', String(selected));
+    });
+  }));
 
   // Auto-resize textarea
   const textareaEl = document.getElementById('dm-input');
@@ -10654,7 +10695,79 @@ async function renderDMChat(username) {
 
   // Msg menu button clicks
   let lastPollMsgId = messages.length > 0 ? Number(messages[messages.length - 1].id) : 0;
-  document.getElementById('dm-messages')?.addEventListener('click', async e => {
+  const sendDmAttachment = async payload => {
+    const message = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, reply_to_id: replyToId })
+    });
+    const el = document.getElementById('dm-messages');
+    if (el) {
+      appendDMMessage(el, message, currentUser.id, false);
+      el.scrollTop = el.scrollHeight;
+    }
+    lastPollMsgId = Math.max(lastPollMsgId, Number(message.id) || 0);
+    window.__dmClearReply?.();
+    return message;
+  };
+  const attachButton = document.getElementById('dm-attach-btn');
+  const attachMenu = document.getElementById('dm-attach-menu');
+  const closeAttachMenu = () => {
+    attachMenu.hidden = true;
+    attachButton.setAttribute('aria-expanded', 'false');
+  };
+  attachButton?.addEventListener('click', () => {
+    attachMenu.hidden = !attachMenu.hidden;
+    attachButton.setAttribute('aria-expanded', String(!attachMenu.hidden));
+  });
+  attachMenu?.addEventListener('click', event => {
+    const option = event.target.closest('[data-dm-attach]');
+    if (!option) return;
+    closeAttachMenu();
+    if (option.dataset.dmAttach === 'photo') {
+      document.getElementById('dm-img-input')?.click();
+    } else if (option.dataset.dmAttach === 'camera') {
+      openDmCamera(addDmImageFile);
+    } else if (option.dataset.dmAttach === 'gif') {
+      showDmGifPicker(gif => sendDmAttachment({ shared_gif_url: gif.url }));
+    } else if (option.dataset.dmAttach === 'music') {
+      showDmSongPicker(song => sendDmAttachment({ shared_song_id: song.id }));
+    }
+  });
+  document.querySelector('.dm-chat')?.addEventListener('click', event => {
+    if (!event.target.closest('.dm-attach-slot')) closeAttachMenu();
+  });
+  const dmMessageList = document.getElementById('dm-messages');
+  dmMessageList?.addEventListener('click', async e => {
+    const musicButton = e.target.closest('.dm-shared-song-play');
+    if (musicButton) {
+      e.preventDefault();
+      e.stopPropagation();
+      let audio = window.__dmSharedSongAudio;
+      if (audio && window.__dmSharedSongButton === musicButton) {
+        if (audio.paused) audio.play().catch(error => toast(error.message || 'Müzik oynatılamadı.', 'error'));
+        else audio.pause();
+        return;
+      }
+      audio?.pause();
+      const previousButton = window.__dmSharedSongButton;
+      if (previousButton?.isConnected) {
+        previousButton.innerHTML = '<i class="fas fa-play" aria-hidden="true"></i>';
+        previousButton.setAttribute('aria-label', 'Müziği oynat');
+      }
+      audio = new Audio(musicButton.dataset.audioUrl);
+      window.__dmSharedSongAudio = audio;
+      window.__dmSharedSongButton = musicButton;
+      const update = () => {
+        if (!musicButton.isConnected) return;
+        musicButton.innerHTML = `<i class="fas fa-${audio.paused ? 'play' : 'pause'}" aria-hidden="true"></i>`;
+        musicButton.setAttribute('aria-label', audio.paused ? 'Müziği oynat' : 'Müziği durdur');
+      };
+      audio.addEventListener('play', update);
+      audio.addEventListener('pause', update);
+      audio.addEventListener('ended', update);
+      audio.play().catch(error => toast(error.message || 'Müzik oynatılamadı.', 'error'));
+      return;
+    }
     const limitedPhotoButton = e.target.closest('.dm-ephemeral-open');
     if (limitedPhotoButton) {
       e.preventDefault();
@@ -11001,6 +11114,339 @@ function showDmImageViewer(imageUrls, ephemeral = false) {
   });
 }
 
+async function openDmCamera(onCapture) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showModal('Kamera kullanılamıyor', '<div class="dm-camera-message"><i class="fas fa-camera"></i><strong>Bu cihazda kullanılabilir kamera bulunamadı.</strong><span>Telefonda kamera iznini açıp yeniden deneyin.</span></div>');
+    return;
+  }
+  let stream;
+  const overlay = document.getElementById('modal-overlay');
+  let observer;
+  const stopCamera = () => {
+    stream?.getTracks().forEach(track => track.stop());
+    stream = null;
+    observer?.disconnect();
+  };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    showModal('Fotoğraf çek', `<div class="dm-camera-capture">
+      <video id="dm-camera-video" autoplay playsinline muted></video>
+      <button type="button" class="btn btn-primary" id="dm-camera-capture"><i class="fas fa-camera"></i> Fotoğraf çek</button>
+    </div>`);
+    const video = document.getElementById('dm-camera-video');
+    video.srcObject = stream;
+    await video.play();
+    observer = new MutationObserver(() => {
+      if (overlay?.classList.contains('hidden')) stopCamera();
+    });
+    if (overlay) observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+    document.getElementById('dm-camera-capture')?.addEventListener('click', () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      if (!canvas.width || !canvas.height) return toast('Kameradan görüntü alınamadı.', 'error');
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      canvas.toBlob(blob => {
+        if (!blob) return toast('Fotoğraf oluşturulamadı.', 'error');
+        stopCamera();
+        hideModal();
+        showDmPhotoEditor(new File([blob], `cigcig-${Date.now()}.jpg`, { type: 'image/jpeg' }), onCapture);
+      }, 'image/jpeg', .92);
+    });
+  } catch (error) {
+    stopCamera();
+    const noCamera = error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError' || error.name === 'NotSupportedError';
+    showModal('Kamera kullanılamıyor', `<div class="dm-camera-message"><i class="fas fa-camera"></i><strong>${noCamera ? 'Bu cihazda kullanılabilir kamera bulunamadı.' : 'Kameraya erişilemedi.'}</strong><span>${noCamera ? 'Fotoğraf göndermek için galeriden bir fotoğraf seçebilirsiniz.' : 'Tarayıcı ayarlarından CigCig için kamera iznini açıp yeniden deneyin.'}</span></div>`);
+  }
+}
+
+async function showDmPhotoEditor(file, onSave) {
+  const sourceUrl = URL.createObjectURL(file);
+  const image = new Image();
+  image.src = sourceUrl;
+  try { await image.decode(); } catch (error) {
+    URL.revokeObjectURL(sourceUrl);
+    toast('Fotoğraf açılamadı.', 'error');
+    return;
+  }
+  showModal('Fotoğrafı düzenle', `<div class="dm-photo-editor">
+    <div class="dm-photo-tools">
+      <button type="button" class="btn btn-ghost btn-sm is-active" data-dm-tool="draw" aria-pressed="true"><i class="fas fa-pen"></i> Kalem</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-dm-tool="erase" aria-pressed="false"><i class="fas fa-eraser"></i> Silgi</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-dm-tool="crop" aria-pressed="false"><i class="fas fa-crop"></i> Kırp</button>
+      <label>Kalınlık <input id="dm-photo-size" type="range" min="2" max="60" value="10" /></label>
+      <label class="dm-photo-color-label">Renk <input id="dm-photo-color" type="color" value="#ff3344" /></label>
+    </div>
+    <div class="dm-photo-canvas-wrap" id="dm-photo-canvas-wrap">
+      <canvas id="dm-photo-base"></canvas><canvas id="dm-photo-draw"></canvas><span class="dm-photo-crop-box" id="dm-photo-crop-box" hidden></span>
+    </div>
+    <div class="dm-photo-text-tools"><input id="dm-photo-text" maxlength="120" placeholder="Fotoğrafa metin ekle..." /><button type="button" class="btn btn-outline btn-sm" id="dm-photo-add-text"><i class="fas fa-text-height"></i> Metin ekle</button><button type="button" class="btn btn-outline btn-sm" id="dm-photo-apply-crop" disabled><i class="fas fa-crop"></i> Kırp</button></div>
+    <div class="dm-photo-editor-actions"><button type="button" class="btn btn-ghost" id="dm-photo-cancel">İptal</button><button type="button" class="btn btn-primary" id="dm-photo-save"><i class="fas fa-check"></i> Fotoğrafı ekle</button></div>
+  </div>`, 'dm-photo-editor-modal');
+  const base = document.getElementById('dm-photo-base');
+  const draw = document.getElementById('dm-photo-draw');
+  const ctx = base.getContext('2d');
+  const drawCtx = draw.getContext('2d');
+  const scale = Math.min(1, 4096 / Math.max(image.naturalWidth, image.naturalHeight));
+  base.width = draw.width = Math.round(image.naturalWidth * scale);
+  base.height = draw.height = Math.round(image.naturalHeight * scale);
+  ctx.drawImage(image, 0, 0, base.width, base.height);
+  URL.revokeObjectURL(sourceUrl);
+  const wrap = document.getElementById('dm-photo-canvas-wrap');
+  const cropBox = document.getElementById('dm-photo-crop-box');
+  const sizeInput = document.getElementById('dm-photo-size');
+  const colorInput = document.getElementById('dm-photo-color');
+  let tool = 'draw';
+  let pointer = null;
+  let cropRect = null;
+  const canvasPoint = event => {
+    const rect = draw.getBoundingClientRect();
+    return { x: (event.clientX - rect.left) * draw.width / rect.width, y: (event.clientY - rect.top) * draw.height / rect.height };
+  };
+  const setCropBox = () => {
+    if (!cropRect) {
+      cropBox.hidden = true;
+      document.getElementById('dm-photo-apply-crop').disabled = true;
+      return;
+    }
+    const scaleX = draw.clientWidth / draw.width;
+    const scaleY = draw.clientHeight / draw.height;
+    cropBox.hidden = false;
+    cropBox.style.left = `${Math.min(cropRect.x, cropRect.x + cropRect.w) * scaleX}px`;
+    cropBox.style.top = `${Math.min(cropRect.y, cropRect.y + cropRect.h) * scaleY}px`;
+    cropBox.style.width = `${Math.abs(cropRect.w) * scaleX}px`;
+    cropBox.style.height = `${Math.abs(cropRect.h) * scaleY}px`;
+    document.getElementById('dm-photo-apply-crop').disabled = Math.abs(cropRect.w) < 8 || Math.abs(cropRect.h) < 8;
+  };
+  document.querySelectorAll('[data-dm-tool]').forEach(button => button.addEventListener('click', () => {
+    tool = button.dataset.dmTool;
+    document.querySelectorAll('[data-dm-tool]').forEach(item => {
+      const selected = item === button;
+      item.classList.toggle('is-active', selected);
+      item.setAttribute('aria-pressed', String(selected));
+    });
+    draw.style.cursor = tool === 'crop' ? 'crosshair' : tool === 'erase' ? 'cell' : 'crosshair';
+  }));
+  draw.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    draw.setPointerCapture(event.pointerId);
+    pointer = { id: event.pointerId, point: canvasPoint(event) };
+    if (tool === 'crop') {
+      cropRect = { x: pointer.point.x, y: pointer.point.y, w: 0, h: 0 };
+      setCropBox();
+      return;
+    }
+    drawCtx.beginPath();
+    drawCtx.moveTo(pointer.point.x, pointer.point.y);
+  });
+  draw.addEventListener('pointermove', event => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const point = canvasPoint(event);
+    if (tool === 'crop') {
+      cropRect.w = point.x - cropRect.x;
+      cropRect.h = point.y - cropRect.y;
+      setCropBox();
+      return;
+    }
+    drawCtx.globalCompositeOperation = tool === 'erase' ? 'destination-out' : 'source-over';
+    drawCtx.lineCap = 'round';
+    drawCtx.lineJoin = 'round';
+    drawCtx.strokeStyle = colorInput.value;
+    drawCtx.lineWidth = Number(sizeInput.value) * draw.width / Math.max(draw.clientWidth, 1);
+    drawCtx.lineTo(point.x, point.y);
+    drawCtx.stroke();
+  });
+  const releasePointer = event => {
+    if (pointer?.id !== event.pointerId) return;
+    pointer = null;
+  };
+  draw.addEventListener('pointerup', releasePointer);
+  draw.addEventListener('pointercancel', releasePointer);
+  document.getElementById('dm-photo-add-text').addEventListener('click', () => {
+    const text = document.getElementById('dm-photo-text').value.trim();
+    if (!text) return toast('Eklenecek metni yazın.', 'error');
+    drawCtx.globalCompositeOperation = 'source-over';
+    drawCtx.font = `bold ${Math.max(24, draw.width * .055)}px sans-serif`;
+    drawCtx.textAlign = 'center';
+    drawCtx.textBaseline = 'middle';
+    drawCtx.lineWidth = Math.max(3, draw.width * .006);
+    drawCtx.strokeStyle = 'rgba(0,0,0,.8)';
+    drawCtx.fillStyle = colorInput.value;
+    drawCtx.strokeText(text, draw.width / 2, draw.height / 2, draw.width * .9);
+    drawCtx.fillText(text, draw.width / 2, draw.height / 2, draw.width * .9);
+  });
+  document.getElementById('dm-photo-apply-crop').addEventListener('click', () => {
+    if (!cropRect || Math.abs(cropRect.w) < 8 || Math.abs(cropRect.h) < 8) return;
+    const x = Math.max(0, Math.floor(Math.min(cropRect.x, cropRect.x + cropRect.w)));
+    const y = Math.max(0, Math.floor(Math.min(cropRect.y, cropRect.y + cropRect.h)));
+    const right = Math.min(base.width, Math.ceil(Math.max(cropRect.x, cropRect.x + cropRect.w)));
+    const bottom = Math.min(base.height, Math.ceil(Math.max(cropRect.y, cropRect.y + cropRect.h)));
+    const cropped = document.createElement('canvas');
+    cropped.width = right - x;
+    cropped.height = bottom - y;
+    cropped.getContext('2d').drawImage(base, x, y, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height);
+    cropped.getContext('2d').drawImage(draw, x, y, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height);
+    base.width = draw.width = cropped.width;
+    base.height = draw.height = cropped.height;
+    ctx.clearRect(0, 0, base.width, base.height);
+    ctx.drawImage(cropped, 0, 0);
+    drawCtx.clearRect(0, 0, draw.width, draw.height);
+    cropRect = null;
+    setCropBox();
+  });
+  document.getElementById('dm-photo-cancel').addEventListener('click', hideModal);
+  document.getElementById('dm-photo-save').addEventListener('click', () => {
+    const output = document.createElement('canvas');
+    output.width = base.width;
+    output.height = base.height;
+    output.getContext('2d').drawImage(base, 0, 0);
+    output.getContext('2d').drawImage(draw, 0, 0);
+    output.toBlob(blob => {
+      if (!blob) return toast('Düzenlenen fotoğraf oluşturulamadı.', 'error');
+      onSave(new File([blob], `cigcig-duzenlenen-${Date.now()}.jpg`, { type: 'image/jpeg' }));
+      hideModal();
+    }, 'image/jpeg', .9);
+  });
+}
+
+function showDmGifPicker(onSelect) {
+  showModal('GIF gönder', `<div class="dm-picker">
+    <label class="dm-picker-search"><i class="fas fa-search"></i><input id="dm-gif-search" type="search" maxlength="80" placeholder="GIF ara..." autocomplete="off" /></label>
+    <div class="dm-gif-results" id="dm-gif-results" aria-live="polite"></div>
+    <small class="dm-picker-credit">GIF’ler GIPHY tarafından sağlanır.</small>
+  </div>`);
+  const results = document.getElementById('dm-gif-results');
+  const search = document.getElementById('dm-gif-search');
+  let offset = 0;
+  let requestId = 0;
+  let debounceTimer;
+  const load = async (append = false) => {
+    const currentRequest = ++requestId;
+    if (!append) {
+      offset = 0;
+      results.innerHTML = '<div class="dm-picker-status"><i class="fas fa-spinner fa-spin"></i> GIF’ler yükleniyor...</div>';
+    }
+    try {
+      const data = await api(`/giphy/search?q=${encodeURIComponent(search.value.trim())}&offset=${offset}`);
+      if (currentRequest !== requestId || !results.isConnected) return;
+      const gifItems = data.gifs || [];
+      const cards = gifItems.map(gif => `<button type="button" class="dm-gif-option" data-gif-url="${escHtml(gif.url)}" data-gif-title="${escHtml(gif.title)}" aria-label="${escHtml(gif.title || 'GIF seç')}"><img src="${escHtml(gif.preview || gif.url)}" alt="${escHtml(gif.title || 'GIF')}" loading="lazy" /></button>`).join('');
+      if (append) results.querySelector('.dm-picker-more')?.remove();
+      else results.innerHTML = '';
+      if (cards) results.insertAdjacentHTML('beforeend', cards);
+      else if (!append) results.innerHTML = '<div class="dm-picker-status">GIF bulunamadı.</div>';
+      if (Number.isFinite(Number(data.next_offset)) && gifItems.length) results.insertAdjacentHTML('beforeend', '<button type="button" class="dm-picker-more">Daha fazla GIF göster</button>');
+      offset = Number(data.next_offset) || offset;
+    } catch (error) {
+      if (currentRequest !== requestId || !results.isConnected) return;
+      results.innerHTML = `<div class="dm-picker-status dm-picker-error">${escHtml(error.message || 'GIF araması başarısız oldu.')}</div>`;
+    }
+  };
+  search.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => load(), 300);
+  });
+  results.addEventListener('click', async event => {
+    const moreButton = event.target.closest('.dm-picker-more');
+    if (moreButton) { moreButton.disabled = true; await load(true); return; }
+    const button = event.target.closest('.dm-gif-option');
+    if (!button) return;
+    button.disabled = true;
+    try {
+      await onSelect({ url: button.dataset.gifUrl, title: button.dataset.gifTitle });
+      hideModal();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'GIF gönderilemedi.', 'error');
+    }
+  });
+  load();
+}
+
+function showDmSongPicker(onSelect) {
+  window.__dmSharedSongAudio?.pause();
+  showModal('Müzik gönder', `<div class="dm-picker">
+    <label class="dm-picker-search"><i class="fas fa-search"></i><input id="dm-song-search" type="search" maxlength="80" placeholder="Site müziklerinde ara..." autocomplete="off" /></label>
+    <div class="dm-song-results" id="dm-song-results" aria-live="polite"></div>
+  </div>`);
+  const results = document.getElementById('dm-song-results');
+  const search = document.getElementById('dm-song-search');
+  let previewAudio = null;
+  let previewButton = null;
+  let requestId = 0;
+  let debounceTimer;
+  const stopPreview = () => {
+    previewAudio?.pause();
+    if (previewButton?.isConnected) previewButton.innerHTML = '<i class="fas fa-play"></i>';
+    previewAudio = null;
+    previewButton = null;
+  };
+  const observer = new MutationObserver(() => {
+    if (document.getElementById('modal-overlay')?.classList.contains('hidden')) {
+      stopPreview();
+      observer.disconnect();
+    }
+  });
+  observer.observe(document.getElementById('modal-overlay'), { attributes: true, attributeFilter: ['class'] });
+  const load = async () => {
+    const currentRequest = ++requestId;
+    stopPreview();
+    results.innerHTML = '<div class="dm-picker-status"><i class="fas fa-spinner fa-spin"></i> Müzikler yükleniyor...</div>';
+    try {
+      const songs = await api(`/songs?q=${encodeURIComponent(search.value.trim())}`);
+      if (currentRequest !== requestId || !results.isConnected) return;
+      results.innerHTML = songs.length ? songs.map(song => `<div class="dm-song-option" data-song-id="${escHtml(String(song.id))}">
+        <span class="dm-song-option-art">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music"></i>'}</span>
+        <span class="dm-song-option-info"><strong>${escHtml(song.title)}</strong><small>${escHtml(song.artist_name || 'Bilinmeyen sanatçı')}</small></span>
+        <button type="button" class="dm-song-preview" data-preview-url="${escHtml(song.audio_url || '')}" aria-label="Önizle" ${song.audio_url ? '' : 'disabled'}><i class="fas fa-play"></i></button>
+        <button type="button" class="btn btn-primary btn-sm dm-song-select">Gönder</button>
+      </div>`).join('') : '<div class="dm-picker-status">Bu aramayla müzik bulunamadı.</div>';
+      results._songs = songs;
+    } catch (error) {
+      if (currentRequest === requestId && results.isConnected) results.innerHTML = `<div class="dm-picker-status dm-picker-error">${escHtml(error.message || 'Müzikler yüklenemedi.')}</div>`;
+    }
+  };
+  search.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(load, 250);
+  });
+  results.addEventListener('click', async event => {
+    const preview = event.target.closest('.dm-song-preview');
+    if (preview) {
+      if (!preview.dataset.previewUrl) return;
+      if (previewAudio?.src === preview.dataset.previewUrl && !previewAudio.paused) {
+        stopPreview();
+        preview.innerHTML = '<i class="fas fa-play"></i>';
+        return;
+      }
+      stopPreview();
+      previewButton = preview;
+      previewAudio = new Audio(preview.dataset.previewUrl);
+      previewAudio.addEventListener('ended', () => { preview.innerHTML = '<i class="fas fa-play"></i>'; });
+      previewAudio.play().then(() => { preview.innerHTML = '<i class="fas fa-pause"></i>'; }).catch(error => {
+        stopPreview();
+        toast(error.message || 'Müzik önizlemesi başlatılamadı.', 'error');
+      });
+      return;
+    }
+    const select = event.target.closest('.dm-song-select');
+    if (!select) return;
+    const song = results._songs?.find(item => String(item.id) === select.closest('.dm-song-option').dataset.songId);
+    if (!song) return;
+    select.disabled = true;
+    stopPreview();
+    try {
+      await onSelect(song);
+      hideModal();
+    } catch (error) {
+      select.disabled = false;
+      toast(error.message || 'Müzik gönderilemedi.', 'error');
+    }
+  });
+  load();
+}
+
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const isOwn = m.sender_id == myId;
   const deleted = m.deleted_for_all;
@@ -11043,12 +11489,18 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
              ${Number(m.image_view_limit) > 0 && !isOwn
                ? Number(m.image_view_count) >= Number(m.image_view_limit)
                  ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
-                 : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}"><i class="fas fa-eye"></i> Sınırlı görüntülemeli fotoğrafı aç</button>`
+                 : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}"><i class="fas fa-eye"></i> Fotoğrafı görüntüle <span>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} hakkın var</span></button>`
                : imageUrls.length === 1
                  ? `<img src="${escHtml(imageUrls[0])}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(imageUrls[0])}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
                  : imageUrls.length > 1
                    ? `<div class="dm-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<img src="${escHtml(url)}" class="dm-message-image" alt="Mesaj fotoğrafı ${index + 1}" data-dm-image-url="${escHtml(url)}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`).join('')}</div>`
                    : ''}
+             ${m.shared_gif_url ? `<img class="dm-shared-gif" src="${escHtml(m.shared_gif_url)}" alt="GIF" loading="lazy" decoding="async" />` : ''}
+             ${m.shared_song_id ? `<div class="dm-shared-song">
+               <span class="dm-shared-song-art">${m.song_cover_url ? `<img src="${escHtml(m.song_cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music" aria-hidden="true"></i>'}</span>
+               <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
+               ${m.song_audio_url ? `<button type="button" class="dm-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
+             </div>` : ''}
              ${m.shared_forum_id
                ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
                     ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
@@ -11119,6 +11571,12 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     && Number.isFinite(createdAt)
     && messageAge <= 3 * 60 * 60 * 1000
     && messageAge >= -5 * 60 * 1000;
+  const canEditMusic = isOwn
+    && Boolean(messageRow?.querySelector('.dm-shared-song'))
+    && !messageRow?.querySelector('.dm-deleted')
+    && Number.isFinite(createdAt)
+    && messageAge <= 3 * 60 * 60 * 1000
+    && messageAge >= -5 * 60 * 1000;
   const rect = btn.getBoundingClientRect();
   const menu = document.createElement('div');
   menu.id = 'dm-msg-ctx';
@@ -11127,6 +11585,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
     ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
+    ...(canEditMusic ? [{ label: '<i class="fas fa-music fa-fw"></i> Müziği değiştir', action: 'edit-music' }] : []),
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
     ...(isOwn ? [{ label: '<i class="fas fa-trash-alt fa-fw"></i> Herkesten Sil', action: 'delete-all', danger: true }] : []),
   ];
@@ -11184,6 +11643,18 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
           }
           if (document.getElementById('edit-dm-message') === input) hideModal();
           toast('Mesaj düzenlendi.');
+        });
+      } else if (item.action === 'edit-music') {
+        showDmSongPicker(async song => {
+          const updated = await api(`/messages/${encodeURIComponent(msgId)}/music`, {
+            method: 'PUT',
+            body: JSON.stringify({ shared_song_id: song.id })
+          });
+          handleRealtimeDirectMessageEdit({
+            usernames: [currentUser.username, username],
+            message: { ...updated, media_changed: true }
+          });
+          toast('Müzik değiştirildi.');
         });
       } else if (item.action === 'delete-me') {
         try { await api(`/messages/${msgId}`, { method: 'DELETE', body: JSON.stringify({ mode: 'me' }) }); renderDMChat(username); }
@@ -12399,7 +12870,7 @@ function restoreSavedMusicPlayback(songs = []) {
   const saved = readSavedMusicPlayback();
   if (!saved) return;
   if (saved.type === 'ad' && saved.ad?.audio_url && saved.ad.id) {
-    playMusicAd(saved.ad, null, Number(saved.currentTime) || 0, { autoplay: false, restore: true });
+    playQueuedMusicAds(saved.ad, null, saved.queued_ads || [], { startAt: Number(saved.currentTime) || 0, autoplay: false, restore: true });
     return;
   }
   const song = songs.find(track => track.slug === saved.slug) || (songs.length === 0 ? saved.song : null);
@@ -12439,14 +12910,14 @@ async function countGuestMusicListen(song, onComplete) {
   if (!songKey || state.listenedSongs.includes(songKey)) return;
   state.listenedSongs.push(songKey);
   state.countSinceAd += 1;
-  const { settings, ad } = await api('/music-ads/guest');
+  const { settings, ad, ads = [] } = await api('/music-ads/guest');
   const due = settings.mode === 'random'
     ? Math.random() < ({ rare: 0.15, medium: 0.3, frequent: 0.5 }[settings.random_frequency] || 0.3)
     : state.countSinceAd >= settings.interval;
   if (due && ad) {
     state.countSinceAd = 0;
     localStorage.setItem(GUEST_MUSIC_AD_STATE_KEY, JSON.stringify(state));
-    playMusicAd(ad, onComplete);
+    playQueuedMusicAds(ad, onComplete, ads.filter(item => String(item.id) !== String(ad.id)));
     return;
   }
   localStorage.setItem(GUEST_MUSIC_AD_STATE_KEY, JSON.stringify(state));
@@ -12516,7 +12987,7 @@ function bindMusicAdTracking(audio, song) {
       }
       if (result.ad) {
         audio.pause();
-        playMusicAd(result.ad, resumeAfterAd);
+        playQueuedMusicAds(result.ad, resumeAfterAd);
       }
     } catch (error) {
       tracking.sessionId = null;
@@ -12563,7 +13034,11 @@ function playMusicAd(ad, onComplete, startAt = 0, options = {}) {
   player.classList.add('music-ad-player');
   const audio = trackMediaAudio(new Audio(ad.audio_url));
   currentAudio = audio;
-  audio.musicResume = { type: 'ad', ad: { id: ad.id, audio_url: ad.audio_url, title: ad.title, cover_url: ad.cover_url, site_url: ad.site_url } };
+  audio.musicResume = {
+    type: 'ad',
+    ad: { id: ad.id, audio_url: ad.audio_url, title: ad.title, cover_url: ad.cover_url, site_url: ad.site_url },
+    queued_ads: Array.isArray(options.queuedAds) ? options.queuedAds : []
+  };
   bindMusicPlaybackPersistence(audio);
   player.innerHTML = `<div class="gplayer-inner music-ad-inner">
     <div class="gplayer-info">
@@ -12626,6 +13101,35 @@ function playMusicAd(ad, onComplete, startAt = 0, options = {}) {
   });
   audio.addEventListener('error', () => toast('Reklam ses dosyası yüklenemedi. Reklam tamamlanana kadar müzik duraklatıldı.', 'error'));
   if (options.autoplay !== false) audio.play().catch(() => toast('Reklamı başlatmak için tarayıcıda oynatmaya izin verin.', 'error'));
+}
+
+function playQueuedMusicAds(ad, onComplete, remainingAds = [], firstOptions = {}) {
+  if (!ad) {
+    onComplete?.();
+    return;
+  }
+  const playNext = (currentAd, queued = [], options = {}) => {
+    const guestQueue = currentUser ? [] : queued;
+    playMusicAd(currentAd, async () => {
+      if (queued.length) {
+        playNext(queued[0], queued.slice(1), { queuedAds: queued.slice(1) });
+        return;
+      }
+      if (currentUser) {
+        try {
+          const pending = await api('/music-ads/pending');
+          if (pending?.ad) {
+            playNext(pending.ad);
+            return;
+          }
+        } catch (error) {
+          console.warn('Sıradaki müzik reklamı alınamadı:', error.message);
+        }
+      }
+      onComplete?.();
+    }, Number(options.startAt) || 0, { ...options, queuedAds: guestQueue });
+  };
+  playNext(ad, remainingAds, firstOptions);
 }
 
 async function playRandomNextTrack() {
@@ -12903,7 +13407,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   if (!options.skipPendingAd && currentUser && !listeningRoomAdsDisabled() && !musicAdBypass && !song?.is_music_ad) {
     const previousAudio = currentAudio;
     api('/music-ads/pending').then(result => {
-      if (result?.ad) return playMusicAd(result.ad, () => {
+      if (result?.ad) return playQueuedMusicAds(result.ad, () => {
         stopMusicAdTracking(previousAudio);
         musicAdBypass = true;
         openMiniPlayer(audioUrl, slug, song, queue, queueIndex, { ...options, skipPendingAd: true });
@@ -13259,6 +13763,11 @@ async function renderMusicDetail(app, slug) {
   const timedLyrics = getTimedLyrics(song);
   const hasLyrics = !!song.lyrics?.trim() || timedLyrics.length > 0;
   const isUploader = currentUser && currentUser.id === song.uploader_id;
+  const renderRecommendationSection = recommendations => (recommendations || []).length ? `
+    <section class="song-recommendations">
+      <div class="song-recommendations-heading"><span class="song-recommendations-icon"><i class="fas fa-headphones"></i></span><div><small>SANA ÖZEL SEÇİM</small><h2>Şunu da dinleyebilirsin</h2><p>Bu parçanın yanına yakışacak birkaç öneri.</p></div></div>
+      <div class="song-recommendations-grid">${recommendations.map((item, index) => `<a class="song-recommendation-card" href="/muzik/${escHtml(item.slug)}" data-link><span class="song-recommendation-index">${String(index + 1).padStart(2, '0')}</span><div class="song-recommendation-art">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" alt="" />` : `<span><i class="fas fa-music"></i></span>`}<span class="song-recommendation-play"><i class="fas fa-play"></i></span></div><span class="song-recommendation-copy"><b>${escHtml(item.title)}</b><small>${escHtml(item.artist_name)}</small></span><i class="fas fa-arrow-up-right-from-square song-recommendation-arrow"></i></a>`).join('')}</div>
+    </section>` : '';
 
   app.innerHTML = `
     <div class="song-detail-page">
@@ -13304,8 +13813,8 @@ async function renderMusicDetail(app, slug) {
           <div class="song-detail-actions-row">
             ${isUploader ? `
               <button class="song-management-action" id="song-edit-btn" type="button"><span class="song-management-icon"><i class="fas fa-pen-to-square"></i></span><span><strong>Şarkıyı düzenle</strong><small>Bilgileri ve kapağı güncelle</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
-              <button class="song-management-action" id="song-remastered-btn" type="button"><span class="song-management-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered ekle</strong><small>Yeni ses sürümü yükle</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
-              <button class="song-management-action" id="song-recommend-btn" type="button"><span class="song-management-icon"><i class="fas fa-headphones"></i></span><span><strong>Dinleme önerisi ekle</strong><small>Bu parçaya benzer müzik öner</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
+              <button class="song-management-action" id="song-remastered-btn" type="button"><span class="song-management-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered sürümünü ayarla</strong><small>${song.remastered_audio_url ? 'Yüklü sürümü yenisiyle değiştir' : 'Yeni ses sürümü yükle'}</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
+              <button class="song-management-action" id="song-recommend-btn" type="button"><span class="song-management-icon"><i class="fas fa-headphones"></i></span><span><strong>Önerileri düzenle</strong><small>Öneri ekle veya kaldır</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
               <button class="song-management-action song-management-action-danger" id="song-delete-btn" type="button"><span class="song-management-icon"><i class="fas fa-trash-can"></i></span><span><strong>Şarkıyı sil</strong><small>Bu paylaşımı kaldır</small></span><i class="fas fa-chevron-right song-management-arrow"></i></button>
             ` : ''}
           </div>
@@ -13329,11 +13838,7 @@ async function renderMusicDetail(app, slug) {
         </div>
       </div>
 
-      ${(song.recommendations || []).length ? `
-        <section class="song-recommendations">
-          <div class="song-recommendations-heading"><span class="song-recommendations-icon"><i class="fas fa-headphones"></i></span><div><small>SANA ÖZEL SEÇİM</small><h2>Şunu da dinleyebilirsin</h2><p>Bu parçanın yanına yakışacak birkaç öneri.</p></div></div>
-          <div class="song-recommendations-grid">${song.recommendations.map((item, index) => `<a class="song-recommendation-card" href="/muzik/${escHtml(item.slug)}" data-link><span class="song-recommendation-index">${String(index + 1).padStart(2, '0')}</span><div class="song-recommendation-art">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" alt="" />` : `<span><i class="fas fa-music"></i></span>`}<span class="song-recommendation-play"><i class="fas fa-play"></i></span></div><span class="song-recommendation-copy"><b>${escHtml(item.title)}</b><small>${escHtml(item.artist_name)}</small></span><i class="fas fa-arrow-up-right-from-square song-recommendation-arrow"></i></a>`).join('')}</div>
-        </section>` : ''}
+      <div id="song-recommendations-section">${renderRecommendationSection(song.recommendations)}</div>
 
       ${hasLyrics ? `
         <div class="song-lyrics-section">
@@ -13451,7 +13956,7 @@ async function renderMusicDetail(app, slug) {
     if (audio.paused) {
       if (currentUser) {
         const pending = await api('/music-ads/pending').catch(() => null);
-        if (!listeningRoomAdsDisabled() && pending?.ad) return playMusicAd(pending.ad, () => {
+        if (!listeningRoomAdsDisabled() && pending?.ad) return playQueuedMusicAds(pending.ad, () => {
           currentAudio = audio;
           currentSlug = song.slug;
           document.getElementById('global-music-player')?.classList.remove('music-ad-player');
@@ -13624,14 +14129,34 @@ async function renderMusicDetail(app, slug) {
 
   const remasteredBtn = document.getElementById('song-remastered-btn');
   remasteredBtn?.addEventListener('click', () => {
-    showModal('Remastered versiyon ekle', `
-      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının remastered ses dosyasını sonradan yükleyebilirsin. Mevcut remastered dosyası varsa yenisiyle değiştirilir.</p>
-      <div class="form-group"><label>Ses dosyası *</label><input type="file" id="remastered-audio" accept="audio/*" required /></div>
-      <button class="btn btn-primary" id="remastered-save" style="width:100%;justify-content:center"><i class="fas fa-upload"></i> Yükle</button>
-      <div id="remastered-msg" class="form-error mt-4"></div>
-    `);
+    const hasRemastered = Boolean(song.remastered_audio_url);
+    showModal(hasRemastered ? 'Remastered sürümünü değiştir' : 'Remastered sürüm ekle', `
+      <div class="song-editor-dialog">
+        <div class="song-editor-intro">
+          <span class="song-editor-intro-icon"><i class="fas fa-wand-magic-sparkles"></i></span>
+          <div><strong>${hasRemastered ? 'Yeni ses sürümünü yükle' : 'Şarkının temizlenmiş sürümünü ekle'}</strong><p>${hasRemastered ? 'Yeni dosya mevcut remastered sürümünün yerini alır.' : 'Dinleyiciler oynatıcıdaki Remastered düğmesiyle bu sürüme geçebilir.'}</p></div>
+        </div>
+        ${hasRemastered ? '<div class="song-editor-current"><i class="fas fa-circle-check"></i><span>Bu şarkıda remastered sürüm zaten var.</span></div>' : ''}
+        <label class="song-upload-zone" for="remastered-audio">
+          <input type="file" id="remastered-audio" accept="audio/*" />
+          <span class="song-upload-icon"><i class="fas fa-cloud-arrow-up"></i></span>
+          <strong>Ses dosyasını seç</strong>
+          <small>MP3, WAV, M4A veya tarayıcının desteklediği ses dosyaları</small>
+          <span class="song-upload-filename" id="remastered-filename">Henüz dosya seçilmedi</span>
+        </label>
+        <div id="remastered-msg" class="form-error" role="alert"></div>
+        <div class="song-editor-actions">
+          <button type="button" class="btn btn-ghost" id="remastered-cancel">Vazgeç</button>
+          <button type="button" class="btn btn-primary" id="remastered-save"><i class="fas fa-upload"></i> ${hasRemastered ? 'Sürümü değiştir' : 'Remastered yükle'}</button>
+        </div>
+      </div>
+    `, 'song-editor-modal');
+    const input = document.getElementById('remastered-audio');
+    input?.addEventListener('change', () => {
+      document.getElementById('remastered-filename').textContent = input.files?.[0]?.name || 'Henüz dosya seçilmedi';
+    });
+    document.getElementById('remastered-cancel')?.addEventListener('click', hideModal);
     document.getElementById('remastered-save')?.addEventListener('click', async () => {
-      const input = document.getElementById('remastered-audio');
       const msg = document.getElementById('remastered-msg');
       if (!input?.files[0]) { msg.textContent = 'Ses dosyası seçmelisin.'; return; }
       const button = document.getElementById('remastered-save');
@@ -13639,33 +14164,95 @@ async function renderMusicDetail(app, slug) {
       try {
         const fd = new FormData(); fd.append('audio', input.files[0]);
         await apiForm('/songs/' + song.id + '/remastered', fd);
-        hideModal(); toast('Remastered versiyon eklendi.'); navigate('/muzik/' + slug);
+        hideModal(); toast(hasRemastered ? 'Remastered sürüm değiştirildi.' : 'Remastered sürüm eklendi.'); navigate('/muzik/' + slug);
       } catch (error) {
-        msg.textContent = error.message; button.disabled = false; button.innerHTML = '<i class="fas fa-upload"></i> Yükle';
+        msg.textContent = error.message; button.disabled = false; button.innerHTML = `<i class="fas fa-upload"></i> ${hasRemastered ? 'Sürümü değiştir' : 'Remastered yükle'}`;
       }
     });
   });
 
   const recommendBtn = document.getElementById('song-recommend-btn');
   recommendBtn?.addEventListener('click', async () => {
-    let songs = [];
-    try { songs = await api('/songs'); } catch (error) { toast(error.message, 'error'); return; }
-    const existing = new Set((song.recommendations || []).map(item => String(item.id)));
-    const options = songs.filter(item => String(item.id) !== String(song.id) && !existing.has(String(item.id)))
-      .map(item => `<option value="${item.id}">${escHtml(item.title)} — ${escHtml(item.artist_name)}</option>`).join('');
-    showModal('Dinleme önerisi ekle', `
-      <p style="color:var(--text-secondary);font-size:13px">Bu şarkının detayında “Şunu da dinleyebilirsiniz” bölümünde görünecek.</p>
-      <div class="form-group"><label>Şarkı seç *</label><select id="recommend-song">${options || '<option value="">Eklenebilecek şarkı yok</option>'}</select></div>
-      <button class="btn btn-primary" id="recommend-save" style="width:100%;justify-content:center" ${options ? '' : 'disabled'}><i class="fas fa-plus"></i> Öneriyi ekle</button>
-      <div id="recommend-msg" class="form-error mt-4"></div>
-    `);
-    document.getElementById('recommend-save')?.addEventListener('click', async () => {
-      const selected = document.getElementById('recommend-song')?.value;
-      try {
-        await api('/songs/' + song.id + '/recommendations', { method: 'POST', body: JSON.stringify({ song_id: selected }) });
-        hideModal(); toast('Dinleme önerisi eklendi.'); navigate('/muzik/' + slug);
-      } catch (error) { document.getElementById('recommend-msg').textContent = error.message; }
-    });
+    let catalog = [];
+    try { catalog = await api('/songs'); } catch (error) { toast(error.message, 'error'); return; }
+    let recommendations = [...(song.recommendations || [])];
+    showModal('Önerileri düzenle', '<div id="song-recommend-manager"></div>', 'song-editor-modal');
+    const manager = document.getElementById('song-recommend-manager');
+    const renderManager = (query = '', preserveSearchFocus = false, cursorPosition = query.length) => {
+      const existingIds = new Set(recommendations.map(item => String(item.id)));
+      const normalizedQuery = query.trim().toLocaleLowerCase('tr');
+      const candidates = catalog.filter(item =>
+        String(item.id) !== String(song.id) && !existingIds.has(String(item.id)) &&
+        (!normalizedQuery || `${item.title} ${item.artist_name || ''}`.toLocaleLowerCase('tr').includes(normalizedQuery))
+      ).slice(0, 60);
+      manager.innerHTML = `
+        <div class="song-editor-intro">
+          <span class="song-editor-intro-icon"><i class="fas fa-headphones"></i></span>
+          <div><strong>Bu şarkının önerilerini yönet</strong><p>Eklediğin parçalar şarkı sayfasında dinleme önerisi olarak görünür.</p></div>
+        </div>
+        <section class="song-recommend-manager-current">
+          <div class="song-recommend-manager-label"><strong>Ekli öneriler</strong><span>${recommendations.length}</span></div>
+          ${recommendations.length ? `<div class="song-recommend-current-list">${recommendations.map(item => `
+            <div class="song-recommend-current">
+              <span class="song-recommend-manager-art">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}</span>
+              <span class="song-recommend-manager-copy"><strong>${escHtml(item.title)}</strong><small>${escHtml(item.artist_name || 'Bilinmeyen sanatçı')}</small></span>
+              <button type="button" class="song-recommend-remove" data-remove-id="${escHtml(String(item.id))}" aria-label="${escHtml(item.title)} önerisini kaldır" title="Öneriyi kaldır"><i class="fas fa-xmark"></i></button>
+            </div>`).join('')}</div>` : '<div class="song-recommend-empty">Henüz öneri eklenmedi. Aşağıdan bir şarkı seç.</div>'}
+        </section>
+        <div class="song-recommend-manager-label"><strong>Yeni öneri ekle</strong></div>
+        <label class="song-recommend-search"><i class="fas fa-search"></i><input id="song-recommend-search" type="search" placeholder="Şarkı veya sanatçı ara..." autocomplete="off" /></label>
+        <div class="song-recommend-candidates">
+          ${candidates.length ? candidates.map(item => `
+            <div class="song-recommend-candidate">
+              <span class="song-recommend-manager-art">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music"></i>'}</span>
+              <span class="song-recommend-manager-copy"><strong>${escHtml(item.title)}</strong><small>${escHtml(item.artist_name || 'Bilinmeyen sanatçı')}</small></span>
+              <button type="button" class="btn btn-primary btn-sm song-recommend-add" data-add-id="${escHtml(String(item.id))}"><i class="fas fa-plus"></i><span>Ekle</span></button>
+            </div>`).join('') : `<div class="song-recommend-empty">${normalizedQuery ? 'Bu aramayla eşleşen eklenebilir şarkı yok.' : 'Eklenebilecek başka şarkı yok.'}</div>`}
+        </div>
+        <div class="song-recommend-feedback" id="song-recommend-feedback" role="status"></div>`;
+      const searchInput = document.getElementById('song-recommend-search');
+      searchInput.value = query;
+      searchInput.addEventListener('input', () => {
+        const nextQuery = searchInput.value;
+        renderManager(nextQuery, true, searchInput.selectionStart);
+      });
+      if (preserveSearchFocus) {
+        searchInput.focus();
+        searchInput.setSelectionRange(cursorPosition, cursorPosition);
+      }
+      manager.querySelectorAll('[data-add-id]').forEach(button => button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await api('/songs/' + song.id + '/recommendations', { method: 'POST', body: JSON.stringify({ song_id: button.dataset.addId }) });
+          const added = catalog.find(item => String(item.id) === button.dataset.addId);
+          if (added) recommendations.push(added);
+          song.recommendations = [...recommendations];
+          document.getElementById('song-recommendations-section').innerHTML = renderRecommendationSection(recommendations);
+          renderManager(query);
+          toast('Öneri eklendi.');
+        } catch (error) {
+          button.disabled = false;
+          const feedback = document.getElementById('song-recommend-feedback');
+          if (feedback) feedback.textContent = error.message;
+        }
+      }));
+      manager.querySelectorAll('[data-remove-id]').forEach(button => button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await api(`/songs/${song.id}/recommendations/${encodeURIComponent(button.dataset.removeId)}`, { method: 'DELETE' });
+          recommendations = recommendations.filter(item => String(item.id) !== button.dataset.removeId);
+          song.recommendations = [...recommendations];
+          document.getElementById('song-recommendations-section').innerHTML = renderRecommendationSection(recommendations);
+          renderManager(query);
+          toast('Öneri kaldırıldı.');
+        } catch (error) {
+          button.disabled = false;
+          const feedback = document.getElementById('song-recommend-feedback');
+          if (feedback) feedback.textContent = error.message;
+        }
+      }));
+    };
+    renderManager();
   });
 }
 
@@ -14063,6 +14650,25 @@ async function showStoryViewers(story) {
   try { const viewers = await api('/stories/' + (story.public_id || story.id) + '/viewers'); $('#modal-body').innerHTML = viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${avatarImg(viewer)}<span><b>${escHtml(viewer.username)}</b><small>${viewer.view_count} kez · ${timeAgo(viewer.viewed_at)}</small></span></div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-eye-slash"></i><p>Henüz görüntüleyen yok.</p></div>'; } catch (error) { $('#modal-body').innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; }
 }
 
+function bindStoryVideoToggle(video, button) {
+  if (!video || !button) return;
+  const updateButton = () => {
+    const paused = video.paused;
+    button.innerHTML = `<i class="fas fa-${paused ? 'play' : 'pause'}" aria-hidden="true"></i>`;
+    button.setAttribute('aria-label', paused ? 'Hikayeyi oynat' : 'Hikayeyi durdur');
+    button.title = paused ? 'Oynat' : 'Durdur';
+  };
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (video.paused) video.play().catch(() => toast('Hikaye oynatılamadı.', 'error'));
+    else video.pause();
+  });
+  video.addEventListener('play', updateButton);
+  video.addEventListener('pause', updateButton);
+  updateButton();
+}
+
 async function loadStoriesBar(container) {
   if (!container) return;
   try {
@@ -14100,7 +14706,8 @@ async function loadStoriesBar(container) {
         const previousStoryAudio = activeStoryAudio;
         const previousStoryAudioPlaying = Boolean(previousStoryAudio && !previousStoryAudio.paused);
         if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
-        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-tap-zone story-tap-left" id="story-tap-left" aria-label="Önceki hikaye"></div><div class="story-tap-zone story-tap-right" id="story-tap-right" aria-label="Sonraki hikaye"></div>${story.media_type === 'video' ? `<video src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img src="${escHtml(story.media_url)}" alt="" style="filter:${mediaFilterCss(story.media_filter)}" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><button class="btn btn-ghost" id="story-share"><i class="fas fa-share-alt"></i> Paylaş</button><button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${story.like_count || 0}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>${story.is_owner ? `<button type="button" class="btn btn-ghost" id="story-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button type="button" class="btn btn-ghost" id="story-edit"><i class="fas fa-pen"></i> Düzenle</button><button type="button" class="btn btn-ghost text-danger" id="story-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>${story.is_owner ? '<small class="story-owner-hint">Hikayeni görenleri ve tekrar görüntüleme sayılarını inceleyebilirsin.</small>' : ''}<div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div></div>`);
+        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-tap-zone story-tap-left" id="story-tap-left" aria-label="Önceki hikaye"></div><div class="story-tap-zone story-tap-right" id="story-tap-right" aria-label="Sonraki hikaye"></div>${story.media_type === 'video' ? `<video id="story-video" src="${escHtml(story.media_url)}" autoplay playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle" id="story-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img src="${escHtml(story.media_url)}" alt="" style="filter:${mediaFilterCss(story.media_filter)}" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><button class="btn btn-ghost" id="story-share"><i class="fas fa-share-alt"></i> Paylaş</button><button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(story.like_count)}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>${story.is_owner ? `<button type="button" class="btn btn-ghost" id="story-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button type="button" class="btn btn-ghost" id="story-edit"><i class="fas fa-pen"></i> Düzenle</button><button type="button" class="btn btn-ghost text-danger" id="story-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>${story.is_owner ? '<small class="story-owner-hint">Hikayeni görenleri ve tekrar görüntüleme sayılarını inceleyebilirsin.</small>' : ''}<div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div></div>`);
+        bindStoryVideoToggle($('#story-video'), $('#story-video-toggle'));
         const storySongButton = $('#story-song-play');
         if (storySongButton) {
           storySongButton.insertAdjacentHTML('afterend', `<input id="story-volume" class="story-volume-control" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Hikaye ses seviyesi" title="Ses seviyesi" />`);
@@ -14434,7 +15041,7 @@ async function renderStoryRoute(app, storyId) {
             <a class="story-route-icon" href="/fotograflar" data-link aria-label="Hikayelerden çık" title="Kapat"><i class="fas fa-times"></i></a>
           </header>
           <div class="story-route-media">
-            ${story.media_type === 'video' ? `<video class="story-route-asset" src="${escHtml(story.media_url)}" controls autoplay playsinline style="filter:${mediaFilterCss(story.media_filter)}"></video>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
+            ${story.media_type === 'video' ? `<video id="story-route-video" class="story-route-asset" src="${escHtml(story.media_url)}" autoplay playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle story-route-video-toggle" id="story-route-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
             <button class="story-route-tap story-route-tap-left" id="story-route-tap-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>
             <button class="story-route-tap story-route-tap-right" id="story-route-tap-next" aria-label="Sonraki hikaye"></button>
             <div class="story-route-overlay-copy">
@@ -14452,6 +15059,7 @@ async function renderStoryRoute(app, storyId) {
         <button class="story-route-nav" id="story-route-next" aria-label="Sonraki hikaye" ${nextStory ? '' : 'disabled'}><i class="fas fa-chevron-right"></i></button>
       </div>
     </div>`;
+    bindStoryVideoToggle($('#story-route-video'), $('#story-route-video-toggle'));
     api('/stories/' + encodeURIComponent(story.public_id || story.id) + '/view', { method: 'POST' }).catch(() => {});
     $('#story-route-prev')?.addEventListener('click', () => navigateToStory(previousStory));
     $('#story-route-next')?.addEventListener('click', () => navigateToStory(nextStory));
@@ -14761,7 +15369,7 @@ function bindPhotoFeed(feed) {
     try {
       const r = await api('/photos/' + c.dataset.photoId + '/like', { method: 'POST' });
       const n = x.querySelector('span');
-      if (n && Number.isFinite(Number(r.like_count))) n.textContent = String(r.like_count);
+      if (n && Number.isFinite(Number(r.like_count))) n.textContent = formatCount(r.like_count);
       const icon = x.querySelector('i');
       if (icon) icon.className = (r.liked ? 'fas' : 'far') + ' fa-heart';
       x.classList.toggle('liked', !!r.liked);
@@ -15372,7 +15980,7 @@ async function renderPlaylistDetail(app, plId) {
   const canManagePlaylist = () => playlist.is_owner && !playlist.source_playlist_id;
 
   const render = () => {
-    app.innerHTML = `<div class="container page">
+    app.innerHTML = `<div class="container page playlist-detail-page">
       <a href="${playlist.is_owner ? '/playlistlerim' : '/'}" data-link class="pl-back-link"><i class="fas fa-chevron-left"></i> ${playlist.is_owner ? 'Playlistlerim' : 'CigCig ana sayfa'}</a>
       <div class="pl-detail-hero">
         <div class="pl-detail-cover">

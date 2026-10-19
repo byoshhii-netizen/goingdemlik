@@ -1070,6 +1070,8 @@ async function initDb() {
       shared_photo_id BIGINT,
       shared_story_id BIGINT,
       shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL,
+      shared_song_id BIGINT,
+      shared_gif_url TEXT NOT NULL DEFAULT '',
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
@@ -1090,6 +1092,8 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
@@ -1494,10 +1498,12 @@ async function initDb() {
       completed_song_count INTEGER DEFAULT 0,
       listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
       pending_ad_id BIGINT REFERENCES music_ads(id) ON DELETE SET NULL,
+      pending_ad_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
       ad_started_at TIMESTAMP,
       updated_at TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE music_ad_states ADD COLUMN IF NOT EXISTS listening_date DATE NOT NULL DEFAULT CURRENT_DATE;
+    ALTER TABLE music_ad_states ADD COLUMN IF NOT EXISTS pending_ad_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 
     CREATE TABLE IF NOT EXISTS music_listen_sessions (
       id UUID PRIMARY KEY,

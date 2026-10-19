@@ -1952,6 +1952,7 @@ async function renderMusicAds(main) {
       <div class="form-row"><div class="form-group"><label for="ma-frequency-mode">Yayın yöntemi</label><select id="ma-frequency-mode"><option value="interval" ${settings.mode === 'interval' ? 'selected' : ''}>Her belirli sayıda şarkıda</option><option value="random" ${settings.mode === 'random' ? 'selected' : ''}>Rastgele</option></select></div>
       <div class="form-group" id="ma-interval-wrap"><label for="ma-interval">Kaç şarkıda bir?</label><input id="ma-interval" type="number" min="1" max="20" value="${settings.interval}" /></div>
       <div class="form-group" id="ma-random-wrap"><label for="ma-random-frequency">Rastgele reklam sıklığı</label><select id="ma-random-frequency"><option value="rare" ${settings.random_frequency === 'rare' ? 'selected' : ''}>Nadir — her uygun şarkıda %15</option><option value="medium" ${settings.random_frequency === 'medium' ? 'selected' : ''}>Orta — her uygun şarkıda %30</option><option value="frequent" ${settings.random_frequency === 'frequent' ? 'selected' : ''}>Sık — her uygun şarkıda %50</option></select></div></div>
+      <div class="form-group" style="max-width:320px"><label for="ma-ad-count">Bir seferde kaç reklam oynatılsın?</label><input id="ma-ad-count" type="number" min="1" max="10" step="1" value="${settings.ad_count}" /><small style="display:block;margin-top:6px;color:var(--text-muted)">Tetiklenince seçilen sayıda reklam sırayla oynar; en fazla 10 reklam. Aktif reklam sayısı daha azsa bulunanlar gösterilir.</small></div>
       <button class="btn btn-outline" id="ma-settings-save"><i class="fas fa-save"></i> Sıklık ayarını kaydet</button><span id="ma-settings-status" style="margin-left:10px"></span>
     </div></div>
     <div class="card"><div class="table-wrap"><table><thead><tr><th>Panel ID</th><th>Başlık</th><th>Öncelik</th><th>Boost</th><th>Dinlenme</th><th>Tıklama</th><th>Durum</th><th></th></tr></thead><tbody>
@@ -1972,7 +1973,8 @@ async function renderMusicAds(main) {
       await adminApi('/music-ad-settings', { method: 'PUT', body: JSON.stringify({
         mode: $('#ma-frequency-mode').value,
         interval: Number($('#ma-interval').value),
-        random_frequency: $('#ma-random-frequency').value
+        random_frequency: $('#ma-random-frequency').value,
+        ad_count: Number($('#ma-ad-count').value)
       }) });
       status.style.color = '';
       status.textContent = 'Kaydedildi';
