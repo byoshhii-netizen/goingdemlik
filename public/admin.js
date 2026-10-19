@@ -3723,15 +3723,21 @@ async function renderSettings(main) {
       <div class="card" style="grid-column: 1 / -1">
         <div class="card-header"><span><i class="fas fa-fill-drip" style="color:var(--red2);margin-right:8px"></i>Site Arka Plan Rengi</span></div>
         <div class="card-body">
-          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Siyah ana arka plan yerine kullanılacak rengi belirleyin. Varsayılan renk: <code>#121212</code>.</p>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:16px">Koyu görünümü Instagram tarzında siyah zemin ve koyu paneller olarak uygulayın veya önceki #121212 görünümüne dönün.</p>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
+            <button class="btn btn-primary" id="s-bg-instagram"><i class="fab fa-instagram"></i> Instagram koyu görünümü</button>
+            <button class="btn btn-outline" id="s-bg-classic"><i class="fas fa-undo"></i> Eski görünümü geri yükle</button>
+            <span id="s-bg-preset-status" style="font-size:12px;color:var(--text3)">${settings['dark_theme_style'] === 'instagram' ? 'Instagram koyu görünümü etkin' : 'Eski / özel koyu görünüm etkin'}</span>
+          </div>
           <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
             <input type="color" id="s-bg-color-picker" value="${settings['background_color']||'#121212'}" style="width:64px;height:48px;border-radius:10px;border:2px solid var(--border);padding:4px;cursor:pointer;background:var(--bg4)" />
             <input type="text" id="s-bg-color-hex" value="${settings['background_color']||'#121212'}" maxlength="7" placeholder="#121212" style="font-family:monospace;font-size:15px;letter-spacing:2px;max-width:160px" />
             <div id="s-bg-color-preview" style="width:120px;height:36px;border-radius:8px;border:1px solid var(--border);background:${settings['background_color']||'#121212'}"></div>
           </div>
+          <p style="font-size:12px;color:var(--text3);margin-top:8px">Özel renk seçip kaydettiğinizde klasik/özel görünüm etkinleşir.</p>
           <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <button class="btn btn-primary" id="s-bg-color-save"><i class="fas fa-save"></i> Kaydet ve Uygula</button>
-            <button class="btn btn-outline" id="s-bg-color-reset"><i class="fas fa-undo"></i> #121212 Yap</button>
+            <button class="btn btn-outline" id="s-bg-color-reset"><i class="fas fa-undo"></i> Rengi #121212 Yap</button>
             <div id="s-bg-color-msg" class="form-error"></div>
           </div>
         </div>
@@ -4029,23 +4035,39 @@ async function renderSettings(main) {
   const bgHex = document.getElementById('s-bg-color-hex');
   const bgPreview = document.getElementById('s-bg-color-preview');
   const bgMsg = document.getElementById('s-bg-color-msg');
+  const bgPresetStatus = document.getElementById('s-bg-preset-status');
   const syncBackgroundUI = hex => {
     if (bgPicker) bgPicker.value = hex;
     if (bgHex) bgHex.value = hex;
     if (bgPreview) bgPreview.style.background = hex;
     document.documentElement.style.setProperty('--bg-primary', hex);
   };
+  const applyBackgroundPreset = async (style, hex) => {
+    bgMsg.textContent = '';
+    if (!await saveSetting('background_color', hex, bgMsg)) return;
+    if (!await saveSetting('dark_theme_style', style, bgMsg)) return;
+    syncBackgroundUI(hex);
+    window.CigCigTheme?.configure({ background_color: hex, dark_theme_style: style });
+    if (bgPresetStatus) bgPresetStatus.textContent = style === 'instagram' ? 'Instagram koyu görünümü etkin' : 'Eski #121212 görünümü etkin';
+    bgMsg.style.color = 'var(--green)';
+    bgMsg.textContent = '✓ Görünüm kaydedildi ve uygulandı';
+  };
+  document.getElementById('s-bg-instagram')?.addEventListener('click', () => applyBackgroundPreset('instagram', '#000000'));
+  document.getElementById('s-bg-classic')?.addEventListener('click', () => applyBackgroundPreset('classic', '#121212'));
   bgPicker?.addEventListener('input', () => syncBackgroundUI(bgPicker.value));
   bgHex?.addEventListener('input', () => { if (/^#[0-9A-Fa-f]{6}$/.test(bgHex.value.trim())) syncBackgroundUI(bgHex.value.trim()); });
   document.getElementById('s-bg-color-save')?.addEventListener('click', async () => {
     const hex = (bgHex?.value || '').trim();
     if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) { bgMsg.textContent = 'Geçerli bir hex kodu girin.'; return; }
-    await saveSetting('background_color', hex, bgMsg);
-    syncBackgroundUI(hex); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Kaydedildi';
+    if (!await saveSetting('background_color', hex, bgMsg)) return;
+    if (!await saveSetting('dark_theme_style', 'classic', bgMsg)) return;
+    syncBackgroundUI(hex);
+    window.CigCigTheme?.configure({ background_color: hex, dark_theme_style: 'classic' });
+    if (bgPresetStatus) bgPresetStatus.textContent = 'Özel koyu görünüm etkin';
+    bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Kaydedildi';
   });
   document.getElementById('s-bg-color-reset')?.addEventListener('click', async () => {
-    await saveSetting('background_color', '#121212', bgMsg);
-    syncBackgroundUI('#121212'); bgMsg.style.color = 'var(--green)'; bgMsg.textContent = '✓ Sıfırlandı';
+    await applyBackgroundPreset('classic', '#121212');
   });
 
   // ===== KİTAP ARKA PLAN RENGİ =====

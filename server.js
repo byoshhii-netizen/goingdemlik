@@ -6414,6 +6414,12 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
+  if (key === 'dark_theme_style') {
+    if (!['classic', 'instagram'].includes(String(value))) {
+      return res.status(400).json({ error: 'Geçerli bir koyu tema seçin' });
+    }
+    value = String(value);
+  }
   const newspaperTextLimits = {
     newspaper_left_quote: 180,
     newspaper_right_quote: 260,
@@ -6493,7 +6499,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -7383,7 +7389,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 // ===== SITE AYARLARI (logo vb.) =====
 app.get('/api/settings/public', async (req, res) => {
   const keys = [
-    'site_name','site_description','primary_color','background_color','light_primary_color','light_background_color',
+    'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','newspaper_left_quote','newspaper_right_quote','newspaper_author',

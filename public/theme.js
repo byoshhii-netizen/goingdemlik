@@ -10,6 +10,7 @@
   const DEFAULTS = {
     primary_color: '#BDA275',
     background_color: '#121212',
+    dark_theme_style: 'classic',
     light_primary_color: '#dc2626',
     light_background_color: '#f8f9fa'
   };
@@ -81,8 +82,9 @@
 
   function palette(mode) {
     const isLight = mode === 'light';
+    const instagramDark = !isLight && settings.dark_theme_style === 'instagram';
     const background = validHex(
-      isLight ? settings.light_background_color : settings.background_color,
+      isLight ? settings.light_background_color : instagramDark ? '#000000' : settings.background_color,
       isLight ? DEFAULTS.light_background_color : DEFAULTS.background_color
     );
     const accent = validHex(
@@ -98,10 +100,10 @@
       '--theme-bg': background,
       '--theme-accent': accent,
       '--bg-primary': background,
-      '--bg-secondary': isLight ? blend(background, '#ffffff', 0.30) : blend(background, '#000000', 0.38),
-      '--bg-card': isLight ? blend(background, '#ffffff', 0.48) : blend(background, surfaceDirection, 0.035),
-      '--bg-card2': isLight ? blend(background, '#ffffff', 0.68) : blend(background, surfaceDirection, 0.085),
-      '--bg-tertiary': isLight ? blend(background, '#ffffff', 0.58) : blend(background, surfaceDirection, 0.06),
+      '--bg-secondary': isLight ? blend(background, '#ffffff', 0.30) : instagramDark ? '#121212' : blend(background, '#000000', 0.38),
+      '--bg-card': isLight ? blend(background, '#ffffff', 0.48) : instagramDark ? '#121212' : blend(background, surfaceDirection, 0.035),
+      '--bg-card2': isLight ? blend(background, '#ffffff', 0.68) : instagramDark ? '#1c1c1c' : blend(background, surfaceDirection, 0.085),
+      '--bg-tertiary': isLight ? blend(background, '#ffffff', 0.58) : instagramDark ? '#161616' : blend(background, surfaceDirection, 0.06),
       '--bg-active': rgba(accent, isLight ? 0.11 : 0.13),
       '--bg-hover': rgba(text, isLight ? 0.055 : 0.07),
       '--accent-red': accent,
