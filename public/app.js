@@ -431,15 +431,92 @@ function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initia
 $('#modal-close').addEventListener('click', hideModal);
 $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-overlay')) hideModal(); });
 
+const routeDataCache = new Map();
+const routeDataRequests = new Map();
+const ROUTE_DATA_CACHE_MS = 10000;
+let routeDataCacheVersion = 0;
+
+function invalidateRouteDataCache() {
+  routeDataCacheVersion += 1;
+  routeDataCache.clear();
+  routeDataRequests.clear();
+}
+
+function isRouteDataCacheable(path) {
+  return /^\/(?:forums|books|groups|photos|videos|songs|poems|newspapers|settings\/public|profile\/[^/?]+|users\/[^/?]+\/follow-status|songs\/[^/?]+|forum\/[^/?]+|newspapers\/[^/?]+|photos\/[^/?]+|playlists\/[^/?]+)$/.test(path);
+}
+
+function cloneApiData(data) {
+  return JSON.parse(JSON.stringify(data));
+}
+
 async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const canCache = method === 'GET' && !options.signal && isRouteDataCacheable(path);
+  const cacheKey = canCache ? `${currentToken || 'guest'}:${path}` : '';
+  if (canCache) {
+    const cached = routeDataCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cloneApiData(cached.data);
+    if (cached) routeDataCache.delete(cacheKey);
+    const pending = routeDataRequests.get(cacheKey);
+    if (pending) return cloneApiData(await pending);
+  }
   const headers = { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
-  const res = await fetch('/api' + path, { ...options, headers });
-  const text = await res.text();
-  let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
-  if (!res.ok) { const error = new Error(data.error || 'Hata'); error.data = data; throw error; }
-  return data;
+  const requestCacheVersion = routeDataCacheVersion;
+  const request = (async () => {
+    const res = await fetch('/api' + path, { ...options, headers });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
+    if (!res.ok) { const error = new Error(data.error || 'Hata'); error.data = data; throw error; }
+    if (canCache && requestCacheVersion === routeDataCacheVersion) {
+      routeDataCache.set(cacheKey, { data: cloneApiData(data), expiresAt: Date.now() + ROUTE_DATA_CACHE_MS });
+      if (routeDataCache.size > 40) routeDataCache.delete(routeDataCache.keys().next().value);
+    } else if (method !== 'GET') {
+      invalidateRouteDataCache();
+    }
+    return data;
+  })();
+  if (!canCache) return request;
+  routeDataRequests.set(cacheKey, request);
+  try { return cloneApiData(await request); }
+  finally {
+    if (routeDataRequests.get(cacheKey) === request) routeDataRequests.delete(cacheKey);
+  }
+}
+
+function routePrefetchPaths(href) {
+  let url;
+  try { url = new URL(href, location.href); } catch { return []; }
+  if (url.origin !== location.origin) return [];
+  const segments = url.pathname.split('/').filter(Boolean);
+  const segment = value => encodeURIComponent(decodeURIComponent(value));
+  const path = url.pathname;
+  if (path === '/muzikler') return ['/songs'];
+  if (path.startsWith('/muzik/') && segments[1]) return ['/songs/' + segment(segments[1])];
+  if (path === '/forum' || path === '/konular') return ['/forums'];
+  if (path.startsWith('/forum/') && segments[1]) return ['/forum/' + segment(segments[1])];
+  if (path === '/kitaplar') return ['/books'];
+  if (path === '/gruplar') return ['/groups'];
+  if (path === '/fotograflar') return ['/photos'];
+  if (path === '/video' || path === '/videolar') return ['/videos'];
+  if (path === '/siirler') return ['/poems'];
+  if (path === '/gazeteler') return ['/newspapers'];
+  if (path.startsWith('/gazete/') && segments[1]) return ['/newspapers/' + segment(segments[1])];
+  if (path.startsWith('/profil/') && segments[1]) {
+    const username = segment(segments[1]);
+    const paths = ['/profile/' + username, '/settings/public'];
+    if (currentUser && String(currentUser.username).toLocaleLowerCase('tr-TR') !== segments[1].toLocaleLowerCase('tr-TR')) {
+      paths.push('/users/' + username + '/follow-status');
+    }
+    return paths;
+  }
+  return [];
+}
+
+function prefetchRouteData(href) {
+  routePrefetchPaths(href).forEach(path => { api(path).catch(() => {}); });
 }
 
 function callAvatar(user, size = 'call-avatar') {
@@ -652,6 +729,7 @@ async function apiForm(path, formData, method = 'POST') {
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
   if (!res.ok) throw new Error(data.error || 'Hata');
+  if (method.toUpperCase() !== 'GET') invalidateRouteDataCache();
   return data;
 }
 
@@ -1089,6 +1167,17 @@ document.addEventListener('click', e => {
     }
     navigate(a.getAttribute('href'));
   }
+});
+
+document.addEventListener('pointerover', event => {
+  if (event.pointerType === 'touch') return;
+  const link = event.target.closest('[data-link]');
+  if (link instanceof HTMLAnchorElement) prefetchRouteData(link.href);
+});
+
+document.addEventListener('focusin', event => {
+  const link = event.target.closest('[data-link]');
+  if (link instanceof HTMLAnchorElement) prefetchRouteData(link.href);
 });
 
 function renderRoute(fullPath) {
@@ -7831,9 +7920,8 @@ async function renderProfile(app, username) {
   const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
   const isOwn = currentUser && currentUser.id === user.id;
-  const [profileSpotify, settings, loadedFollowState] = await Promise.all([
-    getSpotifyNowPlaying(user.username),
-    fetch('/api/settings/public').then(response => response.json()).catch(() => null),
+  const [settings, loadedFollowState] = await Promise.all([
+    api('/settings/public').catch(() => null),
     !isOwn && currentUser
       ? api('/users/' + encodeURIComponent(user.username || username) + '/follow-status').catch(() => null)
       : Promise.resolve(null)
@@ -7889,6 +7977,7 @@ async function renderProfile(app, username) {
     bindFollowButton();
     return;
   }
+  const profileSpotifyPromise = getSpotifyNowPlaying(user.username);
   let savedVideos = [];
   if (isOwn) {
     try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
@@ -7959,7 +8048,7 @@ async function renderProfile(app, username) {
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
         ${badgesHTML}
-        ${spotifyNowPlayingMarkup(profileSpotify, false)}
+        <div id="profile-spotify-now-playing" data-username="${escHtml(user.username)}"></div>
         ${progressHTML}
         ${user.bio ? descriptionPreviewHTML(user.bio, 'profile-bio', 160) : ''}
         ${links.length ? `<div class="profile-links">${links.map(l => {
@@ -8153,6 +8242,12 @@ async function renderProfile(app, username) {
       }, { once: false });
     }
   }
+  profileSpotifyPromise.then(profileSpotify => {
+    const spotifyContainer = document.getElementById('profile-spotify-now-playing');
+    if (spotifyContainer?.dataset.username === String(user.username) && app.contains(spotifyContainer)) {
+      spotifyContainer.innerHTML = spotifyNowPlayingMarkup(profileSpotify, false);
+    }
+  });
 }
 
 async function renderSettings(app) {
@@ -10471,6 +10566,7 @@ async function renderDMChat(username) {
       <div class="dm-attach-slot">
         <button class="dm-input-img-btn dm-attach-plus" id="dm-attach-btn" type="button" title="Ek seçenekler" aria-label="Ek seçenekler" aria-expanded="false"><i class="fas fa-plus"></i></button>
         <div class="dm-attach-menu" id="dm-attach-menu" hidden>
+          <div class="dm-attach-menu-heading"><strong>Paylaş</strong><small>Mesajına ekle</small></div>
           <button type="button" data-dm-attach="photo"><i class="fas fa-image"></i><span>Fotoğraf</span></button>
           <button type="button" data-dm-attach="camera"><i class="fas fa-camera"></i><span>Kamera</span></button>
           <button type="button" data-dm-attach="gif"><i class="fas fa-photo-film"></i><span>GIF</span></button>
@@ -10714,10 +10810,16 @@ async function renderDMChat(username) {
   const closeAttachMenu = () => {
     attachMenu.hidden = true;
     attachButton.setAttribute('aria-expanded', 'false');
+    attachButton.title = 'Ek seçenekler';
+    attachButton.setAttribute('aria-label', 'Ek seçenekler');
+    attachButton.innerHTML = '<i class="fas fa-plus" aria-hidden="true"></i>';
   };
   attachButton?.addEventListener('click', () => {
     attachMenu.hidden = !attachMenu.hidden;
     attachButton.setAttribute('aria-expanded', String(!attachMenu.hidden));
+    attachButton.title = attachMenu.hidden ? 'Ek seçenekler' : 'Menüyü kapat';
+    attachButton.setAttribute('aria-label', attachButton.title);
+    attachButton.innerHTML = `<i class="fas fa-${attachMenu.hidden ? 'plus' : 'xmark'}" aria-hidden="true"></i>`;
   });
   attachMenu?.addEventListener('click', event => {
     const option = event.target.closest('[data-dm-attach]');
