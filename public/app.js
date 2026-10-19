@@ -42,6 +42,10 @@ const managedMediaAudio = new Set();
 let activePlaylistPreviewAudio = null;
 let activePlaylistPreviewButton = null;
 
+document.addEventListener('contextmenu', event => {
+  if (event.target instanceof Element && event.target.closest('.site-logo')) event.preventDefault();
+});
+
 function getRecommendedSongs(songs) {
   const popular = [...songs]
     .filter(song => song?.audio_url)

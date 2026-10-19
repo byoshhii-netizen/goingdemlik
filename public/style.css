@@ -444,7 +444,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   flex-shrink: 0;
   overflow: visible;
 }
-.site-logo { width: 32px !important; height: 32px !important; min-width: 32px; max-width: 32px; flex: 0 0 32px; object-fit: contain !important; object-position: center; aspect-ratio: 1 / 1; border-radius: 6px; }
+.site-logo { width: 32px !important; height: 32px !important; min-width: 32px; max-width: 32px; flex: 0 0 32px; object-fit: contain !important; object-position: center; aspect-ratio: 1 / 1; border-radius: 6px; -webkit-user-drag: none; user-select: none; -webkit-user-select: none; }
 .site-wordmark { font-family: 'Elsie', Georgia, serif; font-size: 22px; font-weight: 900; letter-spacing: 0; color: var(--text-primary); white-space: nowrap; }
 .brand-icon {
   width: 32px; height: 32px;
@@ -6265,4 +6265,32 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 @media (max-width:768px) {
   .profile-header { overflow: visible !important; }
   .profile-actions { z-index: 21; }
+}
+
+@media (max-width:768px) {
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) 28px;
+    align-items: center;
+    column-gap: 10px;
+  }
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item > .dm-story-avatar-link,
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item > .dm-conv-avatar-link,
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item > .dm-group-avatar {
+    grid-column: 1;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    flex: 0 0 44px;
+  }
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item > .dm-conv-info {
+    grid-column: 2;
+    width: 100%;
+    min-width: 0;
+  }
+  .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item > .dm-conv-options-btn {
+    grid-column: 3;
+    width: 28px;
+    flex: 0 0 28px;
+  }
 }
