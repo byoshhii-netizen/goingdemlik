@@ -443,7 +443,8 @@ function invalidateRouteDataCache() {
 }
 
 function isRouteDataCacheable(path) {
-  return /^\/(?:forums|books|groups|photos|videos|songs|poems|newspapers|settings\/public|profile\/[^/?]+|users\/[^/?]+\/follow-status|songs\/[^/?]+|forum\/[^/?]+|newspapers\/[^/?]+|photos\/[^/?]+|playlists\/[^/?]+)$/.test(path);
+  const routePath = path.split('?')[0];
+  return /^\/(?:forums|books|groups|photos|videos|songs|poems|newspapers|settings\/public|profile\/[^/?]+|users\/[^/?]+\/follow-status|songs\/[^/?]+|forum\/[^/?]+|newspapers\/[^/?]+|photos\/[^/?]+|playlists\/[^/?]+)$/.test(routePath);
 }
 
 function cloneApiData(data) {
@@ -493,16 +494,8 @@ function routePrefetchPaths(href) {
   const segments = url.pathname.split('/').filter(Boolean);
   const segment = value => encodeURIComponent(decodeURIComponent(value));
   const path = url.pathname;
-  if (path === '/muzikler') return ['/songs'];
   if (path.startsWith('/muzik/') && segments[1]) return ['/songs/' + segment(segments[1])];
-  if (path === '/forum' || path === '/konular') return ['/forums'];
   if (path.startsWith('/forum/') && segments[1]) return ['/forum/' + segment(segments[1])];
-  if (path === '/kitaplar') return ['/books'];
-  if (path === '/gruplar') return ['/groups'];
-  if (path === '/fotograflar') return ['/photos'];
-  if (path === '/video' || path === '/videolar') return ['/videos'];
-  if (path === '/siirler') return ['/poems'];
-  if (path === '/gazeteler') return ['/newspapers'];
   if (path.startsWith('/gazete/') && segments[1]) return ['/newspapers/' + segment(segments[1])];
   if (path.startsWith('/profil/') && segments[1]) {
     const username = segment(segments[1]);
@@ -2587,21 +2580,54 @@ async function renderHome(app) {
       </div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     let allForums = [];
-    try { allForums = await api('/forums'); const el = $('#home-forums'); if (!allForums.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Henüz konu yok.</p></div>'; else el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${allForums.slice(0, 10).map(f => forumCardHTML(f)).join('')}</div>`; } catch {}
-    $('#home-forum-search')?.addEventListener('input', e => { const q = e.target.value.toLowerCase(); const filtered = allForums.filter(f => f.title.toLowerCase().includes(q) || f.content.toLowerCase().includes(q)); const el = $('#home-forums'); if (!el) return; if (!filtered.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Konu bulunamadı.</p></div>'; return; } el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${filtered.map(f => forumCardHTML(f)).join('')}</div>`; });
+    try {
+      allForums = await api('/forums?limit=10');
+      const el = $('#home-forums');
+      if (!allForums.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-comments"></i><p>Henüz konu yok.</p></div>';
+      else el.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px">${allForums.map(f => forumCardHTML(f)).join('')}</div>`;
+    } catch {}
+    let forumSearchTimer;
+    let forumSearchRequest = 0;
+    $('#home-forum-search')?.addEventListener('input', event => {
+      clearTimeout(forumSearchTimer);
+      const requestId = ++forumSearchRequest;
+      const query = event.target.value.trim();
+      const el = $('#home-forums');
+      if (!el) return;
+      if (!query) {
+        el.innerHTML = allForums.length
+          ? `<div style="display:flex;flex-direction:column;gap:12px">${allForums.map(f => forumCardHTML(f)).join('')}</div>`
+          : '<div class="empty-state"><i class="fas fa-comments"></i><p>Henüz konu yok.</p></div>';
+        return;
+      }
+      forumSearchTimer = setTimeout(async () => {
+        el.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+        try {
+          const results = await api('/forums?q=' + encodeURIComponent(query) + '&limit=50');
+          if (requestId !== forumSearchRequest || !document.getElementById('home-forums')) return;
+          el.innerHTML = results.length
+            ? `<div style="display:flex;flex-direction:column;gap:12px">${results.map(f => forumCardHTML(f)).join('')}</div>`
+            : '<div class="empty-state"><i class="fas fa-comments"></i><p>Konu bulunamadı.</p></div>';
+        } catch (error) {
+          if (requestId === forumSearchRequest) {
+            el.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Arama yapılamadı.')}</p></div>`;
+          }
+        }
+      }, 250);
+    });
   }
 
   async function renderBooksSection() {
     const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Öne Çıkan Kitaplar</div><a href="/kitaplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-books" class="grid-3"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
-    try { const books = await api('/books'); const el = $('#home-books'); if (!books.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-book"></i><p>Henüz kitap yok.</p></div>'; else el.innerHTML = books.slice(0, 6).map(b => bookCardHTML(b)).join(''); } catch {}
+    try { const books = await api('/books?limit=6'); const el = $('#home-books'); if (!books.length) el.innerHTML = '<div class="empty-state"><i class="fas fa-book"></i><p>Henüz kitap yok.</p></div>'; else el.innerHTML = books.map(b => bookCardHTML(b)).join(''); } catch {}
   }
 
   async function renderGroupsSection() {
     const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Popüler Gruplar</div><a href="/gruplar" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-groups" class="groups-grid"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try {
-      const gs = await api('/groups');
+      const gs = await api('/groups?limit=6');
       const el = $('#home-groups');
       if (!gs.length) {
         el.innerHTML = '<div class="empty-state"><i class="fas fa-users"></i><p>Henüz grup yok.</p></div>';
@@ -2616,7 +2642,7 @@ async function renderHome(app) {
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     const el = $('#home-songs');
     try {
-      const songs = await api('/songs');
+      const songs = await api('/songs?limit=10&sort=popular');
       if (!songs.length) { el.innerHTML = '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz müzik yok.</p></div>'; return; }
       songs.sort((a, b) => (b.play_count || 0) - (a.play_count || 0));
       el.innerHTML = `<div class="music-table">
@@ -2673,7 +2699,7 @@ async function renderHome(app) {
     const html = `<div class="section home-media-section"><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     loadStoriesBar($('#home-stories-bar'));
-    try { const ps = shuffleArray(await api('/photos')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
+    try { const ps = shuffleArray(await api('/photos?limit=20')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
   }
 
   async function renderRealsSection() {
@@ -2690,7 +2716,7 @@ async function renderHome(app) {
     const html = `<div class="section home-video-section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Önerilen Videolar</div><a href="/video" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-videos" class="video-list-grid"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try {
-      const videos = await api('/videos');
+      const videos = await api('/videos?limit=20');
       const el = $('#home-videos');
       el.innerHTML = videos.length ? videos.slice(0, 6).map(videoCardHTML).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>';
     } catch {}

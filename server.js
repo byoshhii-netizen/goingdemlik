@@ -2775,7 +2775,11 @@ app.put('/api/vmb-admin/settings', vmbAdminMiddleware, async (req, res) => {
 
 // ===== FORUMS =====
 app.get('/api/forums', async (req, res) => {
-  const { tag } = req.query;
+  const tag = String(req.query.tag || '').trim();
+  const search = String(req.query.q || '').trim().slice(0, 100);
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : null;
+  const params = [];
   let baseQuery = `
     SELECT f.*, u.username, u.nickname, u.avatar, u.name_color, u.is_vip, u.is_plus, u.is_admin,
       u.is_red_verified, u.red_verified_at,
@@ -2788,21 +2792,28 @@ app.get('/api/forums', async (req, res) => {
       ), '[]'::json) as system_tags
     FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`;
 
+  const filters = [];
   if (tag) {
     // Sistem etiketi, custom tag veya içerik içindeki #tag ile filtrele — hepsi case-insensitive
-    baseQuery += ` AND (
-      EXISTS (SELECT 1 FROM forum_tags ft INNER JOIN tags t ON t.id=ft.tag_id WHERE ft.forum_id=f.id AND LOWER(t.name)=LOWER($1))
-      OR f.custom_tags ILIKE $2
-      OR f.content ILIKE $3
-      OR f.title ILIKE $3
-    )`;
-    const likeTag = `%#${tag}%`;
-    const likeTagPlain = `%${tag}%`;
-    const { rows } = await query(baseQuery + ' ORDER BY f.created_at DESC', [tag, likeTagPlain, likeTag]);
-    return res.json(rows);
+    params.push(tag);
+    const tagIndex = params.length;
+    params.push(`%${tag}%`, `%#${tag}%`);
+    filters.push(`(
+      EXISTS (SELECT 1 FROM forum_tags ft INNER JOIN tags t ON t.id=ft.tag_id WHERE ft.forum_id=f.id AND LOWER(t.name)=LOWER($${tagIndex}))
+      OR f.custom_tags ILIKE $${tagIndex + 1}
+      OR f.content ILIKE $${tagIndex + 2}
+      OR f.title ILIKE $${tagIndex + 2}
+    )`);
   }
-
-  const { rows } = await query(baseQuery + ' ORDER BY f.created_at DESC');
+  if (search) {
+    params.push(`%${search}%`);
+    const searchIndex = params.length;
+    filters.push(`(f.title ILIKE $${searchIndex} OR f.content ILIKE $${searchIndex})`);
+  }
+  if (filters.length) baseQuery += ' AND ' + filters.join(' AND ');
+  if (limit !== null) params.push(limit);
+  const limitSql = limit === null ? '' : ` LIMIT $${params.length}`;
+  const { rows } = await query(baseQuery + ' ORDER BY f.created_at DESC' + limitSql, params);
   res.json(rows);
 });
 
@@ -3483,6 +3494,10 @@ async function canAccessBook(book, userId) {
 
 app.get('/api/books', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : null;
+  const limitSql = limit === null ? '' : ' LIMIT $1';
+  const params = limit === null ? [] : [limit];
   const { rows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color, u.is_red_verified, u.red_verified_at,
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
     FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0
@@ -3492,7 +3507,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
         OR b.user_id = ${userId}
         OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})
       )
-    ORDER BY b.created_at DESC`);
+    ORDER BY b.created_at DESC${limitSql}`, params);
   res.json(rows.map(sanitizeBook));
 });
 
@@ -3828,7 +3843,11 @@ app.delete('/api/book/:slug/chapter/:id', authMiddleware, async (req, res) => {
 // ===== GROUPS =====
 app.get('/api/groups', optionalAuth, async (req, res) => {
   const userId = Number(req.user?.id || 0);
-  const { rows } = await query(`SELECT g.*, u.username as owner_name, EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=${userId}) AS is_member FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' OR g.owner_id=${userId} OR EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id=g.id AND gm2.user_id=${userId}) ORDER BY g.created_at DESC`);
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : null;
+  const limitSql = limit === null ? '' : ' LIMIT $1';
+  const params = limit === null ? [] : [limit];
+  const { rows } = await query(`SELECT g.*, u.username as owner_name, EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id=g.id AND gm.user_id=${userId}) AS is_member FROM groups g LEFT JOIN users u ON g.owner_id=u.id WHERE COALESCE(g.visibility, CASE WHEN g.type='private' THEN 'private' WHEN g.invite_only=1 THEN 'invite' ELSE 'public' END) <> 'private' OR g.owner_id=${userId} OR EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id=g.id AND gm2.user_id=${userId}) ORDER BY g.created_at DESC${limitSql}`, params);
   res.json(rows);
 });
 
@@ -4978,6 +4997,8 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
   await ensurePhotoInteractionSchema();
   const { username } = req.query;
   const userId = req.user ? req.user.id : 0;
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
   const base = `SELECT p.id, p.url, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
@@ -4985,9 +5006,9 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
   const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))`;
   const queryText = username
-    ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`
-    : `${base} AND ${visibility} ORDER BY p.created_at DESC LIMIT 100`;
-  const { rows } = username ? await query(queryText, [userId, username]) : await query(queryText, [userId]);
+    ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT $3`
+    : `${base} AND ${visibility} ORDER BY p.created_at DESC LIMIT $2`;
+  const { rows } = username ? await query(queryText, [userId, username, limit]) : await query(queryText, [userId, limit]);
   res.json(rows);
 });
 
@@ -6750,9 +6771,10 @@ app.post('/api/songs', authMiddleware, upload.fields([
 
 // Tüm müzikler (liste)
 app.get('/api/songs', async (req, res) => {
-  // Süresi dolan banları otomatik aktife al
-  await query(`UPDATE songs SET status='active', ban_reason='', ban_until=NULL WHERE status='suspended' AND ban_until IS NOT NULL AND ban_until < NOW()`);
   const { q, genre, artist, distributor } = req.query;
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
+  const sort = String(req.query.sort || '');
   let where = "WHERE s.status='active'";
   const params = [];
   if (q) {
@@ -6762,12 +6784,14 @@ app.get('/api/songs', async (req, res) => {
   if (genre && !q) { params.push(`%${genre}%`); where += ` AND s.genre ILIKE $${params.length}`; }
   if (artist && !q) { params.push(`%${artist}%`); where += ` AND s.artist_name ILIKE $${params.length}`; }
   if (distributor && !q) { params.push(`%${distributor}%`); where += ` AND s.distributor ILIKE $${params.length}`; }
+  params.push(limit);
+  const order = sort === 'popular' ? 's.play_count DESC, s.published_at DESC' : 's.published_at DESC';
   const { rows } = await query(
-    `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url, s.lyrics, s.lyrics_timed,
+    `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url,
             s.remastered_audio_url, s.play_count, s.slug, s.song_type, s.published_at, s.share_reason,
             u.username as uploader, u.avatar as uploader_avatar
     FROM songs s JOIN users u ON s.uploader_id=u.id AND COALESCE(u.is_deleted,0)=0
-     ${where} ORDER BY s.published_at DESC LIMIT 100`,
+     ${where} ORDER BY ${order} LIMIT $${params.length}`,
     params
   );
   res.json(rows);
@@ -9664,6 +9688,16 @@ async function expireSubscriptions() {
 // Her dakika abonelik kontrolü
 setInterval(expireSubscriptions, 60 * 1000);
 
+async function expireSongBans() {
+  try {
+    await query(`UPDATE songs SET status='active', ban_reason='', ban_until=NULL WHERE status='suspended' AND ban_until IS NOT NULL AND ban_until < NOW()`);
+  } catch (error) {
+    console.error('expireSongBans error:', error.message);
+  }
+}
+
+setInterval(expireSongBans, 60 * 1000);
+
 // ===== PUBLIC: Ürünleri listele =====
 app.get('/api/shop/products', async (req, res) => {
   try {
@@ -10273,13 +10307,16 @@ app.get('/api/videos', optionalAuth, async (req, res) => {
   const params = [req.user?.id || 0];
   const searchClause = search ? ` AND (v.title ILIKE $2 OR v.description ILIKE $2 OR u.username ILIKE $2)` : '';
   if (search) params.push(`%${search}%`);
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
+  params.push(limit);
   const order = search
     ? 'ORDER BY v.created_at DESC'
     : `ORDER BY ((COALESCE(v.views,0) * 0.45) +
         ((SELECT COUNT(*) FROM video_likes vl3 WHERE vl3.video_id=v.id) * 8) +
         ((SELECT COUNT(*) FROM video_comments vc3 WHERE vc3.video_id=v.id) * 3) +
         (EXTRACT(EPOCH FROM (NOW() - v.created_at)) / -86400.0)) DESC`;
-  const { rows } = await query(`${videoSelect}${searchClause} AND v.is_reals=0 ${order} LIMIT 100`, params);
+  const { rows } = await query(`${videoSelect}${searchClause} AND v.is_reals=0 ${order} LIMIT $${params.length}`, params);
   res.json(rows);
 });
 
