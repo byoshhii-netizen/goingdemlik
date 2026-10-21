@@ -1270,6 +1270,46 @@ app.post('/api/admin/auth/login', async (req, res) => {
   res.json({ token, is_super_admin: false, username: user.username, permissions: user });
 });
 
+// Site genelinde giriş zorunluluğu açıkken yalnızca içerik gezinme rotaları misafirlere açıktır.
+app.use(async (req, res, next) => {
+  if (
+    req.path.startsWith('/api/') ||
+    req.path === '/gubukgak' ||
+    req.path === '/vmb-panel' ||
+    req.path === '/vmb-panel.html' ||
+    req.method !== 'GET' ||
+    path.extname(req.path)
+  ) return next();
+  try {
+    const normalizedPath = req.path.replace(/\/+$/, '') || '/';
+    const isPublicGuestRoute = normalizedPath === '/giris'
+      || normalizedPath === '/kayit'
+      || normalizedPath === '/muzikler'
+      || normalizedPath === '/kitaplar'
+      || normalizedPath === '/forum'
+      || normalizedPath === '/konular'
+      || /^\/(?:muzik|forum)\/[^/]+(?:\/.*)?$/.test(normalizedPath)
+      || /^\/kitap\/[^/]+(?:\/sayfa\/[^/]+)?$/.test(normalizedPath)
+      || /^\/[a-zA-Z0-9]{24}$/.test(normalizedPath);
+    if (isPublicGuestRoute) return next();
+    const { rows: settings } = await query("SELECT value FROM settings WHERE key='first_visit_auth'");
+    if (settings[0]?.value !== '1') return next();
+    const token = req.headers['authorization']?.replace('Bearer ', '') || getSessionCookie(req);
+    const { rows: sessions } = token
+      ? await query(
+        `SELECT u.id FROM sessions s JOIN users u ON u.id=s.user_id
+         WHERE s.token=$1 AND s.expires_at > NOW() AND COALESCE(u.banned,0)=0`,
+        [token]
+      )
+      : { rows: [] };
+    if (!sessions.length) return res.redirect('/giris');
+    return next();
+  } catch (error) {
+    console.error('Site login requirement check failed:', error.message);
+    return res.status(500).send('Site erişimi doğrulanamadı.');
+  }
+});
+
 // VMB tarzı route koruması: admin panelinden tanımlanan hassas yolları gizler.
 app.use(async (req, res, next) => {
   // API'ler kendi auth middleware'lerini kullanır. Admin/VMB giriş ekranları da
@@ -1315,7 +1355,10 @@ app.use(async (req, res, next) => {
     await logAction(actor, 'restricted_route_attempt', req.path, JSON.stringify({ matchedRoute: matched, redirectTarget: loggedTarget }), getIp(req), getClientInfo(req));
     if (!protectionEnabled) return next();
     return res.redirect(redirectTarget);
-  } catch { return next(); }
+  } catch (error) {
+    console.error('Route access check failed:', error.message);
+    return res.status(500).send('Sayfa erişimi doğrulanamadı.');
+  }
 });
 
 app.use(express.static(path.join(__dirname, 'public'), {

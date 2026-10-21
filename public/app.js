@@ -28,7 +28,7 @@ let storyComposerAudio = null;
 let activePhotoAudio = null;
 let photoAudioObserver = null;
 let siteName = 'CigCig';
-let firstVisitAuthEnabled = false;
+let loginRequiredEnabled = false;
 const journalistDirectory = new Map();
 let dmSearchUnlockCode = '';
 let dmIconUnlockCode = '';
@@ -1146,6 +1146,19 @@ function isForgotPasswordRoute(path) {
   return /^\/[a-zA-Z0-9]{24}$/.test(path);
 }
 
+function isPublicGuestRoute(path) {
+  const normalizedPath = path.replace(/\/+$/, '') || '/';
+  return normalizedPath === '/giris'
+    || normalizedPath === '/kayit'
+    || normalizedPath === '/muzikler'
+    || normalizedPath === '/kitaplar'
+    || normalizedPath === '/forum'
+    || normalizedPath === '/konular'
+    || /^\/(?:muzik|forum)\/[^/]+(?:\/.*)?$/.test(normalizedPath)
+    || /^\/kitap\/[^/]+(?:\/sayfa\/[^/]+)?$/.test(normalizedPath)
+    || isForgotPasswordRoute(normalizedPath);
+}
+
 window.addEventListener('popstate', () => {
   closeMobileCreateMenu();
   renderRoute(location.pathname + location.search);
@@ -1187,6 +1200,9 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  if (loginRequiredEnabled && !currentUser && !isPublicGuestRoute(path)) {
+    return navigate('/giris', false);
+  }
   document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path));
   document.body.classList.toggle('forgot-password-route', isForgotPasswordRoute(path));
   const leavingSongDetail = !path.startsWith('/muzik/');
@@ -1220,10 +1236,6 @@ function renderRoute(fullPath) {
   const segs = path.split('/').filter(Boolean);
 
   if (path === '/') {
-    if (firstVisitAuthEnabled && !currentUser && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
-      localStorage.setItem('cigcig_first_visit_auth_seen', '1');
-      return navigate('/giris', false);
-    }
     return renderHome(app);
   }
   if (path === '/gazeteler') return renderNewspaperList(app);
@@ -1809,11 +1821,6 @@ async function initAuth() {
     const data = await api('/auth/me');
     currentUser = data.user;
     updateNavUI();
-    // Özel sayfalar kullanıcı doğrulanmadan önce ilk kez 404 çizmiş olabilir.
-    // Oturum doğrulandıktan sonra mevcut VMB adresini yeniden oluştur.
-    if (location.pathname === '/vmb' || location.pathname.startsWith('/vmb/')) {
-      renderRoute(location.pathname + location.search);
-    }
   } catch {
     currentToken = null;
     localStorage.removeItem('token');
@@ -9819,17 +9826,9 @@ async function checkUnreadMessages() {
 async function init() {
   $('#new-dropdown')?.classList.add('hidden');
   closeMobileCreateMenu();
-  if (location.pathname === '/') {
-    updateNavUI();
-    loadAnnouncements();
-    renderRoute(location.pathname + location.search);
-  }
   await initAuth();
   updateNavUI();
-  if (location.pathname !== '/' || currentUser) {
-    loadAnnouncements();
-    renderRoute(location.pathname + location.search);
-  }
+  loadAnnouncements();
   const settingsController = new AbortController();
   const settingsTimeout = setTimeout(() => settingsController.abort(), 8000);
   try {
@@ -9838,7 +9837,7 @@ async function init() {
     const ps = await response.json();
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
-    firstVisitAuthEnabled = ps.first_visit_auth === '1';
+    loginRequiredEnabled = ps.first_visit_auth === '1';
     const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
     if (Number.isInteger(configuredPhotoClip) && configuredPhotoClip >= 1 && configuredPhotoClip <= 300) {
       photoSongClipSeconds = configuredPhotoClip;
@@ -9868,15 +9867,12 @@ async function init() {
     if (footer) {
       footer.textContent = ps.footer_copyright_text || '© 2026 İsmail D. Tüm hakları saklıdır.';
     }
-    if (firstVisitAuthEnabled && !currentUser && location.pathname === '/' && !localStorage.getItem('cigcig_first_visit_auth_seen')) {
-      localStorage.setItem('cigcig_first_visit_auth_seen', '1');
-      navigate('/giris', false);
-    }
   } catch (error) {
     console.warn('Genel ayarlar yüklenemedi; varsayılan ayarlarla devam ediliyor:', error.message);
   } finally {
     clearTimeout(settingsTimeout);
   }
+  renderRoute(location.pathname + location.search);
   try {
     const journalists = await api('/journalists');
     journalistDirectory.clear();
@@ -14912,8 +14908,11 @@ async function loadStoriesBar(container) {
 
 function showStoryUploadModal() {
   const savedDraft = window.__storyUploadDraft || null;
-  const pendingStoryFile = window.__pendingStoryFile || null;
+  const pendingStoryFiles = window.__pendingStoryFiles || (window.__pendingStoryFile ? [window.__pendingStoryFile] : []);
+  const pendingStoryFilters = window.__pendingStoryFilters || pendingStoryFiles.map(() => savedDraft?.filter || 'none');
   delete window.__storyUploadDraft;
+  delete window.__pendingStoryFiles;
+  delete window.__pendingStoryFilters;
   delete window.__pendingStoryFile;
   showModal('Hikaye oluştur', `<div class="social-compose social-compose-story">
     <section class="social-compose-preview-pane">
@@ -14937,7 +14936,7 @@ function showStoryUploadModal() {
       <button class="btn btn-primary social-compose-submit" id="story-save"><i class="fas fa-paper-plane"></i> Hikayeni paylaş</button>
     </section>
   </div>`, 'social-compose-modal');
-  let songs = [], selectedSong = null, selectedStoryFiles = pendingStoryFile ? [pendingStoryFile] : [];
+  let songs = [], selectedSong = null, selectedStoryFiles = pendingStoryFiles, selectedStoryFilters = pendingStoryFilters;
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   let storyPreviewUrls = [];
   const renderMediaPreview = files => {
@@ -14946,15 +14945,71 @@ function showStoryUploadModal() {
     if (!files.length) return;
     preview.hidden = false;
     $('#story-preview-empty')?.classList.add('hidden');
-    const previews = files.map(file => {
+    const previews = files.map((file, index) => {
       const url = URL.createObjectURL(file);
       storyPreviewUrls.push(url);
       return file.type.startsWith('video/')
-        ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss($('#story-media-filter').value)}"></video>`
-        : `<img src="${url}" alt="Seçilen hikaye fotoğrafı" draggable="false" style="filter:${mediaFilterCss($('#story-media-filter').value)}" />`;
+        ? `<div class="story-media-preview-item"><video src="${url}" controls playsinline style="filter:${mediaFilterCss($('#story-media-filter').value)}"></video></div>`
+        : `<div class="story-media-preview-item"><img src="${url}" alt="Seçilen hikaye fotoğrafı" draggable="false" style="filter:${mediaFilterCss(selectedStoryFilters[index] || 'none')}" /><div class="story-media-preview-actions"><button type="button" data-story-view="${index}" aria-label="Fotoğrafı büyük görüntüle"><i class="fas fa-eye"></i><span>Görüntüle</span></button><button type="button" data-story-edit="${index}" aria-label="Fotoğrafı düzenle"><i class="fas fa-crop-simple"></i><span>Düzenle</span></button></div></div>`;
     }).join('');
     preview.innerHTML = files.length > 1 ? `<div class="story-media-preview-grid">${previews}</div>` : previews;
   };
+  const storyDraft = () => ({
+    caption: $('#story-caption').value,
+    duration: $('#story-duration').value,
+    filter: $('#story-media-filter').value,
+    songId: $('#story-song').value,
+    songStart: $('#story-song-start').value
+  });
+  const resumeStoryComposer = (files, filters, draft) => {
+    storyPreviewUrls.forEach(URL.revokeObjectURL);
+    window.__storyUploadDraft = draft;
+    window.__pendingStoryFiles = files;
+    window.__pendingStoryFilters = filters;
+    showStoryUploadModal();
+  };
+  preview.addEventListener('click', event => {
+    const viewButton = event.target.closest('[data-story-view]');
+    const editButton = event.target.closest('[data-story-edit]');
+    const index = Number((viewButton || editButton)?.dataset.storyView ?? editButton?.dataset.storyEdit);
+    if (!Number.isInteger(index) || index < 0 || index >= selectedStoryFiles.length) return;
+    if (viewButton) {
+      const file = selectedStoryFiles[index];
+      const item = viewButton.closest('.story-media-preview-item');
+      if (!item || !file) return;
+      const existingViewer = preview.querySelector('.story-media-lightbox');
+      existingViewer?.remove();
+      const url = URL.createObjectURL(file);
+      storyPreviewUrls.push(url);
+      const viewer = document.createElement('div');
+      viewer.className = 'story-media-lightbox';
+      viewer.innerHTML = `<button type="button" class="story-media-lightbox-close" aria-label="Önizlemeyi kapat"><i class="fas fa-xmark"></i></button><img src="${url}" alt="Hikaye fotoğrafı önizlemesi" style="filter:${mediaFilterCss(selectedStoryFilters[index] || 'none')}" />`;
+      preview.append(viewer);
+      viewer.querySelector('button').addEventListener('click', () => {
+        viewer.remove();
+        URL.revokeObjectURL(url);
+        storyPreviewUrls = storyPreviewUrls.filter(previewUrl => previewUrl !== url);
+      });
+      return;
+    }
+    const file = selectedStoryFiles[index];
+    if (!file?.type.startsWith('image/')) return;
+    const files = [...selectedStoryFiles];
+    const filters = [...selectedStoryFilters];
+    const draft = storyDraft();
+    openMediaEditor(file, {
+      title: 'Hikaye fotoğrafını düzenle',
+      aspect: 9 / 16,
+      initialFilter: filters[index] || 'none',
+      onApply: (editedFile) => {
+        files[index] = editedFile;
+        filters[index] = 'none';
+        resumeStoryComposer(files, filters, draft);
+        toast('Hikaye fotoğrafı düzenlendi');
+      },
+      onCancel: () => resumeStoryComposer(files, filters, draft)
+    });
+  });
   mediaInput.onchange = () => {
     const files = [...mediaInput.files];
     if (!files.length) return;
@@ -14970,27 +15025,15 @@ function showStoryUploadModal() {
       mediaInput.value = '';
       return;
     }
-    if (files.length === 1 && files[0].type.startsWith('image/')) {
-      window.__storyUploadDraft = {
-        caption: $('#story-caption').value,
-        duration: $('#story-duration').value,
-        filter: $('#story-media-filter').value,
-        songId: $('#story-song').value,
-        songStart: $('#story-song-start').value
-      };
-      openMediaEditor(file, { title: 'Hikaye fotoğrafını düzenle', aspect: 9 / 16, onApply: (editedFile, filter) => {
-        window.__pendingStoryFile = editedFile;
-        window.__storyUploadDraft = { ...(window.__storyUploadDraft || {}), filter };
-        showStoryUploadModal();
-        toast('Hikaye fotoğrafı düzenlendi');
-      }});
-      return;
-    }
     selectedStoryFiles = files;
+    selectedStoryFilters = files.map(() => $('#story-media-filter').value);
     renderMediaPreview(files);
   };
-  $('#story-media-filter').onchange = () => { if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles); };
-  if (pendingStoryFile) renderMediaPreview([pendingStoryFile]);
+  $('#story-media-filter').onchange = () => {
+    selectedStoryFilters = selectedStoryFiles.map(() => $('#story-media-filter').value);
+    if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
+  };
+  if (pendingStoryFiles.length) renderMediaPreview(pendingStoryFiles);
   if (savedDraft) {
     $('#story-caption').value = savedDraft.caption || '';
     $('#story-duration').value = savedDraft.duration || '24';
@@ -15073,12 +15116,12 @@ function showStoryUploadModal() {
           await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption, duration_hours: duration, media_filter: filter, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0 }) });
           postedCount = 1;
         } else {
-          for (const imageFile of files) {
+          for (const [index, imageFile] of files.entries()) {
             const form = new FormData();
             form.append('media', imageFile);
             form.append('caption', caption);
             form.append('duration_hours', duration);
-            form.append('media_filter', filter);
+            form.append('media_filter', selectedStoryFilters[index] || filter);
             if (selectedSong) {
               form.append('song_id', selectedSong.id);
               form.append('song_start_seconds', $('#story-song-start').value || 0);
@@ -15097,6 +15140,7 @@ function showStoryUploadModal() {
         submitButton.innerHTML = 'Paylaş';
         if (postedCount && postedCount < files.length) {
           selectedStoryFiles = files.slice(postedCount);
+          selectedStoryFilters = selectedStoryFilters.slice(postedCount);
           renderMediaPreview(selectedStoryFiles);
         }
         $('#story-error').textContent = postedCount ? `${postedCount}/${files.length} hikaye paylaşıldı. Kalanlar yüklenemedi: ${error.message || 'Hata'}` : error.message || 'Hikaye yüklenemedi.';

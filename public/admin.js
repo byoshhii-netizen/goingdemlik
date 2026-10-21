@@ -3545,11 +3545,11 @@ async function renderSettings(main) {
         <div class="card-header"><span><i class="fas fa-user-shield" style="color:var(--red2);margin-right:8px"></i>Sosyal Medya Uygulaması</span><span class="adm-setting-status ${settings['first_visit_auth']==='1'?'is-on':''}">${settings['first_visit_auth']==='1'?'AÇIK':'KAPALI'}</span></div>
         <div class="card-body">
           <div class="adm-feature-copy">
-            <strong>İlk ziyarette kayıt / giriş iste</strong>
-            <p>Anonim ziyaretçiler ana sayfaya ilk geldiklerinde doğrudan modern giriş ekranına yönlendirilir. Ayar kapatıldığında normal ziyaret akışı devam eder.</p>
+            <strong>Site genelinde giriş zorunluluğu</strong>
+            <p>Açıkken giriş yapmamış ziyaretçiler ana sayfaya ve özel alanlara giremez. Müzik, kitap ve konu/forum içerikleri misafir olarak görüntülenebilir. Kapalıyken tüm site normal şekilde gezilebilir.</p>
           </div>
           <label class="adm-toggle-row" for="s-first-visit-auth">
-            <span><i class="fas fa-door-open"></i> İlk ana sayfa ziyaretinde auth ekranını göster</span>
+            <span><i class="fas fa-door-open"></i> Site genelinde giriş zorunluluğunu etkinleştir</span>
             <span class="adm-toggle"><input type="checkbox" id="s-first-visit-auth" ${settings['first_visit_auth']==='1'?'checked':''}><span></span></span>
           </label>
           <button class="btn btn-primary" id="s-first-visit-auth-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
@@ -3883,7 +3883,14 @@ async function renderSettings(main) {
   });
   document.getElementById('s-first-visit-auth-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-first-visit-auth-msg');
-    await saveSetting('first_visit_auth', document.getElementById('s-first-visit-auth').checked ? '1' : '0', msg);
+    const enabled = document.getElementById('s-first-visit-auth').checked;
+    const saved = await saveSetting('first_visit_auth', enabled ? '1' : '0', msg);
+    if (!saved) return;
+    const status = document.querySelector('#s-first-visit-auth')?.closest('.card')?.querySelector('.adm-setting-status');
+    if (status) {
+      status.textContent = enabled ? 'AÇIK' : 'KAPALI';
+      status.classList.toggle('is-on', enabled);
+    }
     msg.style.color = 'var(--green)';
     msg.textContent = '✓ Ayar kaydedildi';
   });
