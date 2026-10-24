@@ -1223,6 +1223,18 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(content_type, content_id)
     );
+    CREATE TABLE IF NOT EXISTS user_content_archive (
+      owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content_type TEXT NOT NULL CHECK (content_type IN ('song','forum','book','photo','story','newspaper','poem','video','reals','playlist')),
+      content_id TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('archived','trash')),
+      content_data JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_id, content_type, content_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_content_archive_state
+      ON user_content_archive (owner_id, state, updated_at DESC);
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'active';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_reason TEXT DEFAULT '';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMP;

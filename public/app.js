@@ -7965,6 +7965,138 @@ async function renderProfile(app, username) {
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
+  const renderProfileArchive = async panel => {
+    let state = 'active';
+    panel.innerHTML = `
+      <section class="profile-archive">
+        <header class="profile-archive-header">
+          <span class="profile-archive-icon"><i class="fas fa-box-archive"></i></span>
+          <div><h2>İçerik kasam</h2><p>Paylaşımlarını arşivle, silinenleri geri yükle veya süresi dolan hikâyelerini gör.</p></div>
+        </header>
+        <nav class="profile-archive-tabs" aria-label="Arşiv bölümleri">
+          <button type="button" data-archive-state="active" class="is-active">İçeriklerim</button>
+          <button type="button" data-archive-state="archived">Arşivlenenler</button>
+          <button type="button" data-archive-state="trash">Silinenler</button>
+          <button type="button" data-archive-state="expired_stories">Süresi dolan hikâyeler</button>
+        </nav>
+        <div class="profile-archive-items" aria-live="polite"></div>
+      </section>`;
+
+    const itemsNode = panel.querySelector('.profile-archive-items');
+    const loadItems = async () => {
+      itemsNode.innerHTML = '<div class="profile-archive-loading"><i class="fas fa-spinner fa-spin"></i> İçerikler yükleniyor...</div>';
+      try {
+        const items = await api(`/archive?state=${encodeURIComponent(state)}`);
+        if (!Array.isArray(items) || !items.length) {
+          itemsNode.innerHTML = '<div class="profile-archive-empty"><i class="fas fa-box-open"></i><strong>Bu bölüm şimdilik boş</strong><span>İçeriklerin burada görünecek.</span></div>';
+          return;
+        }
+        itemsNode.innerHTML = `<div class="profile-archive-grid">${items.map(item => {
+          const data = item.content_data || {};
+          const type = item.content_type;
+          const title = data.title || data.caption || data.song_title || data.name || data.content || 'İsimsiz içerik';
+          const image = data.cover_image || data.cover_url || data.thumbnail_url || data.image_url || data.url || '';
+          const date = data.created_at || item.updated_at || item.created_at;
+          const labels = { song: 'Müzik', forum: 'Konu', book: 'Kitap', photo: 'Fotoğraf', story: 'Hikâye', newspaper: 'Gazete', poem: 'Şiir', video: 'Video', reals: 'Real', playlist: 'Çalma listesi' };
+          const actions = state === 'active'
+            ? `<button type="button" class="profile-archive-action is-primary" data-archive-action="archive" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-box-archive"></i> Arşivle</button><button type="button" class="profile-archive-action is-danger" data-archive-action="trash" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-trash"></i> Sil</button>`
+            : state === 'expired_stories'
+              ? '<span class="profile-archive-expired"><i class="fas fa-clock"></i> Geri yüklenemez</span>'
+              : `<button type="button" class="profile-archive-action is-restore" data-archive-action="restore" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-rotate-left"></i> Geri yükle</button>`;
+          return `<article class="profile-archive-card">
+            ${image ? `<img class="profile-archive-cover" src="${escHtml(image)}" alt="" loading="lazy" />` : '<div class="profile-archive-cover profile-archive-cover-empty"><i class="fas fa-file-lines"></i></div>'}
+            <div class="profile-archive-card-body">
+              <span class="profile-archive-type">${escHtml(labels[type] || 'İçerik')}</span>
+              <h3>${escHtml(title)}</h3>
+              <time>${date ? escHtml(new Date(date).toLocaleDateString('tr-TR')) : ''}</time>
+              <div class="profile-archive-card-actions">${actions}</div>
+            </div>
+          </article>`;
+        }).join('')}</div>`;
+      } catch (error) {
+        itemsNode.innerHTML = `<div class="profile-archive-empty is-error"><i class="fas fa-triangle-exclamation"></i><strong>İçerikler yüklenemedi</strong><span>${escHtml(error.message || 'Bir hata oluştu.')}</span></div>`;
+      }
+    };
+
+    panel.querySelectorAll('[data-archive-state]').forEach(button => {
+      button.addEventListener('click', () => {
+        state = button.dataset.archiveState;
+        panel.querySelectorAll('[data-archive-state]').forEach(tab => {
+          const selected = tab === button;
+          tab.classList.toggle('is-active', selected);
+          tab.setAttribute('aria-pressed', String(selected));
+        });
+        loadItems();
+      });
+    });
+
+    panel.addEventListener('click', async event => {
+      const button = event.target.closest('[data-archive-action]');
+      if (!button) return;
+      const action = button.dataset.archiveAction;
+      const type = button.dataset.contentType;
+      const id = button.dataset.contentId;
+      if (action === 'archive' || action === 'trash') {
+        const overlay = document.createElement('div');
+        overlay.className = 'profile-archive-confirm-overlay';
+        overlay.innerHTML = `<section class="profile-archive-confirm" role="dialog" aria-modal="true" aria-labelledby="profile-archive-confirm-title">
+          <span class="profile-archive-confirm-icon"><i class="fas ${action === 'archive' ? 'fa-box-archive' : 'fa-trash'}"></i></span>
+          <h2 id="profile-archive-confirm-title">${action === 'archive' ? 'Arşivlemek istiyor musun?' : 'Silmek istiyor musun?'}</h2>
+          <p>${action === 'archive' ? 'Bu içerik profilinden ve akışlardan gizlenecek. İstediğin zaman arşivinden geri alabilirsin.' : 'Bu içerik yalnızca Silinenler bölümünde görünecek. İstediğin zaman geri yükleyebilirsin.'}</p>
+          <div class="profile-archive-confirm-actions">
+            <button type="button" class="profile-archive-cancel">Vazgeç</button>
+            <button type="button" class="profile-archive-confirm-submit">${action === 'archive' ? 'Arşive al' : 'Sil'}</button>
+          </div>
+        </section>`;
+        document.body.appendChild(overlay);
+        const close = () => {
+          overlay.remove();
+          document.removeEventListener('keydown', onKeydown);
+          button.focus();
+        };
+        const onKeydown = keyEvent => {
+          if (keyEvent.key === 'Escape') close();
+        };
+        overlay.addEventListener('click', clickEvent => {
+          if (clickEvent.target === overlay || clickEvent.target.closest('.profile-archive-cancel')) close();
+        });
+        document.addEventListener('keydown', onKeydown);
+        overlay.querySelector('.profile-archive-confirm-submit').addEventListener('click', async () => {
+          const submitButton = overlay.querySelector('.profile-archive-confirm-submit');
+          submitButton.disabled = true;
+          try {
+            await api(`/archive/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+              method: 'POST',
+              body: JSON.stringify({ action })
+            });
+            close();
+            toast(action === 'archive' ? 'İçerik arşive alındı.' : 'İçerik Silinenler bölümüne taşındı.', 'success');
+            loadItems();
+          } catch (error) {
+            submitButton.disabled = false;
+            toast(error.message || 'İşlem tamamlanamadı.', 'error');
+          }
+        });
+        overlay.querySelector('.profile-archive-cancel').focus();
+        return;
+      }
+      button.disabled = true;
+      try {
+        await api(`/archive/${encodeURIComponent(type)}/${encodeURIComponent(id)}`, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'restore' })
+        });
+        toast('İçerik geri yüklendi.', 'success');
+        loadItems();
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message || 'İçerik geri yüklenemedi.', 'error');
+      }
+    });
+
+    await loadItems();
+  };
+
   const isOwn = currentUser && currentUser.id === user.id;
   const [settings, loadedFollowState] = await Promise.all([
     api('/settings/public').catch(() => null),
@@ -7972,7 +8104,7 @@ async function renderProfile(app, username) {
       ? api('/users/' + encodeURIComponent(user.username || username) + '/follow-status').catch(() => null)
       : Promise.resolve(null)
   ]);
-  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges'];
+  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'badges', 'archive'];
   let combinedContentCount = false;
   if (settings) {
     combinedContentCount = settings.content_count_combined === '1';
@@ -8123,7 +8255,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">${profileTabOrder.filter(tab => isOwn || tab !== 'saved').map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || item !== 'saved') ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler' })[tab]}</button>` : '').join('')}</div>
+    <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler', archive:'Arşiv' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler', archive:'Arşiv' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -8153,6 +8285,7 @@ async function renderProfile(app, username) {
       ${badgesPanelHTML}
       ${isOwn ? `<div style="text-align:center;margin-top:18px"><a href="/rozetler" data-link class="btn btn-outline btn-sm"><i class="fas fa-sliders"></i> Rozetleri yönet</a></div>` : ''}
     </div>
+    ${isOwn ? '<div id="tab-archive" class="hidden"></div>' : ''}
   </div>`;
   if (isOwn && ad_panels.length) {
     const panel = document.createElement('section');
@@ -8197,6 +8330,13 @@ async function renderProfile(app, username) {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
       });
+      if (btn.dataset.tab === 'archive') {
+        const archivePanel = app.querySelector('#tab-archive');
+        if (archivePanel && archivePanel.dataset.loaded !== 'true') {
+          archivePanel.dataset.loaded = 'true';
+          renderProfileArchive(archivePanel);
+        }
+      }
     });
   });
 
@@ -11007,7 +11147,7 @@ async function renderDMChat(username) {
         showDmImageViewer(viewed.image_urls?.length ? viewed.image_urls : viewed.image_url, true);
       } catch (error) {
         if (error.status === 410) {
-          limitedPhotoButton.outerHTML = `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> ${expiresByTime ? 'Fotoğrafın süresi doldu' : 'Fotoğrafın görüntüleme hakkı doldu'}</span>`;
+          limitedPhotoButton.outerHTML = '<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğraf artık açılamıyor</span>';
         } else {
           limitedPhotoButton.disabled = false;
           toast(error.message, 'error');
@@ -11703,17 +11843,16 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
         : `<div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
-             ${!isOwn && Number(m.image_expiry_hours) > 0 && !imageUrls.length
-               ? m.image_expires_at && new Date(m.image_expires_at).getTime() <= Date.now()
-                 ? `<span class="dm-ephemeral-expired"><i class="fas fa-clock"></i> Fotoğrafın süresi doldu</span>`
-                 : `<button type="button" class="dm-ephemeral-open dm-expiry-open"
-                      data-message-id="${m.id}">
-                      <i class="fas fa-clock"></i> Fotoğrafı aç
-                    </button>`
-               : Number(m.image_view_limit) > 0 && !isOwn
+             ${Number(m.image_view_limit) > 0 && !isOwn
                ? Number(m.image_view_count) >= Number(m.image_view_limit)
                  ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
                  : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}"><i class="fas fa-eye"></i> Fotoğrafı görüntüle <span>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} hakkın var</span></button>`
+               : !isOwn && Number(m.image_expiry_hours) > 0 && !imageUrls.length
+                 ? m.image_expires_at && new Date(m.image_expires_at).getTime() <= Date.now()
+                   ? `<span class="dm-ephemeral-expired"><i class="fas fa-clock"></i> Fotoğrafın süresi doldu</span>`
+                   : `<button type="button" class="dm-ephemeral-open dm-expiry-open" data-message-id="${m.id}">
+                        <i class="fas fa-clock"></i> Fotoğrafı aç
+                      </button>`
                : imageUrls.length === 1
                  ? `<img src="${escHtml(imageUrls[0])}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(imageUrls[0])}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
                  : imageUrls.length > 1

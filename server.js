@@ -1068,44 +1068,55 @@ app.get('/sitemap.xml', async (req, res) => {
     query(`SELECT f.slug, f.title, f.banner_image, f.updated_at FROM forums f LEFT JOIN users u ON u.id=f.user_id
       WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
       ORDER BY f.updated_at DESC LIMIT 5000`).then(r => r.rows),
     query(`SELECT b.id, b.slug, b.updated_at FROM books b LEFT JOIN users u ON u.id=b.user_id
       WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
         AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
       ORDER BY b.updated_at DESC LIMIT 2000`).then(r => r.rows),
     query(`SELECT bp.slug AS page_slug, b.slug AS book_slug, bp.created_at AS updated_at
       FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
       WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
         AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
       ORDER BY bp.created_at DESC LIMIT 10000`).then(r => r.rows),
     query("SELECT slug FROM groups WHERE COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active' LIMIT 2000").then(r => r.rows),
     query("SELECT username FROM users WHERE banned=0 AND COALESCE(is_private,0)=0 AND COALESCE(is_deleted,0)=0 LIMIT 5000").then(r => r.rows),
-    query("SELECT s.slug, s.title, s.cover_url, s.published_at FROM songs s LEFT JOIN users u ON u.id=s.uploader_id WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id) ORDER BY s.published_at DESC LIMIT 2000").then(r => r.rows),
+    query("SELECT s.slug, s.title, s.cover_url, s.published_at FROM songs s LEFT JOIN users u ON u.id=s.uploader_id WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='song' AND a.content_id=s.id::text) ORDER BY s.published_at DESC LIMIT 2000").then(r => r.rows),
     query(`SELECT p.id, p.url, p.title, p.caption, p.created_at FROM photos p
       LEFT JOIN users u ON u.id=p.user_id
       WHERE COALESCE(u.is_private,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
       ORDER BY p.created_at DESC LIMIT 10000`).then(r => r.rows),
     query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
       FROM videos v JOIN users u ON u.id=v.user_id
       WHERE v.is_reals=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='video' AND cs.content_id=v.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='video' AND a.content_id=v.id::text)
       ORDER BY v.created_at DESC LIMIT 2000`).then(r => r.rows),
     query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
       FROM videos v JOIN users u ON u.id=v.user_id
       WHERE v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='reals' AND a.content_id=v.id::text)
       ORDER BY v.created_at DESC LIMIT 2000`).then(r => r.rows),
     query(`SELECT p.slug, p.title, p.updated_at, p.created_at
       FROM poems p JOIN users u ON u.id=p.user_id
       WHERE COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)
       ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC LIMIT 2000`).then(r => r.rows),
     query(`SELECT n.id, n.newspaper_date, n.created_at
       FROM newspapers n JOIN users u ON u.id=n.journalist_id
       WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)
       ORDER BY n.newspaper_date DESC, n.created_at DESC LIMIT 2000`).then(r => r.rows),
   ]);
   const now = new Date().toISOString();
@@ -2834,7 +2845,7 @@ app.get('/api/forums', async (req, res) => {
         SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
         FROM tags t INNER JOIN forum_tags ft ON ft.tag_id=t.id WHERE ft.forum_id=f.id
       ), '[]'::json) as system_tags
-    FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`;
+    FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)`;
 
   const filters = [];
   if (tag) {
@@ -2885,6 +2896,7 @@ app.get('/api/newspapers', optionalAuth, async (req, res) => {
       END AS liked
     FROM newspapers n
     JOIN users u ON u.id=n.journalist_id AND COALESCE(u.is_deleted,0)=0
+    WHERE NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)
     ORDER BY n.newspaper_date DESC, n.created_at DESC
     LIMIT 100
   `, [userId]);
@@ -2912,7 +2924,7 @@ app.get('/api/newspapers/:id', optionalAuth, async (req, res) => {
       END AS liked
     FROM newspapers n
     JOIN users u ON u.id=n.journalist_id AND COALESCE(u.is_deleted,0)=0
-    WHERE n.id=$1
+    WHERE n.id=$1 AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)
   `, [id, userId]);
   if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
   res.json(rows[0]);
@@ -2959,12 +2971,16 @@ app.post('/api/newspapers', authMiddleware, uploadLimiter, upload.single('image'
 app.delete('/api/newspapers/:id', authMiddleware, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
-  const { rows } = await query('SELECT journalist_id FROM newspapers WHERE id=$1', [id]);
+  const { rows } = await query('SELECT * FROM newspapers WHERE id=$1', [id]);
   if (!rows.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
   if (Number(rows[0].journalist_id) !== Number(req.user.id) && !req.user.is_admin) {
     return res.status(403).json({ error: 'Bu gazeteyi silme yetkiniz yok.' });
   }
-  await query('DELETE FROM newspapers WHERE id=$1', [id]);
+  if (Number(rows[0].journalist_id) === Number(req.user.id)) {
+    await saveUserContentState('newspaper', rows[0], req.user.id, 'trash');
+  } else {
+    await query('DELETE FROM newspapers WHERE id=$1', [id]);
+  }
   res.json({ ok: true });
 });
 
@@ -3096,7 +3112,7 @@ app.get('/api/forum/:slug', optionalAuth, async (req, res) => {
         SELECT json_agg(json_build_object('id',t.id,'name',t.name,'color',t.color))
         FROM tags t INNER JOIN forum_tags ft ON ft.tag_id=t.id WHERE ft.forum_id=f.id
       ), '[]'::json) as system_tags
-    FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE f.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
+    FROM forums f JOIN users u ON f.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE f.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)`, [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   res.json(rows[0]);
 });
@@ -3182,13 +3198,7 @@ app.delete('/api/forum/:slug', authMiddleware, async (req, res) => {
   if (!fRows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const forum = fRows[0];
   if (forum.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  await query('DELETE FROM forum_comments WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forum_likes WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forum_views WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forum_tags WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forums WHERE id=$1', [forum.id]);
-  await query('UPDATE users SET forum_count=GREATEST(0,forum_count-1) WHERE id=$1', [req.user.id]);
-  await updateUserLevel(req.user.id);
+  await saveUserContentState('forum', forum, req.user.id, 'trash');
   await logAction(req.user.username, 'delete_forum', req.params.slug);
   res.json({ ok: true });
 });
@@ -3310,7 +3320,8 @@ app.get('/api/poems', optionalAuth, async (req, res) => {
       EXISTS(SELECT 1 FROM poem_likes WHERE poem_id=p.id AND user_id=$1) AS liked
     FROM poems p
     JOIN users u ON p.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-    WHERE p.is_hidden=0 OR p.user_id=$1
+    WHERE (p.is_hidden=0 OR p.user_id=$1)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)
     ORDER BY p.created_at DESC`, [userId]);
   res.json(rows);
 });
@@ -3326,7 +3337,7 @@ app.get('/api/poem/:slug', optionalAuth, async (req, res) => {
       EXISTS(SELECT 1 FROM poem_likes WHERE poem_id=p.id AND user_id=$1) AS liked
     FROM poems p
     JOIN users u ON p.user_id=u.id AND COALESCE(u.is_deleted,0)=0
-    WHERE p.slug=$2`, [userId, req.params.slug]);
+    WHERE p.slug=$2 AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)`, [userId, req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Şiir bulunamadı' });
   const poem = rows[0];
   const isOwner = req.user && Number(req.user.id) === Number(poem.user_id);
@@ -3397,7 +3408,8 @@ app.delete('/api/poem/:slug', authMiddleware, async (req, res) => {
   if (Number(poem.user_id) !== Number(req.user.id) && !req.user.is_admin) {
     return res.status(403).json({ error: 'Yetki yok' });
   }
-  await query('DELETE FROM poems WHERE id=$1', [poem.id]);
+  if (Number(poem.user_id) === Number(req.user.id)) await saveUserContentState('poem', poem, req.user.id, 'trash');
+  else await query('DELETE FROM poems WHERE id=$1', [poem.id]);
   res.json({ ok: true });
 });
 
@@ -3546,6 +3558,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
     (b.user_id=${userId} OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=${userId})) AS has_book_access
     FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0
     WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
       AND (
         b.is_hidden = 0
         OR b.user_id = ${userId}
@@ -3556,7 +3569,7 @@ app.get('/api/books', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/book/:slug', optionalAuth, async (req, res) => {
-  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color, u.is_red_verified, u.red_verified_at FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
+  const { rows: bRows } = await query(`SELECT b.*, u.username, u.avatar, u.name_color, u.is_red_verified, u.red_verified_at FROM books b JOIN users u ON b.user_id=u.id AND COALESCE(u.is_deleted,0)=0 WHERE b.slug=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const isOwner = req.user?.id == book.user_id;
@@ -3776,11 +3789,7 @@ app.delete('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  await query('DELETE FROM book_pages WHERE book_id=$1', [book.id]);
-  await query('DELETE FROM book_chapters WHERE book_id=$1', [book.id]);
-  await query('DELETE FROM books WHERE id=$1', [book.id]);
-  await query('UPDATE users SET book_count=GREATEST(0,book_count-1) WHERE id=$1', [req.user.id]);
-  await updateUserLevel(req.user.id);
+  await saveUserContentState('book', book, req.user.id, 'trash');
   await logAction(req.user.username, 'delete_book', req.params.slug);
   res.json({ ok: true });
 });
@@ -3806,7 +3815,9 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
-  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  const { rows: bRows } = await query(`SELECT * FROM books WHERE slug=$1 AND NOT EXISTS (
+    SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=books.id::text
+  )`, [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   const isOwner = req.user?.id == book.user_id;
@@ -5071,7 +5082,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
-    FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`;
+    FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)`;
   const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))`;
   const queryText = username
     ? `${base} AND u.username = $2 AND ${visibility} ORDER BY p.created_at DESC LIMIT $3`
@@ -5091,7 +5102,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id
-    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
+    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
     [req.params.id, userId]
   );
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -5139,19 +5150,148 @@ app.put('/api/photos/:id', authMiddleware, upload.single('image'), async (req, r
   res.json(updated[0]);
 });
 
+const USER_ARCHIVE_TYPES = {
+  song: { table: 'songs', owner: 'uploader_id', id: 'id' },
+  forum: { table: 'forums', owner: 'user_id', id: 'id' },
+  book: { table: 'books', owner: 'user_id', id: 'id' },
+  photo: { table: 'photos', owner: 'user_id', id: 'id' },
+  story: { table: 'stories', owner: 'user_id', id: 'id' },
+  newspaper: { table: 'newspapers', owner: 'journalist_id', id: 'id' },
+  poem: { table: 'poems', owner: 'user_id', id: 'id' },
+  video: { table: 'videos', owner: 'user_id', id: 'id', reals: false },
+  reals: { table: 'videos', owner: 'user_id', id: 'id', reals: true },
+  playlist: { table: 'playlists', owner: 'user_id', id: 'id' }
+};
+
+async function getOwnedArchiveContent(type, contentId, ownerId) {
+  const config = USER_ARCHIVE_TYPES[type];
+  if (!config) return null;
+  const realsFilter = config.reals === undefined ? '' : ` AND c.is_reals=${config.reals ? 1 : 0}`;
+  const { rows } = await query(
+    `SELECT c.* FROM ${config.table} c WHERE c.${config.id}::text=$1 AND c.${config.owner}=$2${realsFilter} LIMIT 1`,
+    [String(contentId), ownerId]
+  );
+  return rows[0] || null;
+}
+
+async function saveUserContentState(type, content, ownerId, state) {
+  const { rows: existing } = await query(
+    'SELECT state FROM user_content_archive WHERE owner_id=$1 AND content_type=$2 AND content_id=$3',
+    [ownerId, type, String(content.id)]
+  );
+  await query(
+    `INSERT INTO user_content_archive (owner_id, content_type, content_id, state, content_data, updated_at)
+     VALUES ($1,$2,$3,$4,$5::jsonb,NOW())
+     ON CONFLICT (owner_id, content_type, content_id)
+     DO UPDATE SET state=EXCLUDED.state, content_data=EXCLUDED.content_data, updated_at=NOW()`,
+    [ownerId, type, String(content.id), state, JSON.stringify(content)]
+  );
+  if (!existing.length && (type === 'forum' || type === 'book')) {
+    const counter = type === 'forum' ? 'forum_count' : 'book_count';
+    await query(`UPDATE users SET ${counter}=GREATEST(0,${counter}-1) WHERE id=$1`, [ownerId]);
+    await updateUserLevel(ownerId);
+  }
+}
+
+app.get('/api/archive', authMiddleware, async (req, res) => {
+  try {
+    const state = String(req.query.state || 'archived');
+    if (state === 'expired_stories') {
+      const { rows } = await query(
+        `SELECT 'story' AS content_type, s.id::text AS content_id, to_jsonb(s) AS content_data,
+                COALESCE(a.state, 'expired_story') AS state
+         FROM stories s
+         LEFT JOIN user_content_archive a
+           ON a.owner_id=$1 AND a.content_type='story' AND a.content_id=s.id::text
+         WHERE s.user_id=$1 AND s.expires_at<=NOW()
+         ORDER BY s.expires_at DESC`,
+        [req.user.id]
+      );
+      return res.json(rows);
+    }
+
+    if (!['active', 'archived', 'trash'].includes(state)) {
+      return res.status(400).json({ error: 'Geçersiz arşiv bölümü.' });
+    }
+
+    if (state !== 'active') {
+      const { rows } = await query(
+        `SELECT content_type, content_id, state, content_data, created_at, updated_at
+         FROM user_content_archive
+         WHERE owner_id=$1 AND state=$2
+           AND NOT (content_type='story' AND COALESCE((content_data->>'expires_at')::timestamptz <= NOW(), false))
+         ORDER BY updated_at DESC`,
+        [req.user.id, state]
+      );
+      return res.json(rows);
+    }
+
+    const items = [];
+    for (const [type, config] of Object.entries(USER_ARCHIVE_TYPES)) {
+      const realsFilter = config.reals === undefined ? '' : ` AND c.is_reals=${config.reals ? 1 : 0}`;
+      const storyExpiryFilter = type === 'story' ? ' AND c.expires_at>NOW()' : '';
+      const { rows } = await query(
+        `SELECT $2::text AS content_type, c.${config.id}::text AS content_id, to_jsonb(c) AS content_data
+         FROM ${config.table} c
+         WHERE c.${config.owner}=$1${realsFilter}${storyExpiryFilter}
+           AND NOT EXISTS (
+             SELECT 1 FROM user_content_archive a
+             WHERE a.owner_id=$1 AND a.content_type=$2 AND a.content_id=c.${config.id}::text
+           )
+         ORDER BY c.${config.id} DESC LIMIT 100`,
+        [req.user.id, type]
+      );
+      items.push(...rows);
+    }
+    res.json(items);
+  } catch (error) {
+    console.error('Archive listing failed:', error);
+    res.status(500).json({ error: 'Arşiv içerikleri yüklenemedi.' });
+  }
+});
+
+app.post('/api/archive/:type/:id', authMiddleware, async (req, res) => {
+  try {
+    const { type } = req.params;
+    const action = String(req.body?.action || '');
+    if (!USER_ARCHIVE_TYPES[type]) return res.status(400).json({ error: 'İçerik türü geçersiz.' });
+    if (!['archive', 'trash', 'restore'].includes(action)) return res.status(400).json({ error: 'İşlem geçersiz.' });
+
+    const content = await getOwnedArchiveContent(type, req.params.id, req.user.id);
+    if (!content) return res.status(404).json({ error: 'İçerik bulunamadı veya size ait değil.' });
+    if (action === 'restore') {
+      if (type === 'story' && new Date(content.expires_at).getTime() <= Date.now()) {
+        return res.status(410).json({ error: 'Süresi dolan hikâyeler geri yüklenemez.' });
+      }
+      const { rows: existing } = await query(
+        'SELECT state FROM user_content_archive WHERE owner_id=$1 AND content_type=$2 AND content_id=$3',
+        [req.user.id, type, String(content.id)]
+      );
+      await query(
+        'DELETE FROM user_content_archive WHERE owner_id=$1 AND content_type=$2 AND content_id=$3',
+        [req.user.id, type, String(content.id)]
+      );
+      if (existing.length && (type === 'forum' || type === 'book')) {
+        const counter = type === 'forum' ? 'forum_count' : 'book_count';
+        await query(`UPDATE users SET ${counter}=${counter}+1 WHERE id=$1`, [req.user.id]);
+        await updateUserLevel(req.user.id);
+      }
+      return res.json({ ok: true, state: 'active' });
+    }
+
+    await saveUserContentState(type, content, req.user.id, action === 'archive' ? 'archived' : 'trash');
+    res.json({ ok: true, state: action === 'archive' ? 'archived' : 'trash' });
+  } catch (error) {
+    console.error('Archive update failed:', error);
+    res.status(500).json({ error: 'İçerik durumu güncellenemedi.' });
+  }
+});
+
 app.delete('/api/photos/:id', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT user_id, public_id FROM photos WHERE id=$1', [req.params.id]);
+  const { rows } = await query('SELECT * FROM photos WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu fotoğrafı silme yetkiniz yok' });
-  const publicId = rows[0].public_id;
-  if (USE_CLOUDINARY && publicId) {
-    try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true });
-    } catch (err) {
-      console.warn('Cloudinary photo destroy failed:', err.message || err);
-    }
-  }
-  await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
+  await saveUserContentState('photo', rows[0], req.user.id, 'trash');
   res.json({ ok: true });
 });
 
@@ -5171,7 +5311,8 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM content_view_events cve WHERE cve.content_type='story' AND cve.content_id=s.id) AS total_views,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
-    WHERE s.expires_at > NOW() AND (s.is_suspended=0 OR s.user_id=$1) AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
+    WHERE s.expires_at > NOW() AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
+      AND (s.is_suspended=0 OR s.user_id=$1) AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
       SELECT 1 FROM follows f2 WHERE f2.follower_id=$1 AND f2.following_id=s.user_id AND f2.status='accepted') THEN 1 ELSE 2 END), s.created_at DESC`, [viewerId]);
@@ -5188,6 +5329,7 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
       CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
     WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW()
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
       AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = rows[0];
@@ -5284,7 +5426,8 @@ app.delete('/api/stories/:id', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT id,user_id,public_id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   if (rows[0].user_id !== req.user.id) return res.status(403).json({ error: 'Bu hikayeyi silme yetkiniz yok' });
-  await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
+  const { rows: storyRows } = await query('SELECT * FROM stories WHERE id=$1', [rows[0].id]);
+  await saveUserContentState('story', storyRows[0], req.user.id, 'trash');
   res.json({ ok: true });
 });
 
@@ -6857,7 +7000,11 @@ app.get('/api/songs', async (req, res) => {
   const requestedLimit = Number.parseInt(req.query.limit, 10);
   const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
   const sort = String(req.query.sort || '');
-  let where = "WHERE s.status='active'";
+  let where = `WHERE s.status='active'
+    AND NOT EXISTS (
+      SELECT 1 FROM user_content_archive a
+      WHERE a.content_type='song' AND a.content_id=s.id::text
+    )`;
   const params = [];
   if (q) {
     params.push(`%${q}%`);
@@ -6892,7 +7039,10 @@ app.get('/api/songs/:slug', async (req, res) => {
             JOIN songs rs ON rs.id=sr.recommended_song_id
             WHERE sr.song_id=s.id AND rs.status='active'), '[]'::json) AS recommendations
      FROM songs s LEFT JOIN users u ON s.uploader_id=u.id
-     WHERE s.slug=$1`,
+     WHERE s.slug=$1 AND NOT EXISTS (
+       SELECT 1 FROM user_content_archive a
+       WHERE a.content_type='song' AND a.content_id=s.id::text
+     )`,
     [req.params.slug]
   );
   if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
@@ -7021,7 +7171,8 @@ app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
     const song = rows[0];
     if (song.uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu müziği silme yetkiniz yok' });
-    await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
+    if (song.uploader_id === req.user.id) await saveUserContentState('song', song, req.user.id, 'trash');
+    else await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
     await logAction(req.user.username, 'delete_song', song.slug);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'Silme hatası: ' + e.message }); }
@@ -7230,6 +7381,7 @@ app.get('/api/public-playlists', async (req, res) => {
        LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id
        WHERE p.is_public = 1 AND p.source_playlist_id IS NULL
          AND ($1 = '' OR p.name ILIKE $2 OR p.description ILIKE $2 OR owner.username ILIKE $2)
+         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='playlist' AND a.content_id=p.id::text)
        GROUP BY p.id, owner.username
        ORDER BY p.created_at DESC
        LIMIT 40`,
@@ -7251,6 +7403,7 @@ app.get('/api/playlists', authMiddleware, async (req, res) => {
        LEFT JOIN playlists source_playlist ON source_playlist.id = p.source_playlist_id
        LEFT JOIN users owner ON owner.id = COALESCE(source_playlist.user_id, p.user_id)
        WHERE p.user_id = $1
+         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='playlist' AND a.content_id=p.id::text)
        GROUP BY p.id, owner.username
        ORDER BY p.created_at DESC`,
       [req.user.id]
@@ -7327,8 +7480,9 @@ app.post('/api/playlists/:id/save', authMiddleware, async (req, res) => {
 
 app.delete('/api/playlists/:id', authMiddleware, async (req, res) => {
   try {
-    const { rows } = await query('DELETE FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2 RETURNING id', [req.params.id, req.user.id]);
+    const { rows } = await query('SELECT * FROM playlists WHERE (public_id=$1 OR id::text=$1) AND user_id=$2', [req.params.id, req.user.id]);
     if (!rows.length) return res.status(404).json({ error: 'Playlist bulunamadı' });
+    await saveUserContentState('playlist', rows[0], req.user.id, 'trash');
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -7826,7 +7980,8 @@ app.get('/siir/:slug', async (req, res) => {
   const { rows } = await query(`SELECT p.slug, p.title, p.content, p.created_at, p.updated_at, u.username
     FROM poems p JOIN users u ON u.id=p.user_id
     WHERE p.slug=$1 AND COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)`, [req.params.slug]);
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)`, [req.params.slug]);
   if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
   const poem = rows[0];
   const description = String(poem.content || poem.title).replace(/\s+/g, ' ').slice(0, 160);
@@ -7869,7 +8024,8 @@ app.get('/gazete/:id', async (req, res) => {
   const { rows } = await query(`SELECT n.id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, u.username
     FROM newspapers n JOIN users u ON u.id=n.journalist_id
     WHERE n.id=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)`, [id]);
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)`, [id]);
   if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
   const newspaper = rows[0];
   const title = `${newspaper.newspaper_name} – CigCig Basın Arşivi`;
@@ -8033,7 +8189,8 @@ app.get('/kitap/:slug', async (req, res) => {
     LEFT JOIN users u ON u.id=b.user_id
     WHERE b.slug=$1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.slug]);
+      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.slug]);
   if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const book = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
@@ -8079,7 +8236,8 @@ app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
     FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
     WHERE bp.slug=$1 AND b.slug=$2 AND b.is_hidden=0 AND COALESCE(b.password_hash,'')=''
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-      AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)`, [req.params.pageSlug, req.params.slug]);
+    AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+    AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.pageSlug, req.params.slug]);
   if (!pages.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
   const page = pages[0];
   const pageUrl = `${SITE_URL}/kitap/${page.book_slug}/sayfa/${page.slug}`;
@@ -8181,14 +8339,17 @@ app.get('/profil/:username', async (req, res) => {
     [profileForums, profileBooks, profilePhotos] = await Promise.all([
       query(`SELECT slug,title,content,created_at FROM forums
         WHERE user_id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=forums.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=forums.id::text)
         ORDER BY created_at DESC LIMIT 30`, [user.id]).then(result => result.rows),
       query(`SELECT b.slug,b.title,b.preface,b.cover_image,u.username AS author FROM books b
         LEFT JOIN users u ON u.id=b.user_id
         WHERE b.user_id=$1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
         ORDER BY b.created_at DESC LIMIT 30`, [user.id]).then(result => result.rows),
       query(`SELECT id,url,title,caption,created_at FROM photos
         WHERE user_id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=photos.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=photos.id::text)
         ORDER BY created_at DESC LIMIT 30`, [user.id]).then(result => result.rows)
     ]);
   }
@@ -8245,6 +8406,7 @@ app.get('/api/search', async (req, res) => {
             WHERE ft.forum_id=f.id AND t.name ILIKE $1))
           AND COALESCE(u.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
         ORDER BY f.created_at DESC LIMIT $2`, [term, limit]),
       // Forum yorumları, sonuç olarak yorumun ait olduğu konuya gider
       query(`SELECT fc.id, fc.content, fc.created_at, f.title, f.slug, cu.username AS author
@@ -8255,12 +8417,14 @@ app.get('/api/search', async (req, res) => {
         WHERE fc.content ILIKE $1
           AND COALESCE(cu.is_deleted,0)=0 AND COALESCE(fu.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
         ORDER BY fc.created_at DESC LIMIT $2`, [term, limit]),
       // Fotoğraf başlığı şemada bulunmadığı için mevcut caption alanı aranır
       query(`SELECT p.id, p.caption, p.created_at, u.username AS author
         FROM photos p JOIN users u ON u.id=p.user_id
         WHERE p.caption ILIKE $1 AND COALESCE(u.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
         ORDER BY p.created_at DESC LIMIT $2`, [term, limit]),
       query(`SELECT pc.id, pc.content, pc.created_at, p.id AS photo_id, pu.username AS author
         FROM photo_comments pc
@@ -8270,6 +8434,7 @@ app.get('/api/search', async (req, res) => {
         WHERE pc.content ILIKE $1
           AND COALESCE(cu.is_deleted,0)=0 AND COALESCE(pu.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
         ORDER BY pc.created_at DESC LIMIT $2`, [term, limit]),
       // Video ve Reals başlık/açıklama/ses alanları
       query(`SELECT v.id, v.slug, v.title, v.description, v.sound_name, v.is_reals, v.created_at, u.username AS author
@@ -8278,6 +8443,10 @@ app.get('/api/search', async (req, res) => {
           AND COALESCE(u.is_deleted,0)=0 AND COALESCE(u.is_private,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs
             WHERE cs.content_id=v.id AND cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a
+            WHERE a.content_id=v.id::text AND a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a
+            WHERE a.content_id=v.id::text AND a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END)
         ORDER BY v.created_at DESC LIMIT $2`, [term, limit]),
       query(`SELECT vc.id, vc.content, vc.created_at, v.slug, v.title, v.is_reals, vu.username AS author
         FROM video_comments vc
@@ -8296,6 +8465,7 @@ app.get('/api/search', async (req, res) => {
           AND (s.title ILIKE $1 OR s.artist_name ILIKE $1 OR s.distributor ILIKE $1 OR s.genre ILIKE $1 OR s.lyrics ILIKE $1)
           AND COALESCE(u.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='song' AND a.content_id=s.id::text)
         ORDER BY s.published_at DESC, s.created_at DESC LIMIT $2`, [term, limit]),
       // Kitap bilgileri
       query(`SELECT b.id, b.slug, b.title, b.preface, b.karakterler, b.kadro, b.created_at, u.username AS author
@@ -8304,6 +8474,9 @@ app.get('/api/search', async (req, res) => {
           AND (b.title ILIKE $1 OR b.preface ILIKE $1 OR b.karakterler ILIKE $1 OR b.kadro ILIKE $1)
           AND COALESCE(u.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
         ORDER BY b.created_at DESC LIMIT $2`, [term, limit]),
       // Kitap sayfaları/bölümleri: doğrudan eşleşen sayfaya götür
       query(`SELECT bp.id, bp.slug AS page_slug, bp.title AS page_title, bp.content, bp.created_at,
@@ -8346,6 +8519,7 @@ app.get('/api/search', async (req, res) => {
         WHERE st.caption ILIKE $1 AND st.expires_at > NOW() AND st.is_suspended=0
           AND COALESCE(u.is_deleted,0)=0 AND COALESCE(u.is_private,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='story' AND cs.content_id=st.id)
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=st.id::text)
         ORDER BY st.created_at DESC LIMIT $2`, [term, limit]),
       // Herkese açık playlistler
       query(`SELECT pl.id, pl.public_id, pl.name, pl.description, pl.created_at, u.username AS author
@@ -10400,7 +10574,8 @@ const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
   (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
   FROM videos v JOIN users u ON u.id=v.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=v.song_id
-  WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)`;
+  WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)
+    AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND a.content_id=v.id::text)`;
 
 app.get('/api/videos', optionalAuth, async (req, res) => {
   const search = String(req.query.q || '').trim();
@@ -10601,10 +10776,14 @@ app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, r
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT id,user_id FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
+  const { rows } = await query('SELECT * FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yetkiniz yok' });
-  await query('DELETE FROM videos WHERE id=$1', [rows[0].id]);
+  if (rows[0].user_id === req.user.id) {
+    await saveUserContentState(rows[0].is_reals ? 'reals' : 'video', rows[0], req.user.id, 'trash');
+  } else {
+    await query('DELETE FROM videos WHERE id=$1', [rows[0].id]);
+  }
   res.json({ ok: true });
 });
 
