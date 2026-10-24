@@ -3032,12 +3032,18 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   background: var(--bg-card2); color: var(--text-muted);
 }
 .dm-story-avatar-link .dm-presence-dot { right: 0; bottom: 0; }
-.dm-conv-avatar-link .avatar-sm {
+.dm-conv-avatar-link img.avatar-sm {
   display: block;
   width: 44px;
   height: 44px;
   flex: 0 0 44px;
   object-fit: cover;
+}
+.dm-conv-avatar-link > .avatar-sm.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
 }
 .dm-conv-item > .dm-conv-avatar-link {
   display: flex;
