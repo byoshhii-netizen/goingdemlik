@@ -24,6 +24,7 @@ let activeStoryAudio = null;
 let storyRouteStoriesCache = [];
 let storyRouteStoriesCacheAt = 0;
 let activeRealsAudio = null;
+let activeVideoPreviewObjectUrl = null;
 let storyComposerAudio = null;
 let activePhotoAudio = null;
 let photoAudioObserver = null;
@@ -240,12 +241,18 @@ function showModal(title, bodyHTML, modalClass = '') {
   $('#modal-overlay').classList.remove('hidden');
 }
 
-function hideModal() {
+function hideModal({ resumeReals = true } = {}) {
   if (storyComposerAudio) { storyComposerAudio.pause(); untrackMediaAudio(storyComposerAudio); storyComposerAudio.src = ''; storyComposerAudio = null; }
   if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
   if (activeRealsAudio) { activeRealsAudio.pause(); untrackMediaAudio(activeRealsAudio); activeRealsAudio.src = ''; activeRealsAudio = null; }
-  window.__realsResumeVideo?.();
-  window.__realsResumeVideo = null;
+  if (resumeReals) {
+    window.__realsResumeVideo?.();
+    window.__realsResumeVideo = null;
+  }
+  if (activeVideoPreviewObjectUrl) {
+    URL.revokeObjectURL(activeVideoPreviewObjectUrl);
+    activeVideoPreviewObjectUrl = null;
+  }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
   $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal');
@@ -1324,28 +1331,32 @@ function generateVideoPoster(file) {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
     const video = document.createElement('video');
-    video.src = objectUrl;
     video.preload = 'metadata';
     video.muted = true;
     video.playsInline = true;
 
     const cleanup = () => URL.revokeObjectURL(objectUrl);
-    video.addEventListener('loadeddata', () => {
-      video.currentTime = 0;
-    }, { once: true });
-    video.addEventListener('seeked', () => {
+    const createPoster = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = 720;
-      canvas.height = 1280;
+      const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight, 1));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
       const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        cleanup();
+        reject(new Error('Kapak görseli oluşturulamadı'));
+        return;
+      }
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       canvas.toBlob(blob => {
         cleanup();
         if (!blob) return reject(new Error('Poster oluşturulamadı'));
-        resolve(new File([blob], 'poster.png', { type: 'image/png' }));
-      }, 'image/png');
-    }, { once: true });
+        resolve(new File([blob], 'cigcig-kapak.jpg', { type: 'image/jpeg' }));
+      }, 'image/jpeg', 0.78);
+    };
+    video.addEventListener('loadeddata', createPoster, { once: true });
     video.addEventListener('error', () => { cleanup(); reject(new Error('Video önizlemesi oluşturulamadı')); }, { once: true });
+    video.src = objectUrl;
   });
 }
 
@@ -1420,6 +1431,47 @@ async function renderRealsFeed(app, initialId = null) {
   let idx = 0;
   let items = [];
   const loadedRealsIndices = new Set();
+  const replayTimers = new Map();
+  function clearReplayCountdown(item) {
+    const timer = replayTimers.get(item);
+    if (timer) clearInterval(timer);
+    replayTimers.delete(item);
+    item?.classList.remove('reals-is-replaying');
+    const overlay = item?.querySelector('.reals-replay-countdown');
+    if (overlay) {
+      overlay.hidden = true;
+      overlay.querySelector('.reals-replay-number').textContent = '2';
+    }
+  }
+  function startReplayCountdown(item, video) {
+    if (replayTimers.has(item)) return;
+    const overlay = item.querySelector('.reals-replay-countdown');
+    const number = overlay?.querySelector('.reals-replay-number');
+    if (!overlay || !number) return;
+    let seconds = 2;
+    number.textContent = String(seconds);
+    number.classList.remove('is-ticking');
+    void number.offsetWidth;
+    number.classList.add('is-ticking');
+    overlay.hidden = false;
+    item.classList.add('reals-is-replaying');
+    const timer = setInterval(() => {
+      seconds -= 1;
+      if (seconds > 0) {
+        number.textContent = String(seconds);
+        number.classList.remove('is-ticking');
+        void number.offsetWidth;
+        number.classList.add('is-ticking');
+        return;
+      }
+      clearReplayCountdown(item);
+      item.classList.remove('reals-is-replaying');
+      if (!item.isConnected || !item.classList.contains('is-active') || !location.pathname.startsWith('/reals')) return;
+      video.currentTime = 0;
+      video.play().catch(() => {});
+    }, 1000);
+    replayTimers.set(item, timer);
+  }
   function ensureRealsFollowState(item) {
     const button = item?.querySelector('.reals-follow-btn');
     const username = button?.dataset.username;
@@ -1570,6 +1622,7 @@ async function renderRealsFeed(app, initialId = null) {
         <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
+        <div class="reals-replay-countdown" hidden aria-live="assertive" aria-label="Video yeniden başlıyor"><div class="reals-replay-orbit"><span class="reals-replay-number">2</span></div><strong>Yeniden başlıyor</strong></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1606,6 +1659,7 @@ async function renderRealsFeed(app, initialId = null) {
     items.forEach(it => {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
+      it.addEventListener('reals-cancel-replay', () => clearReplayCountdown(it));
       let clickTimer = null;
       let lastTouchTapAt = 0;
       let suppressClickUntil = 0;
@@ -1652,6 +1706,7 @@ async function renderRealsFeed(app, initialId = null) {
         likeFromDoubleTap();
       });
       vid.addEventListener('play', () => {
+        if (replayTimers.has(it)) clearReplayCountdown(it);
         const icon = it.querySelector('.reals-play-overlay i');
         if (icon) icon.className = 'fas fa-pause';
         it.classList.remove('reals-is-paused');
@@ -1663,6 +1718,11 @@ async function renderRealsFeed(app, initialId = null) {
         }
         it.querySelector('.reals-play-overlay i')?.classList.replace('fa-pause', 'fa-play');
         it.classList.add('reals-is-paused');
+      });
+      vid.addEventListener('ended', () => {
+        if (!it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
+          startReplayCountdown(it, vid);
+        }
       });
     });
     listEl.querySelectorAll('.mute-btn').forEach(btn => btn.addEventListener('click', e => {
@@ -1734,6 +1794,7 @@ async function renderRealsFeed(app, initialId = null) {
     const previousId = items[idx]?.dataset.id;
     if (previousId && i !== idx && !items[idx]?.dataset.adId) watchedIds.add(Number(previousId));
     const previousIdx = idx;
+    if (previousIdx !== i) clearReplayCountdown(items[previousIdx]);
     idx = i;
     activeRealsAudio?.pause();
     activeRealsAudio = null;
@@ -2413,7 +2474,7 @@ $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classL
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
 $('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
 $('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
-$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else { navigate('/giris'); } });
+$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showNewVideoModal(null, true); else navigate('/giris'); });
 $('#logout-btn')?.addEventListener('click', () => {
   showModal('Çıkış yap', '<div class="logout-confirm"><span class="logout-confirm-icon"><i class="fas fa-arrow-right-from-bracket"></i></span><p>Hesabından çıkış yapmak istediğine emin misin?</p><div class="logout-confirm-actions"><button type="button" class="btn btn-danger" id="logout-confirm-btn"><i class="fas fa-arrow-right-from-bracket"></i> Çıkış yap</button><button type="button" class="btn btn-outline" id="logout-cancel-btn">Vazgeç</button></div></div>');
   $('#logout-cancel-btn')?.addEventListener('click', hideModal);
@@ -2543,7 +2604,7 @@ document.addEventListener('click', e => {
   if (mobNewPhoto) { if (currentUser) showPhotoUploadModal(); }
   if (mobNewStory) { if (currentUser) showStoryUploadModal(); }
   if (mobNewVideo) { if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
-  if (mobNewReals) { if (currentUser) { navigate('/reals'); setTimeout(() => showNewVideoModal(null, true), 180); } else navigate('/giris'); }
+  if (mobNewReals) { if (currentUser) showNewVideoModal(null, true); else navigate('/giris'); }
   if (mobNewMusic) { if (currentUser) navigate('/sarki-yukle'); }
   if (mobNewNewspaper) {
     if (!currentUser) navigate('/giris');
@@ -7294,16 +7355,43 @@ function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyo
   if (state === 'done') setTimeout(() => notice.remove(), 5000);
 }
 
+function pauseRealsForComposer() {
+  if (!location.pathname.startsWith('/reals')) return;
+  const item = document.querySelector('.reals-item.is-active');
+  const video = item?.querySelector('video');
+  if (!video) return;
+  const wasReplaying = !!item.querySelector('.reals-replay-countdown:not([hidden])');
+  const wasPlaying = !video.paused;
+  item.dispatchEvent(new Event('reals-cancel-replay'));
+  const song = activeRealsAudio && !activeRealsAudio.paused
+    ? { src: activeRealsAudio.currentSrc || activeRealsAudio.src, time: activeRealsAudio.currentTime }
+    : null;
+  video.pause();
+  activeRealsAudio?.pause();
+  window.__realsResumeVideo = () => {
+    if ((!wasPlaying && !wasReplaying) || !video.isConnected || !item.classList.contains('is-active')
+      || !location.pathname.startsWith('/reals')) return;
+    if (wasReplaying) video.currentTime = 0;
+    video.play().catch(() => {});
+    if (song?.src) {
+      activeRealsAudio = trackMediaAudio(new Audio(song.src));
+      activeRealsAudio.currentTime = song.time || 0;
+      activeRealsAudio.loop = true;
+      activeRealsAudio.play().catch(() => {});
+    }
+  };
+}
+
 async function showNewVideoModal(existing = null, forceReals = false) {
+  pauseRealsForComposer();
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
-  try { videoSettings = await api('/video-settings'); } catch {}
-  const defaultDescription = existing?.description || videoSettings.defaultDescription || '';
+  const defaultDescription = existing?.description || '';
   showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals oluştur' : 'Video oluştur'), `
     <div class="social-compose social-compose-video${forceReals || existing?.is_reals ? ' social-compose-reals' : ''}">
       <section class="social-compose-preview-pane">
         <div class="social-compose-preview-frame social-compose-video-frame">
-          <video id="video-upload-preview" controls muted playsinline></video>
-          ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(existing.video_url)}" controls muted playsinline></video>` : ''}
+          <video id="video-upload-preview" controls muted playsinline preload="metadata"></video>
+          ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(existing.video_url)}" controls muted playsinline preload="metadata"></video>` : ''}
           <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
           <label class="social-compose-pick"><i class="fas fa-plus"></i> Video seç<input type="file" id="video-file" accept="video/*" /></label>
         </div>
@@ -7332,6 +7420,12 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     </div>
   `, 'social-compose-modal');
 
+  const descriptionField = $('#video-description');
+  api('/video-settings').then(settings => {
+    videoSettings = settings;
+    if (!existing && descriptionField?.isConnected && !descriptionField.value.trim()) descriptionField.value = settings.defaultDescription || '';
+  }).catch(error => console.warn('Video ayarları yüklenemedi:', error.message || error));
+
   const videoInput = $('#video-file');
   const bannerInput = $('#video-banner-file');
   const videoFrame = $('.social-compose-video-frame');
@@ -7344,6 +7438,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const videoSongStart = $('#video-song-start');
   const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
+  let autoBannerPromise = null;
   const getVideoDuration = file => new Promise((resolve, reject) => { const probe = document.createElement('video'); probe.preload = 'metadata'; probe.onloadedmetadata = () => { URL.revokeObjectURL(probe.src); resolve(probe.duration); }; probe.onerror = () => reject(new Error('Video süresi okunamadı')); probe.src = URL.createObjectURL(file); });
   const syncVideoComposer = () => {
     const isReals = forceReals || $('#video-is-reals')?.checked;
@@ -7388,19 +7483,30 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     if (!file) return;
     const uploadPreview = $('#video-upload-preview');
     if (uploadPreview) {
-      uploadPreview.src = URL.createObjectURL(file);
+      if (activeVideoPreviewObjectUrl) URL.revokeObjectURL(activeVideoPreviewObjectUrl);
+      activeVideoPreviewObjectUrl = URL.createObjectURL(file);
+      uploadPreview.src = activeVideoPreviewObjectUrl;
       uploadPreview.style.display = 'block';
       $('#video-preview-empty')?.classList.add('hidden');
       document.querySelector('.social-compose-existing-preview')?.remove();
       uploadPreview.addEventListener('loadedmetadata', () => syncVideoDuration(uploadPreview), { once: true });
     }
     if (bannerInput?.files?.length) return;
-    try {
-      const generated = await generateVideoPoster(file);
-      autoBannerFile = generated;
-    } catch {
-      autoBannerFile = null;
-    }
+    autoBannerFile = null;
+    autoBannerPromise = new Promise(resolve => {
+      window.setTimeout(async () => {
+        if (!videoInput.files[0] || videoInput.files[0] !== file || bannerInput?.files?.length) return resolve(null);
+        try {
+          const poster = await generateVideoPoster(file);
+          if (videoInput.files[0] !== file || bannerInput?.files?.length) return resolve(null);
+          autoBannerFile = poster;
+          resolve(autoBannerFile);
+        } catch (error) {
+          console.warn('Video kapağı otomatik oluşturulamadı:', error.message || error);
+          resolve(null);
+        }
+      }, 0);
+    });
   });
   bannerInput?.addEventListener('change', () => {
     const file = bannerInput.files[0];
@@ -7494,7 +7600,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
     const maxVideoSize = isReals ? 500 * 1024 * 1024 : 100 * 1024 * 1024;
     if (!existing && videoFile.size > maxVideoSize) { $('#video-error').textContent = `${isReals ? 'Reals' : 'Video'} dosyası ${isReals ? 500 : 100} MB sınırını geçemez.`; return; }
-    if (!existing && isReals) { try { const duration = await getVideoDuration(videoFile); if (!Number.isFinite(duration) || duration > 180) { $('#video-error').textContent = 'Reals videoları en fazla 3 dakika olabilir. Uzun videoyu Video olarak yükleyin.'; return; } } catch { $('#video-error').textContent = 'Reals video süresi okunamadı.'; return; } }
+    if (!existing && isReals) { try { const duration = videoDurationSeconds > 0 ? videoDurationSeconds : await getVideoDuration(videoFile); if (!Number.isFinite(duration) || duration > 180) { $('#video-error').textContent = 'Reals videoları en fazla 3 dakika olabilir. Uzun videoyu Video olarak yükleyin.'; return; } } catch { $('#video-error').textContent = 'Reals video süresi okunamadı.'; return; } }
 
     const submitBtn = $('#video-submit');
     const uploadFields = {
@@ -7506,7 +7612,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
     const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
     updateVideoUploadNotice('uploading', 0, isReals ? 'Reals yükleniyor' : 'Video yükleniyor');
-    hideModal();
+    hideModal({ resumeReals: false });
 
     try {
       let videoUrl = existing?.video_url || '';
@@ -7549,10 +7655,13 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         const fd = new FormData(); fd.append('file', bannerFile);
         const bannerResult = await apiForm('/upload', fd);
         bannerImage = bannerResult.url;
-      } else if (autoBannerFile) {
-        const fd = new FormData(); fd.append('file', autoBannerFile);
-        const bannerResult = await apiForm('/upload', fd);
-        bannerImage = bannerResult.url;
+      } else {
+        if (autoBannerPromise) await autoBannerPromise;
+        if (autoBannerFile) {
+          const fd = new FormData(); fd.append('file', autoBannerFile);
+          const bannerResult = await apiForm('/upload', fd);
+          bannerImage = bannerResult.url;
+        }
       }
       const payload = {
         title: uploadFields.title,
@@ -7577,6 +7686,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         const successMs = Math.max(1000, parseInt(videoSettings.uploadSuccessDuration || 3) * 1000);
         toast(videoSettings.uploadSuccessText || 'YÜKLENDİ', 'success', successMs);
         updateVideoUploadNotice('done', 100, isReals ? 'Reals hazır' : 'Video hazır');
+        window.__realsResumeVideo = null;
         navigate(isReals ? '/reals' : '/videolar');
         return;
       }
@@ -7585,6 +7695,8 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     } catch (e) {
       updateVideoUploadNotice('error', 100, e.message || 'Yükleme başarısız');
       toast(e.message || 'Yükleme başarısız', 'error');
+      window.__realsResumeVideo?.();
+      window.__realsResumeVideo = null;
     } finally {
       submitBtn.disabled = false; submitBtn.innerHTML = existing ? 'Güncelle' : 'Yükle';
     }
