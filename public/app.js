@@ -15833,20 +15833,40 @@ function bindPhotoFeed(feed) {
         </div>`;
       }).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
     };
-    try {
-      comments = await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments');
-      if (!document.body.contains(sheet)) return;
-      renderComments(comments);
+    const updateCommentCount = count => {
       const commentButton = card.querySelector('.photo-comment');
       if (commentButton) {
-        commentButton.dataset.commentCount = String(comments.length);
-        const count = commentButton.querySelector('span');
-        if (count) count.textContent = formatCount(comments.length);
+        commentButton.dataset.commentCount = String(count);
+        const label = commentButton.querySelector('span');
+        if (label) label.textContent = formatCount(count);
       }
-    } catch (error) {
-      list.innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message || 'Yorumlar yüklenemedi')}</p></div>`;
-    }
+    };
+    const loadComments = async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      list.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+      try {
+        const loaded = await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments', { signal: controller.signal });
+        if (!document.body.contains(sheet)) return;
+        const merged = new Map(loaded.map(comment => [String(comment.id), comment]));
+        comments.forEach(comment => merged.set(String(comment.id), { ...merged.get(String(comment.id)), ...comment }));
+        comments = [...merged.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        renderComments(comments);
+        updateCommentCount(comments.length);
+      } catch (error) {
+        if (!document.body.contains(sheet)) return;
+        const message = error.name === 'AbortError' ? 'Yorumlar yüklenirken zaman aşımı oldu.' : (error.message || 'Yorumlar yüklenemedi.');
+        list.innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(message)}</p><button type="button" class="btn btn-outline btn-sm photo-comments-retry">Tekrar dene</button></div>`;
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
     list.addEventListener('click', async event => {
+      const retryButton = event.target.closest('.photo-comments-retry');
+      if (retryButton) {
+        await loadComments();
+        return;
+      }
       const likeButton = event.target.closest('.photo-sheet-comment-like');
       if (likeButton) {
         if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
@@ -15871,38 +15891,39 @@ function bindPhotoFeed(feed) {
           await api('/photos/comments/' + deleteButton.dataset.id, { method: 'DELETE' });
           comments = comments.filter(comment => String(comment.id) !== deleteButton.dataset.id);
           renderComments(comments);
-          const commentButton = card.querySelector('.photo-comment');
-          if (commentButton) {
-            commentButton.dataset.commentCount = String(comments.length);
-            const count = commentButton.querySelector('span');
-            if (count) count.textContent = formatCount(comments.length);
-          }
+          updateCommentCount(comments.length);
         } catch (error) { toast(error.message || 'Yorum silinemedi', 'error'); }
       }
     });
     sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
       event.preventDefault();
+      event.stopPropagation();
       const input = event.currentTarget.querySelector('input');
       const content = input.value.trim();
       if (!content) return;
       const button = event.currentTarget.querySelector('button');
       if (button.disabled) return;
       button.disabled = true;
+      input.disabled = true;
       try {
-        await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
-        comments = await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments');
+        const posted = await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        if (!document.body.contains(sheet)) return;
+        if (posted?.id && !comments.some(comment => String(comment.id) === String(posted.id))) {
+          comments.push(posted);
+          comments.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        }
         renderComments(comments);
         input.value = '';
         list.scrollTop = list.scrollHeight;
-        const commentButton = card.querySelector('.photo-comment');
-        if (commentButton) {
-          commentButton.dataset.commentCount = String(comments.length);
-          const count = commentButton.querySelector('span');
-          if (count) count.textContent = formatCount(comments.length);
-        }
+        updateCommentCount(comments.length);
       } catch (error) { toast(error.message || 'Yorum gönderilemedi', 'error'); }
-      finally { button.disabled = false; }
+      finally {
+        button.disabled = false;
+        input.disabled = false;
+        if (document.body.contains(sheet)) input.focus();
+      }
     });
+    await loadComments();
   };
 
   feed.querySelectorAll('.photo-ad-card').forEach(x => x.onclick = () => {

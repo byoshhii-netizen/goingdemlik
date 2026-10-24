@@ -1000,10 +1000,12 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .reals-comment-form { display:flex; gap:8px; padding:12px 14px max(12px,env(safe-area-inset-bottom)); border-top:1px solid var(--border); background:#111; }
 .reals-comment-form input { min-width:0; min-height:42px; border-radius:21px; padding:10px 15px; }
 .reals-comment-form button { flex:0 0 42px; width:42px; height:42px; border:1px solid var(--accent-red2) !important; border-radius:50%; background:var(--accent-red) !important; color:#171717 !important; cursor:pointer; box-shadow:0 2px 10px rgba(var(--accent-rgb),.28); }
+.reals-comment-form button:disabled { opacity:.6; cursor:wait; }
 .reals-comment-login, .reals-comments-empty { padding:28px 16px; text-align:center; color:var(--text-muted); }
 .reals-comments-empty i { display:block; margin-bottom:8px; font-size:28px; color:var(--text-secondary); }
 .reals-comments-empty p { margin:0 0 4px; color:var(--text-primary); }
 .reals-comments-empty span { font-size:12px; }
+.photo-comments-sheet .photo-comments-retry { margin-top:12px; }
 @keyframes realsCommentsFade { from { opacity:0; } to { opacity:1; } }
 @keyframes realsCommentsUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
 @media (max-width:560px) { .reals-comments-panel { max-height:82vh; border-radius:18px 18px 0 0; } .reals-comments-list { padding:12px; } }
