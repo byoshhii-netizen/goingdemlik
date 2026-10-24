@@ -3459,6 +3459,15 @@ async function renderSettings(main) {
           <div id="s-badge-system-msg" class="form-error mt-4"></div>
         </div>
       </div>
+      <div class="card adm-feature-card">
+        <div class="card-header"><span><i class="fas fa-flask" style="color:var(--red2);margin-right:8px"></i>Beta Sürümü</span><span class="adm-setting-status ${settings['beta_mode_enabled'] !== '0' ? 'is-on' : ''}">${settings['beta_mode_enabled'] !== '0' ? 'AÇIK' : 'KAPALI'}</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy"><strong>Markalarda Beta etiketini göster</strong><p>Açıkken CigCig markasının yanında giriş, kayıt ve üst menüde “*Beta” etiketi görünür. Kapalıyken bu etiket kaldırılır.</p></div>
+          <label class="adm-toggle-row" for="s-beta-mode"><span><i class="fas fa-flask"></i> Beta sürümü</span><span class="adm-toggle"><input type="checkbox" id="s-beta-mode" ${settings['beta_mode_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
+          <button class="btn btn-primary" id="s-beta-mode-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
+          <div id="s-beta-mode-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Genel</span></div>
         <div class="card-body">
@@ -3868,6 +3877,17 @@ async function renderSettings(main) {
       status.classList.toggle('is-on', checkbox.checked);
     }
     msg.style.color = 'var(--green)'; msg.textContent = '✓ Rozet sistemi ayarı kaydedildi.';
+  });
+  document.getElementById('s-beta-mode-save')?.addEventListener('click', async () => {
+    const checkbox = document.getElementById('s-beta-mode');
+    const msg = document.getElementById('s-beta-mode-msg');
+    if (!await saveSetting('beta_mode_enabled', checkbox.checked ? '1' : '0', msg)) return;
+    const status = checkbox.closest('.card')?.querySelector('.adm-setting-status');
+    if (status) {
+      status.textContent = checkbox.checked ? 'AÇIK' : 'KAPALI';
+      status.classList.toggle('is-on', checkbox.checked);
+    }
+    msg.style.color = 'var(--green)'; msg.textContent = '✓ Beta sürümü ayarı kaydedildi.';
   });
   document.getElementById('s-call-ringtone-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-call-ringtone-msg');

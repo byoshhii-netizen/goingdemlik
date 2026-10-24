@@ -9965,7 +9965,7 @@ function renderLogin(app) {
   app.innerHTML = `<div class="auth-page auth-page--login">
     <div class="auth-card auth-card--enhanced card card-body">
       <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
-      <div class="auth-site-wordmark">CigCig</div>
+      <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
       <div class="auth-title">Tekrar hoş geldin</div>
       <p class="auth-subtitle">Hesabına giriş yap ve kaldığın yerden devam et.</p>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="login-id" placeholder="@kullanıcı_adı" autocomplete="username" /></div>
@@ -10095,7 +10095,7 @@ function renderRegister(app) {
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
       <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
-      <div class="auth-site-wordmark">CigCig</div>
+      <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
       ${inviteCode ? `<div class="register-invite-notice"><i class="fas fa-ticket"></i><span>Davet kodu <strong>${escHtml(inviteCode)}</strong> ile kayıt oluyorsun.</span></div>` : ''}
@@ -10299,7 +10299,7 @@ function renderForgotPassword(app) {
     app.innerHTML = `<div class="auth-page">
       <div class="auth-card auth-card--enhanced card card-body">
         <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
-        <div class="auth-site-wordmark">CigCig</div>
+        <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
         <div class="auth-title">Şifremi Unuttum</div>
         <p class="auth-subtitle">Hesabındaki e-posta adresini yaz, sana doğrulama kodunu gönderelim.</p>
         <div class="form-group">
@@ -10562,6 +10562,7 @@ async function init() {
     if (!response.ok) throw new Error(`Genel ayarlar yüklenemedi (${response.status}).`);
     const ps = await response.json();
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
+    document.body.classList.toggle('beta-mode-enabled', ps.beta_mode_enabled !== '0');
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     loginRequiredEnabled = ps.first_visit_auth === '1';
     const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
@@ -10587,7 +10588,7 @@ async function init() {
       Merriweather: "'Merriweather', Georgia, serif"
     };
     document.documentElement.style.setProperty('--book-reader-font', bookFontFamilies[ps.book_reader_font] || bookFontFamilies.Georgia);
-    const brandSpan = document.querySelector('.nav-brand span');
+    const brandSpan = document.querySelector('.nav-brand .site-wordmark');
     if (brandSpan) brandSpan.textContent = siteName;
     const footer = document.getElementById('site-footer');
     if (footer) {

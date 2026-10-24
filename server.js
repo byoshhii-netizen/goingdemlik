@@ -6947,7 +6947,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (['level_system_enabled', 'badge_system_enabled'].includes(key)) {
+  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled'].includes(key)) {
     if (!['0', '1', 0, 1, true, false].includes(value)) {
       return res.status(400).json({ error: 'Özellik durumu 0 veya 1 olmalı' });
     }
@@ -7038,7 +7038,7 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds', 'beta_mode_enabled'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -7959,7 +7959,7 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
-    'photo_song_clip_seconds','level_system_enabled','badge_system_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
+    'photo_song_clip_seconds','level_system_enabled','badge_system_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);

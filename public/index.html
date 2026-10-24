@@ -289,9 +289,10 @@
       if(favicon) favicon.href = '/icons/cigcig-192.png?v=20261020-seo';
       // Site adı güncelle
       if(d.site_name && d.site_name.toLowerCase() !== 'demlik') {
-        const navSpan = document.querySelector('.nav-brand span');
+        const navSpan = document.querySelector('.nav-brand .site-wordmark');
         if(navSpan) navSpan.textContent = d.site_name;
       }
+      document.body.classList.toggle('beta-mode-enabled', d.beta_mode_enabled !== '0');
     })
     .catch(()=>{});
 })();
