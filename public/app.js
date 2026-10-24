@@ -1772,7 +1772,7 @@ async function renderRealsFeed(app, initialId = null) {
         return `
       <div class="reals-item reals-ad-item" data-id="ad-${r.id}" data-ad-id="${r.id}" data-video-url="${escHtml(r.video_url)}">
         <div class="reals-video-box reals-ad-box">
-        <video class="reals-video reals-ad-video" preload="none" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
+        <video class="reals-video reals-ad-video" preload="metadata" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1790,7 +1790,7 @@ async function renderRealsFeed(app, initialId = null) {
       return `
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
         <div class="reals-video-box">
-        <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
+        <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
         <div class="reals-replay-countdown" hidden aria-live="assertive" aria-label="Video yeniden başlıyor"><div class="reals-replay-orbit"><span class="reals-replay-number">2</span></div><strong>Yeniden başlıyor</strong></div>
@@ -2000,6 +2000,8 @@ async function renderRealsFeed(app, initialId = null) {
       it.classList.toggle('is-active', j === idx);
       const vid = it.querySelector('video');
       const videoUrl = it.dataset.videoUrl;
+      vid.preload = j === idx ? 'auto' : 'metadata';
+      vid.playsInline = true;
       setRealsVideoSource(vid, videoUrl);
       loadedRealsIndices.add(j);
       ensureRealsFollowState(it);
@@ -2030,7 +2032,7 @@ async function renderRealsFeed(app, initialId = null) {
           ? api('/reals-ads/' + it.dataset.adId + '/view', { method: 'POST' })
           : api('/video/' + it.dataset.id + '/view', { method: 'POST' });
         viewPromise.catch(() => {});
-        vid.play().catch(error => {
+        vid.play().catch(async error => {
           if (idx !== j || !it.isConnected) return;
           if (!vid.muted) {
             vid.muted = true;
@@ -2038,7 +2040,11 @@ async function renderRealsFeed(app, initialId = null) {
             localStorage.setItem('cigcig_reals_muted', '1');
             syncRealsSongAudio(null);
             syncRealsMuteButtons();
-            vid.play().catch(playError => console.error('Reals videosu başlatılamadı:', playError.message));
+            try {
+              await vid.play();
+            } catch (playError) {
+              console.error('Reals videosu başlatılamadı:', playError.message);
+            }
           } else {
             console.error('Reals videosu başlatılamadı:', error.message);
           }
@@ -16848,9 +16854,18 @@ async function renderStoryRoute(app, storyId) {
     const storyIndex = Math.max(0, storySequence.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id));
     const previousStory = storySequence[storyIndex - 1];
     const nextStory = storySequence[storyIndex + 1];
-    [previousStory, nextStory].filter(item => item?.media_type === 'image' && item.media_url).forEach(item => {
-      const image = new Image();
-      image.src = item.media_url;
+    [previousStory, nextStory].filter(item => item?.media_url).forEach(item => {
+      if (item.media_type === 'image') {
+        const image = new Image();
+        image.src = item.media_url;
+        return;
+      }
+      if (item.media_type === 'video') {
+        const video = document.createElement('video');
+        video.preload = 'auto';
+        video.src = item.media_url;
+        video.load();
+      }
     });
     const currentGroup = storyGroups.find(group => group.user_id === story.user_id);
     const currentGroupIndex = currentGroup ? currentGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id) : -1;
@@ -16877,7 +16892,7 @@ async function renderStoryRoute(app, storyId) {
             <a class="story-route-icon" href="/fotograflar" data-link aria-label="Hikayelerden çık" title="Kapat"><i class="fas fa-times"></i></a>
           </header>
           <div class="story-route-media">
-            ${story.media_type === 'video' ? `<video id="story-route-video" class="story-route-asset" src="${escHtml(story.media_url)}" autoplay playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle story-route-video-toggle" id="story-route-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
+            ${story.media_type === 'video' ? `<video id="story-route-video" class="story-route-asset" src="${escHtml(story.media_url)}" autoplay preload="auto" playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle story-route-video-toggle" id="story-route-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
             <button class="story-route-tap story-route-tap-left" id="story-route-tap-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>
             <button class="story-route-tap story-route-tap-right" id="story-route-tap-next" aria-label="Sonraki hikaye"></button>
             <div class="story-route-overlay-copy">

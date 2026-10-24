@@ -1396,8 +1396,23 @@ app.use(async (req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 24 * 60 * 60 * 1000,
   redirect: false,
-  index: false
+  index: false,
+  setHeaders(res, filePath) {
+    if (/\.(?:html|js|css)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+      res.setHeader('CDN-Cache-Control', 'no-store');
+      res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+    }
+  }
 }));
+
+function sendUncachedAppHtml(res, status = 200) {
+  res.status(status);
+  res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+  return res.sendFile(path.join(__dirname, 'public', 'index.html'), { cacheControl: false });
+}
 
 app.get('/api/admin/me', adminMiddleware, (req, res) => {
   res.json({ username: req.adminUser.username, is_super_admin: req.adminUser.isSuperAdmin, permissions: req.adminUser.permissions || null });
@@ -1567,7 +1582,7 @@ app.put('/api/admin/user/:id/badge', adminMiddleware, async (req, res) => {
 
 // VMB tanıtım sayfası herkese açık; özel dosya yolları üyelik gerektirir.
 app.get('/vmb', (req, res) => {
-  return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  return sendUncachedAppHtml(res);
 });
 
 // Özel dosya yolları doğrudan URL ile açıldığında da üyelik kontrolü yapılır.
@@ -1580,7 +1595,7 @@ app.get(/^\/vmb\/(?:dosyalar|dosyalara)(?:\/.*)?$/, async (req, res) => {
       [token]
     );
     if (!hasVmbBadge(rows[0])) return res.redirect('/');
-    return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    return sendUncachedAppHtml(res);
   } catch {
     return res.redirect('/');
   }
@@ -7641,7 +7656,7 @@ app.get('/muzik/:slug', async (req, res) => {
     FROM songs s LEFT JOIN users u ON u.id=s.uploader_id
     WHERE s.slug=$1 AND s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id)`, [req.params.slug]);
-  if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res);
   const s = rows[0];
   const musicKw = `${s.title}, ${s.artist_name}, müzik, CigCig müzik, topluluk platformu, türkçe müzik`;
   const musicLd = safeJsonLd({
@@ -8109,7 +8124,7 @@ function adminIPCheck(req, res, next) {
   if (allowed.length === 0) return next(); // env set edilmemişse geliştirme modunda aç
   const clientIP = (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || '').split(',')[0].trim();
   if (allowed.includes(clientIP)) return next();
-  return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  return sendUncachedAppHtml(res, 404);
 }
 
 app.get('/panel-giris', (req, res) => res.status(404).end());
@@ -8213,12 +8228,12 @@ app.get('/reals', async (req, res) => {
 
 app.get('/reals/:id', async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!Number.isSafeInteger(id) || id < 1) return sendUncachedAppHtml(res, 404);
   const { rows } = await query(`SELECT v.id, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, u.username
     FROM videos v JOIN users u ON u.id=v.user_id
     WHERE v.id=$1 AND v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)`, [id]);
-  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res, 404);
   const real = rows[0];
   const title = real.title || 'CigCig Reals videosu';
   const description = String(real.description || `${title} — CigCig Reals kısa videosu.`).replace(/\s+/g, ' ').slice(0, 160);
@@ -8243,7 +8258,7 @@ app.get('/video/:slug', async (req, res) => {
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='video' AND cs.content_id=v.id)
     LIMIT 1`, [req.params.slug]);
-  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res, 404);
   const video = rows[0];
   const title = video.title || 'CigCig videosu';
   const description = String(video.description || `${title} — CigCig video platformında.`).replace(/\s+/g, ' ').slice(0, 160);
@@ -8289,7 +8304,7 @@ app.get('/siir/:slug', async (req, res) => {
     WHERE p.slug=$1 AND COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)`, [req.params.slug]);
-  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res, 404);
   const poem = rows[0];
   const description = String(poem.content || poem.title).replace(/\s+/g, ' ').slice(0, 160);
   const url = `${SITE_URL}/siir/${poem.slug}`;
@@ -8327,13 +8342,13 @@ app.get('/gazeteler', async (req, res) => {
 
 app.get('/gazete/:id', async (req, res) => {
   const id = Number(req.params.id);
-  if (!Number.isSafeInteger(id) || id < 1) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!Number.isSafeInteger(id) || id < 1) return sendUncachedAppHtml(res, 404);
   const { rows } = await query(`SELECT n.id, n.newspaper_name, n.newspaper_date, n.image_url, n.created_at, u.username
     FROM newspapers n JOIN users u ON u.id=n.journalist_id
     WHERE n.id=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)`, [id]);
-  if (!rows.length) return res.status(404).sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res, 404);
   const newspaper = rows[0];
   const title = `${newspaper.newspaper_name} – CigCig Basın Arşivi`;
   const description = `${newspaper.newspaper_name} gazetesinin ${newspaper.newspaper_date ? new Date(newspaper.newspaper_date).toLocaleDateString('tr-TR') : ''} tarihli sayısı.`;
@@ -8443,7 +8458,7 @@ app.get('/forum/:slug', async (req, res) => {
     FROM forums f LEFT JOIN users u ON u.id=f.user_id
     WHERE f.slug=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
-  if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res);
   const forum = rows[0];
   const { rows: forumComments } = await query(`SELECT fc.id, fc.content, fc.created_at, u.username
     FROM forum_comments fc LEFT JOIN users u ON u.id=fc.user_id
@@ -8498,7 +8513,7 @@ app.get('/kitap/:slug', async (req, res) => {
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.slug]);
-  if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res);
   const book = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const desc = escapeHtml((book.preface || book.title + ' – CigCig Kitap').substring(0, 160));
@@ -8545,7 +8560,7 @@ app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
     AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
     AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.pageSlug, req.params.slug]);
-  if (!pages.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!pages.length) return sendUncachedAppHtml(res);
   const page = pages[0];
   const pageUrl = `${SITE_URL}/kitap/${page.book_slug}/sayfa/${page.slug}`;
   const body = serverPageBody('CİGCİG KİTAP', `${page.book_title} · ${page.title}`, page.author ? `Yazar: ${page.author}` : '', `<article class="seo-article seo-page-article">
@@ -8589,7 +8604,7 @@ app.get('/foto/:id', async (req, res) => {
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
     WHERE p.id=$1 AND COALESCE(u.is_private,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`, [req.params.id]);
-  if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res);
   const photo = rows[0];
   const { rows: photoComments } = await query(`SELECT pc.content, pc.created_at, u.username
     FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id
@@ -8613,7 +8628,7 @@ app.get('/foto/:id', async (req, res) => {
 
 app.get('/grup/:slug', async (req, res) => {
   const { rows } = await query("SELECT * FROM groups WHERE slug=$1 AND COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active'", [req.params.slug]);
-  if (!rows.length) return res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  if (!rows.length) return sendUncachedAppHtml(res);
   const group = rows[0];
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const desc = escapeHtml((group.description || group.name + ' – CigCig topluluğu grubu.').substring(0, 160));
@@ -8636,7 +8651,7 @@ app.get('/grup/:slug', async (req, res) => {
   res.send(injectCrawlableBody(r3!==html?r3:html.replace(/<title>[^<]*<\/title>/,meta), groupBody));
 });
 
-app.get('/profil/:username', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/profil/:username', (req, res) => sendUncachedAppHtml(res));
 
 // ===== KULLANICI ARAMA =====
 app.get('/api/search/users', async (req, res) => {
@@ -11333,7 +11348,7 @@ app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Not found' });
   }
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  sendUncachedAppHtml(res);
 });
 
 initDb().then(() => {
