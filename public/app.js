@@ -14919,7 +14919,7 @@ function showStoryUploadModal() {
       <div class="social-compose-preview-frame social-compose-story-frame">
         <div id="story-media-preview" class="story-media-preview" hidden></div>
         <div class="social-compose-preview-empty" id="story-preview-empty"><i class="fas fa-circle-plus"></i><strong>Hikayeni oluştur</strong><span>Fotoğrafını veya videonu buraya ekle</span></div>
-        <label class="social-compose-pick"><i class="fas fa-plus"></i> 1-3 fotoğraf veya bir video seç<input id="story-media" type="file" accept="image/*,video/*" multiple /></label>
+        <label class="social-compose-pick"><i class="fas fa-plus"></i><span id="story-media-pick-label">1-3 fotoğraf veya bir video seç</span><input id="story-media" type="file" accept="image/*,video/*" multiple /></label>
       </div>
       <div class="social-compose-upload-hint"><i class="fas fa-clock"></i><span>Hikayen seçtiğin süre boyunca yayında kalır.</span></div>
     </section>
@@ -14939,20 +14939,36 @@ function showStoryUploadModal() {
   let songs = [], selectedSong = null, selectedStoryFiles = pendingStoryFiles, selectedStoryFilters = pendingStoryFilters;
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   let storyPreviewUrls = [];
-  const renderMediaPreview = files => {
+  let activeStoryPreviewIndex = 0;
+  const renderStoryPreviewLayers = () => `<div class="story-compose-preview-top"><div class="story-compose-preview-progress">${selectedStoryFiles.map((_, index) => `<span class="${index <= activeStoryPreviewIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-compose-preview-user">${avatarImg(currentUser, 'story-compose-preview-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><small>Şimdi</small></div></div><div class="story-compose-preview-bottom">${$('#story-caption').value.trim() ? `<p>${escHtml($('#story-caption').value.trim())}</p>` : ''}${selectedSong ? `<div class="story-compose-preview-song">${selectedSong.cover_url ? `<img src="${escHtml(selectedSong.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<span><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></span></div>` : ''}</div>`;
+  const updateStoryPreviewLayers = () => {
+    preview.querySelectorAll('.story-media-preview-item,.story-media-lightbox-content').forEach(item => {
+      item.querySelectorAll('.story-compose-preview-top,.story-compose-preview-bottom').forEach(layer => layer.remove());
+      item.insertAdjacentHTML('beforeend', renderStoryPreviewLayers());
+    });
+  };
+  const renderMediaPreview = (files, requestedIndex = activeStoryPreviewIndex) => {
     storyPreviewUrls.forEach(URL.revokeObjectURL);
     storyPreviewUrls = [];
-    if (!files.length) return;
+    if (!files.length) {
+      preview.hidden = true;
+      preview.parentElement.classList.remove('has-media');
+      $('#story-media-pick-label').textContent = '1-3 fotoğraf veya bir video seç';
+      $('#story-preview-empty')?.classList.remove('hidden');
+      return;
+    }
+    activeStoryPreviewIndex = Math.min(Math.max(requestedIndex, 0), files.length - 1);
     preview.hidden = false;
+    preview.parentElement.classList.add('has-media');
+    $('#story-media-pick-label').textContent = 'Medyayı değiştir';
     $('#story-preview-empty')?.classList.add('hidden');
-    const previews = files.map((file, index) => {
-      const url = URL.createObjectURL(file);
-      storyPreviewUrls.push(url);
-      return file.type.startsWith('video/')
-        ? `<div class="story-media-preview-item"><video src="${url}" controls playsinline style="filter:${mediaFilterCss($('#story-media-filter').value)}"></video></div>`
-        : `<div class="story-media-preview-item"><img src="${url}" alt="Seçilen hikaye fotoğrafı" draggable="false" style="filter:${mediaFilterCss(selectedStoryFilters[index] || 'none')}" /><div class="story-media-preview-actions"><button type="button" data-story-view="${index}" aria-label="Fotoğrafı büyük görüntüle"><i class="fas fa-eye"></i><span>Görüntüle</span></button><button type="button" data-story-edit="${index}" aria-label="Fotoğrafı düzenle"><i class="fas fa-crop-simple"></i><span>Düzenle</span></button></div></div>`;
-    }).join('');
-    preview.innerHTML = files.length > 1 ? `<div class="story-media-preview-grid">${previews}</div>` : previews;
+    const file = files[activeStoryPreviewIndex];
+    const url = URL.createObjectURL(file);
+    storyPreviewUrls.push(url);
+    const media = file.type.startsWith('video/')
+      ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss(selectedStoryFilters[activeStoryPreviewIndex] || 'none')}"></video>`
+      : `<img src="${url}" alt="Hikaye önizlemesi" draggable="false" style="filter:${mediaFilterCss(selectedStoryFilters[activeStoryPreviewIndex] || 'none')}" />`;
+    preview.innerHTML = `<div class="story-media-preview-item">${media}${renderStoryPreviewLayers()}<div class="story-media-preview-actions"><button type="button" data-story-view="${activeStoryPreviewIndex}" aria-label="Hikayeyi büyük görüntüle"><i class="fas fa-expand"></i><span>Tam ekran</span></button>${file.type.startsWith('image/') ? `<button type="button" data-story-edit="${activeStoryPreviewIndex}" aria-label="Fotoğrafı düzenle"><i class="fas fa-crop-simple"></i><span>Düzenle</span></button>` : ''}</div>${files.length > 1 ? `<button type="button" class="story-preview-nav story-preview-prev" data-story-step="-1" ${activeStoryPreviewIndex === 0 ? 'disabled' : ''} aria-label="Önceki medya"><i class="fas fa-chevron-left"></i></button><span class="story-preview-count">${activeStoryPreviewIndex + 1} / ${files.length}</span><button type="button" class="story-preview-nav story-preview-next" data-story-step="1" ${activeStoryPreviewIndex === files.length - 1 ? 'disabled' : ''} aria-label="Sonraki medya"><i class="fas fa-chevron-right"></i></button>` : ''}</div>`;
   };
   const storyDraft = () => ({
     caption: $('#story-caption').value,
@@ -14972,6 +14988,11 @@ function showStoryUploadModal() {
     const viewButton = event.target.closest('[data-story-view]');
     const editButton = event.target.closest('[data-story-edit]');
     const index = Number((viewButton || editButton)?.dataset.storyView ?? editButton?.dataset.storyEdit);
+    const stepButton = event.target.closest('[data-story-step]');
+    if (stepButton) {
+      renderMediaPreview(selectedStoryFiles, activeStoryPreviewIndex + Number(stepButton.dataset.storyStep));
+      return;
+    }
     if (!Number.isInteger(index) || index < 0 || index >= selectedStoryFiles.length) return;
     if (viewButton) {
       const file = selectedStoryFiles[index];
@@ -14983,7 +15004,10 @@ function showStoryUploadModal() {
       storyPreviewUrls.push(url);
       const viewer = document.createElement('div');
       viewer.className = 'story-media-lightbox';
-      viewer.innerHTML = `<button type="button" class="story-media-lightbox-close" aria-label="Önizlemeyi kapat"><i class="fas fa-xmark"></i></button><img src="${url}" alt="Hikaye fotoğrafı önizlemesi" style="filter:${mediaFilterCss(selectedStoryFilters[index] || 'none')}" />`;
+      const media = file.type.startsWith('video/')
+        ? `<video src="${url}" controls autoplay playsinline style="filter:${mediaFilterCss(selectedStoryFilters[index] || 'none')}"></video>`
+        : `<img src="${url}" alt="Hikaye fotoğrafı önizlemesi" style="filter:${mediaFilterCss(selectedStoryFilters[index] || 'none')}" />`;
+      viewer.innerHTML = `<button type="button" class="story-media-lightbox-close" aria-label="Önizlemeyi kapat"><i class="fas fa-xmark"></i></button><div class="story-media-lightbox-content">${media}${renderStoryPreviewLayers()}</div>`;
       preview.append(viewer);
       viewer.querySelector('button').addEventListener('click', () => {
         viewer.remove();
@@ -15027,16 +15051,20 @@ function showStoryUploadModal() {
     }
     selectedStoryFiles = files;
     selectedStoryFilters = files.map(() => $('#story-media-filter').value);
-    renderMediaPreview(files);
+    renderMediaPreview(files, 0);
   };
   $('#story-media-filter').onchange = () => {
     selectedStoryFilters = selectedStoryFiles.map(() => $('#story-media-filter').value);
     if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
   };
+  $('#story-caption').oninput = () => {
+    updateStoryPreviewLayers();
+  };
   if (pendingStoryFiles.length) renderMediaPreview(pendingStoryFiles);
   if (savedDraft) {
     $('#story-caption').value = savedDraft.caption || '';
     $('#story-duration').value = savedDraft.duration || '24';
+    if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
   }
   const renderSongs = list => {
     songList.innerHTML = songPickerMarkup(list, selectedSong);
@@ -15048,6 +15076,7 @@ function showStoryUploadModal() {
       }
       selectedSong = songs.find(song => String(song.id) === button.dataset.songId);
       if (!selectedSong) return;
+      updateStoryPreviewLayers();
       $('#story-song').value = selectedSong.id;
       $('#story-song-start').disabled = !selectedSong.audio_url;
       $('#story-song-start').max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
@@ -15084,6 +15113,7 @@ function showStoryUploadModal() {
         $('#story-song-start').disabled = !selectedSong.audio_url;
         $('#story-song-start').max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
         $('#story-song-start').dispatchEvent(new Event('input'));
+        if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
       }
     }
     renderSongs(songs);
