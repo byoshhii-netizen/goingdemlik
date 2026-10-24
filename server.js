@@ -1069,7 +1069,6 @@ app.get('/sitemap.xml', async (req, res) => {
       WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
       ORDER BY f.updated_at DESC LIMIT 5000`).then(r => r.rows),
     query(`SELECT b.id, b.slug, b.updated_at FROM books b LEFT JOIN users u ON u.id=b.user_id
       WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
