@@ -1268,6 +1268,7 @@ function isPublicGuestRoute(path) {
     || normalizedPath === '/kitaplar'
     || normalizedPath === '/forum'
     || normalizedPath === '/konular'
+    || /^\/reals(?:\/[^/]+)?$/.test(normalizedPath)
     || /^\/(?:muzik|forum)\/[^/]+(?:\/.*)?$/.test(normalizedPath)
     || /^\/kitap\/[^/]+(?:\/sayfa\/[^/]+)?$/.test(normalizedPath)
     || isForgotPasswordRoute(normalizedPath);
@@ -2388,9 +2389,7 @@ function updateNavUI() {
     closeMobileCreateMenu();
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = `
-      <a href="${profileRoute(currentUser.username)}" data-link class="mobile-nav-link"><i class="fas fa-user" style="width:18px"></i> Profilim</a>
       <a href="/rozetler" data-link class="mobile-nav-link"><i class="fas fa-award" style="width:18px"></i> Rozetler</a>
-      <a href="/mesajlar" data-link class="mobile-nav-link" id="mob-msg-link"><i class="fas fa-envelope" style="width:18px"></i> Mesajlar <span id="mob-msg-badge" style="display:none;background:var(--accent-red);color:#fff;font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px"></span></a>
       <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
       <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
@@ -8670,7 +8669,7 @@ async function renderProfile(app, username) {
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
   const savedContentHTML = profileSavedVideos.length ? `<div class="profile-saved-content-grid">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
-  const profileArchiveCard = (type, id, content, canArchive = true) => `<div class="profile-archiveable-card">${content}${isOwn && canArchive ? `<button type="button" class="profile-content-archive-btn" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşive taşı"><i class="fas fa-box-archive"></i><span>Arşivle</span></button>` : ''}</div>`;
+  const profileArchiveCard = (type, id, content, canArchive = true, canEditPhoto = false) => `<div class="profile-archiveable-card">${content}${isOwn && canArchive ? `<div class="${canEditPhoto ? 'profile-photo-owner-actions' : ''}">${canEditPhoto ? `<button type="button" class="profile-content-edit-btn" data-profile-edit-photo="${escHtml(id)}" aria-label="Fotoğrafı düzenle" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button>` : ''}<button type="button" class="profile-content-archive-btn" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşive taşı"><i class="fas fa-box-archive"></i><span>Arşivle</span></button></div>` : ''}</div>`;
   const profileSongsHTML = profileSongs.length ? `<div class="profile-songs-grid">${profileSongs.map(s => profileArchiveCard('song', s.id, `
       <div class="song-card profile-song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -8754,7 +8753,7 @@ async function renderProfile(app, username) {
               ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
               ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}`}
         </div>
-        ${isOwn ? `<div class="profile-owner-tools"><a href="/ayarlar" data-link class="btn btn-outline btn-sm"><i class="fas fa-cog"></i> Profili Düzenle</a><button type="button" class="btn btn-outline btn-sm" data-open-profile-archive><i class="fas fa-box-archive"></i> Arşivim</button></div>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
+        ${isOwn ? `<div class="profile-owner-tools"><a href="/ayarlar" data-link class="btn btn-outline btn-sm"><i class="fas fa-cog"></i> Profili Düzenle</a></div>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
@@ -8773,7 +8772,7 @@ async function renderProfile(app, username) {
       ${books.length ? `<div class="grid-3">${books.map(b => profileArchiveCard('book', b.id, bookCardHTML(b), String(b.user_id) === String(user.id))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
     </div>
     <div id="tab-photos" class="hidden">
-      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
+      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`, true, true)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
@@ -8810,6 +8809,11 @@ async function renderProfile(app, username) {
   profileTabOrder.forEach(tab => document.getElementById('tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
   bindProfileAvatarViewer(app, user, data.avatar_photos || [], isOwn);
+  app.querySelectorAll('[data-profile-edit-photo]').forEach(button => button.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    showPhotoEditModal(button.dataset.profileEditPhoto, `/profil/${encodeURIComponent(username)}`);
+  }));
   app.querySelectorAll('[data-profile-archive-type]').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault();
     event.stopPropagation();
@@ -8897,13 +8901,6 @@ async function renderProfile(app, username) {
       profileTabOrder.forEach(name => {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
-      });
-      app.querySelector('[data-open-profile-archive]')?.addEventListener('click', () => {
-        const archiveTab = app.querySelector('.tab[data-tab="archive"]');
-        if (archiveTab) {
-          archiveTab.click();
-          app.querySelector('#tab-archive')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
       });
       if (btn.dataset.tab === 'archive') {
         const archivePanel = app.querySelector('#tab-archive');
@@ -17504,7 +17501,7 @@ document.addEventListener('click', e => {
   if(!currentUser) return toast('İletmek için giriş yapın.', 'error');
   showForwardPhotoModal(btn.closest('[data-photo-id]')?.dataset.photoId);
 }, true);
-async function showPhotoEditModal(photoId) {
+async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
   try {
     const photo = await api('/photos/' + encodeURIComponent(photoId));
     const songs = await api('/songs').catch(() => []);
@@ -17523,7 +17520,7 @@ async function showPhotoEditModal(photoId) {
       };
       openMediaEditor(file, { title: 'Fotoğrafı düzenle', aspect: 1, onApply: editedFile => {
         window.__pendingPhotoEditFile = editedFile;
-        showPhotoEditModal(photoId);
+        showPhotoEditModal(photoId, returnPath);
       }});
     });
     const draft = window.__pendingPhotoEditDraft;
@@ -17545,7 +17542,7 @@ async function showPhotoEditModal(photoId) {
           body.append('allow_comments', $('#edit-photo-comments').checked); body.append('allow_shares', $('#edit-photo-shares').checked);
         }
         await api('/photos/' + photoId, { method: 'PUT', body });
-        hideModal(); toast('Fotoğraf güncellendi'); navigate('/fotograflar');
+        hideModal(); toast('Fotoğraf güncellendi'); navigate(returnPath);
       } catch (error) { $('#edit-photo-error').textContent = error.message; }
     };
   } catch (error) { toast(error.message || 'Fotoğraf yüklenemedi', 'error'); }
