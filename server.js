@@ -4548,6 +4548,38 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
 });
 
 const DM_THEME_KEYS = new Set(['default', 'sunset', 'ocean', 'rose', 'forest', 'lavender']);
+const SITE_THEME_MODES = new Set(['auto', 'light', 'dark']);
+
+app.get('/api/me/site-theme', authMiddleware, async (req, res) => {
+  const { rows } = await query(
+    'SELECT theme_preference,theme_prompt_completed FROM users WHERE id=$1',
+    [req.user.id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  const mode = SITE_THEME_MODES.has(rows[0].theme_preference) ? rows[0].theme_preference : 'auto';
+  res.json({
+    preference: mode,
+    prompt_completed: Number(rows[0].theme_prompt_completed) === 1
+  });
+});
+
+app.put('/api/me/site-theme', authMiddleware, async (req, res) => {
+  const mode = String(req.body?.preference || '');
+  if (!SITE_THEME_MODES.has(mode)) return res.status(400).json({ error: 'Geçersiz tema seçimi.' });
+  const completePrompt = req.body?.prompt_completed === true;
+  const { rows } = await query(
+    `UPDATE users SET theme_preference=$1,
+       theme_prompt_completed=CASE WHEN $2=1 THEN 1 ELSE theme_prompt_completed END
+     WHERE id=$3 RETURNING theme_preference,theme_prompt_completed`,
+    [mode, completePrompt ? 1 : 0, req.user.id]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  res.json({
+    ok: true,
+    preference: rows[0].theme_preference,
+    prompt_completed: Number(rows[0].theme_prompt_completed) === 1
+  });
+});
 
 async function getDmThemeForUser(conversation, userId) {
   const [{ rows: settings }, { rows: localTheme }] = await Promise.all([

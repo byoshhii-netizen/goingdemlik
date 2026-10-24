@@ -3636,7 +3636,7 @@ async function renderSettings(main) {
           <p style="font-size:12px;color:var(--text3);margin:8px 0 16px">Kapalıysa kullanıcılar yalnızca açık veya koyu temayı seçebilir.</p>
           <div style="display:flex;gap:24px;flex-wrap:wrap">
             <div><label>Açık tema hat rengi</label><input type="color" id="s-light-primary" value="${settings['light_primary_color'] || '#dc2626'}" style="width:64px;height:42px;padding:3px" /></div>
-            <div><label>Açık tema arka plan rengi</label><input type="color" id="s-light-background" value="${settings['light_background_color'] || '#f8f9fa'}" style="width:64px;height:42px;padding:3px" /></div>
+            <div><label>Açık tema arka plan rengi</label><input type="color" id="s-light-background" value="${settings['light_background_color'] || '#fafafa'}" style="width:64px;height:42px;padding:3px" /></div>
           </div>
           <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn btn-primary" id="s-light-theme-save"><i class="fas fa-save"></i> Kaydet</button><div id="s-light-theme-msg" class="form-error"></div></div>
         </div>

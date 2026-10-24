@@ -122,11 +122,6 @@ function limitMediaAudioClip(audio, startSeconds, onClipEnd, clipSeconds = MEDIA
   return audio;
 }
 
-localStorage.removeItem('cigcig_theme');
-document.documentElement.style.colorScheme = 'dark';
-function applyDisplayTheme() { document.body.dataset.theme = 'dark'; }
-applyDisplayTheme();
-
 function playNotificationTone() {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1838,6 +1833,123 @@ async function initAuth() {
     currentToken = null;
     localStorage.removeItem('token');
     updateNavUI();
+  }
+}
+
+const THEME_GUEST_PROMPT_KEY = 'cigcig_theme_guest_prompt_completed';
+const THEME_MODES = ['auto', 'light', 'dark'];
+
+function renderThemeChoice(mode, selectedMode, autoAllowed) {
+  const choices = {
+    auto: { icon: 'fa-circle-half-stroke', title: 'Cihaz ayarı', detail: 'Telefonun veya bilgisayarın teması' },
+    light: { icon: 'fa-sun', title: 'Açık tema', detail: 'Aydınlık, sade görünüm' },
+    dark: { icon: 'fa-moon', title: 'Koyu tema', detail: 'CigCig’in mevcut koyu görünümü' }
+  };
+  const choice = choices[mode];
+  const disabled = mode === 'auto' && !autoAllowed;
+  return `<button type="button" class="site-theme-choice ${selectedMode === mode ? 'is-selected' : ''}" data-site-theme-choice="${mode}" aria-pressed="${selectedMode === mode}" ${disabled ? 'disabled' : ''}>
+    <span class="site-theme-preview site-theme-preview--${mode}" aria-hidden="true"><i class="fas ${choice.icon}"></i><span></span><span></span></span>
+    <span class="site-theme-choice-copy"><strong>${choice.title}</strong><small>${disabled ? 'Cihaz teması yönetici tarafından kapatılmış' : choice.detail}</small></span>
+    <i class="fas fa-circle-check site-theme-choice-check" aria-hidden="true"></i>
+  </button>`;
+}
+
+async function saveSiteThemePreference(mode, promptCompleted = true) {
+  if (!THEME_MODES.includes(mode)) throw new Error('Tema seçimi geçersiz.');
+  const result = await api('/me/site-theme', {
+    method: 'PUT',
+    body: JSON.stringify({ preference: mode, prompt_completed: promptCompleted })
+  });
+  window.CigCigTheme?.setPreference(result.preference);
+  return result;
+}
+
+function showSiteThemePrompt({ account = false, selectedMode = 'auto' } = {}) {
+  return new Promise(resolve => {
+    document.getElementById('site-theme-prompt-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'site-theme-prompt-overlay';
+    overlay.className = 'site-theme-prompt-overlay';
+    overlay.innerHTML = `<section class="site-theme-prompt" role="dialog" aria-modal="true" aria-labelledby="site-theme-prompt-title">
+      <div class="site-theme-prompt-brand"><span><i class="fas fa-palette"></i></span><small>CigCig görünümün</small></div>
+      <h2 id="site-theme-prompt-title">${account ? 'CigCig’e hoş geldin!' : 'CigCig’i nasıl kullanmak istersin?'}</h2>
+      <p>Görünümünü seçebilirsin. Seçimini daha sonra Ayarlar bölümünden değiştirebilirsin.</p>
+      <div class="site-theme-choice-list" role="radiogroup" aria-label="Site teması">
+        ${THEME_MODES.map(mode => renderThemeChoice(mode, selectedMode, window.CigCigTheme?.isAutoAllowed() !== false)).join('')}
+      </div>
+      <div class="site-theme-prompt-error" role="alert" aria-live="polite"></div>
+      <div class="site-theme-prompt-foot"><i class="fas fa-lock"></i> Bu tercih yalnızca CigCig’in görünümünü etkiler.</div>
+    </section>`;
+    document.body.appendChild(overlay);
+    document.body.classList.add('site-theme-prompt-open');
+    let completed = false;
+
+    const finish = mode => {
+      if (completed) return;
+      completed = true;
+      document.body.classList.remove('site-theme-prompt-open');
+      overlay.remove();
+      resolve(mode);
+    };
+
+    overlay.querySelectorAll('[data-site-theme-choice]').forEach(button => {
+      button.addEventListener('click', async () => {
+        if (button.disabled || button.dataset.saving === 'true') return;
+        const mode = button.dataset.siteThemeChoice;
+        button.dataset.saving = 'true';
+        button.setAttribute('aria-busy', 'true');
+        overlay.querySelectorAll('[data-site-theme-choice]').forEach(choice => { choice.disabled = true; });
+        const errorNode = overlay.querySelector('.site-theme-prompt-error');
+        errorNode.textContent = '';
+        try {
+          if (account) {
+            await saveSiteThemePreference(mode, true);
+          } else {
+            window.CigCigTheme?.setPreference(mode);
+            try {
+              localStorage.setItem(THEME_GUEST_PROMPT_KEY, '1');
+            } catch (error) {
+              console.warn('Misafir tema tercihi bu tarayıcıda saklanamadı:', error);
+            }
+          }
+          finish(mode);
+        } catch (error) {
+          errorNode.textContent = error.message || 'Tema tercihin kaydedilemedi. Lütfen tekrar dene.';
+          overlay.querySelectorAll('[data-site-theme-choice]').forEach(choice => {
+            choice.disabled = choice.dataset.siteThemeChoice === 'auto' && window.CigCigTheme?.isAutoAllowed() === false;
+          });
+          button.dataset.saving = 'false';
+          button.removeAttribute('aria-busy');
+        }
+      });
+    });
+    overlay.querySelector(`[data-site-theme-choice="${THEME_MODES.includes(selectedMode) ? selectedMode : 'auto'}"]:not(:disabled)`)?.focus();
+  });
+}
+
+async function initializeThemeExperience() {
+  if (currentUser) {
+    try {
+      const settings = await api('/me/site-theme');
+      window.CigCigTheme?.setPreference(settings.preference);
+      if (!settings.prompt_completed) {
+        await showSiteThemePrompt({ account: true, selectedMode: settings.preference });
+      }
+      return;
+    } catch (error) {
+      console.error('Hesap tema tercihleri yüklenemedi:', error);
+      toast('Hesap tema tercihin yüklenemedi. Bu oturumda cihaz teması kullanılacak.', 'error');
+      window.CigCigTheme?.setPreference('auto');
+      return;
+    }
+  }
+
+  let prompted = false;
+  try { prompted = localStorage.getItem(THEME_GUEST_PROMPT_KEY) === '1'; } catch {}
+  if (!prompted) {
+    let selectedMode = window.CigCigTheme?.getPreference() || 'auto';
+    if (!THEME_MODES.includes(selectedMode)) selectedMode = 'auto';
+    await showSiteThemePrompt({ selectedMode });
   }
 }
 
@@ -8816,9 +8928,14 @@ async function renderSettingsSection(section) {
 
   } else if (section === 'appearance') {
     let defaultDmTheme = 'default';
+    let siteThemePreference = window.CigCigTheme?.getPreference() || 'auto';
     try {
-      const themeSettings = await api('/me/dm-theme-settings');
+      const [themeSettings, siteThemeSettings] = await Promise.all([
+        api('/me/dm-theme-settings'),
+        api('/me/site-theme')
+      ]);
       defaultDmTheme = themeSettings.default_theme_key || 'default';
+      siteThemePreference = siteThemeSettings.preference || 'auto';
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -8826,6 +8943,14 @@ async function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
+          <section class="appearance-theme-card">
+            <div class="appearance-theme-heading"><span class="appearance-theme-icon"><i class="fas fa-circle-half-stroke"></i></span><span><strong>Site teması</strong><small>Tercihin hesabınla kaydedilir ve tüm cihazlarında uygulanır.</small></span></div>
+            <div class="appearance-theme-options" role="radiogroup" aria-label="Site teması">
+              ${THEME_MODES.map(mode => renderThemeChoice(mode, siteThemePreference, window.CigCigTheme?.isAutoAllowed() !== false)).join('')}
+            </div>
+            <div class="form-hint">Cihaz ayarı seçeneği telefonunun veya bilgisayarının açık/koyu görünümünü takip eder.</div>
+            <div class="appearance-theme-status" id="appearance-theme-status" aria-live="polite"></div>
+          </section>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<div class="form-group"><label>İsim Rengi (VIP/Plus)</label><input type="color" id="s-name-color" value="${currentUser.name_color || '#f5f5f5'}" style="width:60px;height:36px;padding:2px;cursor:pointer" /></div>` : ''}
@@ -8841,6 +8966,31 @@ async function renderSettingsSection(section) {
           <div id="appear-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    el.querySelectorAll('[data-site-theme-choice]').forEach(button => {
+      button.addEventListener('click', async () => {
+        if (button.disabled) return;
+        const status = $('#appearance-theme-status');
+        const mode = button.dataset.siteThemeChoice;
+        el.querySelectorAll('[data-site-theme-choice]').forEach(choice => { choice.disabled = true; });
+        if (status) status.textContent = 'Tema tercihi kaydediliyor...';
+        try {
+          await saveSiteThemePreference(mode, true);
+          siteThemePreference = mode;
+          el.querySelectorAll('[data-site-theme-choice]').forEach(choice => {
+            const selected = choice.dataset.siteThemeChoice === mode;
+            choice.classList.toggle('is-selected', selected);
+            choice.setAttribute('aria-pressed', String(selected));
+            choice.disabled = choice.dataset.siteThemeChoice === 'auto' && window.CigCigTheme?.isAutoAllowed() === false;
+          });
+          if (status) status.textContent = 'Tema tercihin kaydedildi.';
+        } catch (error) {
+          el.querySelectorAll('[data-site-theme-choice]').forEach(choice => {
+            choice.disabled = choice.dataset.siteThemeChoice === 'auto' && window.CigCigTheme?.isAutoAllowed() === false;
+          });
+          if (status) status.textContent = error.message || 'Tema tercihi kaydedilemedi.';
+        }
+      });
+    });
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
         show_level_progress: $('#s-show-progress').checked,
@@ -9336,7 +9486,7 @@ function renderLogin(app) {
             const verified = await api('/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, value }) });
             currentToken = verified.token; currentUser = verified.user;
             localStorage.setItem('token', currentToken);
-            updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate(returnTo);
+            updateNavUI(); await initializeThemeExperience(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate(returnTo);
           } catch (e) { $('#login-2fa-error').textContent = e.message; }
         };
         $('#login-2fa-btn').addEventListener('click', verify);
@@ -9379,7 +9529,7 @@ function renderLogin(app) {
             const loginData = await api('/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) });
             currentToken = loginData.token; currentUser = loginData.user;
             localStorage.setItem('token', currentToken);
-            updateNavUI(); toast('Hesabın geri alındı, hoş geldin ' + currentUser.username + '!');
+            updateNavUI(); await initializeThemeExperience(); toast('Hesabın geri alındı, hoş geldin ' + currentUser.username + '!');
             navigate(returnTo);
           } catch(e) { toast(e.message, 'error'); }
         });
@@ -9391,7 +9541,7 @@ function renderLogin(app) {
       if (!data?.user?.username || !data.token) throw new Error('Kayıt tamamlandı ancak oturum bilgisi alınamadı. Lütfen giriş ekranından deneyin.');
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
-      updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
+      updateNavUI(); await initializeThemeExperience(); toast('Hoş geldiniz, ' + currentUser.username + '!');
       navigate(returnTo);
     } catch (e) { $('#login-error').textContent = e.message; }
   };
@@ -9711,7 +9861,7 @@ function renderRegister(app) {
       }
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
-      updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
+      updateNavUI(); await initializeThemeExperience(); toast('Hoş geldiniz, ' + currentUser.username + '!');
       navigate(returnTo);
     } catch (e) { $('#reg-error').textContent = e.message; }
   };
@@ -9988,7 +10138,7 @@ async function init() {
     const response = await fetch('/api/public-settings', { signal: settingsController.signal });
     if (!response.ok) throw new Error(`Genel ayarlar yüklenemedi (${response.status}).`);
     const ps = await response.json();
-    window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
+    window.CigCigTheme?.configure(ps);
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     loginRequiredEnabled = ps.first_visit_auth === '1';
     const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
@@ -10025,6 +10175,7 @@ async function init() {
   } finally {
     clearTimeout(settingsTimeout);
   }
+  await initializeThemeExperience();
   renderRoute(location.pathname + location.search);
   try {
     const journalists = await api('/journalists');

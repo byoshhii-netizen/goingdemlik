@@ -85,6 +85,8 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_required INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_preference TEXT NOT NULL DEFAULT 'auto';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS theme_prompt_completed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_red_verified INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS red_verified_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
