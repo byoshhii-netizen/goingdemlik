@@ -3441,6 +3441,24 @@ async function renderSettings(main) {
       </div>
       <div class="settings-section-label"><span>Temel yapı</span><i class="fas fa-minus"></i></div>
       <div class="settings-grid">
+      <div class="card adm-feature-card">
+        <div class="card-header"><span><i class="fas fa-layer-group" style="color:var(--red2);margin-right:8px"></i>Seviye Sistemi</span><span class="adm-setting-status ${settings['level_system_enabled'] !== '0' ? 'is-on' : ''}">${settings['level_system_enabled'] !== '0' ? 'AÇIK' : 'KAPALI'}</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy"><strong>Seviye sistemini etkinleştir</strong><p>Kapalıyken profillerde seviye ve ilerleme çubukları gösterilmez, seviye sınırları uygulanmaz. Mevcut seviyeler ve kullanıcı verileri korunur.</p></div>
+          <label class="adm-toggle-row" for="s-level-system"><span><i class="fas fa-layer-group"></i> Seviye Sistemi</span><span class="adm-toggle"><input type="checkbox" id="s-level-system" ${settings['level_system_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
+          <button class="btn btn-primary" id="s-level-system-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
+          <div id="s-level-system-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card adm-feature-card">
+        <div class="card-header"><span><i class="fas fa-award" style="color:var(--red2);margin-right:8px"></i>Rozet Sistemi</span><span class="adm-setting-status ${settings['badge_system_enabled'] !== '0' ? 'is-on' : ''}">${settings['badge_system_enabled'] !== '0' ? 'AÇIK' : 'KAPALI'}</span></div>
+        <div class="card-body">
+          <div class="adm-feature-copy"><strong>Rozet sistemini etkinleştir</strong><p>Kapalıyken standart rozetler gizlenir ve yeni rozet atamaları durdurulur. Mağazadan alınan ve yetkili rozetleri görünür kalır; mevcut kayıtlar korunur.</p></div>
+          <label class="adm-toggle-row" for="s-badge-system"><span><i class="fas fa-award"></i> Rozet Sistemi</span><span class="adm-toggle"><input type="checkbox" id="s-badge-system" ${settings['badge_system_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
+          <button class="btn btn-primary" id="s-badge-system-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
+          <div id="s-badge-system-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><span><i class="fas fa-palette" style="color:var(--red2);margin-right:8px"></i>Genel</span></div>
         <div class="card-body">
@@ -3828,6 +3846,28 @@ async function renderSettings(main) {
     const msg = document.getElementById('s-general-msg');
     await saveSetting('site_name', document.getElementById('s-sitename').value.trim(), msg);
     await saveSetting('site_description', document.getElementById('s-desc').value.trim(), msg);
+  });
+  document.getElementById('s-level-system-save')?.addEventListener('click', async () => {
+    const checkbox = document.getElementById('s-level-system');
+    const msg = document.getElementById('s-level-system-msg');
+    if (!await saveSetting('level_system_enabled', checkbox.checked ? '1' : '0', msg)) return;
+    const status = checkbox.closest('.card')?.querySelector('.adm-setting-status');
+    if (status) {
+      status.textContent = checkbox.checked ? 'AÇIK' : 'KAPALI';
+      status.classList.toggle('is-on', checkbox.checked);
+    }
+    msg.style.color = 'var(--green)'; msg.textContent = '✓ Seviye sistemi ayarı kaydedildi.';
+  });
+  document.getElementById('s-badge-system-save')?.addEventListener('click', async () => {
+    const checkbox = document.getElementById('s-badge-system');
+    const msg = document.getElementById('s-badge-system-msg');
+    if (!await saveSetting('badge_system_enabled', checkbox.checked ? '1' : '0', msg)) return;
+    const status = checkbox.closest('.card')?.querySelector('.adm-setting-status');
+    if (status) {
+      status.textContent = checkbox.checked ? 'AÇIK' : 'KAPALI';
+      status.classList.toggle('is-on', checkbox.checked);
+    }
+    msg.style.color = 'var(--green)'; msg.textContent = '✓ Rozet sistemi ayarı kaydedildi.';
   });
   document.getElementById('s-call-ringtone-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-call-ringtone-msg');

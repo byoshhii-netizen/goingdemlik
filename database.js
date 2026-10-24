@@ -76,6 +76,7 @@ async function initDb() {
       last_active TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_message_permission TEXT NOT NULL DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
@@ -930,6 +931,8 @@ async function initDb() {
       FOREIGN KEY(blocker_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    ALTER TABLE blocks ADD COLUMN IF NOT EXISTS hide_until TIMESTAMP NOT NULL DEFAULT NOW();
+    ALTER TABLE blocks ADD COLUMN IF NOT EXISTS fake_profile INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS dm_conversations (
       id BIGSERIAL PRIMARY KEY,
