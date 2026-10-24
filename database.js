@@ -490,10 +490,13 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       newspaper_id BIGINT NOT NULL REFERENCES newspapers(id) ON DELETE CASCADE,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      parent_comment_id BIGINT REFERENCES newspaper_comments(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE newspaper_comments ADD COLUMN IF NOT EXISTS parent_comment_id BIGINT REFERENCES newspaper_comments(id) ON DELETE CASCADE;
     CREATE INDEX IF NOT EXISTS idx_newspaper_comments_issue ON newspaper_comments(newspaper_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_newspaper_comments_parent ON newspaper_comments(parent_comment_id);
     CREATE TABLE IF NOT EXISTS newspaper_comment_likes (
       id BIGSERIAL PRIMARY KEY,
       comment_id BIGINT NOT NULL REFERENCES newspaper_comments(id) ON DELETE CASCADE,

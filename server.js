@@ -3043,12 +3043,17 @@ app.get('/api/newspapers/:id/comments', optionalAuth, async (req, res) => {
   const { rows: newspapers } = await query('SELECT id FROM newspapers WHERE id=$1', [id]);
   if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
   const { rows } = await query(`
-    SELECT c.id,c.newspaper_id,c.user_id,c.content,c.created_at,u.username,u.nickname,u.avatar,u.avatar_removed,u.is_red_verified,u.red_verified_at,
+    SELECT c.id,c.newspaper_id,c.user_id,c.parent_comment_id,c.content,c.created_at,u.username,u.nickname,u.avatar,u.avatar_removed,u.is_red_verified,u.red_verified_at,
+      parent_user.username AS parent_username,parent_user.nickname AS parent_nickname,
+      COALESCE(u.comment_count,0)::int AS user_comment_count,
       (SELECT COUNT(*)::int FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id) AS like_count,
       CASE WHEN $2::bigint=0 THEN FALSE
         ELSE EXISTS(SELECT 1 FROM newspaper_comment_likes cl WHERE cl.comment_id=c.id AND cl.user_id=$2)
       END AS liked
-    FROM newspaper_comments c LEFT JOIN users u ON u.id=c.user_id
+    FROM newspaper_comments c
+    LEFT JOIN users u ON u.id=c.user_id
+    LEFT JOIN newspaper_comments parent ON parent.id=c.parent_comment_id
+    LEFT JOIN users parent_user ON parent_user.id=parent.user_id
     WHERE c.newspaper_id=$1 ORDER BY c.created_at ASC
   `, [id, req.user?.id || 0]);
   res.json(rows);
@@ -3058,27 +3063,46 @@ app.post('/api/newspapers/:id/comments', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'comment')) return;
   const id = Number(req.params.id);
   const content = String(req.body?.content || '').trim();
+  const parentCommentId = req.body?.parent_comment_id == null || req.body.parent_comment_id === '' ? null : Number(req.body.parent_comment_id);
   if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'Gazete bulunamadı' });
   if (!content || content.length > 2000) return res.status(400).json({ error: 'Yorum 1-2000 karakter arasında olmalıdır.' });
+  if (parentCommentId !== null && (!Number.isSafeInteger(parentCommentId) || parentCommentId < 1)) {
+    return res.status(400).json({ error: 'Yanıtlanacak yorum geçersiz.' });
+  }
   const { rows: newspapers } = await query('SELECT id,journalist_id FROM newspapers WHERE id=$1', [id]);
   if (!newspapers.length) return res.status(404).json({ error: 'Gazete bulunamadı' });
+  let parentComment = null;
+  if (parentCommentId !== null) {
+    const { rows: parents } = await query(
+      'SELECT id,user_id FROM newspaper_comments WHERE id=$1 AND newspaper_id=$2',
+      [parentCommentId, id]
+    );
+    if (!parents.length) return res.status(404).json({ error: 'Yanıtlanacak yorum bulunamadı.' });
+    parentComment = parents[0];
+  }
   const { rows } = await query(
-    'INSERT INTO newspaper_comments (newspaper_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,newspaper_id,user_id,content,created_at',
-    [id, req.user.id, content]
+    'INSERT INTO newspaper_comments (newspaper_id,user_id,parent_comment_id,content) VALUES ($1,$2,$3,$4) RETURNING id,newspaper_id,user_id,parent_comment_id,content,created_at',
+    [id, req.user.id, parentCommentId, content]
   );
   await query('UPDATE users SET comment_count=comment_count+1 WHERE id=$1', [req.user.id]);
   await updateUserLevel(req.user.id);
-  if (Number(newspapers[0].journalist_id) !== Number(req.user.id)) {
+  const notificationRecipients = new Set([
+    Number(newspapers[0].journalist_id),
+    Number(parentComment?.user_id || 0)
+  ]);
+  notificationRecipients.delete(Number(req.user.id));
+  for (const recipientId of notificationRecipients) {
+    if (!recipientId) continue;
     await query(
       'INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [newspapers[0].journalist_id, 'newspaper_comment', req.user.username, req.user.avatar || '', 'Gazetenize yorum geldi', `@${req.user.username} gazetenize yorum yaptı.`, `/gazete/${id}`]
+      [recipientId, 'newspaper_comment', req.user.username, req.user.avatar || '', parentComment && recipientId === Number(parentComment.user_id) ? 'Yorumunuza yanıt geldi' : 'Gazetenize yorum geldi', parentComment && recipientId === Number(parentComment.user_id) ? `@${req.user.username} yorumunuza yanıt verdi.` : `@${req.user.username} gazetenize yorum yaptı.`, `/gazete/${id}`]
     );
   }
   res.status(201).json({
     ...rows[0], username: req.user.username, nickname: req.user.nickname,
     avatar: req.user.avatar, avatar_removed: req.user.avatar_removed,
     is_red_verified: req.user.is_red_verified, red_verified_at: req.user.red_verified_at,
-    like_count: 0, liked: false,
+    parent_username: null, parent_nickname: null, user_comment_count: 1, like_count: 0, liked: false,
   });
 });
 
@@ -3096,10 +3120,20 @@ app.delete('/api/newspapers/:id/comments/:commentId', authMiddleware, async (req
   if (Number(rows[0].user_id) !== Number(req.user.id) && !req.user.is_admin) {
     return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok.' });
   }
+  const { rows: deletedAuthors } = await query(`
+    WITH RECURSIVE comment_tree AS (
+      SELECT id,user_id FROM newspaper_comments WHERE id=$1
+      UNION ALL
+      SELECT child.id,child.user_id
+      FROM newspaper_comments child JOIN comment_tree parent ON child.parent_comment_id=parent.id
+    )
+    SELECT user_id,COUNT(*)::int AS deleted_count
+    FROM comment_tree WHERE user_id IS NOT NULL GROUP BY user_id
+  `, [commentId]);
   await query('DELETE FROM newspaper_comments WHERE id=$1', [commentId]);
-  if (rows[0].user_id) {
-    await query('UPDATE users SET comment_count=GREATEST(0,comment_count-1) WHERE id=$1', [rows[0].user_id]);
-    await updateUserLevel(rows[0].user_id);
+  for (const author of deletedAuthors) {
+    await query('UPDATE users SET comment_count=GREATEST(0,comment_count-$2) WHERE id=$1', [author.user_id, author.deleted_count]);
+    await updateUserLevel(author.user_id);
   }
   res.json({ ok: true });
 });
@@ -4716,59 +4750,50 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     return res.json({ user: sanitizeUser(user), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
   await ensureProfileAvatarArchiveSchema();
-  const profileNotePromise = req.user
-    ? (async () => {
-      await ensureDmNotesSchema();
-      const { rows } = await query(`
-        SELECT n.content,n.song_id,n.song_start_seconds,n.created_at,n.expires_at,
-               u.username,u.nickname,u.avatar,u.avatar_removed,s.title AS song_title,
-               s.artist_name AS song_artist,s.audio_url,s.remastered_audio_url,s.cover_url
-        FROM dm_notes n
-        JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
-        LEFT JOIN songs s ON s.id=n.song_id
-        WHERE n.user_id=$1 AND n.expires_at>NOW()
-          AND (n.content<>'' OR n.song_id IS NOT NULL)
-          AND ($2::bigint=$1
-            OR EXISTS (SELECT 1 FROM friendships f
-              WHERE ((f.requester_id=$1 AND f.addressee_id=$2)
-                OR (f.requester_id=$2 AND f.addressee_id=$1))
-                AND f.status='accepted')
-            OR (EXISTS (SELECT 1 FROM follows f
-                  WHERE f.follower_id=$2 AND f.following_id=$1 AND f.status='accepted')
-              AND EXISTS (SELECT 1 FROM follows f
-                  WHERE f.follower_id=$1 AND f.following_id=$2 AND f.status='accepted')))
-        LIMIT 1
-      `, [user.id, req.user.id]);
-      return rows[0] || null;
-    })()
-    : Promise.resolve(null);
-  const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos, dmNote] = await Promise.all([
-    query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
-    query(`SELECT b.* FROM books b WHERE (b.user_id=$1 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$1)) AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
+  const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos] = await Promise.all([
+    query(`SELECT f.* FROM forums f WHERE f.user_id=$1
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='forum' AND a.content_id=f.id::text)
+      ORDER BY f.created_at DESC LIMIT 20`, [user.id]).then(r => r.rows),
+    query(`SELECT b.* FROM books b WHERE (b.user_id=$1 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$1))
+      AND (b.is_hidden=0 OR b.user_id=$2)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=b.user_id AND a.content_type='book' AND a.content_id=b.id::text)
+      ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     features.levels ? query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null) : Promise.resolve(null),
     features.levels ? query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows) : Promise.resolve([]),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
-    query('SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,s.title AS song_title,s.artist_name AS song_artist FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1 ORDER BY p.created_at DESC LIMIT 50', [user.id]).then(r => r.rows),
+    query(`SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,s.title AS song_title,s.artist_name AS song_artist
+      FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='photo' AND a.content_id=p.id::text)
+      ORDER BY p.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
     query(`SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
       (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
-      FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=0 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+      FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=0
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='video' AND a.content_id=v.id::text)
+      ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
     query(`SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
       (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
-      FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1 ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+      FROM videos v LEFT JOIN users u ON u.id=v.user_id WHERE v.user_id=$1 AND v.is_reals=1
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='reals' AND a.content_id=v.id::text)
+      ORDER BY v.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
     query(`SELECT s.*, u.username, u.avatar FROM songs s LEFT JOIN users u ON u.id=s.uploader_id
-      WHERE s.uploader_id=$1 AND s.status='active' ORDER BY s.published_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+      WHERE s.uploader_id=$1 AND s.status='active'
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='song' AND a.content_id=s.id::text)
+      ORDER BY s.published_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
     query(`SELECT
-      (SELECT COUNT(*) FROM photos WHERE user_id=$1) AS photo_count,
-      (SELECT COUNT(*) FROM songs WHERE uploader_id=$1 AND status='active') AS song_count`, [user.id]).then(r => r.rows[0]),
+      (SELECT COUNT(*) FROM photos p WHERE p.user_id=$1
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='photo' AND a.content_id=p.id::text)) AS photo_count,
+      (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND a.content_id=v.id::text)) AS video_count,
+      (SELECT COUNT(*) FROM songs s WHERE s.uploader_id=$1 AND s.status='active'
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='song' AND a.content_id=s.id::text)) AS song_count`, [user.id]).then(r => r.rows[0]),
     query('SELECT id,image_url,created_at FROM profile_avatar_archive WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
-    profileNotePromise,
   ]);
   const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
-  const content_count = Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + Number(contentCounts.photo_count || 0) + Number(contentCounts.song_count || 0);
-  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, dm_note: dmNote, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  const content_count = Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + Number(contentCounts.photo_count || 0) + Number(contentCounts.video_count || 0) + Number(contentCounts.song_count || 0);
+  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -9503,6 +9528,8 @@ function matchesDmLockHash(savedHash, code) {
   return savedBuffer.length === inputBuffer.length && crypto.timingSafeEqual(savedBuffer, inputBuffer);
 }
 
+const DM_ACCOUNT_LOCK_SENTINEL = 'account-lock';
+
 async function isValidDmSearchCode(userId, code) {
   if (typeof code !== 'string' || !code) return false;
   const { rows } = await query(
@@ -9908,7 +9935,8 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
 });
 
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
-  const { password } = req.body;
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  const lockType = req.body?.lock_type === 'account' ? 'account' : 'password';
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
@@ -9918,7 +9946,21 @@ app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) =>
   if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
-  const passHash = password ? require('crypto').createHash('sha256').update(password).digest('hex') : '';
+  let passHash;
+  if (lockType === 'account') {
+    const { rows: settings } = await query(
+      'SELECT search_code_hash,search_unlock_enabled,icon_code_hash,icon_unlock_enabled FROM dm_user_settings WHERE user_id=$1',
+      [uid]
+    );
+    const setting = settings[0];
+    const hasAccountLock = Boolean(setting?.search_code_hash && Number(setting.search_unlock_enabled) === 1)
+      || Boolean(setting?.icon_code_hash && Number(setting.icon_unlock_enabled) === 1);
+    if (!hasAccountLock) return res.status(400).json({ error: 'Önce Sohbet Kilidi ayarlarından geçerli bir kilit kodu etkinleştir.' });
+    passHash = DM_ACCOUNT_LOCK_SENTINEL;
+  } else {
+    if (!password) return res.status(400).json({ error: 'Konuşma şifresi gerekli.' });
+    passHash = crypto.createHash('sha256').update(password).digest('hex');
+  }
   if (isUser1) {
     await query('UPDATE dm_conversations SET hidden_by_user1=1, hidden_pass_user1=$1 WHERE id=$2', [passHash, conv.id]);
   } else {
@@ -9953,7 +9995,7 @@ app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) =>
 });
 
 app.post('/api/conversation/:username/unhide', authMiddleware, async (req, res) => {
-  const { password } = req.body;
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
@@ -9964,9 +10006,11 @@ app.post('/api/conversation/:username/unhide', authMiddleware, async (req, res) 
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
   const storedHash = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
-  if (storedHash) {
-    const inputHash = require('crypto').createHash('sha256').update(password||'').digest('hex');
-    if (inputHash !== storedHash) return res.status(403).json({ error: 'Yanlış şifre' });
+  if (storedHash === DM_ACCOUNT_LOCK_SENTINEL) {
+    const validAccountCode = await isValidDmIconCode(uid, password) || await isValidDmSearchCode(uid, password);
+    if (!validAccountCode) return res.status(403).json({ error: 'Hesap kilit kodu yanlış.' });
+  } else if (storedHash) {
+    if (!matchesDmLockHash(storedHash, password)) return res.status(403).json({ error: 'Yanlış şifre' });
   }
   if (isUser1) {
     await query('UPDATE dm_conversations SET hidden_by_user1=0 WHERE id=$1', [conv.id]);

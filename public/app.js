@@ -1314,6 +1314,8 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  const wasOnReals = document.body.classList.contains('reals-page');
+  const isGoingToReals = path === '/reals' || path.startsWith('/reals/');
   if (loginRequiredEnabled && !currentUser && !isPublicGuestRoute(path)) {
     return navigate('/giris', false);
   }
@@ -1329,6 +1331,11 @@ function renderRoute(fullPath) {
       autoplay: !detailAudio.paused,
       countPlay: false
     });
+  }
+  if (isGoingToReals && !wasOnReals) {
+    suspendMusicForReals();
+  } else if (!isGoingToReals && wasOnReals) {
+    resumeMusicAfterReals();
   }
   document.body.classList.toggle('song-detail-route', path.startsWith('/muzik/'));
   const isDmChatRoute = path.startsWith('/mesajlar/') && path.split('/').filter(Boolean).length > 1;
@@ -1531,7 +1538,7 @@ async function renderRealsFeed(app, initialId = null) {
     ? feedItems.findIndex(item => !item.isRealsAd && String(item.id) === String(initialId))
     : -1;
   listEl.addEventListener('selectstart', event => event.preventDefault());
-  let realsMuted = localStorage.getItem('cigcig_reals_muted') !== '0';
+  let realsMuted = localStorage.getItem('cigcig_reals_muted') === '1';
   function syncRealsMuteButtons() {
     listEl.querySelectorAll('.mute-btn').forEach(btn => {
       btn.innerHTML = '<i class="fas fa-volume-' + (realsMuted ? 'mute' : 'up') + '"></i>';
@@ -1712,6 +1719,49 @@ async function renderRealsFeed(app, initialId = null) {
     videoEl.setAttribute('src', src);
     videoEl.load();
   }
+  const stopRealsSongAudio = () => {
+    if (!activeRealsAudio) return;
+    activeRealsAudio.pause();
+    untrackMediaAudio(activeRealsAudio);
+    activeRealsAudio = null;
+  };
+  const syncRealsSongAudio = item => {
+    if (realsMuted || !item?.dataset.songAudio || item.dataset.adId) {
+      stopRealsSongAudio();
+      return;
+    }
+    const audioUrl = new URL(item.dataset.songAudio, location.href).href;
+    if (activeRealsAudio?.src === audioUrl) {
+      if (activeRealsAudio.paused) activeRealsAudio.play().catch(error => console.warn('Reals müziği oynatılamadı:', error.message));
+      return;
+    }
+    stopRealsSongAudio();
+    const audio = trackMediaAudio(new Audio(audioUrl));
+    audio.preload = 'auto';
+    activeRealsAudio = audio;
+    let start = Math.max(0, Number(item.dataset.songStart) || 0);
+    let stopAt = null;
+    audio.addEventListener('loadedmetadata', () => {
+      const duration = Number(audio.duration);
+      if (Number.isFinite(duration) && duration > 0) {
+        start = Math.min(start, Math.max(0, duration - 0.1));
+        audio.currentTime = start;
+        stopAt = Math.min(duration, start + 30);
+      } else audio.currentTime = start;
+    }, { once: true });
+    audio.addEventListener('timeupdate', () => {
+      if (stopAt !== null && audio.currentTime >= stopAt - 0.08) {
+        audio.currentTime = start;
+        stopAt = Math.min(Number(audio.duration) || start + 30, start + 30);
+      }
+    });
+    audio.addEventListener('error', () => {
+      if (activeRealsAudio === audio) console.error('Reals müziği yüklenemedi:', audio.error?.message || 'Bilinmeyen ses hatası');
+    }, { once: true });
+    audio.play().catch(error => {
+      if (activeRealsAudio === audio) console.warn('Reals müziği kullanıcı etkileşimi bekliyor:', error.message);
+    });
+  };
 
   function renderItems() {
     loadedRealsIndices.clear();
@@ -1818,7 +1868,16 @@ async function renderRealsFeed(app, initialId = null) {
       });
       it.querySelector('.reals-play-overlay')?.addEventListener('click', event => {
         event.stopPropagation();
-        if (vid.paused) vid.play().catch(() => {}); else vid.pause();
+        if (vid.paused) {
+          if (realsMuted) {
+            realsMuted = false;
+            localStorage.setItem('cigcig_reals_muted', '0');
+            vid.muted = !!it.dataset.songAudio;
+            syncRealsMuteButtons();
+            syncRealsSongAudio(it);
+          }
+          vid.play().catch(error => console.error('Reals videosu başlatılamadı:', error.message));
+        } else vid.pause();
       });
       it.addEventListener('dblclick', event => {
         if (Date.now() < suppressClickUntil || event.target.closest('button,a,input')) return;
@@ -1830,14 +1889,19 @@ async function renderRealsFeed(app, initialId = null) {
         const icon = it.querySelector('.reals-play-overlay i');
         if (icon) icon.className = 'fas fa-pause';
         it.classList.remove('reals-is-paused');
+        if (!it.dataset.adId && !vid.muted) syncRealsSongAudio(it);
       });
       vid.addEventListener('pause', () => {
         if (it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
           vid.play().catch(() => {});
           return;
         }
+        if (activeRealsAudio && it.classList.contains('is-active')) activeRealsAudio.pause();
         it.querySelector('.reals-play-overlay i')?.classList.replace('fa-pause', 'fa-play');
         it.classList.add('reals-is-paused');
+      });
+      vid.addEventListener('error', () => {
+        if (it.classList.contains('is-active')) console.error('Reals videosu yüklenemedi:', vid.error?.message || 'Video kaynağı okunamadı');
       });
       vid.addEventListener('ended', () => {
         if (!it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
@@ -1846,19 +1910,14 @@ async function renderRealsFeed(app, initialId = null) {
       });
     });
     listEl.querySelectorAll('.mute-btn').forEach(btn => btn.addEventListener('click', e => {
-      e.stopPropagation(); const vid = btn.closest('.reals-video-box').querySelector('video');
-      vid.muted = !vid.muted; realsMuted = vid.muted; localStorage.setItem('cigcig_reals_muted', vid.muted ? '1' : '0');
-      if (realsMuted) activeRealsAudio?.pause();
-      else {
-        const item = btn.closest('.reals-item');
-        if (item?.dataset.songAudio) {
-          activeRealsAudio?.pause();
-          activeRealsAudio = trackMediaAudio(new Audio(item.dataset.songAudio));
-          activeRealsAudio.currentTime = Number(item.dataset.songStart) || 0;
-          activeRealsAudio.loop = true;
-          activeRealsAudio.play().catch(() => {});
-        }
-      }
+      e.stopPropagation();
+      const item = btn.closest('.reals-item');
+      const video = item?.querySelector('video');
+      if (!video || !item) return;
+      realsMuted = !realsMuted;
+      localStorage.setItem('cigcig_reals_muted', realsMuted ? '1' : '0');
+      video.muted = realsMuted || !!item.dataset.songAudio;
+      syncRealsSongAudio(item);
       syncRealsMuteButtons();
     }));
     listEl.querySelectorAll('[data-ad-click]').forEach(link => link.addEventListener('click', event => {
@@ -1916,8 +1975,7 @@ async function renderRealsFeed(app, initialId = null) {
     const previousIdx = idx;
     if (previousIdx !== i) clearReplayCountdown(items[previousIdx]);
     idx = i;
-    activeRealsAudio?.pause();
-    activeRealsAudio = null;
+    stopRealsSongAudio();
     const activeItem = items[idx];
     const activeRealId = activeItem && !activeItem.classList.contains('reals-ad-item') ? activeItem.dataset.id : null;
     if (activeRealId && location.pathname !== '/reals/' + encodeURIComponent(activeRealId)) {
@@ -1949,7 +2007,7 @@ async function renderRealsFeed(app, initialId = null) {
         vid.muted = true;
         continue;
       }
-      vid.muted = realsMuted;
+      vid.muted = realsMuted || !!it.dataset.songAudio;
       (async () => {
         if (!currentUser && !it.dataset.adId && it.dataset.guestChecked !== 'true') {
           try {
@@ -1971,13 +2029,20 @@ async function renderRealsFeed(app, initialId = null) {
           ? api('/reals-ads/' + it.dataset.adId + '/view', { method: 'POST' })
           : api('/video/' + it.dataset.id + '/view', { method: 'POST' });
         viewPromise.catch(() => {});
-        vid.play().catch(() => {});
-        if (!realsMuted && !it.dataset.adId && it.dataset.songAudio) {
-          activeRealsAudio = trackMediaAudio(new Audio(it.dataset.songAudio));
-          activeRealsAudio.currentTime = Number(it.dataset.songStart) || 0;
-          activeRealsAudio.loop = true;
-          activeRealsAudio.play().catch(() => {});
-        }
+        vid.play().catch(error => {
+          if (idx !== j || !it.isConnected) return;
+          if (!vid.muted) {
+            vid.muted = true;
+            realsMuted = true;
+            localStorage.setItem('cigcig_reals_muted', '1');
+            syncRealsSongAudio(null);
+            syncRealsMuteButtons();
+            vid.play().catch(playError => console.error('Reals videosu başlatılamadı:', playError.message));
+          } else {
+            console.error('Reals videosu başlatılamadı:', error.message);
+          }
+        });
+        if (!it.dataset.adId) syncRealsSongAudio(it);
       })();
     }
     if (previousIdx !== idx) {
@@ -3110,19 +3175,33 @@ async function renderNewspaperList(app) {
   });
 }
 
-function newspaperCommentHTML(comment, newspaper) {
+function newspaperCommentHTML(comment, newspaper, depth = 0) {
   const canDelete = currentUser && (Number(currentUser.id) === Number(comment.user_id) || currentUser.is_admin);
-  return `<article class="newspaper-comment" data-newspaper-comment="${escHtml(comment.id)}">
+  return `<article class="newspaper-comment" data-newspaper-comment="${escHtml(comment.id)}" style="--reply-depth:${Math.min(depth, 3)}">
     ${avatarImg(comment, 'newspaper-comment-avatar')}
     <div class="newspaper-comment-main">
-      <div class="newspaper-comment-top"><a href="${profileRoute(comment.username)}" data-link>${userDisplayName(comment)}</a><time>${escHtml(timeAgo(comment.created_at))}</time></div>
+      <div class="newspaper-comment-top"><a href="${profileRoute(comment.username)}" data-link>${userDisplayName(comment)}</a><span class="newspaper-comment-author-count">${Number(comment.user_comment_count) || 0} yorum</span><time>${escHtml(timeAgo(comment.created_at))}</time></div>
+      ${comment.parent_comment_id ? `<div class="newspaper-comment-reply-context"><i class="fas fa-reply"></i> <span>@${escHtml(comment.parent_username || 'kullanıcı')} adlı yoruma yanıt</span></div>` : ''}
       <p>${renderContent(comment.content)}</p>
       <div class="newspaper-comment-actions">
         <button type="button" class="newspaper-comment-like${comment.liked ? ' is-liked' : ''}" data-newspaper-comment-like="${escHtml(comment.id)}"><i class="${comment.liked ? 'fas' : 'far'} fa-heart"></i><span>${Number(comment.like_count) || 0}</span></button>
+        ${currentUser ? `<button type="button" class="newspaper-comment-reply" data-newspaper-comment-reply="${escHtml(comment.id)}" data-reply-username="${escHtml(comment.username || '')}"><i class="fas fa-reply"></i> Yanıtla</button>` : ''}
         ${canDelete ? `<button type="button" class="newspaper-comment-delete" data-newspaper-comment-delete="${escHtml(comment.id)}" data-newspaper-id="${escHtml(newspaper.id)}">Sil</button>` : ''}
       </div>
     </div>
+    ${comment.replies?.length ? `<div class="newspaper-comment-replies">${comment.replies.map(reply => newspaperCommentHTML(reply, newspaper, depth + 1)).join('')}</div>` : ''}
   </article>`;
+}
+
+function newspaperCommentsHTML(comments, newspaper) {
+  const byId = new Map(comments.map(comment => [String(comment.id), { ...comment, replies: [] }]));
+  const roots = [];
+  for (const comment of byId.values()) {
+    const parent = comment.parent_comment_id == null ? null : byId.get(String(comment.parent_comment_id));
+    if (parent && parent !== comment) parent.replies.push(comment);
+    else roots.push(comment);
+  }
+  return roots.map(comment => newspaperCommentHTML(comment, newspaper)).join('');
 }
 
 function showNewspaperViewer(imageUrl, imageAlt) {
@@ -3324,9 +3403,9 @@ async function renderNewspaperDetail(app, newspaperId) {
         </div>
       </article>
       <section class="newspaper-comments-card" id="yorumlar">
-        <header class="newspaper-comments-heading"><span class="newspaper-comments-icon"><i class="fas fa-comments"></i></span><div><span class="newspaper-eyebrow">OKUR MEKTUPLARI</span><h2>Gazete üzerine konuş</h2></div><span class="newspaper-comments-total">${comments.length}</span></header>
-        ${currentUser ? `<form class="newspaper-comment-form" id="newspaper-comment-form">${avatarImg(currentUser, 'newspaper-comment-avatar')}<textarea id="newspaper-comment-input" maxlength="2000" rows="2" placeholder="Bu sayı hakkında ne düşünüyorsun?"></textarea><button type="submit" class="btn btn-primary" aria-label="Yorum gönder"><i class="fas fa-paper-plane"></i></button></form>` : '<p class="newspaper-comment-login">Yorum yapmak için <a href="/giris" data-link>giriş yapın</a>.</p>'}
-        <div class="newspaper-comments-list" id="newspaper-comments-list">${comments.length ? comments.map(comment => newspaperCommentHTML(comment, newspaper)).join('') : '<div class="newspaper-comments-empty"><i class="far fa-comment-dots"></i><span>Henüz yorum yok. İlk okur mektubunu sen yaz.</span></div>'}</div>
+        <header class="newspaper-comments-heading"><span class="newspaper-comments-icon"><i class="fas fa-comments"></i></span><div><span class="newspaper-eyebrow">OKUR MEKTUPLARI</span><h2>Gazete üzerine konuş</h2></div><span class="newspaper-comments-total" title="${comments.length} yorum">${comments.length > 9999 ? '9999+' : comments.length.toLocaleString('tr-TR')}</span></header>
+        ${currentUser ? `<form class="newspaper-comment-form" id="newspaper-comment-form">${avatarImg(currentUser, 'newspaper-comment-avatar')}<div class="newspaper-comment-editor"><div class="newspaper-reply-target" id="newspaper-reply-target" hidden><span></span><button type="button" id="newspaper-reply-cancel" aria-label="Yanıtlamayı iptal et"><i class="fas fa-xmark"></i></button></div><textarea id="newspaper-comment-input" maxlength="2000" rows="2" placeholder="Bu sayı hakkında ne düşünüyorsun?"></textarea></div><button type="submit" class="btn btn-primary" aria-label="Yorum gönder"><i class="fas fa-paper-plane"></i></button></form>` : '<p class="newspaper-comment-login">Yorum yapmak için <a href="/giris" data-link>giriş yapın</a>.</p>'}
+        <div class="newspaper-comments-list" id="newspaper-comments-list">${comments.length ? newspaperCommentsHTML(comments, newspaper) : '<div class="newspaper-comments-empty"><i class="far fa-comment-dots"></i><span>Henüz yorum yok. İlk okur mektubunu sen yaz.</span></div>'}</div>
       </section>
     </div>`;
 
@@ -3358,6 +3437,15 @@ async function renderNewspaperDetail(app, newspaperId) {
   });
 
   const commentForm = $('#newspaper-comment-form');
+  let replyTargetId = null;
+  const clearReplyTarget = () => {
+    replyTargetId = null;
+    const target = $('#newspaper-reply-target');
+    if (target) target.hidden = true;
+    const input = $('#newspaper-comment-input');
+    if (input) input.placeholder = 'Bu sayı hakkında ne düşünüyorsun?';
+  };
+  $('#newspaper-reply-cancel')?.addEventListener('click', clearReplyTarget);
   commentForm?.addEventListener('submit', async event => {
     event.preventDefault();
     const input = $('#newspaper-comment-input');
@@ -3366,7 +3454,7 @@ async function renderNewspaperDetail(app, newspaperId) {
     const button = commentForm.querySelector('button[type="submit"]');
     button.disabled = true;
     try {
-      await api(`/newspapers/${encodeURIComponent(safeId)}/comments`, { method: 'POST', body: JSON.stringify({ content }) });
+      await api(`/newspapers/${encodeURIComponent(safeId)}/comments`, { method: 'POST', body: JSON.stringify({ content, parent_comment_id: replyTargetId }) });
       renderNewspaperDetail(app, safeId);
     } catch (error) {
       toast(error.message || 'Yorum gönderilemedi.', 'error');
@@ -3374,6 +3462,15 @@ async function renderNewspaperDetail(app, newspaperId) {
     }
   });
   $('#newspaper-comments-list')?.addEventListener('click', async event => {
+    const replyButton = event.target.closest('[data-newspaper-comment-reply]');
+    if (replyButton) {
+      replyTargetId = replyButton.dataset.newspaperCommentReply;
+      const target = $('#newspaper-reply-target');
+      target.querySelector('span').textContent = `@${replyButton.dataset.replyUsername || 'kullanıcı'} yorumuna yanıt veriyorsun`;
+      target.hidden = false;
+      $('#newspaper-comment-input')?.focus();
+      return;
+    }
     const likeButton = event.target.closest('[data-newspaper-comment-like]');
     if (likeButton) {
       if (!currentUser) return navigate('/giris');
@@ -4613,7 +4710,7 @@ function poemCardHTML(poem) {
     <div class="poem-card-title">${escHtml(poem.title)}</div>
     <div class="poem-card-preview">${escHtml(preview.length > 220 ? preview.substring(0, 220) + '...' : preview)}</div>
     <div class="poem-card-meta">
-      <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${poem.username ? userDisplayName(poem) : 'Silinmiş Kullanıcı'}</span>
+      <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${poem.username ? escHtml(poem.nickname || poem.username) : 'Silinmiş Kullanıcı'}</span>
       <span class="forum-meta-item"><i class="fas fa-heart"></i>${formatCount(poem.like_count)}</span>
       <span class="forum-meta-item"><i class="fas fa-comment"></i>${poem.comment_count || 0}</span>
       <span class="forum-meta-item" title="${dateStr} ${timeStr}"><i class="fas fa-clock"></i>${dateStr}</span>
@@ -4744,7 +4841,7 @@ async function renderPoemDetail(app, slug) {
         <div class="poem-detail-meta">
           <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             ${avatarImg(poem, 'avatar-sm')}
-            <a href="${profileRoute(poem.username)}" data-link style="color:inherit">${userDisplayName(poem)}</a>
+            <a href="${profileRoute(poem.username)}" data-link style="color:inherit">${escHtml(poem.nickname || poem.username)}</a>
             ${poem.user_location ? `<span style="font-size:11px;color:var(--text-muted)"><i class="fas fa-map-marker-alt" style="font-size:10px"></i> ${escHtml(poem.user_location)}</span>` : ''}
           </span>
           <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDate(poem.created_at)}</span>
@@ -7882,7 +7979,7 @@ async function renderVideoList(app) {
         <div><div class="page-title"><i class="fas fa-video"></i> Video</div></div>
       </div>
       <div class="video-search-bar"><i class="fas fa-search"></i><input id="video-search-input" type="search" placeholder="Videolarda ara..." autocomplete="off" /></div>
-      <div class="video-feed-label"><span><i class="fas fa-wand-magic-sparkles"></i> Sana özel akış</span><small>${videos.length} video</small></div>
+      <div class="video-feed-label"><span><i class="fas fa-video"></i> Video akışı</span><small>${videos.length} video</small></div>
       <div id="video-home-grid" class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
     </div>`;
     $('#video-search-input')?.addEventListener('input', async event => {
@@ -8253,10 +8350,11 @@ function stopProfileNoteAudio() {
   window.__profileNoteAudio = null;
 }
 
-function openProfileNoteViewer(note, profileUser = note) {
+function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
   const username = profileUser.username || note.username || '';
   const displayName = profileUser.nickname || note.nickname || username || 'Kullanıcı';
   const avatar = hasUsableAvatar(profileUser) ? `<img src="${escHtml(profileUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>';
+  const isOwnNote = Boolean(currentUser && String(currentUser.username).toLocaleLowerCase('tr-TR') === String(username).toLocaleLowerCase('tr-TR'));
   const audioUrl = note.remastered_audio_url || note.audio_url;
   const song = note.song_id ? `<button type="button" class="profile-note-song" id="profile-note-play" ${audioUrl ? '' : 'disabled'}>
     <span class="profile-note-song-art">${note.cover_url ? `<img src="${escHtml(note.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}</span>
@@ -8268,7 +8366,22 @@ function openProfileNoteViewer(note, profileUser = note) {
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
     ${song}
     <div class="profile-note-audio-status" id="profile-note-audio-status" aria-live="polite"></div>
+    ${isOwnNote ? '<button type="button" class="btn btn-outline profile-note-delete" id="profile-note-delete"><i class="fas fa-trash"></i> Notu sil</button>' : ''}
   </div>`, 'profile-note-viewer-modal');
+  document.getElementById('profile-note-delete')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (!await CigCigDialogs.confirm('Notunu silmek istiyor musun?')) return;
+    button.disabled = true;
+    try {
+      await api('/dm-notes', { method: 'DELETE' });
+      stopProfileNoteAudio();
+      hideModal();
+      if (onDelete) await onDelete();
+    } catch (error) {
+      toast(error.message || 'Not silinemedi.', 'error');
+      button.disabled = false;
+    }
+  });
   const playButton = document.getElementById('profile-note-play');
   if (!playButton || !audioUrl) return;
   const status = document.getElementById('profile-note-audio-status');
@@ -8361,7 +8474,6 @@ async function renderProfile(app, username) {
   }
 
   const { user, forums, books, groups, photos = [], videos = [], reals, songs, level, levels, book_page_count, badges = [], ad_panels = [] } = data;
-  const profileNote = data.dm_note;
   const profileUsername = user?.username || username;
   const profileSongs = Array.isArray(songs) ? songs : [];
   const profileVideos = Array.isArray(videos) ? videos : [];
@@ -8372,7 +8484,7 @@ async function renderProfile(app, username) {
       <section class="profile-archive">
         <header class="profile-archive-header">
           <span class="profile-archive-icon"><i class="fas fa-box-archive"></i></span>
-          <div><h2>İçerik kasam</h2><p>Paylaşımlarını arşivle, silinenleri geri yükle veya süresi dolan hikâyelerini gör.</p></div>
+          <div><h2>Arşivim</h2><p>Arşivlediğin içerikleri, silinenleri ve süresi dolan hikâyelerini burada bul.</p></div>
         </header>
         <nav class="profile-archive-tabs" aria-label="Arşiv bölümleri">
           <button type="button" data-archive-state="active" class="is-active">İçeriklerim</button>
@@ -8396,7 +8508,7 @@ async function renderProfile(app, username) {
           const data = item.content_data || {};
           const type = item.content_type;
           const title = data.title || data.caption || data.song_title || data.name || data.content || 'İsimsiz içerik';
-          const image = data.cover_image || data.cover_url || data.thumbnail_url || data.image_url || data.url || '';
+          const image = data.media_url || data.cover_image || data.cover_url || data.thumbnail_url || data.image_url || data.url || '';
           const date = data.created_at || item.updated_at || item.created_at;
           const labels = { song: 'Müzik', forum: 'Konu', book: 'Kitap', photo: 'Fotoğraf', story: 'Hikâye', newspaper: 'Gazete', poem: 'Şiir', video: 'Video', reals: 'Real', playlist: 'Çalma listesi' };
           const actions = state === 'active'
@@ -8409,7 +8521,7 @@ async function renderProfile(app, username) {
             <div class="profile-archive-card-body">
               <span class="profile-archive-type">${escHtml(labels[type] || 'İçerik')}</span>
               <h3>${escHtml(title)}</h3>
-              <time>${date ? escHtml(new Date(date).toLocaleDateString('tr-TR')) : ''}</time>
+              <time>${date ? `${escHtml(new Date(date).toLocaleDateString('tr-TR'))}${state === 'expired_stories' && data.expires_at ? ` · ${escHtml(new Date(data.expires_at).toLocaleString('tr-TR'))} süresi doldu` : ''}` : ''}</time>
               <div class="profile-archive-card-actions">${actions}</div>
             </div>
           </article>`;
@@ -8558,7 +8670,8 @@ async function renderProfile(app, username) {
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
   const savedContentHTML = profileSavedVideos.length ? `<div class="profile-saved-content-grid">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
-  const profileSongsHTML = profileSongs.length ? `<div class="profile-songs-grid">${profileSongs.map(s => `
+  const profileArchiveCard = (type, id, content, canArchive = true) => `<div class="profile-archiveable-card">${content}${isOwn && canArchive ? `<button type="button" class="profile-content-archive-btn" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşive taşı"><i class="fas fa-box-archive"></i><span>Arşivle</span></button>` : ''}</div>`;
+  const profileSongsHTML = profileSongs.length ? `<div class="profile-songs-grid">${profileSongs.map(s => profileArchiveCard('song', s.id, `
       <div class="song-card profile-song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
         <div class="song-card-body">
@@ -8566,7 +8679,7 @@ async function renderProfile(app, username) {
           <div class="song-card-subtitle">${escHtml(s.artist_name || s.uploader_name || s.username || '')}</div>
           <div class="song-card-meta">${s.play_count || 0} dinlenme</div>
         </div>
-      </div>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok</p></div>';
+      </div>`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-music"></i><p>Henüz şarkı yok</p></div>';
   document.title = user.username + ' - ' + siteName;
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
@@ -8611,13 +8724,6 @@ async function renderProfile(app, username) {
     : '<div class="empty-state"><i class="fas fa-award"></i><p>Bu profilde gösterilen rozet yok.</p></div>';
 
   app.innerHTML = `<div class="container page">
-    ${profileNote ? `<button type="button" class="profile-note-ticker" id="profile-note-open" aria-label="${escHtml(user.nickname || user.username)} kullanıcısının notunu aç">
-      <span class="profile-note-ticker-avatar">${hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
-      <span class="profile-note-ticker-copy"><strong>${escHtml(user.nickname || user.username)}</strong>
-        <span class="profile-note-ticker-track"><span>${escHtml(profileNote.song_title ? `♫ ${profileNote.song_title} · ${profileNote.song_artist || ''}` : profileNote.content)}</span></span>
-      </span>
-      <span class="profile-note-ticker-open"><i class="fas fa-expand-alt"></i></span>
-    </button>` : ''}
     <div class="profile-header">
       <div class="profile-avatar-wrap">
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
@@ -8646,9 +8752,9 @@ async function renderProfile(app, username) {
               ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
               ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
               ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
-              ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}`}
+              ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}`}
         </div>
-        ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
+        ${isOwn ? `<div class="profile-owner-tools"><a href="/ayarlar" data-link class="btn btn-outline btn-sm"><i class="fas fa-cog"></i> Profili Düzenle</a><button type="button" class="btn btn-outline btn-sm" data-open-profile-archive><i class="fas fa-box-archive"></i> Arşivim</button></div>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
@@ -8661,22 +8767,22 @@ async function renderProfile(app, username) {
     <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler', archive:'Arşiv' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', badges:'Rozetler', archive:'Arşiv' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
-      ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => forumCardHTML(f)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
+      ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => profileArchiveCard('forum', f.id, forumCardHTML(f))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
     </div>
     <div id="tab-books" class="hidden">
-      ${books.length ? `<div class="grid-3">${books.map(b => bookCardHTML(b)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
+      ${books.length ? `<div class="grid-3">${books.map(b => profileArchiveCard('book', b.id, bookCardHTML(b), String(b.user_id) === String(user.id))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
     </div>
     <div id="tab-photos" class="hidden">
-      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
+      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
     </div>
     <div id="tab-videos" class="hidden">
-      ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(videoCardHTML).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
+      ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(video => profileArchiveCard('video', video.id, videoCardHTML(video))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
     </div>
     <div id="tab-reals" class="hidden">
-      ${profileReals.length ? `<div class="profile-reels-grid">${profileReals.map(v => realsProfileCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
+      ${profileReals.length ? `<div class="profile-reels-grid">${profileReals.map(v => profileArchiveCard('reals', v.id, realsProfileCardHTML(v))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
     </div>
     <div id="tab-saved" class="hidden">
       ${savedContentHTML}
@@ -8690,7 +8796,6 @@ async function renderProfile(app, username) {
     </div>` : ''}
     ${isOwn ? '<div id="tab-archive" class="hidden"></div>' : ''}
   </div>`;
-  app.querySelector('#profile-note-open')?.addEventListener('click', () => openProfileNoteViewer(profileNote, user));
   if (isOwn && ad_panels.length) {
     const panel = document.createElement('section');
     panel.className = 'profile-ad-panel-card';
@@ -8705,6 +8810,23 @@ async function renderProfile(app, username) {
   profileTabOrder.forEach(tab => document.getElementById('tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
   bindProfileAvatarViewer(app, user, data.avatar_photos || [], isOwn);
+  app.querySelectorAll('[data-profile-archive-type]').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!await CigCigDialogs.confirm('Bu içeriği arşive taşımak istiyor musun? Profilinden ve herkese açık listelerden gizlenecek; Arşivim bölümünden geri alabilirsin.')) return;
+    button.disabled = true;
+    try {
+      await api(`/archive/${encodeURIComponent(button.dataset.profileArchiveType)}/${encodeURIComponent(button.dataset.profileArchiveId)}`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'archive' })
+      });
+      toast('İçerik arşive taşındı.', 'success');
+      await renderProfile(app, username);
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'İçerik arşivlenemedi.', 'error');
+    }
+  }));
 
   bindFollowButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {
@@ -8749,6 +8871,7 @@ async function renderProfile(app, username) {
         searchInput.dispatchEvent(new Event('input'));
         searchInput.focus();
       });
+      rows.forEach(row => row.addEventListener('click', () => hideModal(), { once: true }));
       searchInput?.focus();
     } catch (e) { toast(e.message, 'error'); }
   }));
@@ -8774,6 +8897,13 @@ async function renderProfile(app, username) {
       profileTabOrder.forEach(name => {
         const tab = $('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
+      });
+      app.querySelector('[data-open-profile-archive]')?.addEventListener('click', () => {
+        const archiveTab = app.querySelector('.tab[data-tab="archive"]');
+        if (archiveTab) {
+          archiveTab.click();
+          app.querySelector('#tab-archive')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
       });
       if (btn.dataset.tab === 'archive') {
         const archivePanel = app.querySelector('#tab-archive');
@@ -9299,14 +9429,17 @@ async function renderSettingsSection(section) {
               ${nameColorPalette.map(color => `<button type="button" class="name-color-swatch${color.toLowerCase() === selectedNameColor.toLowerCase() ? ' is-selected' : ''}" data-name-color="${color}" aria-label="${color} rengi" aria-pressed="${color.toLowerCase() === selectedNameColor.toLowerCase()}" style="--name-color:${color}"></button>`).join('')}
             </div>
             <label class="name-color-custom-label" for="s-name-color">Özel renk kodu</label>
-            <div class="name-color-custom-input"><span>#</span><input type="text" id="s-name-color" value="${selectedNameColor.slice(1)}" maxlength="6" inputmode="text" autocomplete="off" aria-describedby="s-name-color-hint" /><small id="s-name-color-hint">6 haneli HEX</small></div>
+            <div class="name-color-custom-input"><input type="color" id="s-name-color-picker" value="${selectedNameColor}" aria-label="Özel isim rengi seç" /><span>#</span><input type="text" id="s-name-color" value="${selectedNameColor.slice(1)}" maxlength="6" inputmode="text" autocomplete="off" aria-describedby="s-name-color-hint" /><small id="s-name-color-hint">HEX</small></div>
           </section>` : ''}
           <section class="settings-dm-theme">
             <div class="settings-dm-theme-heading"><span><i class="fas fa-palette"></i></span><div><strong>Varsayılan mesaj teması</strong><small>Tüm sohbetlerinde kullanılacak görünümü seç.</small></div></div>
             <div class="dm-theme-options settings-dm-theme-options">${dmThemeOptionsHTML(selectedDmTheme, true)}</div>
             <div class="settings-dm-theme-preview">
               <span>Seçili tema: <strong id="s-dm-theme-name">${DM_THEME_LABELS[selectedDmTheme]}</strong></span>
-              <div class="settings-dm-theme-bubbles" data-dm-theme="${selectedDmTheme}"><span>Selam!</span><span>Bu tema böyle görünüyor.</span></div>
+              <div class="settings-dm-theme-bubbles dm-chat" data-dm-theme="${selectedDmTheme}">
+                <div class="dm-msg-wrap"><div class="dm-msg-bubble">Karşı tarafın mesajı</div></div>
+                <div class="dm-msg-wrap dm-own"><div class="dm-msg-bubble">Senin mesajın</div></div>
+              </div>
             </div>
             <button class="btn btn-outline btn-sm" id="save-dm-default-theme" type="button"><i class="fas fa-check"></i> Temayı kaydet</button>
           </section>
@@ -9321,11 +9454,13 @@ async function renderSettingsSection(section) {
       $('.settings-dm-theme-bubbles').dataset.dmTheme = selectedDmTheme;
     }));
     const nameColorInput = $('#s-name-color');
+    const nameColorPicker = $('#s-name-color-picker');
     const syncNameColor = value => {
       const normalized = String(value || '').replace(/^#/, '');
       if (!/^[0-9a-f]{6}$/i.test(normalized)) return false;
       const color = `#${normalized}`;
       nameColorInput.value = normalized.toUpperCase();
+      if (nameColorPicker) nameColorPicker.value = color;
       $('#s-name-color-preview').style.color = color;
       el.querySelectorAll('.name-color-swatch').forEach(swatch => {
         const selected = swatch.dataset.nameColor.toLowerCase() === color.toLowerCase();
@@ -9338,6 +9473,7 @@ async function renderSettingsSection(section) {
       const normalized = nameColorInput.value.trim().replace(/^#/, '');
       if (/^[0-9a-f]{6}$/i.test(normalized)) syncNameColor(normalized);
     });
+    nameColorPicker?.addEventListener('input', () => syncNameColor(nameColorPicker.value));
     el.querySelectorAll('.name-color-swatch').forEach(button => button.addEventListener('click', () => {
       syncNameColor(button.dataset.nameColor);
     }));
@@ -11054,7 +11190,6 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   let holdTimer = null;
   let suppressClick = false;
   trigger.addEventListener('pointerdown', event => {
-    if (event.pointerType !== 'touch') return;
     suppressClick = false;
     holdTimer = setTimeout(() => {
       suppressClick = true;
@@ -11070,11 +11205,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   trigger.addEventListener('pointerleave', cancelHold);
   trigger.addEventListener('click', event => {
     event.preventDefault();
-    if (suppressClick) {
-      suppressClick = false;
-      return;
-    }
-    openViewer(0);
+    if (suppressClick) suppressClick = false;
   });
   trigger.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -11256,10 +11387,16 @@ async function renderMessages(app, targetUsername) {
     };
     strip.innerHTML = `<button type="button" class="dm-note-card dm-note-create${ownNote ? ' has-note' : ''}" id="dm-note-create">
       <span class="dm-note-avatar">${ownNote && hasUsableAvatar(currentUser) ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-plus"></i>'}${ownNote?.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
-      <span class="dm-note-label">${ownNote ? 'Notun' : 'Not ekle'}</span>
+      <span class="dm-note-label">${ownNote ? 'Notun' : 'Not paylaş'}</span>
       <span class="dm-note-preview">${escHtml(ownNote?.content || ownNote?.song_title || 'Bir not paylaş')}</span>
     </button>${otherNotes.map(note => noteButton(note)).join('')}`;
-    strip.querySelector('#dm-note-create')?.addEventListener('click', () => openDmNoteEditor(ownNote));
+    strip.querySelector('#dm-note-create')?.addEventListener('click', () => {
+      if (!ownNote) return openDmNoteEditor();
+      openProfileNoteViewer(ownNote, ownNote, async () => {
+        dmNotes = dmNotes.filter(note => !note.is_own);
+        renderDmNotes();
+      });
+    });
     strip.querySelectorAll('.dm-note-card[data-note-user]').forEach(button => {
       button.addEventListener('click', () => {
         const note = otherNotes.find(entry => String(entry.username) === button.dataset.noteUser);
@@ -11269,29 +11406,24 @@ async function renderMessages(app, targetUsername) {
     });
   };
 
-  async function openDmNoteEditor(existingNote) {
+  async function openDmNoteEditor() {
     let songs = [];
     try { songs = await api('/songs?limit=100'); }
     catch (error) { toast(error.message || 'Müzikler yüklenemedi', 'error'); }
-    const selected = existingNote?.song_id ? songs.find(song => String(song.id) === String(existingNote.song_id)) || {
-      id: existingNote.song_id, title: existingNote.song_title, artist_name: existingNote.song_artist,
-      cover_url: existingNote.cover_url, audio_url: existingNote.audio_url,
-      remastered_audio_url: existingNote.remastered_audio_url
-    } : null;
-    showModal('Notunu düzenle', `<div class="dm-note-editor">
+    showModal('Not paylaş', `<div class="dm-note-editor">
       <label for="dm-note-content">Notun <span>En fazla 180 karakter</span></label>
-      <textarea id="dm-note-content" maxlength="180" placeholder="Aklından ne geçiyor?">${escHtml(existingNote?.content || '')}</textarea>
-      <div class="dm-note-char-count"><span id="dm-note-char-count">${String(existingNote?.content || '').length}</span>/180</div>
+      <textarea id="dm-note-content" maxlength="180" placeholder="Aklından ne geçiyor?"></textarea>
+      <div class="dm-note-char-count"><span id="dm-note-char-count">0</span>/180</div>
       <section class="dm-note-music-picker">
-        <div class="dm-note-picker-heading"><strong><i class="fas fa-music"></i> Müzik ekle</strong><button type="button" class="btn btn-ghost btn-sm" id="dm-note-clear-song" ${selected ? '' : 'hidden'}>Kaldır</button></div>
+        <div class="dm-note-picker-heading"><strong><i class="fas fa-music"></i> Müzik ekle</strong><button type="button" class="btn btn-ghost btn-sm" id="dm-note-clear-song" hidden>Kaldır</button></div>
         <input id="dm-note-song-search" type="search" placeholder="Şarkı veya sanatçı ara..." autocomplete="off" />
-        <div id="dm-note-song-selected" class="dm-note-song-selected">${selected ? `${selected.cover_url ? `<img src="${escHtml(selected.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<span><strong>${escHtml(selected.title || '')}</strong><small>${escHtml(selected.artist_name || '')}</small></span>` : '<span class="dm-note-no-song">İstersen notuna müzik ekleyebilirsin.</span>'}</div>
+        <div id="dm-note-song-selected" class="dm-note-song-selected"><span class="dm-note-no-song">İstersen notuna müzik ekleyebilirsin.</span></div>
         <div id="dm-note-song-results" class="dm-note-song-results"></div>
-        <div id="dm-note-song-timing" class="dm-note-song-timing"${selected ? '' : ' hidden'}>
+        <div id="dm-note-song-timing" class="dm-note-song-timing" hidden>
           <div class="dm-note-waveform" id="dm-note-waveform" aria-label="Müzik kesitinin başlangıcını seç">
             <div class="dm-note-waveform-bars" id="dm-note-waveform-bars" aria-hidden="true"></div>
             <span class="dm-note-waveform-selection" aria-hidden="true"></span>
-            <input id="dm-note-song-start" type="range" min="0" max="210" step="1" value="${Math.max(0, Number(existingNote?.song_start_seconds) || 0)}" aria-label="Müzik başlangıç zamanı" />
+            <input id="dm-note-song-start" type="range" min="0" max="210" step="1" value="0" aria-label="Müzik başlangıç zamanı" />
           </div>
           <div class="dm-note-song-controls">
             <button type="button" id="dm-note-song-preview" aria-label="Seçilen kesiti önizle"><i class="fas fa-play"></i></button>
@@ -11299,10 +11431,10 @@ async function renderMessages(app, targetUsername) {
           </div>
         </div>
       </section>
-      <div class="dm-note-editor-actions">${existingNote ? '<button type="button" class="btn btn-ghost" id="dm-note-delete">Notu sil</button>' : ''}<button type="button" class="btn btn-primary" id="dm-note-save">Paylaş</button></div>
+      <div class="dm-note-editor-actions"><button type="button" class="btn btn-primary" id="dm-note-save">Paylaş</button></div>
       <div id="dm-note-error" class="form-error"></div>
     </div>`);
-    let chosenSong = selected;
+    let chosenSong = null;
     let previewAudio = null;
     const content = document.getElementById('dm-note-content');
     const count = document.getElementById('dm-note-char-count');
@@ -11409,7 +11541,6 @@ async function renderMessages(app, targetUsername) {
       }
     });
     updateWaveform();
-    if (chosenSong) loadSongMetadata(chosenSong);
     document.getElementById('dm-note-song-preview')?.addEventListener('click', () => {
       if (!chosenSong) return;
       const url = chosenSong.remastered_audio_url || chosenSong.audio_url;
@@ -11449,16 +11580,6 @@ async function renderMessages(app, targetUsername) {
         renderDmNotes();
       } catch (error) { errorNode.textContent = error.message; button.disabled = false; }
     });
-    document.getElementById('dm-note-delete')?.addEventListener('click', async event => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      try {
-        await api('/dm-notes', { method: 'DELETE' });
-        dmNotes = dmNotes.filter(note => !note.is_own);
-        hideModal();
-        renderDmNotes();
-      } catch (error) { document.getElementById('dm-note-error').textContent = error.message; button.disabled = false; }
-    });
     const previewCloseObserver = new MutationObserver(() => {
       if (!document.getElementById('modal-overlay')?.classList.contains('hidden')) return;
       stopSongPreview();
@@ -11481,9 +11602,9 @@ async function renderMessages(app, targetUsername) {
           <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button" title="Arkadaşlar" aria-label="Arkadaşlar"><i class="fas fa-user-friends"></i> Arkadaşlar<span id="dm-friends-badge" class="friend-request-dot"></span></button>
         </div>
         <div class="dm-sidebar-actions">
-          ${dmLockSettings.icon_unlock_enabled ? '<button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>' : ''}
-          <button class="btn btn-primary dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj"><i class="fas fa-plus"></i></button>
-          <button class="btn btn-ghost dm-search-toggle" id="dm-search-toggle" type="button" title="Konuşma ara" aria-label="Konuşma ara" aria-expanded="false"><i class="fas fa-search"></i></button>
+          <button class="btn dm-header-action-btn dm-search-toggle" id="dm-search-toggle" type="button" title="Konuşma ara" aria-label="Konuşma ara" aria-expanded="false"><i class="fas fa-search"></i></button>
+          <button class="btn dm-header-action-btn dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj" aria-label="Yeni mesaj"><i class="fas fa-plus"></i></button>
+          ${dmLockSettings.icon_unlock_enabled ? '<button class="btn dm-header-action-btn dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" aria-label="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>' : ''}
         </div>
       </div>
       <div class="dm-search-wrap hidden">
@@ -13000,6 +13121,53 @@ document.addEventListener('mouseout', e => {
   if (wrap) { const btn = wrap.querySelector('.dm-msg-menu-btn'); if (btn) btn.style.opacity = '0'; }
 });
 
+function showDmMessageLockPrompt(username) {
+  const canUseAccountLock = dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled;
+  showModal('Konuşmayı Kilitle', `
+    <div class="dm-lock-prompt">
+      <div class="dm-lock-prompt-intro"><span><i class="fas fa-lock"></i></span><div><strong>Bu konuşmayı gizle</strong><small>Yalnızca senin mesaj listenden kaldırılır. Kilit açılana kadar görünmez.</small></div></div>
+      <div class="dm-lock-type-options">
+        <label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="personal" checked /><span><i class="fas fa-key"></i><b>Bu sohbet için şifre</b><small>Gizlerken belirleyeceğin şifreyle açılır.</small></span></label>
+        ${canUseAccountLock ? '<label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="account" /><span><i class="fas fa-shield-halved"></i><b>Hesap kilit kodu</b><small>Sohbet Kilidi ayarlarında belirlediğin kodu kullan.</small></span></label>' : ''}
+      </div>
+      <div class="form-group" id="dm-message-lock-password-group"><label for="dm-message-lock-password">Konuşma şifresi</label><input id="dm-message-lock-password" type="password" autocomplete="new-password" placeholder="Bir şifre belirle" /></div>
+      <div class="dm-lock-prompt-actions"><button type="button" class="btn btn-outline" id="dm-message-lock-cancel">Vazgeç</button><button type="button" class="btn btn-primary" id="dm-message-lock-confirm"><i class="fas fa-lock"></i> Konuşmayı kilitle</button></div>
+      <div class="form-error" id="dm-message-lock-error"></div>
+    </div>`);
+  const passwordGroup = document.getElementById('dm-message-lock-password-group');
+  const passwordInput = document.getElementById('dm-message-lock-password');
+  document.querySelectorAll('input[name="dm-lock-type"]').forEach(input => input.addEventListener('change', () => {
+    const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
+    passwordGroup.hidden = !personal;
+    if (!personal) passwordInput.value = '';
+  }));
+  document.getElementById('dm-message-lock-cancel')?.addEventListener('click', hideModal);
+  document.getElementById('dm-message-lock-confirm')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const errorNode = document.getElementById('dm-message-lock-error');
+    const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
+    const password = personal ? passwordInput.value : '';
+    if (personal && !password) {
+      errorNode.textContent = 'Konuşma şifresi belirle veya hesap kilit kodunu seç.';
+      passwordInput.focus();
+      return;
+    }
+    button.disabled = true;
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}/hide`, {
+        method: 'POST',
+        body: JSON.stringify({ password, lock_type: personal ? 'password' : 'account' })
+      });
+      hideModal();
+      navigate('/mesajlar');
+      toast('Konuşma kilitlendi.');
+    } catch (error) {
+      errorNode.textContent = error.message || 'Konuşma kilitlenemedi.';
+      button.disabled = false;
+    }
+  });
+}
+
 function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   document.getElementById('dm-msg-ctx')?.remove();
   const messageRow = [...document.querySelectorAll('.dm-msg-wrap')].find(row => row.dataset.id === String(msgId));
@@ -13024,6 +13192,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   const items = [
     { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
+    { label: '<i class="fas fa-lock fa-fw"></i> Konuşmayı kilitle', action: 'lock-conversation' },
     ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
     ...(canEditMusic ? [{ label: '<i class="fas fa-music fa-fw"></i> Müziği değiştir', action: 'edit-music' }] : []),
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
@@ -13047,6 +13216,8 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
         if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
       } else if (item.action === 'select') {
         enterDmSelection(msgId);
+      } else if (item.action === 'lock-conversation') {
+        showDmMessageLockPrompt(username);
       } else if (item.action === 'edit') {
         showModal('Mesajı düzenle', `
           <div class="form-group">
@@ -13314,7 +13485,7 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
       const pass = personal ? (document.getElementById('dm-hide-pass')?.value || '') : '';
       if (personal && !pass) return toast('Bu sohbet için bir şifre belirle veya hesap kilit kodunu seç.', 'error');
-      try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); }
+      try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass, lock_type: personal ? 'password' : 'account' }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); }
       catch (e) { toast(e.message, 'error'); }
     });
   });
@@ -14091,12 +14262,13 @@ function showAdSubmissionModal() {
 async function renderMusicList(app) {
   document.title = 'Müzikler – ' + siteName;
   app.innerHTML = `<div class="container page">
-    <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px">
-      <div class="page-title" style="display:flex;align-items:center;gap:10px">
-        <i class="fas fa-music" style="color:var(--accent-red2)"></i> Müzikler
+    <div class="page-header music-page-header">
+      <div class="page-title music-page-title">
+        <span class="music-page-title-icon"><i class="fas fa-music"></i></span>
+        <span><strong>Müzik</strong><small>Dinle, keşfet ve koleksiyonunu oluştur</small></span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${currentUser ? `<a href="/playlistlerim" data-link class="btn btn-outline btn-sm"><i class="fas fa-list"></i> Playlistlerim</a>` : ''}
+        ${currentUser ? `<a href="/playlistlerim" data-link class="btn music-playlists-link"><i class="fas fa-record-vinyl"></i><span>Playlistlerim</span><i class="fas fa-arrow-right"></i></a>` : ''}
       </div>
     </div>
     <div class="music-search-bar" style="margin-bottom:20px">
@@ -14219,6 +14391,37 @@ async function renderMusicList(app) {
 // ===== MÜZİK DETAY =====
 let currentAudio = null;
 let currentSlug = null;
+let suspendedMusicForReals = null;
+
+function suspendMusicForReals() {
+  if (!currentAudio || suspendedMusicForReals) return;
+  const player = document.getElementById('global-music-player');
+  suspendedMusicForReals = {
+    audio: currentAudio,
+    currentTime: Number(currentAudio.currentTime) || 0,
+    wasPlaying: !currentAudio.paused,
+    playerDisplay: player?.style.display || ''
+  };
+  currentAudio.pause();
+  if (player) player.style.display = 'none';
+}
+
+function resumeMusicAfterReals() {
+  const suspended = suspendedMusicForReals;
+  if (!suspended) return;
+  suspendedMusicForReals = null;
+  const { audio, currentTime, wasPlaying, playerDisplay } = suspended;
+  const player = document.getElementById('global-music-player');
+  if (player) player.style.display = playerDisplay;
+  if (audio !== currentAudio) return;
+  if (Number.isFinite(audio.duration) && currentTime < audio.duration) audio.currentTime = currentTime;
+  const playButton = document.getElementById('gp-play');
+  if (playButton) {
+    playButton.innerHTML = `<i class="fas fa-${wasPlaying ? 'pause' : 'play'}"></i>`;
+    playButton.title = wasPlaying ? 'Duraklat' : 'Devam et';
+  }
+  if (wasPlaying) audio.play().catch(error => console.warn('Reals sonrası müzik devam ettirilemedi:', error));
+}
 // Playlist queue state
 let currentQueue = [];         // [{id, slug, title, artist_name, cover_url, audio_url}, ...]
 let currentQueueIndex = -1;
@@ -15215,6 +15418,7 @@ async function renderMusicDetail(app, slug) {
 
   app.innerHTML = `
     <div class="song-detail-page">
+      <a href="/muzikler" data-link class="song-detail-back"><i class="fas fa-arrow-left"></i><span>Müziklere dön</span></a>
       <div class="song-detail-hero">
         <div class="song-detail-cover-wrap">
           ${song.cover_url
