@@ -9087,9 +9087,9 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const { rows: msgs } = await query(`
     SELECT     m.id, m.conversation_id, m.sender_id, m.content,
-    CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '' ELSE m.image_url END AS image_url,
-    CASE WHEN m.image_view_limit>0 AND m.sender_id!=$3 THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
-    m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.shared_gif_url,
+    CASE WHEN m.sender_id!=$3 AND (m.image_view_limit>0 OR (m.image_expiry_hours>0 AND (m.image_expires_at IS NULL OR m.image_expires_at<=NOW()))) THEN '' ELSE m.image_url END AS image_url,
+    CASE WHEN m.sender_id!=$3 AND (m.image_view_limit>0 OR (m.image_expiry_hours>0 AND (m.image_expires_at IS NULL OR m.image_expires_at<=NOW()))) THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
+    m.image_view_limit,m.image_view_count,m.image_expiry_hours,m.image_expires_at,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.shared_gif_url,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -9282,6 +9282,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   let image_url = imageUrls[0] || '';
   const imageViewLimit = Number(req.body?.image_view_limit ?? 0);
   if (![0, 1, 2, 3].includes(imageViewLimit)) return res.status(400).json({ error: 'Fotoğraf görüntüleme seçeneği geçersiz.' });
+  const imageExpiryHours = Number(req.body?.image_expiry_hours ?? 0);
+  if (![0, 1, 24, 168].includes(imageExpiryHours)) return res.status(400).json({ error: 'Fotoğraf süresi seçeneği geçersiz.' });
   if (shared_song_id !== undefined && shared_song_id !== null && shared_song_id !== '') {
     const songId = Number(shared_song_id);
     if (!Number.isSafeInteger(songId) || songId < 1) return res.status(400).json({ error: 'Geçersiz müzik.' });
@@ -9310,6 +9312,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     } catch (e) { return res.status(500).json({ error: 'Fotoğraf yüklenemedi: ' + e.message }); }
   }
   if (imageViewLimit > 0 && !imageUrls.length) return res.status(400).json({ error: 'Sınırlı görüntülemeli mesaj için fotoğraf gerekli.' });
+  if (imageExpiryHours > 0 && !imageUrls.length) return res.status(400).json({ error: 'Süreli mesaj için fotoğraf gerekli.' });
   if (shared_photo_id && !content) content = ' ';
   if (shared_newspaper_id !== undefined && shared_newspaper_id !== null && shared_newspaper_id !== '') {
     const newspaperId = Number(shared_newspaper_id);
@@ -9323,8 +9326,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   }
   if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id && !shared_song_id && !shared_gif_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *',
-    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, image_expiry_hours, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *',
+    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, imageExpiryHours, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   if (shared_forum_id) {
@@ -9374,6 +9377,7 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
   if (!Number.isSafeInteger(messageId) || messageId < 1) return res.status(400).json({ error: 'Geçersiz mesaj.' });
   const { rows } = await query(`
     SELECT m.id,m.conversation_id,m.sender_id,m.image_url,m.image_urls,m.image_view_limit,m.image_view_count,
+      m.image_expiry_hours,m.image_expires_at,
       c.user1_id,c.user2_id
     FROM dm_messages m JOIN dm_conversations c ON c.id=m.conversation_id
     JOIN users other ON other.username=$3
@@ -9384,11 +9388,23 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
   const message = rows[0];
   if (!message) return res.status(404).json({ error: 'Fotoğraf bulunamadı.' });
   if (String(message.sender_id) === String(req.user.id)) return res.status(403).json({ error: 'Gönderdiğiniz fotoğrafı bu şekilde açamazsınız.' });
-  if (![1, 2, 3].includes(Number(message.image_view_limit))) return res.status(400).json({ error: 'Bu fotoğraf sınırlı görüntülemeli değil.' });
+  if (![1, 2, 3].includes(Number(message.image_view_limit)) && Number(message.image_expiry_hours) <= 0) {
+    return res.status(400).json({ error: 'Bu fotoğraf için görüntüleme süresi ayarlanmamış.' });
+  }
+  if (message.image_expires_at && new Date(message.image_expires_at).getTime() <= Date.now()) {
+    return res.status(410).json({ error: 'Bu fotoğrafın görüntüleme süresi doldu.' });
+  }
   const { rows: updated } = await query(`UPDATE dm_messages
-    SET image_view_count=image_view_count+1
-    WHERE id=$1 AND image_view_count<image_view_limit
-    RETURNING image_url,image_urls,image_view_limit,image_view_count`, [messageId]);
+    SET image_view_count=image_view_count+CASE WHEN image_view_limit>0 THEN 1 ELSE 0 END,
+      image_expires_at=CASE
+        WHEN image_expiry_hours>0 AND image_expires_at IS NULL
+          THEN NOW() + image_expiry_hours * INTERVAL '1 hour'
+        ELSE image_expires_at
+      END
+    WHERE id=$1
+      AND (image_view_limit=0 OR image_view_count<image_view_limit)
+      AND (image_expires_at IS NULL OR image_expires_at>NOW())
+    RETURNING image_url,image_urls,image_view_limit,image_view_count,image_expiry_hours,image_expires_at`, [messageId]);
   if (!updated.length) return res.status(410).json({ error: 'Bu fotoğraf için görüntüleme sayısı doldu.' });
   res.json({
     image_url: updated[0].image_url,
@@ -9396,7 +9412,9 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
       ? updated[0].image_urls
       : (updated[0].image_url ? [updated[0].image_url] : []),
     image_view_limit: Number(updated[0].image_view_limit),
-    image_view_count: Number(updated[0].image_view_count)
+    image_view_count: Number(updated[0].image_view_count),
+    image_expiry_hours: Number(updated[0].image_expiry_hours),
+    image_expires_at: updated[0].image_expires_at
   });
 });
 

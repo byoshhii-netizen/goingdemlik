@@ -10621,6 +10621,20 @@ async function renderDMChat(username) {
           <small class="dm-image-limit-help">Sınır, bu mesajdaki tüm fotoğraflar için toplam açılma sayısıdır.</small>
           <input type="hidden" id="dm-image-view-limit" value="0" />
         </div>
+        <div class="dm-image-expiry-wrap" id="dm-image-expiry-wrap" hidden>
+          <button class="dm-image-expiry-toggle" id="dm-image-expiry-toggle" type="button" aria-expanded="false">
+            <i class="fas fa-clock"></i>
+            <span id="dm-image-expiry-label">Süre: Süresiz</span>
+            <i class="fas fa-chevron-down" aria-hidden="true"></i>
+          </button>
+          <div class="dm-image-expiry-options" id="dm-image-expiry-options" hidden role="radiogroup" aria-label="Fotoğraf görüntüleme süresi">
+            <button type="button" data-dm-image-expiry="0" class="is-active" aria-pressed="true">Süresiz</button>
+            <button type="button" data-dm-image-expiry="1" aria-pressed="false">1 saat</button>
+            <button type="button" data-dm-image-expiry="24" aria-pressed="false">24 saat</button>
+            <button type="button" data-dm-image-expiry="168" aria-pressed="false">7 gün</button>
+          </div>
+          <input type="hidden" id="dm-image-expiry-hours" value="0" />
+        </div>
         <div class="dm-img-preview-wrap" id="dm-img-preview-wrap" hidden></div>
         <span class="dm-img-upload-status" id="dm-img-upload-status" aria-live="polite"></span>
         <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
@@ -10696,11 +10710,24 @@ async function renderDMChat(username) {
   const renderDmImagePreview = () => {
     const preview = document.getElementById('dm-img-preview-wrap');
     const viewLimitWrap = document.getElementById('dm-image-view-limit-wrap');
+    const expiryWrap = document.getElementById('dm-image-expiry-wrap');
     const inputWrap = document.querySelector('.dm-input-wrap');
     if (!preview) return;
     preview.hidden = pendingImgs.length === 0;
     inputWrap?.classList.toggle('dm-has-images', pendingImgs.length > 0);
     if (viewLimitWrap) viewLimitWrap.hidden = pendingImgs.length === 0;
+    if (expiryWrap) expiryWrap.hidden = pendingImgs.length === 0;
+    if (!pendingImgs.length) {
+      document.getElementById('dm-image-expiry-hours').value = '0';
+      document.getElementById('dm-image-expiry-label').textContent = 'Süre: Süresiz';
+      document.getElementById('dm-image-expiry-options').hidden = true;
+      document.getElementById('dm-image-expiry-toggle').setAttribute('aria-expanded', 'false');
+      document.querySelectorAll('[data-dm-image-expiry]').forEach(option => {
+        const selected = option.dataset.dmImageExpiry === '0';
+        option.classList.toggle('is-active', selected);
+        option.setAttribute('aria-pressed', String(selected));
+      });
+    }
     preview.innerHTML = pendingImgs.map((item, index) => `<span class="dm-img-preview-item">
       <img src="${escHtml(item.previewUrl)}" alt="Seçilen fotoğraf ${index + 1}" />
       <button class="dm-img-clear" data-remove-dm-image="${index}" type="button" aria-label="${index + 1}. fotoğrafı kaldır">×</button>
@@ -10711,6 +10738,55 @@ async function renderDMChat(username) {
       renderDmImagePreview();
     }));
   };
+
+  document.getElementById('dm-img-preview-wrap')?.addEventListener('click', event => {
+    if (event.target.closest('[data-remove-dm-image]')) return;
+    const image = event.target.closest('.dm-img-preview-item img');
+    if (!image) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'dm-image-lightbox';
+    overlay.innerHTML = '<div class="dm-image-lightbox-dialog" role="dialog" aria-modal="true" aria-label="Fotoğraf önizlemesi"><button class="dm-image-lightbox-close" type="button" aria-label="Kapat">×</button><img alt="Seçilen fotoğrafın büyük önizlemesi" /></div>';
+    overlay.querySelector('img').src = image.src;
+    document.body.appendChild(overlay);
+
+    const close = () => {
+      document.removeEventListener('keydown', onKeydown);
+      overlay.remove();
+      image.focus();
+    };
+    const onKeydown = event => {
+      if (event.key === 'Escape') close();
+    };
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay || event.target.closest('.dm-image-lightbox-close')) close();
+    });
+    document.addEventListener('keydown', onKeydown);
+    overlay.querySelector('.dm-image-lightbox-close').focus();
+  });
+
+  document.getElementById('dm-image-expiry-toggle')?.addEventListener('click', event => {
+    const toggle = event.currentTarget;
+    const options = document.getElementById('dm-image-expiry-options');
+    const expanded = toggle.getAttribute('aria-expanded') === 'true';
+    options.hidden = expanded;
+    toggle.setAttribute('aria-expanded', String(!expanded));
+  });
+
+  document.querySelectorAll('[data-dm-image-expiry]').forEach(button => {
+    button.addEventListener('click', () => {
+      const value = button.dataset.dmImageExpiry;
+      document.getElementById('dm-image-expiry-hours').value = value;
+      document.getElementById('dm-image-expiry-label').textContent = `Süre: ${button.textContent.trim()}`;
+      document.querySelectorAll('[data-dm-image-expiry]').forEach(option => {
+        const selected = option === button;
+        option.classList.toggle('is-active', selected);
+        option.setAttribute('aria-pressed', String(selected));
+      });
+      document.getElementById('dm-image-expiry-options').hidden = true;
+      document.getElementById('dm-image-expiry-toggle').setAttribute('aria-expanded', 'false');
+    });
+  });
   const addDmImageFile = file => {
     if (!file?.type?.startsWith('image/')) {
       toast('Yalnızca fotoğraf dosyaları eklenebilir.', 'error');
@@ -10797,6 +10873,7 @@ async function renderDMChat(username) {
         imageUrls.push(uploadRes.url);
       }
       const payload = { content: content || '', reply_to_id: replyToId, image_view_limit: imageViewLimit, image_urls: imageUrls };
+      image_expiry_hours: Number(document.getElementById('dm-image-expiry-hours')?.value || 0), image_urls: imageUrls };
       const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
         method: 'POST', body: JSON.stringify(payload)
       });
@@ -10909,6 +10986,7 @@ async function renderDMChat(username) {
     if (limitedPhotoButton) {
       e.preventDefault();
       if (limitedPhotoButton.disabled) return;
+      const expiresByTime = limitedPhotoButton.classList.contains('dm-expiry-open');
       limitedPhotoButton.disabled = true;
       const messageId = limitedPhotoButton.dataset.messageId;
       try {
@@ -10916,8 +10994,10 @@ async function renderDMChat(username) {
         const row = limitedPhotoButton.closest('.dm-msg-wrap');
         const count = Number(viewed.image_view_count);
         const limit = Number(viewed.image_view_limit);
-        if (count >= limit) {
+        if (!expiresByTime && count >= limit) {
           limitedPhotoButton.outerHTML = '<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>';
+        } else if (expiresByTime) {
+          limitedPhotoButton.disabled = false;
         } else {
           limitedPhotoButton.dataset.viewCount = String(count);
           limitedPhotoButton.innerHTML = `<i class="fas fa-eye"></i> Fotoğrafı aç (${limit - count} görüntüleme kaldı)`;
@@ -10927,7 +11007,7 @@ async function renderDMChat(username) {
         showDmImageViewer(viewed.image_urls?.length ? viewed.image_urls : viewed.image_url, true);
       } catch (error) {
         if (error.status === 410) {
-          limitedPhotoButton.outerHTML = '<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>';
+          limitedPhotoButton.outerHTML = `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> ${expiresByTime ? 'Fotoğrafın süresi doldu' : 'Fotoğrafın görüntüleme hakkı doldu'}</span>`;
         } else {
           limitedPhotoButton.disabled = false;
           toast(error.message, 'error');
@@ -11623,7 +11703,14 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
       ${deleted
         ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
         : `<div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
-             ${Number(m.image_view_limit) > 0 && !isOwn
+             ${!isOwn && Number(m.image_expiry_hours) > 0 && !imageUrls.length
+               ? m.image_expires_at && new Date(m.image_expires_at).getTime() <= Date.now()
+                 ? `<span class="dm-ephemeral-expired"><i class="fas fa-clock"></i> Fotoğrafın süresi doldu</span>`
+                 : `<button type="button" class="dm-ephemeral-open dm-expiry-open"
+                      data-message-id="${m.id}">
+                      <i class="fas fa-clock"></i> Fotoğrafı aç
+                    </button>`
+               : Number(m.image_view_limit) > 0 && !isOwn
                ? Number(m.image_view_count) >= Number(m.image_view_limit)
                  ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
                  : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}"><i class="fas fa-eye"></i> Fotoğrafı görüntüle <span>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} hakkın var</span></button>`
