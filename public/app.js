@@ -2132,6 +2132,7 @@ function syncRealtimeSocket() {
   realtimeSocket = window.io({ auth: { token: currentToken } });
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
   realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
+  realtimeSocket.on('dm:conversation-cleared', handleRealtimeDmConversationCleared);
   realtimeSocket.on('dm:read', handleRealtimeDmRead);
   realtimeSocket.on('dm:typing', handleRealtimeDmTyping);
   realtimeSocket.on('dm:theme', event => {
@@ -2240,6 +2241,21 @@ async function handleRealtimeDirectMessage(event) {
     }
   }
   checkUnreadMessages();
+}
+
+function handleRealtimeDmConversationCleared(event) {
+  if (!currentUser || !event?.usernames || !Array.isArray(event.usernames)) return;
+  const peerUsername = event.usernames.find(username => String(username).toLowerCase() !== String(currentUser.username).toLowerCase());
+  if (!peerUsername) return;
+  const pathParts = location.pathname.split('/').filter(Boolean);
+  const activeUsername = pathParts[0] === 'mesajlar' && pathParts.length > 1
+    ? decodeURIComponent(pathParts[1])
+    : '';
+  if (activeUsername.toLowerCase() === String(peerUsername).toLowerCase()) {
+    renderDMChat(activeUsername);
+  } else if (location.pathname === '/mesajlar') {
+    renderRoute(location.pathname + location.search);
+  }
 }
 
 function handleRealtimeDirectMessageEdit(event) {
@@ -2371,12 +2387,6 @@ function updateNavUI() {
   const mobAuth = $('#mobile-menu-auth');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
-  const isJournalist = !!currentUser && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
-  ['#nav-new-newspaper', '#mob-new-newspaper'].forEach(selector => {
-    const button = $(selector);
-    if (button) button.style.display = isJournalist ? '' : 'none';
-  });
-
   if (currentUser) {
     authEl.classList.add('hidden');
     userEl.classList.remove('hidden');
@@ -2676,20 +2686,9 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
   if (window.innerWidth <= 768) { navigate('/bildirimler'); return; }
   openNotifDropdown();
 });
-$('#nav-new-book')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); navigate('/kitaplar'); setTimeout(() => { if (currentUser) showNewBookModal(); else navigate('/giris'); }, 100); });
-$('#nav-new-newspaper')?.addEventListener('click', () => {
-  $('#new-dropdown')?.classList.add('hidden');
-  if (!currentUser) return navigate('/giris');
-  if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) return toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
-  showNewspaperUploadModal();
-});
-$('#nav-new-forum')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); });
-$('#nav-new-poem')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
-$('#nav-new-music')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) navigate('/sarki-yukle'); else navigate('/giris'); });
-$('#nav-new-video')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } else { navigate('/giris'); } });
 $('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showNewVideoModal(null, true); else navigate('/giris'); });
 $('#logout-btn')?.addEventListener('click', () => {
   showModal('Çıkış yap', '<div class="logout-confirm"><span class="logout-confirm-icon"><i class="fas fa-arrow-right-from-bracket"></i></span><p>Hesabından çıkış yapmak istediğine emin misin?</p><div class="logout-confirm-actions"><button type="button" class="btn btn-danger" id="logout-confirm-btn"><i class="fas fa-arrow-right-from-bracket"></i> Çıkış yap</button><button type="button" class="btn btn-outline" id="logout-cancel-btn">Vazgeç</button></div></div>');
@@ -2805,29 +2804,13 @@ document.addEventListener('keydown', event => {
 });
 
 document.addEventListener('click', e => {
-  const mobNewForum = e.target.closest('#mob-new-forum');
-  const mobNewPoem = e.target.closest('#mob-new-poem');
-  const mobNewBook = e.target.closest('#mob-new-book');
   const mobNewPhoto = e.target.closest('#mob-new-photo');
   const mobNewStory = e.target.closest('#mob-new-story');
-  const mobNewVideo = e.target.closest('#mob-new-video');
-  const mobNewMusic = e.target.closest('#mob-new-music');
   const mobNewReals = e.target.closest('#mob-new-reals');
-  const mobNewNewspaper = e.target.closest('#mob-new-newspaper');
-  if (mobNewForum || mobNewPoem || mobNewBook || mobNewPhoto || mobNewStory || mobNewVideo || mobNewReals || mobNewMusic || mobNewNewspaper) closeMobileCreateMenu();
-  if (mobNewForum) { if (currentUser) { navigate('/forum'); setTimeout(() => showNewForumModal(), 100); } else navigate('/giris'); }
-  if (mobNewPoem) { if (currentUser) { navigate('/siirler'); setTimeout(() => showNewPoemModal(), 100); } else navigate('/giris'); }
-  if (mobNewBook) { navigate('/kitaplar'); setTimeout(() => showNewBookModal(), 100); }
+  if (mobNewPhoto || mobNewStory || mobNewReals) closeMobileCreateMenu();
   if (mobNewPhoto) { if (currentUser) showPhotoUploadModal(); }
   if (mobNewStory) { if (currentUser) showStoryUploadModal(); }
-  if (mobNewVideo) { if (currentUser) { navigate('/videolar'); setTimeout(() => showNewVideoModal(), 120); } }
   if (mobNewReals) { if (currentUser) showNewVideoModal(null, true); else navigate('/giris'); }
-  if (mobNewMusic) { if (currentUser) navigate('/sarki-yukle'); }
-  if (mobNewNewspaper) {
-    if (!currentUser) navigate('/giris');
-    else if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
-    else showNewspaperUploadModal();
-  }
 });
 
 async function renderHome(app) {
@@ -4619,12 +4602,25 @@ async function renderForumList(app, queryString) {
 
   app.innerHTML = `
     <div class="container page forum-page">
+      <div class="forum-page-header">
+        <div class="forum-page-heading">
+          <span class="forum-page-kicker"><i class="fas fa-comments"></i> Topluluk</span>
+          <h1 class="page-title">Konular</h1>
+          <p class="forum-page-lead">Toplulukla fikir paylaş, tartış ve yeni şeyler keşfet.</p>
+          ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
+        </div>
+        ${currentUser ? '<button type="button" class="btn btn-primary forum-new-btn" id="forum-new-topic"><i class="fas fa-plus"></i> Konu aç</button>' : ''}
+      </div>
       <div class="forum-toolbar">
         <div class="search-bar forum-search"><i class="fas fa-search"></i><input type="search" id="forum-search" placeholder="Konu, kullanıcı veya #etiket ara..." autocomplete="off" /></div>
-        ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
       </div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
+
+  $('#forum-new-topic')?.addEventListener('click', () => {
+    if (!currentUser) return navigate('/giris');
+    showNewForumModal();
+  });
 
   let forums = [];
   try {
@@ -4737,9 +4733,18 @@ async function renderPoemList(app) {
   updatePageMeta('Şiirler – ' + siteName, 'Paylaştığın şiirleri okuyup beğen, yorum yaz, gizli tut.', '');
   app.innerHTML = `
     <div class="container page">
+      <div class="content-create-header">
+        <h1 class="page-title"><i class="fas fa-pen-fancy" style="color:var(--accent-red2);margin-right:8px"></i>Şiirler</h1>
+        ${currentUser ? '<button type="button" class="btn btn-primary" id="poem-create"><i class="fas fa-plus"></i> Şiir yaz</button>' : ''}
+      </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Şiir ara..." /></div>
       <div id="poems-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
+
+  $('#poem-create')?.addEventListener('click', () => {
+    if (!currentUser) return navigate('/giris');
+    showNewPoemModal();
+  });
 
   let poems = [];
   try {
@@ -5547,9 +5552,18 @@ async function renderBookList(app) {
   updatePageMeta('Kitaplar – ' + siteName, 'Topluluğun yazdığı eserleri keşfet.', '');
   app.innerHTML = `
     <div class="container page">
+      <div class="books-list-header">
+        <h1 class="page-title">Kitaplar</h1>
+        ${currentUser ? '<button type="button" class="btn btn-primary" id="book-create"><i class="fas fa-plus"></i> Kitap oluştur</button>' : ''}
+      </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
       <div id="books-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
+
+  $('#book-create')?.addEventListener('click', () => {
+    if (!currentUser) return navigate('/giris');
+    showNewBookModal();
+  });
 
   let books = [];
   try { books = await api('/books'); } catch {}
@@ -7654,21 +7668,23 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   pauseRealsForComposer();
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   const defaultDescription = existing?.description || '';
+  const simplifiedRealsComposer = forceReals || Boolean(existing?.is_reals);
   showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals oluştur' : 'Video oluştur'), `
-    <div class="social-compose social-compose-video${forceReals || existing?.is_reals ? ' social-compose-reals' : ''}">
+    <div class="social-compose social-compose-video${simplifiedRealsComposer ? ' social-compose-reals' : ''}">
       <section class="social-compose-preview-pane">
         <div class="social-compose-preview-frame social-compose-video-frame">
           <video id="video-upload-preview" controls muted playsinline preload="metadata"></video>
           ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(existing.video_url)}" controls muted playsinline preload="metadata"></video>` : ''}
           <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
-          <label class="social-compose-pick"><i class="fas fa-plus"></i> Video seç<input type="file" id="video-file" accept="video/*" /></label>
+          <label class="social-compose-pick"><i class="fas fa-plus"></i> ${forceReals ? 'Reals videosu seç' : 'Video seç'}<input type="file" id="video-file" accept="video/mp4,video/quicktime,video/webm,video/ogg,.mp4,.m4v,.mov,.webm,.ogv" /></label>
         </div>
-        <div class="social-compose-upload-hint"><i class="fas fa-mobile-screen"></i><span>${forceReals ? 'Dikey videolar Reals akışında tam ekran görüntülenir.' : 'Videonu ekle, önizle ve paylaşım bilgilerini tamamla.'}</span></div>
+        <div class="social-compose-upload-hint"><i class="fas fa-mobile-screen"></i><span>${forceReals ? 'En fazla 3 dakikalık videolar paylaşabilirsin.' : 'Videonu ekle, önizle ve paylaşım bilgilerini tamamla.'}</span></div>
       </section>
       <section class="social-compose-fields">
         <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>${forceReals ? 'Reals paylaşımı' : 'Video paylaşımı'}</span></div>
-        <div class="form-group"><label>Başlık</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" placeholder="${forceReals ? 'Reals için kısa bir başlık…' : 'Videona bir başlık ekle…'}" /></div>
-        <div class="form-group"><label>Açıklama</label><textarea id="video-description" rows="4" placeholder="Ne düşünüyorsun?">${escHtml(defaultDescription)}</textarea></div>
+        <div class="form-group"><label>${simplifiedRealsComposer ? 'Başlık (isteğe bağlı)' : 'Başlık'}</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" placeholder="${simplifiedRealsComposer ? 'Reals için kısa bir başlık…' : 'Videona bir başlık ekle…'}" /></div>
+        <div class="form-group"><label>Açıklama <span class="text-muted">(isteğe bağlı)</span></label><textarea id="video-description" rows="${simplifiedRealsComposer ? '3' : '4'}" placeholder="Ne düşünüyorsun?">${escHtml(defaultDescription)}</textarea></div>
+        ${simplifiedRealsComposer ? '<details class="social-compose-advanced"><summary><i class="fas fa-sliders"></i> İsteğe bağlı ayarlar</summary><div class="social-compose-advanced-fields">' : ''}
         <div class="form-row">
           <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
           <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
@@ -7681,6 +7697,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           <label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label>
           <label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label>
         </div>
+        ${simplifiedRealsComposer ? '</div></details>' : ''}
         <div id="video-error" class="form-error"></div>
         <button class="btn btn-primary social-compose-submit" id="video-submit"><i class="fas fa-paper-plane"></i> ${existing ? 'Değişiklikleri kaydet' : 'Paylaş'}</button>
         <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
@@ -7707,7 +7724,27 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
   let autoBannerPromise = null;
-  const getVideoDuration = file => new Promise((resolve, reject) => { const probe = document.createElement('video'); probe.preload = 'metadata'; probe.onloadedmetadata = () => { URL.revokeObjectURL(probe.src); resolve(probe.duration); }; probe.onerror = () => reject(new Error('Video süresi okunamadı')); probe.src = URL.createObjectURL(file); });
+  const getVideoDuration = file => new Promise(resolve => {
+    const probe = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+    let timeout;
+    let finished = false;
+    const finish = duration => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      probe.removeAttribute('src');
+      probe.load();
+      URL.revokeObjectURL(objectUrl);
+      resolve(Number.isFinite(duration) && duration > 0 ? duration : null);
+    };
+    probe.preload = 'metadata';
+    probe.addEventListener('loadedmetadata', () => finish(probe.duration), { once: true });
+    probe.addEventListener('error', () => finish(null), { once: true });
+    timeout = setTimeout(() => finish(null), 5000);
+    probe.src = objectUrl;
+    probe.load();
+  });
   const syncVideoComposer = () => {
     const isReals = forceReals || $('#video-is-reals')?.checked;
     videoFrame?.classList.toggle('is-landscape', !isReals);
@@ -7733,7 +7770,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     }
   };
   const syncVideoDuration = video => {
-    if (Number.isFinite(video?.duration)) {
+    if (Number.isFinite(video?.duration) && video.duration > 0) {
       videoDurationSeconds = Math.max(0, Math.ceil(video.duration));
       syncVideoComposer();
     }
@@ -7749,15 +7786,20 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   videoInput?.addEventListener('change', async () => {
     const file = videoInput.files[0];
     if (!file) return;
+    videoDurationSeconds = 0;
     const uploadPreview = $('#video-upload-preview');
     if (uploadPreview) {
       if (activeVideoPreviewObjectUrl) URL.revokeObjectURL(activeVideoPreviewObjectUrl);
       activeVideoPreviewObjectUrl = URL.createObjectURL(file);
+      uploadPreview.addEventListener('loadedmetadata', () => syncVideoDuration(uploadPreview), { once: true });
+      uploadPreview.addEventListener('error', () => {
+        const hint = document.querySelector('.social-compose-upload-hint span');
+        if (hint) hint.textContent = 'Bu video önizlenemiyor; paylaşmayı yine de deneyebilirsin.';
+      }, { once: true });
       uploadPreview.src = activeVideoPreviewObjectUrl;
       uploadPreview.style.display = 'block';
       $('#video-preview-empty')?.classList.add('hidden');
       document.querySelector('.social-compose-existing-preview')?.remove();
-      uploadPreview.addEventListener('loadedmetadata', () => syncVideoDuration(uploadPreview), { once: true });
     }
     if (bannerInput?.files?.length) return;
     autoBannerFile = null;
@@ -7859,23 +7901,34 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   }).catch(() => {});
 
   $('#video-submit').addEventListener('click', async () => {
-    const title = $('#video-title').value.trim();
     const description = $('#video-description').value.trim();
     const videoFile = $('#video-file').files[0];
     const bannerFile = $('#video-banner-file').files[0];
     const isReals = forceReals || $('#video-is-reals').checked;
+    const title = $('#video-title').value.trim() || (isReals ? description.trim().slice(0, 80) || 'Reals' : '');
     if (!title) { $('#video-error').textContent = 'Başlık zorunlu'; return; }
     if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
     const maxVideoSize = isReals ? 500 * 1024 * 1024 : 100 * 1024 * 1024;
     if (!existing && videoFile.size > maxVideoSize) { $('#video-error').textContent = `${isReals ? 'Reals' : 'Video'} dosyası ${isReals ? 500 : 100} MB sınırını geçemez.`; return; }
-    if (!existing && isReals) { try { const duration = videoDurationSeconds > 0 ? videoDurationSeconds : await getVideoDuration(videoFile); if (!Number.isFinite(duration) || duration > 180) { $('#video-error').textContent = 'Reals videoları en fazla 3 dakika olabilir. Uzun videoyu Video olarak yükleyin.'; return; } } catch { $('#video-error').textContent = 'Reals video süresi okunamadı.'; return; } }
+    let durationSeconds = videoDurationSeconds;
+    if (!existing && isReals && durationSeconds <= 0) {
+      durationSeconds = await getVideoDuration(videoFile) || 0;
+      if (!durationSeconds) {
+        const hint = document.querySelector('.social-compose-upload-hint span');
+        if (hint) hint.textContent = 'Video süresi okunamadı; yükleme yine de devam edecek.';
+      }
+    }
+    if (isReals && durationSeconds > 180) {
+      $('#video-error').textContent = 'Reals videoları en fazla 3 dakika olabilir.';
+      return;
+    }
 
     const submitBtn = $('#video-submit');
     const uploadFields = {
       title, description, location: $('#video-location').value.trim(), sound_name: $('#video-sound').value.trim(),
       allow_comments: $('#video-comments').checked, show_likes: $('#video-likes').checked, is_reals: $('#video-is-reals').checked,
       song_id: $('#video-song').value || null, song_start_seconds: $('#video-song-start').value || 0,
-      media_filter: $('#video-filter').value, duration_seconds: videoDurationSeconds
+      media_filter: $('#video-filter').value, duration_seconds: durationSeconds
     };
     submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
     const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
@@ -7889,7 +7942,13 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         let uploadTarget = '/api/upload';
         let uploadUrl = '';
         if (isReals) {
-          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: videoFile.type || 'video/mp4', content_length: videoFile.size }) });
+          const extensionType = {
+            '.mp4': 'video/mp4', '.m4v': 'video/x-m4v', '.mov': 'video/quicktime',
+            '.webm': 'video/webm', '.ogv': 'video/ogg'
+          }[videoFile.name.toLowerCase().match(/\.[^.]+$/)?.[0]];
+          const contentType = videoFile.type.startsWith('video/') ? videoFile.type : extensionType;
+          if (!contentType) throw new Error('Bu video biçimi desteklenmiyor. MP4, MOV veya WebM dosyası seçin.');
+          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: contentType, content_length: videoFile.size }) });
           uploadTarget = signed.public_url;
           uploadUrl = signed.upload_url;
         }
@@ -7982,11 +8041,16 @@ async function renderVideoList(app) {
     app.innerHTML = `<div class="container page">
       <div class="video-home-header">
         <div><div class="page-title"><i class="fas fa-video"></i> Video</div></div>
+        ${currentUser ? '<button type="button" class="btn btn-primary" id="video-create"><i class="fas fa-plus"></i> Video paylaş</button>' : ''}
       </div>
       <div class="video-search-bar"><i class="fas fa-search"></i><input id="video-search-input" type="search" placeholder="Videolarda ara..." autocomplete="off" /></div>
       <div class="video-feed-label"><span><i class="fas fa-video"></i> Video akışı</span><small>${videos.length} video</small></div>
       <div id="video-home-grid" class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
     </div>`;
+    $('#video-create')?.addEventListener('click', () => {
+      if (!currentUser) return navigate('/giris');
+      showNewVideoModal();
+    });
     $('#video-search-input')?.addEventListener('input', async event => {
       const query = event.target.value.trim();
       const grid = $('#video-home-grid');
@@ -12939,10 +13003,10 @@ function showDmSongPicker(onSelect) {
 
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const isOwn = m.sender_id == myId;
-  const deleted = m.deleted_for_all;
+  if (m.deleted_for_all) return '';
   const messageText = String(m.content || '');
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
-  if (hiddenForMe && !deleted) return '';
+  if (hiddenForMe) return '';
   const senderName = m.sender_nickname || m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
   const messageTime = Date.parse(m.created_at);
@@ -12967,15 +13031,13 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
       ${!isOwn && !isContinued
         ? m.sender_username ? `<a href="${senderProfile}" data-link class="dm-msg-sender">${escHtml(senderName)}</a>` : `<span class="dm-msg-sender is-deleted">${escHtml(senderName)}</span>`
         : ''}
-      ${m.reply_to_id && m.reply_content
+      ${m.reply_to_id && m.reply_content && !m.reply_deleted_for_all
         ? `<div class="dm-reply-preview">
              <span style="color:var(--text-muted);font-size:11px;font-weight:600">${escHtml(m.reply_username || '')}</span>
              <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content || '').substring(0, 60))}</div>
            </div>`
         : ''}
-      ${deleted
-        ? `<div class="dm-msg-bubble dm-deleted"><i class="fas fa-ban" style="font-size:11px"></i> Mesaj silindi</div>`
-        : `<div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
+      <div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
              ${Number(m.image_view_limit) > 0 && !isOwn
                ? Number(m.image_view_count) >= Number(m.image_view_limit)
                  ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
@@ -13026,10 +13088,10 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                : ''}
              ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
              ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}
-           </div>`}
+           </div>
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
-        ${isOwn && !deleted
+        ${isOwn
           ? `<span class="dm-read-status${m.read_at ? ' is-read' : ''}" data-message-id="${escHtml(String(m.id))}" style="font-size:11px;margin-left:2px">${m.read_at
               ? '<i class="fas fa-check-double" title="Okundu" aria-label="Okundu"></i>'
               : '<i class="fas fa-check" title="Gönderildi" aria-label="Gönderildi"></i>'}</span>`
@@ -13121,7 +13183,6 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   const items = [
     { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
-    { label: '<i class="fas fa-lock fa-fw"></i> Konuşmayı kilitle', action: 'lock-conversation' },
     ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
     ...(canEditMusic ? [{ label: '<i class="fas fa-music fa-fw"></i> Müziği değiştir', action: 'edit-music' }] : []),
     { label: '<i class="fas fa-trash fa-fw"></i> Benden Sil', action: 'delete-me' },
@@ -13145,8 +13206,6 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
         if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
       } else if (item.action === 'select') {
         enterDmSelection(msgId);
-      } else if (item.action === 'lock-conversation') {
-        showDmMessageLockPrompt(username);
       } else if (item.action === 'edit') {
         showModal('Mesajı düzenle', `
           <div class="form-group">
@@ -13330,12 +13389,12 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
           : '<button class="btn btn-outline" id="dm-opt-mute"><i class="fas fa-bell-slash"></i> Sessize Al</button>'}
       </div>
       <div class="dm-options-actions">
-        ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Kilitle</button>' : ''}
+        <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Konuşmayı kilitle</button>
         ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>' : ''}
         <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
-        <button class="btn dm-clear-all" id="dm-opt-clear-all"><i class="fas fa-trash-alt"></i> Herkesten temizle</button>
+        <button class="btn dm-clear-all" id="dm-opt-clear-own"><i class="fas fa-trash-alt"></i> Kendi mesajlarımı temizle</button>
       </div>
-      <p class="dm-options-note"><i class="fas fa-circle-info"></i> “Herkesten temizle” işlemi geri alınamaz ve konuşmadaki mesajları iki taraftan kaldırır.</p>
+      <p class="dm-options-note"><i class="fas fa-circle-info"></i> “Kendi mesajlarımı temizle” yalnızca sizin gönderdiğiniz mesajları iki taraftan kalıcı olarak kaldırır. Karşı tarafın mesajları korunur.</p>
     </div>
   `);
   let selectedTheme = DM_THEME_LABELS[themeKey] ? themeKey : 'default';
@@ -13386,37 +13445,7 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
   });
   document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
-    showModal('Konuşmayı Gizle', `
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">Bu konuşmanın nasıl açılacağını seç.</p>
-      <div class="form-group"><label>Kilit türü</label><div class="dm-lock-type-options">
-        <label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="personal" checked /><span><i class="fas fa-key"></i><b>Bu sohbet için şifre</b><small>Yalnızca bu konuşmada kullanılır.</small></span></label>
-        ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="account" /><span><i class="fas fa-shield-halved"></i><b>Hesap kilit kodu</b><small>Sohbet Kilidi ayarlarında tanımladığın kodla açılır.</small></span></label>' : ''}
-      </div></div>
-      <div class="form-group" id="dm-hide-pass-group">
-        <label>Bu sohbetin şifresi</label>
-        <div style="position:relative">
-          <input id="dm-hide-pass" type="password" autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly')" placeholder="Bir şifre belirle" style="padding-right:40px" />
-          <button type="button" id="dm-hide-pass-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px"><i class="fas fa-eye" id="dm-hide-pass-icon"></i></button>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" id="dm-hide-confirm" style="flex:1">Gizle</button>
-        <button class="btn btn-outline" onclick="hideModal()" style="flex:1">İptal</button>
-      </div>
-    `);
-    attachPasswordToggle($('#dm-hide-pass'), $('#dm-hide-pass-toggle'), $('#dm-hide-pass-icon'));
-    document.querySelectorAll('input[name="dm-lock-type"]').forEach(input => input.addEventListener('change', () => {
-      const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
-      $('#dm-hide-pass-group').hidden = !personal;
-      if (!personal) $('#dm-hide-pass').value = '';
-    }));
-    document.getElementById('dm-hide-confirm')?.addEventListener('click', async () => {
-      const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
-      const pass = personal ? (document.getElementById('dm-hide-pass')?.value || '') : '';
-      if (personal && !pass) return toast('Bu sohbet için bir şifre belirle veya hesap kilit kodunu seç.', 'error');
-      try { await api(`/conversation/${encodeURIComponent(username)}/hide`, { method: 'POST', body: JSON.stringify({ password: pass, lock_type: personal ? 'password' : 'account' }) }); hideModal(); navigate('/mesajlar'); toast('Konuşma gizlendi'); }
-      catch (e) { toast(e.message, 'error'); }
-    });
+    showDmMessageLockPrompt(username);
   });
   document.getElementById('dm-opt-setpass')?.addEventListener('click', () => {
     hideModal();
@@ -13442,16 +13471,16 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       await api(`/conversation/${encodeURIComponent(username)}`, { method: 'DELETE', body: JSON.stringify({ mode }) });
       hideModal();
       navigate('/mesajlar/' + username);
-      toast(mode === 'all' ? 'Sohbet iki taraftan temizlendi' : 'Sohbet sadece sizden temizlendi');
+      toast(mode === 'own' ? 'Gönderdiğiniz mesajlar iki taraftan kaldırıldı' : 'Sohbet sadece sizden temizlendi');
     } catch (e) { toast(e.message, 'error'); }
   };
   document.getElementById('dm-opt-clear-me')?.addEventListener('click', async () => {
     if (await CigCigDialogs.confirm('Sohbet yalnızca sizden temizlensin mi?')) clearConversation('me');
   });
-  document.getElementById('dm-opt-clear-all')?.addEventListener('click', async () => {
-    if (!await CigCigDialogs.confirm('Bu sohbet tüm mesajlarıyla iki taraftan da temizlensin mi?')) return;
-    if (!await CigCigDialogs.confirm('Son kez soruyorum: Karşı taraftaki mesajlar da kalıcı olarak silinsin mi?')) return;
-    clearConversation('all');
+  document.getElementById('dm-opt-clear-own')?.addEventListener('click', async () => {
+    if (!await CigCigDialogs.confirm('Yalnızca sizin gönderdiğiniz mesajlar iki taraftan kalıcı olarak silinecek. Karşı tarafın mesajları korunacak. Devam edilsin mi?')) return;
+    if (!await CigCigDialogs.confirm('Gönderdiğiniz mesajlar geri alınamayacak şekilde silinsin mi?')) return;
+    clearConversation('own');
   });
 }
 
@@ -14197,6 +14226,7 @@ async function renderMusicList(app) {
         <span><strong>Müzik</strong><small>Dinle, keşfet ve koleksiyonunu oluştur</small></span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        ${currentUser ? '<a href="/sarki-yukle" data-link class="btn btn-primary"><i class="fas fa-plus"></i><span>Şarkı yükle</span></a>' : ''}
         ${currentUser ? `<a href="/playlistlerim" data-link class="btn music-playlists-link"><i class="fas fa-record-vinyl"></i><span>Playlistlerim</span><i class="fas fa-arrow-right"></i></a>` : ''}
       </div>
     </div>

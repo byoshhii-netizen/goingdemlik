@@ -622,6 +622,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .nav-mobile-new-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--bg-card); color: var(--text-primary); font-size: 16px; }
   .mobile-new-dropdown:not(.hidden) { display: grid; }
   .mobile-new-dropdown.hidden { display: none !important; }
+  .mobile-create-menu #mob-new-reals { grid-column: 1 / -1; }
   body.mobile-create-menu-open { overflow: hidden; }
   .mobile-create-backdrop {
     position: fixed;
@@ -779,7 +780,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .video-feed-label { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; color:var(--text-primary); font-weight:700; }
 .video-feed-label small { color:var(--text-muted); font-size:12px; font-weight:400; }
 .books-list-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.books-list-header .page-title { margin:0; }
 .books-list-header .page-subtitle { display:block !important; font-size:15px; font-weight:600; color:var(--text-secondary); }
+.content-create-header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
+.content-create-header .page-title { margin:0; }
 .video-list-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap:16px; }
 .video-card {
   background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(var(--accent-rgb),0.06));
@@ -930,6 +934,9 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 @media (max-width: 768px) {
   .video-home-header { align-items:stretch; flex-direction:column; }
   .video-list-header { flex-direction: column; align-items: stretch; }
+  .video-home-header > .btn { width:100%; justify-content:center; }
+  .books-list-header, .content-create-header { align-items:stretch; flex-direction:column; }
+  .books-list-header > .btn, .content-create-header > .btn { width:100%; justify-content:center; }
   .video-list-grid { grid-template-columns: 1fr; gap: 12px; }
   .video-card { border-radius: 14px; }
   .video-card-body { padding: 12px; }
@@ -5153,6 +5160,16 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .social-compose-fields .story-song-list { max-height:150px; }
 .social-compose-fields .story-selected-song { margin:7px 0 0; }
 .social-compose-reals .social-compose-preview-pane { background:radial-gradient(ellipse at 50% 45%,rgba(189,162,117,.09),transparent 70%),#090a0c; }
+.social-compose-advanced { border:1px solid var(--border); border-radius:12px; background:rgba(255,255,255,.025); }
+.social-compose-advanced > summary { display:flex; align-items:center; gap:8px; padding:12px 14px; color:var(--text-secondary); font-size:12px; font-weight:700; cursor:pointer; list-style:none; }
+.social-compose-advanced > summary::-webkit-details-marker { display:none; }
+.social-compose-advanced > summary::after { content:"+"; margin-left:auto; color:var(--accent-red2); font-size:18px; font-weight:500; }
+.social-compose-advanced[open] > summary::after { content:"−"; }
+.social-compose-advanced > summary i { color:var(--accent-red2); }
+.social-compose-advanced-fields { display:flex; flex-direction:column; gap:12px; padding:0 12px 12px; }
+.social-compose-reals .social-compose-fields > .form-group:nth-of-type(2) input,
+.social-compose-reals .social-compose-fields > .form-group:nth-of-type(3) textarea { font-size:14px; }
+.social-compose-reals .social-compose-submit { min-height:48px; font-size:14px; }
 @media(max-width:768px){
   .social-compose-modal { position:fixed; inset:0; width:100%; max-width:none; height:100dvh; max-height:100dvh; margin:0; border:0; border-radius:0 !important; }
   .social-compose-modal .modal-header { position:sticky; top:0; z-index:4; min-height:54px; padding:15px 52px; background:var(--bg-card); }
@@ -5849,6 +5866,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .profile-photo-owner-actions .profile-content-edit-btn { width:29px; padding:0; }
   .music-page-header { align-items:stretch; padding:14px; }
   .music-page-header > div:last-child,.music-playlists-link { width:100%; justify-content:center; }
+  .music-page-header .btn { width:100%; justify-content:center; }
 }
 
 /* ===== MOBILE DM CHAT ROUTE ===== */

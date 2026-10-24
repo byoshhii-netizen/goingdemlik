@@ -9677,7 +9677,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
-      r.content as reply_content, ru.username as reply_username
+      r.content as reply_content, r.deleted_for_all as reply_deleted_for_all, ru.username as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -9692,6 +9692,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
       AND m.id>$6
+      AND m.deleted_for_all=0
       AND ($2=1 OR m.deleted_by_sender=0 OR m.sender_id!=$3)
       AND ($2=1 OR m.deleted_by_receiver=0 OR m.sender_id=$3)
     ORDER BY m.created_at ASC
@@ -10227,7 +10228,7 @@ app.post('/api/messages/delete-bulk', authMiddleware, async (req, res) => {
 
 app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
   const mode = req.body?.mode || 'me';
-  if (!['me', 'all'].includes(mode)) return res.status(400).json({ error: 'Geçersiz temizleme türü' });
+  if (!['me', 'own', 'all'].includes(mode)) return res.status(400).json({ error: 'Geçersiz temizleme türü' });
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
@@ -10237,8 +10238,12 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
   if (!convRows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
-  if (mode === 'all') {
-    await query('UPDATE dm_messages SET deleted_for_all=1 WHERE conversation_id=$1', [conv.id]);
+  if (mode === 'own' || mode === 'all') {
+    await query('UPDATE dm_messages SET deleted_for_all=1 WHERE conversation_id=$1 AND sender_id=$2', [conv.id, uid]);
+    io.to([`user:${conv.user1_id}`, `user:${conv.user2_id}`]).emit('dm:conversation-cleared', {
+      conversationId: conv.id,
+      usernames: [req.user.username, req.params.username]
+    });
   } else {
     const deletedColumn = isUser1 ? 'deleted_by_sender' : 'deleted_by_receiver';
     const ownDeletedColumn = isUser1 ? 'deleted_by_receiver' : 'deleted_by_sender';
