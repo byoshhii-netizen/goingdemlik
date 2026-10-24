@@ -4260,7 +4260,8 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
 
 /* Reels viewer */
 .reals-container { background: #08090b !important; overflow: hidden; }
-body.reals-page .navbar { display: none !important; }
+body.reals-page #navbar,
+body.reals-page #navbar[hidden] { display: none !important; }
 .reals-list { isolation: isolate; }
 .reals-video-box { box-shadow: 0 18px 60px rgba(0,0,0,.65) !important; }
 .reals-video { display: block; }

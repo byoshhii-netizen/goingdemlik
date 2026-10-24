@@ -1224,6 +1224,8 @@ function renderRoute(fullPath) {
   document.body.classList.toggle('group-chat-route', isGroupChatRoute);
   document.body.classList.toggle('messages-page', path === '/mesajlar');
   document.body.classList.toggle('reals-page', path === '/reals' || path.startsWith('/reals/'));
+  const siteNavbar = document.getElementById('navbar');
+  if (siteNavbar) siteNavbar.hidden = path === '/reals' || path.startsWith('/reals/');
   document.body.classList.toggle('home-page', path === '/');
   document.body.classList.toggle('music-list-page', path === '/muzikler');
   updateNavActive(path);
