@@ -16250,7 +16250,7 @@ function showStoryUploadModal() {
         <div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div>
         <div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda kaydedilir, videolarda izleme ekranında uygulanır.</small></div>
       </div>
-      <div class="form-group"><label>Müzik ekle</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled style="width:100%" /><div class="media-time-row"><span>Müziğin başlayacağı an</span><b id="story-song-time">0:00</b></div></div>
+      <div class="form-group"><label>Müzik ekle</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><div id="story-song-timing" class="story-song-timing" hidden><div class="story-song-waveform" id="story-song-waveform" aria-label="Hikaye müziğinin başlangıç noktasını seç"><div class="story-song-waveform-bars" id="story-song-waveform-bars" aria-hidden="true"></div><span class="story-song-waveform-selection" aria-hidden="true"></span><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled aria-label="Müzik başlangıç zamanı" /></div><div class="story-song-preview-controls"><button type="button" id="story-song-preview" aria-label="Müzik önizlemesini oynat" disabled><i class="fas fa-play"></i></button><span><strong id="story-song-time">0:00 – 0:30</strong><small id="story-song-preview-status">Başlangıç noktasını kaydırarak müziği dinle</small></span></div></div></div>
       <div id="story-song-player" class="story-selected-song" hidden></div>
       <div id="story-error" class="form-error"></div>
       <button class="btn btn-primary social-compose-submit" id="story-save"><i class="fas fa-paper-plane"></i> Hikayeni paylaş</button>
@@ -16260,7 +16260,143 @@ function showStoryUploadModal() {
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   let storyPreviewUrls = [];
   let activeStoryPreviewIndex = 0;
-  const renderStoryPreviewLayers = () => `<div class="story-compose-preview-top"><div class="story-compose-preview-progress">${selectedStoryFiles.map((_, index) => `<span class="${index <= activeStoryPreviewIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-compose-preview-user">${avatarImg(currentUser, 'story-compose-preview-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><small>Şimdi</small></div></div><div class="story-compose-preview-bottom">${$('#story-caption').value.trim() ? `<p>${escHtml($('#story-caption').value.trim())}</p>` : ''}${selectedSong ? `<div class="story-compose-preview-song">${selectedSong.cover_url ? `<img src="${escHtml(selectedSong.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<span><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></span></div>` : ''}</div>`;
+  let storyPreviewStopAt = null;
+  let pendingStoryPreviewStart = null;
+  const storySongStart = $('#story-song-start');
+  const storySongTiming = $('#story-song-timing');
+  const storySongWaveform = $('#story-song-waveform');
+  const storySongPreviewButton = $('#story-song-preview');
+  const storySongPlayer = $('#story-song-player');
+  const formatStorySongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  $('#story-song-waveform-bars').innerHTML = Array.from({ length: 64 }, (_, index) => {
+    const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
+    return `<i style="--bar-height:${Math.round(height)}%"></i>`;
+  }).join('');
+  const updateStorySongWaveform = () => {
+    if (!storySongStart || !storySongWaveform) return;
+    const maxStart = Math.max(0, Number(storySongStart.max) || 0);
+    const total = Math.max(30, Number(storyComposerAudio?.duration) || maxStart + 30);
+    const width = Math.min(100, 30 / total * 100);
+    const left = Math.min(100 - width, (Number(storySongStart.value) || 0) / total * 100);
+    storySongWaveform.style.setProperty('--story-clip-left', `${left}%`);
+    storySongWaveform.style.setProperty('--story-clip-width', `${width}%`);
+    const start = Number(storySongStart.value) || 0;
+    $('#story-song-time').textContent = `${formatStorySongTime(start)} – ${formatStorySongTime(Math.min(total, start + 30))}`;
+  };
+  const setStoryPreviewPlaying = playing => {
+    const icon = storySongPreviewButton?.querySelector('i');
+    if (icon) icon.className = `fas fa-${playing ? 'pause' : 'play'}`;
+    storySongPreviewButton?.setAttribute('aria-label', playing ? 'Müzik önizlemesini duraklat' : 'Müzik önizlemesini oynat');
+    preview?.querySelectorAll('[data-story-sticker-play] i').forEach(stickerIcon => {
+      stickerIcon.className = `fas fa-${playing ? 'pause' : 'play'}`;
+    });
+  };
+  const playStorySongPreview = seconds => {
+    if (!storyComposerAudio || storyComposerAudio.readyState < HTMLMediaElement.HAVE_METADATA) {
+      pendingStoryPreviewStart = seconds;
+      $('#story-song-preview-status').textContent = 'Müzik yükleniyor...';
+      return;
+    }
+    pendingStoryPreviewStart = null;
+    const start = Math.min(Math.max(0, Number(seconds) || 0), Math.max(0, storyComposerAudio.duration - 0.1));
+    storyComposerAudio.currentTime = start;
+    storyPreviewStopAt = Math.min(storyComposerAudio.duration, start + 30);
+    $('#story-song-preview-status').textContent = 'Önizleme çalıyor';
+    storyComposerAudio.play().then(() => setStoryPreviewPlaying(true)).catch(() => {
+      $('#story-song-preview-status').textContent = 'Önizleme başlatılamadı';
+      setStoryPreviewPlaying(false);
+    });
+  };
+  const stopStorySongPreview = () => {
+    if (storyComposerAudio && !storyComposerAudio.paused) storyComposerAudio.pause();
+    storyPreviewStopAt = null;
+    $('#story-song-preview-status').textContent = 'Başlangıç noktasını kaydırarak müziği dinle';
+    setStoryPreviewPlaying(false);
+  };
+  const clearStoryComposerAudio = () => {
+    if (!storyComposerAudio) return;
+    storyComposerAudio.pause();
+    untrackMediaAudio(storyComposerAudio);
+    storyComposerAudio.removeAttribute('src');
+    storyComposerAudio.load();
+    storyComposerAudio = null;
+    storyPreviewStopAt = null;
+    pendingStoryPreviewStart = null;
+    setStoryPreviewPlaying(false);
+  };
+  const selectStorySong = song => {
+    clearStoryComposerAudio();
+    selectedSong = song;
+    updateStoryPreviewLayers();
+    $('#story-song').value = song?.id || '';
+    $('#story-song-player').hidden = !song;
+    storySongTiming.hidden = !song;
+    if (!song) {
+      storySongStart.disabled = true;
+      $('#story-song-preview-status').textContent = 'Başlangıç noktasını kaydırarak müziği dinle';
+      updateStorySongWaveform();
+      renderSongs(songs);
+      return;
+    }
+    storySongPlayer.innerHTML = `${song.cover_url ? `<img src="${escHtml(song.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<div><b>${escHtml(song.title)}</b><small>${escHtml(song.artist_name || '')}</small></div>`;
+    const audioUrl = song.remastered_audio_url || song.audio_url;
+    const savedStart = String($('#story-song-search').dataset.selectedSongId || '') === String(song.id)
+      ? Number(storySongStart.value) || 0
+      : String(savedDraft?.songId || '') === String(song.id) ? Number(savedDraft.songStart) || 0 : 0;
+    $('#story-song-search').dataset.selectedSongId = song.id;
+    storySongStart.value = String(Math.max(0, savedStart));
+    storySongStart.max = String(Math.max(0, Math.floor(Number(song.duration_seconds || 0) - 30)));
+    storySongStart.disabled = !audioUrl;
+    storySongPreviewButton.disabled = !audioUrl;
+    renderSongs(songs);
+    if (!audioUrl) {
+      $('#story-song-preview-status').textContent = 'Bu müzikte önizleme kullanılamıyor';
+      updateStorySongWaveform();
+      return;
+    }
+    storyComposerAudio = trackMediaAudio(new Audio(audioUrl));
+    storyComposerAudio.preload = 'metadata';
+    storyComposerAudio.addEventListener('loadedmetadata', () => {
+      const maxStart = Math.max(0, Math.floor(storyComposerAudio.duration - 30));
+      storySongStart.max = String(maxStart);
+      storySongStart.value = String(Math.min(Number(storySongStart.value) || 0, maxStart));
+      storySongPreviewButton.disabled = false;
+      updateStorySongWaveform();
+      if (pendingStoryPreviewStart !== null) playStorySongPreview(pendingStoryPreviewStart);
+    }, { once: true });
+    storyComposerAudio.addEventListener('timeupdate', () => {
+      if (storyPreviewStopAt !== null && storyComposerAudio.currentTime >= storyPreviewStopAt - 0.05) {
+        storyComposerAudio.pause();
+        storyComposerAudio.currentTime = storyPreviewStopAt;
+        storyPreviewStopAt = null;
+        $('#story-song-preview-status').textContent = '30 saniyelik önizleme tamamlandı';
+        setStoryPreviewPlaying(false);
+      }
+    });
+    storyComposerAudio.addEventListener('ended', () => {
+      storyPreviewStopAt = null;
+      setStoryPreviewPlaying(false);
+    });
+    storyComposerAudio.addEventListener('error', () => {
+      if (selectedSong?.id === song.id) {
+        $('#story-song-preview-status').textContent = 'Müzik yüklenemedi';
+        storySongPreviewButton.disabled = true;
+      }
+    });
+    storyComposerAudio.load();
+    updateStorySongWaveform();
+    playStorySongPreview(Number(storySongStart.value) || 0);
+  };
+  $('#story-song-preview')?.addEventListener('click', () => {
+    if (!storyComposerAudio) return;
+    if (!storyComposerAudio.paused) stopStorySongPreview();
+    else playStorySongPreview(Number(storySongStart.value) || 0);
+  });
+  storySongStart?.addEventListener('input', () => {
+    updateStorySongWaveform();
+    if (selectedSong?.audio_url || selectedSong?.remastered_audio_url) playStorySongPreview(Number(storySongStart.value) || 0);
+  });
+  const renderStoryPreviewLayers = () => `<div class="story-compose-preview-top"><div class="story-compose-preview-progress">${selectedStoryFiles.map((_, index) => `<span class="${index <= activeStoryPreviewIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-compose-preview-user">${avatarImg(currentUser, 'story-compose-preview-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><small>Şimdi</small></div></div><div class="story-compose-preview-bottom">${$('#story-caption').value.trim() ? `<p>${escHtml($('#story-caption').value.trim())}</p>` : ''}${selectedSong ? `<button type="button" class="story-compose-preview-song" data-story-song-sticker aria-label="Müzik bilgisini büyüt">${selectedSong.cover_url ? `<img src="${escHtml(selectedSong.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<span><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></span><i class="fas fa-expand-alt story-compose-preview-song-expand"></i></button>` : ''}</div>`;
   const updateStoryPreviewLayers = () => {
     preview.querySelectorAll('.story-media-preview-item,.story-media-lightbox-content').forEach(item => {
       item.querySelectorAll('.story-compose-preview-top,.story-compose-preview-bottom').forEach(layer => layer.remove());
@@ -16387,63 +16523,41 @@ function showStoryUploadModal() {
     if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
   }
   const renderSongs = list => {
-    songList.innerHTML = songPickerMarkup(list, selectedSong);
+    songList.innerHTML = `<button type="button" class="story-song-option ${selectedSong ? '' : 'selected'}" data-song-id=""><span class="story-song-cover"><i class="fas fa-ban"></i></span><span><b>Müzik yok</b><small>Hikayeden müziği kaldır</small></span></button>${songPickerMarkup(list, selectedSong)}`;
     songList.querySelectorAll('.story-song-option').forEach(button => button.onclick = () => {
-      if (storyComposerAudio) {
-        storyComposerAudio.pause();
-        untrackMediaAudio(storyComposerAudio);
-        storyComposerAudio = null;
-      }
-      selectedSong = songs.find(song => String(song.id) === button.dataset.songId);
-      if (!selectedSong) return;
-      updateStoryPreviewLayers();
-      $('#story-song').value = selectedSong.id;
-      $('#story-song-start').disabled = !selectedSong.audio_url;
-      $('#story-song-start').max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
-      if (selectedSong.audio_url) {
-        const probe = new Audio(selectedSong.audio_url);
-        probe.addEventListener('loadedmetadata', () => { $('#story-song-start').max = Math.max(0, Math.floor(probe.duration || 0)); });
-      }
-      $('#story-song-start').value = Math.min(Number(savedDraft?.songStart) || 0, Number($('#story-song-start').max) || 0);
-      $('#story-song-start').dispatchEvent(new Event('input'));
-      renderSongs(songs);
-      $('#story-song-player').hidden = false;
-      $('#story-song-player').innerHTML = `<img src="${escHtml(selectedSong.cover_url || '')}" alt="" /><div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div><button type="button" id="story-song-toggle" class="btn btn-ghost" aria-label="Önizlemeyi oynat"><i class="fas fa-play"></i></button>`;
-      $('#story-song-toggle').onclick = () => {
-        if (!storyComposerAudio || storyComposerAudio.src !== selectedSong.audio_url) {
-          if (storyComposerAudio) storyComposerAudio.pause();
-          storyComposerAudio = new Audio(selectedSong.audio_url);
-        }
-        storyComposerAudio.currentTime = Number($('#story-song-start').value) || 0;
-        if (storyComposerAudio.paused) {
-          storyComposerAudio.play().then(() => { $('#story-song-toggle i').className = 'fas fa-pause'; }).catch(error => toast(error.message || 'Müzik önizlemesi başlatılamadı', 'error'));
-        } else {
-          storyComposerAudio.pause();
-          $('#story-song-toggle i').className = 'fas fa-play';
-        }
-      };
+      const song = songs.find(item => String(item.id) === button.dataset.songId);
+      selectStorySong(song || null);
     });
   };
   api('/songs').then(result => {
     songs = result;
     if (savedDraft?.songId) {
-      selectedSong = songs.find(song => String(song.id) === String(savedDraft.songId)) || null;
-      if (selectedSong) {
-        $('#story-song').value = selectedSong.id;
-        $('#story-song-start').disabled = !selectedSong.audio_url;
-        $('#story-song-start').max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
-        $('#story-song-start').dispatchEvent(new Event('input'));
-        if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
-      }
+      const savedSong = songs.find(song => String(song.id) === String(savedDraft.songId));
+      if (savedSong) selectStorySong(savedSong);
     }
     renderSongs(songs);
   }).catch(() => { songList.innerHTML = '<small class="text-muted">Müzikler yüklenemedi.</small>'; });
   $('#story-song-search').oninput = event => { const q = event.target.value.toLowerCase(); renderSongs(songs.filter(song => `${song.title} ${song.artist_name}`.toLowerCase().includes(q))); };
-  $('#story-song-start').oninput = event => {
-    const seconds = Number(event.target.value) || 0;
-    $('#story-song-time').textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
-    if (storyComposerAudio && !storyComposerAudio.paused) storyComposerAudio.currentTime = seconds;
-  };
+  preview.addEventListener('click', event => {
+    const sticker = event.target.closest('[data-story-song-sticker]');
+    if (!sticker || !selectedSong) return;
+    event.preventDefault();
+    event.stopPropagation();
+    preview.querySelector('.story-song-sticker-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'story-song-sticker-overlay';
+    overlay.innerHTML = `<button type="button" class="story-song-sticker-close" aria-label="Müzik kartını kapat"><i class="fas fa-xmark"></i></button><div class="story-song-sticker-expanded">${selectedSong.cover_url ? `<img src="${escHtml(selectedSong.cover_url)}" alt="" />` : '<span class="story-song-sticker-art"><i class="fas fa-music"></i></span>'}<strong>${escHtml(selectedSong.title)}</strong><small>${escHtml(selectedSong.artist_name || '')}</small><span class="story-song-sticker-range">${$('#story-song-time').textContent}</span><button type="button" class="story-song-sticker-play" data-story-sticker-play aria-label="Müziği önizle"><i class="fas fa-play"></i></button></div>`;
+    preview.append(overlay);
+    overlay.addEventListener('click', clickEvent => {
+      if (clickEvent.target === overlay || clickEvent.target.closest('.story-song-sticker-close')) {
+        overlay.remove();
+      } else if (clickEvent.target.closest('[data-story-sticker-play]')) {
+        if (!storyComposerAudio) return;
+        if (storyComposerAudio.paused) playStorySongPreview(Number(storySongStart.value) || 0);
+        else stopStorySongPreview();
+      }
+    });
+  });
   $('#story-save').addEventListener('click', async event => {
     const submitButton = event.currentTarget;
       const files = selectedStoryFiles.length ? selectedStoryFiles : [...mediaInput.files];
