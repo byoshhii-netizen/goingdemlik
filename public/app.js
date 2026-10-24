@@ -11163,8 +11163,13 @@ async function renderDMChat(username) {
         const uploadRes = await apiForm('/upload-image', fd);
         imageUrls.push(uploadRes.url);
       }
-      const payload = { content: content || '', reply_to_id: replyToId, image_view_limit: imageViewLimit, image_urls: imageUrls };
-      image_expiry_hours: Number(document.getElementById('dm-image-expiry-hours')?.value || 0), image_urls: imageUrls };
+      const payload = {
+        content: content || '',
+        reply_to_id: replyToId,
+        image_view_limit: imageViewLimit,
+        image_expiry_hours: Number(document.getElementById('dm-image-expiry-hours')?.value || 0),
+        image_urls: imageUrls
+      };
       const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
         method: 'POST', body: JSON.stringify(payload)
       });

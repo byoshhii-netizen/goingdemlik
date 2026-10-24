@@ -111,6 +111,22 @@
         splash?.remove();
         return;
       }
+      const navigationType = performance.getEntriesByType('navigation')[0]?.type;
+      let alreadyShown = navigationType === 'reload';
+      try {
+        alreadyShown = alreadyShown || sessionStorage.getItem('cigcig_mobile_splash_shown') === '1';
+      } catch (error) {
+        console.warn('Açılış ekranı tercihi bu sekmede saklanamadı:', error);
+      }
+      if (alreadyShown) {
+        splash.remove();
+        return;
+      }
+      try {
+        sessionStorage.setItem('cigcig_mobile_splash_shown', '1');
+      } catch (error) {
+        console.warn('Açılış ekranı tercihi bu sekmede saklanamadı:', error);
+      }
       document.body.classList.add('mobile-splash-active');
       setTimeout(() => {
         splash.remove();
@@ -290,7 +306,7 @@
 </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-  <script src="/app.js?v=20261024-device-theme-choice"></script>
+  <script src="/app.js?v=20261024-startup-splash-dm-fix"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---
