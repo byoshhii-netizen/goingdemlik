@@ -4539,7 +4539,7 @@ app.get('/api/users/:username/followers', optionalAuth, async (req, res) => {
   const userId = await canViewFollowList(req.params.username, req.user, 'followers');
   if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
-  const { rows } = await query("SELECT u.id,u.username,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.follower_id WHERE f.following_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
+  const { rows } = await query("SELECT u.id,u.username,u.nickname,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.follower_id WHERE f.following_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
   res.json(rows);
 });
 
@@ -4547,7 +4547,7 @@ app.get('/api/users/:username/following', optionalAuth, async (req, res) => {
   const userId = await canViewFollowList(req.params.username, req.user, 'following');
   if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
-  const { rows } = await query("SELECT u.id,u.username,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.following_id WHERE f.follower_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
+  const { rows } = await query("SELECT u.id,u.username,u.nickname,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.following_id WHERE f.follower_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
   res.json(rows);
 });
 
@@ -4715,7 +4715,34 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   if (user.is_private && !isOwner && !isFollower && !graceViewer) {
     return res.json({ user: sanitizeUser(user), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
-  const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts] = await Promise.all([
+  await ensureProfileAvatarArchiveSchema();
+  const profileNotePromise = req.user
+    ? (async () => {
+      await ensureDmNotesSchema();
+      const { rows } = await query(`
+        SELECT n.content,n.song_id,n.song_start_seconds,n.created_at,n.expires_at,
+               u.username,u.nickname,u.avatar,u.avatar_removed,s.title AS song_title,
+               s.artist_name AS song_artist,s.audio_url,s.remastered_audio_url,s.cover_url
+        FROM dm_notes n
+        JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
+        LEFT JOIN songs s ON s.id=n.song_id
+        WHERE n.user_id=$1 AND n.expires_at>NOW()
+          AND (n.content<>'' OR n.song_id IS NOT NULL)
+          AND ($2::bigint=$1
+            OR EXISTS (SELECT 1 FROM friendships f
+              WHERE ((f.requester_id=$1 AND f.addressee_id=$2)
+                OR (f.requester_id=$2 AND f.addressee_id=$1))
+                AND f.status='accepted')
+            OR (EXISTS (SELECT 1 FROM follows f
+                  WHERE f.follower_id=$2 AND f.following_id=$1 AND f.status='accepted')
+              AND EXISTS (SELECT 1 FROM follows f
+                  WHERE f.follower_id=$1 AND f.following_id=$2 AND f.status='accepted')))
+        LIMIT 1
+      `, [user.id, req.user.id]);
+      return rows[0] || null;
+    })()
+    : Promise.resolve(null);
+  const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos, dmNote] = await Promise.all([
     query('SELECT * FROM forums WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
     query(`SELECT b.* FROM books b WHERE (b.user_id=$1 OR EXISTS (SELECT 1 FROM book_access ba WHERE ba.book_id=b.id AND ba.user_id=$1)) AND (b.is_hidden=0 OR b.user_id=$2) ORDER BY b.created_at DESC LIMIT 20`, [user.id, req.user?.id || 0]).then(r => r.rows.map(sanitizeBook)),
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
@@ -4736,10 +4763,12 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     query(`SELECT
       (SELECT COUNT(*) FROM photos WHERE user_id=$1) AS photo_count,
       (SELECT COUNT(*) FROM songs WHERE uploader_id=$1 AND status='active') AS song_count`, [user.id]).then(r => r.rows[0]),
+    query('SELECT id,image_url,created_at FROM profile_avatar_archive WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
+    profileNotePromise,
   ]);
   const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
   const content_count = Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + Number(contentCounts.photo_count || 0) + Number(contentCounts.song_count || 0);
-  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, songs, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, dm_note: dmNote, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
