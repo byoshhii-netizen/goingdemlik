@@ -1235,6 +1235,8 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_user_content_archive_state
       ON user_content_archive (owner_id, state, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_content_archive_content
+      ON user_content_archive (content_type, content_id);
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'active';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_reason TEXT DEFAULT '';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMP;
