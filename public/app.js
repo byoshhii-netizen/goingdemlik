@@ -6293,15 +6293,17 @@ function showNewGroupModal() {
 let chatPollInterval = null;
 
 async function renderGroupDetail(app, slug) {
+  const groupSlugPath = encodeURIComponent(slug);
   if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
 
   let groupData, members = [], messages = [], channels = [];
   try {
-    groupData = await api('/group/' + slug);
-    members = await api('/group/' + slug + '/members');
-    try { messages = await api('/group/' + slug + '/messages'); } catch {}
-    try { channels = await api('/group/' + slug + '/channels'); }
+    groupData = await api('/group/' + groupSlugPath);
+    members = await api('/group/' + groupSlugPath + '/members');
+    try { messages = await api('/group/' + groupSlugPath + '/messages'); }
+    catch (error) { toast(error.message || 'Grup mesajları yüklenemedi', 'error'); }
+    try { channels = await api('/group/' + groupSlugPath + '/channels'); }
     catch (error) { toast(error.message || 'Grup kanalları yüklenemedi', 'error'); }
   } catch (error) {
     const status = error.data?.group_status;
@@ -6690,10 +6692,10 @@ async function renderGroupDetail(app, slug) {
     const ids = [...groupChatSelection];
     if (!ids.length) return;
     for (const id of ids) {
-      try { await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'error'); }
+      try { await api('/group/' + groupSlugPath + '/messages/' + id, { method: 'DELETE' }); } catch (e) { toast(e.message, 'error'); }
     }
     clearChatSelection();
-    try { const fresh = await api('/group/' + slug + '/messages'); const chatEl2 = $('#chat-messages'); if (chatEl2) { chatEl2.innerHTML = fresh.map(m => chatMsgHTML(m, isOwner || isMod, !!canSend)).join(''); enhanceLinkPreviews(chatEl2); } messages.splice(0, messages.length, ...fresh); } catch (e) { toast(e.message, 'error'); }
+    try { const fresh = await api('/group/' + groupSlugPath + '/messages'); const chatEl2 = $('#chat-messages'); if (chatEl2) { chatEl2.innerHTML = fresh.map(m => chatMsgHTML(m, isOwner || isMod, !!canSend)).join(''); enhanceLinkPreviews(chatEl2); } messages.splice(0, messages.length, ...fresh); } catch (e) { toast(e.message, 'error'); }
   });
   updateSelectionToolbar();
 
@@ -6704,7 +6706,7 @@ async function renderGroupDetail(app, slug) {
     const btn = $('#load-more-msgs');
     btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:12px;height:12px;display:inline-block"></div>';
     try {
-      const older = await api('/group/' + slug + '/messages?before_id=' + oldestMsgId);
+      const older = await api('/group/' + groupSlugPath + '/messages?before_id=' + oldestMsgId);
       if (!older.length) { $('#load-more-msgs-wrap').style.display = 'none'; return; }
       const chatEl2 = $('#chat-messages');
       const prevHeight = chatEl2.scrollHeight;
@@ -6801,7 +6803,7 @@ async function renderGroupDetail(app, slug) {
       return;
     }
     try {
-      const newMsgs = await api('/group/' + slug + '/messages');
+      const newMsgs = await api('/group/' + groupSlugPath + '/messages');
       const newest = newMsgs.filter(m => Number(m.id) > lastId);
       const chatEl2 = $('#chat-messages');
       if (chatEl2 && newMsgs.length && chatSignature(newMsgs) !== lastChatSignature) {
@@ -6919,10 +6921,10 @@ async function renderGroupDetail(app, slug) {
         let image_url = '';
         if (pendingChatImage) {
           const fd = new FormData(); fd.append('image', pendingChatImage);
-          const uploaded = await apiForm('/group/' + slug + '/upload', fd);
+          const uploaded = await apiForm('/group/' + groupSlugPath + '/upload', fd);
           image_url = uploaded.url;
         }
-        const msg = await api('/group/' + slug + '/messages', { method: 'POST', body: JSON.stringify({ content, image_url, reply_to_id: groupReplyToId }) });
+        const msg = await api('/group/' + groupSlugPath + '/messages', { method: 'POST', body: JSON.stringify({ content, image_url, reply_to_id: groupReplyToId }) });
         if (!messages.some(item => String(item.id) === String(msg.id))) {
           $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod, !!canSend));
           enhanceLinkPreviews(chatEl);
@@ -7004,7 +7006,7 @@ async function renderGroupDetail(app, slug) {
             const target = document.querySelector(`.edit-msg[data-id="${CSS.escape(id)}"]`);
             if (target) target.click();
           } else if (action === 'delete-me') {
-            await api('/group/' + slug + '/messages/' + id, { method: 'DELETE' });
+            await api('/group/' + groupSlugPath + '/messages/' + id, { method: 'DELETE' });
             const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(id)}"]`);
             if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>';
           }
@@ -7049,12 +7051,12 @@ async function renderGroupDetail(app, slug) {
       const message = edit.closest('.chat-msg');
       showModal('Mesajı düzenle', `<div class="form-group"><label>Mesaj</label><textarea id="edit-group-message" rows="5">${escHtml(edit.dataset.content || '')}</textarea></div><button class="btn btn-primary" id="save-group-message-edit" style="width:100%">Kaydet</button><div id="edit-group-message-error" class="form-error mt-4"></div>`);
       $('#save-group-message-edit').addEventListener('click', async () => {
-        try { const updated = await api('/group/' + slug + '/messages/' + edit.dataset.id, { method: 'PUT', body: JSON.stringify({ content: $('#edit-group-message').value }) }); message.outerHTML = chatMsgHTML(updated, isOwner || isMod, !!canSend); hideModal(); toast('Mesaj düzenlendi'); } catch (error) { $('#edit-group-message-error').textContent = error.message; }
+        try { const updated = await api('/group/' + groupSlugPath + '/messages/' + edit.dataset.id, { method: 'PUT', body: JSON.stringify({ content: $('#edit-group-message').value }) }); message.outerHTML = chatMsgHTML(updated, isOwner || isMod, !!canSend); hideModal(); toast('Mesaj düzenlendi'); } catch (error) { $('#edit-group-message-error').textContent = error.message; }
       });
       return;
     }
     if (!del) return;
-    try { await api('/group/' + slug + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.chat-msg'); if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
+    try { await api('/group/' + groupSlugPath + '/messages/' + del.dataset.id, { method: 'DELETE' }); const row = del.closest('.chat-msg'); if (row) row.outerHTML = '<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>'; } catch (e) { toast(e.message, 'error'); }
   });
 
   $('#join-requests-btn')?.addEventListener('click', async () => {
@@ -10880,6 +10882,7 @@ async function renderDMChat(username) {
       </div>
       <div class="dm-input-wrap">
         <input type="file" id="dm-img-input" accept="image/*" multiple hidden />
+        <input type="file" id="dm-camera-input" accept="image/*" capture="environment" hidden />
         <div class="dm-image-view-limit-wrap" id="dm-image-view-limit-wrap" hidden>
           <span class="dm-image-limit-title"><i class="fas fa-eye"></i> Fotoğraf sınırı</span>
           <div class="dm-image-limit-options" role="radiogroup" aria-label="Fotoğraf görüntüleme sınırı">
@@ -10892,6 +10895,7 @@ async function renderDMChat(username) {
           <input type="hidden" id="dm-image-view-limit" value="0" />
         </div>
         <div class="dm-img-preview-wrap" id="dm-img-preview-wrap" hidden></div>
+        <button class="dm-image-limit-toggle" id="dm-image-limit-toggle" type="button" title="Fotoğraf sınırını ayarla" aria-label="Fotoğraf sınırını ayarla" aria-controls="dm-image-view-limit-wrap" aria-expanded="false" hidden><i class="fas fa-eye" aria-hidden="true"></i></button>
         <span class="dm-img-upload-status" id="dm-img-upload-status" aria-live="polite"></span>
         <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
       </div>
@@ -10963,14 +10967,30 @@ async function renderDMChat(username) {
   };
 
   // Image management
+  let imageLimitPanelOpen = false;
   const renderDmImagePreview = () => {
     const preview = document.getElementById('dm-img-preview-wrap');
     const viewLimitWrap = document.getElementById('dm-image-view-limit-wrap');
+    const viewLimitToggle = document.getElementById('dm-image-limit-toggle');
     const inputWrap = document.querySelector('.dm-input-wrap');
     if (!preview) return;
+    if (!pendingImgs.length) {
+      imageLimitPanelOpen = false;
+      const imageViewLimit = document.getElementById('dm-image-view-limit');
+      if (imageViewLimit) imageViewLimit.value = '0';
+      document.querySelectorAll('[data-image-limit]').forEach(option => {
+        const selected = option.dataset.imageLimit === '0';
+        option.classList.toggle('is-active', selected);
+        option.setAttribute('aria-pressed', String(selected));
+      });
+    }
     preview.hidden = pendingImgs.length === 0;
     inputWrap?.classList.toggle('dm-has-images', pendingImgs.length > 0);
-    if (viewLimitWrap) viewLimitWrap.hidden = pendingImgs.length === 0;
+    if (viewLimitWrap) viewLimitWrap.hidden = pendingImgs.length === 0 || !imageLimitPanelOpen;
+    if (viewLimitToggle) {
+      viewLimitToggle.hidden = pendingImgs.length === 0;
+      viewLimitToggle.setAttribute('aria-expanded', String(pendingImgs.length > 0 && imageLimitPanelOpen));
+    }
     preview.innerHTML = pendingImgs.map((item, index) => `<span class="dm-img-preview-item">
       <img src="${escHtml(item.previewUrl)}" alt="Seçilen fotoğraf ${index + 1}" />
       <button class="dm-img-clear" data-remove-dm-image="${index}" type="button" aria-label="${index + 1}. fotoğrafı kaldır">×</button>
@@ -11041,6 +11061,15 @@ async function renderDMChat(username) {
       inputEl?.focus();
     }
   });
+  document.getElementById('dm-camera-input')?.addEventListener('change', event => {
+    const [file] = Array.from(event.target.files || []);
+    if (file) addDmImageFile(file);
+    event.target.value = '';
+  });
+  document.getElementById('dm-image-limit-toggle')?.addEventListener('click', () => {
+    imageLimitPanelOpen = !imageLimitPanelOpen;
+    renderDmImagePreview();
+  });
   document.querySelectorAll('[data-image-limit]').forEach(button => button.addEventListener('click', () => {
     const limit = button.dataset.imageLimit;
     document.getElementById('dm-image-view-limit').value = limit;
@@ -11054,6 +11083,17 @@ async function renderDMChat(username) {
   // Auto-resize textarea
   const textareaEl = document.getElementById('dm-input');
   if (textareaEl) {
+    textareaEl.addEventListener('paste', event => {
+      const files = Array.from(event.clipboardData?.items || [])
+        .filter(item => item.type.startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+      if (!files.length) return;
+      event.preventDefault();
+      const availableSlots = Math.max(0, maxDmImages - pendingImgs.length);
+      files.slice(0, availableSlots).forEach(addDmImageFile);
+      if (files.length > availableSlots) toast(`Bir mesajda en fazla ${maxDmImages} fotoğraf gönderebilirsin.`, 'error');
+    });
     textareaEl.addEventListener('input', () => {
       textareaEl.style.height = 'auto';
       textareaEl.style.height = Math.min(textareaEl.scrollHeight, 120) + 'px';
@@ -11555,7 +11595,7 @@ function showDmImageViewer(imageUrls, ephemeral = false) {
 
 async function openDmCamera(onCapture) {
   if (!navigator.mediaDevices?.getUserMedia) {
-    showModal('Kamera kullanılamıyor', '<div class="dm-camera-message"><i class="fas fa-camera"></i><strong>Bu cihazda kullanılabilir kamera bulunamadı.</strong><span>Telefonda kamera iznini açıp yeniden deneyin.</span></div>');
+    document.getElementById('dm-camera-input')?.click();
     return;
   }
   let stream;
@@ -11567,7 +11607,12 @@ async function openDmCamera(onCapture) {
     observer?.disconnect();
   };
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+    } catch (error) {
+      if (['NotAllowedError', 'PermissionDeniedError', 'SecurityError'].includes(error.name)) throw error;
+      stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    }
     showModal('Fotoğraf çek', `<div class="dm-camera-capture">
       <video id="dm-camera-video" autoplay playsinline muted></video>
       <button type="button" class="btn btn-primary" id="dm-camera-capture"><i class="fas fa-camera"></i> Fotoğraf çek</button>
@@ -11595,7 +11640,11 @@ async function openDmCamera(onCapture) {
   } catch (error) {
     stopCamera();
     const noCamera = error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError' || error.name === 'NotSupportedError';
-    showModal('Kamera kullanılamıyor', `<div class="dm-camera-message"><i class="fas fa-camera"></i><strong>${noCamera ? 'Bu cihazda kullanılabilir kamera bulunamadı.' : 'Kameraya erişilemedi.'}</strong><span>${noCamera ? 'Fotoğraf göndermek için galeriden bir fotoğraf seçebilirsiniz.' : 'Tarayıcı ayarlarından CigCig için kamera iznini açıp yeniden deneyin.'}</span></div>`);
+    showModal('Kamera kullanılamıyor', `<div class="dm-camera-message"><i class="fas fa-camera"></i><strong>${noCamera ? 'Kamera açılamadı.' : 'Kameraya erişilemedi.'}</strong><span>${noCamera ? 'Fotoğrafı galeriden seçebilir veya cihaz kamerasını yeniden deneyebilirsin.' : 'Tarayıcı ayarlarından CigCig için kamera iznini açıp yeniden deneyin.'}</span><button type="button" class="btn btn-outline" id="dm-camera-gallery"><i class="fas fa-image"></i> Galeriden seç</button></div>`);
+    document.getElementById('dm-camera-gallery')?.addEventListener('click', () => {
+      hideModal();
+      document.getElementById('dm-camera-input')?.click();
+    });
   }
 }
 
