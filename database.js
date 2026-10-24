@@ -76,6 +76,7 @@ async function initDb() {
       last_active TIMESTAMP DEFAULT NOW()
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_message_permission TEXT NOT NULL DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
@@ -489,10 +490,13 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       newspaper_id BIGINT NOT NULL REFERENCES newspapers(id) ON DELETE CASCADE,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      parent_comment_id BIGINT REFERENCES newspaper_comments(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE newspaper_comments ADD COLUMN IF NOT EXISTS parent_comment_id BIGINT REFERENCES newspaper_comments(id) ON DELETE CASCADE;
     CREATE INDEX IF NOT EXISTS idx_newspaper_comments_issue ON newspaper_comments(newspaper_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_newspaper_comments_parent ON newspaper_comments(parent_comment_id);
     CREATE TABLE IF NOT EXISTS newspaper_comment_likes (
       id BIGSERIAL PRIMARY KEY,
       comment_id BIGINT NOT NULL REFERENCES newspaper_comments(id) ON DELETE CASCADE,
@@ -930,6 +934,8 @@ async function initDb() {
       FOREIGN KEY(blocker_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    ALTER TABLE blocks ADD COLUMN IF NOT EXISTS hide_until TIMESTAMP NOT NULL DEFAULT NOW();
+    ALTER TABLE blocks ADD COLUMN IF NOT EXISTS fake_profile INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS dm_conversations (
       id BIGSERIAL PRIMARY KEY,
@@ -1219,6 +1225,20 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(content_type, content_id)
     );
+    CREATE TABLE IF NOT EXISTS user_content_archive (
+      owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content_type TEXT NOT NULL CHECK (content_type IN ('song','forum','book','photo','story','newspaper','poem','video','reals','playlist')),
+      content_id TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('archived','trash')),
+      content_data JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (owner_id, content_type, content_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_content_archive_state
+      ON user_content_archive (owner_id, state, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_user_content_archive_content
+      ON user_content_archive (content_type, content_id);
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'active';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_reason TEXT DEFAULT '';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMP;
