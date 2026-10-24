@@ -4260,6 +4260,7 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
 
 /* Reels viewer */
 .reals-container { background: #08090b !important; overflow: hidden; }
+body.reals-page .navbar { display: none !important; }
 .reals-list { isolation: isolate; }
 .reals-video-box { box-shadow: 0 18px 60px rgba(0,0,0,.65) !important; }
 .reals-video { display: block; }
@@ -4274,6 +4275,8 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
 .reals-icon-btn { backdrop-filter: blur(10px); box-shadow: 0 5px 18px rgba(0,0,0,.35); }
 .reals-info-btn { backdrop-filter: blur(10px); }
 @media (min-width:769px) {
+  body.reals-page .reals-container { min-height: 100dvh !important; }
+  body.reals-page .reals-list { height: 100dvh !important; }
   .reals-list { width: min(100%, 520px); }
   .reals-video-box { width: 400px; height: min(720px, calc(100vh - 88px)); border-radius: 18px; }
   .reals-video { object-fit: cover; }
@@ -4318,7 +4321,7 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
 }
 @media (max-width: 768px) {
   body.reals-page { padding-bottom: 0 !important; }
-  .reals-container { height: calc(100dvh - 56px - 60px - env(safe-area-inset-bottom)) !important; min-height: 0 !important; overflow: hidden !important; }
+  .reals-container { height: calc(100dvh - 60px - env(safe-area-inset-bottom)) !important; min-height: 0 !important; overflow: hidden !important; }
   .reals-list { height: 100% !important; overflow-y: auto !important; overflow-x: hidden !important; scroll-snap-type: y mandatory !important; }
   .reals-item { position: relative !important; inset: auto !important; flex: 0 0 100% !important; width: 100% !important; height: 100% !important; min-height: 100% !important; overflow: hidden; scroll-snap-align: start; scroll-snap-stop: normal; }
   .reals-video-box { width: 100% !important; height: 100% !important; max-height: none !important; }
