@@ -4906,6 +4906,8 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .social-compose-modal .modal-body { height:calc(100dvh - 54px); max-height:calc(100dvh - 54px); }
   .social-compose { display:flex; flex-direction:column; min-height:0; }
   .social-compose-preview-pane { gap:8px; padding:12px 14px 8px; border-right:0; border-bottom:1px solid var(--border); }
+  .social-compose-story .social-compose-preview-pane { margin-top:-8px; margin-bottom:-8px; padding-top:4px; background:#090a0c; }
+  .social-compose-story .social-compose-preview-frame { background:#000; }
   .social-compose-preview-frame { min-height:0; max-height:30dvh; border-radius:13px; }
   .social-compose-story-frame, .social-compose-video-frame:not(.is-landscape) { width:auto; height:30dvh; max-height:30dvh; aspect-ratio:9/16; }
   .social-compose-video-frame.is-landscape { width:100%; height:auto; max-height:32dvh; aspect-ratio:16/9; }
