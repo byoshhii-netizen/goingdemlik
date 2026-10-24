@@ -5081,13 +5081,12 @@ async function renderForumDetail(app, slug) {
         return `<div class="forum-tags-row" style="margin:12px 0">${html}</div>`;
       })()}
       <div class="forum-actions">
-        <button class="forum-action-btn like-count-control ${liked ? 'liked' : ''}" id="like-btn" aria-label="${liked ? 'Beğeniyi kaldır' : 'Beğen'}">
+        <button class="forum-action-btn like-count-control ${liked ? 'liked' : ''}" id="like-btn" aria-label="${liked ? 'Beğeniyi kaldır' : 'Beğen'}" aria-pressed="${liked}" data-liked="${liked}" data-like-count="${Number(forum.like_count) || 0}">
           <i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span id="like-count">${formatCount(forum.like_count)}</span>
         </button>
         <button class="forum-action-btn" id="share-btn"><i class="fas fa-share-alt"></i> Paylaş</button>
         ${currentUser ? `<button class="forum-action-btn" id="forward-forum-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}
       </div>
-      <hr class="divider" />
        <div class="comments-section">
          <div class="comments-heading"><div><div class="comments-title"><i class="fas fa-comments"></i> Yorumlar <span class="comments-count">${comments.length}</span></div><p class="comments-lead">Konuyu birlikte geliştirmek için düşünceni paylaş.</p></div><span class="comments-sort"><i class="fas fa-arrow-down-wide-short"></i> En yeni</span></div>
         ${currentUser && forum.allow_comments ? `
@@ -5117,20 +5116,37 @@ async function renderForumDetail(app, slug) {
 
   $('#like-btn').addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
+    const btn = $('#like-btn');
+    const cnt = $('#like-count');
+    if (btn.disabled) return;
+    const wasLiked = btn.dataset.liked === 'true';
+    const previousCount = Number(btn.dataset.likeCount) || 0;
+    const nextLiked = !wasLiked;
+    const nextCount = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+    const setLikeState = (isLiked, count) => {
+      btn.dataset.liked = String(isLiked);
+      btn.dataset.likeCount = String(count);
+      btn.classList.toggle('liked', isLiked);
+      btn.setAttribute('aria-pressed', String(isLiked));
+      btn.setAttribute('aria-label', isLiked ? 'Beğeniyi kaldır' : 'Beğen');
+      cnt.textContent = formatCount(count);
+      const icon = btn.querySelector('i');
+      if (icon) icon.className = `${isLiked ? 'fas' : 'far'} fa-heart`;
+    };
+    btn.disabled = true;
+    setLikeState(nextLiked, nextCount);
+    if (nextLiked) {
+      btn.classList.remove('like-pop');
+      requestAnimationFrame(() => btn.classList.add('like-pop'));
+    }
     try {
       const r = await api('/forum/' + slug + '/like', { method: 'POST' });
       liked = r.liked;
-      const btn = $('#like-btn'); const cnt = $('#like-count');
-      btn.classList.toggle('liked', liked);
-      cnt.textContent = formatCount(r.like_count ?? cnt.textContent);
-      const icon = btn.querySelector('i');
-      if (icon) icon.className = `${liked ? 'fas' : 'far'} fa-heart`;
-      btn.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Beğen');
-      if (liked) {
-        btn.classList.remove('like-pop');
-        requestAnimationFrame(() => btn.classList.add('like-pop'));
-      }
-    } catch (error) { toast(error.message, 'error'); }
+      setLikeState(liked, Number.isFinite(Number(r.like_count)) ? Number(r.like_count) : nextCount);
+    } catch (error) {
+      setLikeState(wasLiked, previousCount);
+      toast(error.message, 'error');
+    } finally { btn.disabled = false; }
   });
 
   $('#share-btn').addEventListener('click', async () => {
@@ -15748,7 +15764,7 @@ async function renderPhotos(app) {
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null), loadStoriesBar($('#stories-bar'))]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
 function photoCardHTML(p) {
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div><div class="photo-comment-box" hidden></div></div></article>`;
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
@@ -15765,79 +15781,125 @@ function bindPhotoFeed(feed) {
     }
   };
 
-  const renderComments = async (c, box) => {
-    const cs = await api('/photos/' + c.dataset.photoId + '/comments');
-    box.innerHTML = `<div class="photo-comments">${cs.map(v => `<div class="photo-comment-row"><p><b>${escHtml(v.nickname || v.username)}${redVerificationIconHTML(v.is_red_verified, v.red_verified_at)}</b> ${escHtml(v.content)}</p><div class="photo-comment-actions"><button type="button" class="btn btn-ghost btn-sm photo-comment-like ${v.liked ? 'liked' : ''}" data-comment-id="${v.id}"><i class="${v.liked ? 'fas' : 'far'} fa-heart"></i> <span>${v.like_count || 0}</span></button>${currentUser && (currentUser.id === v.user_id || currentUser.id === c.dataset.ownerId) ? `<button type="button" class="btn btn-ghost btn-sm photo-comment-delete" data-comment-id="${v.id}" title="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}</div></div>`).join('') || '<small>Henüz yorum yok.</small>'}</div>    ${currentUser ? '<form class="photo-comment-form"><input class="photo-comment-input" placeholder="Yorum yaz" maxlength="2000" autocomplete="off"/><button type="submit" class="btn btn-primary btn-sm photo-comment-send">Gönder</button></form>' : '<small>Yorum yapmak için <a href="/giris?returnTo=%2Ffotograflar" data-link>giriş yapın</a>.</small>'}`;
-    box.querySelector('.photo-comment-form')?.addEventListener('submit', async event => {
-      event.preventDefault();
-      const input = box.querySelector('input');
-      if (!input?.value.trim()) return;
-      const sendButton = box.querySelector('.photo-comment-send');
-      if (sendButton?.disabled) return;
-      if (sendButton) {
-        sendButton.disabled = true;
-        sendButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+  const openPhotoComments = async card => {
+    document.getElementById('photo-comments-sheet')?._closeComments?.();
+    const sheet = document.createElement('div');
+    sheet.id = 'photo-comments-sheet';
+    sheet.className = 'reals-comments-sheet photo-comments-sheet';
+    sheet.innerHTML = `<div class="reals-comments-backdrop"></div><section class="reals-comments-panel" role="dialog" aria-modal="true" aria-label="Fotoğraf yorumları">
+      <header class="reals-comments-header"><strong>Yorumlar</strong><button type="button" class="reals-comments-close" aria-label="Yorumları kapat"><i class="fas fa-times"></i></button></header>
+      <div class="reals-comments-list"><div class="loading-center"><div class="spinner"></div></div></div>
+      ${currentUser ? '<form class="reals-comment-form"><input type="text" maxlength="2000" placeholder="Yorum yaz..." autocomplete="off" /><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için <a href="/giris?returnTo=%2Ffotograflar" data-link>giriş yapın</a>.</div>'}
+    </section>`;
+    document.body.appendChild(sheet);
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') sheet._closeComments();
+    };
+    const close = () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      sheet.remove();
+    };
+    sheet._closeComments = close;
+    sheet.querySelector('.reals-comments-close').addEventListener('click', close);
+    sheet.querySelector('.reals-comments-backdrop').addEventListener('click', close);
+    document.addEventListener('keydown', closeOnEscape);
+    sheet.addEventListener('click', event => {
+      if (event.target.closest('a[data-link]')) close();
+    });
+    const list = sheet.querySelector('.reals-comments-list');
+    let comments = [];
+    const renderComments = values => {
+      list.innerHTML = values.length ? values.map(comment => {
+        const canDelete = currentUser && (
+          Number(currentUser.id) === Number(comment.user_id) ||
+          Number(currentUser.id) === Number(card.dataset.ownerId) ||
+          currentUser.is_admin
+        );
+        const author = userDisplayName(comment);
+        return `<div class="comment">
+          ${avatarImg(comment, 'comment-avatar')}
+          <div class="comment-body">
+            <div class="comment-header"><span class="comment-author">${comment.username ? `<a href="${profileRoute(comment.username)}" data-link>${author}</a>` : author}</span><span class="comment-time">${timeAgo(comment.created_at)}</span></div>
+            <div class="comment-content">${renderContent(comment.content)}</div>
+            <div class="photo-sheet-comment-actions">
+              ${canDelete ? `<button type="button" class="btn btn-ghost btn-sm photo-sheet-comment-delete" data-id="${comment.id}" aria-label="Yorumu sil"><i class="fas fa-trash"></i></button>` : ''}
+              <button type="button" class="btn btn-ghost btn-sm photo-sheet-comment-like${comment.liked ? ' liked' : ''}" data-id="${comment.id}" aria-label="${comment.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${comment.liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(comment.like_count)}</span></button>
+            </div>
+          </div>
+        </div>`;
+      }).join('') : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
+    };
+    try {
+      comments = await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments');
+      if (!document.body.contains(sheet)) return;
+      renderComments(comments);
+      const commentButton = card.querySelector('.photo-comment');
+      if (commentButton) {
+        commentButton.dataset.commentCount = String(comments.length);
+        const count = commentButton.querySelector('span');
+        if (count) count.textContent = formatCount(comments.length);
       }
-      try {
-        await api('/photos/' + c.dataset.photoId + '/comments', { method: 'POST', body: JSON.stringify({ content: input.value.trim() }) });
-        input.value = '';
-        const count = c.querySelector('.photo-comment span');
-        const commentButton = c.querySelector('.photo-comment');
-        if (count && commentButton) {
-          const nextCount = (Number(commentButton.dataset.commentCount) || 0) + 1;
-          commentButton.dataset.commentCount = String(nextCount);
-          count.textContent = formatCount(nextCount);
-        }
+    } catch (error) {
+      list.innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message || 'Yorumlar yüklenemedi')}</p></div>`;
+    }
+    list.addEventListener('click', async event => {
+      const likeButton = event.target.closest('.photo-sheet-comment-like');
+      if (likeButton) {
+        if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
+        if (likeButton.disabled) return;
+        likeButton.disabled = true;
         try {
-          await renderComments(c, box);
-        } catch (error) {
-          toast('Yorum gönderildi ancak yorumlar yenilenemedi. ' + (error.message || ''), 'error');
-          if (sendButton) {
-            sendButton.disabled = false;
-            sendButton.innerHTML = 'Gönder';
+          const result = await api('/photos/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
+          const count = likeButton.querySelector('span');
+          const value = Math.max(0, (Number(count.textContent) || 0) + (result.liked ? 1 : -1));
+          count.textContent = formatCount(value);
+          likeButton.classList.toggle('liked', result.liked);
+          likeButton.setAttribute('aria-label', result.liked ? 'Beğeniyi kaldır' : 'Beğen');
+          likeButton.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+        } catch (error) { toast(error.message || 'Yorum beğenilemedi', 'error'); }
+        finally { likeButton.disabled = false; }
+        return;
+      }
+      const deleteButton = event.target.closest('.photo-sheet-comment-delete');
+      if (deleteButton) {
+        if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
+        try {
+          await api('/photos/comments/' + deleteButton.dataset.id, { method: 'DELETE' });
+          comments = comments.filter(comment => String(comment.id) !== deleteButton.dataset.id);
+          renderComments(comments);
+          const commentButton = card.querySelector('.photo-comment');
+          if (commentButton) {
+            commentButton.dataset.commentCount = String(comments.length);
+            const count = commentButton.querySelector('span');
+            if (count) count.textContent = formatCount(comments.length);
           }
-        }
-      } catch (error) {
-        toast(error.message || 'Yorum gönderilemedi', 'error');
-        if (sendButton) {
-          sendButton.disabled = false;
-          sendButton.innerHTML = 'Gönder';
-        }
+        } catch (error) { toast(error.message || 'Yorum silinemedi', 'error'); }
       }
     });
-    box.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
+    sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
       event.preventDefault();
-      event.stopPropagation();
-      if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
+      const input = event.currentTarget.querySelector('input');
+      const content = input.value.trim();
+      if (!content) return;
+      const button = event.currentTarget.querySelector('button');
+      if (button.disabled) return;
+      button.disabled = true;
       try {
-        const result = await api('/photos/comments/' + button.dataset.commentId + '/like', { method: 'POST' });
-        const count = button.querySelector('span');
-        const value = Math.max(0, Number(count?.textContent || 0) + (result.liked ? 1 : -1));
-        if (count) count.textContent = value;
-        button.classList.toggle('liked', result.liked);
-        button.querySelector('i').className = (result.liked ? 'fas' : 'far') + ' fa-heart';
-      } catch (error) { toast(error.message || 'Yorum beğenilemedi', 'error'); }
-    }));
-    box.querySelectorAll('.photo-comment-delete').forEach(button => button.addEventListener('click', async event => {
-      event.preventDefault(); event.stopPropagation();
-      if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
-      try { await api('/photos/comments/' + button.dataset.commentId, { method: 'DELETE' }); await renderComments(c, box); } catch (error) { toast(error.message || 'Yorum silinemedi', 'error'); }
-    }));
+        await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        comments = await api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/comments');
+        renderComments(comments);
+        input.value = '';
+        list.scrollTop = list.scrollHeight;
+        const commentButton = card.querySelector('.photo-comment');
+        if (commentButton) {
+          commentButton.dataset.commentCount = String(comments.length);
+          const count = commentButton.querySelector('span');
+          if (count) count.textContent = formatCount(comments.length);
+        }
+      } catch (error) { toast(error.message || 'Yorum gönderilemedi', 'error'); }
+      finally { button.disabled = false; }
+    });
   };
-
-  feed.querySelectorAll('.photo-comment-like').forEach(button => button.addEventListener('click', async event => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
-    try {
-      const result = await api('/photos/comments/' + button.dataset.commentId + '/like', { method: 'POST' });
-      const count = button.querySelector('span');
-      const value = Math.max(0, Number(count?.textContent || 0) + (result.liked ? 1 : -1));
-      if (count) count.textContent = value;
-      button.classList.toggle('liked', result.liked);
-      button.querySelector('i').className = (result.liked ? 'fas' : 'far') + ' fa-heart';
-    } catch (error) { toast(error.message || 'Yorum beğenilemedi', 'error'); }
-  }));
 
   feed.querySelectorAll('.photo-ad-card').forEach(x => x.onclick = () => {
     const id = x.dataset.adId;
@@ -15867,14 +15929,7 @@ function bindPhotoFeed(feed) {
     e.stopPropagation();
     const c = x.closest('[data-photo-id]');
     if (!c) return;
-    const box = c.querySelector('.photo-comment-box');
-    if (!box) return;
-    box.hidden = !box.hidden;
-    if (!box.hidden) {
-      box.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
-      try { await renderComments(c, box); }
-      catch (error) { box.innerHTML = `<small class="form-error">${escHtml(error.message || 'Yorumlar yüklenemedi')}</small>`; }
-    }
+    await openPhotoComments(c);
   });
 
   feed.querySelectorAll('.photo-share').forEach(x => x.onclick = async e => {

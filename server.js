@@ -3207,8 +3207,11 @@ app.post('/api/forum/:slug/like', authMiddleware, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
   const fid = rows[0].id;
   const { rows: ex } = await query('SELECT id FROM forum_likes WHERE forum_id=$1 AND user_id=$2', [fid, req.user.id]);
-  if (ex.length) { await query('DELETE FROM forum_likes WHERE id=$1', [ex[0].id]); res.json({ liked: false }); }
-  else { await query('INSERT INTO forum_likes (forum_id,user_id) VALUES ($1,$2)', [fid, req.user.id]); res.json({ liked: true }); }
+  const liked = !ex.length;
+  if (liked) await query('INSERT INTO forum_likes (forum_id,user_id) VALUES ($1,$2)', [fid, req.user.id]);
+  else await query('DELETE FROM forum_likes WHERE id=$1', [ex[0].id]);
+  const { rows: counts } = await query('SELECT COUNT(*)::int AS like_count FROM forum_likes WHERE forum_id=$1', [fid]);
+  res.json({ liked, like_count: counts[0].like_count });
 });
 
 app.get('/api/forum/:slug/liked', optionalAuth, async (req, res) => {

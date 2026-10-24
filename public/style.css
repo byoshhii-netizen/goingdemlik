@@ -992,6 +992,11 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .reals-comments-list { min-height:180px; overflow-y:auto; padding:14px 16px; display:grid; align-content:start; gap:12px; }
 .reals-comments-list .comment { margin:0; padding:0 0 12px; border-bottom:1px solid var(--border); }
 .reals-comments-list .comment:last-child { border-bottom:0; }
+.photo-comments-sheet .reals-comments-panel { max-height:min(82vh,720px); }
+.photo-sheet-comment-actions { display:flex; align-items:center; justify-content:flex-end; gap:6px; margin-top:8px; }
+.photo-sheet-comment-actions .btn { min-width:34px; min-height:30px; padding:3px 7px; border-radius:999px; color:var(--text-muted); }
+.photo-sheet-comment-actions .photo-sheet-comment-like.liked { color:var(--accent-red2); }
+.photo-comments-sheet .reals-comment-login a { color:var(--accent-red2); }
 .reals-comment-form { display:flex; gap:8px; padding:12px 14px max(12px,env(safe-area-inset-bottom)); border-top:1px solid var(--border); background:#111; }
 .reals-comment-form input { min-width:0; min-height:42px; border-radius:21px; padding:10px 15px; }
 .reals-comment-form button { flex:0 0 42px; width:42px; height:42px; border:1px solid var(--accent-red2) !important; border-radius:50%; background:var(--accent-red) !important; color:#171717 !important; cursor:pointer; box-shadow:0 2px 10px rgba(var(--accent-rgb),.28); }
@@ -1575,15 +1580,7 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .photo-native { display:block; width:100%; height:100%; border-radius:10px; object-fit:contain; object-position:center; background:transparent; }
 .photo-card h3 { margin:10px 0 4px; font-size:15px; }.photo-card p { margin:0 0 7px; color:var(--text-secondary); font-size:13px; line-height:1.45; }.photo-card small { color:var(--text-muted); }
 .photo-actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
-.photo-comment-box { margin-top:12px; border-top:1px solid var(--border); padding-top:10px; }
-.photo-comments { display:grid; gap:7px; margin-bottom:10px; }
-.photo-comments p { padding:8px 10px; margin:0; background:var(--bg-card2); border-radius:8px; overflow-wrap:anywhere; }
-.photo-comment-row { display:flex; align-items:center; gap:4px; }
-.photo-comment-row p { flex:1; min-width:0; }
-.photo-comment-like { flex:0 0 auto; padding:5px 7px; color:var(--text-muted); }
-.photo-comment-like.liked, .photo-like.liked { color:#f72585 !important; }
-.photo-comment-actions { display:flex; align-items:center; gap:2px; }
-.photo-comment-form { display:flex; gap:8px; }.photo-comment-form input { flex:1; min-width:0; }
+.photo-like.liked { color:#f72585 !important; }
 
 @media (max-width: 600px) { .photos-feed { gap:12px; } .photo-card { border-radius:12px; padding:10px; } }
 @media (min-width: 1000px) {
@@ -4376,7 +4373,7 @@ body.reals-page #navbar[hidden] { display: none !important; }
 .reals-action-btn, .reals-icon-btn, .reals-close-btn { position: relative; z-index: 7; pointer-events: auto !important; }
 .reals-play-overlay { z-index: 1 !important; }
 .reals-play-overlay span { position: relative; z-index: 1; }
-.photo-comment-like.liked, .photo-like.liked { color:#f72585 !important; text-shadow:0 0 10px rgba(247,37,133,.45); }
+.photo-like.liked { color:#f72585 !important; text-shadow:0 0 10px rgba(247,37,133,.45); }
 .reals-video-box, .reals-video { background:#000 !important; }
 .reals-container, .reals-list, .reals-item, .reals-video, .reals-meta, .reals-right-actions { user-select:none; -webkit-user-select:none; }
 .reals-container ::selection { background:transparent; color:inherit; }
@@ -5147,11 +5144,11 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 
 .forum-detail {
   max-width: 900px;
-  padding: clamp(18px, 4vw, 34px);
-  border: 1px solid var(--border);
-  border-radius: 20px;
-  background: linear-gradient(150deg, color-mix(in srgb, var(--bg-card) 96%, white 4%), var(--bg-card));
-  box-shadow: 0 16px 46px rgba(0,0,0,.12);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .forum-detail-header {
   padding-bottom: 18px;
@@ -5177,14 +5174,31 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   line-height: 1.9;
 }
 .forum-actions {
-  padding-top: 4px;
-  margin-bottom: 10px;
-  gap: 8px;
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:14px 0;
+  margin:0;
+  border-top:1px solid var(--border);
+  border-bottom:1px solid var(--border);
 }
 .forum-action-btn {
-  min-height: 38px;
-  padding: 8px 13px;
-  border-radius: 10px;
+  min-height:40px;
+  padding:8px 14px;
+  border:1px solid transparent;
+  border-radius:999px;
+  background:transparent;
+  font-weight:600;
+}
+.forum-action-btn:disabled { opacity:.65; cursor:wait; }
+.forum-action-btn.like-count-control { color:var(--text-secondary); }
+.forum-action-btn.like-count-control i { transition:transform .2s; }
+.forum-action-btn.like-count-control.liked i { color:var(--accent-red2); }
+.forum-action-btn:hover { background:rgba(var(--accent-rgb),.08); }
+.forum-actions + .comments-section {
+  padding-top:4px;
+  margin-top:26px;
 }
 
 .comments-section {
@@ -5464,11 +5478,11 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .forum-card-open { opacity: 1; transform: none; }
   .forum-card-meta { gap: 8px 12px; }
   .forum-card-banner { width: 100%; height: 150px; margin: 0; border-radius: 0 0 13px 13px; }
-  .forum-detail { padding: 17px 14px; border-radius: 16px; }
+  .forum-detail { padding: 0; border-radius: 0; }
   .forum-detail-title { margin-top: 13px; font-size: 25px; }
   .forum-detail-content { font-size: 15px; line-height: 1.75; }
-  .forum-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .forum-action-btn { width: 100%; justify-content: center; }
+  .forum-actions { display:flex; gap:6px; }
+  .forum-action-btn { width:auto; flex:1 1 auto; justify-content:center; padding:8px 10px; }
   .comments-heading { align-items: flex-start; }
   .comments-sort { display: none; }
   .comments-title { font-size: 18px; }
@@ -5694,27 +5708,6 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 
 .photo-actions .btn { min-height:38px; border:1px solid var(--border); border-radius:999px; padding-inline:13px; }
 .photo-actions .photo-like.liked { color:#f72585 !important; border-color:rgba(247,37,133,.36); background:rgba(247,37,133,.08); }
-.photo-comment-form {
-  align-items:center;
-  gap:7px;
-  padding:6px;
-  border:1px solid var(--border);
-  border-radius:999px;
-  background:var(--bg-card2);
-}
-.photo-comment-form input {
-  min-height:38px;
-  padding-inline:10px;
-  border:0;
-  background:transparent;
-  box-shadow:none;
-}
-.photo-comment-form input:focus { border:0; box-shadow:none; }
-.photo-comment-form .photo-comment-send {
-  min-height:36px;
-  border-radius:999px;
-  padding-inline:14px;
-}
 
 @media (max-width: 768px) {
   #global-music-player:not(.music-ad-player) .gplayer-inner {
