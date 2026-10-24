@@ -10544,8 +10544,8 @@ async function renderMessages(app, targetUsername) {
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
         <div class="dm-header-links">
-          <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button"><i class="fas fa-users"></i> Gruplar</button>
-          <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button"><i class="fas fa-user-friends"></i> Arkadaşlar<span id="dm-friends-badge" class="friend-request-dot"></span></button>
+          <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button" title="Gruplar" aria-label="Gruplar"><i class="fas fa-users"></i> Gruplar</button>
+          <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button" title="Arkadaşlar" aria-label="Arkadaşlar"><i class="fas fa-user-friends"></i> Arkadaşlar<span id="dm-friends-badge" class="friend-request-dot"></span></button>
         </div>
         <div class="dm-sidebar-actions">
           ${dmLockSettings.icon_unlock_enabled ? '<button class="dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>' : ''}

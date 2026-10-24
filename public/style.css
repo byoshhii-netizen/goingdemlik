@@ -5672,6 +5672,25 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .comment-compose-footer > span { font-size:9px; }
   .comment-compose-footer .btn { min-width:78px; padding-inline:8px; }
 }
+@media (max-width: 360px) {
+  .dm-sidebar-header { gap:6px; padding:8px; }
+  .dm-header-links { flex:0 0 auto; gap:4px; padding:2px; }
+  .dm-groups-button, .dm-friends-header-button {
+    flex:0 0 36px;
+    width:36px;
+    min-width:36px;
+    height:36px;
+    min-height:36px;
+    justify-content:center;
+    gap:0;
+    padding:0;
+    font-size:0;
+  }
+  .dm-groups-button > i, .dm-friends-header-button > i { font-size:14px; }
+  .dm-friends-header-button .friend-request-dot { top:1px; right:1px; }
+  .dm-sidebar-actions { flex:0 0 auto; }
+  .dm-new-message-btn { flex:0 0 36px; width:36px; min-width:36px; height:36px; }
+}
 
 .photo-actions .btn { min-height:38px; border:1px solid var(--border); border-radius:999px; padding-inline:13px; }
 .photo-actions .photo-like.liked { color:#f72585 !important; border-color:rgba(247,37,133,.36); background:rgba(247,37,133,.08); }
