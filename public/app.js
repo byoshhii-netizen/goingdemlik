@@ -10094,13 +10094,17 @@ async function renderSearch(app, queryString = '') {
 async function checkUnreadMessages() {
   try {
     const data = await api('/conversations/unread-count');
-    const count = data.count || 0;
+    const count = Number(data.count) || 0;
     const badge = $('#nav-msg-badge');
     const mobBadge = $('#mob-msg-badge');
     const bottomBadge = $('#mbb-msg-badge');
     if (badge) { badge.textContent = count > 9 ? '9+' : count; badge.style.display = count > 0 ? 'inline' : 'none'; }
     if (mobBadge) { mobBadge.textContent = count > 9 ? '9+' : count; mobBadge.style.display = count > 0 ? 'inline' : 'none'; }
     if (bottomBadge) { bottomBadge.textContent = count > 99 ? '99+' : count; bottomBadge.style.display = count > 0 ? 'block' : 'none'; }
+    ['#nav-msg-badge', '#mob-msg-badge', '#mbb-msg-badge'].forEach(selector => {
+      const element = $(selector);
+      if (element) element.setAttribute('aria-label', count ? `${count} kişiden okunmamış mesaj var` : 'Okunmamış mesaj yok');
+    });
   } catch {}
 }
 
@@ -10448,7 +10452,7 @@ async function renderMessages(app, targetUsername) {
         <button type="button" class="dm-conv-options-btn" title="Grup seçenekleri" aria-label="${escHtml(c.name || 'Grup')} seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>`;
     }
-    const unread = c.unread_count || 0;
+    const unread = Number(c.unread_count) || 0;
     const avatarHTML = hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed })
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
@@ -10467,7 +10471,7 @@ async function renderMessages(app, targetUsername) {
         <div class="dm-conv-name-row">
           <span class="user-identity dm-conv-name" ${c.other_name_color ? `style="color:${escHtml(c.other_name_color)}"` : ''}><strong>${escHtml(c.other_nickname || c.other_username)}</strong></span><span class="dm-presence-slot">${presenceHTML}</span>${isHidden ? ' <i class="fas fa-lock dm-conv-lock"></i>' : ''}
           ${muted ? '<i class="fas fa-bell-slash dm-conv-mute-icon" title="Sohbet sessizde"></i>' : ''}
-          ${unread > 0 ? `<span class="dm-unread-badge">${unread > 9 ? '9+' : unread}</span>` : ''}
+          ${unread > 0 ? `<span class="dm-unread-badge" aria-label="${formatCount(unread)} okunmamış mesaj">${formatCount(unread)}</span>` : ''}
         </div>
         <div class="dm-conv-last">${escHtml((c.last_message || '').substring(0, 40))}</div>
       </div>

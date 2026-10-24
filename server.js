@@ -9215,7 +9215,7 @@ app.post('/api/conversations/unlock-search', authMiddleware, async (req, res) =>
 app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
   const uid = req.user.id;
   const { rows } = await query(`
-    SELECT COUNT(*) as c FROM dm_messages m
+    SELECT COUNT(DISTINCT m.sender_id) as c FROM dm_messages m
     JOIN dm_conversations c ON c.id=m.conversation_id
     WHERE ((c.user1_id=$1 AND c.hidden_by_user1=0) OR (c.user2_id=$1 AND c.hidden_by_user2=0))
     AND m.sender_id!=$1

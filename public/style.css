@@ -518,8 +518,8 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   font-size: 14px;
   transition: border-color 0.2s;
 }
-.nav-user-btn { padding: 5px; border-radius: 50%; }
-.nav-user-btn .nav-avatar { display: block; width: 32px; height: 32px; }
+.nav-user-btn { box-sizing: border-box; width: 42px; height: 42px; padding: 4px; align-items: center; justify-content: center; border-radius: 50%; }
+.nav-user-btn .nav-avatar { display: block; box-sizing: border-box; width: 32px; height: 32px; min-width: 32px; flex: 0 0 32px; margin: 0; object-position: center; }
 .nav-user-btn:hover { border-color: var(--border-hover); }
 .nav-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; background: var(--bg-card2); }
 .nav-user-identity { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; line-height: 1.15; }
@@ -2862,6 +2862,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .mobile-bottom-bar a.active { color: var(--accent-red) !important; background: transparent; }
   .mobile-bottom-bar a:hover { color: var(--text-muted); background: transparent; }
   .mobile-bottom-bar i { font-size: 18px; }
+  .mobile-bottom-bar #mbb-auth { align-items: center; justify-content: center; }
   body { padding-bottom: 60px; }
   #toast-container { bottom: 72px; }
 }
@@ -3098,8 +3099,22 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-conv-options-btn { flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .dm-conv-options-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 .dm-unread-badge {
-  background: var(--accent-red); color: #fff;
-  font-size: 10px; padding: 1px 6px; border-radius: 10px; flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  background: #e11d48 !important;
+  color: #fff !important;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 /* ---- Main area ---- */
