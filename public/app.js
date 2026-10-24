@@ -1354,13 +1354,22 @@ async function renderRealsFeed(app, initialId = null) {
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
   app.innerHTML = `
     <div class="reals-container">
-      <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında">?</button>
+      <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında" hidden>?</button>
       <div id="reals-list" class="reals-list"></div>
     </div>`;
 
-  if (!localStorage.getItem('cigcig_reals_intro_seen')) {
-    document.getElementById('reals-intro-ok')?.addEventListener('click', () => { localStorage.setItem('cigcig_reals_intro_seen', '1'); hideModal(); });
-  }
+  let realsInfoSettings = null;
+  const realsInfoSettingsPromise = api('/reals-settings').then(settings => {
+    realsInfoSettings = settings;
+    const infoButton = document.getElementById('reals-info-btn');
+    const shouldShow = settings.infoEnabled !== false && !localStorage.getItem('cigcig_reals_info_seen');
+    if (infoButton) infoButton.hidden = !shouldShow;
+    if (shouldShow) localStorage.setItem('cigcig_reals_info_seen', '1');
+    return settings;
+  }).catch(error => {
+    console.error('Reals bilgi ayarları yüklenemedi:', error);
+    return null;
+  });
 
   // fetch reals
   let reals = [];
@@ -1402,7 +1411,9 @@ async function renderRealsFeed(app, initialId = null) {
   const followRequests = new Map();
 
   document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
-    try { const data = await fetch('/api/reals-settings').then(response => response.json()); showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`); } catch {}
+    const data = await realsInfoSettingsPromise;
+    if (!data) return toast('Reals bilgisi yüklenemedi.', 'error');
+    showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`);
   });
 
   let watchedIds = new Set();

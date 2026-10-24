@@ -10408,7 +10408,12 @@ app.get('/api/reals', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals-settings', async (req, res) => {
-  res.json({ reminder: 'Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.' });
+  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled']]);
+  const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  res.json({
+    reminder: settings.reals_reminder || 'Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.',
+    infoEnabled: settings.reals_info_enabled !== '0'
+  });
 });
 
 app.get('/api/video-settings', async (req, res) => {

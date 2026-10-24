@@ -3039,6 +3039,38 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   flex: 0 0 44px;
   object-fit: cover;
 }
+.dm-conv-item > .dm-conv-avatar-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  flex: 0 0 44px;
+}
+.dm-conv-item > .dm-conv-avatar-link > .avatar-sm {
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 44px;
+  max-height: 44px;
+  flex: 0 0 44px;
+  line-height: 1;
+}
+.dm-story-ring > .dm-story-avatar-media.avatar-placeholder {
+  box-sizing: border-box;
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px;
+  min-height: 40px;
+  max-width: 40px;
+  max-height: 40px;
+  line-height: 1;
+  font-size: 14px;
+}
 .dm-presence-dot {
   position: absolute; right: 0; bottom: 0;
   width: 11px; height: 11px; border: 2px solid var(--bg-card);

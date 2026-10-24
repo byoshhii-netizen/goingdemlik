@@ -3606,8 +3606,9 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-bolt" style="color:var(--red2);margin-right:8px"></i>Reals</span></div>
         <div class="card-body">
+          <div class="adm-feature-copy"><strong>Reals bilgi düğmesi</strong><p>Açıksa soru işareti, her kullanıcının Reals sayfasına ilk girişinde bir kez görünür. Kapalıysa hiç gösterilmez.</p></div>
+          <label class="adm-toggle-row" for="s-reals-info-enabled"><span><i class="fas fa-circle-question"></i> İlk Reals ziyaretinde göster</span><span class="adm-toggle"><input type="checkbox" id="s-reals-info-enabled" ${settings['reals_info_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Reals ilk hatırlatma metni (kısa)</label><textarea id="s-reals-reminder" rows="3">${escHtml(settings['reals_reminder']||'')}</textarea></div>
-          <div class="form-group"><label>Hatırlatma yalnızca ilk ziyaret için gösterilsin</label><div style="font-size:12px;color:var(--text2)">Kullanıcı Reals sayfasına ilk girdiğinde bir kez gösterilecek.</div></div>
           <button class="btn btn-primary" id="s-reals-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
           <div id="s-reals-msg" class="form-error mt-4"></div>
         </div>
@@ -3957,10 +3958,10 @@ async function renderSettings(main) {
   // Reals reminder save
   document.getElementById('s-reals-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-reals-msg');
-    try {
-      await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg);
-      msg.style.color='var(--green)'; msg.textContent='✓ Kaydedildi';
-    } catch (e) { msg.textContent=e.message; }
+    msg.textContent = '';
+    if (!await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg)) return;
+    if (!await saveSetting('reals_info_enabled', document.getElementById('s-reals-info-enabled').checked ? '1' : '0', msg)) return;
+    msg.style.color='var(--green)'; msg.textContent='✓ Reals ayarları kaydedildi';
   });
 
   // ===== TEMA RENGİ =====
