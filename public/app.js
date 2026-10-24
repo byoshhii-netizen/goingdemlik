@@ -943,6 +943,7 @@ document.addEventListener('keydown', event => {
 
 function closeMobileMenu() {
   $('#mobile-menu')?.classList.add('hidden');
+  $('#navbar')?.classList.remove('mobile-menu-expanded');
   $('#mobile-toggle')?.setAttribute('aria-expanded', 'false');
   $('#mobile-toggle')?.setAttribute('aria-label', 'Menüyü aç');
   $('#mobile-toggle i')?.classList.replace('fa-xmark', 'fa-bars');
@@ -2504,6 +2505,7 @@ $('#mobile-toggle').addEventListener('click', () => {
   const menu = $('#mobile-menu');
   const isOpening = menu.classList.contains('hidden');
   menu.classList.toggle('hidden', !isOpening);
+  $('#navbar')?.classList.toggle('mobile-menu-expanded', isOpening);
   $('#mobile-toggle').setAttribute('aria-expanded', String(isOpening));
   $('#mobile-toggle').setAttribute('aria-label', isOpening ? 'Menüyü kapat' : 'Menüyü aç');
   $('#mobile-toggle i').classList.toggle('fa-bars', !isOpening);
@@ -2571,7 +2573,7 @@ $('#mobile-notif-btn')?.addEventListener('click', () => navigate('/bildirimler')
 
 document.addEventListener('click', e => {
   if (!$('#mobile-menu')?.contains(e.target) && !$('#mobile-toggle')?.contains(e.target)) {
-    $('#mobile-menu')?.classList.add('hidden');
+    closeMobileMenu();
   }
   if (!$('#mobile-new-dropdown')?.contains(e.target) && !$('#mobile-new-toggle')?.contains(e.target)) {
     closeMobileCreateMenu();

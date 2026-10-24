@@ -5763,11 +5763,10 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .mobile-menu {
     position: relative;
     z-index: 20;
-    max-height: 75vh;
-    max-height: 75dvh;
     overflow-x: hidden;
-    overflow-y: auto;
+    overflow-y: visible;
   }
+  .navbar.mobile-menu-expanded { position: relative; }
   .mobile-menu.hidden { display: none !important; }
   .dm-conv-item { box-sizing: border-box; min-height: 68px; }
   .dm-conv-item > .dm-story-avatar-link,
