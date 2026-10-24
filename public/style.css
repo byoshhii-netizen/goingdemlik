@@ -6621,67 +6621,6 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
   #tab-songs > .empty-state { padding: 32px 14px; }
   .playlist-detail-page > .empty-state { padding: 28px 14px; }
 }
-.dm-image-expiry-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 8px 0;
-}
-
-.dm-image-expiry-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 38px;
-  padding: 8px 13px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, .14));
-  border-radius: 999px;
-  color: var(--text-primary, #f5f5f5);
-  background: var(--surface-color, rgba(255, 255, 255, .07));
-  font: inherit;
-  cursor: pointer;
-}
-
-.dm-image-expiry-toggle .fa-chevron-down {
-  font-size: 11px;
-  opacity: .7;
-}
-
-.dm-image-expiry-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: min(100%, 420px);
-  padding: 10px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, .14));
-  border-radius: 16px;
-  background: var(--surface-color, #171717);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, .22);
-}
-
-.dm-image-expiry-options[hidden] {
-  display: none;
-}
-
-.dm-image-expiry-options button {
-  flex: 1 1 auto;
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid var(--border-color, rgba(255, 255, 255, .12));
-  border-radius: 999px;
-  color: var(--text-primary, #f5f5f5);
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-}
-
-.dm-image-expiry-options button.is-active {
-  border-color: var(--accent-color, #e94b8a);
-  color: #fff;
-  background: var(--accent-color, #e94b8a);
-}
-
 .dm-img-preview-item img {
   cursor: zoom-in;
 }
@@ -7001,15 +6940,6 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 }
 
 @media (max-width: 600px) {
-  .dm-image-expiry-options {
-    width: 100%;
-    gap: 6px;
-  }
-
-  .dm-image-expiry-options button {
-    min-width: calc(50% - 6px);
-  }
-
   .dm-image-lightbox {
     padding: 10px;
   }

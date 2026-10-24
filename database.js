@@ -1064,8 +1064,6 @@ async function initDb() {
       image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
       image_view_limit INTEGER NOT NULL DEFAULT 0,
       image_view_count INTEGER NOT NULL DEFAULT 0,
-      image_expiry_hours INTEGER NOT NULL DEFAULT 0,
-      image_expires_at TIMESTAMPTZ,
       shared_forum_id BIGINT,
       shared_video_id BIGINT,
       shared_book_id BIGINT,
@@ -1098,8 +1096,6 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_expiry_hours INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_expires_at TIMESTAMPTZ;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
     UPDATE dm_messages SET shared_newspaper_id=NULL
       WHERE shared_newspaper_id IS NOT NULL
