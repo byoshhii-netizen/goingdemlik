@@ -9258,7 +9258,7 @@ async function renderSettingsSection(section) {
             }
           </div>
           ${isBlocked ? '' : `
-          <div class="form-group"><label>Yeni Kullanıcı Adı</label><input type="text" id="new-username" placeholder="3-30 karakter, harf/rakam/alt çizgi" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" /></div>
+          <div class="form-group"><label>Yeni Kullanıcı Adı</label><input type="text" id="new-username" placeholder="3-30 karakter, harf/rakam/nokta/alt çizgi" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" /></div>
           <button class="btn btn-primary" id="save-username-btn">Kullanıcı Adını Değiştir</button>
           <div id="username-msg" class="form-error mt-4"></div>
           `}
@@ -10111,7 +10111,7 @@ function renderRegister(app) {
           <small id="reg-avatar-name">JPG, PNG, WEBP veya GIF · en fazla 5 MB</small>
         </div>
       </div>
-      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" maxlength="30" placeholder="3-30 karakter, harf/rakam/alt çizgi" autocomplete="username" /></div>
+      <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" maxlength="30" placeholder="3-30 karakter, harf/rakam/nokta/alt çizgi" autocomplete="username" /></div>
       <div class="form-group"><label>Takma Ad</label><input type="text" id="reg-nickname" maxlength="32" placeholder="Ekranda görünecek adın (en fazla 32 karakter)" autocomplete="nickname" /><div class="form-hint">Boşluk kullanabilirsin; takma adın benzersiz olmak zorunda değil.</div></div>
       <div class="form-group">
         <label>Şifre</label>
@@ -10132,11 +10132,12 @@ function renderRegister(app) {
         <label>Hesap gizliliği</label>
         <label class="checkbox-label"><input type="checkbox" id="reg-private" /> Hesabımı gizli yap</label>
       </div>
-      <div class="form-group">
-        <label class="checkbox-label">
+      <div class="register-consent">
+        <label class="register-consent-label" for="reg-kvkk">
           <input type="checkbox" id="reg-kvkk" />
-          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum. <button type="button" class="btn btn-ghost btn-sm" id="kvkk-btn" style="padding:0;color:var(--accent-red2);font-size:13px">Metni oku</button></span>
+          <span>KVKK aydınlatma metnini okudum ve kabul ediyorum.</span>
         </label>
+        <button type="button" class="register-consent-read" id="kvkk-btn"><i class="fas fa-file-lines"></i> Metni oku</button>
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="reg-btn">Kayıt Ol</button>
       <div id="reg-error" class="form-error mt-4" style="text-align:center"></div>
@@ -10265,7 +10266,7 @@ function renderRegister(app) {
     if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--;
     if (age < 15 || birth > today) { $('#reg-error').textContent = '15 yaş altı kabul edilmez (¬‿¬) hııhıı'; return; }
     if (/\s/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adında boşluk oluşamaz'; return; }
-    if (username.length < 3 || username.length > 30 || !/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adı 3-30 karakter olmalı; harf, rakam ve alt çizgi kullanabilirsin'; return; }
+    if (username.length < 3 || username.length > 30 || !/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+(?:[._][a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)*$/.test(username)) { $('#reg-error').textContent = 'Kullanıcı adı 3-30 karakter olmalı; harf, rakam, nokta veya alt çizgi kullanabilirsin'; return; }
     if (nickname.length > 32) { $('#reg-error').textContent = 'Takma ad en fazla 32 karakter olabilir'; return; }
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {

@@ -1662,8 +1662,8 @@ async function createQuickRegistrationSuggestion(req, res) {
         : [noun];
       const usernameWord = usernameWords[crypto.randomInt(usernameWords.length)];
       const baseUsername = isSingleNickname
-        ? `${quickRegisterUsernamePart(nickname)}_${quickRegisterUsernamePart(usernameWord)}`
-        : `${quickRegisterUsernamePart(adjective)}_${quickRegisterUsernamePart(usernameWord)}`;
+        ? `${quickRegisterUsernamePart(nickname).slice(0, 8)}.${quickRegisterUsernamePart(usernameWord).slice(0, 8)}`
+        : `${quickRegisterUsernamePart(adjective).slice(0, 8)}.${quickRegisterUsernamePart(usernameWord).slice(0, 8)}`;
       const username = baseUsername;
       const { rows } = await query(
         `SELECT 1 FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
@@ -1739,7 +1739,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (emailAddress && !isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (/\s/.test(usernameValue)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
-    if (usernameValue.length < 3 || usernameValue.length > 30 || !/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(usernameValue)) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı ve yalnızca harf, rakam veya alt çizgi içermeli' });
+    if (usernameValue.length < 3 || usernameValue.length > 30 || !/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+(?:[._][a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)*$/.test(usernameValue)) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı; harf, rakam, nokta veya alt çizgi kullanabilirsin' });
     if (nicknameValue.length > 32 || /[\u0000-\u001F\u007F]/.test(nicknameValue)) return res.status(400).json({ error: 'Takma ad en fazla 32 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
     const twoFactorMethod = 'none';
@@ -5121,7 +5121,7 @@ app.put('/api/profile/username', authMiddleware, async (req, res) => {
     if (!username) return res.status(400).json({ error: 'Kullanıcı adı zorunlu' });
     if (/\s/.test(username)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (username.length < 3 || username.length > 30) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı' });
-    if (!/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı yalnızca harf, rakam ve alt çizgi içerebilir' });
+    if (!/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+(?:[._][a-zA-ZğüşıöçĞÜŞİÖÇ0-9]+)*$/.test(username)) return res.status(400).json({ error: 'Kullanıcı adı harf ve rakamlardan oluşmalı; nokta veya alt çizgi yalnızca kelimeleri ayırmak için kullanılabilir' });
     if (username.toLowerCase() === req.user.username.toLowerCase()) return res.status(400).json({ error: 'Bu zaten mevcut kullanıcı adınız' });
 
     const now = new Date();
