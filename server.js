@@ -5,6 +5,7 @@ const { randomUUID } = require('crypto');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
+const { once } = require('events');
 const { Readable } = require('stream');
 const multer = require('multer');
 const slugify = require('slugify');
@@ -5008,6 +5009,30 @@ function ensurePhotoInteractionSchema() {
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(photo_id, user_id)
       );
+      DO $$
+      BEGIN
+        LOCK TABLE photo_likes IN ACCESS EXCLUSIVE MODE;
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid='photo_likes'::regclass
+            AND conname='photo_likes_photo_id_fkey'
+            AND confrelid <> 'photos'::regclass
+        ) THEN
+          ALTER TABLE photo_likes DROP CONSTRAINT photo_likes_photo_id_fkey;
+        END IF;
+        DELETE FROM photo_likes pl
+        WHERE NOT EXISTS (SELECT 1 FROM photos p WHERE p.id=pl.photo_id);
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid='photo_likes'::regclass
+            AND conname='photo_likes_photo_id_fkey'
+            AND confrelid='photos'::regclass
+        ) THEN
+          ALTER TABLE photo_likes
+            ADD CONSTRAINT photo_likes_photo_id_fkey
+            FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
       CREATE TABLE IF NOT EXISTS photo_comments (
         id BIGSERIAL PRIMARY KEY,
         photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
@@ -6583,8 +6608,15 @@ app.get('/api/image-proxy', async (req, res) => {
     || imageUrl.username || imageUrl.password || !/\/image\/upload\//.test(imageUrl.pathname)) {
     return res.status(400).json({ error: 'Yalnızca herkese açık Cloudinary görselleri açılabilir.' });
   }
+  const timeoutSignal = AbortSignal.timeout(60000);
+  const clientAbortController = new AbortController();
+  const signal = AbortSignal.any([timeoutSignal, clientAbortController.signal]);
+  const abortOnDisconnect = () => {
+    if (!res.writableEnded) clientAbortController.abort();
+  };
+  res.once('close', abortOnDisconnect);
   try {
-    const upstream = await fetch(imageUrl, { redirect: 'error', signal: AbortSignal.timeout(20000) });
+    const upstream = await fetch(imageUrl, { redirect: 'error', signal });
     if (!upstream.ok || !upstream.body) return res.status(502).json({ error: 'Görsel kaynağına ulaşılamadı.' });
     const contentType = String(upstream.headers.get('content-type') || '').split(';', 1)[0].toLowerCase();
     if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif', 'image/bmp'].includes(contentType)) {
@@ -6595,19 +6627,26 @@ app.get('/api/image-proxy', async (req, res) => {
       'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
       'X-Content-Type-Options': 'nosniff'
     });
-    const imageStream = Readable.fromWeb(upstream.body);
-    imageStream.on('error', error => {
-      console.error('[image-proxy] Cloudinary görsel akışı kesildi:', error.message);
-      if (!res.headersSent) res.status(502);
-      res.destroy(error);
-    });
-    imageStream.pipe(res);
+    for await (const chunk of Readable.fromWeb(upstream.body)) {
+      if (!res.write(chunk)) await once(res, 'drain', { signal });
+    }
+    res.end();
   } catch (error) {
+    if (timeoutSignal.aborted) {
+      if (!res.headersSent) return res.status(504).json({ error: 'Görsel yüklemesi zaman aşımına uğradı.' });
+      console.error('[image-proxy] Cloudinary görsel akışı zaman aşımına uğradı:', error.message);
+      return res.destroy(error);
+    }
+    if (clientAbortController.signal.aborted || res.destroyed) {
+      return;
+    }
     if (error.name === 'TimeoutError' || error.name === 'AbortError') {
       return res.status(504).json({ error: 'Görsel yüklemesi zaman aşımına uğradı.' });
     }
     console.error('[image-proxy] Cloudinary görseli yüklenemedi:', error.message);
     return res.status(502).json({ error: 'Görsel şu anda açılamıyor.' });
+  } finally {
+    res.off('close', abortOnDisconnect);
   }
 });
 
