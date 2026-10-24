@@ -1833,8 +1833,6 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .auth-card--enhanced input { min-height: 44px; border-radius: 9px; }
 .auth-card--enhanced .btn-primary { min-height: 46px; font-weight: 700; }
 .auth-card--register { max-width: 520px; }
-.auth-card--register .register-preferences { margin: 18px 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card2); }
-.auth-card--register .register-preferences summary { color: var(--text-primary); font-weight: 700; cursor: pointer; }
 .auth-link { color: var(--accent-red2); }
 .auth-link:hover { text-decoration: underline; }
 .auth-footer { text-align: center; margin-top: 20px; font-size: 14px; color: var(--text-secondary); }

@@ -9349,7 +9349,7 @@ async function renderSettingsSection(section) {
           </div>
           <div class="form-group"><label>Doğrulama yöntemi</label><select id="s-2fa-method">
             <option value="none" ${config.method === 'none' ? 'selected' : ''}>Kapalı</option>
-            <option value="email" ${config.method === 'email' ? 'selected' : ''}>E-posta kodu</option>
+            <option value="email" ${config.method === 'email' ? 'selected' : ''} ${currentUser.email ? '' : 'disabled'}>E-posta kodu${currentUser.email ? '' : ' (önce e-posta ekle)'}</option>
             <option value="question" ${config.method === 'question' ? 'selected' : ''}>Güvenlik sorusu</option>
           </select></div>
           <div id="s-2fa-question-fields" style="display:${config.method === 'question' ? 'block' : 'none'};padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
@@ -9360,7 +9360,7 @@ async function renderSettingsSection(section) {
             </select></div>
             <div class="form-group"><label>Yeni cevap</label><input type="text" id="s-2fa-answer" autocomplete="off" placeholder="Cevabını yaz" /></div>
           </div>
-          <div id="s-2fa-email-info" class="form-hint" style="display:${config.method === 'email' ? 'block' : 'none'};margin:12px 0">Kod, ${escHtml(config.email)} adresine gönderilecek.</div>
+          <div id="s-2fa-email-info" class="form-hint" style="display:${config.method === 'email' ? 'block' : 'none'};margin:12px 0">${currentUser.email ? `Kod, ${escHtml(config.email)} adresine gönderilecek.` : 'E-posta kodunu kullanmak için önce aşağıdan e-posta adresi ekle.'}</div>
           <div class="form-group"><label>Hesap şifren</label><input type="password" id="s-2fa-password" autocomplete="current-password" placeholder="Değişikliği onaylamak için" /></div>
           <button class="btn btn-primary" id="save-2fa-btn"><i class="fas fa-save"></i> 2AD ayarını kaydet</button>
           <div id="s-2fa-msg" class="form-error mt-4"></div>
@@ -9404,6 +9404,9 @@ async function renderSettingsSection(section) {
       try {
         const result = await api('/profile/email/confirm', { method: 'POST', body: JSON.stringify({ challenge: emailChallenge, code: $('#s-email-code').value.trim() }) });
         currentUser.email = result.email; msg.style.color = 'var(--green)'; msg.textContent = 'E-posta adresin güncellendi.'; $('#s-email-code-box').style.display = 'none'; $('#s-new-email').value = ''; $('#s-email-password').value = '';
+        const emailOption = $('#s-2fa-method option[value="email"]');
+        if (emailOption) emailOption.disabled = false;
+        $('#s-2fa-email-info').textContent = `Kod, ${result.maskedEmail} adresine gönderilecek.`;
       } catch (e) { msg.style.color = ''; msg.textContent = e.message; }
     });
 
@@ -10096,8 +10099,8 @@ function renderRegister(app) {
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
       ${inviteCode ? `<div class="register-invite-notice"><i class="fas fa-ticket"></i><span>Davet kodu <strong>${escHtml(inviteCode)}</strong> ile kayıt oluyorsun.</span></div>` : ''}
-      <button type="button" class="quick-register-button" id="reg-quick-btn" aria-label="Hızlı kayıt ol"><span class="quick-register-icon"><i class="fas fa-user-plus" aria-hidden="true"></i></span><strong>HIZLI KAYIT OL</strong></button>
-      <p class="quick-register-hint">E-posta ve şifreni sen gir; profil fotoğrafını istersen kaldır. Hızlı kayıt IP ve zaman bilgisiyle kaydedilir, şifren asla loglanmaz. KVKK onayı yine gereklidir.</p>
+      <button type="button" class="quick-register-button" id="reg-quick-btn" aria-label="Hızlıca doldur"><span class="quick-register-icon"><i class="fas fa-user-plus" aria-hidden="true"></i></span><strong>Hızlıca Doldur</strong></button>
+      <p class="quick-register-hint">Kullanıcı adı, takma ad, doğum tarihi ve profil fotoğrafı önerilir. Hızlı doldurma IP ve zaman bilgisiyle kaydedilir; şifren asla loglanmaz. KVKK onayı yine gereklidir.</p>
       <div class="register-profile-photo">
         <div class="register-avatar-preview" id="reg-avatar-preview" role="button" tabindex="0" aria-disabled="true" aria-label="Profil fotoğrafı önizlemesi"><i class="fas fa-user"></i></div>
         <div class="register-profile-copy">
@@ -10110,13 +10113,6 @@ function renderRegister(app) {
       </div>
       <div class="form-group"><label>Kullanıcı Adı</label><input type="text" id="reg-username" maxlength="30" placeholder="3-30 karakter, harf/rakam/alt çizgi" autocomplete="username" /></div>
       <div class="form-group"><label>Takma Ad</label><input type="text" id="reg-nickname" maxlength="32" placeholder="Ekranda görünecek adın (en fazla 32 karakter)" autocomplete="nickname" /><div class="form-hint">Boşluk kullanabilirsin; takma adın benzersiz olmak zorunda değil.</div></div>
-      <div class="form-group">
-        <label style="display:flex;align-items:center;gap:8px">
-          E-posta
-          <span style="font-size:11px;color:var(--text-muted);font-weight:400">İletişim için kullanılır.</span>
-        </label>
-        <input type="email" id="reg-email" placeholder="..." autocomplete="email" />
-      </div>
       <div class="form-group">
         <label>Şifre</label>
         <div style="position:relative">
@@ -10132,51 +10128,10 @@ function renderRegister(app) {
         <div class="form-hint">15 yaş altı kabul edilmez (¬‿¬) hııhıı</div>
         <div class="form-hint">Doğum tarihi bir daha değiştirilemez.</div>
       </div>
-      <div class="form-group auth-2fa-choice">
-        <label><i class="fas fa-shield-halved" style="color:var(--accent-red2)"></i> İki aşamalı doğrulama</label>
-        <select id="reg-2fa-method">
-          <option value="none">Kullanmak istemiyorum</option>
-          <option value="email">E-posta kodu kullan</option>
-          <option value="question">Güvenlik sorusu kullan</option>
-        </select>
-        <div class="form-hint">Şifrene ek olarak hesabını koruyacak yöntemi seçebilirsin.</div>
-      </div>
-      <div id="reg-question-fields" class="form-group" style="display:none;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
-        <label>Güvenlik sorusu</label>
-        <select id="reg-2fa-question">
-          <option value="En sevdiğin yemek nedir?">En sevdiğin yemek nedir?</option>
-          <option value="En sevdiğin isim nedir?">En sevdiğin isim nedir?</option>
-          <option value="En sevdiğin eşya nedir?">En sevdiğin eşya nedir?</option>
-        </select>
-        <label style="margin-top:10px">Cevabın</label>
-        <input type="text" id="reg-2fa-answer" autocomplete="off" placeholder="Cevabını yaz" />
-        <div class="form-hint">Büyük/küçük harf ve fazla boşluk farkı gözetilmez.</div>
-      </div>
       <div class="form-group">
         <label>Hesap gizliliği</label>
         <label class="checkbox-label"><input type="checkbox" id="reg-private" /> Hesabımı gizli yap</label>
       </div>
-      <div class="form-group">
-        <label>Beni kimler etiketleyebilir?</label>
-        <label class="radio-label"><input type="radio" name="reg-tags" value="friends" /> Arkadaşlarım (takipleştiklerim)</label>
-        <label class="radio-label"><input type="radio" name="reg-tags" value="everyone" checked /> Herkes</label>
-        <label class="radio-label"><input type="radio" name="reg-tags" value="nobody" /> Hiç kimse</label>
-      </div>
-      <details class="register-preferences">
-        <summary>Profil Ayarları</summary>
-        <p class="form-hint">Profilinde göstermek istediğin bilgileri seç.</p>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="forums" checked /> Konu sayısı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="books" /> Kitap sayısı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="comments" /> Yorum sayısı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="photos" /> Fotoğraf sayısı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="music" /> Müzik sayısı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="followers" checked /> Takipçi sayımı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="following" checked /> Takip sayımı</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="followers_list" checked /> Takipçilerimi göster</label>
-        <label class="checkbox-label"><input type="checkbox" data-reg-stat="following_list" checked /> Takip ettiklerimi göster</label>
-        <label class="checkbox-label"><input type="checkbox" id="reg-show-level" checked /> Seviye rozetini göster</label>
-        <label class="checkbox-label"><input type="checkbox" id="reg-show-progress" checked /> Seviye ilerleme barını göster</label>
-      </details>
       <div class="form-group">
         <label class="checkbox-label">
           <input type="checkbox" id="reg-kvkk" />
@@ -10188,30 +10143,6 @@ function renderRegister(app) {
       <div class="auth-footer">Zaten hesabın var mı? <a href="/giris" data-link class="auth-link">Giriş Yap</a></div>
     </div>
   </div>`;
-
-  fetch('/api/settings/public').then(response => response.json()).then(settings => {
-    let sections = [];
-    try { sections = JSON.parse(settings.homepage_sections || '[]'); } catch { sections = []; }
-    const sectionMap = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
-    const selectedSections = Array.isArray(sections) ? sections : [];
-    const defaults = new Set(selectedSections.map(section => sectionMap[section] || section));
-    const details = document.querySelector('.register-preferences');
-    if (settings.content_count_combined === '1') {
-      details?.querySelectorAll('[data-reg-stat="forums"], [data-reg-stat="books"], [data-reg-stat="comments"], [data-reg-stat="photos"], [data-reg-stat="music"]').forEach(input => {
-        input.closest('.checkbox-label')?.remove();
-      });
-    }
-    const orderedStats = selectedSections.map(section => sectionMap[section] || section).filter(stat => ['forums', 'books', 'comments', 'photos', 'music'].includes(stat));
-    if (details && defaults.size) {
-      details.querySelectorAll('[data-reg-stat]').forEach(input => { input.checked = defaults.has(input.dataset.regStat); });
-      const order = new Map(orderedStats.map((stat, index) => [stat, index]));
-      const profileStatNames = new Set(['forums', 'books', 'comments', 'photos', 'music']);
-      const statLabels = Array.from(details.querySelectorAll('.checkbox-label')).filter(label => profileStatNames.has(label.querySelector('[data-reg-stat]')?.dataset.regStat));
-      const firstOtherLabel = Array.from(details.querySelectorAll('.checkbox-label')).find(label => !statLabels.includes(label));
-      statLabels.sort((a, b) => (order.get(a.querySelector('[data-reg-stat]').dataset.regStat) ?? 999) - (order.get(b.querySelector('[data-reg-stat]').dataset.regStat) ?? 999));
-      statLabels.forEach(label => details.insertBefore(label, firstOtherLabel || null));
-    }
-  }).catch(() => {});
 
   $('#reg-pw-toggle').addEventListener('click', () => {
     const pw = $('#reg-pw');
@@ -10242,7 +10173,6 @@ function renderRegister(app) {
       $('#reg-nickname').value = suggestion.nickname;
       $('#reg-birth-date').value = suggestion.birth_date;
       $('#reg-private').checked = false;
-      document.querySelector('input[name="reg-tags"][value="everyone"]').checked = true;
       selectedRegisterAvatar = null;
       $('#reg-avatar').value = '';
       setRegisterAvatarPreview(`<img src="${escHtml(quickAvatarUrl)}" alt="Otomatik seçilen kedi profil fotoğrafı" referrerpolicy="no-referrer" />`);
@@ -10269,10 +10199,6 @@ function renderRegister(app) {
       quickRegisterButton.classList.remove('is-loading');
       quickRegisterButton.removeAttribute('aria-busy');
     }
-  });
-
-  $('#reg-2fa-method').addEventListener('change', () => {
-    $('#reg-question-fields').style.display = $('#reg-2fa-method').value === 'question' ? 'block' : 'none';
   });
 
   $('#reg-avatar').addEventListener('change', e => {
@@ -10326,23 +10252,13 @@ function renderRegister(app) {
   const doRegister = async () => {
     const username = $('#reg-username').value.trim();
     const nickname = $('#reg-nickname').value.trim().replace(/\s+/g, ' ');
-    const email = $('#reg-email').value.trim();
     const password = $('#reg-pw').value;
     const kvkk_accepted = $('#reg-kvkk').checked;
     const birth_date = $('#reg-birth-date').value;
     const is_private = $('#reg-private').checked;
-    const tag_permission = document.querySelector('input[name="reg-tags"]:checked')?.value || 'everyone';
-    const profile_visibility = {};
     const avatar = selectedRegisterAvatar;
-    const sectionNames = { forums: 'konular', books: 'kitaplar', comments: 'yorumlar', photos: 'fotograflar', music: 'muzikler' };
-    const homepage_sections = [];
-    document.querySelectorAll('[data-reg-stat]').forEach(input => {
-      profile_visibility[input.dataset.regStat] = input.checked;
-      if (input.checked && sectionNames[input.dataset.regStat]) homepage_sections.push(sectionNames[input.dataset.regStat]);
-    });
-    if (!username || !nickname || !email || !password || !birth_date) { $('#reg-error').textContent = 'Kullanıcı adı, takma ad ve diğer alanları doldurun'; return; }
+    if (!username || !nickname || !password || !birth_date) { $('#reg-error').textContent = 'Kullanıcı adı, takma ad, şifre ve doğum tarihini doldurun'; return; }
     if (birth_date < '1900-01-01') { $('#reg-error').textContent = 'Doğum tarihi 1 Ocak 1900 veya sonrası olmalıdır'; return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $('#reg-error').textContent = 'Geçerli bir e-posta adresi girin'; return; }
     const birth = new Date(`${birth_date}T00:00:00`);
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
@@ -10354,39 +10270,13 @@ function renderRegister(app) {
     if (!kvkk_accepted) { $('#reg-error').textContent = 'KVKK onayı zorunludur'; return; }
     try {
       const formData = new FormData();
-      const show_level_badge = $('#reg-show-level').checked;
-      const show_level_progress = $('#reg-show-progress').checked;
-      const two_factor_method = $('#reg-2fa-method').value;
-      const two_factor_question = $('#reg-2fa-question').value;
-      const two_factor_answer = $('#reg-2fa-answer').value;
-      Object.entries({ username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, two_factor_method, two_factor_question, two_factor_answer, show_level_badge, show_level_progress, invite_code: inviteCode, homepage_sections: JSON.stringify(homepage_sections), profile_visibility: JSON.stringify(profile_visibility) }).forEach(([key, value]) => formData.append(key, value));
+      Object.entries({ username, nickname, password, kvkk_accepted, birth_date, is_private, invite_code: inviteCode }).forEach(([key, value]) => formData.append(key, value));
       if (quickRegistrationId) {
         formData.append('quick_registration_id', quickRegistrationId);
         formData.append('quick_avatar_url', quickAvatarUrl);
       }
       if (avatar) formData.append('avatar', avatar);
       const data = await api('/auth/register', { method: 'POST', body: formData });
-      if (data.email_verification_required) {
-        app.innerHTML = `<div class="auth-page"><div class="auth-card auth-card--enhanced card card-body">
-          <div style="text-align:center"><div class="auth-site-wordmark"><i class="fas fa-envelope" style="color:var(--accent-red2)"></i> E-postanı doğrula</div>
-          <p class="auth-subtitle">${escHtml(data.maskedEmail)} adresine 6 haneli bir kod gönderdik.</p></div>
-          <div class="form-group"><label>Doğrulama kodu</label><input type="text" id="reg-email-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" /></div>
-          <button class="btn btn-primary" style="width:100%" id="reg-email-verify-btn"><i class="fas fa-check"></i> E-postayı doğrula</button>
-          <div id="reg-email-verify-error" class="form-error mt-4" style="text-align:center"></div>
-        </div></div>`;
-        const verifyRegistrationEmail = async () => {
-          const code = $('#reg-email-code').value.trim();
-          try {
-            await api('/auth/verify-registration-email', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, code }) });
-            navigate('/giris?returnTo=' + encodeURIComponent(returnTo));
-            toast('E-posta doğrulandı. Şimdi giriş yapabilirsin.');
-          } catch (e) { $('#reg-email-verify-error').textContent = e.message; }
-        };
-        $('#reg-email-verify-btn').addEventListener('click', verifyRegistrationEmail);
-        $('#reg-email-code').addEventListener('keydown', e => { if (e.key === 'Enter') verifyRegistrationEmail(); });
-        $('#reg-email-code').focus();
-        return;
-      }
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');

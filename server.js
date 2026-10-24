@@ -1719,17 +1719,13 @@ app.post('/api/auth/quick-registration', createQuickRegistrationSuggestion);
 
 app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) => {
   try {
-    const { username, nickname, email, password, kvkk_accepted, birth_date, is_private, tag_permission, homepage_sections, profile_visibility, show_level_badge, show_level_progress, two_factor_method, two_factor_question, two_factor_answer } = req.body;
+    const { username, nickname, email, password, kvkk_accepted, birth_date, is_private } = req.body;
     const quickRegistrationId = String(req.body.quick_registration_id || '').trim();
     const inviteCode = String(req.body.invite_code || '').trim().toUpperCase();
     const usernameValue = String(username || '').trim();
     const nicknameValue = String(nickname || '').trim().replace(/\s+/g, ' ');
-    const emailAddress = String(email || '').trim().toLowerCase();
-    let parsedHomepageSections = homepage_sections;
-    let parsedProfileVisibility = profile_visibility;
-    try { if (typeof parsedHomepageSections === 'string') parsedHomepageSections = JSON.parse(parsedHomepageSections); } catch { parsedHomepageSections = []; }
-    try { if (typeof parsedProfileVisibility === 'string') parsedProfileVisibility = JSON.parse(parsedProfileVisibility); } catch { parsedProfileVisibility = null; }
-    if (!usernameValue || !nicknameValue || !emailAddress || !password) return res.status(400).json({ error: 'Kullanıcı adı, takma ad, e-posta ve şifre zorunlu' });
+    const emailAddress = String(email || '').trim().toLowerCase() || null;
+    if (!usernameValue || !nicknameValue || !password) return res.status(400).json({ error: 'Kullanıcı adı, takma ad ve şifre zorunlu' });
     let quickRegistration = null;
     if (quickRegistrationId) {
       if (!/^[0-9a-f-]{36}$/i.test(quickRegistrationId)) return res.status(400).json({ error: 'Hızlı kayıt oturumu geçersiz.' });
@@ -1740,15 +1736,13 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
       if (!rows.length) return res.status(400).json({ error: 'Hızlı kayıt oturumu bulunamadı veya süresi doldu. Bilgileri yeniden oluşturun.' });
       quickRegistration = rows[0];
     }
-    if (!isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
+    if (emailAddress && !isValidEmail(emailAddress)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
     if (!kvkk_accepted) return res.status(400).json({ error: 'KVKK onayı zorunlu' });
     if (/\s/.test(usernameValue)) return res.status(400).json({ error: 'Kullanıcı adında boşluk oluşamaz' });
     if (usernameValue.length < 3 || usernameValue.length > 30 || !/^[a-zA-ZğüşıöçĞÜŞİÖÇ0-9_]+$/.test(usernameValue)) return res.status(400).json({ error: 'Kullanıcı adı 3-30 karakter olmalı ve yalnızca harf, rakam veya alt çizgi içermeli' });
     if (nicknameValue.length > 32 || /[\u0000-\u001F\u007F]/.test(nicknameValue)) return res.status(400).json({ error: 'Takma ad en fazla 32 karakter olmalı' });
     if (password.length < 6) return res.status(400).json({ error: 'Şifre en az 6 karakter olmalı' });
-    const twoFactorMethod = ['none', 'email', 'question'].includes(two_factor_method) ? two_factor_method : 'none';
-    if (twoFactorMethod === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta doğrulama servisi yapılandırılmamış' });
-    if (twoFactorMethod === 'question' && (!two_factor_question || normalizeSecurityAnswer(two_factor_answer).length < 2)) return res.status(400).json({ error: 'Güvenlik sorusu ve cevabı zorunlu' });
+    const twoFactorMethod = 'none';
     if (!birth_date || !/^\d{4}-\d{2}-\d{2}$/.test(birth_date)) return res.status(400).json({ error: 'Doğum tarihi zorunlu' });
     if (birth_date < '1900-01-01') return res.status(400).json({ error: 'Doğum tarihi 1 Ocak 1900 veya sonrası olmalıdır' });
     const birth = new Date(`${birth_date}T00:00:00Z`);
@@ -1760,21 +1754,20 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     const monthDiff = today.getUTCMonth() - birth.getUTCMonth();
     if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
     if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
-    const validTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : 'everyone';
+    const validTagPermission = 'everyone';
     const isPrivate = is_private === true || is_private === 1 || ['true', '1', 'on'].includes(String(is_private ?? '').trim().toLowerCase());
     let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true, followers_list: true, following_list: true };
-    if (parsedProfileVisibility && typeof parsedProfileVisibility === 'object') {
-      Object.keys(defaultVisibility).forEach(key => { defaultVisibility[key] = parsedProfileVisibility[key] !== false; });
-    } else {
-      const { rows: homepageSettings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
-      let sections = [];
-      try { sections = JSON.parse(homepageSettings[0]?.value || '[]'); } catch {}
-      const sectionMap = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
-      (Array.isArray(sections) ? sections : []).forEach(section => {
-        const key = sectionMap[section] || section;
-        if (key in defaultVisibility) defaultVisibility[key] = true;
-      });
-    }
+    const { rows: homepageSettings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
+    let defaultHomepageSections = [];
+    try {
+      const sections = JSON.parse(homepageSettings[0]?.value || '[]');
+      if (Array.isArray(sections)) defaultHomepageSections = sections;
+    } catch {}
+    const sectionMap = { konular: 'forums', kitaplar: 'books', yorumlar: 'comments', fotograflar: 'photos', muzikler: 'music' };
+    defaultHomepageSections.forEach(section => {
+      const key = sectionMap[section] || section;
+      if (key in defaultVisibility) defaultVisibility[key] = true;
+    });
     const ip = getIp(req);
     const { rows: ipBan } = await query("SELECT id FROM users WHERE banned_ip=$1 AND ban_type='ip'", [ip]);
     if (ipBan.length) return res.status(403).json({ error: 'Bu IP adresi yasaklanmış' });
@@ -1786,8 +1779,8 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
       );
       if (!inviteRows.length) return res.status(410).json({ error: 'Bu davet bağlantısı artık aktif değil' });
     }
-    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($2)', [usernameValue, emailAddress]);
-    if (existing.length) return res.status(400).json({ error: 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' });
+    const { rows: existing } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) OR ($2::text IS NOT NULL AND LOWER(email)=LOWER($2))', [usernameValue, emailAddress]);
+    if (existing.length) return res.status(400).json({ error: emailAddress ? 'Bu kullanıcı adı veya e-posta zaten kullanılıyor' : 'Bu kullanıcı adı zaten kullanılıyor' });
     let avatar = '';
     if (req.file) avatar = await handleUpload(req.file);
     else if (quickRegistration) {
@@ -1797,19 +1790,17 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
       }
       avatar = selectedAvatarUrl;
     }
-    const registrationCode = twoFactorMethod === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
-    const emailVerified = twoFactorMethod === 'email' ? 0 : 1;
     const { rows } = await query(
       'INSERT INTO users (username,nickname,email,password_hash,two_factor_method,two_factor_question,two_factor_answer_hash,email_verified,kvkk_accepted,ip,birth_date,is_private,tag_permission,homepage_sections,profile_visibility,show_level_badge,show_level_progress,avatar) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *',
-      [usernameValue, nicknameValue, emailAddress, hashPassword(password), twoFactorMethod, twoFactorMethod === 'question' ? two_factor_question : '', twoFactorMethod === 'question' ? hashPassword(normalizeSecurityAnswer(two_factor_answer)) : '', emailVerified, 1, ip, birth_date, isPrivate ? 1 : 0, validTagPermission, JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []), JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1, show_level_progress === 'false' ? 0 : 1, avatar]);
+      [usernameValue, nicknameValue, emailAddress, hashPassword(password), twoFactorMethod, '', '', 1, 1, ip, birth_date, isPrivate ? 1 : 0, validTagPermission, JSON.stringify(defaultHomepageSections), JSON.stringify(defaultVisibility), 1, 1, avatar]);
     const user = rows[0];
     if (quickRegistration) {
       const quickLogValues = [
-        usernameValue, nicknameValue, emailAddress, birth_date, validTagPermission, isPrivate ? 1 : 0,
-        JSON.stringify(Array.isArray(parsedHomepageSections) ? parsedHomepageSections : []),
-        JSON.stringify(defaultVisibility), show_level_badge === 'false' ? 0 : 1,
-        show_level_progress === 'false' ? 0 : 1, twoFactorMethod, avatar, user.id,
-        registrationCode ? 'email_verification_pending' : 'completed', quickRegistrationId
+        usernameValue, nicknameValue, emailAddress || '', birth_date, validTagPermission, isPrivate ? 1 : 0,
+        JSON.stringify(defaultHomepageSections),
+        JSON.stringify(defaultVisibility), 1,
+        1, twoFactorMethod, avatar, user.id,
+        'completed', quickRegistrationId
       ];
       await query(
         `UPDATE quick_registration_logs SET username=$1,nickname=$2,email=$3,birth_date=$4,
@@ -1818,18 +1809,6 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
          user_id=$13,status=$14,completed_at=NOW() WHERE id=$15`,
         quickLogValues
       );
-    }
-    if (registrationCode) {
-      const challenge = createChallengeToken();
-      try {
-        await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,target_value,expires_at) VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, 'registration', 'email', hashChallengeValue(registrationCode), inviteCode]);
-        await sendEmailCode(emailAddress, usernameValue, registrationCode);
-      } catch (error) {
-        await query('DELETE FROM auth_challenges WHERE user_id=$1 AND purpose=$2', [user.id, 'registration']);
-        await query('DELETE FROM users WHERE id=$1', [user.id]);
-        throw error;
-      }
-      return res.json({ email_verification_required: true, challenge, maskedEmail: maskEmail(email) });
     }
     await trackInviteRegistration(inviteCode, user, ip);
     const token = generateToken(user.id);
@@ -2004,17 +1983,18 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
 });
 
 app.get('/api/profile/2fa', authMiddleware, async (req, res) => {
-  res.json({ method: req.user.two_factor_method || 'none', question: req.user.two_factor_question || '', email: maskEmail(req.user.email) });
+  res.json({ method: req.user.two_factor_method || 'none', question: req.user.two_factor_question || '', email: req.user.email ? maskEmail(req.user.email) : '' });
 });
 
 app.put('/api/profile/2fa', authMiddleware, async (req, res) => {
   const { method, question, answer, password } = req.body || {};
   if (!password || !verifyPassword(password, req.user.password_hash)) return res.status(401).json({ error: 'Hesap şifresi yanlış' });
   if (!['none', 'email', 'question'].includes(method)) return res.status(400).json({ error: 'Geçersiz doğrulama yöntemi' });
+  if (method === 'email' && !req.user.email) return res.status(400).json({ error: 'E-posta kodu için önce ayarlardan e-posta adresi eklemen gerekiyor.' });
   if (method === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta servisi yapılandırılmamış' });
   if (method === 'question' && (!question || normalizeSecurityAnswer(answer).length < 2)) return res.status(400).json({ error: 'Soru ve cevap zorunlu' });
   await query('UPDATE users SET two_factor_method=$1,two_factor_question=$2,two_factor_answer_hash=$3 WHERE id=$4', [method, method === 'question' ? String(question).trim() : '', method === 'question' ? hashPassword(normalizeSecurityAnswer(answer)) : '', req.user.id]);
-  res.json({ ok: true, method, question: method === 'question' ? String(question).trim() : '', email: maskEmail(req.user.email) });
+  res.json({ ok: true, method, question: method === 'question' ? String(question).trim() : '', email: req.user.email ? maskEmail(req.user.email) : '' });
 });
 
 app.post('/api/profile/email/request', authMiddleware, async (req, res) => {
@@ -6341,6 +6321,11 @@ app.put('/api/admin/user/:id/2fa', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Bu işlem yalnızca ana admine açıktır' });
   const { method, question, answer } = req.body || {};
   if (!['none', 'email', 'question'].includes(method)) return res.status(400).json({ error: 'Geçersiz doğrulama yöntemi' });
+  if (method === 'email') {
+    const { rows: users } = await query('SELECT email FROM users WHERE id=$1', [req.params.id]);
+    if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    if (!users[0].email) return res.status(400).json({ error: 'E-posta doğrulaması için kullanıcının önce e-posta adresi eklemesi gerekiyor.' });
+  }
   if (method === 'question' && (!question || normalizeSecurityAnswer(answer).length < 2)) return res.status(400).json({ error: 'Soru ve cevap zorunlu' });
   const { rows } = await query('UPDATE users SET two_factor_method=$1,two_factor_question=$2,two_factor_answer_hash=$3 WHERE id=$4 RETURNING id,username,email,two_factor_method,two_factor_question', [method, method === 'question' ? String(question).trim() : '', method === 'question' ? hashPassword(normalizeSecurityAnswer(answer)) : '', req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });

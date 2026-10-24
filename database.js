@@ -46,7 +46,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
-      email TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE,
       password_hash TEXT NOT NULL,
       two_factor_method TEXT NOT NULL DEFAULT 'none',
       two_factor_question TEXT DEFAULT '',
@@ -81,6 +81,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_required INTEGER NOT NULL DEFAULT 0;

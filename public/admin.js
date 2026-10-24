@@ -726,7 +726,7 @@ async function renderUserDirectory(main) {
   renderUsersTable(users);
   $('#user-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
-    renderUsersTable(users.filter(u => u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.ip||'').includes(q)));
+    renderUsersTable(users.filter(u => u.username.toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q) || (u.ip||'').includes(q)));
   });
 }
 
@@ -1027,7 +1027,7 @@ function renderUsersTable(users) {
     </td>
     <td><button class="btn btn-outline btn-xs user-badges-btn" data-id="${u.id}" title="Kullanıcının rozetlerini görüntüle"><i class="fas fa-award"></i> Rozetler${userBadgeList(u).length ? ` <span class="user-badges-count">${userBadgeList(u).length}</span>` : ''}</button></td>
     <td><button class="btn btn-outline btn-xs user-red-tick-btn" data-id="${u.id}" title="Kırmızı Tik yönetimi"><i class="fas fa-check-circle" style="color:#ef3340"></i> Kırmızı Tik</button></td>
-    <td style="font-size:12px;color:var(--text2)">${escHtml(u.email)}</td>
+    <td style="font-size:12px;color:var(--text2)">${escHtml(u.email || '—')}</td>
     <td><span class="badge ${u.two_factor_method && u.two_factor_method !== 'none' ? 'badge-green' : 'badge-gray'}"><i class="fas ${u.two_factor_method === 'email' ? 'fa-envelope' : u.two_factor_method === 'question' ? 'fa-circle-question' : 'fa-minus'}"></i> ${u.two_factor_method === 'email' ? 'E-posta' : u.two_factor_method === 'question' ? 'Soru' : 'Kapalı'}</span></td>
     <td style="font-size:11px;color:var(--text2)">${u.birth_date ? new Date(u.birth_date).toLocaleDateString('tr-TR') : '-'}</td>
     <td><span class="badge badge-gray">${u.level_id||1}</span></td>
@@ -1142,9 +1142,9 @@ async function renderTwoFactorUsers(main) {
   let users = [];
   try { users = await adminApi('/users'); } catch (e) { main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)">${escHtml(e.message)}</div></div>`; return; }
   main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-shield-halved"></i></div> 2AD Yönetimi <span style="font-size:13px;font-weight:400;color:var(--text2)">(${users.length} kullanıcı)</span></div><div class="adm-search"><i class="fas fa-search"></i><input id="2fa-user-search" placeholder="Kullanıcı veya e-posta ara..." style="min-width:240px" /></div></div><div class="card"><div class="table-wrap"><table><thead><tr><th>Kullanıcı</th><th>E-posta</th><th>Yöntem</th><th>Güvenlik sorusu</th><th>İşlem</th></tr></thead><tbody id="2fa-users-tbody"></tbody></table></div></div>`;
-  const render = list => { $('#2fa-users-tbody').innerHTML = list.length ? list.map(user => `<tr><td><strong>${escHtml(user.username)}</strong></td><td style="color:var(--text2)">${escHtml(user.email)}</td><td>${user.two_factor_method === 'email' ? '<span class="badge badge-green"><i class="fas fa-envelope"></i> E-posta</span>' : user.two_factor_method === 'question' ? '<span class="badge badge-green"><i class="fas fa-circle-question"></i> Soru</span>' : '<span class="badge badge-gray"><i class="fas fa-minus"></i> Kapalı</span>'}</td><td style="color:var(--text2)">${user.two_factor_method === 'question' ? escHtml(user.two_factor_question || '-') : '-'}</td><td><button class="btn btn-outline btn-xs admin-2fa-edit" data-id="${user.id}"><i class="fas fa-pen"></i> Düzenle</button></td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text3)">Kullanıcı bulunamadı</td></tr>'; };
+  const render = list => { $('#2fa-users-tbody').innerHTML = list.length ? list.map(user => `<tr><td><strong>${escHtml(user.username)}</strong></td><td style="color:var(--text2)">${escHtml(user.email || '—')}</td><td>${user.two_factor_method === 'email' ? '<span class="badge badge-green"><i class="fas fa-envelope"></i> E-posta</span>' : user.two_factor_method === 'question' ? '<span class="badge badge-green"><i class="fas fa-circle-question"></i> Soru</span>' : '<span class="badge badge-gray"><i class="fas fa-minus"></i> Kapalı</span>'}</td><td style="color:var(--text2)">${user.two_factor_method === 'question' ? escHtml(user.two_factor_question || '-') : '-'}</td><td><button class="btn btn-outline btn-xs admin-2fa-edit" data-id="${user.id}"><i class="fas fa-pen"></i> Düzenle</button></td></tr>`).join('') : '<tr><td colspan="5" style="text-align:center;padding:28px;color:var(--text3)">Kullanıcı bulunamadı</td></tr>'; };
   render(users);
-  $('#2fa-user-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); render(users.filter(user => user.username.toLowerCase().includes(q) || user.email.toLowerCase().includes(q))); });
+  $('#2fa-user-search').addEventListener('input', event => { const q = event.target.value.toLowerCase(); render(users.filter(user => user.username.toLowerCase().includes(q) || (user.email || '').toLowerCase().includes(q))); });
   $('#2fa-users-tbody').addEventListener('click', event => { const button = event.target.closest('.admin-2fa-edit'); const user = users.find(item => item.id == button?.dataset.id); if (user) showAdminTwoFactorModal(user); });
 }
 
@@ -1164,7 +1164,7 @@ function showEditUserModal(user) {
   showModal('Kullanıcı Düzenle — ' + user.username, `
     <div class="form-row">
       <div class="form-group"><label>Kullanıcı Adı</label><input id="eu-username" value="${escHtml(user.username)}" /></div>
-      <div class="form-group"><label>E-posta</label><input id="eu-email" type="email" value="${escHtml(user.email)}" /></div>
+      <div class="form-group"><label>E-posta</label><input id="eu-email" type="email" value="${escHtml(user.email || '')}" /></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Yeni Şifre (boş=değişme)</label><input id="eu-pw" type="password" placeholder="••••••" /></div>
