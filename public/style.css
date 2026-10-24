@@ -6210,12 +6210,21 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
   body.home-page #home-stories-bar .stories-strip {
     width:100%;
     margin:0 0 10px;
-    padding:10px 12px 12px;
+    padding:8px 12px 9px;
     border-bottom:1px solid var(--border);
   }
-  body.home-page #home-stories-bar .stories-scroll { gap:13px; }
+  body.home-page #home-stories-bar .stories-scroll { gap:12px; }
   body.home-page #home-stories-bar .story-user,
-  body.home-page #home-stories-bar .story-add { gap:8px; }
+  body.home-page #home-stories-bar .story-add,
+  body.home-page #home-stories-bar .story-own-wrap { flex:0 0 84px; width:84px; }
+  body.home-page #home-stories-bar .story-own-wrap .story-own { width:84px; }
+  body.home-page #home-stories-bar .story-user,
+  body.home-page #home-stories-bar .story-add { gap:6px; }
+  body.home-page #home-stories-bar .story-user small,
+  body.home-page #home-stories-bar .story-add small { max-width:84px; font-size:13px; line-height:1.25; }
+  body.home-page #home-stories-bar .story-ring,
+  body.home-page #home-stories-bar .story-add > span { width:72px !important; height:72px !important; min-width:72px !important; max-width:72px !important; min-height:72px !important; max-height:72px !important; flex-basis:72px !important; }
+  body.home-page #home-stories-bar .story-add-corner { right:5px; bottom:19px; width:25px; height:25px; font-size:12px; }
 
   .photos-feed {
     width:100%;
@@ -6237,7 +6246,11 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
     background:var(--bg-primary);
   }
   .photos-feed .photo-card-head { min-height:48px; margin:0; padding:8px 14px !important; }
-  body.home-page #home-photos .photo-card-head { min-height:60px; padding:10px 16px !important; }
+  body.home-page #home-photos .photo-card-head { min-height:68px; gap:14px; padding:11px 16px !important; }
+  body.home-page #home-photos .photo-card-head > .avatar-sm { width:42px; height:42px; min-width:42px; flex:0 0 42px; }
+  body.home-page #home-photos .photo-card-head > .avatar-placeholder { font-size:16px; }
+  body.home-page #home-photos .photo-card-head .user-display-identity strong { font-size:16px; }
+  body.home-page #home-photos .photo-card-head .user-display-identity small { font-size:13px; }
   .photos-feed .photo-media-wrap {
     display:flex;
     align-items:center;
