@@ -5050,6 +5050,30 @@ function ensurePhotoInteractionSchema() {
         content TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT NOW()
       );
+      DO $$
+      BEGIN
+        LOCK TABLE photo_comments IN ACCESS EXCLUSIVE MODE;
+        IF EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid='photo_comments'::regclass
+            AND conname='photo_comments_photo_id_fkey'
+            AND confrelid <> 'photos'::regclass
+        ) THEN
+          ALTER TABLE photo_comments DROP CONSTRAINT photo_comments_photo_id_fkey;
+        END IF;
+        DELETE FROM photo_comments pc
+        WHERE NOT EXISTS (SELECT 1 FROM photos p WHERE p.id=pc.photo_id);
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conrelid='photo_comments'::regclass
+            AND conname='photo_comments_photo_id_fkey'
+            AND confrelid='photos'::regclass
+        ) THEN
+          ALTER TABLE photo_comments
+            ADD CONSTRAINT photo_comments_photo_id_fkey
+            FOREIGN KEY (photo_id) REFERENCES photos(id) ON DELETE CASCADE;
+        END IF;
+      END $$;
       CREATE TABLE IF NOT EXISTS photo_comment_likes (
         id BIGSERIAL PRIMARY KEY,
         comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
