@@ -2390,9 +2390,8 @@ function updateNavUI() {
     if (mobNewToggle) mobNewToggle.classList.remove('hidden');
     if (mobUserLinks) mobUserLinks.innerHTML = `
       <a href="/rozetler" data-link class="mobile-nav-link"><i class="fas fa-award" style="width:18px"></i> Rozetler</a>
-      <a href="/arkadaslar" data-link class="mobile-nav-link" id="mob-friends-link"><i class="fas fa-user-friends" style="width:18px"></i> Arkadaşlar <span id="mob-friends-badge" class="friend-request-dot" aria-label="Bekleyen arkadaşlık isteği"></span></a>
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
-      <button class="mobile-nav-link" id="mob-logout" style="background:none;border:none;width:100%;text-align:left;color:var(--accent-red2)"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
+      <button class="mobile-nav-link mobile-nav-logout" id="mob-logout"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
     $('#mob-logout')?.addEventListener('click', async () => {
       try { await api('/auth/logout', { method: 'POST' }); } catch {}
