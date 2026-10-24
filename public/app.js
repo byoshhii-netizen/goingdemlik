@@ -30,6 +30,7 @@ let activePhotoAudio = null;
 let photoAudioObserver = null;
 let siteName = 'CigCig';
 let loginRequiredEnabled = false;
+let appVersionPollTimer = null;
 const journalistDirectory = new Map();
 let dmSearchUnlockCode = '';
 let dmIconUnlockCode = '';
@@ -10549,6 +10550,38 @@ async function checkUnreadMessages() {
   } catch {}
 }
 
+function redirectForAppUpdate(version) {
+  if (!version) return false;
+  const htmlVersion = document.querySelector('meta[name="cigcig-app-version"]')?.content || '';
+  if (htmlVersion === version) {
+    const currentUrl = new URL(location.href);
+    if (currentUrl.searchParams.has('__cigcig_build')) {
+      currentUrl.searchParams.delete('__cigcig_build');
+      history.replaceState(history.state, '', currentUrl);
+    }
+    return false;
+  }
+  const currentUrl = new URL(location.href);
+  if (currentUrl.searchParams.get('__cigcig_build') === version) return false;
+  currentUrl.searchParams.set('__cigcig_build', version);
+  location.replace(currentUrl.href);
+  return true;
+}
+
+async function checkForAppUpdate() {
+  const response = await fetch('/api/app-version', { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+  if (!response.ok) throw new Error(`Sürüm kontrolü başarısız (${response.status}).`);
+  const result = await response.json();
+  return redirectForAppUpdate(result.version);
+}
+
+function startAppVersionPolling() {
+  if (appVersionPollTimer) clearInterval(appVersionPollTimer);
+  appVersionPollTimer = setInterval(() => {
+    checkForAppUpdate().catch(error => console.warn('Uygulama güncellemesi kontrol edilemedi:', error.message));
+  }, 120000);
+}
+
 async function init() {
   $('#new-dropdown')?.classList.add('hidden');
   closeMobileCreateMenu();
@@ -10558,9 +10591,10 @@ async function init() {
   const settingsController = new AbortController();
   const settingsTimeout = setTimeout(() => settingsController.abort(), 8000);
   try {
-    const response = await fetch('/api/public-settings', { signal: settingsController.signal });
+    const response = await fetch('/api/public-settings', { signal: settingsController.signal, cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!response.ok) throw new Error(`Genel ayarlar yüklenemedi (${response.status}).`);
     const ps = await response.json();
+    if (redirectForAppUpdate(ps.asset_version)) return;
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     document.body.classList.toggle('beta-mode-enabled', ps.beta_mode_enabled !== '0');
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
@@ -10599,6 +10633,7 @@ async function init() {
   } finally {
     clearTimeout(settingsTimeout);
   }
+  startAppVersionPolling();
   renderRoute(location.pathname + location.search);
   try {
     const journalists = await api('/journalists');

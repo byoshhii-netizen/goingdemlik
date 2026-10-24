@@ -37,6 +37,11 @@ const server = http.createServer(app);
 const io = new Server(server);
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
+const appAssetHash = crypto.createHash('sha256');
+for (const file of ['server.js', 'public/index.html', 'public/admin.html', 'public/app.js', 'public/admin.js', 'public/style.css', 'public/dialogs.js', 'public/dialogs.css', 'public/theme.js', 'public/homepage-sections.js']) {
+  appAssetHash.update(fs.readFileSync(path.join(__dirname, file)));
+}
+const APP_ASSET_VERSION = appAssetHash.digest('hex').slice(0, 16);
 const VMB_PANEL_USERNAME = String(process.env.VMB_PANEL_USERNAME || '').trim();
 const VMB_PANEL_PASSWORD = String(process.env.VMB_PANEL_PASSWORD || '').trim();
 const VMB_PANEL_AUTH_CONFIGURED = Boolean(VMB_PANEL_USERNAME && VMB_PANEL_PASSWORD);
@@ -1393,6 +1398,43 @@ app.use(async (req, res, next) => {
   }
 });
 
+function setNoStoreHeaders(res) {
+  res.setHeader('Cache-Control', 'no-store, no-cache, max-age=0, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('CDN-Cache-Control', 'no-store');
+  res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+}
+
+function versionAppHtml(html) {
+  const versioned = html.replace(
+    /((?:src|href)=["'])(\/?(?:theme|homepage-sections|style|dialogs|app|admin)\.(?:js|css)(?:\?[^"']*)?)(["'])/gi,
+    (_match, prefix, assetPath, quote) => `${prefix}${assetPath.split('?')[0]}?v=${APP_ASSET_VERSION}${quote}`
+  );
+  const versionMeta = `<meta name="cigcig-app-version" content="${APP_ASSET_VERSION}" />`;
+  if (/<meta name=["']cigcig-app-version["']/i.test(versioned)) {
+    return versioned.replace(/<meta name=["']cigcig-app-version["'][^>]*>/i, versionMeta);
+  }
+  return versioned.replace('</head>', `  ${versionMeta}\n</head>`);
+}
+
+app.use((req, res, next) => {
+  const send = res.send;
+  res.send = function sendVersionedHtml(body) {
+    if (typeof body === 'string' && /<!doctype html|<html[\s>]/i.test(body.slice(0, 500))) {
+      setNoStoreHeaders(res);
+      body = versionAppHtml(body);
+    }
+    return send.call(this, body);
+  };
+  next();
+});
+
+app.get(['/', '/index.html'], (req, res) => sendUncachedAppHtml(res));
+app.get(['/admin', '/admin.html'], (req, res) => {
+  res.type('html').send(fs.readFileSync(path.join(__dirname, 'public', 'admin.html'), 'utf8'));
+});
+
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 24 * 60 * 60 * 1000,
   redirect: false,
@@ -1408,10 +1450,8 @@ app.use(express.static(path.join(__dirname, 'public'), {
 
 function sendUncachedAppHtml(res, status = 200) {
   res.status(status);
-  res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
-  res.setHeader('CDN-Cache-Control', 'no-store');
-  res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
-  return res.sendFile(path.join(__dirname, 'public', 'index.html'), { cacheControl: false });
+  setNoStoreHeaders(res);
+  return res.type('html').send(fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8'));
 }
 
 app.get('/api/admin/me', adminMiddleware, (req, res) => {
@@ -7038,12 +7078,14 @@ app.get('/api/kvkk', async (req, res) => {
 });
 
 app.get('/api/public-settings', async (req, res) => {
+  setNoStoreHeaders(res);
   const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds', 'beta_mode_enabled'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
     result[k] = rows[0]?.value || null;
   }
+  result.asset_version = APP_ASSET_VERSION;
   res.json(result);
 });
 
@@ -7967,6 +8009,11 @@ app.get('/api/settings/public', async (req, res) => {
   rows.forEach(r => { obj[r.key] = r.value; });
   if (!obj.site_name || obj.site_name.toLowerCase() === 'demlik') obj.site_name = 'CigCig';
   res.json(obj);
+});
+
+app.get('/api/app-version', (req, res) => {
+  setNoStoreHeaders(res);
+  res.json({ version: APP_ASSET_VERSION });
 });
 
 // ===== SPOTİFY OAuth =====
