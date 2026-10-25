@@ -360,6 +360,16 @@ function sanitizeUser(u) {
   return rest;
 }
 
+function sanitizeUserForFeatures(user, features) {
+  const sanitized = sanitizeUser(user);
+  if (sanitized && !features.levels) {
+    sanitized.level_id = null;
+    sanitized.show_level_badge = 0;
+    sanitized.show_level_progress = 0;
+  }
+  return sanitized;
+}
+
 function isReservedVmbBadgeName(value) {
   const badge = String(value || '').trim().toLocaleLowerCase('tr-TR');
   return badge === 'vmb' || badge === 'vmb yönetim';
@@ -397,7 +407,8 @@ function profileBadgeKey(type, id = '') {
 async function getUserProfileBadges(user, { includeInactive = false, featureStates = null } = {}) {
   if (!user?.id) return [];
 
-  const [customResult, preferenceResult, levelResult, journalistResult, features] = await Promise.all([
+  const features = featureStates || await getSiteFeatureStates();
+  const [customResult, preferenceResult, levelResult, journalistResult] = await Promise.all([
     query(`
       SELECT b.id, b.name, b.icon, b.color, b.is_system, ub.assigned_at, ub.assigned_by
       FROM user_badges ub
@@ -406,9 +417,10 @@ async function getUserProfileBadges(user, { includeInactive = false, featureStat
       ORDER BY ub.assigned_at DESC NULLS LAST, ub.id DESC
     `, [user.id]),
     query('SELECT badge_key, is_active FROM user_badge_visibility WHERE user_id=$1', [user.id]),
-    query('SELECT id, name, icon, color FROM levels WHERE id=$1', [user.level_id]),
+    features.levels
+      ? query('SELECT id, name, icon, color FROM levels WHERE id=$1', [user.level_id])
+      : Promise.resolve({ rows: [] }),
     query('SELECT assigned_at FROM journalists WHERE user_id=$1', [user.id]),
-    featureStates ? Promise.resolve(featureStates) : getSiteFeatureStates(),
   ]);
 
   const preferences = new Map(preferenceResult.rows.map(row => [row.badge_key, Number(row.is_active) !== 0]));
@@ -1853,7 +1865,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(usernameValue, 'register', '', '', ip);
     setSessionCookie(res, token);
-    res.json({ token, user: sanitizeUser(user) });
+    res.json({ token, user: sanitizeUserForFeatures(user, await getSiteFeatureStates()) });
   } catch (e) { res.status(400).json({ error: 'Kayıt başarısız: ' + e.message }); }
 });
 
@@ -1902,7 +1914,7 @@ app.post('/api/auth/login', async (req, res) => {
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
     await logAction(user.username, 'login', '', '', ip);
     setSessionCookie(res, token);
-    res.json({ token, user: sanitizeUser(user) });
+    res.json({ token, user: sanitizeUserForFeatures(user, await getSiteFeatureStates()) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1917,7 +1929,7 @@ app.post('/api/auth/2fa/verify', async (req, res) => {
     if (!rows.length) return res.status(401).json({ error: 'Oturum oluşturulamadı' });
     await query('UPDATE users SET last_active=NOW() WHERE id=$1', [rows[0].id]);
     setSessionCookie(res, token);
-    res.json({ token, user: sanitizeUser(rows[0]) });
+    res.json({ token, user: sanitizeUserForFeatures(rows[0], await getSiteFeatureStates()) });
   } catch (e) { res.status(500).json({ error: 'Doğrulama işlemi başarısız' }); }
 });
 
@@ -2074,7 +2086,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const { rows: lvRows } = features.levels
     ? await query('SELECT * FROM levels WHERE id=$1', [req.user.level_id])
     : { rows: [] };
-  res.json({ user: sanitizeUser(req.user), level: lvRows[0] || null, features });
+  res.json({ user: sanitizeUserForFeatures(req.user, features), level: lvRows[0] || null, features });
 });
 
 app.post('/api/auth/logout', authMiddleware, async (req, res) => {
@@ -4770,7 +4782,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     });
   }
   if (blockByMe) {
-    return res.json({ blocked_by_me: true, user: sanitizeUser(user) });
+    return res.json({ blocked_by_me: true, user: sanitizeUserForFeatures(user, features) });
   }
   const badges = await getUserProfileBadges(user, { featureStates: features });
   const isOwner = req.user && req.user.id === user.id;
@@ -4780,7 +4792,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower && !graceViewer) {
-    return res.json({ user: sanitizeUser(user), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
+    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
   }
   await ensureProfileAvatarArchiveSchema();
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos] = await Promise.all([
@@ -4826,7 +4838,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   ]);
   const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
   const content_count = Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + Number(contentCounts.photo_count || 0) + Number(contentCounts.video_count || 0) + Number(contentCounts.song_count || 0);
-  res.json({ user: sanitizeUser(user), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {

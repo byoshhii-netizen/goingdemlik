@@ -4687,9 +4687,7 @@ async function renderForumList(app, queryString) {
     <div class="container page forum-page">
       <div class="forum-page-header">
         <div class="forum-page-heading">
-          <span class="forum-page-kicker"><i class="fas fa-comments"></i> Topluluk</span>
           <h1 class="page-title">Konular</h1>
-          <p class="forum-page-lead">Toplulukla fikir paylaş, tartış ve yeni şeyler keşfet.</p>
           ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
         ${currentUser ? '<button type="button" class="btn btn-primary forum-new-btn" id="forum-new-topic"><i class="fas fa-plus"></i> Konu aç</button>' : ''}
@@ -8876,7 +8874,7 @@ async function renderProfile(app, username) {
 
   const nextLevel = levels.find(l => l.order_num > (level?.order_num || 0));
   let progressHTML = '';
-  if (nextLevel && user.show_level_progress !== 0) {
+  if (data.features?.levels !== false && nextLevel && user.show_level_progress !== 0) {
     const reqAny = nextLevel.require_any === 1;
     const INF = 9999999;
     const nf = nextLevel.min_forums >= INF ? null : nextLevel.min_forums;
@@ -9640,6 +9638,13 @@ async function renderSettingsSection(section) {
 
   } else if (section === 'appearance') {
     let defaultDmTheme = 'default';
+    let levelsEnabled = false;
+    try {
+      const siteSettings = await api('/settings/public');
+      levelsEnabled = siteSettings.level_system_enabled !== '0';
+    } catch (error) {
+      toast(error.message, 'error');
+    }
     try {
       const themeSettings = await api('/me/dm-theme-settings');
       defaultDmTheme = themeSettings.default_theme_key || 'default';
@@ -9653,7 +9658,7 @@ async function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span>Görünüm</span></div>
         <div class="card-body">
-          <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>
+          ${levelsEnabled ? `<div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-progress" ${currentUser.show_level_progress !== 0 ? 'checked' : ''} /> Seviye ilerleme barını göster</label></div>` : ''}
           <div class="form-group"><label class="checkbox-label"><input type="checkbox" id="s-show-color" ${currentUser.show_level_color ? 'checked' : ''} /> İsim rengini göster</label></div>
           ${(currentUser.is_vip || currentUser.is_plus) ? `<section class="name-color-setting">
             <div class="name-color-setting-heading"><span><i class="fas fa-droplet"></i></span><div><strong>İsim rengi</strong><small>Profilinde ve desteklenen alanlarda kullandığın rengi seç.</small></div></div>
@@ -9712,9 +9717,9 @@ async function renderSettingsSection(section) {
     }));
     $('#save-appearance-btn').addEventListener('click', async () => {
       const body = {
-        show_level_progress: $('#s-show-progress').checked,
         show_level_color: $('#s-show-color').checked,
       };
+      if (levelsEnabled) body.show_level_progress = $('#s-show-progress').checked;
       if ((currentUser.is_vip || currentUser.is_plus) && nameColorInput) {
         const color = nameColorInput.value.trim().replace(/^#/, '');
         if (!syncNameColor(color)) {

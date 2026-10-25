@@ -5755,8 +5755,9 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 
 @media (max-width: 700px) {
   .forum-page { padding-top: 22px; padding-bottom: 88px; }
-  .forum-page-header { align-items: stretch; flex-direction: column; gap: 14px; margin-bottom: 17px; }
-  .forum-new-btn { width:100%; max-width:calc(100vw - 40px); align-self:center; justify-content:center; }
+  .forum-page-header { align-items: center; flex-direction: row; gap: 12px; margin-bottom: 15px; }
+  .forum-page .page-title { margin: 0; font-size: 26px; }
+  .forum-new-btn { width:auto; min-height:38px; flex:0 0 auto; align-self:auto; justify-content:center; gap:7px; padding:0 12px; border-radius:12px; font-size:12px; }
   .forum-toolbar { display: block; }
   .forum-toolbar-hint { display: none; }
   .forum-search input { height: 46px; }

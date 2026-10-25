@@ -3444,7 +3444,7 @@ async function renderSettings(main) {
       <div class="card adm-feature-card">
         <div class="card-header"><span><i class="fas fa-layer-group" style="color:var(--red2);margin-right:8px"></i>Seviye Sistemi</span><span class="adm-setting-status ${settings['level_system_enabled'] !== '0' ? 'is-on' : ''}">${settings['level_system_enabled'] !== '0' ? 'AÇIK' : 'KAPALI'}</span></div>
         <div class="card-body">
-          <div class="adm-feature-copy"><strong>Seviye sistemini etkinleştir</strong><p>Kapalıyken profillerde seviye ve ilerleme çubukları gösterilmez, seviye sınırları uygulanmaz. Mevcut seviyeler ve kullanıcı verileri korunur.</p></div>
+          <div class="adm-feature-copy"><strong>Seviye sistemini etkinleştir</strong><p>Kapalıyken seviye bilgileri, ilerleme çubukları ve seviye rozetleri gizlenir; seviye sınırları uygulanmaz. Mevcut seviyeler ve kullanıcı verileri korunur.</p></div>
           <label class="adm-toggle-row" for="s-level-system"><span><i class="fas fa-layer-group"></i> Seviye Sistemi</span><span class="adm-toggle"><input type="checkbox" id="s-level-system" ${settings['level_system_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <button class="btn btn-primary" id="s-level-system-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Ayarı Kaydet</button>
           <div id="s-level-system-msg" class="form-error mt-4"></div>
