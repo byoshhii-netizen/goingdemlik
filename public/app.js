@@ -1835,6 +1835,16 @@ async function renderRealsFeed(app, initialId = null) {
       let clickTimer = null;
       let lastTouchTapAt = 0;
       let suppressClickUntil = 0;
+      let touchStartPoint = null;
+      it.addEventListener('pointerdown', event => {
+        if (event.pointerType === 'touch') touchStartPoint = { x: event.clientX, y: event.clientY };
+      }, { passive: true });
+      it.addEventListener('pointercancel', event => {
+        if (event.pointerType !== 'touch') return;
+        touchStartPoint = null;
+        suppressClickUntil = Date.now() + 450;
+        lastTouchTapAt = 0;
+      }, { passive: true });
       const likeFromDoubleTap = () => {
         const likeButton = it.querySelector('.like-btn');
         if (!likeButton) return;
@@ -1859,6 +1869,15 @@ async function renderRealsFeed(app, initialId = null) {
       it.addEventListener('pointerup', event => {
         if (event.pointerType !== 'touch' || event.target.closest('button,a,input') || it.classList.contains('reals-ad-item')) return;
         const now = Date.now();
+        const moved = touchStartPoint
+          && Math.hypot(event.clientX - touchStartPoint.x, event.clientY - touchStartPoint.y) > 12;
+        touchStartPoint = null;
+        if (moved) {
+          clearTimeout(clickTimer);
+          suppressClickUntil = now + 450;
+          lastTouchTapAt = 0;
+          return;
+        }
         if (now - lastTouchTapAt <= 320) {
           clearTimeout(clickTimer);
           suppressClickUntil = now + 450;
@@ -1985,32 +2004,34 @@ async function renderRealsFeed(app, initialId = null) {
     }
     if (shouldScroll) listEl.scrollTo({ top: i * listEl.clientHeight, behavior: 'smooth' });
     for (const j of [...loadedRealsIndices]) {
-      if (Math.abs(j - idx) <= 1) continue;
+      if (j === idx || j === idx + 1) continue;
+      const item = items[j];
       const video = items[j]?.querySelector('video');
       if (video) {
-        setRealsVideoSource(video, '');
+        item?.classList.remove('is-active');
         video.pause();
+        setRealsVideoSource(video, '');
         video.currentTime = 0;
         video.muted = true;
       }
       loadedRealsIndices.delete(j);
     }
-    for (let j = Math.max(0, idx - 1); j <= Math.min(items.length - 1, idx + 1); j++) {
+    for (let j = idx; j <= Math.min(items.length - 1, idx + 1); j++) {
       const it = items[j];
       if (!it) continue;
       it.classList.toggle('is-active', j === idx);
       const vid = it.querySelector('video');
       const videoUrl = it.dataset.videoUrl;
-      vid.preload = j === idx ? 'auto' : 'metadata';
+      vid.preload = j === idx ? 'auto' : 'none';
       vid.playsInline = true;
-      setRealsVideoSource(vid, videoUrl);
-      loadedRealsIndices.add(j);
       ensureRealsFollowState(it);
       if (j !== idx) {
-        vid.pause();
-        vid.muted = true;
+        if (!loadedRealsIndices.has(j)) setRealsVideoSource(vid, videoUrl);
+        loadedRealsIndices.add(j);
         continue;
       }
+      setRealsVideoSource(vid, videoUrl);
+      loadedRealsIndices.add(j);
       vid.muted = realsMuted || !!it.dataset.songAudio;
       (async () => {
         if (!currentUser && !it.dataset.adId && it.dataset.guestChecked !== 'true') {
@@ -2083,12 +2104,14 @@ async function renderRealsFeed(app, initialId = null) {
     const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(listEl.scrollTop / Math.max(1, listEl.clientHeight))));
     if (nextIndex !== idx) showIndex(nextIndex, false);
   };
+  const supportsScrollEnd = 'onscrollend' in listEl;
   listEl.addEventListener('scroll', () => {
+    if (supportsScrollEnd) return;
     if (scrollFrame) return;
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = null;
       clearTimeout(scrollEndTimer);
-      scrollEndTimer = setTimeout(settleRealsScroll, 160);
+      scrollEndTimer = setTimeout(settleRealsScroll, 260);
     });
   }, { passive: true });
   listEl.addEventListener('scrollend', settleRealsScroll, { passive: true });
@@ -7690,7 +7713,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
         </div>
         <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
-        <div class="form-group" id="video-song-field"><label>Reals müziği</label><small class="text-muted" id="video-song-limit-hint">3 dakikayı aşan videolara müzik eklenemez.</small><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><div id="video-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="video-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="video-song-preview-audio" preload="none" style="display:none"></audio><div class="song-start-control"><label for="video-song-start">Şarkıda başlayacağı an</label><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled /><div class="media-time-row"><span>Başlangıç noktası</span><b id="video-song-time">0:00</b></div></div></div>
+        <div class="form-group" id="video-song-field"><label>Reals müziği</label><small class="text-muted" id="video-song-limit-hint">3 dakikayı aşan videolara müzik eklenemez.</small><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><div id="video-song-player" class="story-selected-song" hidden></div><div class="media-song-timing"><div class="dm-note-waveform media-song-waveform" id="video-song-waveform" aria-label="Reals müziğinin başlangıç noktasını seç"><div class="dm-note-waveform-bars" id="video-song-waveform-bars" aria-hidden="true"></div><span class="dm-note-waveform-selection" aria-hidden="true"></span><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled aria-label="Müzik başlangıç zamanı" /></div><div class="dm-note-song-controls"><button type="button" id="video-song-preview" aria-label="Seçilen kesiti önizle" style="margin:0" disabled><i class="fas fa-play"></i></button><span><strong id="video-song-time">0:00 – 0:30</strong><small id="video-song-duration">30 saniyelik kesit</small></span></div></div><audio id="video-song-preview-audio" preload="none" style="display:none"></audio></div>
         <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
         <div class="social-compose-options">
           <label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label>
@@ -7721,6 +7744,22 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const videoSongPreview = $('#video-song-preview-audio');
   const videoSongPreviewButton = $('#video-song-preview');
   const videoSongStart = $('#video-song-start');
+  const videoSongWaveform = $('#video-song-waveform');
+  const videoSongDuration = $('#video-song-duration');
+  $('#video-song-waveform-bars').innerHTML = Array.from({ length: 68 }, (_, index) => {
+    const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
+    return `<i style="--bar-height:${Math.round(height)}%"></i>`;
+  }).join('');
+  const formatVideoSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const updateVideoSongWaveform = () => {
+    const maxStart = Math.max(0, Number(videoSongStart?.max) || 0);
+    const timeline = maxStart + 30;
+    const width = Math.min(100, 30 / Math.max(30, timeline) * 100);
+    const left = Math.min(100 - width, (Number(videoSongStart?.value) || 0) / Math.max(30, timeline) * 100);
+    videoSongWaveform?.style.setProperty('--clip-left', `${left}%`);
+    videoSongWaveform?.style.setProperty('--clip-width', `${width}%`);
+    $('#video-song-time').textContent = `${formatVideoSongTime(Number(videoSongStart?.value) || 0)} – ${formatVideoSongTime((Number(videoSongStart?.value) || 0) + 30)}`;
+  };
   const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
   let autoBannerPromise = null;
@@ -7825,21 +7864,33 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   });
   $('#video-song-start')?.addEventListener('input', event => {
     const seconds = Number(event.target.value) || 0;
-    $('#video-song-time').textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
-    if (videoSongPreview && !videoSongPreview.paused) videoSongPreview.currentTime = seconds;
+    updateVideoSongWaveform();
+    if (videoSongPreview && !videoSongPreview.paused) {
+      videoSongPreview.pause();
+      videoSongPreview.currentTime = seconds;
+      videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+    }
   });
+  updateVideoSongWaveform();
   videoSongPreviewButton?.addEventListener('click', () => {
     if (!selectedVideoSong?.audio_url) return;
     if (videoSongPreview.src !== new URL(selectedVideoSong.audio_url, location.href).href) videoSongPreview.src = selectedVideoSong.audio_url;
     videoSongPreview.currentTime = Number(videoSongStart.value) || 0;
     if (videoSongPreview.paused) {
-      videoSongPreview.play().then(() => { videoSongPreviewButton.innerHTML = '<i class="fas fa-pause"></i> Önizlemeyi durdur'; }).catch(error => toast(error.message || 'Müzik önizlemesi başlatılamadı', 'error'));
+      const stopAt = Math.min(videoSongPreview.duration || Infinity, videoSongPreview.currentTime + 30);
+      videoSongPreview.ontimeupdate = () => {
+        if (videoSongPreview.currentTime < stopAt) return;
+        videoSongPreview.pause();
+        videoSongPreview.currentTime = stopAt;
+        videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+      };
+      videoSongPreview.play().then(() => { videoSongPreviewButton.innerHTML = '<i class="fas fa-pause"></i>'; }).catch(error => toast(error.message || 'Müzik önizlemesi başlatılamadı', 'error'));
     } else {
       videoSongPreview.pause();
-      videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+      videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
     }
   });
-  videoSongPreview?.addEventListener('ended', () => { videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat'; });
+  videoSongPreview?.addEventListener('ended', () => { videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i>'; });
   api('/songs').then(songs => {
     const list = $('#video-song-list');
     const renderVideoSongs = values => {
@@ -7851,7 +7902,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           videoSongPreview.pause();
           videoSongPreview.removeAttribute('src');
           videoSongPreviewButton.disabled = true;
-          videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+          videoSongPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
           $('#video-song-player').hidden = true;
         } else {
           videoSongPreviewButton.disabled = !selectedVideoSong.audio_url;
@@ -7860,13 +7911,14 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           $('#video-song-player').innerHTML = `${selectedVideoSong.cover_url ? `<img src="${escHtml(selectedVideoSong.cover_url)}" alt="" />` : ''}<div><b>${escHtml(selectedVideoSong.title)}</b><small>${escHtml(selectedVideoSong.artist_name || '')}</small></div>`;
         }
         $('#video-song-start').disabled = !selectedVideoSong?.audio_url;
-        $('#video-song-start').max = Math.max(0, Math.floor(Number(selectedVideoSong?.duration_seconds || 0)));
+        $('#video-song-start').max = Math.max(0, Math.floor(Number(selectedVideoSong?.duration_seconds || 0) - 30));
         $('#video-song-start').value = Math.min(Number($('#video-song-start').value) || 0, Number($('#video-song-start').max) || 0);
         if (selectedVideoSong?.audio_url) {
           const probe = new Audio(selectedVideoSong.audio_url);
           probe.addEventListener('loadedmetadata', () => {
-            $('#video-song-start').max = Math.floor(probe.duration || 0);
+            $('#video-song-start').max = Math.max(0, Math.floor(probe.duration || 0) - 30);
             $('#video-song-start').dispatchEvent(new Event('input'));
+            videoSongDuration.textContent = `${formatVideoSongTime(Math.floor(probe.duration || 0))} toplam`;
           });
         }
         $('#video-song-start').dispatchEvent(new Event('input'));
@@ -7882,16 +7934,17 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         $('#video-song-start').disabled = !selectedVideoSong.audio_url;
         videoSongPreviewButton.disabled = !selectedVideoSong.audio_url;
         videoSongPreview.src = selectedVideoSong.audio_url || '';
-        $('#video-song-start').max = Math.max(0, Math.floor(Number(selectedVideoSong.duration_seconds || 0)));
-        $('#video-song-start').value = Math.min(savedVideoSongStart, Number($('#video-song-start').max) || savedVideoSongStart);
+        $('#video-song-start').max = Math.max(0, Math.floor(Number(selectedVideoSong.duration_seconds || 0) - 30));
+        $('#video-song-start').value = Math.min(savedVideoSongStart, Number($('#video-song-start').max) || 0);
         $('#video-song-player').hidden = false;
         $('#video-song-player').innerHTML = `${selectedVideoSong.cover_url ? `<img src="${escHtml(selectedVideoSong.cover_url)}" alt="" />` : ''}<div><b>${escHtml(selectedVideoSong.title)}</b><small>${escHtml(selectedVideoSong.artist_name || '')}</small></div>`;
         if (selectedVideoSong.audio_url) {
           const probe = new Audio(selectedVideoSong.audio_url);
           probe.addEventListener('loadedmetadata', () => {
-            $('#video-song-start').max = Math.floor(probe.duration || 0);
+            $('#video-song-start').max = Math.max(0, Math.floor(probe.duration || 0) - 30);
             $('#video-song-start').value = Math.min(savedVideoSongStart, Number($('#video-song-start').max));
             $('#video-song-start').dispatchEvent(new Event('input'));
+            videoSongDuration.textContent = `${formatVideoSongTime(Math.floor(probe.duration || 0))} toplam`;
           });
         }
       }
@@ -16413,8 +16466,12 @@ function showStoryUploadModal() {
         <div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div>
         <div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda kaydedilir, videolarda izleme ekranında uygulanır.</small></div>
       </div>
-      <div class="form-group"><label>Müzik ekle</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><div id="story-song-timing" class="story-song-timing" hidden><div class="story-song-waveform" id="story-song-waveform" aria-label="Hikaye müziğinin başlangıç noktasını seç"><div class="story-song-waveform-bars" id="story-song-waveform-bars" aria-hidden="true"></div><span class="story-song-waveform-selection" aria-hidden="true"></span><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled aria-label="Müzik başlangıç zamanı" /></div><div class="story-song-preview-controls"><button type="button" id="story-song-preview" aria-label="Müzik önizlemesini oynat" disabled><i class="fas fa-play"></i></button><span><strong id="story-song-time">0:00 – 0:30</strong><small id="story-song-preview-status">Başlangıç noktasını kaydırarak müziği dinle</small></span></div></div></div>
-      <div id="story-song-player" class="story-selected-song" hidden></div>
+      <details class="social-compose-advanced story-compose-music">
+        <summary><i class="fas fa-music"></i> İsteğe bağlı müzik ve başlangıç noktası</summary>
+        <div class="social-compose-advanced-fields">
+          <div class="form-group"><label>Müzik ekle</label><input id="story-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="story-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="story-song" type="hidden" /><div id="story-song-timing" class="story-song-timing" hidden><div class="story-song-waveform dm-note-waveform" id="story-song-waveform" aria-label="Hikaye müziğinin başlangıç noktasını seç"><div class="story-song-waveform-bars dm-note-waveform-bars" id="story-song-waveform-bars" aria-hidden="true"></div><span class="story-song-waveform-selection dm-note-waveform-selection" aria-hidden="true"></span><input id="story-song-start" type="range" min="0" max="0" value="${Number(savedDraft?.songStart) || 0}" step="1" disabled aria-label="Müzik başlangıç zamanı" /></div><div class="story-song-preview-controls dm-note-song-controls"><button type="button" id="story-song-preview" aria-label="Müzik önizlemesini oynat" disabled><i class="fas fa-play"></i></button><span><strong id="story-song-time">0:00 – 0:30</strong><small id="story-song-preview-status">Başlangıç noktasını kaydırarak müziği dinle</small></span></div></div><div id="story-song-player" class="story-selected-song" hidden></div>
+        </div>
+      </details>
       <div id="story-error" class="form-error"></div>
       <button class="btn btn-primary social-compose-submit" id="story-save"><i class="fas fa-paper-plane"></i> Hikayeni paylaş</button>
     </section>
@@ -16443,6 +16500,8 @@ function showStoryUploadModal() {
     const left = Math.min(100 - width, (Number(storySongStart.value) || 0) / total * 100);
     storySongWaveform.style.setProperty('--story-clip-left', `${left}%`);
     storySongWaveform.style.setProperty('--story-clip-width', `${width}%`);
+    storySongWaveform.style.setProperty('--clip-left', `${left}%`);
+    storySongWaveform.style.setProperty('--clip-width', `${width}%`);
     const start = Number(storySongStart.value) || 0;
     $('#story-song-time').textContent = `${formatStorySongTime(start)} – ${formatStorySongTime(Math.min(total, start + 30))}`;
   };
@@ -17539,8 +17598,15 @@ function showPhotoUploadModal() {
         <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" placeholder="Paylaşımına bir başlık ekle…" /></div>
         <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3" placeholder="Fotoğrafınla ilgili bir şeyler yaz…"></textarea></div>
         <div class="form-group"><label>Konum</label><input id="photo-location" placeholder="Konum ekle" /></div>
-        <div class="form-group"><label>Müzik ekle</label><input id="photo-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div><button type="button" class="btn btn-ghost btn-sm" id="photo-song-preview" style="margin-top:8px" disabled><i class="fas fa-play"></i> Önizlemeyi başlat</button><audio id="photo-song-preview-player" controls style="width:100%;margin-top:10px;display:none"></audio></div>
-        <div class="form-group"><label>Müzik başlangıcı <span id="photo-song-time" style="color:var(--text-muted);font-weight:400">0:00</span></label><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled style="width:100%" /></div>
+        <details class="social-compose-advanced">
+          <summary><i class="fas fa-music"></i> İsteğe bağlı müzik ve başlangıç noktası</summary>
+          <div class="social-compose-advanced-fields">
+            <div class="form-group"><label>Müzik ekle</label><input id="photo-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="photo-song-list" class="story-song-list"><div class="loading-center"><div class="spinner"></div></div></div><input id="photo-song" type="hidden" /><div id="photo-song-player" class="story-selected-song" hidden></div>
+              <div id="photo-song-timing" class="media-song-timing" hidden><div class="dm-note-waveform media-song-waveform" id="photo-song-waveform" aria-label="Müzik kesitinin başlangıcını seç"><div class="dm-note-waveform-bars" id="photo-song-waveform-bars" aria-hidden="true"></div><span class="dm-note-waveform-selection" aria-hidden="true"></span><input id="photo-song-start" type="range" min="0" max="0" value="0" step="1" disabled aria-label="Müzik başlangıç zamanı" /></div><div class="dm-note-song-controls"><button type="button" id="photo-song-preview" aria-label="Seçilen kesiti önizle" disabled><i class="fas fa-play"></i></button><span><strong id="photo-song-time">0:00 – 0:30</strong><small id="photo-song-duration">30 saniyelik kesit</small></span></div></div>
+              <audio id="photo-song-preview-player" preload="none" style="display:none"></audio>
+            </div>
+          </div>
+        </details>
         <div class="social-compose-options">
           <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
           <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
@@ -17562,6 +17628,23 @@ function showPhotoUploadModal() {
   const previewPlayer = document.getElementById('photo-song-preview-player');
   const start = document.getElementById('photo-song-start');
   const time = document.getElementById('photo-song-time');
+  const timing = document.getElementById('photo-song-timing');
+  const waveform = document.getElementById('photo-song-waveform');
+  const durationLabel = document.getElementById('photo-song-duration');
+  const formatPhotoSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  document.getElementById('photo-song-waveform-bars').innerHTML = Array.from({ length: 68 }, (_, index) => {
+    const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
+    return `<i style="--bar-height:${Math.round(height)}%"></i>`;
+  }).join('');
+  const updatePhotoSongWaveform = () => {
+    const maxStart = Math.max(0, Number(start.max) || 0);
+    const timeline = maxStart + 30;
+    const width = Math.min(100, 30 / Math.max(30, timeline) * 100);
+    const left = Math.min(100 - width, (Number(start.value) || 0) / Math.max(30, timeline) * 100);
+    waveform.style.setProperty('--clip-left', `${left}%`);
+    waveform.style.setProperty('--clip-width', `${width}%`);
+    time.textContent = `${formatPhotoSongTime(Number(start.value) || 0)} – ${formatPhotoSongTime((Number(start.value) || 0) + 30)}`;
+  };
   const savedSongStart = Math.max(0, Number(savedDraft?.start) || 0);
   document.getElementById('photo-file')?.addEventListener('change', event => {
     const file = event.target.files[0];
@@ -17602,21 +17685,28 @@ function showPhotoUploadModal() {
         selectedSong = songs.find(song => String(song.id) === button.dataset.songId);
         songInput.value = selectedSong?.id || '';
         renderSongs(songs);
+        timing.hidden = !selectedSong;
         previewBtn.disabled = !selectedSong?.audio_url;
-        start.disabled = !selectedSong;
+        start.disabled = !selectedSong?.audio_url;
         start.value = 0;
         start.max = 0;
         if (selectedSong?.audio_url) {
           previewPlayer.src = selectedSong.audio_url;
-          previewPlayer.onended = () => { previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat'; };
+          previewPlayer.onended = () => { previewBtn.innerHTML = '<i class="fas fa-play"></i>'; };
           previewPlayer.load();
           const probe = new Audio(selectedSong.audio_url);
           probe.addEventListener('loadedmetadata', () => {
-            start.max = Math.floor(probe.duration) || 0;
+            start.max = Math.max(0, Math.floor(probe.duration) - 30);
             if (savedDraft?.songId && String(savedDraft.songId) === String(selectedSong.id)) start.value = Math.min(savedSongStart, Number(start.max));
             start.dispatchEvent(new Event('input'));
+            durationLabel.textContent = `${formatPhotoSongTime(Math.floor(probe.duration))} toplam`;
           });
           updatePreviewUi();
+        } else {
+          previewPlayer.pause();
+          previewPlayer.removeAttribute('src');
+          previewPlayer.load();
+          previewBtn.innerHTML = '<i class="fas fa-play"></i>';
         }
         document.getElementById('photo-song-player').hidden = !selectedSong;
         document.getElementById('photo-song-player').innerHTML = selectedSong ? `<img src="${escHtml(selectedSong.cover_url || '')}" alt="" /><div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div>` : '';
@@ -17626,19 +17716,23 @@ function showPhotoUploadModal() {
       selectedSong = songs.find(song => String(song.id) === String(savedDraft.songId)) || null;
       if (selectedSong) {
         songInput.value = selectedSong.id;
+        timing.hidden = false;
         start.disabled = !selectedSong.audio_url;
-        start.max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0)));
-        if (savedDraft?.songId && String(savedDraft.songId) === String(selectedSong.id)) start.value = Math.min(savedSongStart, Number(start.max) || savedSongStart);
+        start.max = Math.max(0, Math.floor(Number(selectedSong.duration_seconds || 0) - 30));
+        if (savedDraft?.songId && String(savedDraft.songId) === String(selectedSong.id)) start.value = Math.min(savedSongStart, Number(start.max) || 0);
         start.dispatchEvent(new Event('input'));
         if (selectedSong.audio_url) {
           previewPlayer.src = selectedSong.audio_url;
           const probe = new Audio(selectedSong.audio_url);
           probe.addEventListener('loadedmetadata', () => {
-            start.max = Math.floor(probe.duration) || 0;
+            start.max = Math.max(0, Math.floor(probe.duration) - 30);
             start.value = Math.min(savedSongStart, Number(start.max));
             start.dispatchEvent(new Event('input'));
+            durationLabel.textContent = `${formatPhotoSongTime(Math.floor(probe.duration))} toplam`;
           });
         }
+        $('#photo-song-player').hidden = false;
+        $('#photo-song-player').innerHTML = `${selectedSong.cover_url ? `<img src="${escHtml(selectedSong.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<div><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></div>`;
       }
     }
     renderSongs(songs);
@@ -17647,7 +17741,7 @@ function showPhotoUploadModal() {
 
   const showTime = () => {
     const seconds = Number(start.value) || 0;
-    time.textContent = Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+    updatePhotoSongWaveform();
     if (previewPlayer && !previewPlayer.paused) {
       previewPlayer.currentTime = Math.max(0, seconds);
     }
@@ -17655,25 +17749,33 @@ function showPhotoUploadModal() {
 
   const updatePreviewUi = () => {
     if (previewPlayer && previewPlayer.src) {
-      previewPlayer.style.display = 'block';
+      previewPlayer.style.display = 'none';
     } else {
       previewPlayer.style.display = 'none';
-      previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+      previewBtn.innerHTML = '<i class="fas fa-play"></i>';
     }
   };
 
   start.oninput = showTime;
+  updatePhotoSongWaveform();
 
   previewBtn.onclick = () => {
     if (!previewPlayer?.src) return;
     const targetTime = Math.max(0, Number(start.value) || 0);
-    previewPlayer.currentTime = targetTime;
     if (previewPlayer.paused) {
-      previewPlayer.play();
-      previewBtn.innerHTML = '<i class="fas fa-pause"></i> Önizlemeyi durdur';
+      previewPlayer.currentTime = targetTime;
+      const stopAt = Math.min(previewPlayer.duration || Infinity, targetTime + 30);
+      previewPlayer.ontimeupdate = () => {
+        if (previewPlayer.currentTime < stopAt) return;
+        previewPlayer.pause();
+        previewPlayer.currentTime = stopAt;
+        previewBtn.innerHTML = '<i class="fas fa-play"></i>';
+      };
+      previewPlayer.play().then(() => { previewBtn.innerHTML = '<i class="fas fa-pause"></i>'; })
+        .catch(error => toast(error.message || 'Müzik önizlemesi başlatılamadı', 'error'));
     } else {
       previewPlayer.pause();
-      previewBtn.innerHTML = '<i class="fas fa-play"></i> Önizlemeyi başlat';
+      previewBtn.innerHTML = '<i class="fas fa-play"></i>';
     }
   };
 
