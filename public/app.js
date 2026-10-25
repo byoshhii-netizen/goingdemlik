@@ -8999,12 +8999,9 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     <div class="profile-note-viewer-profile"><span class="profile-note-viewer-avatar">${avatar}</span><span><strong>${escHtml(displayName)}</strong><small>@${escHtml(username)}</small></span></div>
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
     ${song}
-    <div class="profile-note-actions">
-      ${isOwnNote
-        ? `<button type="button" class="profile-note-likes-button" id="profile-note-likers"><i class="fas fa-heart"></i><span>Beğenenler</span><b>${Number(note.like_count) || 0}</b></button>`
-        : `<button type="button" class="profile-note-like-button${note.liked_by_me ? ' is-liked' : ''}" id="profile-note-like" aria-pressed="${note.liked_by_me ? 'true' : 'false'}"><i class="${note.liked_by_me ? 'fas' : 'far'} fa-heart"></i><span>${note.liked_by_me ? 'Beğendin' : 'Beğen'}</span><b>${Number(note.like_count) || 0}</b></button>`}
-    </div>
-    ${isOwnNote ? '<div class="profile-note-likers-list" id="profile-note-likers-list" hidden></div>' : ''}
+    ${isOwnNote
+      ? (Number(note.like_count) > 0 ? `<div class="profile-note-actions"><button type="button" class="profile-note-likes-button" id="profile-note-likers"><i class="fas fa-heart"></i><span>Beğenenler</span><b>${Number(note.like_count)}</b></button></div><div class="profile-note-likers-list" id="profile-note-likers-list" hidden></div>` : '')
+      : `<div class="profile-note-actions"><button type="button" class="profile-note-like-button${note.liked_by_me ? ' is-liked' : ''}" id="profile-note-like" aria-label="${note.liked_by_me ? 'Beğeniyi kaldır' : 'Notu beğen'}" aria-pressed="${note.liked_by_me ? 'true' : 'false'}"><i class="${note.liked_by_me ? 'fas' : 'far'} fa-heart"></i></button></div>`}
     <div class="profile-note-audio-status" id="profile-note-audio-status" aria-live="polite"></div>
     ${isOwnNote ? '<button type="button" class="btn btn-outline profile-note-delete" id="profile-note-delete"><i class="fas fa-trash"></i> Notu sil</button>' : ''}
   </div>`, 'profile-note-viewer-modal');
@@ -9017,9 +9014,8 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
       note.like_count = result.like_count;
       button.classList.toggle('is-liked', result.liked);
       button.setAttribute('aria-pressed', result.liked ? 'true' : 'false');
+      button.setAttribute('aria-label', result.liked ? 'Beğeniyi kaldır' : 'Notu beğen');
       button.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
-      button.querySelector('span').textContent = result.liked ? 'Beğendin' : 'Beğen';
-      button.querySelector('b').textContent = String(result.like_count);
       button.disabled = false;
     } catch (error) {
       button.disabled = false;
@@ -9032,10 +9028,14 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     button.disabled = true;
     try {
       const likers = await api(`/dm-notes/${encodeURIComponent(username)}/likes`);
-      list.innerHTML = likers.length
-        ? `<div class="profile-note-likers-heading">Bu notu beğenenler</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${avatarImg(liker)}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`
-        : '<div class="profile-note-likers-empty">Bu notu henüz beğenen yok.</div>';
-      list.hidden = false;
+      if (likers.length) {
+        list.innerHTML = `<div class="profile-note-likers-heading">Bu notu beğenenler</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${avatarImg(liker)}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`;
+        list.hidden = false;
+      } else {
+        list.innerHTML = '';
+        list.hidden = true;
+        button.closest('.profile-note-actions').hidden = true;
+      }
       button.querySelector('b').textContent = String(likers.length);
       button.disabled = false;
     } catch (error) {
