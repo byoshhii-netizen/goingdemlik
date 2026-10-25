@@ -44,6 +44,8 @@ const managedMediaAudio = new Set();
 let activePlaylistPreviewAudio = null;
 let activePlaylistPreviewButton = null;
 let designedFilePickerSequence = 0;
+let storyAvatarHoldTimer = null;
+let longPressedStoryAvatar = null;
 
 document.addEventListener('contextmenu', event => {
   if (!(event.target instanceof Element)) return;
@@ -399,6 +401,47 @@ function showImagePreviewModal(url, title = 'Görsel önizlemesi') {
   if (!url) return;
   showModal(title, `<div class="media-preview-modal"><div><img src="${escHtml(url)}" alt="${escHtml(title)}" /></div></div>`);
 }
+
+document.addEventListener('pointerdown', event => {
+  if (!(event.target instanceof Element)) return;
+  const avatar = event.target.closest('img.story-avatar-media, img.dm-story-avatar-media');
+  if (!avatar) return;
+  clearTimeout(storyAvatarHoldTimer);
+  longPressedStoryAvatar = null;
+  storyAvatarHoldTimer = setTimeout(() => {
+    longPressedStoryAvatar = avatar;
+    showImagePreviewModal(avatar.currentSrc || avatar.src, 'Profil fotoğrafı');
+  }, 450);
+}, true);
+
+document.addEventListener('pointerup', () => {
+  clearTimeout(storyAvatarHoldTimer);
+  storyAvatarHoldTimer = null;
+}, true);
+
+document.addEventListener('pointercancel', () => {
+  clearTimeout(storyAvatarHoldTimer);
+  storyAvatarHoldTimer = null;
+  longPressedStoryAvatar = null;
+}, true);
+
+document.addEventListener('click', event => {
+  if (!(event.target instanceof Element)) return;
+  const storyAvatar = event.target.closest('img.story-avatar-media, img.dm-story-avatar-media');
+  if (storyAvatar) {
+    if (storyAvatar === longPressedStoryAvatar) {
+      event.preventDefault();
+      event.stopPropagation();
+      longPressedStoryAvatar = null;
+    }
+    return;
+  }
+  const avatar = event.target.closest('img[data-profile-avatar], img.profile-avatar, img.nav-avatar, img.mobile-bottom-avatar, img.profile-avatar-archive-image, img.comment-avatar');
+  if (!avatar || avatar.closest('.profile-header .profile-avatar-wrap')) return;
+  event.preventDefault();
+  event.stopPropagation();
+  showImagePreviewModal(avatar.currentSrc || avatar.src, 'Profil fotoğrafı');
+}, true);
 
 document.addEventListener('click', event => {
   const description = event.target.closest('[data-full-description]');
@@ -840,13 +883,6 @@ async function apiForm(path, formData, method = 'POST') {
   return data;
 }
 
-async function transcribeSongFile(file) {
-  if (!file) throw new Error('Önce şarkının ses dosyasını seçin.');
-  const form = new FormData();
-  form.append('audio', file);
-  return apiForm('/songs/transcribe', form);
-}
-
 function getTimedLyrics(song) {
   let segments = song?.lyrics_timed || [];
   if (typeof segments === 'string') {
@@ -1107,7 +1143,7 @@ window.showJournalistSince = function (assignedAt) {
 };
 
 function avatarImg(u, cls = 'avatar-sm') {
-  if (u && u.avatar && !u.avatar_removed) return `<img src="${escHtml(u.avatar)}" class="${cls}" alt="" />`;
+  if (u && u.avatar && !u.avatar_removed) return `<img src="${escHtml(u.avatar)}" class="${cls}" data-profile-avatar alt="" />`;
   return `<div class="${cls} avatar-placeholder" aria-label="Profil fotoğrafı yok"><i class="fas fa-user"></i></div>`;
 }
 
@@ -8792,7 +8828,11 @@ async function renderProfile(app, username) {
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
   const savedContentHTML = profileSavedVideos.length ? `<div class="profile-saved-content-grid">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
-  const profileArchiveCard = (type, id, content, canArchive = true, canEditPhoto = false) => `<div class="profile-archiveable-card">${content}${isOwn && canArchive ? `<div class="${canEditPhoto ? 'profile-photo-owner-actions' : ''}">${canEditPhoto ? `<button type="button" class="profile-content-edit-btn" data-profile-edit-photo="${escHtml(id)}" aria-label="Fotoğrafı düzenle" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button>` : ''}<button type="button" class="profile-content-archive-btn" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşive taşı"><i class="fas fa-box-archive"></i><span>Arşivle</span></button></div>` : ''}</div>`;
+  const profileArchiveCard = (type, id, content, canArchive = true, editAction = '') => `<div class="profile-archiveable-card${isOwn && canArchive && editAction ? ' has-profile-owner-actions' : ''}">${content}${isOwn && canArchive && editAction ? `<div class="profile-photo-owner-actions" aria-label="İçerik işlemleri">
+      <button type="button" class="profile-content-edit-btn" ${editAction} aria-label="Düzenle" title="Düzenle"><i class="fas fa-pen"></i><span>Düzenle</span></button>
+      <button type="button" class="profile-content-archive-btn" data-profile-content-action="archive" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşivle"><i class="fas fa-box-archive"></i><span>Arşivle</span></button>
+      <button type="button" class="profile-content-trash-btn" data-profile-content-action="trash" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Sil"><i class="fas fa-trash"></i><span>Sil</span></button>
+    </div>` : isOwn && canArchive ? `<button type="button" class="profile-content-archive-btn" data-profile-content-action="archive" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşive taşı"><i class="fas fa-box-archive"></i><span>Arşivle</span></button>` : ''}</div>`;
   const profileSongsHTML = profileSongs.length ? `<div class="profile-songs-grid">${profileSongs.map(s => profileArchiveCard('song', s.id, `
       <div class="song-card profile-song-card" onclick="navigate('/muzik/${escHtml(s.slug)}')" style="cursor:pointer">
         ${s.cover_url ? `<img src="${escHtml(s.cover_url)}" class="song-card-cover" />` : `<div class="song-card-cover song-card-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -8895,7 +8935,7 @@ async function renderProfile(app, username) {
       ${books.length ? `<div class="grid-3">${books.map(b => profileArchiveCard('book', b.id, bookCardHTML(b), String(b.user_id) === String(user.id))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
     </div>
     <div id="tab-photos" class="hidden">
-      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`, true, true)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
+      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`, true, `data-profile-edit-photo="${escHtml(photo.id)}"`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
@@ -8904,7 +8944,7 @@ async function renderProfile(app, username) {
       ${profileVideos.length ? `<div class="grid-3">${profileVideos.map(video => profileArchiveCard('video', video.id, videoCardHTML(video))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-video"></i><p>Video yok.</p></div>'}
     </div>
     <div id="tab-reals" class="hidden">
-      ${profileReals.length ? `<div class="profile-reels-grid">${profileReals.map(v => profileArchiveCard('reals', v.id, realsProfileCardHTML(v))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
+      ${profileReals.length ? `<div class="profile-reels-grid">${profileReals.map(v => profileArchiveCard('reals', v.id, realsProfileCardHTML(v), true, `data-profile-edit-real="${escHtml(v.id)}"`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-circle-play"></i><p>Reals yok.</p></div>'}
     </div>
     <div id="tab-saved" class="hidden">
       ${savedContentHTML}
@@ -8932,26 +8972,66 @@ async function renderProfile(app, username) {
   profileTabOrder.forEach(tab => document.getElementById('tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
   bindProfileAvatarViewer(app, user, data.avatar_photos || [], isOwn);
+  let ownerActionHoldTimer = null;
+  let suppressProfileCardClick = false;
+  app.addEventListener('pointerdown', event => {
+    const card = event.target.closest('.profile-archiveable-card.has-profile-owner-actions');
+    if (!card || event.target.closest('.profile-photo-owner-actions')) return;
+    app.querySelectorAll('.profile-archiveable-card.is-actions-open').forEach(openCard => {
+      if (openCard !== card) openCard.classList.remove('is-actions-open');
+    });
+    clearTimeout(ownerActionHoldTimer);
+    suppressProfileCardClick = false;
+    ownerActionHoldTimer = setTimeout(() => {
+      card.classList.add('is-actions-open');
+      suppressProfileCardClick = true;
+    }, 500);
+  });
+  const cancelOwnerActionHold = () => {
+    clearTimeout(ownerActionHoldTimer);
+    ownerActionHoldTimer = null;
+  };
+  app.addEventListener('pointerup', cancelOwnerActionHold);
+  app.addEventListener('pointercancel', cancelOwnerActionHold);
+  app.addEventListener('pointerleave', cancelOwnerActionHold);
+  app.addEventListener('pointercancel', () => { suppressProfileCardClick = false; });
+  app.addEventListener('click', event => {
+    const card = event.target.closest('.profile-archiveable-card.has-profile-owner-actions');
+    if (!card || !suppressProfileCardClick) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressProfileCardClick = false;
+  }, true);
   app.querySelectorAll('[data-profile-edit-photo]').forEach(button => button.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
     showPhotoEditModal(button.dataset.profileEditPhoto, `/profil/${encodeURIComponent(username)}`);
   }));
-  app.querySelectorAll('[data-profile-archive-type]').forEach(button => button.addEventListener('click', async event => {
+  app.querySelectorAll('[data-profile-edit-real]').forEach(button => button.addEventListener('click', event => {
     event.preventDefault();
     event.stopPropagation();
-    if (!await CigCigDialogs.confirm('Bu içeriği arşive taşımak istiyor musun? Profilinden ve herkese açık listelerden gizlenecek; Arşivim bölümünden geri alabilirsin.')) return;
+    const real = profileReals.find(item => String(item.id) === String(button.dataset.profileEditReal));
+    if (real) showNewVideoModal(real, true);
+  }));
+  app.querySelectorAll('[data-profile-content-action="archive"], [data-profile-content-action="trash"]').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const action = button.dataset.profileContentAction;
+    const archive = action === 'archive';
+    if (!await CigCigDialogs.confirm(archive
+      ? 'Bu içeriği arşive taşımak istiyor musun? Profilinden ve herkese açık listelerden gizlenecek; Arşivim bölümünden geri alabilirsin.'
+      : 'Bu içeriği silmek istiyor musun? Silinenler bölümünden geri yükleyebilirsin.')) return;
     button.disabled = true;
     try {
       await api(`/archive/${encodeURIComponent(button.dataset.profileArchiveType)}/${encodeURIComponent(button.dataset.profileArchiveId)}`, {
         method: 'POST',
-        body: JSON.stringify({ action: 'archive' })
+        body: JSON.stringify({ action })
       });
-      toast('İçerik arşive taşındı.', 'success');
+      toast(archive ? 'İçerik arşive taşındı.' : 'İçerik silinenlere taşındı.', 'success');
       await renderProfile(app, username);
     } catch (error) {
       button.disabled = false;
-      toast(error.message || 'İçerik arşivlenemedi.', 'error');
+      toast(error.message || 'İçerik güncellenemedi.', 'error');
     }
   }));
 
@@ -11252,6 +11332,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   trigger.addEventListener('click', event => {
     event.preventDefault();
     if (suppressClick) suppressClick = false;
+    else openViewer(0);
   });
   trigger.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -15791,7 +15872,7 @@ async function renderMusicDetail(app, slug) {
         </div>` : `
         <div class="form-group"><label>Sanatçı Adı</label><input id="ue-artist" value="${escHtml(song.artist_name)}" /></div>`}
         <div class="form-group"><label>Müzik Türü</label><input id="ue-genre" value="${escHtml(song.genre||'')}" /></div>
-        <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea><button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="ue-transcribe"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button><small class="song-transcribe-status" id="ue-transcribe-status">Ses dosyasını seçin. Ses OpenAI Whisper'a gönderilir; sonuçları kontrol edin.</small></div>
+        <div class="form-group"><label>Şarkı Sözleri</label><textarea id="ue-lyrics" rows="5">${escHtml(song.lyrics||'')}</textarea></div>
         ${song.song_type === 'other' ? `<div class="form-group"><label>Paylaşma Sebebi</label><textarea id="ue-reason" rows="2">${escHtml(song.share_reason||'')}</textarea></div>` : ''}
         <div class="form-group"><label>Yeni Kapak Fotoğrafı (1:1 kare) <span style="font-size:11px;color:var(--text-muted)">(boş bırak = değişmez)</span></label>
           <input type="file" id="ue-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:8px;cursor:pointer;border-radius:8px" />
@@ -15802,25 +15883,6 @@ async function renderMusicDetail(app, slug) {
         <button class="btn btn-primary" id="ue-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Kaydet</button>
         <div id="ue-msg" style="margin-top:8px;font-size:12px;color:var(--accent-red2);text-align:center"></div>
       `);
-      document.getElementById('ue-transcribe').addEventListener('click', async event => {
-        const button = event.currentTarget;
-        const status = document.getElementById('ue-transcribe-status');
-        button.disabled = true;
-        button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Sözler çıkarılıyor...';
-        status.textContent = '';
-        try {
-          const result = await transcribeSongFile(document.getElementById('ue-audio')?.files[0]);
-          document.getElementById('ue-lyrics').value = result.lyrics;
-          transcribedLyricsText = result.lyrics;
-          editedTimedLyrics = result.segments;
-          status.textContent = `${result.segments.length} zamanlı söz satırı hazır.`;
-        } catch (error) {
-          status.textContent = error.message;
-        } finally {
-          button.disabled = false;
-          button.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar';
-        }
-      });
       document.getElementById('ue-lyrics').addEventListener('input', event => {
         if (event.target.value !== transcribedLyricsText) editedTimedLyrics = [];
       });
@@ -16104,7 +16166,7 @@ async function renderArtistPanel(app) {
           <div class="form-group"><label>Şarkı Türü</label><input id="s-genre" placeholder="Pop, Rock, Elektronik..." /></div>
           <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea><button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="s-transcribe"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button>          <small class="song-transcribe-status" id="s-transcribe-status">Ses OpenAI Whisper'a gönderilir; sonuçları kontrol et. API kullanımı ücret oluşturabilir.</small></div>
+          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.own_rules)}</div>
           <label class="checkbox-label" style="margin-bottom:16px"><input type="checkbox" id="s-rules-own" style="width:auto" /> Şarkı yayınlama kurallarını okudum ve kabul ediyorum</label>
         </div>
@@ -16112,7 +16174,7 @@ async function renderArtistPanel(app) {
           <div class="form-group"><label>Şarkı Adı *</label><input id="s-title-o" /></div>
           <div class="form-group"><label>Şarkı Sahibi (Sanatçı) *</label><input id="s-artist-o" /></div>
           <div class="form-group"><label>Kapak Fotoğrafı (1:1 kare)</label><input type="file" id="s-cover-o" accept="image/*" style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /><small class="text-muted">Yüklediğin görsel ortadan kare kırpılır.</small></div>
-          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea><button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="s-transcribe-o"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button>          <small class="song-transcribe-status" id="s-transcribe-status-o">Ses OpenAI Whisper'a gönderilir; sonuçları kontrol et. API kullanımı ücret oluşturabilir.</small></div>
+          <div class="form-group"><label>Şarkı Sözleri (isteğe bağlı)</label><textarea id="s-lyrics-o" rows="6" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea></div>
           <div class="form-group"><label>Şarkı Dosyası * (MP3/WAV)</label><input type="file" id="s-audio-o" accept="audio/*" required style="background:var(--bg-card2);border:1px dashed var(--border);padding:10px;cursor:pointer" /></div>
           <div class="form-group"><label>Neden paylaştınız? *</label><textarea id="s-reason" rows="3" placeholder="Bu şarkıyı neden topluluğumuzla paylaşmak istediniz?"></textarea></div>
           <div style="background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary);max-height:120px;overflow-y:auto">${escHtml(rules.other_rules)}</div>
@@ -16129,41 +16191,6 @@ async function renderArtistPanel(app) {
     document.getElementById('own-fields').style.display = own ? '' : 'none';
     document.getElementById('other-fields').style.display = own ? 'none' : '';
   }));
-
-  let ownTimedLyrics = [], otherTimedLyrics = [];
-  const bindTranscribe = (buttonId, audioId, lyricsId, statusId, onTranscript) => {
-    const button = document.getElementById(buttonId);
-    const lyricsField = document.getElementById(lyricsId);
-    const status = document.getElementById(statusId);
-    button.addEventListener('click', async () => {
-      button.disabled = true;
-      button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Sözler çıkarılıyor...';
-      status.textContent = '';
-      try {
-        const result = await transcribeSongFile(document.getElementById(audioId)?.files[0]);
-        lyricsField.value = result.lyrics;
-        onTranscript(result);
-        status.textContent = `${result.segments.length} zamanlı söz satırı hazır. Kaydedince çalma sırasında vurgulanır.`;
-      } catch (error) {
-        status.textContent = error.message;
-      } finally {
-        button.disabled = false;
-        button.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar';
-      }
-    });
-    lyricsField.addEventListener('input', () => {
-      if (lyricsField.value !== lyricsField.dataset.transcribedText) onTranscript(null);
-    });
-    document.getElementById(audioId).addEventListener('change', () => onTranscript(null));
-  };
-  bindTranscribe('s-transcribe', 's-audio', 's-lyrics', 's-transcribe-status', result => {
-    ownTimedLyrics = result?.segments || [];
-    document.getElementById('s-lyrics').dataset.transcribedText = result?.lyrics || '';
-  });
-  bindTranscribe('s-transcribe-o', 's-audio-o', 's-lyrics-o', 's-transcribe-status-o', result => {
-    otherTimedLyrics = result?.segments || [];
-    document.getElementById('s-lyrics-o').dataset.transcribedText = result?.lyrics || '';
-  });
 
   document.getElementById('song-upload-btn').addEventListener('click', async () => {
     const isOwn = document.getElementById('st-own').checked;
@@ -16184,7 +16211,7 @@ async function renderArtistPanel(app) {
       fd.append('distributor', document.getElementById('s-distributor')?.value.trim()||'');
       fd.append('genre', document.getElementById('s-genre')?.value.trim()||'');
       fd.append('lyrics', document.getElementById('s-lyrics')?.value.trim()||'');
-      fd.append('lyrics_timed', JSON.stringify(ownTimedLyrics));
+      fd.append('lyrics_timed', '[]');
       fd.append('audio', audio);
       const cover = document.getElementById('s-cover')?.files[0]; if(cover) fd.append('cover', await squareCoverFile(cover));
     } else {
@@ -16195,7 +16222,7 @@ async function renderArtistPanel(app) {
       if (!audio) { msg.style.color='var(--accent-red2)'; msg.textContent='Ses dosyası gerekli'; return; }
       fd.append('title', title); fd.append('artist_name', artist);
       fd.append('lyrics', document.getElementById('s-lyrics-o')?.value.trim()||'');
-      fd.append('lyrics_timed', JSON.stringify(otherTimedLyrics));
+      fd.append('lyrics_timed', '[]');
       fd.append('share_reason', document.getElementById('s-reason')?.value.trim()||'');
       fd.append('audio', audio);
       const cover = document.getElementById('s-cover-o')?.files[0]; if(cover) fd.append('cover', await squareCoverFile(cover));
@@ -16259,8 +16286,6 @@ async function renderShareSong(app) {
         <div class="form-group">
           <label>Şarkı Sözleri (isteğe bağlı)</label>
           <textarea id="ss-lyrics" rows="5" placeholder="Şarkı sözlerini buraya yapıştırın..."></textarea>
-          <button type="button" class="btn btn-outline btn-sm song-transcribe-btn" id="ss-transcribe"><i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar</button>
-          <small class="song-transcribe-status" id="ss-transcribe-status">Ses OpenAI Whisper'a gönderilir; sonuçları kontrol et. API kullanımı ücret oluşturabilir.</small>
         </div>
         <div class="form-group">
           <label>Neden paylaşıyorsunuz? *</label>
@@ -16281,32 +16306,6 @@ async function renderShareSong(app) {
       </div>
     </div>
   </div>`;
-
-  let shareTimedLyrics = [];
-  let transcribedShareLyrics = '';
-  document.getElementById('ss-transcribe').addEventListener('click', async event => {
-    const button = event.currentTarget;
-    const status = document.getElementById('ss-transcribe-status');
-    button.disabled = true;
-    button.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Sözler çıkarılıyor...';
-    status.textContent = '';
-    try {
-      const result = await transcribeSongFile(document.getElementById('ss-audio').files[0]);
-      document.getElementById('ss-lyrics').value = result.lyrics;
-      transcribedShareLyrics = result.lyrics;
-      shareTimedLyrics = result.segments;
-      status.textContent = `${result.segments.length} zamanlı söz satırı hazır.`;
-    } catch (error) {
-      status.textContent = error.message;
-    } finally {
-      button.disabled = false;
-      button.innerHTML = '<i class="fas fa-wand-magic-sparkles"></i> Sözleri otomatik çıkar';
-    }
-  });
-  document.getElementById('ss-lyrics').addEventListener('input', event => {
-    if (event.target.value !== transcribedShareLyrics) shareTimedLyrics = [];
-  });
-  document.getElementById('ss-audio').addEventListener('change', () => { shareTimedLyrics = []; });
 
   document.getElementById('ss-submit').addEventListener('click', async () => {
     const msg = document.getElementById('ss-msg');
@@ -16333,7 +16332,7 @@ async function renderShareSong(app) {
     fd.append('artist_name', artist);
     fd.append('genre', genre);
     fd.append('lyrics', lyrics);
-    fd.append('lyrics_timed', JSON.stringify(shareTimedLyrics));
+    fd.append('lyrics_timed', '[]');
     fd.append('share_reason', reason);
     fd.append('audio', audio);
     if (cover) fd.append('cover', await squareCoverFile(cover));

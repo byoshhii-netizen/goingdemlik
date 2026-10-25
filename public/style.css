@@ -4704,8 +4704,6 @@ body.reals-page #navbar[hidden] { display: none !important; }
 .song-lyrics-timed { max-height:420px; overflow-y:auto; }
 .song-lyric-line { min-height:1.6em; padding:2px 8px; border-radius:6px; opacity:.58; transition:color .2s,opacity .2s,background .2s; }
 .song-lyric-line.active { color:var(--text-primary); opacity:1; background:rgba(var(--accent-rgb),.13); font-weight:700; }
-.song-transcribe-btn { margin-top:8px; }
-.song-transcribe-status { display:block; margin-top:6px; color:var(--text-muted); font-size:11px; line-height:1.45; }
 
 /* Responsive */
 @media (max-width:680px) {
@@ -5877,18 +5875,28 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .profile-owner-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; margin-top:16px; }
 .profile-admin-panel-btn { border:0; color:#fff; background:linear-gradient(135deg,#1a1aff,#5865F2); }
 .profile-archiveable-card { position:relative; min-width:0; }
-.profile-photo-owner-actions { position:absolute; z-index:3; top:8px; right:8px; display:flex; align-items:center; gap:6px; }
+.profile-photo-owner-actions { position:absolute; z-index:5; inset:0; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px; padding:12px; opacity:0; visibility:hidden; pointer-events:none; transition:opacity .16s,visibility .16s; }
 .profile-photo-owner-actions .profile-content-archive-btn,
-.profile-photo-owner-actions .profile-content-edit-btn { position:static; display:flex; align-items:center; justify-content:center; gap:6px; min-width:32px; min-height:32px; padding:0 10px; border:1px solid rgba(255,255,255,.18); border-radius:999px; color:#fff; background:rgba(10,12,16,.8); box-shadow:0 4px 14px rgba(0,0,0,.24); font-size:10px; font-weight:700; cursor:pointer; opacity:1; transform:none; transition:background .15s; backdrop-filter:blur(8px); }
-.profile-photo-owner-actions .profile-content-edit-btn { width:32px; padding:0; }
+.profile-photo-owner-actions .profile-content-edit-btn,
+.profile-photo-owner-actions .profile-content-trash-btn { position:static; display:flex; align-items:center; justify-content:center; gap:6px; min-width:42px; min-height:38px; padding:0 11px; border:1px solid rgba(255,255,255,.2); border-radius:999px; color:#fff; background:rgba(10,12,16,.88); box-shadow:0 4px 14px rgba(0,0,0,.24); font-size:11px; font-weight:700; cursor:pointer; opacity:1; transform:none; transition:background .15s,transform .15s; backdrop-filter:blur(8px); }
 .profile-photo-owner-actions .profile-content-archive-btn:hover,
-.profile-photo-owner-actions .profile-content-edit-btn:hover { background:rgba(var(--accent-rgb),.85); }
+.profile-photo-owner-actions .profile-content-edit-btn:hover { background:rgba(var(--accent-rgb),.85); transform:translateY(-1px); }
+.profile-photo-owner-actions .profile-content-trash-btn { border-color:rgba(255,105,105,.45); background:rgba(105,22,29,.9); }
+.profile-photo-owner-actions .profile-content-trash-btn:hover { background:rgba(174,35,49,.95); transform:translateY(-1px); }
+.profile-archiveable-card.has-profile-owner-actions { overflow:hidden; }
+.profile-archiveable-card.has-profile-owner-actions::after { position:absolute; z-index:4; inset:0; content:""; background:rgba(5,7,10,.52); opacity:0; visibility:hidden; pointer-events:none; transition:opacity .16s,visibility .16s; }
+.profile-archiveable-card.has-profile-owner-actions.is-actions-open::after { opacity:1; visibility:visible; }
+.profile-archiveable-card.has-profile-owner-actions.is-actions-open .profile-photo-owner-actions { opacity:1; visibility:visible; pointer-events:auto; }
+.profile-archiveable-card.has-profile-owner-actions.is-actions-open .profile-photo-owner-actions .profile-content-archive-btn,
+.profile-archiveable-card.has-profile-owner-actions.is-actions-open .profile-photo-owner-actions .profile-content-trash-btn { opacity:1; transform:none; }
+.profile-archiveable-card.has-profile-owner-actions img { -webkit-touch-callout:none; user-select:none; }
+.profile-content-trash-btn { position:absolute; z-index:3; top:8px; left:8px; display:flex; align-items:center; gap:6px; min-height:32px; padding:0 10px; border:1px solid rgba(255,105,105,.4); border-radius:999px; color:#fff; background:rgba(105,22,29,.84); box-shadow:0 4px 14px rgba(0,0,0,.24); font-size:10px; font-weight:700; cursor:pointer; opacity:0; transform:translateY(-3px); transition:opacity .15s,transform .15s,background .15s; backdrop-filter:blur(8px); }
 .profile-content-archive-btn { position:absolute; z-index:3; top:8px; right:8px; display:flex; align-items:center; gap:6px; min-height:32px; padding:0 10px; border:1px solid rgba(255,255,255,.18); border-radius:999px; color:#fff; background:rgba(10,12,16,.8); box-shadow:0 4px 14px rgba(0,0,0,.24); font-size:10px; font-weight:700; cursor:pointer; opacity:0; transform:translateY(-3px); transition:opacity .15s,transform .15s,background .15s; backdrop-filter:blur(8px); }
 .profile-archiveable-card:hover .profile-content-archive-btn,.profile-content-archive-btn:focus-visible { opacity:1; transform:translateY(0); }
+.profile-archiveable-card:hover .profile-content-trash-btn,.profile-content-trash-btn:focus-visible { opacity:1; transform:translateY(0); }
 .profile-content-archive-btn:hover { background:rgba(var(--accent-rgb),.85); }
 .profile-photo-grid .profile-archiveable-card { aspect-ratio:1; }
 .profile-photo-grid .profile-photo-item { position:absolute; inset:0; }
-.profile-photo-grid .profile-content-archive-btn { opacity:1; }
 .music-page-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; margin-bottom:22px; padding:18px 20px; border:1px solid var(--border); border-radius:18px; background:linear-gradient(110deg,rgba(var(--accent-rgb),.1),var(--bg-card) 60%); }
 .music-page-title { display:flex; align-items:center; gap:13px; margin:0; }
 .music-page-title-icon { display:grid; flex:0 0 48px; width:48px; height:48px; place-items:center; border:1px solid rgba(var(--accent-rgb),.25); border-radius:15px; color:var(--accent-red2); background:rgba(var(--accent-rgb),.11); font-size:19px; }
@@ -5907,11 +5915,12 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .dm-options-actions { gap: 8px; }
   .dm-options-actions .btn { min-height: 46px; }
   .dm-lock-prompt-actions { flex-direction:column-reverse; }
-  .profile-content-archive-btn { top:5px; right:5px; min-height:29px; padding:0 8px; font-size:9px; opacity:1; }
-  .profile-photo-owner-actions { top:5px; right:5px; gap:5px; }
+  .profile-content-archive-btn { top:5px; right:5px; min-height:29px; padding:0 8px; font-size:9px; }
+  .profile-content-trash-btn { top:5px; left:5px; min-height:29px; padding:0 8px; font-size:9px; }
+  .profile-photo-owner-actions { gap:6px; padding:8px; }
   .profile-photo-owner-actions .profile-content-archive-btn,
-  .profile-photo-owner-actions .profile-content-edit-btn { min-width:29px; min-height:29px; padding:0 8px; font-size:9px; }
-  .profile-photo-owner-actions .profile-content-edit-btn { width:29px; padding:0; }
+  .profile-photo-owner-actions .profile-content-edit-btn,
+  .profile-photo-owner-actions .profile-content-trash-btn { min-width:0; min-height:36px; padding:0 9px; font-size:10px; }
   .music-page-header { align-items:stretch; padding:14px; }
   .music-page-header > div:last-child,.music-playlists-link { width:100%; justify-content:center; }
   .music-page-header .btn { width:100%; justify-content:center; }
