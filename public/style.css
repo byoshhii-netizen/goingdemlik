@@ -5212,6 +5212,15 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .social-compose-reals .social-compose-fields > .form-group:nth-of-type(2) input,
 .social-compose-reals .social-compose-fields > .form-group:nth-of-type(3) textarea { font-size:14px; }
 .social-compose-reals .social-compose-submit { min-height:48px; font-size:14px; }
+.video-compose-intro { display:flex; align-items:center; gap:12px; padding:13px 14px; border:1px solid rgba(var(--accent-rgb),.22); border-radius:14px; background:linear-gradient(120deg,rgba(var(--accent-rgb),.11),rgba(255,255,255,.025)); }
+.video-compose-intro > span { display:grid; flex:0 0 40px; width:40px; height:40px; place-items:center; border:1px solid rgba(var(--accent-rgb),.25); border-radius:13px; color:var(--accent-red2); background:rgba(var(--accent-rgb),.12); font-size:16px; }
+.video-compose-intro > div { display:grid; min-width:0; gap:4px; }
+.video-compose-intro strong { color:var(--text-primary); font-size:13px; }
+.video-compose-intro small { color:var(--text-muted); font-size:10px; line-height:1.45; }
+.social-compose-video-standard .social-compose-fields { gap:13px; }
+.social-compose-video-standard .social-compose-fields input:not([type="file"]),
+.social-compose-video-standard .social-compose-fields textarea { border-radius:11px; }
+.social-compose-video-standard .social-compose-upload-hint { padding:9px 11px; border:1px solid var(--border); border-radius:10px; background:rgba(255,255,255,.025); }
 @media(max-width:768px){
   .social-compose-modal { position:fixed; inset:0; width:100%; max-width:none; height:100dvh; max-height:100dvh; margin:0; border:0; border-radius:0 !important; }
   .social-compose-modal .modal-header { position:sticky; top:0; z-index:4; min-height:54px; padding:15px 52px; background:var(--bg-card); }

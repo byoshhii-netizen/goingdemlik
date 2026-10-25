@@ -917,12 +917,10 @@ const playlistCoverUpload = multer({
   }
 });
 
-const largeVideoStorage = USE_CLOUDINARY
-  ? multer.diskStorage({
-      destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-      filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname))
-    })
-  : storage;
+const largeVideoStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname))
+});
 const largeVideoUpload = multer({
   storage: largeVideoStorage,
   limits: { fileSize: 500 * 1024 * 1024 },

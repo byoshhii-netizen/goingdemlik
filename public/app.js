@@ -7728,8 +7728,9 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   const defaultDescription = existing?.description || '';
   const simplifiedRealsComposer = forceReals || Boolean(existing?.is_reals);
+  const showRealsOptions = simplifiedRealsComposer;
   showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals oluştur' : 'Video oluştur'), `
-    <div class="social-compose social-compose-video${simplifiedRealsComposer ? ' social-compose-reals' : ''}">
+    <div class="social-compose social-compose-video${simplifiedRealsComposer ? ' social-compose-reals' : ' social-compose-video-standard'}">
       <section class="social-compose-preview-pane">
         <div class="social-compose-preview-frame social-compose-video-frame">
           <video id="video-upload-preview" controls muted playsinline preload="metadata"></video>
@@ -7737,26 +7738,27 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
           <label class="social-compose-pick"><i class="fas fa-plus"></i> ${forceReals ? 'Reals videosu seç' : 'Video seç'}<input type="file" id="video-file" accept="video/mp4,video/quicktime,video/webm,video/ogg,.mp4,.m4v,.mov,.webm,.ogv" /></label>
         </div>
-        <div class="social-compose-upload-hint"><i class="fas fa-mobile-screen"></i><span>${forceReals ? 'En fazla 3 dakikalık videolar paylaşabilirsin.' : 'Videonu ekle, önizle ve paylaşım bilgilerini tamamla.'}</span></div>
+        <div class="social-compose-upload-hint"><i class="fas fa-mobile-screen"></i><span>${forceReals ? 'En fazla 3 dakikalık ve 500 MB boyutunda Reals paylaşabilirsin.' : 'En fazla 500 MB boyutunda videolar paylaşabilirsin.'}</span></div>
       </section>
       <section class="social-compose-fields">
+        ${!simplifiedRealsComposer ? '<div class="video-compose-intro"><span><i class="fas fa-video"></i></span><div><strong>Uzun video paylaş</strong><small>Videonu ekle, başlık ve açıklamayla paylaşımını tamamla.</small></div></div>' : ''}
         <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>${forceReals ? 'Reals paylaşımı' : 'Video paylaşımı'}</span></div>
         <div class="form-group"><label>${simplifiedRealsComposer ? 'Başlık (isteğe bağlı)' : 'Başlık'}</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" placeholder="${simplifiedRealsComposer ? 'Reals için kısa bir başlık…' : 'Videona bir başlık ekle…'}" /></div>
         <div class="form-group"><label>Açıklama <span class="text-muted">(isteğe bağlı)</span></label><textarea id="video-description" rows="${simplifiedRealsComposer ? '3' : '4'}" placeholder="Ne düşünüyorsun?">${escHtml(defaultDescription)}</textarea></div>
-        ${simplifiedRealsComposer ? '<details class="social-compose-advanced"><summary><i class="fas fa-sliders"></i> İsteğe bağlı ayarlar</summary><div class="social-compose-advanced-fields">' : ''}
+        <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
+        ${showRealsOptions ? `<details class="social-compose-advanced"><summary><i class="fas fa-sliders"></i> İsteğe bağlı Reals ayarları</summary><div class="social-compose-advanced-fields">
         <div class="form-row">
           <div class="form-group"><label>Konum</label><input id="video-location" type="text" value="${escHtml(existing?.location || '')}" placeholder="Konum ekle" /></div>
           <div class="form-group"><label>Ses parçası adı</label><input id="video-sound" type="text" value="${escHtml(existing?.sound_name || '')}" placeholder="Orijinal ses" /></div>
         </div>
-        <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
         <div class="form-group" id="video-song-field"><label>Reals müziği</label><small class="text-muted" id="video-song-limit-hint">3 dakikayı aşan videolara müzik eklenemez.</small><input id="video-song-search" placeholder="Şarkı veya sanatçı ara..." /><div id="video-song-list" class="story-song-list"></div><input id="video-song" type="hidden" value="${escHtml(existing?.song_id || '')}" /><div id="video-song-player" class="story-selected-song" hidden></div><div class="media-song-timing"><div class="dm-note-waveform media-song-waveform" id="video-song-waveform" aria-label="Reals müziğinin başlangıç noktasını seç"><div class="dm-note-waveform-bars" id="video-song-waveform-bars" aria-hidden="true"></div><span class="dm-note-waveform-selection" aria-hidden="true"></span><input id="video-song-start" type="range" min="0" max="0" value="${Number(existing?.song_start_seconds) || 0}" step="1" disabled aria-label="Müzik başlangıç zamanı" /></div><div class="dm-note-song-controls"><button type="button" id="video-song-preview" aria-label="Seçilen kesiti önizle" style="margin:0" disabled><i class="fas fa-play"></i></button><span><strong id="video-song-time">0:00 – 0:30</strong><small id="video-song-duration">30 saniyelik kesit</small></span></div></div><audio id="video-song-preview-audio" preload="none" style="display:none"></audio></div>
         <div class="form-group"><label>Video filtresi</label><select id="video-filter">${mediaFilterOptions(existing?.media_filter || 'none')}</select></div>
+        </div></details>` : ''}
         <div class="social-compose-options">
           <label class="checkbox-label"><input type="checkbox" id="video-comments" ${!existing || existing.allow_comments !== 0 ? 'checked' : ''} /> Yorumlara izin ver</label>
           <label class="checkbox-label"><input type="checkbox" id="video-likes" ${!existing || existing.show_likes !== 0 ? 'checked' : ''} /> Beğenileri göster</label>
-          <label class="checkbox-label"><input type="checkbox" id="video-is-reals" ${existing && existing.is_reals ? 'checked' : ''} ${forceReals ? 'checked' : ''} /> Bu video Reals olsun</label>
         </div>
-        ${simplifiedRealsComposer ? '</div></details>' : ''}
+        <input type="checkbox" id="video-is-reals" ${existing?.is_reals || forceReals ? 'checked' : ''} hidden />
         <div id="video-error" class="form-error"></div>
         <button class="btn btn-primary social-compose-submit" id="video-submit"><i class="fas fa-paper-plane"></i> ${existing ? 'Değişiklikleri kaydet' : 'Paylaş'}</button>
         <div id="video-upload-progress" style="margin-top:10px;display:none"></div>
@@ -7782,20 +7784,22 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const videoSongStart = $('#video-song-start');
   const videoSongWaveform = $('#video-song-waveform');
   const videoSongDuration = $('#video-song-duration');
+  const updateVideoSongWaveform = () => {
+    if (!videoSongStart || !videoSongWaveform) return;
+    const maxStart = Math.max(0, Number(videoSongStart.max) || 0);
+    const timeline = maxStart + 30;
+    const width = Math.min(100, 30 / Math.max(30, timeline) * 100);
+    const left = Math.min(100 - width, (Number(videoSongStart.value) || 0) / Math.max(30, timeline) * 100);
+    videoSongWaveform.style.setProperty('--clip-left', `${left}%`);
+    videoSongWaveform.style.setProperty('--clip-width', `${width}%`);
+    $('#video-song-time').textContent = `${formatVideoSongTime(Number(videoSongStart.value) || 0)} – ${formatVideoSongTime((Number(videoSongStart.value) || 0) + 30)}`;
+  };
+  const formatVideoSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  if (videoSongField) {
   $('#video-song-waveform-bars').innerHTML = Array.from({ length: 68 }, (_, index) => {
     const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
     return `<i style="--bar-height:${Math.round(height)}%"></i>`;
   }).join('');
-  const formatVideoSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  const updateVideoSongWaveform = () => {
-    const maxStart = Math.max(0, Number(videoSongStart?.max) || 0);
-    const timeline = maxStart + 30;
-    const width = Math.min(100, 30 / Math.max(30, timeline) * 100);
-    const left = Math.min(100 - width, (Number(videoSongStart?.value) || 0) / Math.max(30, timeline) * 100);
-    videoSongWaveform?.style.setProperty('--clip-left', `${left}%`);
-    videoSongWaveform?.style.setProperty('--clip-width', `${width}%`);
-    $('#video-song-time').textContent = `${formatVideoSongTime(Number(videoSongStart?.value) || 0)} – ${formatVideoSongTime((Number(videoSongStart?.value) || 0) + 30)}`;
-  };
   const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
   let autoBannerPromise = null;
@@ -7834,7 +7838,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         ? 'Uzun videolarda müzik kullanılamaz.'
         : '3 dakikayı aşan videolara müzik eklenemez.';
     }
-    if (longVideo) {
+    if (longVideo && videoSongField) {
       selectedVideoSong = null;
       $('#video-song').value = '';
       videoSongPreview?.pause();
@@ -7988,6 +7992,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       renderVideoSongs(songs);
     }
   }).catch(() => {});
+  }
 
   $('#video-submit').addEventListener('click', async () => {
     const description = $('#video-description').value.trim();
@@ -7997,8 +8002,8 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     const title = $('#video-title').value.trim() || (isReals ? description.trim().slice(0, 80) || 'Reals' : '');
     if (!title) { $('#video-error').textContent = 'Başlık zorunlu'; return; }
     if (!existing && !videoFile) { $('#video-error').textContent = 'Video dosyası zorunlu'; return; }
-    const maxVideoSize = isReals ? 500 * 1024 * 1024 : 100 * 1024 * 1024;
-    if (!existing && videoFile.size > maxVideoSize) { $('#video-error').textContent = `${isReals ? 'Reals' : 'Video'} dosyası ${isReals ? 500 : 100} MB sınırını geçemez.`; return; }
+    const maxVideoSize = 500 * 1024 * 1024;
+    if (!existing && videoFile.size > maxVideoSize) { $('#video-error').textContent = `Video dosyası 500 MB sınırını geçemez.`; return; }
     let durationSeconds = videoDurationSeconds;
     if (!existing && isReals && durationSeconds <= 0) {
       durationSeconds = await getVideoDuration(videoFile) || 0;
@@ -8014,10 +8019,10 @@ async function showNewVideoModal(existing = null, forceReals = false) {
 
     const submitBtn = $('#video-submit');
     const uploadFields = {
-      title, description, location: $('#video-location').value.trim(), sound_name: $('#video-sound').value.trim(),
-      allow_comments: $('#video-comments').checked, show_likes: $('#video-likes').checked, is_reals: $('#video-is-reals').checked,
-      song_id: $('#video-song').value || null, song_start_seconds: $('#video-song-start').value || 0,
-      media_filter: $('#video-filter').value, duration_seconds: durationSeconds
+      title, description, location: $('#video-location')?.value.trim() || existing?.location || '', sound_name: $('#video-sound')?.value.trim() || existing?.sound_name || '',
+      allow_comments: $('#video-comments').checked, show_likes: $('#video-likes').checked, is_reals: isReals,
+      song_id: $('#video-song')?.value || existing?.song_id || null, song_start_seconds: $('#video-song-start')?.value || existing?.song_start_seconds || 0,
+      media_filter: $('#video-filter')?.value || existing?.media_filter || 'none', duration_seconds: durationSeconds
     };
     submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
     const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
@@ -8028,7 +8033,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       let videoUrl = existing?.video_url || '';
       let bannerImage = existing?.banner_image || '';
       if (videoFile) {
-        let uploadTarget = '/api/upload';
+        let uploadTarget = '/api/upload-video';
         let uploadUrl = '';
         if (isReals) {
           const extensionType = {
@@ -8060,7 +8065,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
           xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
           xhr.open(isReals ? 'PUT' : 'POST', isReals ? uploadUrl : uploadTarget);
-          xhr.timeout = 15 * 60 * 1000;
+          xhr.timeout = 60 * 60 * 1000;
           if (isReals) xhr.setRequestHeader('Content-Type', videoFile.type || 'video/mp4');
           else xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
           xhr.send(isReals ? videoFile : (() => { const fd = new FormData(); fd.append('file', videoFile); return fd; })());
