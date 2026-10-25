@@ -1762,7 +1762,8 @@ async function renderRealsFeed(app, initialId = null) {
     ? feedItems.findIndex(item => !item.isRealsAd && String(item.id) === String(initialId))
     : -1;
   listEl.addEventListener('selectstart', event => event.preventDefault());
-  let realsMuted = localStorage.getItem('cigcig_reals_muted') === '1';
+  const savedRealsMute = localStorage.getItem('cigcig_reals_muted');
+  let realsMuted = savedRealsMute === null || savedRealsMute === '1';
   function syncRealsMuteButtons() {
     listEl.querySelectorAll('.mute-btn').forEach(btn => {
       btn.innerHTML = '<i class="fas fa-volume-' + (realsMuted ? 'mute' : 'up') + '"></i>';
@@ -2150,7 +2151,11 @@ async function renderRealsFeed(app, initialId = null) {
             syncRealsMuteButtons();
             syncRealsSongAudio(it);
           }
-          vid.play().catch(error => console.error('Reals videosu başlatılamadı:', error.message));
+          vid.play().catch(error => {
+            if (error.name === 'AbortError') return;
+            showRealsPlaybackError(it, error.name === 'NotAllowedError' ? 'Oynatmak için tekrar dokun' : 'Video başlatılamadı · Tekrar dene');
+            console.error('Reals videosu başlatılamadı:', error.message);
+          });
         } else vid.pause();
       });
       it.addEventListener('dblclick', event => {
@@ -2161,6 +2166,7 @@ async function renderRealsFeed(app, initialId = null) {
       vid.addEventListener('play', () => {
         const retryButton = it.querySelector('.reals-video-retry');
         if (retryButton) retryButton.hidden = true;
+        delete it.dataset.realsNetworkRetry;
         if (replayTimers.has(it)) clearReplayCountdown(it);
         const icon = it.querySelector('.reals-play-overlay i');
         if (icon) icon.className = 'fas fa-pause';
@@ -2179,10 +2185,29 @@ async function renderRealsFeed(app, initialId = null) {
       });
       vid.addEventListener('error', () => {
         if (!it.classList.contains('is-active')) return;
-        setVideoLoading(false);
         const errorCode = vid.error?.code;
-        const message = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
-          ? 'Video biçimi desteklenmiyor · Tekrar dene'
+        if (errorCode === MediaError.MEDIA_ERR_NETWORK && it.dataset.realsNetworkRetry !== '1') {
+          it.dataset.realsNetworkRetry = '1';
+          setVideoLoading(true);
+          window.setTimeout(() => {
+            if (!it.isConnected || !it.classList.contains('is-active')) return;
+            setRealsVideoSource(vid, '');
+            requestAnimationFrame(() => {
+              if (!it.isConnected || !it.classList.contains('is-active')) return;
+              setRealsVideoSource(vid, it.dataset.videoUrl);
+              vid.muted = true;
+              vid.play().catch(error => {
+                if (error.name === 'AbortError') return;
+                setVideoLoading(false);
+                showRealsPlaybackError(it, 'Bağlantı kesildi · Yeniden dene');
+              });
+            });
+          }, 450);
+          return;
+        }
+        setVideoLoading(false);
+        const message = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || errorCode === MediaError.MEDIA_ERR_DECODE
+          ? 'Bu video biçimi oynatılamıyor · Tekrar dene'
           : 'Video yüklenemedi · Tekrar dene';
         showRealsPlaybackError(it, message);
         console.error('Reals videosu yüklenemedi:', { code: errorCode, message: vid.error?.message, source: vid.currentSrc });
@@ -2192,12 +2217,14 @@ async function renderRealsFeed(app, initialId = null) {
         const retry = event.currentTarget;
         retry.disabled = true;
         retry.querySelector('span').textContent = 'Video yükleniyor...';
+        delete it.dataset.realsNetworkRetry;
         setRealsVideoSource(vid, '');
         requestAnimationFrame(() => {
           if (!it.isConnected || !it.classList.contains('is-active')) return;
           setRealsVideoSource(vid, it.dataset.videoUrl);
           vid.muted = true;
           vid.play().catch(error => {
+            if (error.name === 'AbortError') return;
             showRealsPlaybackError(it, 'Video başlatılamadı · Tekrar dene');
             console.error('Reals tekrar başlatılamadı:', error.message);
           }).finally(() => { retry.disabled = false; });
@@ -2337,6 +2364,7 @@ async function renderRealsFeed(app, initialId = null) {
         viewPromise.catch(() => {});
         vid.play().catch(async error => {
           if (idx !== j || !it.isConnected) return;
+          if (error.name === 'AbortError') return;
           if (!vid.muted) {
             vid.muted = true;
             realsMuted = true;
@@ -2346,11 +2374,12 @@ async function renderRealsFeed(app, initialId = null) {
             try {
               await vid.play();
             } catch (playError) {
+              if (playError.name === 'AbortError') return;
               showRealsPlaybackError(it, 'Oynatmak için tekrar dokun');
               console.error('Reals videosu başlatılamadı:', playError.message);
             }
           } else {
-            showRealsPlaybackError(it, 'Video başlatılamadı · Tekrar dene');
+            showRealsPlaybackError(it, error.name === 'NotAllowedError' ? 'Oynatmak için dokun' : 'Video başlatılamadı · Tekrar dene');
             console.error('Reals videosu başlatılamadı:', error.message);
           }
         });
@@ -9007,17 +9036,33 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
   </div>`, 'profile-note-viewer-modal');
   document.getElementById('profile-note-like')?.addEventListener('click', async event => {
     const button = event.currentTarget;
+    if (button.disabled) return;
+    const previousLiked = Boolean(note.liked_by_me);
+    const previousCount = Number(note.like_count) || 0;
+    const nextLiked = !previousLiked;
+    note.liked_by_me = nextLiked;
+    note.like_count = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+    button.classList.toggle('is-liked', nextLiked);
+    button.setAttribute('aria-pressed', String(nextLiked));
+    button.setAttribute('aria-label', nextLiked ? 'Beğeniyi kaldır' : 'Notu beğen');
+    button.querySelector('i').className = `${nextLiked ? 'fas' : 'far'} fa-heart`;
     button.disabled = true;
     try {
       const result = await api(`/dm-notes/${encodeURIComponent(username)}/like`, { method: 'POST', body: JSON.stringify({}) });
       note.liked_by_me = result.liked;
-      note.like_count = result.like_count;
+      note.like_count = Number.isFinite(Number(result.like_count)) ? Number(result.like_count) : Math.max(0, previousCount + (result.liked ? 1 : -1));
       button.classList.toggle('is-liked', result.liked);
-      button.setAttribute('aria-pressed', result.liked ? 'true' : 'false');
+      button.setAttribute('aria-pressed', String(result.liked));
       button.setAttribute('aria-label', result.liked ? 'Beğeniyi kaldır' : 'Notu beğen');
       button.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
       button.disabled = false;
     } catch (error) {
+      note.liked_by_me = previousLiked;
+      note.like_count = previousCount;
+      button.classList.toggle('is-liked', previousLiked);
+      button.setAttribute('aria-pressed', String(previousLiked));
+      button.setAttribute('aria-label', previousLiked ? 'Beğeniyi kaldır' : 'Notu beğen');
+      button.querySelector('i').className = `${previousLiked ? 'fas' : 'far'} fa-heart`;
       button.disabled = false;
       toast(error.message || 'Not beğenisi kaydedilemedi.', 'error');
     }
@@ -15011,9 +15056,13 @@ async function renderMusicList(app) {
         <span class="music-page-title-icon"><i class="fas fa-music"></i></span>
         <span><strong>Müzik</strong><small>Dinle, keşfet ve koleksiyonunu oluştur</small></span>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${currentUser ? `<a href="/playlistlerim" data-link class="btn music-playlists-link"><i class="fas fa-record-vinyl"></i><span>Playlistlerim</span><i class="fas fa-arrow-right"></i></a>` : ''}
-      </div>
+      ${currentUser ? `<div class="music-page-header-actions">
+        <a href="/playlistlerim" data-link class="music-playlists-link" aria-label="Playlistlerim">
+          <span class="music-playlists-icon"><i class="fas fa-record-vinyl"></i></span>
+          <span class="music-playlists-copy"><strong>Playlistlerim</strong><small>Koleksiyonunu aç</small></span>
+          <i class="fas fa-arrow-right music-playlists-arrow" aria-hidden="true"></i>
+        </a>
+      </div>` : ''}
     </div>
     <div class="music-search-bar" style="margin-bottom:20px">
       <div class="search-bar" style="margin:0">

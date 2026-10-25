@@ -9861,12 +9861,8 @@ app.post('/api/dm-notes/:username/like', authMiddleware, async (req, res) => {
         [noteUserId, req.user.id]
       );
     }
-    const { rows } = await client.query(
-      'SELECT COUNT(*)::int AS like_count FROM dm_note_likes WHERE note_user_id=$1',
-      [noteUserId]
-    );
     await client.query('COMMIT');
-    res.json({ liked, like_count: rows[0].like_count });
+    res.json({ liked });
   } catch (error) {
     await client.query('ROLLBACK').catch(rollbackError => console.error('[dm-notes] Like rollback failed:', rollbackError));
     console.error('[dm-notes] Like failed:', error);
