@@ -350,7 +350,7 @@ function showModal(title, bodyHTML, modalClass = '') {
   managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -376,7 +376,7 @@ function hideModal({ resumeReals = true } = {}) {
   }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -9713,14 +9713,67 @@ async function renderProfile(app, username) {
     const moreBtn = document.getElementById('profile-more-btn');
     const moreMenu = document.getElementById('profile-more-menu');
     if (moreBtn && moreMenu) {
+      let storyHidden = false;
       const getBlockStatus = async () => {
         const blocks = await api('/blocks').catch(() => []);
         return { blocked_by_me: Array.isArray(blocks) && blocks.some(block => block.username === username) };
       };
+      const showStoryVisibilityConfirmation = hide => new Promise(resolve => {
+        const displayName = user.nickname || user.username;
+        showModal(hide ? 'Hikayeyi gizle' : 'Hikayeleri yeniden göster', `
+          <div class="story-visibility-confirm">
+            <div class="story-visibility-art ${hide ? 'is-hidden' : 'is-visible'}">
+              <span class="story-visibility-glow"></span>
+              <span class="story-visibility-avatar">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
+              <span class="story-visibility-state-icon"><i class="fas ${hide ? 'fa-eye-slash' : 'fa-eye'}"></i></span>
+            </div>
+            <div class="story-visibility-copy">
+              <span class="story-visibility-eyebrow">${hide ? 'HİKAYE GÖRÜNÜRLÜĞÜ' : 'GÖRÜNÜRLÜĞÜ GERİ AÇ'}</span>
+              <h4>${hide ? `${escHtml(displayName)}’in hikayelerini gizlemek istiyor musun?` : `${escHtml(displayName)}’in hikayelerini yeniden görmek istiyor musun?`}</h4>
+              <p>${hide
+                ? 'Onaylarsan bu kişinin mevcut ve yeni hikayeleri sana gösterilmez. Profilinden dilediğin zaman tekrar açabilirsin.'
+                : 'Onaylarsan bu kişinin süresi devam eden ve sonraki hikayeleri hikaye alanında yeniden görünür.'}</p>
+            </div>
+            <div class="story-visibility-preview">
+              <span class="story-visibility-preview-ring ${hide ? 'is-muted' : ''}">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<i class="fas fa-user"></i>'}</span>
+              <span><strong>@${escHtml(user.username)}</strong><small>${hide ? 'Hikayeleri sana gösterilmeyecek' : 'Hikayelerini tekrar görebileceksin'}</small></span>
+              <i class="fas ${hide ? 'fa-eye-slash' : 'fa-eye'}"></i>
+            </div>
+            <div class="story-visibility-actions">
+              <button type="button" class="btn btn-outline" id="story-visibility-cancel">Vazgeç</button>
+              <button type="button" class="btn ${hide ? 'btn-danger' : 'btn-primary'}" id="story-visibility-confirm"><i class="fas ${hide ? 'fa-eye-slash' : 'fa-eye'}"></i> ${hide ? 'Hikayeyi gizle' : 'Hikayeleri göster'}</button>
+            </div>
+          </div>`, 'story-visibility-confirm-modal');
+        let settled = false;
+        const onEscape = event => {
+          if (event.key === 'Escape') finish(false);
+        };
+        const onOverlayClick = event => {
+          if (event.target.id === 'modal-overlay') finish(false);
+        };
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', onEscape);
+          document.getElementById('modal-overlay')?.removeEventListener('click', onOverlayClick);
+          hideModal();
+          resolve(value);
+        };
+        document.addEventListener('keydown', onEscape);
+        document.getElementById('modal-overlay')?.addEventListener('click', onOverlayClick);
+        document.getElementById('story-visibility-cancel')?.addEventListener('click', () => finish(false));
+        document.getElementById('story-visibility-confirm')?.addEventListener('click', () => finish(true));
+        document.querySelector('#modal .modal-close')?.addEventListener('click', () => finish(false));
+      });
       function buildMenuItems(fs) {
         const items = [
           { icon: 'fa-share-nodes', label: 'Profili Paylaş', action: 'share-profile' }
         ];
+        items.push({
+          icon: storyHidden ? 'fa-eye' : 'fa-eye-slash',
+          label: storyHidden ? 'Hikayelerini göster' : 'Hikayelerini gizle',
+          action: 'toggle-story-visibility'
+        });
         if (currentUser.is_founder) {
           items.push({ icon: 'fa-comments', label: 'Sohbet geçmişi', action: 'founder-messages' });
           items.push({ icon: 'fa-user-lock', label: 'Kısıtlama ayarla', action: 'founder-restriction' });
@@ -9767,6 +9820,17 @@ async function renderProfile(app, username) {
                 } else {
                   throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
                 }
+              } else if (action === 'toggle-story-visibility') {
+                const hide = !storyHidden;
+                if (!await showStoryVisibilityConfirmation(hide)) return;
+                const result = await api('/users/' + encodeURIComponent(username) + '/story-visibility', {
+                  method: 'PUT',
+                  body: JSON.stringify({ hidden: hide })
+                });
+                storyHidden = result.hidden;
+                storyRouteStoriesCacheAt = 0;
+                document.querySelectorAll('[id$="stories-bar"]').forEach(storiesBar => loadStoriesBar(storiesBar));
+                toast(hide ? 'Bu kişinin hikayeleri gizlendi.' : 'Bu kişinin hikayeleri yeniden gösteriliyor.');
               } else if (action === 'block-user') {
                 const settings = await askBlockSettings(username);
                 if (!settings) return;
@@ -9798,7 +9862,13 @@ async function renderProfile(app, username) {
         });
       }
 
-      getBlockStatus().then(renderMenu).catch(() => renderMenu({}));
+      Promise.all([
+        getBlockStatus(),
+        api('/users/' + encodeURIComponent(username) + '/story-visibility').then(result => {
+          storyHidden = result.hidden === true;
+          return storyHidden;
+        })
+      ]).then(([blockStatus]) => renderMenu(blockStatus)).catch(() => renderMenu({}));
 
       const toggleProfileMenu = (event) => {
         if (event) event.stopPropagation();

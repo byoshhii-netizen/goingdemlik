@@ -2414,9 +2414,12 @@ async function notifyFollowersOfContent(actorUser, type, title, body, link) {
 
 // ===== BİLDİRİM ENDPOİNTLERİ =====
 app.get('/api/notifications', authMiddleware, async (req, res) => {
+  await ensureStoryVisibilitySchema();
   const { rows } = await query(
     `SELECT n.* FROM notifications n WHERE n.user_id=$1
       AND (n.actor_username IS NULL OR LOWER(n.actor_username)<>LOWER($2) OR n.type IN ('restriction','content_suspended'))
+      AND (n.type<>'new_story' OR NOT EXISTS (SELECT 1 FROM user_story_visibility usv JOIN users actor ON actor.id=usv.hidden_user_id
+        WHERE usv.user_id=$1 AND LOWER(actor.username)=LOWER(n.actor_username)))
       AND NOT EXISTS (SELECT 1 FROM users actor JOIN blocks b ON b.blocker_id=actor.id
         WHERE actor.username=n.actor_username AND b.blocked_id=$1)
       ORDER BY n.created_at DESC LIMIT 50`,
@@ -2426,9 +2429,12 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/notifications/unread-count', authMiddleware, async (req, res) => {
+  await ensureStoryVisibilitySchema();
   const { rows } = await query(
     `SELECT COUNT(*) as c FROM notifications WHERE user_id=$1 AND is_read=0
-      AND (actor_username IS NULL OR LOWER(actor_username)<>LOWER($2) OR type IN ('restriction','content_suspended'))`,
+      AND (actor_username IS NULL OR LOWER(actor_username)<>LOWER($2) OR type IN ('restriction','content_suspended'))
+      AND (type<>'new_story' OR NOT EXISTS (SELECT 1 FROM user_story_visibility usv JOIN users actor ON actor.id=usv.hidden_user_id
+        WHERE usv.user_id=$1 AND LOWER(actor.username)=LOWER(notifications.actor_username)))`,
     [req.user.id, req.user.username]
   );
   res.json({ count: parseInt(rows[0].c) });
@@ -5919,7 +5925,48 @@ function randomStoryPublicId() {
   return 'h' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
 }
 
+let storyVisibilitySchemaPromise;
+function ensureStoryVisibilitySchema() {
+  if (!storyVisibilitySchemaPromise) {
+    storyVisibilitySchemaPromise = query(`
+      CREATE TABLE IF NOT EXISTS user_story_visibility (
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        hidden_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (user_id, hidden_user_id),
+        CHECK (user_id <> hidden_user_id)
+      )
+    `);
+  }
+  return storyVisibilitySchemaPromise;
+}
+
+app.get('/api/users/:username/story-visibility', authMiddleware, async (req, res) => {
+  await ensureStoryVisibilitySchema();
+  const { rows: targets } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!targets.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (String(targets[0].id) === String(req.user.id)) return res.status(400).json({ error: 'Kendi hikayelerin için bu ayar kullanılamaz' });
+  const { rows } = await query('SELECT 1 FROM user_story_visibility WHERE user_id=$1 AND hidden_user_id=$2', [req.user.id, targets[0].id]);
+  res.json({ hidden: rows.length > 0 });
+});
+
+app.put('/api/users/:username/story-visibility', authMiddleware, async (req, res) => {
+  await ensureStoryVisibilitySchema();
+  const { rows: targets } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!targets.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (String(targets[0].id) === String(req.user.id)) return res.status(400).json({ error: 'Kendi hikayelerin için bu ayar kullanılamaz' });
+  if (typeof req.body?.hidden !== 'boolean') return res.status(400).json({ error: 'Hikaye görünürlüğü tercihi geçersiz' });
+  if (req.body.hidden) {
+    await query(`INSERT INTO user_story_visibility(user_id,hidden_user_id)
+      VALUES($1,$2) ON CONFLICT(user_id,hidden_user_id) DO NOTHING`, [req.user.id, targets[0].id]);
+  } else {
+    await query('DELETE FROM user_story_visibility WHERE user_id=$1 AND hidden_user_id=$2', [req.user.id, targets[0].id]);
+  }
+  res.json({ hidden: req.body.hidden });
+});
+
 app.get('/api/stories', optionalAuth, async (req, res) => {
+  await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
       u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
@@ -5933,6 +5980,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
     WHERE s.expires_at > NOW() AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
       AND (s.is_suspended=0 OR s.user_id=$1)
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=s.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())
+      AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$1 AND usv.hidden_user_id=s.user_id)
       AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
@@ -5941,6 +5989,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/stories/:id', optionalAuth, async (req, res) => {
+  await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
   const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
   u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
@@ -5952,6 +6001,7 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
     WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW()
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=s.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW())
+      AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
       AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = rows[0];
@@ -6019,8 +6069,9 @@ app.post('/api/stories/from-url', authMiddleware, uploadLimiter, async (req, res
 });
 
 app.post('/api/stories/:id/view', optionalAuth, async (req, res) => {
+  await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   await recordContentView('story', story[0].id, req);
   if (req.user?.id) {
