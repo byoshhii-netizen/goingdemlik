@@ -3198,7 +3198,7 @@ async function renderHome(app) {
       <div class="section">
         <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
           <div><div class="page-title">Son Konular</div></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <div class="music-page-header-actions">
             <div class="search-bar" style="margin:0;flex:1;min-width:180px"><i class="fas fa-search"></i><input type="text" id="home-forum-search" placeholder="Konu ara..." /></div>
             <a href="/forum" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a>
           </div>
@@ -8087,8 +8087,8 @@ async function resumePendingVideoUpload() {
     const jobs = await getVideoUploadJobs();
     const job = jobs.find(item => String(item.userId) === String(currentUser.id));
     if (job) {
-      updateVideoUploadNotice('uploading', videoUploadPercent(job), `${job.fields.is_reals ? 'Reals' : 'Video'} yüklemesi sürdürülüyor`);
       runVideoUploadJob(job);
+      updateVideoUploadNotice('uploading', videoUploadPercent(job), `${job.fields.is_reals ? 'Reals' : 'Video'} yüklemesi sürdürülüyor`);
     }
   } catch (error) {
     console.error('Bekleyen video yüklemesi geri yüklenemedi:', error);
@@ -8106,7 +8106,7 @@ async function cancelVideoUpload() {
   try {
     if (active.job.uploadId) await api(`/upload-video/resumable/${encodeURIComponent(active.job.uploadId)}`, { method: 'DELETE' });
     await removeVideoUploadJob(active.job.id);
-    updateVideoUploadNotice('cancelled', 0, 'Video yüklemesi iptal edildi');
+    updateVideoUploadNotice('cancelled', 0, 'İptal oldu · dokunup kapat');
     toast('Video yüklemesi iptal edildi');
   } catch (error) {
     active.job.cancelled = false;
@@ -8131,7 +8131,7 @@ function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyo
   notice.querySelector('.video-upload-notice-bar i').style.width = `${state === 'error' ? 100 : percent}%`;
   const cancelButton = notice.querySelector('.video-upload-cancel');
   cancelButton.textContent = state === 'error' ? 'Tekrar dene' : 'İptal et';
-  cancelButton.hidden = !['uploading', 'error'].includes(state);
+  cancelButton.hidden = state === 'error' ? false : state === 'uploading' ? !window.__activeVideoUpload : true;
   cancelButton.onclick = state === 'error' ? () => resumePendingVideoUpload() : () => cancelVideoUpload();
   notice.onclick = event => {
     if (event.target.closest('button')) return;
@@ -8490,8 +8490,8 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
         $('#video-upload-progress').style.display = 'block';
         hideModal({ resumeReals: false });
-        updateVideoUploadNotice('uploading', 0, isReals ? 'Reals yükleniyor' : 'Video yükleniyor');
         runVideoUploadJob(job);
+        updateVideoUploadNotice('uploading', 0, isReals ? 'Reals yükleniyor' : 'Video yükleniyor');
       } catch (error) {
         $('#video-error').textContent = error.message || 'Video yüklemesi kalıcı olarak kaydedilemedi.';
         toast(error.message || 'Video yüklemesi başlatılamadı.', 'error');
