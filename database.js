@@ -1083,6 +1083,9 @@ async function initDb() {
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
       deleted_for_all INTEGER DEFAULT 0,
+      deleted_by_sender_at TIMESTAMP,
+      deleted_by_receiver_at TIMESTAMP,
+      deleted_for_all_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(conversation_id) REFERENCES dm_conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1104,6 +1107,9 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_by_sender_at TIMESTAMP;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_by_receiver_at TIMESTAMP;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_for_all_at TIMESTAMP;
     UPDATE dm_messages SET shared_newspaper_id=NULL
       WHERE shared_newspaper_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM newspapers WHERE newspapers.id=dm_messages.shared_newspaper_id);

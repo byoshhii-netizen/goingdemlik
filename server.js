@@ -362,10 +362,14 @@ function sanitizeUser(u) {
 
 function sanitizeUserForFeatures(user, features) {
   const sanitized = sanitizeUser(user);
-  if (sanitized && !features.levels) {
-    sanitized.level_id = null;
-    sanitized.show_level_badge = 0;
-    sanitized.show_level_progress = 0;
+  if (sanitized) {
+    sanitized.is_founder = Number(user.id) === Number(features.founderUserId);
+    sanitized.founder_color = sanitized.is_founder ? features.founderColor : null;
+    if (!features.levels) {
+      sanitized.level_id = null;
+      sanitized.show_level_badge = 0;
+      sanitized.show_level_progress = 0;
+    }
   }
   return sanitized;
 }
@@ -391,12 +395,14 @@ function boolValue(value) {
 }
 
 async function getSiteFeatureStates() {
-  const keys = ['level_system_enabled', 'badge_system_enabled'];
+  const keys = ['level_system_enabled', 'badge_system_enabled', 'founder_user_id', 'founder_color'];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1::text[])', [keys]);
   const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
   return {
     levels: settings.level_system_enabled !== '0',
     badges: settings.badge_system_enabled !== '0',
+    founderUserId: Number(settings.founder_user_id) || 0,
+    founderColor: /^#[0-9a-f]{6}$/i.test(settings.founder_color || '') ? settings.founder_color : '#e11d48',
   };
 }
 
@@ -424,7 +430,7 @@ async function getUserProfileBadges(user, { includeInactive = false, featureStat
   ]);
 
   const preferences = new Map(preferenceResult.rows.map(row => [row.badge_key, Number(row.is_active) !== 0]));
-  const preservedBadgeTypes = new Set(['vip', 'plus', 'admin', 'red_verified', 'artist', 'journalist', 'vmb']);
+  const preservedBadgeTypes = new Set(['vip', 'plus', 'admin', 'red_verified', 'artist', 'journalist', 'vmb', 'founder']);
   const badges = [];
   const addBadge = (badge) => {
     if (!badge?.key || !badge.name) return;
@@ -504,6 +510,16 @@ async function getUserProfileBadges(user, { includeInactive = false, featureStat
       color: isManager ? '#fbbf24' : '#facc15',
     });
   }
+  if (Number(user.id) === Number(features.founderUserId)) {
+    addBadge({
+      key: 'founder',
+      type: 'founder',
+      name: 'Kurucu',
+      icon: 'fas fa-crown',
+      color: features.founderColor,
+      authorityAssigned: true,
+    });
+  }
 
   return badges;
 }
@@ -556,6 +572,23 @@ async function authMiddleware(req, res, next) {
   if (!users.length) return res.status(401).json({ error: 'Kullanıcı bulunamadı' });
   if (users[0].banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
   req.user = users[0];
+  next();
+}
+
+async function founderMiddleware(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Giriş gerekli' });
+  const { rows: sessions } = await query('SELECT user_id FROM sessions WHERE token=$1 AND expires_at > NOW()', [token]);
+  if (!sessions.length) return res.status(401).json({ error: 'Giriş gerekli' });
+  const { rows: users } = await query('SELECT * FROM users WHERE id=$1', [sessions[0].user_id]);
+  if (!users.length) return res.status(401).json({ error: 'Kullanıcı bulunamadı' });
+  if (users[0].banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
+  req.user = users[0];
+  const features = await getSiteFeatureStates();
+  if (Number(req.user.id) !== Number(features.founderUserId) || !features.founderUserId) {
+    return res.status(403).json({ error: 'Bu işlem Kurucu yetkisi gerektirir.' });
+  }
+  req.founderFeatures = features;
   next();
 }
 
@@ -1504,6 +1537,62 @@ app.get('/api/admin/content-analytics', adminMiddleware, async (req, res) => {
 });
 
 // ===== ADMIN BADGES API =====
+app.get('/api/admin/founder', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Kurucu ayarı yalnızca ana admine açıktır.' });
+  const features = await getSiteFeatureStates();
+  const { rows } = features.founderUserId
+    ? await query('SELECT id,username FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0', [features.founderUserId])
+    : { rows: [] };
+  res.json({ founder: rows[0] || null, color: features.founderColor });
+});
+
+app.put('/api/admin/founder', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Kurucu ayarı yalnızca ana admine açıktır.' });
+  const username = String(req.body?.username || '').trim();
+  const color = String(req.body?.color || '');
+  if (!username) return res.status(400).json({ error: 'Kurucu kullanıcı adı zorunludur.' });
+  if (!/^#[0-9a-f]{6}$/i.test(color)) return res.status(400).json({ error: 'Geçerli bir rozet rengi seçin.' });
+  const { rows: targets } = await query(
+    'SELECT id,username FROM users WHERE LOWER(username)=LOWER($1) AND COALESCE(is_deleted,0)=0',
+    [username]
+  );
+  if (!targets.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  const features = await getSiteFeatureStates();
+  const target = targets[0];
+  if (features.founderUserId && Number(features.founderUserId) !== Number(target.id)) {
+    const expected = String(process.env.FOUNDER_TRANSFER_PASSWORD || '');
+    const supplied = String(req.body?.transfer_password || '');
+    if (!expected) return res.status(503).json({ error: 'Kurucu devri için sunucuda FOUNDER_TRANSFER_PASSWORD ayarlanmalıdır.' });
+    const expectedBuffer = Buffer.from(expected);
+    const suppliedBuffer = Buffer.from(supplied);
+    if (expectedBuffer.length !== suppliedBuffer.length || !crypto.timingSafeEqual(expectedBuffer, suppliedBuffer)) {
+      return res.status(403).json({ error: 'Kurucu devir şifresi geçersiz.' });
+    }
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ('founder_user_id',$1)
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+      [String(target.id)]
+    );
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ('founder_color',$1)
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+      [color]
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+  await logAction(req.adminUser.username, 'set_founder', target.username, JSON.stringify({ color }));
+  res.json({ ok: true, founder: target, color });
+});
+
 app.get('/api/admin/badges', adminMiddleware, async (req, res) => {
   try {
     const { rows } = await query(`
@@ -6284,7 +6373,8 @@ app.post('/api/reals-ads/:id/comments', authMiddleware, async (req, res) => {
   const content = String(req.body.content || '').trim();
   if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO reals_ad_comments (ad_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,ad_id,content,created_at', [req.params.id, req.user.id, content.slice(0, 1000)]);
-  res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar, like_count: 0, liked: false });
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS comment_count FROM reals_ad_comments WHERE ad_id=$1', [req.params.id]);
+  res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar, like_count: 0, liked: false, comment_count: countRows[0].comment_count });
 });
 app.post('/api/reals-ads/:id/comments/:commentId/like', authMiddleware, async (req, res) => {
   const { rows: comments } = await query('SELECT id FROM reals_ad_comments WHERE id=$1 AND ad_id=$2', [req.params.commentId, req.params.id]);
@@ -6296,11 +6386,12 @@ app.post('/api/reals-ads/:id/comments/:commentId/like', authMiddleware, async (r
   res.json({ liked: !existing.length, like_count: rows[0].count });
 });
 app.delete('/api/reals-ads/:id/comments/:commentId', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT c.id,c.user_id FROM reals_ad_comments c WHERE c.id=$1 AND c.ad_id=$2', [req.params.commentId, req.params.id]);
+  const { rows } = await query('SELECT c.id,c.user_id,c.ad_id FROM reals_ad_comments c WHERE c.id=$1 AND c.ad_id=$2', [req.params.commentId, req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
   if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok' });
   await query('DELETE FROM reals_ad_comments WHERE id=$1', [rows[0].id]);
-  res.json({ ok: true });
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS comment_count FROM reals_ad_comments WHERE ad_id=$1', [rows[0].ad_id]);
+  res.json({ ok: true, comment_count: countRows[0].comment_count });
 });
 app.get('/api/admin/reals-ads', adminMiddleware, async (req, res) => {
   const { rows } = await query(`${realsAdSelect('FROM reals_ads a ORDER BY a.priority DESC,a.created_at DESC')}`);
@@ -6436,6 +6527,45 @@ app.put('/api/admin/users/:userId/red-tick', adminMiddleware, async (req, res) =
       'SELECT is_red_verified,red_verified_at FROM users WHERE id=$1',
       [userId]
     );
+    res.json({ ok: true, ...current[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/api/founder/users/:userId/red-tick', founderMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const enabled = req.body?.enabled;
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'Rozet durumu geçerli değil.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: users } = await client.query(
+      'SELECT id,is_red_verified FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0 FOR UPDATE',
+      [userId]
+    );
+    if (!users.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+    }
+    const wasEnabled = Number(users[0].is_red_verified) === 1;
+    if (wasEnabled !== enabled) {
+      await client.query(
+        'UPDATE users SET is_red_verified=$1,red_verified_at=CASE WHEN $1=1 THEN NOW() ELSE NULL END WHERE id=$2',
+        [enabled ? 1 : 0, userId]
+      );
+      await client.query(
+        'INSERT INTO red_verification_events(user_id,action,performed_by) VALUES($1,$2,$3)',
+        [userId, enabled ? 'granted' : 'revoked', req.user.username]
+      );
+    }
+    await client.query('COMMIT');
+    const { rows: current } = await query('SELECT is_red_verified,red_verified_at FROM users WHERE id=$1', [userId]);
+    await logAction(req.user.username, enabled ? 'founder_grant_red_tick' : 'founder_revoke_red_tick', String(userId));
     res.json({ ok: true, ...current[0] });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -6997,7 +7127,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled'].includes(key)) {
+  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled'].includes(key)) {
     if (!['0', '1', 0, 1, true, false].includes(value)) {
       return res.status(400).json({ error: 'Özellik durumu 0 veya 1 olmalı' });
     }
@@ -7044,6 +7174,9 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   }
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
+  if (key === 'other_songs_enabled' && storedValue === '0') {
+    await query("UPDATE songs SET status='suspended' WHERE song_type='other' AND status='active'");
+  }
   res.json({ ok: true });
 });
 
@@ -7089,12 +7222,18 @@ app.get('/api/kvkk', async (req, res) => {
 
 app.get('/api/public-settings', async (req, res) => {
   setNoStoreHeaders(res);
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds', 'beta_mode_enabled'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds', 'beta_mode_enabled', 'founder_color'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
     result[k] = rows[0]?.value || null;
   }
+  const { rows: founderRows } = await query(
+    `SELECT username FROM users
+     WHERE id=COALESCE((SELECT value FROM settings WHERE key='founder_user_id'),'0')::bigint
+       AND COALESCE(is_deleted,0)=0`
+  );
+  result.founder_username = founderRows[0]?.username || '';
   result.asset_version = APP_ASSET_VERSION;
   res.json(result);
 });
@@ -7173,6 +7312,57 @@ function parseRestrictionDuration(value) {
   if (!total) return undefined;
   return new Date(Date.now() + total);
 }
+
+app.get('/api/founder/users/:userId/restrictions', founderMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows } = await query(
+    'SELECT * FROM user_restrictions WHERE user_id=$1 ORDER BY created_at DESC',
+    [userId]
+  );
+  res.json(rows);
+});
+
+app.post('/api/founder/users/:userId/restrictions', founderMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const types = ['photo','story','reals','music','comment','forum','message','group'];
+  const type = String(req.body.restriction_type || '');
+  const reason = String(req.body.reason || '').trim();
+  if (!types.includes(type)) return res.status(400).json({ error: 'Geçerli bir kısıtlama türü seçin.' });
+  if (!reason) return res.status(400).json({ error: 'Kısıtlama nedeni zorunludur.' });
+  const expiresAt = parseRestrictionDuration(req.body.duration);
+  if (expiresAt === undefined) return res.status(400).json({ error: 'Süreyi örneğin 2 gün 4 saat veya süresiz yazın.' });
+  const { rows: target } = await query('SELECT id,username FROM users WHERE id=$1 AND COALESCE(is_deleted,0)=0', [userId]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  await query('UPDATE user_restrictions SET revoked_at=NOW(),revoked_by=$1 WHERE user_id=$2 AND restriction_type=$3 AND revoked_at IS NULL', [req.user.id, userId, type]);
+  const { rows } = await query(
+    'INSERT INTO user_restrictions (user_id,restriction_type,reason,expires_at,created_by) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+    [userId, type, reason, expiresAt, req.user.id]
+  );
+  const labels = { photo:'fotoğraf', story:'hikaye', reals:'Reals', music:'müzik', comment:'yorum', forum:'forum', message:'mesaj', group:'grup' };
+  const durationLabel = expiresAt ? expiresAt.toLocaleString('tr-TR') + ' tarihine kadar' : 'süresiz';
+  await query(
+    'INSERT INTO notifications (user_id,type,actor_username,title,body,link) VALUES ($1,$2,$3,$4,$5,$6)',
+    [userId, 'restriction', req.user.username, 'Hesabınıza kısıtlama uygulandı', `Kurucu tarafından ${durationLabel} ${labels[type]} gönderme/oluşturma kısıtlaması aldınız. Neden: ${reason}`, '/bildirimler']
+  );
+  await logAction(req.user.username, 'founder_apply_restriction', target[0].username, JSON.stringify({ type, reason, expiresAt }));
+  res.json(rows[0]);
+});
+
+app.delete('/api/founder/users/:userId/restrictions/:restrictionId', founderMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  const restrictionId = Number(req.params.restrictionId);
+  if (!Number.isSafeInteger(userId) || !Number.isSafeInteger(restrictionId) || userId < 1 || restrictionId < 1) {
+    return res.status(400).json({ error: 'Geçersiz kısıtlama.' });
+  }
+  await query(
+    'UPDATE user_restrictions SET revoked_at=NOW(),revoked_by=$1 WHERE id=$2 AND user_id=$3 AND revoked_at IS NULL',
+    [req.user.id, restrictionId, userId]
+  );
+  await logAction(req.user.username, 'founder_revoke_restriction', String(userId), String(restrictionId));
+  res.json({ ok: true });
+});
 
 app.get('/api/admin/user/:id/restrictions', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions.can_restrict_users) return res.status(403).json({ error: 'Kısıtlama yetkisi yok' });
@@ -7328,6 +7518,11 @@ app.post('/api/songs', authMiddleware, upload.fields([
 ]), async (req, res) => {
   if (await denyIfRestricted(req, res, 'music')) return;
   const { song_type, title, artist_name, distributor, genre, lyrics, lyrics_timed, share_reason, rules_accepted } = req.body;
+  if (!['own', 'other'].includes(song_type || 'own')) return res.status(400).json({ error: 'Geçersiz şarkı türü' });
+  if (song_type === 'other') {
+    const { rows: settings } = await query("SELECT value FROM settings WHERE key='other_songs_enabled'");
+    if (settings[0]?.value === '0') return res.status(403).json({ error: 'Başkasının şarkısını paylaşma şu anda kapalı.' });
+  }
   // Kendi müziği için artist rozeti zorunlu, başkasının müziği için değil
   if ((song_type === 'own' || !song_type) && !req.user.is_artist) {
     return res.status(403).json({ error: 'Kendi müziğini yüklemek için artist rozeti gerekli' });
@@ -7360,6 +7555,7 @@ app.get('/api/songs', async (req, res) => {
   const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
   const sort = String(req.query.sort || '');
   let where = `WHERE s.status='active'
+    AND (s.song_type <> 'other' OR COALESCE((SELECT value FROM settings WHERE key='other_songs_enabled'), '1') <> '0')
     AND NOT EXISTS (
       SELECT 1 FROM user_content_archive a
       WHERE a.content_type='song' AND a.content_id=s.id::text
@@ -7398,7 +7594,9 @@ app.get('/api/songs/:slug', async (req, res) => {
             JOIN songs rs ON rs.id=sr.recommended_song_id
             WHERE sr.song_id=s.id AND rs.status='active'), '[]'::json) AS recommendations
      FROM songs s LEFT JOIN users u ON s.uploader_id=u.id
-     WHERE s.slug=$1 AND NOT EXISTS (
+     WHERE s.slug=$1 AND s.status='active'
+       AND (s.song_type <> 'other' OR COALESCE((SELECT value FROM settings WHERE key='other_songs_enabled'), '1') <> '0')
+       AND NOT EXISTS (
        SELECT 1 FROM user_content_archive a
        WHERE a.content_type='song' AND a.content_id=s.id::text
      )`,
@@ -7410,7 +7608,7 @@ app.get('/api/songs/:slug', async (req, res) => {
 
 // Dinlenme sayısı artır
 app.post('/api/songs/:slug/play', async (req, res) => {
-  const { rows } = await query('SELECT id FROM songs WHERE slug=$1 AND status=\'active\'', [req.params.slug]);
+  const { rows } = await query("SELECT id FROM songs WHERE slug=$1 AND status='active' AND (song_type <> 'other' OR COALESCE((SELECT value FROM settings WHERE key='other_songs_enabled'), '1') <> '0')", [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
   await recordContentView('song', rows[0].id, req);
@@ -7419,7 +7617,7 @@ app.post('/api/songs/:slug/play', async (req, res) => {
 
 // Yarı dinleme sayacı — müziğin %50'sine ulaşınca çağrılır
 app.post('/api/songs/:slug/play-half', async (req, res) => {
-  const { rows } = await query('SELECT id FROM songs WHERE slug=$1 AND status=\'active\'', [req.params.slug]);
+  const { rows } = await query("SELECT id FROM songs WHERE slug=$1 AND status='active' AND (song_type <> 'other' OR COALESCE((SELECT value FROM settings WHERE key='other_songs_enabled'), '1') <> '0')", [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
   await recordContentView('song', rows[0].id, req);
@@ -7509,6 +7707,10 @@ app.put('/api/admin/songs/:id', adminMiddleware, upload.fields([
   const { title, artist_name, distributor, genre, lyrics, play_count, status } = req.body;
   const song = (await query('SELECT * FROM songs WHERE id=$1', [req.params.id])).rows[0];
   if (!song) return res.status(404).json({ error: 'Müzik bulunamadı' });
+  if (song.song_type === 'other' && status === 'active') {
+    const { rows: settings } = await query("SELECT value FROM settings WHERE key='other_songs_enabled'");
+    if (settings[0]?.value === '0') return res.status(403).json({ error: 'Başkasının şarkısı özelliği kapalıyken bu şarkı aktifleştirilemez.' });
+  }
   let audio_url = song.audio_url, cover_url = song.cover_url;
   if (req.files?.audio?.[0]) { try { audio_url = await handleUpload(req.files.audio[0]); } catch {} }
   if (req.files?.cover?.[0]) { try { cover_url = await handleUpload(req.files.cover[0]); } catch {} }
@@ -8011,7 +8213,7 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
-    'photo_song_clip_seconds','level_system_enabled','badge_system_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
+    'photo_song_clip_seconds','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
@@ -10205,12 +10407,12 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   const isOwn = msg.sender_id == req.user.id;
   if (mode === 'all' && !isOwn) return res.status(403).json({ error: 'Sadece kendi mesajınızı herkesten silebilirsiniz' });
   if (mode === 'all') {
-    await query('UPDATE dm_messages SET deleted_for_all=1 WHERE id=$1', [msg.id]);
+    await query('UPDATE dm_messages SET deleted_for_all=1,deleted_for_all_at=COALESCE(deleted_for_all_at,NOW()) WHERE id=$1', [msg.id]);
   } else {
     if (msg.sender_id == req.user.id) {
-      await query('UPDATE dm_messages SET deleted_by_sender=1 WHERE id=$1', [msg.id]);
+      await query('UPDATE dm_messages SET deleted_by_sender=1,deleted_by_sender_at=COALESCE(deleted_by_sender_at,NOW()) WHERE id=$1', [msg.id]);
     } else {
-      await query('UPDATE dm_messages SET deleted_by_receiver=1 WHERE id=$1', [msg.id]);
+      await query('UPDATE dm_messages SET deleted_by_receiver=1,deleted_by_receiver_at=COALESCE(deleted_by_receiver_at,NOW()) WHERE id=$1', [msg.id]);
     }
   }
   res.json({ ok: true });
@@ -10232,10 +10434,10 @@ app.post('/api/messages/delete-bulk', authMiddleware, async (req, res) => {
     const isOwn = msg.sender_id == req.user.id;
     if (mode === 'all' && !isOwn) continue; // sadece kendi mesajlarını herkesten sil
     if (mode === 'all') {
-      await query('UPDATE dm_messages SET deleted_for_all=1 WHERE id=$1', [id]);
+      await query('UPDATE dm_messages SET deleted_for_all=1,deleted_for_all_at=COALESCE(deleted_for_all_at,NOW()) WHERE id=$1', [id]);
     } else {
-      if (isOwn) await query('UPDATE dm_messages SET deleted_by_sender=1 WHERE id=$1', [id]);
-      else await query('UPDATE dm_messages SET deleted_by_receiver=1 WHERE id=$1', [id]);
+      if (isOwn) await query('UPDATE dm_messages SET deleted_by_sender=1,deleted_by_sender_at=COALESCE(deleted_by_sender_at,NOW()) WHERE id=$1', [id]);
+      else await query('UPDATE dm_messages SET deleted_by_receiver=1,deleted_by_receiver_at=COALESCE(deleted_by_receiver_at,NOW()) WHERE id=$1', [id]);
     }
   }
   res.json({ ok: true });
@@ -10254,7 +10456,8 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
   const conv = convRows[0];
   const isUser1 = conv.user1_id == uid;
   if (mode === 'own' || mode === 'all') {
-    await query('UPDATE dm_messages SET deleted_for_all=1 WHERE conversation_id=$1 AND sender_id=$2', [conv.id, uid]);
+    await query(`UPDATE dm_messages SET deleted_for_all=1,deleted_for_all_at=COALESCE(deleted_for_all_at,NOW())
+      WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, uid]);
     io.to([`user:${conv.user1_id}`, `user:${conv.user2_id}`]).emit('dm:conversation-cleared', {
       conversationId: conv.id,
       usernames: [req.user.username, req.params.username]
@@ -10262,13 +10465,94 @@ app.delete('/api/conversation/:username', authMiddleware, async (req, res) => {
   } else {
     const deletedColumn = isUser1 ? 'deleted_by_sender' : 'deleted_by_receiver';
     const ownDeletedColumn = isUser1 ? 'deleted_by_receiver' : 'deleted_by_sender';
-    await query(`UPDATE dm_messages SET ${deletedColumn}=1 WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, uid]);
-    await query(`UPDATE dm_messages SET ${ownDeletedColumn}=1 WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, other.id]);
+    const deletedAtColumn = isUser1 ? 'deleted_by_sender_at' : 'deleted_by_receiver_at';
+    const ownDeletedAtColumn = isUser1 ? 'deleted_by_receiver_at' : 'deleted_by_sender_at';
+    await query(`UPDATE dm_messages SET ${deletedColumn}=1,${deletedAtColumn}=COALESCE(${deletedAtColumn},NOW()) WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, uid]);
+    await query(`UPDATE dm_messages SET ${ownDeletedColumn}=1,${ownDeletedAtColumn}=COALESCE(${ownDeletedAtColumn},NOW()) WHERE conversation_id=$1 AND sender_id=$2`, [conv.id, other.id]);
   }
   res.json({ ok: true });
 });
 
 // ===== ADMIN: MESAJLARI OKU =====
+app.get('/api/founder/users/:userId/conversations', founderMiddleware, async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (!Number.isSafeInteger(userId) || userId < 1) return res.status(400).json({ error: 'Geçersiz kullanıcı.' });
+  const { rows: users } = await query('SELECT id FROM users WHERE id=$1', [userId]);
+  if (!users.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
+  const { rows } = await query(`
+    SELECT c.id,u1.username AS user1,u2.username AS user2,c.last_message_at,
+      COUNT(m.id)::int AS message_count,
+      COUNT(m.id) FILTER (WHERE m.deleted_for_all=1 OR m.deleted_by_sender=1 OR m.deleted_by_receiver=1)::int AS deleted_count
+    FROM dm_conversations c
+    JOIN users u1 ON u1.id=c.user1_id
+    JOIN users u2 ON u2.id=c.user2_id
+    LEFT JOIN dm_messages m ON m.conversation_id=c.id
+    WHERE c.user1_id=$1 OR c.user2_id=$1
+    GROUP BY c.id,u1.username,u2.username,c.last_message_at
+    ORDER BY c.last_message_at DESC
+  `, [userId]);
+  await logAction(req.user.username, 'founder_view_user_conversations', String(userId), `${rows.length} konuşma`);
+  res.json(rows);
+});
+
+app.get('/api/founder/conversations/:id/messages', founderMiddleware, async (req, res) => {
+  const conversationId = Number(req.params.id);
+  if (!Number.isSafeInteger(conversationId) || conversationId < 1) return res.status(400).json({ error: 'Geçersiz konuşma.' });
+  const { rows: conversations } = await query(
+    `SELECT c.id,u1.username AS user1,u2.username AS user2 FROM dm_conversations c
+     JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id WHERE c.id=$1`,
+    [conversationId]
+  );
+  if (!conversations.length) return res.status(404).json({ error: 'Konuşma bulunamadı.' });
+  const { rows } = await query(`
+    SELECT m.*,u.username AS sender_username
+    FROM dm_messages m JOIN users u ON u.id=m.sender_id
+    WHERE m.conversation_id=$1 ORDER BY m.created_at ASC,m.id ASC
+  `, [conversationId]);
+  const { rows: calls } = await query(`
+    SELECT c.id,c.caller_id,c.callee_id,c.status,c.created_at,c.updated_at,c.ended_at,
+      cu.username AS caller_username,tu.username AS callee_username
+    FROM voice_calls c
+    JOIN dm_conversations d ON d.user1_id=LEAST(c.caller_id,c.callee_id) AND d.user2_id=GREATEST(c.caller_id,c.callee_id)
+    JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
+    WHERE d.id=$1 ORDER BY c.created_at ASC
+  `, [conversationId]);
+  await logAction(req.user.username, 'founder_view_conversation_messages', String(conversationId), `${rows.length} mesaj`);
+  const messages = rows.map(message => ({
+    ...message,
+    audit_status: message.deleted_for_all ? 'deleted_for_all'
+      : (message.deleted_by_sender || message.deleted_by_receiver ? 'deleted_for_user' : 'visible'),
+    deletion_events: [
+      ...(message.deleted_for_all ? [{ kind: 'all', label: 'Herkesten silindi', deleted_at: message.deleted_for_all_at }] : []),
+      ...(message.deleted_by_sender ? [{ kind: 'user', label: 'Gönderen kendisinden sildi', deleted_at: message.deleted_by_sender_at }] : []),
+      ...(message.deleted_by_receiver ? [{ kind: 'user', label: 'Alıcı kendisinden sildi', deleted_at: message.deleted_by_receiver_at }] : []),
+    ],
+  }));
+  res.json({ conversation: conversations[0], messages, calls });
+});
+
+app.get('/api/founder/messages/search', founderMiddleware, async (req, res) => {
+  const search = String(req.query.q || '').trim();
+  if (search.length < 2) return res.json([]);
+  const { rows } = await query(`
+    SELECT m.id,m.conversation_id,m.content,m.created_at,m.deleted_for_all,m.deleted_for_all_at,
+      m.deleted_by_sender,m.deleted_by_sender_at,m.deleted_by_receiver,m.deleted_by_receiver_at,
+      sender.username AS sender_username,u1.username AS user1,u2.username AS user2
+    FROM dm_messages m
+    JOIN users sender ON sender.id=m.sender_id
+    JOIN dm_conversations c ON c.id=m.conversation_id
+    JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
+    WHERE m.content ILIKE $1
+    ORDER BY m.created_at DESC LIMIT 100
+  `, [`%${search}%`]);
+  await logAction(req.user.username, 'founder_search_message_archive', '', `Arama yapıldı (${search.length} karakter)`);
+  res.json(rows.map(message => ({
+    ...message,
+    audit_status: message.deleted_for_all ? 'deleted_for_all'
+      : (message.deleted_by_sender || message.deleted_by_receiver ? 'deleted_for_user' : 'visible'),
+  })));
+});
+
 app.get('/api/admin/conversations', adminMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT c.id, u1.username as user1, u2.username as user2, c.last_message_at,
@@ -10995,6 +11279,8 @@ function makeVideoSlug(title, id) {
 }
 
 const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.nickname, u.avatar, u.avatar_removed, u.is_private, u.is_red_verified, u.red_verified_at,
+  (u.id=COALESCE((SELECT value FROM settings WHERE key='founder_user_id'),'0')::bigint) AS is_founder,
+  (SELECT value FROM settings WHERE key='founder_color') AS founder_color,
   s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
@@ -11230,7 +11516,8 @@ app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   if (video[0].allow_comments !== 1) return res.status(403).json({ error: 'Yorumlar kapalı' });
   if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO video_comments (video_id,user_id,content) VALUES ($1,$2,$3) RETURNING *', [video[0].id, req.user.id, content.slice(0, 1000)]);
-  res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar });
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS comment_count FROM video_comments WHERE video_id=$1', [video[0].id]);
+  res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar, comment_count: countRows[0].comment_count });
 });
 
 app.put('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
@@ -11285,14 +11572,15 @@ app.post('/api/video/:slug/comments/:commentId/pin', authMiddleware, async (req,
 });
 
 app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, res) => {
-  const { rows } = await query(`SELECT c.id, c.user_id, v.user_id AS video_owner_id
+  const { rows } = await query(`SELECT c.id, c.user_id, c.video_id, v.user_id AS video_owner_id
     FROM video_comments c JOIN videos v ON v.id=c.video_id
     WHERE c.id=$1 AND (v.slug=$2 OR v.id::text=$2)`, [req.params.commentId, req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
   const comment = rows[0];
   if (comment.user_id != req.user.id && comment.video_owner_id != req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu yorumu silme yetkiniz yok' });
   await query('DELETE FROM video_comments WHERE id=$1', [comment.id]);
-  res.json({ ok: true });
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS comment_count FROM video_comments WHERE video_id=$1', [comment.video_id]);
+  res.json({ ok: true, comment_count: countRows[0]?.comment_count ?? 0 });
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {

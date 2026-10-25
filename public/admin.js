@@ -192,12 +192,27 @@ async function renderBadges(main) {
       <div><span class="badge-manager-kicker">TOPLULUK ROZETLERİ</span><h2>Rozetleri doğru kişilere ulaştır</h2><p>Bir rozet birden fazla kullanıcıya verilebilir. Rozetin kartındaki menüden kullanıcıları aratabilir, verilen rozeti yine aynı yerden geri alabilirsin.</p></div>
       <div class="badge-manager-hero-stat"><strong>${badges.reduce((sum, badge) => sum + Number(badge.assigned_count || 0), 0)}</strong><span>toplam atama</span></div>
     </div>
+    ${adminProfile?.is_super_admin ? `
+    <div class="card founder-admin-card" id="founder-admin-card">
+      <div class="card-header"><span><i class="fas fa-crown" style="color:var(--red2);margin-right:8px"></i>Kurucu yetkisi</span><span class="badge-manager-hint">Tek kullanıcıya atanır</span></div>
+      <div class="card-body">
+        <p class="founder-admin-note">İlk atama ana admin tarafından yapılır. Sonraki kullanıcı değişikliklerinde sunucu ortamındaki <code>FOUNDER_TRANSFER_PASSWORD</code> gerekir. Bu parola kaynak koduna kaydedilmez.</p>
+        <div class="founder-admin-current" id="founder-admin-current">Kurucu bilgisi yükleniyor…</div>
+        <div class="founder-admin-form">
+          <label><span>Kullanıcı adı</span><input id="founder-admin-username" autocomplete="off" placeholder="Kurucu olacak kullanıcının adı" /></label>
+          <label><span>Rozet rengi</span><input id="founder-admin-color" type="color" value="#e11d48" /></label>
+          <label class="founder-transfer-password"><span>Devir parolası</span><input id="founder-admin-password" type="password" autocomplete="new-password" placeholder="Yalnızca kullanıcı değiştirirken" /></label>
+          <button class="btn btn-primary" id="founder-admin-save"><i class="fas fa-crown"></i> Kaydet</button>
+        </div>
+        <div class="form-error" id="founder-admin-error"></div>
+      </div>
+    </div>` : ''}
     <div class="card badge-create-card">
       <div class="card-header"><span><i class="fas fa-plus-circle" style="color:var(--red2);margin-right:8px"></i> Yeni rozet oluştur</span><span class="badge-manager-hint">İkon için Font Awesome sınıfı veya görsel URL'si</span></div>
       <div class="card-body badge-create-grid">
         <input id="new-badge-name" placeholder="Rozet adı (ör. Katılımcı)" />
         <input id="new-badge-icon" placeholder="fas fa-star veya https://..." />
-        <label class="badge-color-field"><span>Renk</span><input id="new-badge-color" type="color" value="#bda275" /></label>
+        <label class="badge-color-field"><span>Renk</span><input id="new-badge-color" type="color" value="#e11d48" /></label>
         <button class="btn btn-primary" id="create-badge"><i class="fas fa-plus"></i> Oluştur</button>
       </div>
     </div>
@@ -219,6 +234,38 @@ async function renderBadges(main) {
     </div>`;
 
   $('#adm-badges-refresh')?.addEventListener('click', () => loadSection('badges'));
+  if (adminProfile?.is_super_admin) {
+    try {
+      const result = await adminApi('/founder');
+      $('#founder-admin-current').textContent = result.founder
+        ? `Aktif Kurucu: @${result.founder.username}`
+        : 'Henüz Kurucu atanmamış.';
+      $('#founder-admin-username').value = result.founder?.username || '';
+      $('#founder-admin-color').value = result.color || '#e11d48';
+    } catch (error) {
+      $('#founder-admin-current').textContent = 'Kurucu ayarı yüklenemedi.';
+      $('#founder-admin-error').textContent = error.message;
+    }
+    $('#founder-admin-save')?.addEventListener('click', async () => {
+      const errorBox = $('#founder-admin-error');
+      errorBox.textContent = '';
+      try {
+        const result = await adminApi('/founder', {
+          method: 'PUT',
+          body: JSON.stringify({
+            username: $('#founder-admin-username').value.trim(),
+            color: $('#founder-admin-color').value,
+            transfer_password: $('#founder-admin-password').value,
+          }),
+        });
+        $('#founder-admin-password').value = '';
+        $('#founder-admin-current').textContent = `Aktif Kurucu: @${result.founder.username}`;
+        toast('Kurucu yetkisi güncellendi');
+      } catch (error) {
+        errorBox.textContent = error.message;
+      }
+    });
+  }
   $('#create-badge')?.addEventListener('click', async () => {
     const name = $('#new-badge-name').value.trim();
     const icon = $('#new-badge-icon').value.trim();
@@ -1149,14 +1196,39 @@ async function renderTwoFactorUsers(main) {
 }
 
 async function showRestrictionModal(user) {
-  showModal('Kısıtlama Uygula — ' + user.username, `<div class="form-group"><label>Kısıtlama türü</label><select id="restriction-type"><option value="photo">Fotoğraf</option><option value="story">Hikaye</option><option value="reals">Reals</option><option value="music">Müzik</option><option value="comment">Yorum</option><option value="forum">Forum</option><option value="message">Mesaj</option><option value="group">Grup</option></select></div><div class="form-group"><label>Süre</label><input id="restriction-duration" placeholder="Örn: 2 gün 4 saat veya süresiz" /></div><div class="form-group"><label>Neden <b style="color:var(--red2)">*</b></label><textarea id="restriction-reason" rows="4" placeholder="Kısıtlama nedenini yazın"></textarea></div><button class="btn btn-primary" id="restriction-save" style="width:100%;justify-content:center"><i class="fas fa-shield-halved"></i> Kısıtlamayı Uygula</button><div id="restriction-error" class="form-error mt-4"></div><div id="restriction-history" style="margin-top:18px"></div>`);
+  showModal('Kısıtlama Uygula — ' + user.username, `
+    <div class="form-group"><label for="restriction-type">Kısıtlama türü</label><select id="restriction-type"><option value="photo">Fotoğraf</option><option value="story">Hikaye</option><option value="reals">Reals</option><option value="music">Müzik</option><option value="comment">Yorum</option><option value="forum">Forum</option><option value="message">Mesaj</option><option value="group">Grup</option></select></div>
+    <div class="form-group">
+      <label for="restriction-duration-choice">Süre</label>
+      <select id="restriction-duration-choice">
+        <option value="1 saat">1 saat</option><option value="6 saat">6 saat</option><option value="1 gün" selected>1 gün</option>
+        <option value="3 gün">3 gün</option><option value="7 gün">7 gün</option><option value="30 gün">30 gün</option>
+        <option value="custom">Özel süre</option><option value="süresiz">Süresiz</option>
+      </select>
+    </div>
+    <div class="form-row" id="restriction-custom-duration" hidden>
+      <div class="form-group"><label for="restriction-duration-value">Süre miktarı</label><input id="restriction-duration-value" type="number" min="1" step="1" inputmode="numeric" placeholder="Örn. 2" /></div>
+      <div class="form-group"><label for="restriction-duration-unit">Birim</label><select id="restriction-duration-unit"><option value="dakika">Dakika</option><option value="saat">Saat</option><option value="gün">Gün</option><option value="hafta">Hafta</option></select></div>
+    </div>
+    <div class="form-group"><label for="restriction-reason">Neden <b style="color:var(--red2)">*</b></label><textarea id="restriction-reason" rows="4" placeholder="Kısıtlama nedenini yazın"></textarea></div>
+    <button class="btn btn-primary" id="restriction-save" style="width:100%;justify-content:center"><i class="fas fa-shield-halved"></i> Kısıtlamayı Uygula</button><div id="restriction-error" class="form-error mt-4"></div><div id="restriction-history" style="margin-top:18px"></div>`);
+  const durationChoice = $('#restriction-duration-choice');
+  const customDuration = $('#restriction-custom-duration');
+  durationChoice.addEventListener('change', () => { customDuration.hidden = durationChoice.value !== 'custom'; });
   try {
     const history = await adminApi('/user/' + user.id + '/restrictions');
     $('#restriction-history').innerHTML = history.length ? '<div style="font-size:11px;color:var(--text3);margin-bottom:7px">Kısıtlama geçmişi</div>' + history.slice(0,5).map(item => `<div style="padding:8px 0;border-top:1px solid var(--border);font-size:11px"><b>${escHtml(item.restriction_type)}</b> · ${escHtml(item.reason)}<br><span style="color:var(--text3)">${item.expires_at ? formatDate(item.expires_at) : 'Süresiz'} · ${item.revoked_at ? 'Kaldırıldı' : 'Aktif'}</span></div>`).join('') : '';
   } catch {}
   $('#restriction-save').addEventListener('click', async () => {
     const error = $('#restriction-error');
-    try { await adminApi('/user/' + user.id + '/restrictions', { method:'POST', body:JSON.stringify({ restriction_type:$('#restriction-type').value, duration:$('#restriction-duration').value, reason:$('#restriction-reason').value.trim() }) }); toast('Kısıtlama uygulandı'); hideModal(); loadSection('users'); } catch (e) { error.textContent = e.message; }
+    const duration = durationChoice.value === 'custom'
+      ? `${$('#restriction-duration-value').value} ${$('#restriction-duration-unit').value}`
+      : durationChoice.value;
+    if (durationChoice.value === 'custom' && (!Number.isInteger(Number($('#restriction-duration-value').value)) || Number($('#restriction-duration-value').value) < 1)) {
+      error.textContent = 'Özel süre için 1 veya daha büyük tam sayı girin.';
+      return;
+    }
+    try { await adminApi('/user/' + user.id + '/restrictions', { method:'POST', body:JSON.stringify({ restriction_type:$('#restriction-type').value, duration, reason:$('#restriction-reason').value.trim() }) }); toast('Kısıtlama uygulandı'); hideModal(); loadSection('users'); } catch (e) { error.textContent = e.message; }
   });
 }
 
@@ -3124,25 +3196,31 @@ async function renderAdminSongs(main) {
   main.innerHTML = `
     <div class="adm-section-header">
       <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-music"></i></div> Müzikler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${songs.length})</span></div>
-      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="song-search" placeholder="Müzik, sanatçı, dağıtıcı ara..." style="min-width:220px" /></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="song-category-filter" aria-label="Müzik kategorisi" style="width:auto;min-width:190px">
+          <option value="all">Tüm müzikler</option><option value="own">Kendi şarkısı</option><option value="other">Başkasının şarkısı</option>
+        </select>
+        <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="song-search" placeholder="Müzik, sanatçı, dağıtıcı ara..." style="min-width:220px" /></div>
+      </div>
     </div>
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Kapak</th><th>Başlık / Sanatçı</th><th>Tür</th><th>Dağıtıcı</th><th>Dinlenme</th><th>Durum</th><th>Yükleyen</th><th>Tarih</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>Kapak</th><th>Başlık / Sanatçı</th><th>Kategori</th><th>Tür</th><th>Dağıtıcı</th><th>Dinlenme</th><th>Durum</th><th>Yükleyen</th><th>Tarih</th><th>İşlem</th></tr></thead>
           <tbody id="songs-tbody"></tbody>
         </table>
       </div>
     </div>`;
   const render = (list) => {
     const t = document.getElementById('songs-tbody'); if (!t) return;
-    if (!list.length) { t.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px">Müzik yok</td></tr>'; return; }
+    if (!list.length) { t.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:32px">Bu kategoride müzik yok</td></tr>'; return; }
     t.innerHTML = list.map(s => `<tr>
       <td>${s.cover_url ? `<img src="${escHtml(s.cover_url)}" style="width:40px;height:40px;border-radius:6px;object-fit:cover" />` : `<div style="width:40px;height:40px;border-radius:6px;background:var(--bg4);display:flex;align-items:center;justify-content:center;color:var(--text3)"><i class="fas fa-music"></i></div>`}</td>
       <td>
         <div style="font-weight:600;font-size:13px">${escHtml(s.title)}</div>
         <div style="font-size:11px;color:var(--text2)">${escHtml(s.artist_name)}</div>
       </td>
+      <td><span class="badge ${s.song_type === 'other' ? 'badge-orange' : 'badge-blue'}">${s.song_type === 'other' ? 'Başkasının şarkısı' : 'Kendi şarkısı'}</span></td>
       <td style="font-size:12px;color:var(--text2)">${escHtml(s.genre||'-')}</td>
       <td style="font-size:12px;color:var(--text2)">${escHtml(s.distributor||'-')}</td>
       <td style="font-size:12px">${s.play_count}</td>
@@ -3160,7 +3238,10 @@ async function renderAdminSongs(main) {
       </td>
     </tr>`).join('');
 
-    t.addEventListener('click', async e => {
+  };
+  const tbody = document.getElementById('songs-tbody');
+  tbody.addEventListener('click', async e => {
+      const list = songs;
       const es = e.target.closest('.es-btn');
       const sus = e.target.closest('.sus-btn');
       const unsus = e.target.closest('.unsus-btn');
@@ -3174,13 +3255,18 @@ async function renderAdminSongs(main) {
         try { await adminApi('/songs/'+unsus.dataset.id, {method:'PUT', body:JSON.stringify({status:'active'})}); toast('Aktife alındı'); loadSection('songs'); } catch(e){toast(e.message,'error');}
       }
       if (ds) { if (!await CigCigDialogs.confirm('Müzik kalıcı silinsin mi?')) return; try { await adminApi('/songs/'+ds.dataset.id, {method:'DELETE'}); toast('Silindi'); loadSection('songs'); } catch(e){toast(e.message,'error');} }
-    });
-  };
-  render(songs);
-  document.getElementById('song-search').addEventListener('input', e => {
-    const q = e.target.value.toLowerCase();
-    render(songs.filter(s => s.title.toLowerCase().includes(q) || s.artist_name.toLowerCase().includes(q) || (s.distributor||'').toLowerCase().includes(q)));
   });
+  render(songs);
+  const filterSongs = () => {
+    const q = document.getElementById('song-search').value.toLocaleLowerCase('tr-TR');
+    const category = document.getElementById('song-category-filter').value;
+    render(songs.filter(song =>
+      (category === 'all' || (song.song_type || 'own') === category)
+      && [song.title, song.artist_name, song.distributor, song.uploader].some(value => String(value || '').toLocaleLowerCase('tr-TR').includes(q))
+    ));
+  };
+  document.getElementById('song-search').addEventListener('input', filterSongs);
+  document.getElementById('song-category-filter').addEventListener('change', filterSongs);
 }
 
 function showSongEditModal(song) {
@@ -4614,7 +4700,7 @@ async function renderShopSettings(main) {
     .pay-field { margin-bottom:14px }
     .pay-field label { display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px }
     .pay-field input, .pay-field select { width:100%;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:13px;outline:none }
-    .pay-field input:focus { border-color:rgba(189,162,117,.5) }
+    .pay-field input:focus { border-color:rgba(225,29,72,.5) }
     .pay-status { display:flex;align-items:center;gap:8px;padding:12px 16px;border-radius:10px;margin-bottom:20px;font-size:13px;font-weight:600 }
     .pay-status.active { background:#22c55e18;border:1px solid #22c55e30;color:#22c55e }
     .pay-status.inactive { background:#ef444418;border:1px solid #ef444430;color:#ef4444 }
