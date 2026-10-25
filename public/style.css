@@ -8268,21 +8268,20 @@ input[type="file"].designed-file-picker-native {
 .profile-note-audio-progress > span { display: block; width: 0; height: 100%; background: var(--accent-red2); transition: width .2s linear; }
 .profile-note-audio-status { min-height: 0; color: var(--text-muted); font-size: 12px; }
 .profile-note-actions { display:flex;justify-content:center; }
-.profile-note-like-button,.profile-note-likes-button {
+.profile-note-like-button {
   display:inline-flex;min-height:38px;align-items:center;justify-content:center;gap:8px;
   padding:7px 13px;border:1px solid var(--border);border-radius:999px;
   background:var(--bg-card2);color:var(--text-primary);font:inherit;font-size:13px;cursor:pointer;
 }
-.profile-note-like-button i,.profile-note-likes-button i,.profile-note-liker > i { color:var(--accent-red2); }
+.profile-note-like-button i,.profile-note-liker > i { color:var(--accent-red2); }
 .profile-note-like-button { width:44px;height:44px;min-height:44px;padding:0;gap:0;font-size:18px;transition:color .16s,background .16s,border-color .16s,box-shadow .16s,transform .16s; }
 .profile-note-like-button.is-liked {
   border-color:rgba(239,77,95,.85);background:rgba(239,77,95,.16);color:#ff4158;
   box-shadow:0 0 9px rgba(255,45,75,.55),0 0 22px rgba(255,45,75,.32),inset 0 0 9px rgba(255,45,75,.16);
   text-shadow:0 0 8px rgba(255,45,75,.8);
 }
-.profile-note-like-button:disabled,.profile-note-likes-button:disabled { opacity:.65;cursor:wait; }
-.profile-note-like-button b,.profile-note-likes-button b { min-width:12px;font-size:12px; }
-.profile-note-likers-list { display:grid;gap:4px;max-height:240px;overflow:auto; }
+.profile-note-like-button:disabled { opacity:.65;cursor:wait; }
+.profile-note-likers-list { display:grid;gap:4px;max-height:min(34dvh,240px);overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch; }
 .profile-note-likers-list[hidden] { display:none; }
 .profile-note-likers-heading { padding:2px 3px 5px;color:var(--text-muted);font-size:12px;font-weight:650; }
 .profile-note-liker { display:flex;min-width:0;align-items:center;gap:10px;padding:7px 8px;border-radius:10px;color:var(--text-primary);text-decoration:none; }
@@ -8301,6 +8300,20 @@ input[type="file"].designed-file-picker-native {
 .profile-note-likers-empty { padding:8px 3px;color:var(--text-muted);font-size:13px;text-align:center; }
 .profile-note-delete { width:100%; min-height:42px; justify-content:center; border-color:rgba(239,77,95,.3); color:var(--accent-red2); }
 .profile-note-delete:hover { border-color:var(--accent-red2); background:rgba(239,77,95,.08); }
+.settings-autosave-status { min-height:18px;margin:8px 0;color:var(--text-muted);font-size:12px;line-height:1.5; }
+
+@media (max-width:600px) {
+  .modal-overlay:has(.founder-info-modal) {
+    align-items:center !important;
+    justify-content:center !important;
+    padding:16px !important;
+  }
+  .modal-overlay:has(.founder-info-modal) .modal {
+    max-height:calc(100dvh - 32px);
+    margin:auto !important;
+    border-radius:var(--radius) !important;
+  }
+}
 
 .dm-note-song-timing { display: grid; gap: 10px; }
 .dm-note-song-timing[hidden] { display: none; }

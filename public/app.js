@@ -9029,7 +9029,7 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
     ${song}
     ${isOwnNote
-      ? (Number(note.like_count) > 0 ? `<div class="profile-note-actions"><button type="button" class="profile-note-likes-button" id="profile-note-likers"><i class="fas fa-heart"></i><span>Beğenenler</span><b>${Number(note.like_count)}</b></button></div><div class="profile-note-likers-list" id="profile-note-likers-list" hidden></div>` : '')
+      ? (Number(note.like_count) > 0 ? '<div class="profile-note-likers-list" id="profile-note-likers-list" hidden></div>' : '')
       : `<div class="profile-note-actions"><button type="button" class="profile-note-like-button${note.liked_by_me ? ' is-liked' : ''}" id="profile-note-like" aria-label="${note.liked_by_me ? 'Beğeniyi kaldır' : 'Notu beğen'}" aria-pressed="${note.liked_by_me ? 'true' : 'false'}"><i class="${note.liked_by_me ? 'fas' : 'far'} fa-heart"></i></button></div>`}
     <div class="profile-note-audio-status" id="profile-note-audio-status" aria-live="polite"></div>
     ${isOwnNote ? '<button type="button" class="btn btn-outline profile-note-delete" id="profile-note-delete"><i class="fas fa-trash"></i> Notu sil</button>' : ''}
@@ -9067,27 +9067,21 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
       toast(error.message || 'Not beğenisi kaydedilemedi.', 'error');
     }
   });
-  document.getElementById('profile-note-likers')?.addEventListener('click', async event => {
-    const button = event.currentTarget;
+  if (isOwnNote && Number(note.like_count) > 0) {
     const list = document.getElementById('profile-note-likers-list');
-    button.disabled = true;
-    try {
-      const likers = await api(`/dm-notes/${encodeURIComponent(username)}/likes`);
+    api(`/dm-notes/${encodeURIComponent(username)}/likes`).then(likers => {
+      if (!list?.isConnected) return;
       if (likers.length) {
-        list.innerHTML = `<div class="profile-note-likers-heading">Bu notu beğenenler</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${hasUsableAvatar(liker) ? `<img src="${escHtml(liker.avatar)}" class="profile-note-liker-avatar" alt="" />` : '<span class="profile-note-liker-avatar is-placeholder" aria-hidden="true"><i class="fas fa-user"></i></span>'}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`;
+        list.innerHTML = `<div class="profile-note-likers-heading">Beğenenler · ${likers.length}</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${hasUsableAvatar(liker) ? `<img src="${escHtml(liker.avatar)}" class="profile-note-liker-avatar" alt="" />` : '<span class="profile-note-liker-avatar is-placeholder" aria-hidden="true"><i class="fas fa-user"></i></span>'}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`;
         list.hidden = false;
       } else {
         list.innerHTML = '';
         list.hidden = true;
-        button.closest('.profile-note-actions').hidden = true;
       }
-      button.querySelector('b').textContent = String(likers.length);
-      button.disabled = false;
-    } catch (error) {
-      button.disabled = false;
+    }).catch(error => {
       toast(error.message || 'Notu beğenenler yüklenemedi.', 'error');
-    }
-  });
+    });
+  }
   document.getElementById('profile-note-delete')?.addEventListener('click', async event => {
     const button = event.currentTarget;
     if (!await CigCigDialogs.confirm('Notunu silmek istiyor musun?')) return;
@@ -9790,7 +9784,6 @@ async function renderSettings(app) {
       <div class="settings-nav">
         <div class="settings-nav-item active" data-section="profile"><i class="fas fa-user"></i> Profil</div>
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
-        <div class="settings-nav-item" data-section="nickname"><i class="fas fa-signature"></i> Takma Ad</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
@@ -9855,7 +9848,8 @@ async function renderSettingsSection(section) {
             <div id="links-container" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
             <button type="button" class="btn btn-outline btn-sm" id="add-link-btn"><i class="fas fa-plus"></i> Link Ekle</button>
           </div>
-          <button class="btn btn-primary" id="save-profile-btn">Kaydet</button>
+          <div class="settings-autosave-status" id="profile-autosave-status" aria-live="polite">Biyografi, ünvan ve konum alanları değiştirildiğinde otomatik kaydedilir.</div>
+          <button class="btn btn-primary" id="save-profile-btn">Fotoğrafı ve linkleri kaydet</button>
           <div id="profile-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
@@ -9871,6 +9865,7 @@ async function renderSettingsSection(section) {
     }
 
     let currentLinks = [...links];
+    let profileAutosaveQueue = Promise.resolve();
     renderLinkRows(currentLinks);
     const profileFieldLimits = { 's-bio': 500, 's-title': 100, 's-location': 100 };
     Object.entries(profileFieldLimits).forEach(([id, limit]) => {
@@ -9883,6 +9878,32 @@ async function renderSettingsSection(section) {
         counter.classList.toggle('is-near-limit', field.value.length >= limit * 0.9);
       };
       field.addEventListener('input', updateCounter);
+      const profileKey = { 's-bio': 'bio', 's-title': 'title', 's-location': 'location' }[id];
+      field.addEventListener('change', async () => {
+        if (field.disabled) return;
+        const value = field.value;
+        field.disabled = true;
+        const status = $('#profile-autosave-status');
+        const save = profileAutosaveQueue.then(async () => {
+          if (status) status.textContent = 'Profil alanı kaydediliyor…';
+          const fd = new FormData();
+          fd.append(profileKey, value);
+          currentUser = await apiForm('/profile', fd, 'PUT');
+          updateNavUI();
+          if (status) status.textContent = 'Profil alanı kaydedildi.';
+        });
+        profileAutosaveQueue = save.catch(() => {});
+        try {
+          await save;
+        } catch (error) {
+          field.value = String(currentUser[profileKey] || '');
+          updateCounter();
+          if (status) status.textContent = error.message || 'Profil alanı kaydedilemedi.';
+          toast(error.message || 'Profil alanı kaydedilemedi.', 'error');
+        } finally {
+          field.disabled = false;
+        }
+      });
       updateCounter();
     });
 
@@ -9908,11 +9929,8 @@ async function renderSettingsSection(section) {
     });
 
     $('#save-profile-btn').addEventListener('click', async () => {
-      const titleVal = ($('#s-title').value || '').trim();
+      await profileAutosaveQueue;
       const fd = new FormData();
-      fd.append('bio', $('#s-bio').value);
-      fd.append('title', titleVal);
-      fd.append('location', $('#s-location').value || '');
       const validLinks = currentLinks.filter(l => l.url && l.url.trim());
       fd.append('links', JSON.stringify(validLinks));
       if (selectedAvatarFile) fd.append('avatar', selectedAvatarFile);
@@ -9921,7 +9939,7 @@ async function renderSettingsSection(section) {
         const updated = await apiForm('/profile', fd, 'PUT');
         currentUser = updated;
         updateNavUI();
-        toast('Profil güncellendi');
+        toast('Fotoğraf ve linkler kaydedildi');
         $('#profile-msg').style.color = 'var(--accent-red2)';
         $('#profile-msg').textContent = '';
       } catch (e) { $('#profile-msg').textContent = e.message; }
@@ -9960,42 +9978,6 @@ async function renderSettingsSection(section) {
           message.textContent = error.message;
           button.disabled = false;
         }
-      });
-    }
-
-  } else if (section === 'nickname') {
-    const resetAt = currentUser.nickname_change_reset_at ? new Date(currentUser.nickname_change_reset_at) : null;
-    const changes = resetAt && resetAt <= new Date() ? 0 : Number(currentUser.nickname_changes || 0);
-    const isBlocked = changes >= 2 && resetAt && resetAt > new Date();
-    const resetDateStr = resetAt ? resetAt.toLocaleString('tr-TR') : '';
-    el.innerHTML = `
-      <div class="card">
-        <div class="card-header"><span>Takma Adını Değiştir</span></div>
-        <div class="card-body">
-          <div class="form-group">
-            <label>Mevcut Takma Ad</label>
-            <div style="padding:8px 12px;background:var(--bg-card2);border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-size:14px">${escHtml(currentUser.nickname || currentUser.username)} <small>@${escHtml(currentUser.username)}</small></div>
-          </div>
-          <div style="padding:10px 14px;background:var(--bg-card2);border-radius:8px;margin-bottom:16px;font-size:13px;color:var(--text-muted)">
-            Takma adını 48 saat içinde <strong>2 kez</strong> değiştirebilirsin. Takma ad boşluk içerebilir ve başkalarıyla aynı olabilir.
-            ${isBlocked ? `<br><span style="color:var(--accent-red2);margin-top:6px;display:block"><i class="fas fa-clock"></i> Yeni takma adını ${resetDateStr} sonrasında değiştirebilirsin.</span>` : `<br><span style="color:var(--accent-red);margin-top:4px;display:block">Kalan hak: <strong>${2 - changes}/2</strong>${resetAt ? ` · Hakların ${resetDateStr} tarihinde yenilenir` : ''}</span>`}
-          </div>
-          ${isBlocked ? '' : `<div class="form-group"><label>Yeni Takma Ad</label><input type="text" id="new-nickname" maxlength="32" value="${escHtml(currentUser.nickname || currentUser.username)}" placeholder="En fazla 32 karakter" /></div>
-          <button class="btn btn-primary" id="save-nickname-btn">Takma Adı Değiştir</button>
-          <div id="nickname-msg" class="form-error mt-4"></div>`}
-        </div>
-      </div>`;
-    if (!isBlocked) {
-      $('#save-nickname-btn').addEventListener('click', async () => {
-        const nickname = ($('#new-nickname').value || '').trim().replace(/\s+/g, ' ');
-        if (!nickname) { $('#nickname-msg').textContent = 'Takma ad zorunlu'; return; }
-        if (nickname.length > 32) { $('#nickname-msg').textContent = 'Takma ad en fazla 32 karakter olabilir'; return; }
-        try {
-          currentUser = await api('/profile/nickname', { method: 'PUT', body: JSON.stringify({ nickname }) });
-          updateNavUI();
-          toast('Takma ad güncellendi');
-          renderSettingsSection('nickname');
-        } catch (error) { $('#nickname-msg').textContent = error.message; }
       });
     }
 
@@ -10218,17 +10200,58 @@ async function renderSettingsSection(section) {
                 <div class="dm-msg-wrap dm-own"><div class="dm-msg-bubble">Senin mesajın</div></div>
               </div>
             </div>
-            <button class="btn btn-outline btn-sm" id="save-dm-default-theme" type="button"><i class="fas fa-check"></i> Temayı kaydet</button>
           </section>
-          <button class="btn btn-primary" id="save-appearance-btn">Kaydet</button>
-          <div id="appear-msg" class="form-error mt-4"></div>
+          <div id="appearance-save-status" class="settings-autosave-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
         </div>
       </div>`;
-    el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(button => button.addEventListener('click', () => {
+    const appearanceControls = [...el.querySelectorAll('.settings-dm-theme-options .dm-theme-option, #s-show-progress, #s-show-color, #s-name-color, #s-name-color-picker, .name-color-swatch')];
+    const appearanceStatus = $('#appearance-save-status');
+    let appearanceSaving = false;
+    const saveAppearanceChange = async (save, rollback, successMessage) => {
+      if (appearanceSaving) return false;
+      appearanceSaving = true;
+      appearanceControls.forEach(control => { control.disabled = true; });
+      appearanceStatus.textContent = 'Kaydediliyor…';
+      try {
+        await save();
+        appearanceStatus.textContent = successMessage;
+        return true;
+      } catch (error) {
+        rollback?.();
+        appearanceStatus.textContent = error.message || 'Değişiklik kaydedilemedi.';
+        toast(appearanceStatus.textContent, 'error');
+        return false;
+      } finally {
+        appearanceControls.forEach(control => { control.disabled = false; });
+        appearanceSaving = false;
+      }
+    };
+    const saveProfileAppearance = async fields => {
+      const fd = new FormData();
+      Object.entries(fields).forEach(([key, value]) => fd.append(key, value));
+      currentUser = await apiForm('/profile', fd, 'PUT');
+      updateNavUI();
+    };
+    el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(button => button.addEventListener('click', async () => {
+      if (appearanceSaving) return;
+      const previousTheme = selectedDmTheme;
       selectedDmTheme = button.dataset.themeKey;
       el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(option => option.setAttribute('aria-pressed', String(option === button)));
       $('#s-dm-theme-name').textContent = DM_THEME_LABELS[selectedDmTheme];
       $('.settings-dm-theme-bubbles').dataset.dmTheme = selectedDmTheme;
+      await saveAppearanceChange(
+        () => api('/me/dm-theme-settings', {
+          method: 'PUT',
+          body: JSON.stringify({ default_theme_key: selectedDmTheme, default_theme_custom: true })
+        }),
+        () => {
+          selectedDmTheme = previousTheme;
+          el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(option => option.setAttribute('aria-pressed', String(option.dataset.themeKey === previousTheme)));
+          $('#s-dm-theme-name').textContent = DM_THEME_LABELS[previousTheme];
+          $('.settings-dm-theme-bubbles').dataset.dmTheme = previousTheme;
+        },
+        'Mesaj teması kaydedildi.'
+      );
     }));
     const nameColorInput = $('#s-name-color');
     const nameColorPicker = $('#s-name-color-picker');
@@ -10251,40 +10274,46 @@ async function renderSettingsSection(section) {
       if (/^[0-9a-f]{6}$/i.test(normalized)) syncNameColor(normalized);
     });
     nameColorPicker?.addEventListener('input', () => syncNameColor(nameColorPicker.value));
-    el.querySelectorAll('.name-color-swatch').forEach(button => button.addEventListener('click', () => {
-      syncNameColor(button.dataset.nameColor);
-    }));
-    $('#save-appearance-btn').addEventListener('click', async () => {
-      const body = {
-        show_level_color: $('#s-show-color').checked,
-      };
-      if (levelsEnabled) body.show_level_progress = $('#s-show-progress').checked;
-      if ((currentUser.is_vip || currentUser.is_plus) && nameColorInput) {
-        const color = nameColorInput.value.trim().replace(/^#/, '');
-        if (!syncNameColor(color)) {
-          $('#appear-msg').textContent = 'İsim rengi 6 haneli HEX biçiminde olmalı.';
-          nameColorInput.focus();
-          return;
-        }
-        body.name_color = `#${color}`;
+    const saveNameColor = async () => {
+      if (!nameColorInput || appearanceSaving) return;
+      const color = nameColorInput.value.trim().replace(/^#/, '');
+      if (!/^[0-9a-f]{6}$/i.test(color) || !syncNameColor(color)) {
+        appearanceStatus.textContent = 'İsim rengi 6 haneli HEX biçiminde olmalı.';
+        return;
       }
-      try {
-        const fd = new FormData();
-        Object.entries(body).forEach(([k, v]) => fd.append(k, v));
-        const updated = await apiForm('/profile', fd, 'PUT');
-        currentUser = updated; updateNavUI();
-        toast('Görünüm güncellendi');
-      } catch (e) { $('#appear-msg').textContent = e.message; }
-    });
-    $('#save-dm-default-theme').addEventListener('click', async () => {
-      try {
-        await api('/me/dm-theme-settings', {
-          method: 'PUT',
-          body: JSON.stringify({ default_theme_key: selectedDmTheme, default_theme_custom: true })
-        });
-        toast('Varsayılan mesaj teması kaydedildi');
-      } catch (error) { toast(error.message, 'error'); }
-    });
+      const previousColor = /^#[0-9a-f]{6}$/i.test(currentUser.name_color || '') ? currentUser.name_color : '#f5f5f5';
+      await saveAppearanceChange(
+        () => saveProfileAppearance({ name_color: `#${color}` }),
+        () => {
+          syncNameColor(previousColor);
+          nameColorInput.value = previousColor.slice(1);
+        },
+        'İsim rengi kaydedildi.'
+      );
+    };
+    nameColorInput?.addEventListener('change', saveNameColor);
+    nameColorPicker?.addEventListener('change', saveNameColor);
+    el.querySelectorAll('.name-color-swatch').forEach(button => button.addEventListener('click', async () => {
+      if (appearanceSaving) return;
+      syncNameColor(button.dataset.nameColor);
+      await saveNameColor();
+    }));
+    const bindAppearanceToggle = (selector, field, successMessage) => {
+      const input = $(selector);
+      if (!input) return;
+      input.addEventListener('change', async () => {
+        if (appearanceSaving) return;
+        const previousValue = Boolean(currentUser[field]);
+        const nextValue = input.checked;
+        await saveAppearanceChange(
+          () => saveProfileAppearance({ [field]: nextValue }),
+          () => { input.checked = previousValue; },
+          successMessage
+        );
+      });
+    };
+    bindAppearanceToggle('#s-show-color', 'show_level_color', 'İsim rengi görünürlüğü kaydedildi.');
+    bindAppearanceToggle('#s-show-progress', 'show_level_progress', 'Seviye ilerleme tercihi kaydedildi.');
   } else if (section === 'account-status') {
     const isPrivate = !!currentUser.is_private;
     el.innerHTML = `
@@ -10310,17 +10339,41 @@ async function renderSettingsSection(section) {
               ].map(([value, label, description, icon]) => `<button type="button" class="dm-permission-option${(currentUser.dm_message_permission || 'everyone') === value ? ' is-selected' : ''}" data-dm-permission="${value}" aria-pressed="${(currentUser.dm_message_permission || 'everyone') === value}"><span class="dm-permission-option-icon"><i class="fas ${icon}"></i></span><span class="dm-permission-option-copy"><strong>${label}</strong><small>${description}</small></span><i class="fas fa-check dm-permission-option-check"></i></button>`).join('')}
             </div>
           </section>
-          <button type="button" class="btn btn-outline btn-sm" id="save-dm-message-permission" style="margin-top:10px">Mesaj ayarını kaydet</button>
+          <div class="settings-autosave-status" id="dm-message-permission-status" aria-live="polite">Seçimin otomatik kaydedilir.</div>
         </div>
       </div>`;
     let selectedDmPermission = ['everyone', 'friends', 'followers'].includes(currentUser.dm_message_permission) ? currentUser.dm_message_permission : 'everyone';
-    el.querySelectorAll('.dm-permission-option').forEach(button => button.addEventListener('click', () => {
+    const permissionOptions = [...el.querySelectorAll('.dm-permission-option')];
+    permissionOptions.forEach(button => button.addEventListener('click', async () => {
+      if (button.disabled || button.dataset.dmPermission === selectedDmPermission) return;
+      const previousPermission = selectedDmPermission;
       selectedDmPermission = button.dataset.dmPermission;
-      el.querySelectorAll('.dm-permission-option').forEach(option => {
+      permissionOptions.forEach(option => {
         const selected = option === button;
         option.classList.toggle('is-selected', selected);
         option.setAttribute('aria-pressed', String(selected));
+        option.disabled = true;
       });
+      const status = $('#dm-message-permission-status');
+      if (status) status.textContent = 'Kaydediliyor…';
+      try {
+        const fd = new FormData();
+        fd.append('dm_message_permission', selectedDmPermission);
+        currentUser = await apiForm('/profile', fd, 'PUT');
+        updateNavUI();
+        if (status) status.textContent = 'Mesajlaşma tercihi kaydedildi.';
+      } catch (error) {
+        selectedDmPermission = previousPermission;
+        permissionOptions.forEach(option => {
+          const selected = option.dataset.dmPermission === previousPermission;
+          option.classList.toggle('is-selected', selected);
+          option.setAttribute('aria-pressed', String(selected));
+        });
+        if (status) status.textContent = error.message || 'Mesajlaşma tercihi kaydedilemedi.';
+        toast(error.message || 'Mesajlaşma tercihi kaydedilemedi.', 'error');
+      } finally {
+        permissionOptions.forEach(option => { option.disabled = false; });
+      }
     }));
     $('#account-private-switch')?.addEventListener('change', event => {
       const nextPrivate = event.target.checked;
@@ -10348,18 +10401,6 @@ async function renderSettingsSection(section) {
           $('#account-status-error').textContent = error.message;
         }
       });
-    });
-    $('#save-dm-message-permission')?.addEventListener('click', async event => {
-      const button = event.currentTarget;
-      button.disabled = true;
-      try {
-        const fd = new FormData();
-        fd.append('dm_message_permission', selectedDmPermission);
-        currentUser = await apiForm('/profile', fd, 'PUT');
-        updateNavUI();
-        toast('Mesajlaşma ayarı kaydedildi');
-      } catch (error) { toast(error.message, 'error'); }
-      finally { button.disabled = false; }
     });
   } else if (section === '__removed-homepage') {
     const options = [
@@ -10417,12 +10458,34 @@ async function renderSettingsSection(section) {
     ];
     items.push(['followers_list', 'Takipçileri göster', 'Takipçi listesini profilinden aç', 'fas fa-users']);
     items.push(['following_list', 'Takip ettiklerini göster', 'Takip edilenler listesini profilinden aç', 'fas fa-user-check']);
-    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:6px"></i>Profil Ayarları</span></div><div class="card-body"><p class="settings-help">Profilinde hangi bilgilerin ve listelerin görüneceğini seç.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} /></label>`).join('')}</div><button class="btn btn-primary" id="save-profile-visibility"><i class="fas fa-save"></i> Kaydet</button><div id="profile-visibility-msg" class="form-error mt-4"></div></div></div>`;
-    $('#save-profile-visibility').addEventListener('click', async () => {
+    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:6px"></i>Profil Ayarları</span></div><div class="card-body"><p class="settings-help">Profilinde hangi bilgilerin ve listelerin görüneceğini seç.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} /></label>`).join('')}</div><div class="settings-autosave-status" id="profile-visibility-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div></div></div>`;
+    let visibilitySaving = false;
+    el.querySelectorAll('[data-visibility]').forEach(input => input.addEventListener('change', async () => {
+      if (visibilitySaving) return;
+      visibilitySaving = true;
+      const previous = { ...visibility };
       const next = {};
       el.querySelectorAll('[data-visibility]').forEach(input => { next[input.dataset.visibility] = input.checked; });
-      try { const result = await api('/me/profile-visibility', { method: 'PUT', body: JSON.stringify({ visibility: next }) }); currentUser = result.user; updateNavUI(); toast('Profil görünürlük ayarları kaydedildi'); } catch (error) { $('#profile-visibility-msg').textContent = error.message; }
-    });
+      const inputs = [...el.querySelectorAll('[data-visibility]')];
+      inputs.forEach(control => { control.disabled = true; });
+      const status = $('#profile-visibility-status');
+      if (status) status.textContent = 'Kaydediliyor…';
+      try {
+        const result = await api('/me/profile-visibility', { method: 'PUT', body: JSON.stringify({ visibility: next }) });
+        visibility = { ...next, ...result.visibility };
+        currentUser = result.user;
+        updateNavUI();
+        if (status) status.textContent = 'Profil tercihleri kaydedildi.';
+      } catch (error) {
+        visibility = previous;
+        inputs.forEach(control => { control.checked = previous[control.dataset.visibility] !== false; });
+        if (status) status.textContent = error.message || 'Profil tercihleri kaydedilemedi.';
+        toast(error.message || 'Profil tercihleri kaydedilemedi.', 'error');
+      } finally {
+        inputs.forEach(control => { control.disabled = false; });
+        visibilitySaving = false;
+      }
+    }));
   } else if (section === 'dm-lock') {
     let lockSettings;
     try {
@@ -10564,18 +10627,27 @@ async function renderSettingsSection(section) {
               <option value="nobody" ${(currentUser.tag_permission || 'everyone') === 'nobody' ? 'selected' : ''}>Hiç kimse</option>
             </select>
           </div>
-          <button class="btn btn-primary" id="save-notif-btn">Kaydet</button>
+          <div class="settings-autosave-status" id="notif-settings-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
           <div id="notif-settings-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
-    $('#save-notif-btn').addEventListener('click', async () => {
+    $('#s-tag-permission').addEventListener('change', async event => {
+      const select = event.currentTarget;
+      const previousValue = currentUser.tag_permission || 'everyone';
+      const status = $('#notif-settings-status');
+      select.disabled = true;
+      if (status) status.textContent = 'Kaydediliyor…';
       const fd = new FormData();
-      fd.append('tag_permission', $('#s-tag-permission').value);
+      fd.append('tag_permission', select.value);
       try {
         const updated = await apiForm('/profile', fd, 'PUT');
         currentUser = updated; updateNavUI();
-        toast('Bildirim ayarları kaydedildi');
-      } catch(e) { $('#notif-settings-msg').textContent = e.message; }
+        if (status) status.textContent = 'Etiketleme tercihi kaydedildi.';
+      } catch(e) {
+        select.value = previousValue;
+        if (status) status.textContent = e.message || 'Etiketleme tercihi kaydedilemedi.';
+        toast(e.message || 'Etiketleme tercihi kaydedilemedi.', 'error');
+      } finally { select.disabled = false; }
     });
   } else if (section === '__removed-spotify') {
     const hasSpotify = !!(currentUser.spotify_token || currentUser.spotify_expires > 0);
