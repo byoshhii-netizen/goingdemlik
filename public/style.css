@@ -8611,6 +8611,13 @@ body.reals-page .reals-close-btn:focus-visible {
     border-radius:0 !important;
     box-shadow:none !important;
   }
+  body.reals-page .reals-meta {
+    left:0 !important;
+    right:0 !important;
+  }
+  body.reals-page .reals-right-actions {
+    right:8px !important;
+  }
   body.reals-page .reals-video {
     width:100% !important;
     height:100% !important;
