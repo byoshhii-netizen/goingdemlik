@@ -2067,10 +2067,11 @@ body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; pad
 .profile-badges-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; margin-bottom: 4px; }
 .profile-badges-button {
   display:inline-flex; align-items:center; justify-content:center; gap:7px; width:auto; min-height:32px;
-  margin:10px auto 4px; padding:6px 11px; border:1px solid var(--border); border-radius:999px;
+  max-width:100%; box-sizing:border-box; margin:0 auto 4px; padding:6px 11px; border:1px solid var(--border); border-radius:999px;
   background:var(--bg-card2); color:var(--text-secondary); font:inherit; font-size:12px; font-weight:650;
   line-height:1; cursor:pointer; transition:background .16s,border-color .16s,color .16s,transform .16s;
 }
+.profile-badges-slot { display:flex; justify-content:center; width:100%; min-width:0; margin:0 0 8px; }
 .profile-badges-button:hover,.profile-badges-button:focus-visible { border-color:rgba(var(--accent-rgb),.5); background:rgba(var(--accent-rgb),.1); color:var(--text-primary); }
 .profile-badges-button:active { transform:scale(.97); }
 .profile-badges-button > i { color:var(--accent-red2); }
@@ -6173,6 +6174,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .profile-photo-owner-actions .profile-content-archive-btn,
 .profile-photo-owner-actions .profile-content-edit-btn,
 .profile-photo-owner-actions .profile-content-trash-btn { position:static; display:flex; align-items:center; justify-content:center; gap:6px; min-width:42px; min-height:38px; padding:0 11px; border:1px solid rgba(255,255,255,.2); border-radius:999px; color:#fff; background:rgba(10,12,16,.88); box-shadow:0 4px 14px rgba(0,0,0,.24); font-size:11px; font-weight:700; cursor:pointer; opacity:1; transform:none; transition:background .15s,transform .15s; backdrop-filter:blur(8px); }
+.profile-photo-owner-actions > button { box-sizing:border-box; max-width:100%; white-space:nowrap; }
 .profile-photo-owner-actions .profile-content-archive-btn:hover,
 .profile-photo-owner-actions .profile-content-edit-btn:hover { background:rgba(var(--accent-rgb),.85); transform:translateY(-1px); }
 .profile-photo-owner-actions .profile-content-trash-btn { border-color:rgba(255,105,105,.45); background:rgba(105,22,29,.9); }
@@ -6215,10 +6217,16 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .dm-lock-prompt-actions { flex-direction:column-reverse; }
   .profile-content-archive-btn { top:5px; right:5px; min-height:29px; padding:0 8px; font-size:9px; }
   .profile-content-trash-btn { top:5px; left:5px; min-height:29px; padding:0 8px; font-size:9px; }
-  .profile-photo-owner-actions { gap:6px; padding:8px; }
+  .profile-photo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap:6px; width:100%; min-width:0; }
+  .profile-photo-grid .profile-archiveable-card,
+  .profile-photo-grid .profile-photo-item { min-width:0; }
+  .profile-photo-owner-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-content:center; gap:5px; padding:6px; }
   .profile-photo-owner-actions .profile-content-archive-btn,
   .profile-photo-owner-actions .profile-content-edit-btn,
-  .profile-photo-owner-actions .profile-content-trash-btn { min-width:0; min-height:36px; padding:0 9px; font-size:10px; }
+  .profile-photo-owner-actions .profile-content-trash-btn { display:grid; place-items:center; width:100%; min-width:0; min-height:36px; padding:0 4px; font-size:10px; }
+  .profile-photo-owner-actions .profile-content-edit-btn span,
+  .profile-photo-owner-actions .profile-content-archive-btn span,
+  .profile-photo-owner-actions .profile-content-trash-btn span { display:none; }
   .music-page-header { flex-wrap:nowrap; align-items:center; gap:10px; margin-bottom:16px; padding:12px; border-radius:14px; }
   .music-page-title { min-width:0; flex:1 1 auto; gap:9px; }
   .music-page-title-icon { flex-basis:40px; width:40px; height:40px; border-radius:12px; font-size:16px; }

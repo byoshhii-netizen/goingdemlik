@@ -9374,9 +9374,9 @@ async function renderProfile(app, username) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
-       ${profileBadgesButtonHTML(data.badges || [])}
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
+      <div class="profile-badges-slot">${profileBadgesButtonHTML(data.badges || [])}</div>
       ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>` : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
     bindProfileAvatarViewer(app, user);
@@ -9453,7 +9453,6 @@ async function renderProfile(app, username) {
         </div>
         ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
-        ${profileBadgesButtonHTML(badges)}
         <div id="profile-spotify-now-playing" data-username="${escHtml(user.username)}"></div>
         ${progressHTML}
         ${user.bio ? descriptionPreviewHTML(user.bio, 'profile-bio', 160) : ''}
@@ -9462,6 +9461,7 @@ async function renderProfile(app, username) {
           if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
+        <div class="profile-badges-slot">${profileBadgesButtonHTML(badges)}</div>
         <div class="profile-stats" style="margin-top:12px">
           ${combinedContentCount
             ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></button>`
