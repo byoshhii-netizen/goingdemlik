@@ -9768,6 +9768,17 @@ app.get('/api/dm-notes', authMiddleware, async (req, res) => {
            s.artist_name AS song_artist,s.audio_url,s.remastered_audio_url,s.cover_url,
            nv.viewed_at,
            (SELECT COUNT(*)::int FROM dm_note_likes nl WHERE nl.note_user_id=n.user_id) AS like_count,
+           CASE WHEN n.user_id=$1 THEN (
+             SELECT COALESCE(json_agg(recent_likers), '[]'::json)
+             FROM (
+               SELECT lu.username,lu.nickname,lu.avatar,lu.avatar_removed
+               FROM dm_note_likes nl
+               JOIN users lu ON lu.id=nl.user_id AND COALESCE(lu.is_deleted,0)=0
+               WHERE nl.note_user_id=n.user_id
+               ORDER BY nl.created_at DESC
+               LIMIT 3
+             ) recent_likers
+           ) ELSE '[]'::json END AS recent_likers,
            EXISTS(SELECT 1 FROM dm_note_likes nl WHERE nl.note_user_id=n.user_id AND nl.user_id=$1) AS liked_by_me
     FROM dm_notes n
     JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0

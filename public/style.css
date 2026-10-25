@@ -3308,6 +3308,14 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   background:var(--bg-secondary);color:var(--text-primary);font-size:11px;font-weight:550;line-height:1.4;
   overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:2;
 }
+.dm-note-likers { display:flex;min-height:20px;align-items:center;justify-content:center;margin-top:1px; }
+.dm-note-liker-avatar {
+  box-sizing:border-box;display:block;width:20px;height:20px;flex:0 0 20px;
+  margin-left:-4px;border:2px solid var(--bg-secondary);border-radius:50%;
+  background:var(--bg-card2);color:var(--text-muted);object-fit:cover;
+}
+.dm-note-liker-avatar:first-child { margin-left:0; }
+.dm-note-liker-avatar.is-placeholder { display:grid;place-items:center;font-size:9px; }
 .dm-note-card:hover .dm-note-avatar { border-color:var(--accent-red2); }
 .dm-note-editor { display:grid;gap:10px;min-width:min(420px,75vw); }
 .dm-note-editor > label,.dm-note-song-timing > label { display:flex;justify-content:space-between;gap:12px;font-size:13px;font-weight:700; }
@@ -8265,7 +8273,13 @@ input[type="file"].designed-file-picker-native {
 .profile-note-likers-heading { padding:2px 3px 5px;color:var(--text-muted);font-size:12px;font-weight:650; }
 .profile-note-liker { display:flex;min-width:0;align-items:center;gap:10px;padding:7px 8px;border-radius:10px;color:var(--text-primary);text-decoration:none; }
 .profile-note-liker:hover { background:var(--bg-hover); }
-.profile-note-liker > span:not(.avatar-sm) { display:grid;min-width:0;flex:1;gap:2px; }
+.profile-note-liker > .profile-note-liker-avatar {
+  box-sizing:border-box;display:block;width:32px;height:32px;flex:0 0 32px;
+  border:1px solid var(--border-hover);border-radius:50%;background:var(--bg-card2);
+  color:var(--text-muted);object-fit:cover;
+}
+.profile-note-liker > .profile-note-liker-avatar.is-placeholder { display:grid;place-items:center;font-size:14px; }
+.profile-note-liker > span:not(.profile-note-liker-avatar) { display:grid;min-width:0;flex:1;gap:2px; }
 .profile-note-liker strong,.profile-note-liker small { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .profile-note-liker strong { font-size:13px; }
 .profile-note-liker small { color:var(--text-muted);font-size:11px; }

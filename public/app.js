@@ -9029,7 +9029,7 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     try {
       const likers = await api(`/dm-notes/${encodeURIComponent(username)}/likes`);
       if (likers.length) {
-        list.innerHTML = `<div class="profile-note-likers-heading">Bu notu beğenenler</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${avatarImg(liker)}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`;
+        list.innerHTML = `<div class="profile-note-likers-heading">Bu notu beğenenler</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${hasUsableAvatar(liker) ? `<img src="${escHtml(liker.avatar)}" class="profile-note-liker-avatar" alt="" />` : '<span class="profile-note-liker-avatar is-placeholder" aria-hidden="true"><i class="fas fa-user"></i></span>'}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`;
         list.hidden = false;
       } else {
         list.innerHTML = '';
@@ -12123,19 +12123,28 @@ async function renderMessages(app, targetUsername) {
     sortDmNotes();
     const ownNote = dmNotes.find(note => note.is_own);
     const otherNotes = dmNotes.filter(note => !note.is_own);
+    const ownRecentLikers = Array.isArray(ownNote?.recent_likers) ? ownNote.recent_likers.slice(0, 3) : [];
+    const noteLikersHTML = likers => likers.length
+      ? `<span class="dm-note-likers" aria-label="Son beğenenler">${likers.map(liker => hasUsableAvatar(liker)
+        ? `<img class="dm-note-liker-avatar" src="${escHtml(liker.avatar)}" alt="${escHtml(liker.nickname || liker.username)}" />`
+        : `<span class="dm-note-liker-avatar is-placeholder" aria-label="${escHtml(liker.nickname || liker.username)}"><i class="fas fa-user"></i></span>`).join('')}</span>`
+      : '';
     const noteButton = (note, own = false) => {
       const avatar = hasUsableAvatar(note) ? `<img src="${escHtml(note.avatar)}" alt="" />` : '<i class="fas fa-user"></i>';
       const label = own ? 'Notun' : (note.nickname || note.username || 'Kullanıcı');
+      const recentLikers = own && Array.isArray(note.recent_likers) ? note.recent_likers.slice(0, 3) : [];
       return `<button type="button" class="dm-note-card${own ? ' is-own' : ''}" data-note-user="${escHtml(note.username || '')}" aria-label="${escHtml(label)} notu">
         <span class="dm-note-avatar">${avatar}${note.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
         <span class="dm-note-label">${escHtml(own ? 'Notun' : (note.nickname || note.username || 'Not'))}</span>
         <span class="dm-note-preview">${escHtml(note.content || note.song_title || '♪')}</span>
+        ${noteLikersHTML(recentLikers)}
       </button>`;
     };
     strip.innerHTML = `<button type="button" class="dm-note-card dm-note-create${ownNote ? ' has-note' : ''}" id="dm-note-create">
       <span class="dm-note-avatar">${ownNote && hasUsableAvatar(currentUser) ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-plus"></i>'}${ownNote?.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
       <span class="dm-note-label">${ownNote ? 'Notun' : 'Not paylaş'}</span>
       <span class="dm-note-preview">${escHtml(ownNote?.content || ownNote?.song_title || 'Bir not paylaş')}</span>
+      ${noteLikersHTML(ownRecentLikers)}
     </button>${otherNotes.map(note => noteButton(note)).join('')}`;
     strip.querySelector('#dm-note-create')?.addEventListener('click', () => {
       if (!ownNote) return openDmNoteEditor();
