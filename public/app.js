@@ -2853,13 +2853,49 @@ $('#nav-user-btn').addEventListener('click', () => {
 });
 document.addEventListener('click', e => {
   if (!$('#nav-dropdown')?.contains(e.target)) $('#dropdown-menu')?.classList.add('hidden');
-  if (!$('#new-btn-wrap')?.contains(e.target)) $('#new-dropdown')?.classList.add('hidden');
+  if (!$('#new-btn-wrap')?.contains(e.target)) closeDesktopCreateMenu();
   if (!$('#notif-btn-wrap')?.contains(e.target)) $('#notif-dropdown')?.classList.add('hidden');
 });
 
 $('#nav-new-btn')?.addEventListener('click', e => {
   e.stopPropagation();
-  $('#new-dropdown').classList.toggle('hidden');
+  const dropdown = $('#new-dropdown');
+  const isOpening = dropdown.classList.contains('hidden');
+  dropdown.classList.toggle('hidden', !isOpening);
+  $('#nav-new-btn')?.setAttribute('aria-expanded', String(isOpening));
+});
+
+function closeDesktopCreateMenu() {
+  $('#new-dropdown')?.classList.add('hidden');
+  $('#nav-new-btn')?.setAttribute('aria-expanded', 'false');
+}
+
+function runDesktopCreateAction(action) {
+  closeDesktopCreateMenu();
+  if (!currentUser) return navigate('/giris');
+  if (action === 'photo') return showPhotoUploadModal();
+  if (action === 'story') return showStoryUploadModal();
+  if (action === 'reals') return showNewVideoModal(null, true);
+  if (action === 'video') return showNewVideoModal();
+  if (action === 'music') return navigate('/sarki-yukle');
+  if (action === 'forum') return showNewForumModal();
+  if (action === 'poem') return showNewPoemModal();
+  if (action === 'book') return showNewBookModal();
+  if (action === 'newspaper') return showNewspaperUploadModal();
+}
+
+[
+  ['nav-new-photo', 'photo'],
+  ['nav-new-story', 'story'],
+  ['nav-new-reals', 'reals'],
+  ['nav-new-video', 'video'],
+  ['nav-new-music', 'music'],
+  ['nav-new-forum', 'forum'],
+  ['nav-new-poem', 'poem'],
+  ['nav-new-book', 'book'],
+  ['nav-newspaper-publish', 'newspaper']
+].forEach(([id, action]) => {
+  document.getElementById(id)?.addEventListener('click', () => runDesktopCreateAction(action));
 });
 
 // ===== BİLDİRİM SİSTEMİ =====
@@ -2995,9 +3031,6 @@ $('#nav-notif-btn')?.addEventListener('click', e => {
   openNotifDropdown();
 });
 $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(); showMyGroupsModal(); });
-$('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
-$('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
-$('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showNewVideoModal(null, true); else navigate('/giris'); });
 function showLogoutConfirmation() {
   showModal('Çıkış yap', '<div class="logout-confirm"><span class="logout-confirm-icon"><i class="fas fa-arrow-right-from-bracket"></i></span><p>Hesabından çıkış yapmak istediğine emin misin?</p><div class="logout-confirm-actions"><button type="button" class="btn btn-danger" id="logout-confirm-btn"><i class="fas fa-arrow-right-from-bracket"></i> Çıkış yap</button><button type="button" class="btn btn-outline" id="logout-cancel-btn">Vazgeç</button></div></div>');
   $('#logout-cancel-btn')?.addEventListener('click', hideModal);
@@ -4915,12 +4948,7 @@ async function renderForumList(app, queryString) {
 
   app.innerHTML = `
     <div class="container page forum-page">
-      <div class="forum-page-header">
-        <div class="forum-page-heading">
-          <h1 class="page-title">Konular</h1>
-          ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
-        </div>
-      </div>
+      ${activeTag ? `<div class="forum-page-header"><div class="forum-page-heading"><div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div></div></div>` : ''}
       <div class="forum-toolbar">
         <div class="search-bar forum-search"><i class="fas fa-search"></i><input type="search" id="forum-search" placeholder="Konu, kullanıcı veya #etiket ara..." autocomplete="off" /></div>
       </div>

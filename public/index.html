@@ -162,13 +162,20 @@
         <a href="/kayit" data-link class="btn btn-primary btn-sm">Kayıt Ol</a>
         <a href="/giris" data-link class="btn btn-outline btn-sm">Giriş Yap</a>
       </div>
-      <div class="nav-user hidden" id="nav-user" style="display:flex;align-items:center;gap:8px">
+      <div class="nav-user hidden" id="nav-user" style="display:flex;align-items:center">
         <div style="position:relative" id="new-btn-wrap">
-          <button class="btn btn-primary btn-sm" id="nav-new-btn" title="Yeni paylaşım" aria-label="Yeni paylaşım"><i class="fas fa-plus"></i></button>
-          <div id="new-dropdown" class="dropdown-menu hidden" style="right:0;top:calc(100% + 8px);min-width:180px">
-            <button class="dropdown-item" id="nav-new-photo"><i class="fas fa-camera"></i> Fotoğraf</button>
-            <button class="dropdown-item" id="nav-new-story"><i class="fas fa-circle"></i> Hikâye</button>
-            <button class="dropdown-item" id="nav-new-reals"><i class="fas fa-circle-play"></i> Reals</button>
+          <button class="nav-create-toggle" id="nav-new-btn" type="button" title="Yeni paylaşım" aria-label="Yeni paylaşım" aria-haspopup="true" aria-expanded="false"><i class="fas fa-plus"></i></button>
+          <div id="new-dropdown" class="dropdown-menu nav-create-dropdown hidden" role="menu" aria-label="Yeni paylaşım seçenekleri">
+            <div class="nav-create-dropdown-title">Yeni paylaşım</div>
+            <button class="dropdown-item" id="nav-new-photo" type="button"><i class="fas fa-camera"></i><span>Fotoğraf</span></button>
+            <button class="dropdown-item" id="nav-new-story" type="button"><i class="fas fa-circle"></i><span>Hikâye</span></button>
+            <button class="dropdown-item" id="nav-new-reals" type="button"><i class="fas fa-circle-play"></i><span>Reals</span></button>
+            <button class="dropdown-item" id="nav-new-video" type="button"><i class="fas fa-video"></i><span>Video</span></button>
+            <button class="dropdown-item" id="nav-new-music" type="button"><i class="fas fa-music"></i><span>Müzik</span></button>
+            <button class="dropdown-item" id="nav-new-forum" type="button"><i class="fas fa-comments"></i><span>Konu</span></button>
+            <button class="dropdown-item" id="nav-new-poem" type="button"><i class="fas fa-pen-fancy"></i><span>Şiir</span></button>
+            <button class="dropdown-item" id="nav-new-book" type="button"><i class="fas fa-book"></i><span>Kitap</span></button>
+            <button class="dropdown-item" id="nav-newspaper-publish" type="button"><i class="fas fa-newspaper"></i><span>Gazete</span></button>
           </div>
         </div>
         <a href="/mesajlar" data-link class="nav-messages-btn" id="nav-header-messages" aria-label="Mesajlar" title="Mesajlar">

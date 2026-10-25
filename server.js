@@ -80,18 +80,16 @@ try {
 
 // Fallback: local disk (Railway volume veya geliştirme)
 let UPLOAD_DIR = process.env.UPLOAD_DIR || '/data/uploads';
-if (!USE_CLOUDINARY) {
-  try {
-    if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-    fs.accessSync(UPLOAD_DIR, fs.constants.W_OK);
-  } catch (e) {
-    if (!process.env.UPLOAD_DIR) {
-      UPLOAD_DIR = path.join(__dirname, 'persistent', 'uploads');
-      fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-      console.warn('Varsayılan upload klasörü kullanılamıyor; kalıcı klasöre geçildi:', e.message);
-    } else {
-      console.warn('Upload klasörü kullanılamıyor:', e.message);
-    }
+try {
+  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  fs.accessSync(UPLOAD_DIR, fs.constants.W_OK);
+} catch (e) {
+  if (!process.env.UPLOAD_DIR) {
+    UPLOAD_DIR = path.join(__dirname, 'persistent', 'uploads');
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    console.warn('Varsayılan upload klasörü kullanılamıyor; kalıcı klasöre geçildi:', e.message);
+  } else {
+    console.warn('Upload klasörü kullanılamıyor:', e.message);
   }
 }
 

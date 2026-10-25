@@ -442,11 +442,11 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .nav-container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 16px;
   height: 60px;
   display: flex;
   align-items: center;
-  gap: 32px;
+  gap: 14px;
 }
 .nav-brand {
   display: flex;
@@ -474,12 +474,13 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 }
 .nav-links {
   display: flex;
-  gap: 4px;
+  justify-content: center;
+  gap: 2px;
   flex: 1;
   min-width: 0;
 }
 .nav-link {
-  padding: 6px 14px;
+  padding: 6px 10px;
   border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 500;
@@ -489,6 +490,77 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .nav-link:hover, .nav-link.active { color: var(--text-primary); background: rgba(var(--accent-rgb),0.1); }
 .mobile-header-action { display: none; background: none; border: 0; color: var(--text-secondary); position: relative; }
 .nav-auth { display: flex; gap: 8px; align-items: center; }
+.nav-create-toggle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--text-primary);
+  background: var(--bg-card);
+  font-size: 16px;
+  cursor: pointer;
+  transition: border-color .16s ease, background .16s ease, color .16s ease, transform .16s ease;
+}
+.nav-create-toggle:hover,
+.nav-create-toggle[aria-expanded="true"] {
+  color: var(--accent-red2);
+  border-color: var(--border-hover);
+  background: var(--bg-active);
+  transform: translateY(-1px);
+}
+.nav-create-dropdown {
+  top: calc(100% + 10px);
+  right: 0;
+  width: 292px;
+  min-width: 0;
+  max-height: min(70vh, 440px);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#new-dropdown.nav-create-dropdown { overflow-y: auto; }
+.nav-create-dropdown.hidden { display: none !important; }
+.nav-create-dropdown-title {
+  grid-column: 1 / -1;
+  padding: 4px 8px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.nav-create-dropdown .dropdown-item {
+  min-width: 0;
+  min-height: 42px;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.nav-create-dropdown .dropdown-item:hover {
+  border-color: rgba(var(--accent-rgb), .22);
+  background: rgba(var(--accent-rgb), .08);
+}
+.nav-create-dropdown .dropdown-item i {
+  width: 16px;
+  flex: 0 0 16px;
+  color: var(--accent-red2);
+  text-align: center;
+}
+.nav-create-dropdown .dropdown-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-user { flex: 0 0 auto; min-width: 0; gap: 7px; }
 .nav-messages-btn {
   position: relative;
   display: inline-grid;
@@ -1803,13 +1875,26 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 }
 
 @media (min-width: 769px) and (max-width: 1200px) {
-  .nav-container { gap: 10px; padding-left: 12px; padding-right: 12px; }
+  .nav-container { gap: 8px; padding-left: 12px; padding-right: 12px; }
   .nav-brand { gap: 5px; }
   .nav-brand span:not(.site-wordmark) { font-size: 14px !important; }
   .site-logo { width: 28px !important; height: 28px !important; min-width: 28px; max-width: 28px; }
   .nav-links { gap: 0; }
-  .nav-link { padding: 6px 6px; font-size: 12px; white-space: nowrap; }
-  .nav-user-btn { padding: 5px 7px; font-size: 12px; }
+  .nav-link { padding: 6px clamp(3px, .55vw, 7px); font-size: clamp(10px, 1.08vw, 12px); white-space: nowrap; }
+  .nav-user { gap: 5px; }
+  .nav-create-toggle, .nav-messages-btn { width: 36px; height: 36px; flex-basis: 36px; }
+  #nav-notif-btn { width: 36px; height: 36px; padding: 0 !important; }
+  .nav-user-btn { width: 38px; height: 38px; padding: 3px; }
+}
+@media (min-width: 769px) and (max-width: 900px) {
+  .nav-container { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .site-wordmark { font-size: 19px; }
+  .nav-brand { gap: 3px; }
+  .nav-link { padding-inline: 3px; font-size: 10px; }
+  .nav-user { gap: 3px; }
+  .nav-create-toggle, .nav-messages-btn, #nav-notif-btn { width: 32px; height: 32px; flex-basis: 32px; }
+  .nav-user-btn { width: 34px; height: 34px; }
+  .nav-user-btn .nav-avatar { width: 28px; height: 28px; min-width: 28px; flex-basis: 28px; }
 }
 .toggle-switch input:checked + .toggle-slider {
   background: var(--accent-red);
