@@ -9466,7 +9466,7 @@ async function renderProfile(app, username) {
           ${profileVisibility.followers ? (profileVisibility.followers_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`) : ''}
           ${profileVisibility.following ? (profileVisibility.following_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`) : ''}
           ${combinedContentCount
-            ? `<div class="profile-stat"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></div>`
+            ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div><span class="profile-content-count-hint"><i class="fas fa-chevron-down"></i> Dağılımı gör</span></button>`
             : `${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
               ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
               ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
@@ -9588,6 +9588,44 @@ async function renderProfile(app, username) {
       toast(error.message || 'İçerik güncellenemedi.', 'error');
     }
   }));
+
+  app.querySelector('.profile-content-count')?.addEventListener('click', () => {
+    const breakdown = data.content_breakdown || {
+      forums: Number(user.forum_count || 0),
+      books: Number(user.book_count || 0),
+      comments: Number(user.comment_count || 0),
+      photos: photos.length,
+      videos: profileVideos.length,
+      reals: profileReals.length,
+      songs: profileSongs.length
+    };
+    const items = [
+      ['forums', 'Forum konuları', 'fa-comments'],
+      ['books', 'Kitaplar', 'fa-book'],
+      ['comments', 'Yorumlar', 'fa-comment-dots'],
+      ['photos', 'Fotoğraflar', 'fa-image'],
+      ['videos', 'Videolar', 'fa-video'],
+      ['reals', 'Reals', 'fa-circle-play'],
+      ['songs', 'Müzikler', 'fa-music']
+    ];
+    const total = Number(data.content_count || 0);
+    showModal('İçerik dağılımı', `
+      <div class="profile-content-breakdown">
+        <div class="profile-content-breakdown-total">
+          <span class="profile-content-breakdown-total-icon"><i class="fas fa-layer-group"></i></span>
+          <span><small>Toplam içerik</small><strong>${total.toLocaleString('tr-TR')}</strong></span>
+          <span class="profile-content-breakdown-total-label">paylaşım</span>
+        </div>
+        <div class="profile-content-breakdown-list">
+          ${items.map(([key, label, icon]) => `<div class="profile-content-breakdown-item">
+            <span class="profile-content-breakdown-icon"><i class="fas ${icon}"></i></span>
+            <span class="profile-content-breakdown-name">${label}</span>
+            <strong>${Number(breakdown[key] || 0).toLocaleString('tr-TR')}</strong>
+          </div>`).join('')}
+        </div>
+        <p class="profile-content-breakdown-note"><i class="fas fa-circle-info"></i> Arşivlenen içerikler bu sayılara dahil değildir.</p>
+      </div>`, 'profile-content-breakdown-modal');
+  });
 
   bindFollowButton();
   app.querySelectorAll('.profile-follow-list').forEach(button => button.addEventListener('click', async () => {

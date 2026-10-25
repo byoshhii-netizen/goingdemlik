@@ -4919,6 +4919,10 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     query(`SELECT
       (SELECT COUNT(*) FROM photos p WHERE p.user_id=$1
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='photo' AND a.content_id=p.id::text)) AS photo_count,
+      (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1 AND v.is_reals=0
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='video' AND a.content_id=v.id::text)) AS regular_video_count,
+      (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1 AND v.is_reals=1
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='reals' AND a.content_id=v.id::text)) AS reals_count,
       (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND a.content_id=v.id::text)) AS video_count,
       (SELECT COUNT(*) FROM songs s WHERE s.uploader_id=$1 AND s.status='active'
@@ -4926,8 +4930,18 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     query('SELECT id,image_url,created_at FROM profile_avatar_archive WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
   ]);
   const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
+  const { rows: combinedCountSettings } = await query("SELECT value FROM settings WHERE key='content_count_combined'");
   const content_count = Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + Number(contentCounts.photo_count || 0) + Number(contentCounts.video_count || 0) + Number(contentCounts.song_count || 0);
-  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  const content_breakdown = combinedCountSettings[0]?.value === '1' ? {
+    forums: Number(user.forum_count || 0),
+    books: Number(user.book_count || 0),
+    comments: Number(user.comment_count || 0),
+    photos: Number(contentCounts.photo_count || 0),
+    videos: Number(contentCounts.regular_video_count || 0),
+    reals: Number(contentCounts.reals_count || 0),
+    songs: Number(contentCounts.song_count || 0)
+  } : undefined;
+  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
