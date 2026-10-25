@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="/theme.js?v=20261024-dark-only"></script>
   <script src="/homepage-sections.js?v=20261014-homepage-sections"></script>
-  <link rel="stylesheet" href="/style.css?v=20261025-reals-playback" />
+  <link rel="stylesheet" href="/style.css?v=20261025-reals-performance-1" />
   <link rel="stylesheet" href="/dialogs.css?v=20261017-native-dialogs" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
@@ -97,15 +97,25 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
-  <div class="mobile-splash" id="mobile-splash" aria-label="CigCig yükleniyor">
-    <div class="mobile-splash-brand">
+  <div class="mobile-splash" id="mobile-splash" role="status" aria-label="CigCig açılıyor">
+    <div class="mobile-splash-content">
+      <div class="mobile-splash-brand">
       <img src="/cigcig.png?v=20260829" alt="" draggable="false" />
-      <span>CigCig</span>
+        <span>CigCig</span>
+      </div>
+      <p class="mobile-splash-tagline">Topluluğun, kendi ritminde.</p>
+      <div class="mobile-splash-progress" aria-hidden="true"><span></span></div>
     </div>
   </div>
   <script>
     (() => {
       const splash = document.getElementById('mobile-splash');
+      window.hideMobileSplash = () => {
+        if (!splash?.isConnected) return;
+        splash.classList.add('is-leaving');
+        document.body.classList.remove('mobile-splash-active');
+        window.setTimeout(() => splash.remove(), 320);
+      };
       if (!splash || !window.matchMedia('(max-width: 768px)').matches) {
         splash?.remove();
         return;
@@ -127,10 +137,7 @@
         console.warn('Açılış ekranı tercihi bu sekmede saklanamadı:', error);
       }
       document.body.classList.add('mobile-splash-active');
-      setTimeout(() => {
-        splash.remove();
-        document.body.classList.remove('mobile-splash-active');
-      }, 2000);
+      window.setTimeout(() => window.hideMobileSplash?.(), 4500);
     })();
   </script>
   <!-- NAVBAR -->
@@ -231,7 +238,13 @@
   <div id="announcements-container"></div>
 
   <!-- APP -->
-  <div id="app"></div>
+  <div id="app">
+    <div class="app-startup-state" role="status" aria-label="Uygulama hazırlanıyor">
+      <img src="/cigcig.png?v=20260829" alt="" />
+      <span>Topluluk hazırlanıyor</span>
+      <i aria-hidden="true"></i>
+    </div>
+  </div>
 
   <!-- MODAL -->
   <div class="modal-overlay hidden" id="modal-overlay">
@@ -287,7 +300,7 @@
 </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-  <script src="/app.js?v=20261025-reals-playback"></script>
+  <script src="/app.js?v=20261025-reals-performance-1"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---

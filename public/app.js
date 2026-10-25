@@ -1463,6 +1463,10 @@ function renderRoute(fullPath) {
   const [path, queryStr] = fullPath.split('?');
   const wasOnReals = document.body.classList.contains('reals-page');
   const isGoingToReals = path === '/reals' || path.startsWith('/reals/');
+  if (wasOnReals && !isGoingToReals && window.__realsKeydownHandler) {
+    window.removeEventListener('keydown', window.__realsKeydownHandler);
+    window.__realsKeydownHandler = null;
+  }
   if (loginRequiredEnabled && !currentUser && !isPublicGuestRoute(path)) {
     return navigate('/giris', false);
   }
@@ -1640,8 +1644,16 @@ async function renderRealsFeed(app, initialId = null) {
   app.innerHTML = `
     <div class="reals-container">
       <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında" hidden>?</button>
-      <div id="reals-list" class="reals-list"></div>
+      <div id="reals-list" class="reals-list" aria-live="polite">
+        <div class="reals-feed-loading" role="status">
+          <div class="reals-loader-mark"><img src="/cigcig.png?v=20260829" alt="" /></div>
+          <strong>Reals akışı hazırlanıyor</strong>
+          <span>Videolar sıraya alınıyor</span>
+          <i class="reals-loader-track" aria-hidden="true"><i></i></i>
+        </div>
+      </div>
     </div>`;
+  const listEl = document.getElementById('reals-list');
 
   let realsInfoSettings = null;
   const realsInfoSettingsPromise = api('/reals-settings').then(settings => {
@@ -1656,18 +1668,25 @@ async function renderRealsFeed(app, initialId = null) {
     return null;
   });
 
-  // fetch reals
-  let reals = [];
-  let realsAds = [];
-  try {
-    [reals, realsAds] = await Promise.all([api('/reals'), api('/reals-ads')]);
-  } catch (e) {
-    try { reals = await api('/reals'); } catch {}
-    realsAds = [];
-    if (!reals.length) { document.getElementById('reals-list').innerHTML = '<div style="padding:24px;color:var(--red2)">'+escHtml(e.message)+'</div>'; return; }
+  // Reals ve reklamları tek seferde, birbirinden bağımsız sonuçlarla yükle.
+  const [realsResult, adsResult] = await Promise.allSettled([
+    api('/reals'),
+    api('/reals-ads')
+  ]);
+  if (!listEl?.isConnected || !app.contains(listEl)) return;
+  if (realsResult.status === 'rejected') {
+    const message = realsResult.reason?.message || 'Reals akışı yüklenemedi.';
+    listEl.innerHTML = `<div class="reals-feed-message" role="alert"><span class="reals-feed-message-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Akışa ulaşılamadı</strong><span>${escHtml(message)}</span><button type="button" class="btn btn-outline btn-sm" id="reals-feed-retry">Tekrar dene</button></div>`;
+    listEl.querySelector('#reals-feed-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
+    return;
   }
-  const listEl = document.getElementById('reals-list');
-  if (!reals.length) { listEl.innerHTML = '<div class="empty-state"><i class="fas fa-video"></i><p>Reals bulunamadı.</p></div>'; return; }
+  const reals = Array.isArray(realsResult.value) ? realsResult.value : [];
+  const realsAds = adsResult.status === 'fulfilled' && Array.isArray(adsResult.value) ? adsResult.value : [];
+  if (adsResult.status === 'rejected') console.warn('Reals reklamları yüklenemedi; akış reklamsız devam ediyor:', adsResult.reason?.message);
+  if (!reals.length) {
+    listEl.innerHTML = '<div class="reals-feed-message"><span class="reals-feed-message-icon"><i class="fas fa-circle-play"></i></span><strong>Şimdilik yeni Reals yok</strong><span>Yeni videolar paylaşıldığında burada görünecek.</span></div>';
+    return;
+  }
 
   const orderedReals = shuffleArray(reals);
   const activeRealsAds = Array.isArray(realsAds) ? realsAds.filter(ad => ad.active === 1 || ad.active === true) : [];
@@ -1937,7 +1956,8 @@ async function renderRealsFeed(app, initialId = null) {
         return `
       <div class="reals-item reals-ad-item" data-id="ad-${r.id}" data-ad-id="${r.id}" data-video-url="${escHtml(r.video_url)}">
         <div class="reals-video-box reals-ad-box">
-        <video class="reals-video reals-ad-video" preload="metadata" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
+        <video class="reals-video reals-ad-video" preload="none" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
+        <div class="reals-video-loading" aria-hidden="true"><span class="reals-loader-ring"></span><span>Video yükleniyor</span></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
@@ -1955,7 +1975,8 @@ async function renderRealsFeed(app, initialId = null) {
       return `
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
         <div class="reals-video-box">
-        <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
+        <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
+        <div class="reals-video-loading" aria-hidden="true"><span class="reals-loader-ring"></span><span>Video yükleniyor</span></div>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <button type="button" class="reals-video-retry" hidden><i class="fas fa-rotate-right"></i><span>Video başlatılamadı · Tekrar dene</span></button>
         <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
@@ -1996,7 +2017,16 @@ async function renderRealsFeed(app, initialId = null) {
     items.forEach(it => {
       const vid = it.querySelector('video');
       setRealsVideoSource(vid, '');
+      const setVideoLoading = isLoading => {
+        if (isLoading && !it.classList.contains('is-active')) return;
+        it.classList.toggle('reals-is-loading', isLoading);
+      };
       it.addEventListener('reals-cancel-replay', () => clearReplayCountdown(it));
+      vid.addEventListener('loadstart', () => setVideoLoading(true));
+      vid.addEventListener('waiting', () => setVideoLoading(true));
+      vid.addEventListener('stalled', () => setVideoLoading(true));
+      vid.addEventListener('loadeddata', () => setVideoLoading(false));
+      vid.addEventListener('playing', () => setVideoLoading(false));
       let clickTimer = null;
       let lastTouchTapAt = 0;
       let suppressClickUntil = 0;
@@ -2085,11 +2115,13 @@ async function renderRealsFeed(app, initialId = null) {
           return;
         }
         if (activeRealsAudio && it.classList.contains('is-active')) activeRealsAudio.pause();
+        setVideoLoading(false);
         it.querySelector('.reals-play-overlay i')?.classList.replace('fa-pause', 'fa-play');
         it.classList.add('reals-is-paused');
       });
       vid.addEventListener('error', () => {
         if (!it.classList.contains('is-active')) return;
+        setVideoLoading(false);
         const errorCode = vid.error?.code;
         const message = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
           ? 'Video biçimi desteklenmiyor · Tekrar dene'
@@ -2198,6 +2230,7 @@ async function renderRealsFeed(app, initialId = null) {
       const video = items[j]?.querySelector('video');
       if (video) {
         item?.classList.remove('is-active');
+        item?.classList.remove('reals-is-loading');
         video.pause();
         setRealsVideoSource(video, '');
         video.currentTime = 0;
@@ -2213,6 +2246,7 @@ async function renderRealsFeed(app, initialId = null) {
       const videoUrl = it.dataset.videoUrl;
       vid.preload = j === idx ? 'auto' : 'none';
       vid.playsInline = true;
+      it.classList.toggle('reals-is-loading', j === idx && vid.readyState < 2);
       ensureRealsFollowState(it);
       if (j !== idx) {
         if (!loadedRealsIndices.has(j)) setRealsVideoSource(vid, videoUrl);
@@ -2306,11 +2340,13 @@ async function renderRealsFeed(app, initialId = null) {
     });
   }, { passive: true });
   listEl.addEventListener('scrollend', settleRealsScroll, { passive: true });
-  window.addEventListener('keydown', e => {
+  if (window.__realsKeydownHandler) window.removeEventListener('keydown', window.__realsKeydownHandler);
+  window.__realsKeydownHandler = e => {
     if (location.pathname !== '/reals') return;
     if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); showIndex(idx+1); }
     if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); showIndex(idx-1); }
-  });
+  };
+  window.addEventListener('keydown', window.__realsKeydownHandler);
 }
 
 
@@ -10956,13 +10992,21 @@ function startAppVersionPolling() {
 async function init() {
   $('#new-dropdown')?.classList.add('hidden');
   closeMobileCreateMenu();
-  await initAuth();
-  updateNavUI();
-  loadAnnouncements();
+  const authPromise = initAuth();
   const settingsController = new AbortController();
   const settingsTimeout = setTimeout(() => settingsController.abort(), 8000);
+  const settingsPromise = fetch('/api/public-settings', { signal: settingsController.signal, cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+  await authPromise;
+  updateNavUI();
+  loadAnnouncements();
+  const currentPath = location.pathname + location.search;
+  const canRenderBeforeSettings = Boolean(currentUser) || isPublicGuestRoute(location.pathname);
+  if (canRenderBeforeSettings) {
+    renderRoute(currentPath);
+    window.hideMobileSplash?.();
+  }
   try {
-    const response = await fetch('/api/public-settings', { signal: settingsController.signal, cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    const response = await settingsPromise;
     if (!response.ok) throw new Error(`Genel ayarlar yüklenemedi (${response.status}).`);
     const ps = await response.json();
     if (redirectForAppUpdate(ps.asset_version)) return;
@@ -11007,7 +11051,10 @@ async function init() {
     clearTimeout(settingsTimeout);
   }
   startAppVersionPolling();
-  renderRoute(location.pathname + location.search);
+  if (!canRenderBeforeSettings) {
+    renderRoute(location.pathname + location.search);
+    window.hideMobileSplash?.();
+  }
   try {
     const journalists = await api('/journalists');
     journalistDirectory.clear();
