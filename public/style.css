@@ -4618,6 +4618,17 @@ body.reals-page #navbar[hidden] { display: none !important; }
   .reals-right-actions { right: 10px !important; bottom: max(28px, env(safe-area-inset-bottom)) !important; }
   .reals-meta { padding: 24px 78px 18px 16px !important; }
 }
+.reals-video-retry { position:absolute; z-index:8; left:50%; top:50%; display:flex; align-items:center; justify-content:center; gap:9px; max-width:calc(100% - 32px); min-height:44px; padding:10px 15px; transform:translate(-50%,-50%); border:1px solid rgba(255,255,255,.22); border-radius:999px; color:#fff; background:rgba(12,13,16,.9); box-shadow:0 8px 28px rgba(0,0,0,.4); font:inherit; font-size:12px; font-weight:700; cursor:pointer; backdrop-filter:blur(10px); }
+.reals-video-retry[hidden] { display:none !important; }
+.reals-video-retry:not(:disabled):hover { background:rgba(35,37,43,.96); }
+.reals-video-retry:disabled { opacity:.8; cursor:wait; }
+@media (max-width:768px) {
+  .reals-container { height:100dvh !important; min-height:100dvh !important; }
+  .reals-list { height:100dvh !important; }
+  .reals-item { height:100dvh !important; min-height:100dvh !important; }
+  .reals-video-box { box-sizing:border-box; width:min(calc(100vw - 28px),calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px) * 9 / 16)) !important; height:auto !important; max-height:calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 28px) !important; aspect-ratio:9 / 16 !important; border:1px solid rgba(255,255,255,.14); border-radius:18px !important; }
+  .reals-video { width:100% !important; height:100% !important; object-fit:contain !important; border-radius:inherit !important; }
+}
 .reals-heart-burst { position:absolute; z-index:5; inset:0; display:grid; place-items:center; color:#fff; font-size:clamp(72px,18vw,128px); opacity:0; transform:scale(.35); pointer-events:none; text-shadow:0 4px 25px rgba(0,0,0,.4); }
 .reals-item.reals-heart-animate .reals-heart-burst { animation:realsHeartBurst .72s ease-out both; }
 @keyframes realsHeartBurst { 0% { opacity:0; transform:scale(.35); } 25% { opacity:.95; transform:scale(1.12); } 62% { opacity:.9; transform:scale(.94); } 100% { opacity:0; transform:scale(1.22); } }

@@ -1744,10 +1744,16 @@ async function renderRealsFeed(app, initialId = null) {
       videoEl.load();
       return;
     }
-    if (videoEl.getAttribute('src') === src) return;
-    videoEl.setAttribute('src', src);
+    if (videoEl.src === new URL(src, location.href).href) return;
+    videoEl.src = src;
     videoEl.load();
   }
+  const showRealsPlaybackError = (item, message) => {
+    const retry = item?.querySelector('.reals-video-retry');
+    if (!retry) return;
+    retry.hidden = false;
+    retry.querySelector('span').textContent = message;
+  };
   const stopRealsSongAudio = () => {
     if (!activeRealsAudio) return;
     activeRealsAudio.pause();
@@ -1820,6 +1826,7 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="reals-video-box">
         <video class="reals-video" preload="metadata" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
+        <button type="button" class="reals-video-retry" hidden><i class="fas fa-rotate-right"></i><span>Video başlatılamadı · Tekrar dene</span></button>
         <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
         <div class="reals-replay-countdown" hidden aria-live="assertive" aria-label="Video yeniden başlıyor"><div class="reals-replay-orbit"><span class="reals-replay-number">2</span></div><strong>Yeniden başlıyor</strong></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
@@ -1933,6 +1940,8 @@ async function renderRealsFeed(app, initialId = null) {
         likeFromDoubleTap();
       });
       vid.addEventListener('play', () => {
+        const retryButton = it.querySelector('.reals-video-retry');
+        if (retryButton) retryButton.hidden = true;
         if (replayTimers.has(it)) clearReplayCountdown(it);
         const icon = it.querySelector('.reals-play-overlay i');
         if (icon) icon.className = 'fas fa-pause';
@@ -1949,7 +1958,29 @@ async function renderRealsFeed(app, initialId = null) {
         it.classList.add('reals-is-paused');
       });
       vid.addEventListener('error', () => {
-        if (it.classList.contains('is-active')) console.error('Reals videosu yüklenemedi:', vid.error?.message || 'Video kaynağı okunamadı');
+        if (!it.classList.contains('is-active')) return;
+        const errorCode = vid.error?.code;
+        const message = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+          ? 'Video biçimi desteklenmiyor · Tekrar dene'
+          : 'Video yüklenemedi · Tekrar dene';
+        showRealsPlaybackError(it, message);
+        console.error('Reals videosu yüklenemedi:', { code: errorCode, message: vid.error?.message, source: vid.currentSrc });
+      });
+      it.querySelector('.reals-video-retry')?.addEventListener('click', event => {
+        event.stopPropagation();
+        const retry = event.currentTarget;
+        retry.disabled = true;
+        retry.querySelector('span').textContent = 'Video yükleniyor...';
+        setRealsVideoSource(vid, '');
+        requestAnimationFrame(() => {
+          if (!it.isConnected || !it.classList.contains('is-active')) return;
+          setRealsVideoSource(vid, it.dataset.videoUrl);
+          vid.muted = true;
+          vid.play().catch(error => {
+            showRealsPlaybackError(it, 'Video başlatılamadı · Tekrar dene');
+            console.error('Reals tekrar başlatılamadı:', error.message);
+          }).finally(() => { retry.disabled = false; });
+        });
       });
       vid.addEventListener('ended', () => {
         if (!it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
@@ -2092,9 +2123,11 @@ async function renderRealsFeed(app, initialId = null) {
             try {
               await vid.play();
             } catch (playError) {
+              showRealsPlaybackError(it, 'Oynatmak için tekrar dokun');
               console.error('Reals videosu başlatılamadı:', playError.message);
             }
           } else {
+            showRealsPlaybackError(it, 'Video başlatılamadı · Tekrar dene');
             console.error('Reals videosu başlatılamadı:', error.message);
           }
         });
@@ -8026,14 +8059,15 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       if (videoFile) {
         let uploadTarget = '/api/upload-video';
         let uploadUrl = '';
+        let uploadContentType = videoFile.type || 'video/mp4';
         if (isReals) {
           const extensionType = {
             '.mp4': 'video/mp4', '.m4v': 'video/x-m4v', '.mov': 'video/quicktime',
             '.webm': 'video/webm', '.ogv': 'video/ogg'
           }[videoFile.name.toLowerCase().match(/\.[^.]+$/)?.[0]];
-          const contentType = videoFile.type.startsWith('video/') ? videoFile.type : extensionType;
-          if (!contentType) throw new Error('Bu video biçimi desteklenmiyor. MP4, MOV veya WebM dosyası seçin.');
-          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: contentType, content_length: videoFile.size }) });
+          uploadContentType = videoFile.type.startsWith('video/') ? videoFile.type : extensionType;
+          if (!uploadContentType) throw new Error('Bu video biçimi desteklenmiyor. MP4, MOV veya WebM dosyası seçin.');
+          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: uploadContentType, content_length: videoFile.size }) });
           uploadTarget = signed.public_url;
           uploadUrl = signed.upload_url;
         }
@@ -8057,7 +8091,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
           xhr.open(isReals ? 'PUT' : 'POST', isReals ? uploadUrl : uploadTarget);
           xhr.timeout = 60 * 60 * 1000;
-          if (isReals) xhr.setRequestHeader('Content-Type', videoFile.type || 'video/mp4');
+          if (isReals) xhr.setRequestHeader('Content-Type', uploadContentType);
           else xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
           xhr.send(isReals ? videoFile : (() => { const fd = new FormData(); fd.append('file', videoFile); return fd; })());
         });
