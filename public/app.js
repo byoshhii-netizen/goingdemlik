@@ -9463,15 +9463,16 @@ async function renderProfile(app, username) {
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
         <div class="profile-stats" style="margin-top:12px">
+          ${combinedContentCount
+            ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></button>`
+            : ''}
           ${profileVisibility.followers ? (profileVisibility.followers_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`) : ''}
           ${profileVisibility.following ? (profileVisibility.following_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`) : ''}
-          ${combinedContentCount
-            ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div><span class="profile-content-count-hint"><i class="fas fa-chevron-down"></i> Dağılımı gör</span></button>`
-            : `${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
+          ${!combinedContentCount ? `${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
               ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
               ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
               ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
-              ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}`}
+              ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}` : ''}
         </div>
         ${isOwn ? `<div class="profile-owner-tools"><a href="/ayarlar" data-link class="btn btn-outline btn-sm"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm profile-admin-panel-btn"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}</div>` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
