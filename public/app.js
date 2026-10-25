@@ -10280,7 +10280,7 @@ async function renderSettingsSection(section) {
       try {
         await api('/me/dm-theme-settings', {
           method: 'PUT',
-          body: JSON.stringify({ default_theme_key: selectedDmTheme })
+          body: JSON.stringify({ default_theme_key: selectedDmTheme, default_theme_custom: true })
         });
         toast('Varsayılan mesaj teması kaydedildi');
       } catch (error) { toast(error.message, 'error'); }
@@ -12803,13 +12803,14 @@ async function renderDMChat(username) {
   if (!isSelfConversation) {
     api('/me/dm-theme-settings').then(async settings => {
       const currentChat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(conv.id))}"]`);
-      if (currentChat && !settings.first_dm_theme_prompt_completed) {
+      if (currentChat && !settings.first_dm_theme_prompt_completed && !settings.has_custom_theme) {
         const defaultTheme = settings.default_theme_key || theme?.theme_key || 'default';
         try {
           await api('/me/dm-theme-settings', {
             method: 'PUT',
             body: JSON.stringify({
               default_theme_key: defaultTheme,
+              default_theme_custom: false,
               first_dm_theme_prompt_completed: true
             })
           });
@@ -14179,6 +14180,7 @@ function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConve
         method: 'PUT',
         body: JSON.stringify({
           default_theme_key: selectedTheme,
+          default_theme_custom: true,
           first_dm_theme_prompt_completed: true
         })
       });

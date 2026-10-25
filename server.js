@@ -4943,16 +4943,20 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
 const DM_THEME_KEYS = new Set(['default', 'sunset', 'ocean', 'rose', 'forest', 'lavender']);
 
 async function getDmThemeForUser(conversation, userId) {
-  const [{ rows: settings }, { rows: localTheme }] = await Promise.all([
-    query('SELECT default_theme_key FROM dm_user_settings WHERE user_id=$1', [userId]),
-    query('SELECT theme_key,updated_at FROM dm_conversation_user_themes WHERE conversation_id=$1 AND user_id=$2', [conversation.id, userId])
+  const [{ rows: settings }, { rows: localTheme }, { rows: globalTheme }] = await Promise.all([
+    query('SELECT default_theme_key,default_theme_custom FROM dm_user_settings WHERE user_id=$1', [userId]),
+    query('SELECT theme_key,updated_at FROM dm_conversation_user_themes WHERE conversation_id=$1 AND user_id=$2', [conversation.id, userId]),
+    query("SELECT value FROM settings WHERE key='dm_default_theme_key'")
   ]);
   const ownTheme = localTheme[0];
   const hasNewerLocalTheme = ownTheme && (!conversation.shared_theme_key ||
     new Date(ownTheme.updated_at).getTime() > new Date(conversation.shared_theme_updated_at || 0).getTime());
+  const hasCustomDefault = Number(settings[0]?.default_theme_custom) === 1;
   const themeKey = hasNewerLocalTheme
     ? ownTheme.theme_key
-    : (conversation.shared_theme_key || ownTheme?.theme_key || settings[0]?.default_theme_key || 'default');
+    : (conversation.shared_theme_key || ownTheme?.theme_key ||
+      (hasCustomDefault ? settings[0]?.default_theme_key : globalTheme[0]?.value) ||
+      settings[0]?.default_theme_key || 'default');
   return {
     theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default',
     shared: Boolean(conversation.shared_theme_key),
@@ -4961,10 +4965,17 @@ async function getDmThemeForUser(conversation, userId) {
 }
 
 app.get('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT default_theme_key,first_dm_theme_prompt_completed FROM dm_user_settings WHERE user_id=$1', [req.user.id]);
-  const themeKey = rows[0]?.default_theme_key || 'default';
+  const [{ rows }, { rows: globalTheme }] = await Promise.all([
+    query('SELECT default_theme_key,default_theme_custom,first_dm_theme_prompt_completed FROM dm_user_settings WHERE user_id=$1', [req.user.id]),
+    query("SELECT value FROM settings WHERE key='dm_default_theme_key'")
+  ]);
+  const hasCustomTheme = Number(rows[0]?.default_theme_custom) === 1;
+  const themeKey = hasCustomTheme
+    ? rows[0]?.default_theme_key
+    : (globalTheme[0]?.value || rows[0]?.default_theme_key || 'default');
   res.json({
     default_theme_key: DM_THEME_KEYS.has(themeKey) ? themeKey : 'default',
+    has_custom_theme: hasCustomTheme,
     first_dm_theme_prompt_completed: Number(rows[0]?.first_dm_theme_prompt_completed) === 1
   });
 });
@@ -4972,17 +4983,24 @@ app.get('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
 app.put('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
   const themeKey = String(req.body?.default_theme_key || '');
   if (!DM_THEME_KEYS.has(themeKey)) return res.status(400).json({ error: 'Geçersiz mesaj teması.' });
+  if (req.body?.default_theme_custom !== undefined && typeof req.body.default_theme_custom !== 'boolean') {
+    return res.status(400).json({ error: 'Kişisel tema tercihi geçersiz.' });
+  }
+  const hasCustomTheme = req.body?.default_theme_custom !== false;
+  const storedThemeKey = hasCustomTheme ? themeKey : 'default';
   const completeFirstPrompt = req.body?.first_dm_theme_prompt_completed === true;
-  const { rows } = await query(`INSERT INTO dm_user_settings(user_id,default_theme_key,first_dm_theme_prompt_completed,updated_at)
-    VALUES($1,$2,$3,NOW())
+  const { rows } = await query(`INSERT INTO dm_user_settings(user_id,default_theme_key,default_theme_custom,first_dm_theme_prompt_completed,updated_at)
+    VALUES($1,$2,$3,$4,NOW())
     ON CONFLICT(user_id) DO UPDATE SET default_theme_key=EXCLUDED.default_theme_key,
-      first_dm_theme_prompt_completed=CASE WHEN $3=1 THEN 1 ELSE dm_user_settings.first_dm_theme_prompt_completed END,
+      default_theme_custom=EXCLUDED.default_theme_custom,
+      first_dm_theme_prompt_completed=CASE WHEN $4=1 THEN 1 ELSE dm_user_settings.first_dm_theme_prompt_completed END,
       updated_at=NOW()
-    RETURNING default_theme_key,first_dm_theme_prompt_completed`,
-  [req.user.id, themeKey, completeFirstPrompt ? 1 : 0]);
+    RETURNING default_theme_key,default_theme_custom,first_dm_theme_prompt_completed`,
+  [req.user.id, storedThemeKey, hasCustomTheme ? 1 : 0, completeFirstPrompt ? 1 : 0]);
   res.json({
     ok: true,
     default_theme_key: rows[0].default_theme_key,
+    has_custom_theme: Number(rows[0].default_theme_custom) === 1,
     first_dm_theme_prompt_completed: Number(rows[0].first_dm_theme_prompt_completed) === 1
   });
 });
@@ -7301,6 +7319,12 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   if (key === 'dark_theme_style') {
     if (!['classic', 'instagram'].includes(String(value))) {
       return res.status(400).json({ error: 'Geçerli bir koyu tema seçin' });
+    }
+    value = String(value);
+  }
+  if (key === 'dm_default_theme_key') {
+    if (!DM_THEME_KEYS.has(String(value))) {
+      return res.status(400).json({ error: 'Geçerli bir varsayılan mesaj teması seçin' });
     }
     value = String(value);
   }
@@ -9932,7 +9956,13 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN ct.theme_key IS NOT NULL AND
         (COALESCE(c.shared_theme_key,'')='' OR c.shared_theme_updated_at IS NULL OR ct.updated_at>c.shared_theme_updated_at)
         THEN ct.theme_key
-        ELSE COALESCE(NULLIF(c.shared_theme_key,''),ct.theme_key,dus.default_theme_key,'default')
+        ELSE COALESCE(NULLIF(c.shared_theme_key,''),ct.theme_key,
+          CASE WHEN COALESCE(dus.default_theme_custom,0)=1
+            AND dus.default_theme_key IN ('default','sunset','ocean','rose','forest','lavender')
+            THEN dus.default_theme_key END,
+          CASE WHEN dm_global_theme.value IN ('default','sunset','ocean','rose','forest','lavender')
+            THEN dm_global_theme.value END,
+          dus.default_theme_key,'default')
       END AS theme_key,
       CASE WHEN c.user1_id=$1 THEN u2.username ELSE u1.username END as other_username,
       CASE WHEN c.user1_id=$1 THEN u2.nickname ELSE u1.nickname END as other_nickname,
@@ -9957,6 +9987,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     JOIN users u2 ON c.user2_id=u2.id
     LEFT JOIN dm_conversation_user_themes ct ON ct.conversation_id=c.id AND ct.user_id=$1
     LEFT JOIN dm_user_settings dus ON dus.user_id=$1
+    LEFT JOIN settings dm_global_theme ON dm_global_theme.key='dm_default_theme_key'
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
         MAX(last_heartbeat) as last_active

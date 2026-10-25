@@ -3823,7 +3823,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   }
   .profile-header > .profile-avatar-wrap {
     align-self: center !important;
-    flex: 0 0 70px !important;
+    flex: 0 0 76px !important;
     margin: 0 auto !important;
   }
   .profile-header > .profile-info {
@@ -4637,7 +4637,7 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
   .profile-avatar, .profile-avatar-placeholder { width: 100% !important; height: 100% !important; font-size: 28px !important; }
 
   /* Final media normalization: avatars remain circular instead of inheriting card dimensions. */
-  .profile-avatar-wrap { width: 70px !important; height: 70px !important; min-width: 70px !important; max-width: 70px !important; aspect-ratio: 1 / 1 !important; }
+  .profile-avatar-wrap { width: 76px !important; height: 76px !important; min-width: 76px !important; max-width: 76px !important; aspect-ratio: 1 / 1 !important; }
   .profile-avatar, .profile-avatar-placeholder { box-sizing: border-box; width: 100% !important; height: 100% !important; min-width: 0 !important; max-width: none !important; aspect-ratio: 1 / 1 !important; border-radius: 50% !important; object-fit: cover !important; overflow: hidden; }
   .profile-username { font-size: 16px !important; }
 
@@ -6644,7 +6644,7 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
   body.home-page #home-stories-bar .stories-strip {
     width:100%;
     margin:0 0 10px;
-    padding:8px 12px 9px;
+    padding:8px 12px 9px 6px;
     border-bottom:1px solid var(--border);
   }
   body.home-page #home-stories-bar .stories-scroll { gap:12px; }
@@ -8106,7 +8106,7 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 
 @media (max-width: 600px) {
   .profile-header { gap: 16px; padding: 20px 8px !important; }
-  .profile-avatar-wrap { width: 96px; height: 96px; min-width: 96px; max-width: 96px; flex-basis: 96px; }
+  .profile-avatar-wrap { width: 76px; height: 76px; min-width: 76px; max-width: 76px; flex-basis: 76px; }
   .profile-header .profile-stats { grid-template-columns: repeat(auto-fit,minmax(64px,1fr)); gap: 9px 6px !important; }
   .profile-header .profile-stat-num { font-size: clamp(17px,5vw,21px); }
   .profile-avatar-gallery { gap: 12px; padding: 15px; border-radius: 23px; }
@@ -8722,6 +8722,8 @@ body.reals-page .reals-close-btn:focus-visible {
     aspect-ratio:1 / 1 !important;
     border-radius:50% !important;
     object-fit:cover !important;
+    object-position:50% 50% !important;
+    transform:none !important;
   }
 }
 

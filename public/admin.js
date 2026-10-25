@@ -3573,6 +3573,17 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-comments" style="color:var(--red2);margin-right:8px"></i>Varsayılan Mesaj Teması</span></div>
+        <div class="card-body">
+          <div class="form-group"><label for="s-dm-default-theme">Yeni ve varsayılan temayı kullanan üyeler</label><select id="s-dm-default-theme">
+            ${[['default', 'Varsayılan'], ['sunset', 'Gün Batımı'], ['ocean', 'Okyanus'], ['rose', 'Gül'], ['forest', 'Orman'], ['lavender', 'Lavanta']].map(([key, label]) => `<option value="${key}" ${(settings['dm_default_theme_key'] || 'default') === key ? 'selected' : ''}>${label}</option>`).join('')}
+          </select></div>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Kişisel mesaj temasını değiştirmiş üyelerin seçimi korunur; bu ayar yalnızca varsayılan temayı kullananları etkiler.</small>
+          <button class="btn btn-primary" id="s-dm-default-theme-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Temayı kaydet</button>
+          <div id="s-dm-default-theme-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-book-open" style="color:var(--red2);margin-right:8px"></i>Kitap Okuma Yazı Tipi</span></div>
         <div class="card-body">
           <div class="form-group"><label>Okuyucuda kullanılacak yazı tipi</label><select id="s-book-reader-font">
@@ -3880,6 +3891,16 @@ async function renderSettings(main) {
     await saveSetting('photo_song_clip_seconds', String(seconds), msg);
     msg.style.color = 'var(--green)';
     msg.textContent = `✓ Fotoğraf müziği ${seconds} saniye olarak kaydedildi.`;
+  });
+
+  document.getElementById('s-dm-default-theme-save')?.addEventListener('click', async () => {
+    const select = document.getElementById('s-dm-default-theme');
+    const msg = document.getElementById('s-dm-default-theme-msg');
+    msg.style.color = '';
+    msg.textContent = '';
+    if (!await saveSetting('dm_default_theme_key', select.value, msg)) return;
+    msg.style.color = 'var(--green)';
+    msg.textContent = '✓ Varsayılan mesaj teması kaydedildi.';
   });
 
   document.getElementById('s-book-reader-font-save')?.addEventListener('click', async () => {
