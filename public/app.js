@@ -11265,14 +11265,16 @@ async function renderMessages(app, targetUsername) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - ' + siteName;
 
-  let convs = [], hiddenConvs = [], groups = [];
-  const [conversationsResult, groupsResult, lockResult, friendsResult, storiesResult, notesResult] = await Promise.allSettled([
+  let convs = [], hiddenConvs = [], groups = [], suggestedPeople = [];
+  let suggestedPeopleError = '';
+  const [conversationsResult, groupsResult, lockResult, friendsResult, storiesResult, notesResult, suggestionsResult] = await Promise.allSettled([
     api('/conversations'),
     api('/my-groups'),
     api('/me/dm-lock-settings'),
     api('/friends'),
     api('/stories'),
-    api('/dm-notes')
+    api('/dm-notes'),
+    api('/friends/suggestions')
   ]);
   if (conversationsResult.status === 'fulfilled') convs = conversationsResult.value;
   else toast(conversationsResult.reason?.message || 'Konuşmalar yüklenemedi', 'error');
@@ -11282,6 +11284,8 @@ async function renderMessages(app, targetUsername) {
   else toast(lockResult.reason?.message || 'Sohbet kilidi ayarları yüklenemedi', 'error');
   const friends = friendsResult.status === 'fulfilled' ? friendsResult.value : null;
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
+  if (suggestionsResult.status === 'fulfilled') suggestedPeople = suggestionsResult.value;
+  else suggestedPeopleError = suggestionsResult.reason?.message || 'Önerilen kişiler yüklenemedi.';
   const dmStories = storiesResult.status === 'fulfilled' ? storiesResult.value : [];
   let dmNotes = notesResult.status === 'fulfilled' ? notesResult.value : [];
   const dmStoryByUsername = new Map();
@@ -11407,10 +11411,69 @@ async function renderMessages(app, targetUsername) {
         muteExpirationTimers.push(window.setTimeout(renderInboxList, delay + 100));
       }
     });
-    list.innerHTML = entries.length
+    const showSuggestions = convs.length <= 3;
+    const suggestedUsers = suggestedPeople
+      .filter(user => ![...convs, ...hiddenConvs, ...dmSearchUnlockedConvs].some(conversation => String(conversation.other_id) === String(user.id))
+        && String(user.id) !== String(currentUser.id))
+      .slice(0, 6);
+    const suggestionsHTML = showSuggestions ? `<section class="dm-suggestions" id="dm-suggestions">
+      <div class="dm-suggestions-heading">
+        <span class="dm-suggestions-icon"><i class="fas fa-wand-magic-sparkles"></i></span>
+        <span><strong>Önerilen kişiler</strong><small>Yeni bir sohbet başlat</small></span>
+      </div>
+      ${suggestedPeopleError
+        ? `<div class="dm-suggestions-state"><span>${escHtml(suggestedPeopleError)}</span><button type="button" class="dm-suggestions-retry" id="dm-suggestions-retry">Tekrar dene</button></div>`
+        : suggestedUsers.length
+          ? `<div class="dm-suggestions-rail">${suggestedUsers.map(user => {
+            const avatar = hasUsableAvatar(user)
+              ? `<img src="${escHtml(user.avatar)}" alt="" />`
+              : '<span class="avatar-placeholder"><i class="fas fa-user"></i></span>';
+            return `<article class="dm-suggestion-card">
+              <a class="dm-suggestion-identity" href="${profileRoute(user.username)}" data-link>
+                <span class="dm-suggestion-avatar">${avatar}</span>
+                <span class="dm-suggestion-copy"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+              </a>
+              <button type="button" class="dm-suggestion-add" data-username="${escHtml(user.username)}" aria-label="${escHtml(user.nickname || user.username)} kişisine istek gönder">
+                <i class="fas fa-plus" aria-hidden="true"></i><span>İstek gönder</span>
+              </button>
+            </article>`;
+          }).join('')}</div>`
+          : '<div class="dm-suggestions-state">Şimdilik önerilecek yeni kişi yok.</div>'}
+    </section>` : '';
+    list.innerHTML = `${suggestionsHTML}${entries.length
       ? entries.map(entry => convItemHTML(entry.item, !!entry.hidden, entry.isGroup)).join('')
-      : '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>';
+      : '<div class="dm-list-empty"><i class="fas fa-paper-plane"></i><span>Henüz mesajın yok. Önerilen kişilerden biriyle sohbet başlatabilirsin.</span></div>'}`;
     bindConversationItems();
+    const currentQuery = (document.getElementById('dm-search')?.value || '').toLocaleLowerCase('tr-TR');
+    const suggestions = document.getElementById('dm-suggestions');
+    if (suggestions) suggestions.hidden = !!currentQuery;
+    document.getElementById('dm-suggestions-retry')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        suggestedPeople = await api('/friends/suggestions');
+        suggestedPeopleError = '';
+        renderInboxList();
+      } catch (error) {
+        suggestedPeopleError = error.message || 'Önerilen kişiler yüklenemedi.';
+        button.disabled = false;
+        button.closest('.dm-suggestions-state').querySelector('span').textContent = suggestedPeopleError;
+      }
+    });
+    list.querySelectorAll('.dm-suggestion-add').forEach(button => button.addEventListener('click', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        const result = await api(`/friends/request/${encodeURIComponent(button.dataset.username)}`, { method: 'POST' });
+        button.innerHTML = `<i class="fas fa-check" aria-hidden="true"></i><span>${result.pending ? 'İstek gönderildi' : 'Takiptesin'}</span>`;
+        button.classList.add('is-sent');
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message || 'İstek gönderilemedi.', 'error');
+      }
+    }));
     const query = (document.getElementById('dm-search')?.value || '').toLocaleLowerCase('tr-TR');
     list.querySelectorAll('.dm-conv-item').forEach(item => {
       item.style.display = !query || item.dataset.searchName.toLocaleLowerCase('tr-TR').includes(query) ? '' : 'none';
@@ -11743,6 +11806,8 @@ async function renderMessages(app, targetUsername) {
   // Search filter and temporary locked-chat access code
   document.getElementById('dm-search')?.addEventListener('input', e => {
     const q = e.target.value.toLocaleLowerCase('tr-TR');
+    const suggestions = document.getElementById('dm-suggestions');
+    if (suggestions) suggestions.hidden = !!q;
     document.querySelectorAll('#dm-conv-list .dm-conv-item').forEach(el => {
       el.style.display = !q || el.dataset.searchName.toLocaleLowerCase('tr-TR').includes(q) ? '' : 'none';
     });

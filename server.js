@@ -8902,6 +8902,11 @@ app.get('/api/friends/suggestions', authMiddleware, async (req, res) => {
         WHERE (b.blocker_id=$1 AND b.blocked_id=u.id)
            OR (b.blocker_id=u.id AND b.blocked_id=$1)
       )
+      AND NOT EXISTS (
+        SELECT 1 FROM follows f
+        WHERE (f.follower_id=$1 AND f.following_id=u.id)
+           OR (f.follower_id=u.id AND f.following_id=$1)
+      )
     ORDER BY RANDOM()
     LIMIT 8
   `, [req.user.id]);
