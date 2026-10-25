@@ -8206,9 +8206,11 @@ input[type="file"].designed-file-picker-native {
 }
 .profile-note-viewer-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .profile-note-viewer-modal { max-width: 430px; }
-.profile-note-viewer-modal .modal-body { padding-top: 0; }
+.profile-note-viewer-modal .modal-header { min-height:0; margin:0; padding:10px 14px 0; }
+.profile-note-viewer-modal .modal-header h3 { display:none; }
+.profile-note-viewer-modal .modal-body { padding-top: 8px; }
 .profile-note-viewer { display: grid; gap: 15px; }
-.profile-note-viewer-profile { display: flex; align-items: center; gap: 11px; }
+.profile-note-viewer-profile { display: flex; flex-direction:column; align-items:center; gap:8px; text-align:center; }
 .profile-note-viewer-profile > span:last-child { display: grid; min-width: 0; gap: 3px; }
 .profile-note-viewer-profile strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-note-viewer-profile small { color: var(--text-muted); font-size: 12px; }
@@ -8226,9 +8228,7 @@ input[type="file"].designed-file-picker-native {
   color: var(--text-primary);
   background: var(--bg-card2);
   text-align: left;
-  cursor: pointer;
 }
-.profile-note-song:disabled { cursor: default; opacity: .75; }
 .profile-note-song-art { display: grid; flex: 0 0 48px; width: 48px; height: 48px; place-items: center; overflow: hidden; border-radius: 9px; color: var(--accent-red2); background: rgba(var(--accent-rgb),.12); }
 .profile-note-song-art img { width: 100%; height: 100%; object-fit: cover; }
 .profile-note-song-info { display: grid; flex: 1; min-width: 0; gap: 4px; }
@@ -8237,7 +8237,7 @@ input[type="file"].designed-file-picker-native {
 .profile-note-play-icon { display: grid; flex: 0 0 42px; width: 42px; height: 42px; place-items: center; border-radius: 50%; color: var(--accent-red2); background: rgba(var(--accent-rgb),.12); }
 .profile-note-audio-progress { height: 3px; overflow: hidden; border-radius: 3px; background: var(--border); }
 .profile-note-audio-progress > span { display: block; width: 0; height: 100%; background: var(--accent-red2); transition: width .2s linear; }
-.profile-note-audio-status { min-height: 16px; color: var(--text-muted); font-size: 12px; }
+.profile-note-audio-status { min-height: 0; color: var(--text-muted); font-size: 12px; }
 .profile-note-delete { width:100%; min-height:42px; justify-content:center; border-color:rgba(239,77,95,.3); color:var(--accent-red2); }
 .profile-note-delete:hover { border-color:var(--accent-red2); background:rgba(239,77,95,.08); }
 

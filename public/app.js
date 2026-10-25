@@ -8991,12 +8991,11 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
   const avatar = hasUsableAvatar(profileUser) ? `<img src="${escHtml(profileUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>';
   const isOwnNote = Boolean(currentUser && String(currentUser.username).toLocaleLowerCase('tr-TR') === String(username).toLocaleLowerCase('tr-TR'));
   const audioUrl = note.remastered_audio_url || note.audio_url;
-  const song = note.song_id ? `<button type="button" class="profile-note-song" id="profile-note-play" ${audioUrl ? '' : 'disabled'}>
+  const song = note.song_id ? `<div class="profile-note-song">
     <span class="profile-note-song-art">${note.cover_url ? `<img src="${escHtml(note.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}</span>
     <span class="profile-note-song-info"><strong>${escHtml(note.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(note.song_artist || 'CigCig Müzik')}</small></span>
-    <span class="profile-note-play-icon"><i class="fas fa-${audioUrl ? 'pause' : 'music'}"></i></span>
-  </button><div class="profile-note-audio-progress" aria-hidden="true"><span id="profile-note-audio-progress"></span></div>` : '';
-  showModal('Not', `<div class="profile-note-viewer">
+  </div><div class="profile-note-audio-progress" aria-hidden="true"><span id="profile-note-audio-progress"></span></div>` : '';
+  showModal('', `<div class="profile-note-viewer">
     <div class="profile-note-viewer-profile"><span class="profile-note-viewer-avatar">${avatar}</span><span><strong>${escHtml(displayName)}</strong><small>@${escHtml(username)}</small></span></div>
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
     ${song}
@@ -9017,17 +9016,14 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
       button.disabled = false;
     }
   });
-  const playButton = document.getElementById('profile-note-play');
-  if (!playButton || !audioUrl) return;
+  if (!note.song_id || !audioUrl) return;
   const status = document.getElementById('profile-note-audio-status');
   const progress = document.getElementById('profile-note-audio-progress');
-  const setPlaying = playing => { playButton.querySelector('i').className = `fas fa-${playing ? 'pause' : 'play'}`; };
   const startAudio = () => {
     const existingAudio = window.__profileNoteAudio;
     const absoluteUrl = new URL(audioUrl, location.href).href;
     if (existingAudio?.src === absoluteUrl) {
-      if (existingAudio.paused) existingAudio.play().then(() => setPlaying(true)).catch(() => { status.textContent = 'Müziği oynatmak için tekrar dokun.'; });
-      else { existingAudio.pause(); setPlaying(false); }
+      if (existingAudio.paused) existingAudio.play().catch(() => { status.textContent = 'Müzik otomatik başlatılamadı.'; });
       return;
     }
     stopProfileNoteAudio();
@@ -9042,8 +9038,8 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
       segmentStart = Math.min(segmentStart, Math.max(0, duration - clipDuration));
       segmentEnd = Math.min(duration, segmentStart + clipDuration);
       audio.currentTime = segmentStart;
-      audio.play().then(() => { setPlaying(true); status.textContent = ''; })
-        .catch(() => { setPlaying(false); status.textContent = 'Müziği oynatmak için tekrar dokun.'; });
+      audio.play().then(() => { status.textContent = ''; })
+        .catch(() => { status.textContent = 'Müzik otomatik başlatılamadı.'; });
     };
     audio.addEventListener('loadedmetadata', playSegment, { once: true });
     audio.addEventListener('timeupdate', () => {
@@ -9054,14 +9050,11 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     });
     audio.addEventListener('ended', () => {
       audio.currentTime = segmentStart;
-      audio.play().catch(() => { setPlaying(false); status.textContent = 'Müziği oynatmak için tekrar dokun.'; });
+      audio.play().catch(() => { status.textContent = 'Müzik otomatik başlatılamadı.'; });
     });
-    audio.addEventListener('play', () => setPlaying(true));
-    audio.addEventListener('pause', () => setPlaying(false));
     audio.addEventListener('error', () => { status.textContent = 'Müzik yüklenemedi. Daha sonra tekrar deneyebilirsin.'; });
     if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) playSegment();
   };
-  playButton.addEventListener('click', startAudio);
   startAudio();
 }
 
@@ -12168,6 +12161,23 @@ async function renderMessages(app, targetUsername) {
       previewStopHandler = null;
       document.getElementById('dm-note-song-preview').innerHTML = '<i class="fas fa-play"></i>';
     };
+    const playSongPreview = () => {
+      if (!chosenSong || !previewAudio || previewAudio.readyState < HTMLMediaElement.HAVE_METADATA) return;
+      if (previewStopHandler) previewAudio.removeEventListener('timeupdate', previewStopHandler);
+      const startAt = Number(startInput.value) || 0;
+      previewAudio.currentTime = startAt;
+      const stopAt = Math.min(previewAudio.duration || Infinity, startAt + 30);
+      previewStopHandler = () => {
+        if (previewAudio && previewAudio.currentTime >= stopAt) stopSongPreview();
+      };
+      previewAudio.addEventListener('timeupdate', previewStopHandler);
+      previewAudio.play().then(() => {
+        document.getElementById('dm-note-song-preview').innerHTML = '<i class="fas fa-pause"></i>';
+      }).catch(() => {
+        durationLabel.textContent = 'Önizleme başlatılamadı';
+        stopSongPreview();
+      });
+    };
     const loadSongMetadata = song => {
       stopSongPreview();
       if (previewAudio) {
@@ -12196,6 +12206,7 @@ async function renderMessages(app, targetUsername) {
         durationLabel.textContent = `${formatSongTime(Math.floor(metadataAudio.duration))} toplam`;
         document.getElementById('dm-note-song-preview').disabled = false;
         updateWaveform();
+        playSongPreview();
       }, { once: true });
       metadataAudio.addEventListener('error', () => {
         if (previewAudio === metadataAudio) {
@@ -12236,10 +12247,8 @@ async function renderMessages(app, targetUsername) {
     });
     startInput?.addEventListener('input', () => {
       updateWaveform();
-      if (previewAudio) {
-        stopSongPreview();
-        previewAudio.currentTime = Number(startInput.value) || 0;
-      }
+      stopSongPreview();
+      playSongPreview();
     });
     updateWaveform();
     document.getElementById('dm-note-song-preview')?.addEventListener('click', () => {
@@ -12257,14 +12266,7 @@ async function renderMessages(app, targetUsername) {
         stopSongPreview();
         return;
       }
-      previewAudio.currentTime = Number(startInput.value) || 0;
-      const stopAt = Math.min(previewAudio.duration || Infinity, previewAudio.currentTime + 30);
-      previewStopHandler = () => {
-        if (previewAudio && previewAudio.currentTime >= stopAt) stopSongPreview();
-      };
-      previewAudio.addEventListener('timeupdate', previewStopHandler);
-      previewAudio.play().then(() => { document.getElementById('dm-note-song-preview').innerHTML = '<i class="fas fa-pause"></i>'; })
-        .catch(() => { durationLabel.textContent = 'Önizleme başlatılamadı'; stopSongPreview(); });
+      playSongPreview();
     });
     document.getElementById('dm-note-save')?.addEventListener('click', async event => {
       const button = event.currentTarget;
