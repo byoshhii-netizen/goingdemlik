@@ -1111,6 +1111,66 @@ function closeMobileCreateMenu() {
   document.body.classList.remove('mobile-create-menu-open');
 }
 
+let configuredMobileCreateAction = null;
+
+function mobileCreateActionFromSections(sections) {
+  const actionBySection = {
+    fotograflar: 'media', photos: 'media', medya: 'media', reals: 'media',
+    konular: 'forum', forum: 'forum', forums: 'forum',
+    kitaplar: 'book', books: 'book',
+    siirler: 'poem', poems: 'poem',
+    muzikler: 'music', music: 'music',
+    videolar: 'video', video: 'video', videos: 'video'
+  };
+  const orderedSections = Array.isArray(sections) ? sections : [sections];
+  const actions = orderedSections.map(section => actionBySection[String(section).toLowerCase()]).filter(Boolean);
+  return actions.includes('media') ? 'media' : (actions[0] || 'forum');
+}
+
+async function getMobileCreateAction(path = location.pathname) {
+  if (/^\/(?:fotograflar|foto\/|hikaye\/|reals(?:\/|$))/.test(path)) return 'media';
+  if (/^\/(?:video|videolar)(?:\/|$)/.test(path)) return 'video';
+  if (/^\/(?:muzikler|muzik\/)(?:\/|$)/.test(path)) return 'music';
+  if (/^\/(?:forum|konular)(?:\/|$)/.test(path)) return 'forum';
+  if (/^\/(?:siirler|siir\/)(?:\/|$)/.test(path)) return 'poem';
+  if (/^\/(?:kitaplar|kitap\/)(?:\/|$)/.test(path)) return 'book';
+
+  if (!configuredMobileCreateAction) {
+    try {
+      const settings = await api('/settings/public');
+      let sections = settings.homepage_sections;
+      if (window.normalizeHomepageSections) {
+        sections = window.normalizeHomepageSections(sections);
+      } else {
+        if (typeof sections === 'string') {
+          try { sections = JSON.parse(sections); } catch { sections = [sections]; }
+        }
+        if (!Array.isArray(sections)) sections = [sections];
+      }
+      configuredMobileCreateAction = mobileCreateActionFromSections(sections);
+    } catch (error) {
+      console.warn('Varsayılan paylaşım türü alınamadı; konu oluşturma varsayılanı kullanılacak:', error.message || error);
+      configuredMobileCreateAction = 'forum';
+    }
+  }
+  return configuredMobileCreateAction;
+}
+
+async function handleMobileCreateAction() {
+  const action = await getMobileCreateAction();
+  if (action === 'media') {
+    openMobileCreateMenu();
+    return;
+  }
+  closeMobileCreateMenu();
+  if (!currentUser) return navigate('/giris');
+  if (action === 'video') return showNewVideoModal();
+  if (action === 'music') return navigate('/sarki-yukle');
+  if (action === 'forum') return showNewForumModal();
+  if (action === 'poem') return showNewPoemModal();
+  if (action === 'book') return showNewBookModal();
+}
+
 function openMobileCreateMenu() {
   const dropdown = $('#mobile-new-dropdown');
   if (!dropdown) return;
@@ -1646,10 +1706,8 @@ async function renderRealsFeed(app, initialId = null) {
       <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında" hidden>?</button>
       <div id="reals-list" class="reals-list" aria-live="polite">
         <div class="reals-feed-loading" role="status">
-          <div class="reals-loader-mark"><img src="/cigcig.png?v=20260829" alt="" /></div>
-          <strong>Reals akışı hazırlanıyor</strong>
-          <span>Videolar sıraya alınıyor</span>
-          <i class="reals-loader-track" aria-hidden="true"><i></i></i>
+          <i class="reals-loader-ring" aria-hidden="true"></i>
+          <span>Reals yükleniyor</span>
         </div>
       </div>
     </div>`;
@@ -2712,6 +2770,10 @@ function updateMobileBottomBar(path) {
     const href = a.getAttribute('href');
     a.classList.toggle('active', href === path || (href !== '/' && path.startsWith(href)));
   });
+  const desktopMessages = $('#nav-header-messages');
+  if (desktopMessages) {
+    desktopMessages.classList.toggle('active', path === '/mesajlar' || path.startsWith('/mesajlar/'));
+  }
 }
 
 function mobileSwipeSection(path) {
@@ -2973,10 +3035,13 @@ $('#mobile-toggle').addEventListener('click', () => {
   $('#mobile-toggle i').classList.toggle('fa-xmark', isOpening);
 });
 
-$('#mobile-new-toggle')?.addEventListener('click', e => {
+$('#mobile-new-toggle')?.addEventListener('click', async e => {
   e.stopPropagation();
-  if ($('#mobile-new-dropdown')?.classList.contains('hidden')) openMobileCreateMenu();
-  else closeMobileCreateMenu();
+  if (!$('#mobile-new-dropdown')?.classList.contains('hidden')) {
+    closeMobileCreateMenu();
+    return;
+  }
+  await handleMobileCreateAction();
 });
 
 async function showMyGroupsModal() {
@@ -3093,6 +3158,7 @@ async function renderHome(app) {
     if (!parsed.length || (parsed.length === 1 && parsed[0] === 'fotograflar')) return ['konular'];
     return parsed.filter(s => !(s === 'fotograflar' && parsed.length === 1));
   })();
+  configuredMobileCreateAction = mobileCreateActionFromSections(sections);
 
   async function renderForumsSection() {
     const html = `
@@ -4854,18 +4920,12 @@ async function renderForumList(app, queryString) {
           <h1 class="page-title">Konular</h1>
           ${activeTag ? `<div class="page-subtitle forum-active-filter"><i class="fas fa-hashtag"></i> <strong>${escHtml(activeTag)}</strong> etiketiyle filtreli <a href="/forum" data-link><i class="fas fa-times"></i> Temizle</a></div>` : ''}
         </div>
-        ${currentUser ? '<button type="button" class="btn btn-primary forum-new-btn" id="forum-new-topic"><i class="fas fa-plus"></i> Konu aç</button>' : ''}
       </div>
       <div class="forum-toolbar">
         <div class="search-bar forum-search"><i class="fas fa-search"></i><input type="search" id="forum-search" placeholder="Konu, kullanıcı veya #etiket ara..." autocomplete="off" /></div>
       </div>
       <div id="forums-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
-
-  $('#forum-new-topic')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewForumModal();
-  });
 
   let forums = [];
   try {
@@ -4980,16 +5040,10 @@ async function renderPoemList(app) {
     <div class="container page">
       <div class="content-create-header">
         <h1 class="page-title"><i class="fas fa-pen-fancy" style="color:var(--accent-red2);margin-right:8px"></i>Şiirler</h1>
-        ${currentUser ? '<button type="button" class="btn btn-primary" id="poem-create"><i class="fas fa-plus"></i> Şiir yaz</button>' : ''}
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="poem-search" placeholder="Şiir ara..." /></div>
       <div id="poems-list"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
-
-  $('#poem-create')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewPoemModal();
-  });
 
   let poems = [];
   try {
@@ -5799,16 +5853,10 @@ async function renderBookList(app) {
     <div class="container page">
       <div class="books-list-header">
         <h1 class="page-title">Kitaplar</h1>
-        ${currentUser ? '<button type="button" class="btn btn-primary" id="book-create"><i class="fas fa-plus"></i> Kitap oluştur</button>' : ''}
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
       <div id="books-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
-
-  $('#book-create')?.addEventListener('click', () => {
-    if (!currentUser) return navigate('/giris');
-    showNewBookModal();
-  });
 
   let books = [];
   try { books = await api('/books'); } catch {}
@@ -8322,16 +8370,11 @@ async function renderVideoList(app) {
     app.innerHTML = `<div class="container page">
       <div class="video-home-header">
         <div><div class="page-title"><i class="fas fa-video"></i> Video</div></div>
-        ${currentUser ? '<button type="button" class="btn btn-primary" id="video-create"><i class="fas fa-plus"></i> Video paylaş</button>' : ''}
       </div>
       <div class="video-search-bar"><i class="fas fa-search"></i><input id="video-search-input" type="search" placeholder="Videolarda ara..." autocomplete="off" /></div>
       <div class="video-feed-label"><span><i class="fas fa-video"></i> Video akışı</span><small>${videos.length} video</small></div>
       <div id="video-home-grid" class="video-list-grid">${videos.length ? videos.map(v => videoCardHTML(v)).join('') : '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-video"></i><p>Henüz video yok.</p></div>'}</div>
     </div>`;
-    $('#video-create')?.addEventListener('click', () => {
-      if (!currentUser) return navigate('/giris');
-      showNewVideoModal();
-    });
     $('#video-search-input')?.addEventListener('input', async event => {
       const query = event.target.value.trim();
       const grid = $('#video-home-grid');
@@ -10945,12 +10988,14 @@ async function checkUnreadMessages() {
     const data = await api('/conversations/unread-count');
     const count = Number(data.count) || 0;
     const badge = $('#nav-msg-badge');
+    const headerBadge = $('#nav-header-msg-badge');
     const mobBadge = $('#mob-msg-badge');
     const bottomBadge = $('#mbb-msg-badge');
     if (badge) { badge.textContent = count > 9 ? '9+' : count; badge.style.display = count > 0 ? 'inline' : 'none'; }
+    if (headerBadge) { headerBadge.textContent = count > 9 ? '9+' : count; headerBadge.style.display = count > 0 ? 'grid' : 'none'; }
     if (mobBadge) { mobBadge.textContent = count > 9 ? '9+' : count; mobBadge.style.display = count > 0 ? 'inline' : 'none'; }
     if (bottomBadge) { bottomBadge.textContent = count > 99 ? '99+' : count; bottomBadge.style.display = count > 0 ? 'block' : 'none'; }
-    ['#nav-msg-badge', '#mob-msg-badge', '#mbb-msg-badge'].forEach(selector => {
+    ['#nav-msg-badge', '#nav-header-msg-badge', '#mob-msg-badge', '#mbb-msg-badge'].forEach(selector => {
       const element = $(selector);
       if (element) element.setAttribute('aria-label', count ? `${count} kişiden okunmamış mesaj var` : 'Okunmamış mesaj yok');
     });
@@ -14652,7 +14697,6 @@ async function renderMusicList(app) {
         <span><strong>Müzik</strong><small>Dinle, keşfet ve koleksiyonunu oluştur</small></span>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        ${currentUser ? '<a href="/sarki-yukle" data-link class="btn btn-primary"><i class="fas fa-plus"></i><span>Şarkı yükle</span></a>' : ''}
         ${currentUser ? `<a href="/playlistlerim" data-link class="btn music-playlists-link"><i class="fas fa-record-vinyl"></i><span>Playlistlerim</span><i class="fas fa-arrow-right"></i></a>` : ''}
       </div>
     </div>

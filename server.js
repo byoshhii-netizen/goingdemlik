@@ -2418,18 +2418,20 @@ async function notifyFollowersOfContent(actorUser, type, title, body, link) {
 app.get('/api/notifications', authMiddleware, async (req, res) => {
   const { rows } = await query(
     `SELECT n.* FROM notifications n WHERE n.user_id=$1
+      AND (n.actor_username IS NULL OR LOWER(n.actor_username)<>LOWER($2) OR n.type IN ('restriction','content_suspended'))
       AND NOT EXISTS (SELECT 1 FROM users actor JOIN blocks b ON b.blocker_id=actor.id
         WHERE actor.username=n.actor_username AND b.blocked_id=$1)
       ORDER BY n.created_at DESC LIMIT 50`,
-    [req.user.id]
+    [req.user.id, req.user.username]
   );
   res.json(rows);
 });
 
 app.get('/api/notifications/unread-count', authMiddleware, async (req, res) => {
   const { rows } = await query(
-    'SELECT COUNT(*) as c FROM notifications WHERE user_id=$1 AND is_read=0',
-    [req.user.id]
+    `SELECT COUNT(*) as c FROM notifications WHERE user_id=$1 AND is_read=0
+      AND (actor_username IS NULL OR LOWER(actor_username)<>LOWER($2) OR type IN ('restriction','content_suspended'))`,
+    [req.user.id, req.user.username]
   );
   res.json({ count: parseInt(rows[0].c) });
 });
