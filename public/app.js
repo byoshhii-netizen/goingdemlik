@@ -344,7 +344,7 @@ function showModal(title, bodyHTML, modalClass = '') {
   managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -364,7 +364,7 @@ function hideModal({ resumeReals = true } = {}) {
   }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -1082,7 +1082,7 @@ document.addEventListener('click', event => {
   event.stopPropagation();
   const date = new Date(badge.dataset.redVerifiedAt);
   const formatted = Number.isNaN(date.getTime()) ? badge.dataset.redVerifiedAt : date.toLocaleString('tr-TR');
-  showModal('Kırmızı Tik', `<p>Bu kişi ${escHtml(formatted)} tarihinde kırmızı tik sahibi oldu.</p>`);
+  showModal('Kırmızı Tik', `<p>Bu kişi ${escHtml(formatted)} tarihinde kırmızı tik sahibi oldu.</p>`, 'red-verification-modal');
 });
 document.addEventListener('keydown', event => {
   const badge = event.target.closest?.('[data-red-verified-at]');
