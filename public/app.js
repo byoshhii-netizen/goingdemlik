@@ -9150,6 +9150,17 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
   startAudio();
 }
 
+document.addEventListener('click', event => {
+  const openCards = document.querySelectorAll('#app .profile-archiveable-card.is-actions-open');
+  if (!openCards.length) return;
+  const clickedCard = event.target instanceof Element
+    ? event.target.closest('.profile-archiveable-card.is-actions-open')
+    : null;
+  openCards.forEach(card => {
+    if (card !== clickedCard) card.classList.remove('is-actions-open');
+  });
+}, true);
+
 async function renderProfile(app, username) {
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
@@ -9529,9 +9540,17 @@ async function renderProfile(app, username) {
   app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(badges, isOwn));
   let ownerActionHoldTimer = null;
   let suppressProfileCardClick = false;
+  let pendingProfileCardNavigation = null;
+  let lastProfileCardTap = null;
   app.addEventListener('pointerdown', event => {
     const card = event.target.closest('.profile-archiveable-card.has-profile-owner-actions');
-    if (!card || event.target.closest('.profile-photo-owner-actions')) return;
+    if (!card) {
+      clearTimeout(pendingProfileCardNavigation);
+      pendingProfileCardNavigation = null;
+      lastProfileCardTap = null;
+      return;
+    }
+    if (event.target.closest('.profile-photo-owner-actions')) return;
     app.querySelectorAll('.profile-archiveable-card.is-actions-open').forEach(openCard => {
       if (openCard !== card) openCard.classList.remove('is-actions-open');
     });
@@ -9552,10 +9571,33 @@ async function renderProfile(app, username) {
   app.addEventListener('pointercancel', () => { suppressProfileCardClick = false; });
   app.addEventListener('click', event => {
     const card = event.target.closest('.profile-archiveable-card.has-profile-owner-actions');
-    if (!card || !suppressProfileCardClick) return;
+    if (!card || event.target.closest('.profile-photo-owner-actions')) return;
+    if (suppressProfileCardClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressProfileCardClick = false;
+      lastProfileCardTap = null;
+      return;
+    }
+    const link = event.target.closest('a[data-link]');
+    if (!link || !card.contains(link)) return;
+    const now = Date.now();
+    const isDoubleTap = event.detail > 1
+      || (lastProfileCardTap?.card === card && now - lastProfileCardTap.at <= 360);
     event.preventDefault();
     event.stopPropagation();
-    suppressProfileCardClick = false;
+    clearTimeout(pendingProfileCardNavigation);
+    pendingProfileCardNavigation = null;
+    if (isDoubleTap) {
+      card.classList.add('is-actions-open');
+      lastProfileCardTap = null;
+      return;
+    }
+    lastProfileCardTap = { card, at: now };
+    pendingProfileCardNavigation = setTimeout(() => {
+      if (!app.contains(card)) return;
+      navigate(link.getAttribute('href'));
+    }, 300);
   }, true);
   app.querySelectorAll('[data-profile-edit-photo]').forEach(button => button.addEventListener('click', event => {
     event.preventDefault();
