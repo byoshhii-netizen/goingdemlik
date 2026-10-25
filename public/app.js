@@ -335,6 +335,12 @@ function toast(msg, type = 'success', duration = 2200) {
 
 function showModal(title, bodyHTML, modalClass = '') {
   stopProfileNoteAudio();
+  const photoEditAudio = $('#edit-photo-song-audio');
+  if (photoEditAudio) {
+    photoEditAudio.pause();
+    photoEditAudio.removeAttribute('src');
+    photoEditAudio.load();
+  }
   if (activePlaylistPreviewAudio) {
     activePlaylistPreviewAudio.pause();
     untrackMediaAudio(activePlaylistPreviewAudio);
@@ -344,13 +350,19 @@ function showModal(title, bodyHTML, modalClass = '') {
   managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
 
 function hideModal({ resumeReals = true } = {}) {
   stopProfileNoteAudio();
+  const photoEditAudio = $('#edit-photo-song-audio');
+  if (photoEditAudio) {
+    photoEditAudio.pause();
+    photoEditAudio.removeAttribute('src');
+    photoEditAudio.load();
+  }
   if (storyComposerAudio) { storyComposerAudio.pause(); untrackMediaAudio(storyComposerAudio); storyComposerAudio.src = ''; storyComposerAudio = null; }
   if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
   if (activeRealsAudio) { activeRealsAudio.pause(); untrackMediaAudio(activeRealsAudio); activeRealsAudio.src = ''; activeRealsAudio = null; }
@@ -364,7 +376,7 @@ function hideModal({ resumeReals = true } = {}) {
   }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -393,7 +405,7 @@ function showDescriptionModal(text, sourceElement = null) {
     <div class="description-modal-heading"><span><i class="fas fa-align-left"></i></span><div><strong>Tam açıklama</strong><small>Paylaşımın tüm detayları</small></div></div>
     <div class="description-modal-content">${escHtml(text)}</div>
     <button type="button" class="btn btn-primary description-modal-close" id="description-modal-close">Kapat</button>
-  </div>`);
+  </div>`, sourceElement?.closest('.photo-card') ? 'photo-description-modal' : '');
   document.getElementById('description-modal-close')?.addEventListener('click', hideModal);
 }
 
@@ -10619,36 +10631,43 @@ async function renderSettingsSection(section) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-bell" style="color:var(--accent-red2);margin-right:6px"></i>Bildirim Ayarları</span></div>
         <div class="card-body">
-          <div class="form-group">
-            <label for="s-tag-permission">Beni kimler etiketleyebilir?</label>
-            <select id="s-tag-permission">
-              <option value="friends" ${(currentUser.tag_permission || 'everyone') === 'friends' ? 'selected' : ''}>Arkadaşlarım (takipleştiklerim)</option>
-              <option value="everyone" ${(currentUser.tag_permission || 'everyone') === 'everyone' ? 'selected' : ''}>Herkes</option>
-              <option value="nobody" ${(currentUser.tag_permission || 'everyone') === 'nobody' ? 'selected' : ''}>Hiç kimse</option>
-            </select>
+          <div class="tag-permission-setting">
+            <div class="tag-permission-heading"><strong>Beni kimler etiketleyebilir?</strong><small>Etiketleme iznini dilediğin zaman değiştirebilirsin.</small></div>
+            <div class="tag-permission-options" role="group" aria-label="Etiketleme izni">
+              <button type="button" class="tag-permission-option ${(currentUser.tag_permission || 'everyone') === 'friends' ? 'is-selected' : ''}" data-value="friends" aria-pressed="${(currentUser.tag_permission || 'everyone') === 'friends'}"><span class="tag-permission-icon"><i class="fas fa-user-group"></i></span><span><strong>Arkadaşlarım</strong><small>Takipleştiğim kişiler</small></span><i class="fas fa-check tag-permission-check"></i></button>
+              <button type="button" class="tag-permission-option ${(currentUser.tag_permission || 'everyone') === 'everyone' ? 'is-selected' : ''}" data-value="everyone" aria-pressed="${(currentUser.tag_permission || 'everyone') === 'everyone'}"><span class="tag-permission-icon"><i class="fas fa-earth-europe"></i></span><span><strong>Herkes</strong><small>Tüm CigCig kullanıcıları</small></span><i class="fas fa-check tag-permission-check"></i></button>
+              <button type="button" class="tag-permission-option ${(currentUser.tag_permission || 'everyone') === 'nobody' ? 'is-selected' : ''}" data-value="nobody" aria-pressed="${(currentUser.tag_permission || 'everyone') === 'nobody'}"><span class="tag-permission-icon"><i class="fas fa-user-lock"></i></span><span><strong>Hiç kimse</strong><small>Etiketlenmeyi kapat</small></span><i class="fas fa-check tag-permission-check"></i></button>
+            </div>
           </div>
           <div class="settings-autosave-status" id="notif-settings-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
           <div id="notif-settings-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
-    $('#s-tag-permission').addEventListener('change', async event => {
-      const select = event.currentTarget;
+    document.querySelectorAll('.tag-permission-option').forEach(option => option.addEventListener('click', async event => {
+      const selectedOption = event.currentTarget;
       const previousValue = currentUser.tag_permission || 'everyone';
+      const nextValue = selectedOption.dataset.value;
+      if (nextValue === previousValue) return;
       const status = $('#notif-settings-status');
-      select.disabled = true;
+      const options = [...document.querySelectorAll('.tag-permission-option')];
+      options.forEach(button => { button.disabled = true; });
       if (status) status.textContent = 'Kaydediliyor…';
       const fd = new FormData();
-      fd.append('tag_permission', select.value);
+      fd.append('tag_permission', nextValue);
       try {
         const updated = await apiForm('/profile', fd, 'PUT');
         currentUser = updated; updateNavUI();
+        options.forEach(button => {
+          const isSelected = button.dataset.value === nextValue;
+          button.classList.toggle('is-selected', isSelected);
+          button.setAttribute('aria-pressed', String(isSelected));
+        });
         if (status) status.textContent = 'Etiketleme tercihi kaydedildi.';
       } catch(e) {
-        select.value = previousValue;
         if (status) status.textContent = e.message || 'Etiketleme tercihi kaydedilemedi.';
         toast(e.message || 'Etiketleme tercihi kaydedilemedi.', 'error');
-      } finally { select.disabled = false; }
-    });
+      } finally { options.forEach(button => { button.disabled = false; }); }
+    }));
   } else if (section === '__removed-spotify') {
     const hasSpotify = !!(currentUser.spotify_token || currentUser.spotify_expires > 0);
     el.innerHTML = `
@@ -17889,7 +17908,7 @@ async function renderPhotos(app) {
   try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null), loadStoriesBar($('#stories-bar'))]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
 }
 function photoCardHTML(p) {
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div style="padding:12px">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?`<p>${escHtml(p.caption)}</p>`:''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div class="photo-card-content">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?descriptionPreviewHTML(p.caption, 'photo-caption-preview', 180):''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
@@ -18307,11 +18326,170 @@ document.addEventListener('click', e => {
 async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
   try {
     const photo = await api('/photos/' + encodeURIComponent(photoId));
-    const songs = await api('/songs').catch(() => []);
+    const songs = await api('/songs');
     const pendingPhotoFile = window.__pendingPhotoEditFile || null;
     delete window.__pendingPhotoEditFile;
-    showModal('Fotoğrafı düzenle', `<div class="form-group"><label>Fotoğrafı değiştir</label><input id="edit-photo-file" type="file" accept="image/*" /><div id="edit-photo-preview" class="photo-file-preview"><img src="${escHtml(pendingPhotoFile ? URL.createObjectURL(pendingPhotoFile) : photo.url)}" alt="Fotoğraf önizlemesi" /></div></div><div class="form-group"><label>Başlık</label><input id="edit-photo-title" maxlength="120" value="${escHtml(photo.title || '')}" /></div><div class="form-group"><label>Açıklama</label><textarea id="edit-photo-caption" rows="3">${escHtml(photo.caption || '')}</textarea></div><div class="form-group"><label>Konum</label><input id="edit-photo-location" value="${escHtml(photo.location || '')}" /></div><div class="form-group"><label>Müzik</label><select id="edit-photo-song"><option value="">Müzik yok</option>${songs.map(song => `<option value="${song.id}" ${String(song.id) === String(photo.song_id) ? 'selected' : ''}>${escHtml(song.title)} · ${escHtml(song.artist_name || '')}</option>`).join('')}</select></div><div class="form-group"><label>Müzik başlangıcı</label><input id="edit-photo-start" type="number" min="0" value="${Number(photo.song_start_seconds) || 0}" /></div><label class="checkbox-label"><input id="edit-photo-likes" type="checkbox" ${photo.show_likes !== 0 ? 'checked' : ''} /> Beğeni açık</label><label class="checkbox-label"><input id="edit-photo-comments" type="checkbox" ${photo.allow_comments !== 0 ? 'checked' : ''} /> Yorum açık</label><label class="checkbox-label"><input id="edit-photo-shares" type="checkbox" ${photo.allow_shares !== 0 ? 'checked' : ''} /> Paylaşım ve iletme açık</label><button class="btn btn-primary" id="edit-photo-save" style="width:100%;margin-top:14px">Kaydet</button><div id="edit-photo-error" class="form-error mt-4"></div>`);
+    const pendingDraft = window.__pendingPhotoEditDraft || null;
+    delete window.__pendingPhotoEditDraft;
+    showModal('Fotoğrafı düzenle', `
+      <div class="photo-edit-form">
+        <div class="photo-edit-image-field">
+          <div class="photo-edit-preview" id="edit-photo-preview"><img src="${escHtml(pendingPhotoFile ? URL.createObjectURL(pendingPhotoFile) : photo.url)}" alt="Fotoğraf önizlemesi" /></div>
+          <label class="btn btn-outline photo-edit-image-pick"><i class="fas fa-crop-simple"></i> Fotoğrafı değiştir<input id="edit-photo-file" type="file" accept="image/*" /></label>
+        </div>
+        <div class="form-group"><label for="edit-photo-title">Başlık</label><input id="edit-photo-title" maxlength="120" value="${escHtml(pendingDraft?.title ?? photo.title ?? '')}" placeholder="Fotoğrafına bir başlık ekle" /></div>
+        <div class="form-group"><label for="edit-photo-caption">Açıklama</label><textarea id="edit-photo-caption" rows="4" placeholder="Fotoğrafınla ilgili bir şeyler yaz…">${escHtml(pendingDraft?.caption ?? photo.caption ?? '')}</textarea></div>
+        <div class="form-group"><label for="edit-photo-location">Konum</label><input id="edit-photo-location" value="${escHtml(pendingDraft?.location ?? photo.location ?? '')}" placeholder="Konum ekle" /></div>
+        <section class="photo-edit-music">
+          <div class="photo-edit-section-heading"><span><i class="fas fa-music"></i></span><div><strong>Fotoğraf müziği</strong><small>Şarkı seç veya müziği kaldır; başlangıç yerini de ayarla.</small></div></div>
+          <div class="photo-edit-song-current" id="edit-photo-song-current"><span class="photo-edit-song-cover"><i class="fas fa-music"></i></span><span><strong>Müzik yok</strong><small>Bu fotoğrafa henüz müzik eklenmedi.</small></span></div>
+          <label class="photo-edit-song-search"><i class="fas fa-search"></i><input id="edit-photo-song-search" type="search" placeholder="Şarkı veya sanatçı ara…" autocomplete="off" /></label>
+          <div id="edit-photo-song-list" class="photo-edit-song-list"></div>
+          <input id="edit-photo-song" type="hidden" value="${escHtml(pendingDraft?.song ?? photo.song_id ?? '')}" />
+          <div class="media-song-timing" id="edit-photo-song-timing" hidden>
+            <div class="dm-note-waveform media-song-waveform" id="edit-photo-song-waveform" aria-label="Müzik başlangıç noktasını seç">
+              <div class="dm-note-waveform-bars" id="edit-photo-song-waveform-bars" aria-hidden="true"></div><span class="dm-note-waveform-selection" aria-hidden="true"></span>
+              <input id="edit-photo-start" type="range" min="0" max="0" value="${Number(pendingDraft?.start ?? photo.song_start_seconds) || 0}" step="1" disabled aria-label="Müzik başlangıç zamanı" />
+            </div>
+            <div class="dm-note-song-controls"><button type="button" id="edit-photo-song-preview" aria-label="Müzik önizlemesini oynat" disabled><i class="fas fa-play"></i></button><span><strong id="edit-photo-song-time">0:00 – 0:30</strong><small id="edit-photo-song-duration">Başlangıç noktasını kaydırarak ayarla</small></span></div>
+          </div>
+          <audio id="edit-photo-song-audio" preload="none" style="display:none"></audio>
+        </section>
+        <section class="photo-edit-options">
+          <label class="photo-edit-option"><span><i class="fas fa-heart"></i><span><strong>Beğeniler</strong><small>Fotoğraf beğenilebilsin</small></span></span><input id="edit-photo-likes" type="checkbox" ${pendingDraft ? (pendingDraft.likes ? 'checked' : '') : photo.show_likes !== 0 ? 'checked' : ''} /></label>
+          <label class="photo-edit-option"><span><i class="far fa-comment"></i><span><strong>Yorumlar</strong><small>Fotoğrafa yorum yapılabilsin</small></span></span><input id="edit-photo-comments" type="checkbox" ${pendingDraft ? (pendingDraft.comments ? 'checked' : '') : photo.allow_comments !== 0 ? 'checked' : ''} /></label>
+          <label class="photo-edit-option"><span><i class="fas fa-share-alt"></i><span><strong>Paylaşım</strong><small>Fotoğraf paylaşılabilsin ve iletilebilsin</small></span></span><input id="edit-photo-shares" type="checkbox" ${pendingDraft ? (pendingDraft.shares ? 'checked' : '') : photo.allow_shares !== 0 ? 'checked' : ''} /></label>
+        </section>
+        <div id="edit-photo-error" class="form-error" role="alert"></div>
+        <button class="btn btn-primary photo-edit-save" id="edit-photo-save"><i class="fas fa-check"></i> Değişiklikleri kaydet</button>
+      </div>
+    `, 'photo-edit-modal');
     let selectedPhotoFile = pendingPhotoFile;
+    let selectedPhotoSong = songs.find(song => String(song.id) === String(pendingDraft?.song ?? photo.song_id)) || null;
+    let photoSongAudioEndTimer = null;
+    const songInput = $('#edit-photo-song');
+    const songStart = $('#edit-photo-start');
+    const songWaveform = $('#edit-photo-song-waveform');
+    const songAudio = $('#edit-photo-song-audio');
+    const songPreviewButton = $('#edit-photo-song-preview');
+    const songTiming = $('#edit-photo-song-timing');
+    const originalSongStart = Number(pendingDraft?.start ?? photo.song_start_seconds) || 0;
+    const formatSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    $('#edit-photo-song-waveform-bars').innerHTML = Array.from({ length: 68 }, (_, index) => {
+      const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
+      return `<i style="--bar-height:${Math.round(height)}%"></i>`;
+    }).join('');
+    const updateSongStartUi = () => {
+      const maxStart = Math.max(0, Number(songStart.max) || 0);
+      const timeline = maxStart + 30;
+      songWaveform.style.setProperty('--clip-left', `${Math.min(100, (Number(songStart.value) || 0) / Math.max(30, timeline) * 100)}%`);
+      songWaveform.style.setProperty('--clip-width', `${Math.min(100, 30 / Math.max(30, timeline) * 100)}%`);
+      $('#edit-photo-song-time').textContent = `${formatSongTime(Number(songStart.value) || 0)} – ${formatSongTime((Number(songStart.value) || 0) + 30)}`;
+      if (!songAudio.paused && songAudio.src) songAudio.currentTime = Number(songStart.value) || 0;
+    };
+    const renderPhotoSongs = (list = songs) => {
+      const listElement = $('#edit-photo-song-list');
+      listElement.innerHTML = `<button type="button" class="photo-edit-song-option${selectedPhotoSong ? '' : ' is-selected'}" data-song-id=""><span class="photo-edit-song-cover"><i class="fas fa-volume-xmark"></i></span><span><strong>Müzik yok</strong><small>Fotoğrafına müzik ekleme</small></span>${selectedPhotoSong ? '' : '<i class="fas fa-check"></i>'}</button>${list.length
+        ? list.map(song => `<button type="button" class="photo-edit-song-option${String(song.id) === String(selectedPhotoSong?.id) ? ' is-selected' : ''}" data-song-id="${escHtml(song.id)}">${song.cover_url ? `<img src="${escHtml(song.cover_url)}" class="photo-edit-song-cover" alt="" />` : '<span class="photo-edit-song-cover"><i class="fas fa-music"></i></span>'}<span><strong>${escHtml(song.title)}</strong><small>${escHtml(song.artist_name || 'CigCig Müzik')}</small></span>${String(song.id) === String(selectedPhotoSong?.id) ? '<i class="fas fa-check"></i>' : ''}</button>`).join('')
+        : '<p class="photo-edit-song-empty">Eşleşen müzik bulunamadı.</p>'}`;
+      listElement.querySelectorAll('.photo-edit-song-option').forEach(button => button.addEventListener('click', () => {
+        const song = songs.find(item => String(item.id) === String(button.dataset.songId)) || null;
+        const previousSongId = songInput.value;
+        selectedPhotoSong = song;
+        songInput.value = song?.id || '';
+        clearTimeout(photoSongAudioEndTimer);
+        songAudio.pause();
+        songAudio.removeAttribute('src');
+        songAudio.load();
+        songPreviewButton.disabled = !song?.audio_url;
+        songPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+        songStart.value = '0';
+        songStart.max = '0';
+        songStart.disabled = !song?.audio_url;
+        songTiming.hidden = !song;
+        const current = $('#edit-photo-song-current');
+        current.innerHTML = song
+          ? `${song.cover_url ? `<img class="photo-edit-song-cover" src="${escHtml(song.cover_url)}" alt="" />` : '<span class="photo-edit-song-cover"><i class="fas fa-music"></i></span>'}<span><strong>${escHtml(song.title)}</strong><small>${escHtml(song.artist_name || 'CigCig Müzik')}</small></span>`
+          : '<span class="photo-edit-song-cover"><i class="fas fa-music"></i></span><span><strong>Müzik yok</strong><small>Bu fotoğrafa müzik ekle</small></span>';
+        if (song?.audio_url) {
+          songAudio.src = song.audio_url;
+          songAudio.load();
+          const probe = new Audio(song.audio_url);
+          probe.addEventListener('loadedmetadata', () => {
+            if (songInput.value !== String(song.id)) return;
+            songStart.max = String(Math.max(0, Math.floor(probe.duration) - 30));
+            if (String(song.id) === String(photo.song_id) && previousSongId === String(photo.song_id)) {
+              songStart.value = String(Math.min(originalSongStart, Number(songStart.max)));
+            }
+            $('#edit-photo-song-duration').textContent = `${formatSongTime(Math.floor(probe.duration))} toplam`;
+            updateSongStartUi();
+          });
+          probe.addEventListener('error', () => {
+            if (songInput.value === String(song.id)) $('#edit-photo-song-duration').textContent = 'Müzik süresi alınamadı; başlangıç 0:00 olarak kullanılabilir.';
+          }, { once: true });
+        } else {
+          $('#edit-photo-song-duration').textContent = 'Başlangıç noktasını kaydırarak ayarla';
+        }
+        renderPhotoSongs();
+        updateSongStartUi();
+      }));
+    };
+    renderPhotoSongs();
+    $('#edit-photo-song-search').addEventListener('input', event => {
+      const query = event.currentTarget.value.trim().toLocaleLowerCase('tr-TR');
+      const matches = songs.filter(song => `${song.title} ${song.artist_name || ''}`.toLocaleLowerCase('tr-TR').includes(query));
+      renderPhotoSongs(matches);
+    });
+    songStart.addEventListener('input', updateSongStartUi);
+    if (selectedPhotoSong) {
+      const selectedSongId = String(selectedPhotoSong.id);
+      renderPhotoSongs();
+      $('#edit-photo-song-current').innerHTML = `${selectedPhotoSong.cover_url ? `<img class="photo-edit-song-cover" src="${escHtml(selectedPhotoSong.cover_url)}" alt="" />` : '<span class="photo-edit-song-cover"><i class="fas fa-music"></i></span>'}<span><strong>${escHtml(selectedPhotoSong.title)}</strong><small>${escHtml(selectedPhotoSong.artist_name || 'CigCig Müzik')}</small></span>`;
+      songTiming.hidden = false;
+      songStart.value = String(originalSongStart);
+      songStart.disabled = !selectedPhotoSong.audio_url;
+      songPreviewButton.disabled = !selectedPhotoSong.audio_url;
+      if (selectedPhotoSong.audio_url) {
+        songAudio.src = selectedPhotoSong.audio_url;
+        songAudio.load();
+        const probe = new Audio(selectedPhotoSong.audio_url);
+        probe.addEventListener('loadedmetadata', () => {
+          if (songInput.value !== selectedSongId) return;
+          songStart.max = String(Math.max(0, Math.floor(probe.duration) - 30));
+          songStart.value = String(Math.min(originalSongStart, Number(songStart.max)));
+          $('#edit-photo-song-duration').textContent = `${formatSongTime(Math.floor(probe.duration))} toplam`;
+          updateSongStartUi();
+        });
+        probe.addEventListener('error', () => {
+          if (songInput.value === selectedSongId) $('#edit-photo-song-duration').textContent = 'Müzik süresi alınamadı; başlangıç 0:00 olarak kullanılabilir.';
+        }, { once: true });
+      }
+    }
+    songPreviewButton.addEventListener('click', async () => {
+      if (!songAudio.src || !selectedPhotoSong?.audio_url) return;
+      if (!songAudio.paused) {
+        songAudio.pause();
+        songPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+        clearTimeout(photoSongAudioEndTimer);
+        return;
+      }
+      songAudio.currentTime = Number(songStart.value) || 0;
+      try {
+        await songAudio.play();
+        songPreviewButton.innerHTML = '<i class="fas fa-pause"></i>';
+        clearTimeout(photoSongAudioEndTimer);
+        photoSongAudioEndTimer = setTimeout(() => {
+          songAudio.pause();
+          songPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+        }, 30000);
+      } catch (error) {
+        toast(error.message || 'Müzik önizlemesi başlatılamadı.', 'error');
+      }
+    });
+    songAudio.addEventListener('ended', () => {
+      clearTimeout(photoSongAudioEndTimer);
+      songPreviewButton.innerHTML = '<i class="fas fa-play"></i>';
+    });
     $('#edit-photo-file').addEventListener('change', event => {
       const file = event.target.files[0];
       if (!file) return;
@@ -18326,15 +18504,10 @@ async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
         showPhotoEditModal(photoId, returnPath);
       }});
     });
-    const draft = window.__pendingPhotoEditDraft;
-    delete window.__pendingPhotoEditDraft;
-    if (draft) {
-      $('#edit-photo-title').value = draft.title; $('#edit-photo-caption').value = draft.caption;
-      $('#edit-photo-location').value = draft.location; $('#edit-photo-song').value = draft.song;
-      $('#edit-photo-start').value = draft.start; $('#edit-photo-likes').checked = draft.likes;
-      $('#edit-photo-comments').checked = draft.comments; $('#edit-photo-shares').checked = draft.shares;
-    }
     $('#edit-photo-save').onclick = async () => {
+      const saveButton = $('#edit-photo-save');
+      if (saveButton.disabled) return;
+      saveButton.disabled = true;
       try {
         const body = selectedPhotoFile ? new FormData() : JSON.stringify({ url: photo.url, title: $('#edit-photo-title').value.trim(), caption: $('#edit-photo-caption').value.trim(), location: $('#edit-photo-location').value.trim(), song_id: $('#edit-photo-song').value || null, song_start_seconds: $('#edit-photo-start').value, show_likes: $('#edit-photo-likes').checked, allow_comments: $('#edit-photo-comments').checked, allow_shares: $('#edit-photo-shares').checked });
         if (selectedPhotoFile) {
@@ -18345,8 +18518,13 @@ async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
           body.append('allow_comments', $('#edit-photo-comments').checked); body.append('allow_shares', $('#edit-photo-shares').checked);
         }
         await api('/photos/' + photoId, { method: 'PUT', body });
+        songAudio.pause();
+        clearTimeout(photoSongAudioEndTimer);
         hideModal(); toast('Fotoğraf güncellendi'); navigate(returnPath);
-      } catch (error) { $('#edit-photo-error').textContent = error.message; }
+      } catch (error) {
+        $('#edit-photo-error').textContent = error.message;
+        saveButton.disabled = false;
+      }
     };
   } catch (error) { toast(error.message || 'Fotoğraf yüklenemedi', 'error'); }
 }
