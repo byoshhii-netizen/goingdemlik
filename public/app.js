@@ -8999,9 +8999,50 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     <div class="profile-note-viewer-profile"><span class="profile-note-viewer-avatar">${avatar}</span><span><strong>${escHtml(displayName)}</strong><small>@${escHtml(username)}</small></span></div>
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
     ${song}
+    <div class="profile-note-actions">
+      ${isOwnNote
+        ? `<button type="button" class="profile-note-likes-button" id="profile-note-likers"><i class="fas fa-heart"></i><span>Beğenenler</span><b>${Number(note.like_count) || 0}</b></button>`
+        : `<button type="button" class="profile-note-like-button${note.liked_by_me ? ' is-liked' : ''}" id="profile-note-like" aria-pressed="${note.liked_by_me ? 'true' : 'false'}"><i class="${note.liked_by_me ? 'fas' : 'far'} fa-heart"></i><span>${note.liked_by_me ? 'Beğendin' : 'Beğen'}</span><b>${Number(note.like_count) || 0}</b></button>`}
+    </div>
+    ${isOwnNote ? '<div class="profile-note-likers-list" id="profile-note-likers-list" hidden></div>' : ''}
     <div class="profile-note-audio-status" id="profile-note-audio-status" aria-live="polite"></div>
     ${isOwnNote ? '<button type="button" class="btn btn-outline profile-note-delete" id="profile-note-delete"><i class="fas fa-trash"></i> Notu sil</button>' : ''}
   </div>`, 'profile-note-viewer-modal');
+  document.getElementById('profile-note-like')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await api(`/dm-notes/${encodeURIComponent(username)}/like`, { method: 'POST', body: JSON.stringify({}) });
+      note.liked_by_me = result.liked;
+      note.like_count = result.like_count;
+      button.classList.toggle('is-liked', result.liked);
+      button.setAttribute('aria-pressed', result.liked ? 'true' : 'false');
+      button.querySelector('i').className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+      button.querySelector('span').textContent = result.liked ? 'Beğendin' : 'Beğen';
+      button.querySelector('b').textContent = String(result.like_count);
+      button.disabled = false;
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'Not beğenisi kaydedilemedi.', 'error');
+    }
+  });
+  document.getElementById('profile-note-likers')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const list = document.getElementById('profile-note-likers-list');
+    button.disabled = true;
+    try {
+      const likers = await api(`/dm-notes/${encodeURIComponent(username)}/likes`);
+      list.innerHTML = likers.length
+        ? `<div class="profile-note-likers-heading">Bu notu beğenenler</div>${likers.map(liker => `<a class="profile-note-liker" href="${profileRoute(liker.username)}" data-link>${avatarImg(liker)}<span><strong>${escHtml(liker.nickname || liker.username)}</strong><small>@${escHtml(liker.username)}</small></span><i class="fas fa-heart" aria-label="Beğendi"></i></a>`).join('')}`
+        : '<div class="profile-note-likers-empty">Bu notu henüz beğenen yok.</div>';
+      list.hidden = false;
+      button.querySelector('b').textContent = String(likers.length);
+      button.disabled = false;
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'Notu beğenenler yüklenemedi.', 'error');
+    }
+  });
   document.getElementById('profile-note-delete')?.addEventListener('click', async event => {
     const button = event.currentTarget;
     if (!await CigCigDialogs.confirm('Notunu silmek istiyor musun?')) return;
@@ -12065,9 +12106,21 @@ async function renderMessages(app, targetUsername) {
     });
   };
 
+  const sortDmNotes = () => {
+    dmNotes.sort((a, b) => {
+      if (Boolean(a.is_own) !== Boolean(b.is_own)) return a.is_own ? -1 : 1;
+      const aViewed = Boolean(a.viewed_at);
+      const bViewed = Boolean(b.viewed_at);
+      if (aViewed !== bViewed) return aViewed ? 1 : -1;
+      if (aViewed) return new Date(a.viewed_at).getTime() - new Date(b.viewed_at).getTime();
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  };
+  sortDmNotes();
   const renderDmNotes = () => {
     const strip = document.getElementById('dm-notes-strip');
     if (!strip) return;
+    sortDmNotes();
     const ownNote = dmNotes.find(note => note.is_own);
     const otherNotes = dmNotes.filter(note => !note.is_own);
     const noteButton = (note, own = false) => {
@@ -12092,9 +12145,17 @@ async function renderMessages(app, targetUsername) {
       });
     });
     strip.querySelectorAll('.dm-note-card[data-note-user]').forEach(button => {
-      button.addEventListener('click', () => {
+      button.addEventListener('click', async () => {
         const note = otherNotes.find(entry => String(entry.username) === button.dataset.noteUser);
         if (!note) return;
+        try {
+          const result = await api(`/dm-notes/${encodeURIComponent(note.username)}/view`, { method: 'POST', body: JSON.stringify({}) });
+          note.viewed_at = result.viewed_at;
+          sortDmNotes();
+          renderDmNotes();
+        } catch (error) {
+          toast(error.message || 'Not görüntülenme sırasına alınamadı.', 'error');
+        }
         openProfileNoteViewer(note);
       });
     });

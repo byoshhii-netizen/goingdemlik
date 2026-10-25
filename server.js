@@ -9738,7 +9738,21 @@ function ensureDmNotesSchema() {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         expires_at TIMESTAMPTZ NOT NULL
       )
-    `).catch(error => {
+    `).then(() => query(`
+      CREATE TABLE IF NOT EXISTS dm_note_likes (
+        note_user_id BIGINT NOT NULL REFERENCES dm_notes(user_id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (note_user_id,user_id)
+      )
+    `)).then(() => query(`
+      CREATE TABLE IF NOT EXISTS dm_note_views (
+        note_user_id BIGINT NOT NULL REFERENCES dm_notes(user_id) ON DELETE CASCADE,
+        viewer_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (note_user_id,viewer_user_id)
+      )
+    `)).catch(error => {
       dmNotesSchemaPromise = null;
       throw error;
     });
@@ -9751,10 +9765,14 @@ app.get('/api/dm-notes', authMiddleware, async (req, res) => {
   const { rows } = await query(`
     SELECT n.user_id,n.content,n.song_id,n.song_start_seconds,n.created_at,n.expires_at,
            u.username,u.nickname,u.avatar,u.avatar_removed,s.title AS song_title,
-           s.artist_name AS song_artist,s.audio_url,s.remastered_audio_url,s.cover_url
+           s.artist_name AS song_artist,s.audio_url,s.remastered_audio_url,s.cover_url,
+           nv.viewed_at,
+           (SELECT COUNT(*)::int FROM dm_note_likes nl WHERE nl.note_user_id=n.user_id) AS like_count,
+           EXISTS(SELECT 1 FROM dm_note_likes nl WHERE nl.note_user_id=n.user_id AND nl.user_id=$1) AS liked_by_me
     FROM dm_notes n
     JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
     LEFT JOIN songs s ON s.id=n.song_id
+    LEFT JOIN dm_note_views nv ON nv.note_user_id=n.user_id AND nv.viewer_user_id=$1
     WHERE n.expires_at>NOW()
       AND (n.content<>'' OR n.song_id IS NOT NULL)
       AND (n.user_id=$1
@@ -9764,10 +9782,107 @@ app.get('/api/dm-notes', authMiddleware, async (req, res) => {
             AND f.status='accepted')
         OR (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=n.user_id AND f.status='accepted')
           AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=n.user_id AND f.following_id=$1 AND f.status='accepted')))
-    ORDER BY (n.user_id=$1) DESC,n.created_at DESC
+    ORDER BY (n.user_id=$1) DESC,
+      (nv.viewed_at IS NOT NULL) ASC,
+      CASE WHEN nv.viewed_at IS NOT NULL THEN nv.viewed_at END ASC NULLS LAST,
+      CASE WHEN nv.viewed_at IS NULL THEN n.created_at END DESC
     LIMIT 50
   `, [req.user.id]);
   res.json(rows.map(note => ({ ...note, is_own: String(note.user_id) === String(req.user.id) })));
+});
+
+app.post('/api/dm-notes/:username/view', authMiddleware, async (req, res) => {
+  await ensureDmNotesSchema();
+  const { rows: noteRows } = await query(`
+    SELECT n.user_id FROM dm_notes n
+    JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
+    WHERE LOWER(u.username)=LOWER($1) AND n.expires_at>NOW()
+      AND (n.user_id=$2
+        OR EXISTS (SELECT 1 FROM friendships f
+          WHERE ((f.requester_id=$2 AND f.addressee_id=n.user_id)
+            OR (f.requester_id=n.user_id AND f.addressee_id=$2))
+            AND f.status='accepted')
+        OR (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=n.user_id AND f.status='accepted')
+          AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=n.user_id AND f.following_id=$2 AND f.status='accepted')))
+    LIMIT 1
+  `, [req.params.username, req.user.id]);
+  if (!noteRows.length) return res.status(404).json({ error: 'Not bulunamadı veya görüntüleme iznin yok.' });
+  const noteUserId = noteRows[0].user_id;
+  if (String(noteUserId) === String(req.user.id)) return res.json({ viewed_at: null });
+  const { rows } = await query(`
+    INSERT INTO dm_note_views (note_user_id,viewer_user_id,viewed_at)
+    VALUES ($1,$2,NOW())
+    ON CONFLICT (note_user_id,viewer_user_id) DO UPDATE SET viewed_at=EXCLUDED.viewed_at
+    RETURNING viewed_at
+  `, [noteUserId, req.user.id]);
+  res.json({ viewed_at: rows[0].viewed_at });
+});
+
+app.post('/api/dm-notes/:username/like', authMiddleware, async (req, res) => {
+  await ensureDmNotesSchema();
+  const { rows: noteRows } = await query(`
+    SELECT n.user_id FROM dm_notes n
+    JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
+    WHERE LOWER(u.username)=LOWER($1) AND n.expires_at>NOW()
+      AND (n.user_id=$2
+        OR EXISTS (SELECT 1 FROM friendships f
+          WHERE ((f.requester_id=$2 AND f.addressee_id=n.user_id)
+            OR (f.requester_id=n.user_id AND f.addressee_id=$2))
+            AND f.status='accepted')
+        OR (EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=n.user_id AND f.status='accepted')
+          AND EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=n.user_id AND f.following_id=$2 AND f.status='accepted')))
+    LIMIT 1
+  `, [req.params.username, req.user.id]);
+  if (!noteRows.length) return res.status(404).json({ error: 'Not bulunamadı veya beğenme iznin yok.' });
+  const noteUserId = noteRows[0].user_id;
+  if (String(noteUserId) === String(req.user.id)) return res.status(400).json({ error: 'Kendi notunu beğenemezsin.' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rowCount } = await client.query(
+      'DELETE FROM dm_note_likes WHERE note_user_id=$1 AND user_id=$2',
+      [noteUserId, req.user.id]
+    );
+    const liked = rowCount === 0;
+    if (liked) {
+      await client.query(
+        'INSERT INTO dm_note_likes (note_user_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+        [noteUserId, req.user.id]
+      );
+    }
+    const { rows } = await client.query(
+      'SELECT COUNT(*)::int AS like_count FROM dm_note_likes WHERE note_user_id=$1',
+      [noteUserId]
+    );
+    await client.query('COMMIT');
+    res.json({ liked, like_count: rows[0].like_count });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(rollbackError => console.error('[dm-notes] Like rollback failed:', rollbackError));
+    console.error('[dm-notes] Like failed:', error);
+    return res.status(500).json({ error: 'Not beğenisi kaydedilemedi.' });
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/api/dm-notes/:username/likes', authMiddleware, async (req, res) => {
+  await ensureDmNotesSchema();
+  const { rows: noteRows } = await query(`
+    SELECT n.user_id FROM dm_notes n
+    JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
+    WHERE LOWER(u.username)=LOWER($1) AND n.expires_at>NOW()
+    LIMIT 1
+  `, [req.params.username]);
+  if (!noteRows.length) return res.status(404).json({ error: 'Not bulunamadı.' });
+  if (String(noteRows[0].user_id) !== String(req.user.id)) return res.status(403).json({ error: 'Not beğenilerini yalnızca not sahibi görebilir.' });
+  const { rows } = await query(`
+    SELECT u.username,u.nickname,u.avatar,u.avatar_removed,nl.created_at
+    FROM dm_note_likes nl
+    JOIN users u ON u.id=nl.user_id AND COALESCE(u.is_deleted,0)=0
+    WHERE nl.note_user_id=$1
+    ORDER BY nl.created_at DESC
+  `, [req.user.id]);
+  res.json(rows);
 });
 
 app.put('/api/dm-notes', authMiddleware, async (req, res) => {
