@@ -428,19 +428,10 @@ document.addEventListener('pointercancel', () => {
 document.addEventListener('click', event => {
   if (!(event.target instanceof Element)) return;
   const storyAvatar = event.target.closest('img.story-avatar-media, img.dm-story-avatar-media');
-  if (storyAvatar) {
-    if (storyAvatar === longPressedStoryAvatar) {
-      event.preventDefault();
-      event.stopPropagation();
-      longPressedStoryAvatar = null;
-    }
-    return;
-  }
-  const avatar = event.target.closest('img[data-profile-avatar], img.profile-avatar, img.nav-avatar, img.mobile-bottom-avatar, img.profile-avatar-archive-image, img.comment-avatar');
-  if (!avatar || avatar.closest('.profile-header .profile-avatar-wrap')) return;
+  if (!storyAvatar || storyAvatar !== longPressedStoryAvatar) return;
   event.preventDefault();
   event.stopPropagation();
-  showImagePreviewModal(avatar.currentSrc || avatar.src, 'Profil fotoğrafı');
+  longPressedStoryAvatar = null;
 }, true);
 
 document.addEventListener('click', event => {
@@ -1143,7 +1134,7 @@ window.showJournalistSince = function (assignedAt) {
 };
 
 function avatarImg(u, cls = 'avatar-sm') {
-  if (u && u.avatar && !u.avatar_removed) return `<img src="${escHtml(u.avatar)}" class="${cls}" data-profile-avatar alt="" />`;
+  if (u && u.avatar && !u.avatar_removed) return `<img src="${escHtml(u.avatar)}" class="${cls}" alt="" />`;
   return `<div class="${cls} avatar-placeholder" aria-label="Profil fotoğrafı yok"><i class="fas fa-user"></i></div>`;
 }
 
