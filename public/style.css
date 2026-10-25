@@ -2721,17 +2721,64 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
   /* Mobile menu geliştirilmiş */
   .mobile-menu {
-    background: var(--bg-card2);
-    border-bottom: 1px solid var(--border);
-    padding: 6px 12px 10px;
+    background:
+      radial-gradient(ellipse at 8% 0%, rgba(var(--accent-rgb), .15), transparent 48%),
+      linear-gradient(155deg, #1b2029 0%, #11141a 72%);
+    border: 1px solid rgba(var(--accent-rgb), .2);
+    border-top: 1px solid rgba(255,255,255,.08);
+    border-radius: 0 0 16px 16px;
+    box-shadow: 0 16px 32px rgba(0,0,0,.38), inset 0 1px rgba(255,255,255,.025);
+    padding: 10px 12px 13px;
+    gap: 5px;
   }
   .mobile-nav-link {
-    padding: 11px 12px;
-    font-size: 15px;
+    min-height: 48px;
+    padding: 7px 12px;
+    color: #e4e7ec;
+    font-size: 14px;
     display: flex;
     align-items: center;
-    gap: 10px;
-    border-radius: 8px;
+    gap: 12px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    transition: background .16s ease, border-color .16s ease, transform .16s ease, color .16s ease;
+  }
+  .mobile-nav-link > i {
+    display: grid;
+    place-items: center;
+    width: 32px !important;
+    height: 32px;
+    flex: 0 0 32px;
+    border: 1px solid rgba(var(--accent-rgb), .22);
+    border-radius: 10px;
+    color: var(--accent-red2);
+    background: linear-gradient(145deg, rgba(var(--accent-rgb), .18), rgba(255,255,255,.045));
+    font-size: 14px;
+  }
+  .mobile-nav-link:hover,
+  .mobile-nav-link:focus-visible {
+    color: #fff;
+    border-color: rgba(var(--accent-rgb), .3);
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), .16), rgba(255,255,255,.035));
+    transform: translateX(2px);
+  }
+  #mobile-menu-user-links { display:flex; flex-direction:column; gap:5px; }
+  .mobile-nav-logout {
+    margin-top: 4px;
+    border-color: rgba(248,113,113,.18);
+    color: #fecaca;
+    background: linear-gradient(100deg, rgba(127,29,29,.24), rgba(127,29,29,.08));
+  }
+  .mobile-nav-logout > i {
+    border-color: rgba(248,113,113,.3);
+    color: #fca5a5;
+    background: linear-gradient(145deg, rgba(220,38,38,.3), rgba(127,29,29,.16));
+  }
+  .mobile-nav-logout:hover,
+  .mobile-nav-logout:focus-visible {
+    border-color: rgba(248,113,113,.5);
+    color: #fff;
+    background: linear-gradient(100deg, rgba(185,28,28,.55), rgba(127,29,29,.28));
   }
 
   /* Hero mobil */

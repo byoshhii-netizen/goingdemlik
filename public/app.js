@@ -2624,13 +2624,9 @@ function updateNavUI() {
       <a href="/ayarlar" data-link class="mobile-nav-link"><i class="fas fa-cog" style="width:18px"></i> Ayarlar</a>
       <button class="mobile-nav-link mobile-nav-logout" id="mob-logout"><i class="fas fa-sign-out-alt" style="width:18px"></i> Çıkış Yap</button>
     `;
-    $('#mob-logout')?.addEventListener('click', async () => {
-      try { await api('/auth/logout', { method: 'POST' }); } catch {}
-      stopMusicPlaybackForAccountChange();
-      currentToken = null; currentUser = null;
-      localStorage.removeItem('token');
-      updateNavUI(); navigate('/'); toast('Çıkış yapıldı');
-      $('#mobile-menu').classList.add('hidden');
+    $('#mob-logout')?.addEventListener('click', () => {
+      closeMobileMenu();
+      showLogoutConfirmation();
     });
 
     const mbbAuth = $('#mbb-auth');
@@ -2904,7 +2900,7 @@ $('#nav-groups-btn')?.addEventListener('click', event => { event.preventDefault(
 $('#nav-new-photo')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showPhotoUploadModal(); else navigate('/giris'); });
 $('#nav-new-story')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showStoryUploadModal(); else navigate('/giris'); });
 $('#nav-new-reals')?.addEventListener('click', () => { $('#new-dropdown').classList.add('hidden'); if (currentUser) showNewVideoModal(null, true); else navigate('/giris'); });
-$('#logout-btn')?.addEventListener('click', () => {
+function showLogoutConfirmation() {
   showModal('Çıkış yap', '<div class="logout-confirm"><span class="logout-confirm-icon"><i class="fas fa-arrow-right-from-bracket"></i></span><p>Hesabından çıkış yapmak istediğine emin misin?</p><div class="logout-confirm-actions"><button type="button" class="btn btn-danger" id="logout-confirm-btn"><i class="fas fa-arrow-right-from-bracket"></i> Çıkış yap</button><button type="button" class="btn btn-outline" id="logout-cancel-btn">Vazgeç</button></div></div>');
   $('#logout-cancel-btn')?.addEventListener('click', hideModal);
   $('#logout-confirm-btn')?.addEventListener('click', async event => {
@@ -2927,7 +2923,8 @@ $('#logout-btn')?.addEventListener('click', () => {
   navigate('/');
   toast('Çıkış yapıldı');
   });
-});
+}
+$('#logout-btn')?.addEventListener('click', showLogoutConfirmation);
 
 $('#mobile-toggle').addEventListener('click', () => {
   const menu = $('#mobile-menu');
@@ -11700,9 +11697,9 @@ async function renderMessages(app, targetUsername) {
           }).join('')}</div>`
           : '<div class="dm-suggestions-state">Şimdilik önerilecek yeni kişi yok.</div>'}
     </section>` : '';
-    list.innerHTML = `${suggestionsHTML}${entries.length
+    list.innerHTML = `${entries.length
       ? entries.map(entry => convItemHTML(entry.item, !!entry.hidden, entry.isGroup)).join('')
-      : '<div class="dm-list-empty"><i class="fas fa-paper-plane"></i><span>Henüz mesajın yok. Önerilen kişilerden biriyle sohbet başlatabilirsin.</span></div>'}`;
+      : '<div class="dm-list-empty"><i class="fas fa-paper-plane"></i><span>Henüz mesajın yok. Önerilen kişilerden biriyle sohbet başlatabilirsin.</span></div>'}${suggestionsHTML}`;
     bindConversationItems();
     const currentQuery = (document.getElementById('dm-search')?.value || '').toLocaleLowerCase('tr-TR');
     const suggestions = document.getElementById('dm-suggestions');
