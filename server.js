@@ -5374,6 +5374,171 @@ app.post('/api/upload-video', authMiddleware, uploadLimiter, (req, res, next) =>
   }
 });
 
+const RESUMABLE_VIDEO_DIR = path.join(UPLOAD_DIR, '.resumable-video');
+const RESUMABLE_VIDEO_CHUNK_SIZE = 8 * 1024 * 1024;
+
+function resumableVideoPaths(id) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(id || ''))) return null;
+  return {
+    data: path.join(RESUMABLE_VIDEO_DIR, `${id}.upload`),
+    metadata: path.join(RESUMABLE_VIDEO_DIR, `${id}.json`)
+  };
+}
+
+async function readResumableVideoMetadata(id, userId) {
+  const paths = resumableVideoPaths(id);
+  if (!paths) return null;
+  try {
+    const metadata = JSON.parse(await fs.promises.readFile(paths.metadata, 'utf8'));
+    if (String(metadata.userId) !== String(userId)) return null;
+    return { ...metadata, ...paths };
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+async function writeResumableVideoMetadata(metadata) {
+  const tempPath = `${metadata.metadata}.${randomUUID()}.tmp`;
+  await fs.promises.writeFile(tempPath, JSON.stringify({
+    id: metadata.id,
+    userId: metadata.userId,
+    originalName: metadata.originalName,
+    mimetype: metadata.mimetype,
+    size: metadata.size,
+    uploadedBytes: metadata.uploadedBytes,
+    completedUrl: metadata.completedUrl || '',
+    createdAt: metadata.createdAt
+  }), { flag: 'wx' });
+  await fs.promises.rename(tempPath, metadata.metadata);
+}
+
+app.post('/api/upload-video/resumable', authMiddleware, uploadLimiter, async (req, res) => {
+  const originalName = path.basename(String(req.body?.filename || 'video.mp4')).slice(0, 240);
+  const mimetype = String(req.body?.mimetype || 'video/mp4');
+  const size = Number(req.body?.size);
+  if (!mimetype.startsWith('video/')) return res.status(400).json({ error: 'Sadece video dosyası yükleyebilirsiniz.' });
+  if (!Number.isSafeInteger(size) || size < 1 || size > 500 * 1024 * 1024) {
+    return res.status(400).json({ error: 'Video boyutu 1 bayt ile 500 MB arasında olmalı.' });
+  }
+  try {
+    await fs.promises.mkdir(RESUMABLE_VIDEO_DIR, { recursive: true });
+    const id = randomUUID();
+    const paths = resumableVideoPaths(id);
+    const metadata = {
+      id,
+      userId: req.user.id,
+      originalName,
+      mimetype,
+      size,
+      uploadedBytes: 0,
+      createdAt: Date.now(),
+      ...paths
+    };
+    await fs.promises.writeFile(paths.data, Buffer.alloc(0), { flag: 'wx' });
+    await writeResumableVideoMetadata(metadata);
+    res.status(201).json({ id, uploaded_bytes: 0, chunk_size: RESUMABLE_VIDEO_CHUNK_SIZE });
+  } catch (error) {
+    console.error('[video-upload] Could not initialize resumable upload:', error);
+    res.status(500).json({ error: 'Video yüklemesi başlatılamadı.' });
+  }
+});
+
+app.get('/api/upload-video/resumable/:id', authMiddleware, async (req, res) => {
+  try {
+    const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
+    if (!metadata) return res.status(404).json({ error: 'Devam eden video yüklemesi bulunamadı.' });
+    res.json({ id: metadata.id, uploaded_bytes: metadata.uploadedBytes, size: metadata.size, completed_url: metadata.completedUrl || '' });
+  } catch (error) {
+    console.error('[video-upload] Could not read resumable upload status:', error);
+    res.status(500).json({ error: 'Video yükleme durumu okunamadı.' });
+  }
+});
+
+app.put('/api/upload-video/resumable/:id', authMiddleware, express.raw({ type: 'application/octet-stream', limit: RESUMABLE_VIDEO_CHUNK_SIZE }), async (req, res) => {
+  try {
+    const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
+    if (!metadata) return res.status(404).json({ error: 'Devam eden video yüklemesi bulunamadı.' });
+    if (metadata.completedUrl) return res.status(409).json({ error: 'Video yüklemesi zaten tamamlandı.', uploaded_bytes: metadata.uploadedBytes });
+    if (!Buffer.isBuffer(req.body) || req.body.length < 1 || req.body.length > RESUMABLE_VIDEO_CHUNK_SIZE) {
+      return res.status(400).json({ error: 'Video parçası geçersiz.' });
+    }
+    const offset = Number(req.get('x-upload-offset'));
+    if (!Number.isSafeInteger(offset) || offset !== metadata.uploadedBytes) {
+      return res.status(409).json({ error: 'Yükleme konumu değişmiş.', uploaded_bytes: metadata.uploadedBytes });
+    }
+    if (offset + req.body.length > metadata.size) return res.status(400).json({ error: 'Video parçası belirtilen boyutu aşıyor.' });
+    const handle = await fs.promises.open(metadata.data, 'r+');
+    try {
+      let written = 0;
+      while (written < req.body.length) {
+        const result = await handle.write(req.body, written, req.body.length - written, offset + written);
+        if (!result.bytesWritten) throw new Error('Video parçası diske yazılamadı.');
+        written += result.bytesWritten;
+      }
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    metadata.uploadedBytes += req.body.length;
+    await writeResumableVideoMetadata(metadata);
+    res.json({ uploaded_bytes: metadata.uploadedBytes });
+  } catch (error) {
+    console.error('[video-upload] Could not save resumable chunk:', error);
+    res.status(500).json({ error: 'Video parçası kaydedilemedi.' });
+  }
+});
+
+app.post('/api/upload-video/resumable/:id/complete', authMiddleware, async (req, res) => {
+  try {
+    const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
+    if (!metadata) return res.status(404).json({ error: 'Devam eden video yüklemesi bulunamadı.' });
+    if (metadata.completedUrl) return res.json({ url: metadata.completedUrl });
+    if (metadata.uploadedBytes !== metadata.size) {
+      return res.status(409).json({ error: 'Video yüklemesi henüz tamamlanmadı.', uploaded_bytes: metadata.uploadedBytes });
+    }
+    const filename = randomUUID() + (path.extname(metadata.originalName) || '.mp4');
+    const finalPath = path.join(UPLOAD_DIR, filename);
+    await fs.promises.rename(metadata.data, finalPath);
+    const url = await handleLargeVideoUpload({
+      path: finalPath,
+      filename,
+      originalname: metadata.originalName,
+      mimetype: metadata.mimetype,
+      size: metadata.size
+    });
+    metadata.completedUrl = url;
+    await writeResumableVideoMetadata(metadata);
+    res.json({ url });
+  } catch (error) {
+    console.error('[video-upload] Could not finalize resumable upload:', error);
+    const metadata = await readResumableVideoMetadata(req.params.id, req.user.id).catch(() => null);
+    if (metadata && !metadata.completedUrl) {
+      await fs.promises.writeFile(metadata.data, Buffer.alloc(0)).catch(() => {});
+      metadata.uploadedBytes = 0;
+      await writeResumableVideoMetadata(metadata).catch(writeError => {
+        console.error('[video-upload] Could not reset failed upload session:', writeError);
+      });
+    }
+    res.status(500).json({ error: 'Video yüklemesi tamamlanamadı: ' + error.message });
+  }
+});
+
+app.delete('/api/upload-video/resumable/:id', authMiddleware, async (req, res) => {
+  try {
+    const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
+    if (!metadata) return res.json({ ok: true });
+    if (!metadata.completedUrl) {
+      await fs.promises.unlink(metadata.data).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    }
+    await fs.promises.unlink(metadata.metadata).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('[video-upload] Could not cancel resumable upload:', error);
+    res.status(500).json({ error: 'Video yüklemesi iptal edilemedi.' });
+  }
+});
+
 app.post('/api/reals/upload-url', authMiddleware, uploadLimiter, async (req, res) => {
   if (await denyIfRestricted(req, res, 'reals')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Reals R2 depolama ayarlanmamış.' });

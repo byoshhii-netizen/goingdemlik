@@ -7942,20 +7942,201 @@ function realsProfileCardHTML(v) {
   </a>`;
 }
 
+let videoUploadDbPromise = null;
+
+function openVideoUploadDb() {
+  if (!('indexedDB' in window)) return Promise.reject(new Error('Tarayıcı kalıcı video yüklemesini desteklemiyor.'));
+  if (!videoUploadDbPromise) {
+    videoUploadDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open('cigcig-video-uploads', 1);
+      request.onupgradeneeded = () => request.result.createObjectStore('jobs', { keyPath: 'id' });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('Video yükleme kaydı açılamadı.'));
+    });
+  }
+  return videoUploadDbPromise;
+}
+
+async function storeVideoUploadJob(job) {
+  const db = await openVideoUploadDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('jobs', 'readwrite');
+    transaction.objectStore('jobs').put(job);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error('Video yükleme durumu kaydedilemedi.'));
+    transaction.onabort = () => reject(transaction.error || new Error('Video yükleme kaydı iptal edildi.'));
+  });
+}
+
+async function getVideoUploadJobs() {
+  const db = await openVideoUploadDb();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('jobs', 'readonly').objectStore('jobs').getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error || new Error('Bekleyen video yüklemeleri okunamadı.'));
+  });
+}
+
+async function removeVideoUploadJob(id) {
+  const db = await openVideoUploadDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('jobs', 'readwrite');
+    transaction.objectStore('jobs').delete(id);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error || new Error('Video yükleme kaydı silinemedi.'));
+  });
+}
+
+function videoUploadPercent(job) {
+  return Math.min(100, Math.round((Number(job.uploadedBytes) / job.videoFile.size) * 100));
+}
+
+async function runVideoUploadJob(job) {
+  if (window.__videoUploadJobRunning) return;
+  window.__videoUploadJobRunning = true;
+  const controller = new AbortController();
+  window.__activeVideoUpload = { job, controller };
+  const signal = controller.signal;
+  const name = job.fields.is_reals ? 'Reals' : 'Video';
+  try {
+    if (job.uploadId) {
+      try {
+        const status = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, { signal });
+        job.uploadedBytes = status.uploaded_bytes;
+      } catch (error) {
+        if (error.data?.error !== 'Devam eden video yüklemesi bulunamadı.') throw error;
+        job.uploadId = null;
+        job.uploadedBytes = 0;
+        await storeVideoUploadJob(job);
+      }
+    }
+    if (!job.uploadId) {
+      const started = await api('/upload-video/resumable', {
+        method: 'POST',
+        body: JSON.stringify({ filename: job.videoFile.name, mimetype: job.videoFile.type || 'video/mp4', size: job.videoFile.size }),
+        signal
+      });
+      job.uploadId = started.id;
+      job.chunkSize = started.chunk_size;
+      job.uploadedBytes = started.uploaded_bytes || 0;
+      await storeVideoUploadJob(job);
+    }
+
+    const chunkSize = Number(job.chunkSize) || 8 * 1024 * 1024;
+    while (job.uploadedBytes < job.videoFile.size) {
+      const chunk = job.videoFile.slice(job.uploadedBytes, job.uploadedBytes + chunkSize);
+      const result = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, {
+        method: 'PUT',
+        body: chunk,
+        headers: { 'Content-Type': 'application/octet-stream', 'X-Upload-Offset': String(job.uploadedBytes) },
+        signal
+      });
+      job.uploadedBytes = result.uploaded_bytes;
+      await storeVideoUploadJob(job);
+      updateVideoUploadNotice('uploading', videoUploadPercent(job), `${name} yükleniyor`);
+    }
+
+    updateVideoUploadNotice('finalizing', 100, `${name} hazırlanıyor`);
+    const uploaded = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}/complete`, {
+      method: 'POST', body: JSON.stringify({}), signal
+    });
+    let bannerImage = job.existing?.banner_image || '';
+    if (job.bannerFile) {
+      const form = new FormData();
+      form.append('file', job.bannerFile, job.bannerFile.name);
+      const banner = await apiForm('/upload', form);
+      bannerImage = banner.url;
+    }
+    const payload = {
+      ...job.fields,
+      video_url: uploaded.url,
+      banner_image: bannerImage
+    };
+    if (job.existing?.slug) {
+      await api('/video/' + encodeURIComponent(job.existing.slug), { method: 'PUT', body: JSON.stringify(payload) });
+      toast('Video güncellendi');
+    } else {
+      await api('/videos', { method: 'POST', body: JSON.stringify(payload) });
+      toast('YÜKLENDİ', 'success', 3000);
+    }
+    if (job.uploadId) {
+      try {
+        await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, { method: 'DELETE' });
+      } catch (error) {
+        console.warn('Tamamlanan video yükleme oturumu temizlenemedi:', error.message);
+      }
+    }
+    await removeVideoUploadJob(job.id);
+    updateVideoUploadNotice('done', 100, job.fields.is_reals ? 'Reals hazır' : 'Video hazır');
+    if (!job.existing?.slug) navigate(job.fields.is_reals ? '/reals' : '/videolar');
+    else renderRoute(location.pathname);
+  } catch (error) {
+    if (signal.aborted || job.cancelled) return;
+    updateVideoUploadNotice('error', videoUploadPercent(job), 'Yükleme bekliyor');
+    toast(error.message || 'Video yüklemesi başarısız oldu. Tekrar deneyebilirsin.', 'error');
+    console.error('Video yükleme devam ettirilemedi:', error);
+  } finally {
+    if (window.__activeVideoUpload?.job.id === job.id) window.__activeVideoUpload = null;
+    window.__videoUploadJobRunning = false;
+  }
+}
+
+async function resumePendingVideoUpload() {
+  if (!currentUser || window.__videoUploadJobRunning) return;
+  try {
+    const jobs = await getVideoUploadJobs();
+    const job = jobs.find(item => String(item.userId) === String(currentUser.id));
+    if (job) {
+      updateVideoUploadNotice('uploading', videoUploadPercent(job), `${job.fields.is_reals ? 'Reals' : 'Video'} yüklemesi sürdürülüyor`);
+      runVideoUploadJob(job);
+    }
+  } catch (error) {
+    console.error('Bekleyen video yüklemesi geri yüklenemedi:', error);
+    toast(error.message || 'Bekleyen video yüklemesi geri yüklenemedi.', 'error');
+  }
+}
+
+async function cancelVideoUpload() {
+  const active = window.__activeVideoUpload;
+  if (!active) return;
+  if (!await CigCigDialogs.confirm('Video yüklemesini iptal etmek istiyor musun?')) return;
+  if (!await CigCigDialogs.confirm('Bu işlem yüklenen parçaları da silecek. İptal kesinleşsin mi?')) return;
+  active.job.cancelled = true;
+  active.controller.abort();
+  try {
+    if (active.job.uploadId) await api(`/upload-video/resumable/${encodeURIComponent(active.job.uploadId)}`, { method: 'DELETE' });
+    await removeVideoUploadJob(active.job.id);
+    updateVideoUploadNotice('cancelled', 0, 'Video yüklemesi iptal edildi');
+    toast('Video yüklemesi iptal edildi');
+  } catch (error) {
+    active.job.cancelled = false;
+    console.error('Video yüklemesi iptal edilemedi:', error);
+    updateVideoUploadNotice('error', videoUploadPercent(active.job), 'İptal edilemedi; tekrar deneyebilirsin');
+    toast(error.message || 'Video yüklemesi iptal edilemedi.', 'error');
+  }
+}
+
 function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyor') {
   let notice = document.getElementById('video-upload-notice');
   if (!notice) {
     notice = document.createElement('div');
     notice.id = 'video-upload-notice';
     notice.className = 'video-upload-notice';
-    notice.innerHTML = '<div class="video-upload-notice-head"><i class="fas fa-cloud-arrow-up"></i><span></span><b></b></div><div class="video-upload-notice-bar"><i></i></div>';
+    notice.innerHTML = '<div class="video-upload-notice-head"><i class="fas fa-cloud-arrow-up"></i><span></span><b></b></div><div class="video-upload-notice-bar"><i></i></div><button type="button" class="video-upload-cancel">İptal et</button>';
     document.body.appendChild(notice);
   }
   notice.className = `video-upload-notice ${state}`;
   notice.querySelector('span').textContent = message;
-  notice.querySelector('b').textContent = state === 'error' ? '!' : `${percent}%`;
+  notice.querySelector('b').textContent = state === 'error' ? '!' : state === 'cancelled' ? '' : `${percent}%`;
   notice.querySelector('.video-upload-notice-bar i').style.width = `${state === 'error' ? 100 : percent}%`;
-  if (state === 'done') setTimeout(() => notice.remove(), 5000);
+  const cancelButton = notice.querySelector('.video-upload-cancel');
+  cancelButton.textContent = state === 'error' ? 'Tekrar dene' : 'İptal et';
+  cancelButton.hidden = !['uploading', 'error'].includes(state);
+  cancelButton.onclick = state === 'error' ? () => resumePendingVideoUpload() : () => cancelVideoUpload();
+  notice.onclick = event => {
+    if (event.target.closest('button')) return;
+    if (['cancelled', 'done'].includes(state)) notice.remove();
+  };
 }
 
 function pauseRealsForComposer() {
@@ -8286,6 +8467,39 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       song_id: $('#video-song')?.value || existing?.song_id || null, song_start_seconds: $('#video-song-start')?.value || existing?.song_start_seconds || 0,
       media_filter: $('#video-filter')?.value || existing?.media_filter || 'none', duration_seconds: durationSeconds
     };
+    if (videoFile) {
+      submitBtn.disabled = true;
+      try {
+        const pendingJobs = await getVideoUploadJobs();
+        if (window.__videoUploadJobRunning || pendingJobs.some(job => String(job.userId) === String(currentUser.id))) {
+          throw new Error('Önce mevcut video yüklemesinin tamamlanmasını veya iptal edilmesini bekle.');
+        }
+        if (!bannerFile && autoBannerPromise) await autoBannerPromise;
+        const job = {
+          id: crypto.randomUUID(),
+          userId: String(currentUser.id),
+          videoFile,
+          bannerFile: bannerFile || autoBannerFile || null,
+          fields: uploadFields,
+          existing: existing ? { slug: existing.slug, banner_image: existing.banner_image || '' } : null,
+          uploadId: null,
+          uploadedBytes: 0,
+          createdAt: Date.now()
+        };
+        await storeVideoUploadJob(job);
+        submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
+        $('#video-upload-progress').style.display = 'block';
+        hideModal({ resumeReals: false });
+        updateVideoUploadNotice('uploading', 0, isReals ? 'Reals yükleniyor' : 'Video yükleniyor');
+        runVideoUploadJob(job);
+      } catch (error) {
+        $('#video-error').textContent = error.message || 'Video yüklemesi kalıcı olarak kaydedilemedi.';
+        toast(error.message || 'Video yüklemesi başlatılamadı.', 'error');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = existing ? 'Güncelle' : 'Yükle';
+      }
+      return;
+    }
     submitBtn.disabled = true; submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
     const progress = $('#video-upload-progress'); progress.style.display='block'; progress.innerHTML = '<div style="font-size:12px;color:var(--text-secondary)">Yükleniyor...</div>';
     updateVideoUploadNotice('uploading', 0, isReals ? 'Reals yükleniyor' : 'Video yükleniyor');
@@ -11070,6 +11284,7 @@ async function init() {
   const settingsTimeout = setTimeout(() => settingsController.abort(), 8000);
   const settingsPromise = fetch('/api/public-settings', { signal: settingsController.signal, cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
   await authPromise;
+  resumePendingVideoUpload();
   updateNavUI();
   loadAnnouncements();
   const currentPath = location.pathname + location.search;
