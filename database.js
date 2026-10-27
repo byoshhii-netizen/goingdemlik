@@ -1127,6 +1127,15 @@ async function initDb() {
       FOREIGN KEY(shared_book_id) REFERENCES books(id) ON DELETE SET NULL,
       FOREIGN KEY(reply_to_id) REFERENCES dm_messages(id) ON DELETE SET NULL
     );
+    CREATE TABLE IF NOT EXISTS dm_message_reactions (
+      id BIGSERIAL PRIMARY KEY,
+      message_id BIGINT NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      emoji TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(message_id,user_id,emoji)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dm_message_reactions_message ON dm_message_reactions(message_id);
 
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;

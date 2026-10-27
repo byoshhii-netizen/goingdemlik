@@ -346,6 +346,53 @@ function closeOpenMessageMenu() {
   document.querySelectorAll('.msg-menu-popover').forEach(menu => menu.remove());
 }
 
+function showRealtimeAlert(kind, detail) {
+  if (!detail || !document.body) return;
+  let host = document.getElementById('realtime-alerts');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'realtime-alerts';
+    host.setAttribute('aria-live', 'polite');
+    host.setAttribute('aria-relevant', 'additions');
+    document.body.appendChild(host);
+  }
+  while (host.children.length >= 3) {
+    const oldest = host.firstElementChild;
+    clearTimeout(oldest.dismissTimer);
+    oldest.remove();
+  }
+
+  const isMessage = kind === 'message';
+  const title = isMessage
+    ? detail.name || detail.username || 'Yeni mesaj'
+    : detail.title || 'Yeni bildirim';
+  const preview = isMessage
+    ? detail.preview || 'Yeni mesaj'
+    : detail.body || detail.content || '';
+  const avatarHTML = isMessage && detail.avatar && Number(detail.avatarRemoved) !== 1
+    ? `<img class="realtime-alert-avatar" src="${escHtml(detail.avatar)}" alt="" />`
+    : `<span class="realtime-alert-icon${isMessage ? '' : ' is-notification'}" aria-hidden="true"><i class="fas ${isMessage ? 'fa-user' : 'fa-bell'}"></i>${isMessage ? '' : '<i class="realtime-alert-unread-dot"></i>'}</span>`;
+  const alert = document.createElement('button');
+  alert.type = 'button';
+  alert.className = `realtime-alert${isMessage ? ' is-message' : ' is-notification'}`;
+  alert.innerHTML = `${avatarHTML}<span class="realtime-alert-copy"><strong>${escHtml(title)}</strong><span>${escHtml(preview)}</span></span>`;
+  alert.addEventListener('click', () => {
+    clearTimeout(alert.dismissTimer);
+    alert.classList.add('is-leaving');
+    setTimeout(() => alert.remove(), 220);
+    const target = isMessage
+      ? (detail.username ? `/mesajlar/${encodeURIComponent(detail.username)}` : '')
+      : (typeof detail.link === 'string' && detail.link.startsWith('/') && !detail.link.startsWith('//') ? detail.link : '');
+    if (target) navigate(target);
+  });
+  host.appendChild(alert);
+  requestAnimationFrame(() => alert.classList.add('is-visible'));
+  alert.dismissTimer = setTimeout(() => {
+    alert.classList.add('is-leaving');
+    setTimeout(() => alert.remove(), 220);
+  }, 3000);
+}
+
 const SITE_URL = 'https://cigcig.xyz';
 
 function $(sel) { return document.querySelector(sel); }
@@ -2681,7 +2728,14 @@ function syncRealtimeSocket() {
   realtimeSocketToken = currentToken;
   realtimeSocket = window.io({ auth: { token: currentToken } });
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
+  realtimeSocket.on('dm:incoming', handleRealtimeIncomingMessage);
+  realtimeSocket.on('notification:new', notification => {
+    showRealtimeAlert('notification', notification);
+    loadNotifCount();
+    playConfiguredNotificationSound(notification?.type?.includes('mention') ? 'mention' : 'message');
+  });
   realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
+  realtimeSocket.on('dm:reaction', handleRealtimeDmReaction);
   realtimeSocket.on('dm:conversation-cleared', handleRealtimeDmConversationCleared);
   realtimeSocket.on('dm:read', handleRealtimeDmRead);
   realtimeSocket.on('dm:typing', handleRealtimeDmTyping);
@@ -2707,6 +2761,21 @@ function syncRealtimeSocket() {
   realtimeSocket.on('connect_error', error => {
     console.warn('Gerçek zamanlı mesaj bağlantısı kurulamadı:', error.message);
   });
+}
+
+function handleRealtimeIncomingMessage(event) {
+  if (!currentUser || !event?.username || String(event.senderId) === String(currentUser.id)) return;
+  const currentChat = location.pathname.match(/^\/mesajlar\/([^/?]+)/);
+  if (currentChat && decodeURIComponent(currentChat[1]).toLocaleLowerCase('tr-TR') === String(event.username).toLocaleLowerCase('tr-TR')
+    && document.visibilityState === 'visible' && document.hasFocus()) return;
+  showRealtimeAlert('message', event);
+  playConfiguredNotificationSound('message');
+}
+
+function handleRealtimeDmReaction(event) {
+  if (!event?.messageId || !Array.isArray(event.reactions)) return;
+  const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(event.messageId))}"]`);
+  if (row) updateDmMessageReactions(row, event.reactions);
 }
 
 async function stopLocalDmTyping() {
@@ -3233,6 +3302,7 @@ async function openNotifDropdown() {
     ]);
     await api('/notifications/read-all', { method: 'POST' });
     const badge = $('#nav-notif-badge'); if (badge) badge.style.display = 'none';
+    const mobileBadge = $('#mobile-notif-badge'); if (mobileBadge) mobileBadge.style.display = 'none';
     if (!notifs.length) {
       dd.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px"><i class="fas fa-bell-slash" style="font-size:24px;margin-bottom:8px;display:block"></i>Bildirim yok</div>';
       return;
@@ -13917,6 +13987,25 @@ async function renderDMChat(username) {
       updateDmSelActions();
       return;
     }
+    const reactionPill = e.target.closest('.dm-reaction-pill');
+    if (reactionPill) {
+      e.preventDefault();
+      e.stopPropagation();
+      const row = reactionPill.closest('.dm-msg-wrap');
+      if (!row || reactionPill.disabled) return;
+      reactionPill.disabled = true;
+      try {
+        const result = await api(`/messages/${encodeURIComponent(row.dataset.id)}/reactions`, {
+          method: 'POST',
+          body: JSON.stringify({ emoji: reactionPill.dataset.emoji })
+        });
+        updateDmMessageReactions(row, result.reactions);
+      } catch (error) {
+        reactionPill.disabled = false;
+        toast(error.message || 'Emoji tepkisi güncellenemedi.', 'error');
+      }
+      return;
+    }
     const musicButton = e.target.closest('.dm-shared-song-play');
     if (musicButton) {
       e.preventDefault();
@@ -14748,8 +14837,40 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
           : ''}
         <button class="dm-msg-menu-btn btn btn-ghost" data-id="${m.id}" data-own="${isOwn ? 1 : 0}" style="padding:0 4px;font-size:12px;color:var(--text-muted)"><i class="fas fa-ellipsis-h"></i></button>
       </div>
+      ${dmMessageReactionsHTML(m.reactions, myId)}
     </div>
   </div>`;
+}
+
+function dmMessageReactionsHTML(reactions, myId) {
+  const rows = Array.isArray(reactions) ? reactions : [];
+  const grouped = new Map();
+  rows.forEach(reaction => {
+    if (!reaction?.emoji) return;
+    const item = grouped.get(reaction.emoji) || { emoji: reaction.emoji, count: 0, mine: false };
+    item.count += 1;
+    item.mine ||= String(reaction.user_id) === String(myId);
+    grouped.set(reaction.emoji, item);
+  });
+  if (!grouped.size) return '';
+  return `<div class="dm-msg-reactions" aria-label="Mesaj tepkileri">${[...grouped.values()].map(item => `
+    <button type="button" class="dm-reaction-pill${item.mine ? ' is-mine' : ''}" data-emoji="${escHtml(item.emoji)}" aria-pressed="${item.mine}" aria-label="${escHtml(item.emoji)} tepkisi, ${item.count} kişi">
+      <span>${escHtml(item.emoji)}</span><small>${item.count}</small>
+    </button>`).join('')}</div>`;
+}
+
+function updateDmMessageReactions(row, reactions) {
+  const html = dmMessageReactionsHTML(reactions, currentUser?.id);
+  const existing = row.querySelector('.dm-msg-reactions');
+  if (!html) {
+    existing?.remove();
+    return;
+  }
+  if (existing) {
+    existing.outerHTML = html;
+    return;
+  }
+  row.querySelector('.dm-msg-content')?.insertAdjacentHTML('beforeend', html);
 }
 
 // Hover: show/hide menu btn on desktop
@@ -14831,6 +14952,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   menu.id = 'dm-msg-ctx';
   menu.style.cssText = 'position:fixed;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden';
   const items = [
+    { label: '<i class="fas fa-face-smile fa-fw"></i> Emoji tepkisi ekle', action: 'react' },
     { label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
     ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
@@ -14846,7 +14968,9 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
     el.addEventListener('mouseleave', () => el.style.background = '');
     el.addEventListener('click', async () => {
       menu.remove();
-      if (item.action === 'reply') {
+      if (item.action === 'react') {
+        showDmReactionPicker(btn, msgId);
+      } else if (item.action === 'reply') {
         const msgEl = document.querySelector(`.dm-msg-wrap[data-id="${msgId}"]`);
         const content = msgEl?.querySelector('.dm-msg-bubble span')?.textContent || '';
         if (setReply) setReply(msgId);
@@ -14921,6 +15045,58 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   menu.style.left = `${Math.max(8, Math.min(rect.left - menu.offsetWidth + rect.width, window.innerWidth - menu.offsetWidth - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
+}
+
+function showDmReactionPicker(anchor, messageId) {
+  document.getElementById('dm-reaction-picker')?.remove();
+  const commonEmojis = ['❤️','😂','😍','😮','😢','👍','👎','🔥','👏','🎉','🙏','🥰','🤔','💯','😎','✨','🤗','😡'];
+  let recent = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem('cigcig_dm_recent_reactions') || '[]');
+    if (Array.isArray(saved)) recent = saved.filter(emoji => commonEmojis.includes(emoji)).slice(0, 8);
+  } catch {}
+  const panel = document.createElement('div');
+  panel.id = 'dm-reaction-picker';
+  panel.className = 'dm-reaction-picker';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Emoji tepkisi seç');
+  panel.innerHTML = `${recent.length ? `<div class="dm-reaction-recent"><span>Son kullanılan</span><div>${recent.map(emoji => `<button type="button" class="dm-reaction-choice" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join('')}</div></div>` : ''}
+    <div class="dm-reaction-grid">${commonEmojis.map(emoji => `<button type="button" class="dm-reaction-choice" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join('')}</div>`;
+  panel.addEventListener('click', async event => {
+    const choice = event.target.closest('.dm-reaction-choice');
+    if (!choice) return;
+    const emoji = choice.dataset.emoji;
+    choice.disabled = true;
+    try {
+      const result = await api(`/messages/${encodeURIComponent(messageId)}/reactions`, {
+        method: 'POST',
+        body: JSON.stringify({ emoji })
+      });
+      const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(messageId))}"]`);
+      if (row) updateDmMessageReactions(row, result.reactions);
+      const updatedRecent = [emoji, ...recent.filter(item => item !== emoji)].slice(0, 8);
+      localStorage.setItem('cigcig_dm_recent_reactions', JSON.stringify(updatedRecent));
+      panel.remove();
+    } catch (error) {
+      choice.disabled = false;
+      toast(error.message || 'Emoji tepkisi eklenemedi.', 'error');
+    }
+  });
+  document.body.appendChild(panel);
+  const rect = anchor.getBoundingClientRect();
+  const width = Math.min(290, window.innerWidth - 24);
+  panel.style.width = `${width}px`;
+  const left = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, window.innerWidth - width - 12));
+  const height = panel.offsetHeight;
+  const top = rect.top >= height + 12 ? rect.top - height - 8 : Math.min(rect.bottom + 8, window.innerHeight - height - 12);
+  panel.style.left = `${left}px`;
+  panel.style.top = `${Math.max(12, top)}px`;
+  const closeOnOutside = event => {
+    if (panel.contains(event.target) || anchor.contains(event.target)) return;
+    panel.remove();
+    document.removeEventListener('pointerdown', closeOnOutside, true);
+  };
+  setTimeout(() => document.addEventListener('pointerdown', closeOnOutside, true), 0);
 }
 
 function showMuteDurationPicker(title, onSelect) {
@@ -15153,6 +15329,7 @@ async function renderNotifications(app) {
     ]);
     await api('/notifications/read-all', { method: 'POST' });
     const badge = $('#nav-notif-badge'); if (badge) badge.style.display = 'none';
+    const mobileBadge = $('#mobile-notif-badge'); if (mobileBadge) mobileBadge.style.display = 'none';
     const list = $('#notif-page-list');
     if (!notifs || !notifs.length) {
       list.innerHTML = '<div class="empty-state"><i class="fas fa-bell-slash"></i><p>Bildirim yok</p></div>';

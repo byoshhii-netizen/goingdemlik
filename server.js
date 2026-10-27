@@ -16,7 +16,7 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { Server } = require('socket.io');
-const { query, pool, initDb } = require('./database');
+const { query: databaseQuery, pool, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 
 function createPlaylistPublicId() {
@@ -36,6 +36,19 @@ const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+async function query(text, params = []) {
+  const isNotificationInsert = /^\s*INSERT\s+INTO\s+notifications\b/i.test(String(text));
+  const statement = isNotificationInsert && !/\bRETURNING\b/i.test(String(text))
+    ? `${String(text).trim().replace(/;$/, '')} RETURNING *`
+    : text;
+  const result = await databaseQuery(statement, params);
+  if (isNotificationInsert) {
+    for (const notification of result.rows || []) {
+      io.to(`user:${notification.user_id}`).emit('notification:new', notification);
+    }
+  }
+  return result;
+}
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const appAssetHash = crypto.createHash('sha256');
@@ -780,6 +793,17 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
     usernames: [sender.username, recipient.username],
     preview: message.content || (message.image_url ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
   });
+  if (String(sender.id) !== String(recipient.id)) {
+    io.to(`user:${recipient.id}`).emit('dm:incoming', {
+      conversationId,
+      senderId: sender.id,
+      username: sender.username,
+      name: sender.nickname || sender.username,
+      avatar: sender.avatar || '',
+      avatarRemoved: sender.avatar_removed,
+      preview: message.content || (message.image_url || message.image_urls?.length ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
+    });
+  }
 }
 
 async function requireVmbMiddleware(req, res, next) {
@@ -10887,7 +10911,11 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.audio_url END as song_audio_url,
       CASE WHEN m.deleted_for_all=1 OR r.deleted_for_all=1 THEN NULL ELSE r.content END as reply_content,
       r.deleted_for_all as reply_deleted_for_all,
-      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username,
+      CASE WHEN m.deleted_for_all=1 THEN '[]'::jsonb ELSE COALESCE((
+        SELECT json_agg(json_build_object('emoji',reaction.emoji,'user_id',reaction.user_id) ORDER BY reaction.created_at)
+        FROM dm_message_reactions reaction WHERE reaction.message_id=m.id
+      ), '[]'::json) END AS reactions
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -11149,7 +11177,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
-      r.content as reply_content, ru.username as reply_username
+      r.content as reply_content, ru.username as reply_username,
+      '[]'::json AS reactions
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
     LEFT JOIN videos v ON m.shared_video_id=v.id
@@ -11166,6 +11195,60 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   const sentMessage = full[0];
   emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '', image_urls: [] } : sentMessage);
   res.json(sentMessage);
+});
+
+const DM_REACTION_EMOJIS = new Set(['❤️','😂','😍','😮','😢','👍','👎','🔥','👏','🎉','🙏','🥰','🤔','💯','😎','✨','🤗','😡']);
+
+app.post('/api/messages/:id/reactions', authMiddleware, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası.' });
+  const emoji = String(req.body?.emoji || '');
+  if (!DM_REACTION_EMOJIS.has(emoji)) return res.status(400).json({ error: 'Bu emoji tepkisi kullanılamıyor.' });
+  const { rows: messages } = await query(`
+    SELECT m.id,m.conversation_id,m.sender_id,
+      CASE WHEN m.sender_id=$2 THEN COALESCE(m.deleted_by_sender,0) ELSE COALESCE(m.deleted_by_receiver,0) END AS deleted_for_user,
+      c.user1_id,c.user2_id
+    FROM dm_messages m
+    JOIN dm_conversations c ON c.id=m.conversation_id
+    WHERE m.id=$1 AND (c.user1_id=$2 OR c.user2_id=$2) AND COALESCE(m.deleted_for_all,0)=0
+  `, [req.params.id, req.user.id]);
+  const message = messages[0];
+  if (!message || Number(message.deleted_for_user) === 1) return res.status(404).json({ error: 'Mesaj bulunamadı.' });
+
+  const { rows: existing } = await query(
+    'SELECT id FROM dm_message_reactions WHERE message_id=$1 AND user_id=$2 AND emoji=$3',
+    [message.id, req.user.id, emoji]
+  );
+  if (existing.length) {
+    await query('DELETE FROM dm_message_reactions WHERE id=$1', [existing[0].id]);
+  } else {
+    const { rows: countRows } = await query(
+      'SELECT COUNT(*)::int AS count FROM dm_message_reactions WHERE message_id=$1 AND user_id=$2',
+      [message.id, req.user.id]
+    );
+    if (Number(countRows[0]?.count || 0) >= 5) return res.status(400).json({ error: 'Bir mesaja en fazla 5 farklı emoji tepkisi ekleyebilirsiniz.' });
+    await query(
+      'INSERT INTO dm_message_reactions (message_id,user_id,emoji) VALUES ($1,$2,$3) ON CONFLICT (message_id,user_id,emoji) DO NOTHING',
+      [message.id, req.user.id, emoji]
+    );
+  }
+
+  const { rows: reactionRows } = await query(
+    `SELECT COALESCE(json_agg(json_build_object('emoji',emoji,'user_id',user_id) ORDER BY created_at),'[]'::json) AS reactions
+     FROM dm_message_reactions WHERE message_id=$1`,
+    [message.id]
+  );
+  const reactions = reactionRows[0]?.reactions || [];
+  const { rows: participants } = await query(
+    'SELECT user1_id,user2_id FROM dm_conversations WHERE id=$1',
+    [message.conversation_id]
+  );
+  const conversation = participants[0];
+  io.to([`user:${conversation.user1_id}`, `user:${conversation.user2_id}`]).emit('dm:reaction', {
+    conversationId: message.conversation_id,
+    messageId: message.id,
+    reactions
+  });
+  res.json({ reactions });
 });
 
 app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddleware, async (req, res) => {
@@ -11888,7 +11971,7 @@ app.post('/api/shop/webhook', express.urlencoded({ extended: true }), async (req
 
       // Kullanıcıya bildirim gönder
       await query(
-        `INSERT INTO notifications (user_id, type, content, link) VALUES ($1,'purchase',$2,'/profil')`,
+        `INSERT INTO notifications (user_id, type, body, link) VALUES ($1,'purchase',$2,'/profil')`,
         [order.user_id, `${order.product_name} üyeliğiniz aktif edildi! ${durDays} gün boyunca geçerlidir.`]
       );
 
