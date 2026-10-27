@@ -1125,6 +1125,63 @@ async function handleUpload(file) {
   }
 }
 
+function getCloudinaryAssetDetails(asset) {
+  const publicId = String(asset?.publicId || '').trim();
+  const fallbackType = String(asset?.resourceType || 'image');
+  if (publicId) {
+    return ['image', 'video', 'raw'].includes(fallbackType)
+      ? { publicId, resourceType: fallbackType }
+      : null;
+  }
+
+  const rawUrl = String(asset?.url || '').trim();
+  if (!rawUrl) return null;
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (!/(^|\.)cloudinary\.com$/i.test(url.hostname)) return null;
+
+  const segments = url.pathname.split('/').filter(Boolean);
+  const uploadIndex = segments.indexOf('upload');
+  if (uploadIndex < 1) return null;
+  const resourceType = segments[uploadIndex - 1];
+  if (!['image', 'video', 'raw'].includes(resourceType)) return null;
+
+  let assetStart = uploadIndex + 1;
+  const versionIndex = segments.findIndex((segment, index) => index > uploadIndex && /^v\d+$/.test(segment));
+  if (versionIndex !== -1) assetStart = versionIndex + 1;
+  const path = segments.slice(assetStart);
+  if (!path.length) return null;
+  path[path.length - 1] = path[path.length - 1].replace(/\.[^.]+$/, '');
+  const resolvedPublicId = path.join('/');
+  return resolvedPublicId ? { publicId: resolvedPublicId, resourceType } : null;
+}
+
+async function destroyCloudinaryAssets(assets) {
+  if (!USE_CLOUDINARY) return;
+  const uniqueAssets = new Map();
+  for (const asset of assets) {
+    const details = getCloudinaryAssetDetails(asset);
+    if (!details) continue;
+    uniqueAssets.set(`${details.resourceType}:${details.publicId}`, details);
+  }
+
+  for (const { publicId, resourceType } of uniqueAssets.values()) {
+    try {
+      const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType, invalidate: true });
+      if (!['ok', 'not found'].includes(result?.result)) {
+        throw new Error(result?.result || 'Cloudinary dosyayı silemedi.');
+      }
+    } catch (error) {
+      console.error(`Cloudinary asset deletion failed (${resourceType}:${publicId}):`, error.message || error);
+      throw new Error(`Cloudinary dosyası silinemedi: ${error.message || error}`);
+    }
+  }
+}
+
 async function handleVmbUpload(file) {
   const ext = path.extname(file.originalname || '').toLowerCase();
   const key = `vmb/${randomUUID()}${ext}`;
@@ -2467,8 +2524,49 @@ async function purgeDeletedAccounts() {
   } catch(e) { console.error('purge error:', e.message); }
 }
 
+async function deleteUserCloudinaryMedia(userId) {
+  const mediaQueries = [
+    { table: 'users', ownerColumn: 'id', columns: ['avatar'] },
+    { table: 'profile_avatar_archive', ownerColumn: 'user_id', columns: ['image_url'] },
+    { table: 'photos', ownerColumn: 'user_id', columns: ['url', 'public_id'], resourceType: 'image' },
+    { table: 'stories', ownerColumn: 'user_id', columns: ['media_url'] },
+    { table: 'videos', ownerColumn: 'user_id', columns: ['video_url', 'thumbnail_url'] },
+    { table: 'songs', ownerColumn: 'uploader_id', columns: ['audio_url', 'cover_url', 'remastered_audio_url'] },
+    { table: 'playlists', ownerColumn: 'user_id', columns: ['cover_url'], excludeSharedCover: true },
+    { table: 'forums', ownerColumn: 'user_id', columns: ['banner_image'] },
+    { table: 'books', ownerColumn: 'user_id', columns: ['cover_image'] },
+    { table: 'newspapers', ownerColumn: 'journalist_id', columns: ['image_url'] },
+    { table: 'group_messages', ownerColumn: 'user_id', columns: ['image_url'] },
+    { table: 'groups', ownerColumn: 'owner_id', columns: ['cover_image', 'banner_image', 'logo_url'] },
+    { table: 'ad_submissions', ownerColumn: 'user_id', columns: ['media_url', 'cover_url'] }
+  ];
+  const assets = [];
+  for (const mediaQuery of mediaQueries) {
+    try {
+      const { rows } = await query(
+        `SELECT ${mediaQuery.columns.join(',')} FROM ${mediaQuery.table} WHERE ${mediaQuery.ownerColumn}=$1${mediaQuery.excludeSharedCover ? ' AND NOT EXISTS (SELECT 1 FROM playlists other WHERE other.cover_url=playlists.cover_url AND other.id<>playlists.id)' : ''}`,
+        [userId]
+      );
+      for (const row of rows) {
+        for (const column of mediaQuery.columns) {
+          if (column === 'public_id') {
+            assets.push({ publicId: row.public_id, resourceType: mediaQuery.resourceType || 'image' });
+          } else {
+            assets.push({ url: row[column], resourceType: mediaQuery.resourceType });
+          }
+        }
+      }
+    } catch (error) {
+      if (/does not exist|undefined column/i.test(error.message)) continue;
+      throw error;
+    }
+  }
+  await destroyCloudinaryAssets(assets);
+}
+
 // Permanently remove every user-owned record only after the grace period ends.
 async function purgeUserContent(userId) {
+  await deleteUserCloudinaryMedia(userId);
   const ownedRows = [
     ['forum_comments', 'user_id'], ['forums', 'user_id'],
     ['book_pages', 'user_id'], ['book_chapters', 'user_id'], ['books', 'user_id'],
@@ -4364,17 +4462,29 @@ app.put('/api/group/:slug', authMiddleware, async (req, res) => {
 });
 
 app.delete('/api/group/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const group = rows[0];
-  if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  await query('DELETE FROM group_messages WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM group_members WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM group_invites WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM moderator_permissions WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM groups WHERE id=$1', [group.id]);
-  await logAction(req.user.username, 'delete_group', req.params.slug);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM groups WHERE slug=$1', [req.params.slug]);
+    if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+    const group = rows[0];
+    if (group.owner_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+    const { rows: messages } = await query('SELECT image_url FROM group_messages WHERE group_id=$1', [group.id]);
+    await destroyCloudinaryAssets([
+      { url: group.cover_image },
+      { url: group.banner_image },
+      { url: group.logo_url },
+      ...messages.map(message => ({ url: message.image_url }))
+    ]);
+    await query('DELETE FROM group_messages WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM group_members WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM group_invites WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM moderator_permissions WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM groups WHERE id=$1', [group.id]);
+    await logAction(req.user.username, 'delete_group', req.params.slug);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Group media deletion failed:', error);
+    res.status(500).json({ error: 'Grup silinemedi.' });
+  }
 });
 
 app.post('/api/group/:slug/join', authMiddleware, async (req, res) => {
@@ -4976,6 +5086,14 @@ app.delete('/api/profile/avatar-archive/:id', authMiddleware, async (req, res) =
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Profil fotoğrafı arşivde bulunamadı.' });
     }
+    const { rows: sharedAssets } = await client.query(
+      `SELECT 1 FROM users WHERE avatar=$1 AND id<>$2
+       UNION ALL
+       SELECT 1 FROM profile_avatar_archive WHERE image_url=$1 AND id<>$3
+       LIMIT 1`,
+      [photos[0].image_url, req.user.id, req.params.id]
+    );
+    if (!sharedAssets.length) await destroyCloudinaryAssets([{ url: photos[0].image_url }]);
     await client.query('DELETE FROM profile_avatar_archive WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
     const { rows: users } = await client.query(`UPDATE users
       SET avatar=CASE WHEN avatar=$1 THEN '' ELSE avatar END,
@@ -4985,7 +5103,8 @@ app.delete('/api/profile/avatar-archive/:id', authMiddleware, async (req, res) =
     res.json({ ok: true, avatar: users[0]?.avatar || '', avatar_removed: Number(users[0]?.avatar_removed) === 1 });
   } catch (error) {
     await client.query('ROLLBACK');
-    throw error;
+    console.error('Profile avatar archive deletion failed:', error);
+    res.status(500).json({ error: 'Arşivlenmiş profil fotoğrafı silinemedi.' });
   } finally {
     client.release();
   }
@@ -6060,10 +6179,61 @@ app.post('/api/archive/:type/:id', authMiddleware, async (req, res) => {
     const { type } = req.params;
     const action = String(req.body?.action || '');
     if (!USER_ARCHIVE_TYPES[type]) return res.status(400).json({ error: 'İçerik türü geçersiz.' });
-    if (!['archive', 'trash', 'restore'].includes(action)) return res.status(400).json({ error: 'İşlem geçersiz.' });
+    if (!['archive', 'trash', 'restore', 'delete_permanently'].includes(action)) return res.status(400).json({ error: 'İşlem geçersiz.' });
 
     const content = await getOwnedArchiveContent(type, req.params.id, req.user.id);
     if (!content) return res.status(404).json({ error: 'İçerik bulunamadı veya size ait değil.' });
+    if (action === 'delete_permanently') {
+      const mediaTypes = ['photo', 'story', 'song', 'video', 'reals', 'playlist', 'forum', 'book', 'newspaper'];
+      if (!mediaTypes.includes(type)) return res.status(400).json({ error: 'Bu içerik türü kalıcı olarak silinemez.' });
+      const { rows: archived } = await query(
+        'SELECT state FROM user_content_archive WHERE owner_id=$1 AND content_type=$2 AND content_id=$3',
+        [req.user.id, type, String(content.id)]
+      );
+      if (archived[0]?.state !== 'trash') return res.status(400).json({ error: 'Yalnızca Silinenler bölümündeki içerikler kalıcı silinebilir.' });
+
+      const assets = type === 'photo'
+        ? [{ publicId: content.public_id, resourceType: 'image' }, { url: content.url }]
+        : type === 'story'
+          ? [{ url: content.media_url }]
+          : type === 'song'
+            ? [{ url: content.audio_url }, { url: content.cover_url }, { url: content.remastered_audio_url }]
+            : type === 'playlist'
+              ? [{ url: content.cover_url }]
+              : type === 'forum'
+                ? [{ url: content.banner_image }]
+                : type === 'book'
+                  ? [{ url: content.cover_image }]
+                  : type === 'newspaper'
+                    ? [{ url: content.image_url }]
+                    : [{ url: content.video_url }, { url: content.thumbnail_url }];
+      if (type === 'playlist' && content.cover_url) {
+        const { rows: otherPlaylists } = await query(
+          'SELECT 1 FROM playlists WHERE cover_url=$1 AND id<>$2 LIMIT 1',
+          [content.cover_url, content.id]
+        );
+        if (otherPlaylists.length) assets.length = 0;
+      }
+      await destroyCloudinaryAssets(assets);
+      const config = USER_ARCHIVE_TYPES[type];
+      if (type === 'forum') {
+        await query('DELETE FROM forum_comments WHERE forum_id=$1', [content.id]);
+        await query('DELETE FROM forum_likes WHERE forum_id=$1', [content.id]);
+        await query('DELETE FROM forum_views WHERE forum_id=$1', [content.id]);
+        await query('DELETE FROM forum_tags WHERE forum_id=$1', [content.id]);
+      } else if (type === 'book') {
+        await query('DELETE FROM book_pages WHERE book_id=$1', [content.id]);
+        await query('DELETE FROM book_chapters WHERE book_id=$1', [content.id]);
+      } else if (type === 'playlist') {
+        await query('DELETE FROM playlist_songs WHERE playlist_id=$1', [content.id]);
+      }
+      await query(`DELETE FROM ${config.table} WHERE ${config.id}::text=$1 AND ${config.owner}=$2${config.reals === undefined ? '' : ` AND is_reals=${config.reals ? 1 : 0}`}`, [String(content.id), req.user.id]);
+      await query(
+        'DELETE FROM user_content_archive WHERE owner_id=$1 AND content_type=$2 AND content_id=$3',
+        [req.user.id, type, String(content.id)]
+      );
+      return res.json({ ok: true, state: 'deleted' });
+    }
     if (action === 'restore') {
       if (type === 'story' && new Date(content.expires_at).getTime() <= Date.now()) {
         return res.status(410).json({ error: 'Süresi dolan hikâyeler geri yüklenemez.' });
@@ -6341,10 +6511,16 @@ app.put('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
 });
 
 app.delete('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT id FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
-  await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM stories WHERE public_id=$1 OR id::text=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
+    await destroyCloudinaryAssets([{ url: rows[0].media_url }]);
+    await query('DELETE FROM stories WHERE id=$1', [rows[0].id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin story deletion failed:', error);
+    res.status(500).json({ error: 'Hikaye silinemedi.' });
+  }
 });
 
 app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
@@ -6541,17 +6717,16 @@ app.put('/api/admin/photos/:id', adminMiddleware, async (req, res) => {
 });
 
 app.delete('/api/admin/photos/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT public_id FROM photos WHERE id=$1', [req.params.id]);
-  const publicId = rows.length ? rows[0].public_id : null;
-  if (USE_CLOUDINARY && publicId) {
-    try {
-      await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true });
-    } catch (err) {
-      console.warn('Cloudinary admin photo destroy failed:', err.message || err);
-    }
+  try {
+    const { rows } = await query('SELECT public_id,url FROM photos WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı.' });
+    await destroyCloudinaryAssets([{ publicId: rows[0].public_id, resourceType: 'image' }, { url: rows[0].url }]);
+    await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin photo deletion failed:', error);
+    res.status(500).json({ error: 'Fotoğraf silinemedi.' });
   }
-  await query('DELETE FROM photos WHERE id=$1', [req.params.id]);
-  res.json({ ok: true });
 });
 
 // ===== PHOTO ADVERTISING =====
@@ -6740,7 +6915,19 @@ app.put('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => {
   const b=req.body,site=normalizedExternalUrl(b.site_url??old.site_url); if(!site)return res.status(400).json({error:'Geçerli site adresi girin'});
   const {rows}=await query('UPDATE photo_ads SET title=$1,description=$2,site_url=$3,show_likes=$4,allow_comments=$5,allow_shares=$6,active=$7,priority=$8,updated_at=NOW() WHERE id=$9 RETURNING *',[b.title||old.title,b.description??old.description,site,b.show_likes===undefined?old.show_likes:(b.show_likes?1:0),b.allow_comments===undefined?old.allow_comments:(b.allow_comments?1:0),b.allow_shares===undefined?old.allow_shares:(b.allow_shares?1:0),b.active===undefined?old.active:(b.active?1:0),b.priority??old.priority,old.id]);res.json(rows[0]);
 });
-app.delete('/api/admin/photo-ads/:id', adminMiddleware, async (req,res) => { await query('DELETE FROM photo_ads WHERE id=$1',[req.params.id]);res.json({ok:true}); });
+app.delete('/api/admin/photo-ads/:id', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM photo_ads WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Reklam bulunamadı.' });
+    const ad = rows[0];
+    await destroyCloudinaryAssets([{ url: ad.image_url || ad.media_url || ad.cover_url }]);
+    await query('DELETE FROM photo_ads WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin photo ad deletion failed:', error);
+    res.status(500).json({ error: 'Reklam silinemedi.' });
+  }
+});
 // ===== REALS ADVERTISING =====
 function normalizeRealsAdFrequency(body = {}, old = {}) {
   const mode = body.frequency_mode === undefined ? (old.frequency_mode || 'count') : String(body.frequency_mode);
@@ -6868,8 +7055,16 @@ app.put('/api/admin/reals-ads/:id', adminMiddleware, realsAdUpload.fields([{ nam
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/admin/reals-ads/:id', adminMiddleware, async (req, res) => {
-  await query('DELETE FROM reals_ads WHERE id=$1', [req.params.id]);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM reals_ads WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Reals reklamı bulunamadı.' });
+    await destroyCloudinaryAssets([{ url: rows[0].video_url }, { url: rows[0].cover_url }]);
+    await query('DELETE FROM reals_ads WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin reals ad deletion failed:', error);
+    res.status(500).json({ error: 'Reals reklamı silinemedi.' });
+  }
 });
 app.post('/api/ad-submissions', authMiddleware, upload.fields([{name:'media',maxCount:1},{name:'cover',maxCount:1}]), async (req,res) => {
   try { const b=req.body;if(!['music','photo','reals'].includes(b.type)||!b.title?.trim()||!req.files?.media?.[0])return res.status(400).json({error:'Reklam türü, başlık ve dosya zorunlu.'});const site=normalizedExternalUrl(b.site_url);if(!site)return res.status(400).json({error:'Geçerli site adresi girin.'});const media=await handleUpload(req.files.media[0]),cover=req.files?.cover?.[0]?await handleUpload(req.files.cover[0]):'',code=await uniqueAdPortalCode('ad_submissions');const {rows}=await query(`INSERT INTO ad_submissions (user_id,type,title,description,site_url,media_url,cover_url,show_likes,allow_comments,allow_shares,portal_code) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,[req.user.id,b.type,b.title.trim(),b.description||'',site,media,cover,b.show_likes==='false'?0:1,b.allow_comments==='false'?0:1,b.allow_shares==='false'?0:1,code]);res.json(rows[0]); } catch(e){res.status(500).json({error:e.message});}
@@ -7315,9 +7510,15 @@ app.post('/api/admin/user/:id/unban', adminMiddleware, async (req, res) => {
 app.delete('/api/admin/user/:id', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-  await query('DELETE FROM users WHERE id=$1', [req.params.id]);
-  await logAction('admin', 'delete_user', rows[0].username);
-  res.json({ ok: true });
+  try {
+    await deleteUserCloudinaryMedia(rows[0].id);
+    await query('DELETE FROM users WHERE id=$1', [req.params.id]);
+    await logAction('admin', 'delete_user', rows[0].username);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin user media deletion failed:', error);
+    res.status(500).json({ error: 'Kullanıcı medyaları silinemedi.' });
+  }
 });
 
 app.get('/api/admin/forums', adminMiddleware, async (req, res) => {
@@ -7340,17 +7541,23 @@ app.put('/api/admin/forum/:id', adminMiddleware, async (req, res) => {
 });
 
 app.delete('/api/admin/forum/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM forums WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
-  const forum = rows[0];
-  await query('DELETE FROM forum_comments WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forum_likes WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forum_views WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forum_tags WHERE forum_id=$1', [forum.id]);
-  await query('DELETE FROM forums WHERE id=$1', [forum.id]);
-  if (forum.user_id) await query('UPDATE users SET forum_count=GREATEST(0,forum_count-1) WHERE id=$1', [forum.user_id]);
-  await logAction('admin', 'delete_forum', forum.slug);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM forums WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Konu bulunamadı' });
+    const forum = rows[0];
+    await destroyCloudinaryAssets([{ url: forum.banner_image }]);
+    await query('DELETE FROM forum_comments WHERE forum_id=$1', [forum.id]);
+    await query('DELETE FROM forum_likes WHERE forum_id=$1', [forum.id]);
+    await query('DELETE FROM forum_views WHERE forum_id=$1', [forum.id]);
+    await query('DELETE FROM forum_tags WHERE forum_id=$1', [forum.id]);
+    await query('DELETE FROM forums WHERE id=$1', [forum.id]);
+    if (forum.user_id) await query('UPDATE users SET forum_count=GREATEST(0,forum_count-1) WHERE id=$1', [forum.user_id]);
+    await logAction('admin', 'delete_forum', forum.slug);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin forum deletion failed:', error);
+    res.status(500).json({ error: 'Konu silinemedi.' });
+  }
 });
 
 app.get('/api/admin/books', adminMiddleware, async (req, res) => {
@@ -7380,15 +7587,21 @@ app.put('/api/admin/book/:id', adminMiddleware, async (req, res) => {
 });
 
 app.delete('/api/admin/book/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM books WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
-  const book = rows[0];
-  await query('DELETE FROM book_pages WHERE book_id=$1', [book.id]);
-  await query('DELETE FROM book_chapters WHERE book_id=$1', [book.id]);
-  await query('DELETE FROM books WHERE id=$1', [book.id]);
-  if (book.user_id) await query('UPDATE users SET book_count=GREATEST(0,book_count-1) WHERE id=$1', [book.user_id]);
-  await logAction('admin', 'delete_book', book.slug);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM books WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+    const book = rows[0];
+    await destroyCloudinaryAssets([{ url: book.cover_image }]);
+    await query('DELETE FROM book_pages WHERE book_id=$1', [book.id]);
+    await query('DELETE FROM book_chapters WHERE book_id=$1', [book.id]);
+    await query('DELETE FROM books WHERE id=$1', [book.id]);
+    if (book.user_id) await query('UPDATE users SET book_count=GREATEST(0,book_count-1) WHERE id=$1', [book.user_id]);
+    await logAction('admin', 'delete_book', book.slug);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin book deletion failed:', error);
+    res.status(500).json({ error: 'Kitap silinemedi.' });
+  }
 });
 
 app.get('/api/admin/poems', adminMiddleware, async (req, res) => {
@@ -7465,16 +7678,28 @@ app.patch('/api/admin/group/:id/status', adminMiddleware, async (req, res) => {
 });
 
 app.delete('/api/admin/group/:id', adminMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM groups WHERE id=$1', [req.params.id]);
-  if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
-  const group = rows[0];
-  await query('DELETE FROM group_messages WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM group_members WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM group_invites WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM moderator_permissions WHERE group_id=$1', [group.id]);
-  await query('DELETE FROM groups WHERE id=$1', [group.id]);
-  await logAction('admin', 'delete_group', group.slug);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM groups WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Grup bulunamadı' });
+    const group = rows[0];
+    const { rows: messages } = await query('SELECT image_url FROM group_messages WHERE group_id=$1', [group.id]);
+    await destroyCloudinaryAssets([
+      { url: group.cover_image },
+      { url: group.banner_image },
+      { url: group.logo_url },
+      ...messages.map(message => ({ url: message.image_url }))
+    ]);
+    await query('DELETE FROM group_messages WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM group_members WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM group_invites WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM moderator_permissions WHERE group_id=$1', [group.id]);
+    await query('DELETE FROM groups WHERE id=$1', [group.id]);
+    await logAction('admin', 'delete_group', group.slug);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin group deletion failed:', error);
+    res.status(500).json({ error: 'Grup silinemedi.' });
+  }
 });
 
 app.get('/api/admin/levels', adminMiddleware, async (req, res) => {
@@ -8233,7 +8458,14 @@ app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
     const song = rows[0];
     if (song.uploader_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Bu müziği silme yetkiniz yok' });
     if (song.uploader_id === req.user.id) await saveUserContentState('song', song, req.user.id, 'trash');
-    else await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
+    else {
+      await destroyCloudinaryAssets([
+        { url: song.audio_url },
+        { url: song.cover_url },
+        { url: song.remastered_audio_url }
+      ]);
+      await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
+    }
     await logAction(req.user.username, 'delete_song', song.slug);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'Silme hatası: ' + e.message }); }
@@ -8241,8 +8473,21 @@ app.delete('/api/songs/:id', authMiddleware, async (req, res) => {
 
 // Admin: müzik sil
 app.delete('/api/admin/songs/:id', adminMiddleware, async (req, res) => {
-  await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
-  res.json({ ok: true });
+  try {
+    const { rows } = await query('SELECT * FROM songs WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı.' });
+    const song = rows[0];
+    await destroyCloudinaryAssets([
+      { url: song.audio_url },
+      { url: song.cover_url },
+      { url: song.remastered_audio_url }
+    ]);
+    await query('DELETE FROM songs WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin song deletion failed:', error);
+    res.status(500).json({ error: 'Müzik silinemedi.' });
+  }
 });
 
 // Admin: artist başvuruları
@@ -12299,15 +12544,24 @@ app.delete('/api/video/:slug/comments/:commentId', authMiddleware, async (req, r
 });
 
 app.delete('/api/video/:slug', authMiddleware, async (req, res) => {
-  const { rows } = await query('SELECT * FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
-  if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
-  if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yetkiniz yok' });
-  if (rows[0].user_id === req.user.id) {
-    await saveUserContentState(rows[0].is_reals ? 'reals' : 'video', rows[0], req.user.id, 'trash');
-  } else {
-    await query('DELETE FROM videos WHERE id=$1', [rows[0].id]);
+  try {
+    const { rows } = await query('SELECT * FROM videos WHERE slug=$1 OR id::text=$1', [req.params.slug]);
+    if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+    if (rows[0].user_id !== req.user.id && !req.user.is_admin) return res.status(403).json({ error: 'Yetkiniz yok' });
+    if (rows[0].user_id === req.user.id) {
+      await saveUserContentState(rows[0].is_reals ? 'reals' : 'video', rows[0], req.user.id, 'trash');
+    } else {
+      await destroyCloudinaryAssets([
+        { url: rows[0].video_url },
+        { url: rows[0].thumbnail_url }
+      ]);
+      await query('DELETE FROM videos WHERE id=$1', [rows[0].id]);
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Video deletion failed:', error);
+    res.status(500).json({ error: 'Video silinemedi.' });
   }
-  res.json({ ok: true });
 });
 
 app.get('/api/admin/music-ads', adminMiddleware, async (req,res) => {
@@ -12358,7 +12612,18 @@ app.put('/api/admin/music-ads/:id', adminMiddleware, upload.fields([{name:'audio
       [b.title?.trim()||old.title,b.site_url??old.site_url,audio,cover,b.priority??old.priority,b.boost_points??old.boost_points,b.active===undefined?old.active:(b.active==='false'?0:1),old.id]); res.json(rows[0]);
   } catch(e) { res.status(500).json({error:e.message}); }
 });
-app.delete('/api/admin/music-ads/:id', adminMiddleware, async (req,res) => { await query('DELETE FROM music_ads WHERE id=$1',[req.params.id]); res.json({ok:true}); });
+app.delete('/api/admin/music-ads/:id', adminMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT * FROM music_ads WHERE id=$1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'Müzik reklamı bulunamadı.' });
+    await destroyCloudinaryAssets([{ url: rows[0].audio_url }, { url: rows[0].cover_url }]);
+    await query('DELETE FROM music_ads WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Admin music ad deletion failed:', error);
+    res.status(500).json({ error: 'Müzik reklamı silinemedi.' });
+  }
+});
 
 // 6 haneli kod reklamverenin gizli panel anahtarıdır.
 app.get('/api/reklampanel/:code', async (req,res) => {

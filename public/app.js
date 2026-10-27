@@ -9429,11 +9429,12 @@ async function renderProfile(app, username) {
           const image = data.media_url || data.cover_image || data.cover_url || data.thumbnail_url || data.image_url || data.url || '';
           const date = data.created_at || item.updated_at || item.created_at;
           const labels = { song: 'Müzik', forum: 'Konu', book: 'Kitap', photo: 'Fotoğraf', story: 'Hikâye', newspaper: 'Gazete', poem: 'Şiir', video: 'Video', reals: 'Real', playlist: 'Çalma listesi' };
+          const canDeletePermanently = ['photo', 'story', 'song', 'video', 'reals', 'playlist', 'forum', 'book', 'newspaper'].includes(type);
           const actions = state === 'active'
             ? `<button type="button" class="profile-archive-action is-primary" data-archive-action="archive" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-box-archive"></i> Arşivle</button><button type="button" class="profile-archive-action is-danger" data-archive-action="trash" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-trash"></i> Sil</button>`
             : state === 'expired_stories'
               ? '<span class="profile-archive-expired"><i class="fas fa-clock"></i> Geri yüklenemez</span>'
-              : `<button type="button" class="profile-archive-action is-restore" data-archive-action="restore" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-rotate-left"></i> Geri yükle</button>`;
+              : `<button type="button" class="profile-archive-action is-restore" data-archive-action="restore" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-rotate-left"></i> Geri yükle</button>${state === 'trash' && canDeletePermanently ? `<button type="button" class="profile-archive-action is-danger" data-archive-action="delete_permanently" data-content-type="${escHtml(type)}" data-content-id="${escHtml(item.content_id)}"><i class="fas fa-trash"></i> Kalıcı sil</button>` : ''}`;
           return `<article class="profile-archive-card">
             ${image ? `<img class="profile-archive-cover" src="${escHtml(image)}" alt="" loading="lazy" />` : '<div class="profile-archive-cover profile-archive-cover-empty"><i class="fas fa-file-lines"></i></div>'}
             <div class="profile-archive-card-body">
@@ -9471,16 +9472,17 @@ async function renderProfile(app, username) {
       const action = button.dataset.archiveAction;
       const type = button.dataset.contentType;
       const id = button.dataset.contentId;
-      if (action === 'archive' || action === 'trash') {
+      if (action === 'archive' || action === 'trash' || action === 'delete_permanently') {
+        const deletingPermanently = action === 'delete_permanently';
         const overlay = document.createElement('div');
         overlay.className = 'profile-archive-confirm-overlay';
         overlay.innerHTML = `<section class="profile-archive-confirm" role="dialog" aria-modal="true" aria-labelledby="profile-archive-confirm-title">
           <span class="profile-archive-confirm-icon"><i class="fas ${action === 'archive' ? 'fa-box-archive' : 'fa-trash'}"></i></span>
-          <h2 id="profile-archive-confirm-title">${action === 'archive' ? 'Arşivlemek istiyor musun?' : 'Silmek istiyor musun?'}</h2>
-          <p>${action === 'archive' ? 'Bu içerik profilinden ve akışlardan gizlenecek. İstediğin zaman arşivinden geri alabilirsin.' : 'Bu içerik yalnızca Silinenler bölümünde görünecek. İstediğin zaman geri yükleyebilirsin.'}</p>
+          <h2 id="profile-archive-confirm-title">${action === 'archive' ? 'Arşivlemek istiyor musun?' : deletingPermanently ? 'Kalıcı olarak silinsin mi?' : 'Silmek istiyor musun?'}</h2>
+          <p>${action === 'archive' ? 'Bu içerik profilinden ve akışlardan gizlenecek. İstediğin zaman arşivinden geri alabilirsin.' : deletingPermanently ? 'Bu işlem geri alınamaz. İçerik ve Cloudinary dosyası kalıcı olarak silinecek.' : 'Bu içerik yalnızca Silinenler bölümünde görünecek. İstediğin zaman geri yükleyebilirsin.'}</p>
           <div class="profile-archive-confirm-actions">
             <button type="button" class="profile-archive-cancel">Vazgeç</button>
-            <button type="button" class="profile-archive-confirm-submit">${action === 'archive' ? 'Arşive al' : 'Sil'}</button>
+            <button type="button" class="profile-archive-confirm-submit">${action === 'archive' ? 'Arşive al' : deletingPermanently ? 'Kalıcı sil' : 'Sil'}</button>
           </div>
         </section>`;
         document.body.appendChild(overlay);
@@ -9505,7 +9507,7 @@ async function renderProfile(app, username) {
               body: JSON.stringify({ action })
             });
             close();
-            toast(action === 'archive' ? 'İçerik arşive alındı.' : 'İçerik Silinenler bölümüne taşındı.', 'success');
+            toast(action === 'archive' ? 'İçerik arşive alındı.' : deletingPermanently ? 'İçerik kalıcı olarak silindi.' : 'İçerik Silinenler bölümüne taşındı.', 'success');
             loadItems();
           } catch (error) {
             submitButton.disabled = false;
@@ -16275,9 +16277,11 @@ function bindMusicAdTracking(audio, song) {
 
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
-  activePhotoAudio?.pause();
-  activeStoryAudio?.pause();
-  storyComposerAudio?.pause();
+  const backgroundMusic = currentAudio?.musicResume?.type === 'song' ? currentAudio : null;
+  const audioElements = new Set([...managedMediaAudio, ...document.querySelectorAll('audio')]);
+  audioElements.forEach(audio => {
+    if (audio !== backgroundMusic) audio.pause();
+  });
   document.querySelectorAll('video').forEach(video => video.pause());
 });
 
