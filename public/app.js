@@ -9409,7 +9409,7 @@ async function renderProfile(app, username) {
       }
     } catch {}
   }
-  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true };
+  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers_list: true, following_list: true };
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (loadedFollowState) followState = loadedFollowState;
@@ -9422,7 +9422,7 @@ async function renderProfile(app, username) {
         followState = followState.following || followState.pending
           ? await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'DELETE' })
           : await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
-        button.textContent = user.is_private ? 'Takip isteği gönderildi' : (followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takiptesin' : 'Takip et'));
+        button.textContent = followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takiptesin' : 'Takip et');
         if (user.is_private && followState.pending) toast('Takip isteği gönderildi');
         button.classList.toggle('btn-outline', followState.following || followState.pending);
         button.classList.toggle('btn-primary', !followState.following && !followState.pending);
@@ -9435,9 +9435,9 @@ async function renderProfile(app, username) {
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
       <div class="profile-header-actions is-other">${profileBadgesButtonHTML(data.badges || [])}</div>
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
-      <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
+      <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>` : ''}</div></div></div>`;
+      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'İstek gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>` : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
     bindProfileAvatarViewer(app, user);
     bindFollowButton();
@@ -9532,8 +9532,8 @@ async function renderProfile(app, username) {
           ${combinedContentCount
             ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></button>`
             : ''}
-          ${profileVisibility.followers ? (profileVisibility.followers_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="followers"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`) : ''}
-          ${profileVisibility.following ? (profileVisibility.following_list !== false ? `<button class="profile-stat profile-follow-list" data-follow-list="following"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`) : ''}
+          ${profileVisibility.followers_list !== false ? `<button type="button" class="profile-stat profile-follow-list" data-follow-list="followers" aria-label="Takipçi listesini gör"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`}
+          ${profileVisibility.following_list !== false ? `<button type="button" class="profile-stat profile-follow-list" data-follow-list="following" aria-label="Takip ettiklerini gör"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`}
           ${!combinedContentCount ? `${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
               ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
               ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
@@ -10033,7 +10033,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
-        <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
+        ${(currentUser.is_vip || currentUser.is_plus) ? '<div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>' : ''}
         <div class="settings-nav-item" data-section="messages"><i class="fas fa-comments"></i> Mesajlar</div>
         <div class="settings-nav-item" data-section="account-status"><i class="fas fa-user-shield"></i> Hesap Durumu</div>
         <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-sliders"></i> Profil Seçenekleri</div>
@@ -10067,6 +10067,10 @@ async function renderSettings(app) {
 
 async function renderSettingsSection(section) {
   const el = $('#settings-content'); if (!el) return;
+  if (section === 'appearance' && !currentUser?.is_vip && !currentUser?.is_plus) {
+    renderSettingsSection('profile');
+    return;
+  }
   if (section === 'profile') {
     let selectedAvatarFile = null;
     const links = (() => { try { return JSON.parse(currentUser.links || '[]'); } catch { return []; } })();
@@ -10805,28 +10809,53 @@ async function renderSettingsSection(section) {
       try { toast('Bu eski ayar artık kullanılmıyor'); } catch (error) { $('#homepage-msg').textContent = error.message; }
     });
   } else if (section === 'profile-visibility') {
-    let visibility = { forums: true, books: true, comments: true, photos: true, music: true, followers: true, following: true, followers_list: true, following_list: true };
-    try { visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility }; } catch {}
+    let visibility = { forums: true, books: true, comments: true, photos: true, music: true, followers_list: true, following_list: true };
+    try {
+      visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility };
+    } catch (error) {
+      el.innerHTML = `<div class="card"><div class="card-body"><div class="form-error">${escHtml(error.message || 'Profil seçenekleri yüklenemedi.')}</div></div></div>`;
+      return;
+    }
     let combinedContentCount = false;
     try {
       const response = await fetch('/api/settings/public');
       if (!response.ok) throw new Error('Site ayarları yüklenemedi');
       combinedContentCount = (await response.json()).content_count_combined === '1';
-    } catch (error) { console.error('Profil ayarları yüklenemedi:', error); }
-    const items = [
-      ['followers', 'Takipçi sayımı', 'Profilindeki takipçi sayısını göster', 'fas fa-user-plus'],
-      ['following', 'Takip sayımı', 'Profilindeki takip edilen sayısını göster', 'fas fa-user-check'],
-      ...(!combinedContentCount ? [
-        ['forums', 'Forum sayısı', 'Profilindeki forum/konu sayısını göster', 'fas fa-comments'],
-        ['books', 'Kitap sayısı', 'Profilindeki kitap sayısını göster', 'fas fa-book'],
-        ['comments', 'Yorum sayısı', 'Profilindeki yorum sayısını göster', 'fas fa-comment'],
-        ['photos', 'Fotoğraf sayısı', 'Profilindeki fotoğraf sayısını göster', 'fas fa-images'],
-        ['music', 'Müzik sayısı', 'Profilindeki müzik sayısını göster', 'fas fa-music']
-      ] : [])
+    } catch (error) {
+      el.innerHTML = `<div class="card"><div class="card-body"><div class="form-error">${escHtml(error.message || 'Profil seçenekleri yüklenemedi.')}</div></div></div>`;
+      return;
+    }
+    const renderOption = ([id, title, desc, icon]) => `<label class="profile-visibility-option">
+      <span class="profile-visibility-icon"><i class="${icon}"></i></span>
+      <span><b>${title}</b><small>${desc}</small></span>
+      <input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} />
+    </label>`;
+    const contentItems = combinedContentCount ? [] : [
+      ['forums', 'Forum konuları', 'Profilinde forum ve konu sayısını göster', 'fas fa-comments'],
+      ['books', 'Kitaplar', 'Profilinde kitap sayısını göster', 'fas fa-book'],
+      ['comments', 'Yorumlar', 'Profilinde yorum sayısını göster', 'fas fa-comment'],
+      ['photos', 'Medya', 'Profilinde fotoğraf ve video sayısını göster', 'fas fa-images'],
+      ['music', 'Müzikler', 'Profilinde müzik sayısını göster', 'fas fa-music']
     ];
-    items.push(['followers_list', 'Takipçileri göster', 'Takipçi listesini profilinden aç', 'fas fa-users']);
-    items.push(['following_list', 'Takip ettiklerini göster', 'Takip edilenler listesini profilinden aç', 'fas fa-user-check']);
-    el.innerHTML = `<div class="card profile-visibility-card"><div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:6px"></i>Profil Ayarları</span></div><div class="card-body"><p class="settings-help">Profilinde hangi bilgilerin ve listelerin görüneceğini seç.</p><div class="profile-visibility-list">${items.map(([id, title, desc, icon]) => `<label class="profile-visibility-option"><span class="profile-visibility-icon"><i class="${icon}"></i></span><span><b>${title}</b><small>${desc}</small></span><input type="checkbox" data-visibility="${id}" ${visibility[id] !== false ? 'checked' : ''} /></label>`).join('')}</div><div class="settings-autosave-status" id="profile-visibility-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div></div></div>`;
+    const followItems = [
+      ['followers_list', 'Takipçi listesi', 'Takipçilerini profilinden açılabilir yap', 'fas fa-users'],
+      ['following_list', 'Takip edilenler listesi', 'Takip ettiklerini profilinden açılabilir yap', 'fas fa-user-check']
+    ];
+    el.innerHTML = `<div class="card profile-visibility-card">
+      <div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:8px"></i>Profil seçenekleri</span></div>
+      <div class="card-body">
+        <p class="settings-help">Profilinde hangi içeriklerin ve listelerin görüneceğini buradan seç.</p>
+        ${contentItems.length ? `<section class="profile-preference-group">
+          <div class="profile-preference-heading"><strong>Profilde gösterilenler</strong><small>İçerik sayılarını profilinde göster veya gizle.</small></div>
+          <div class="profile-visibility-list">${contentItems.map(renderOption).join('')}</div>
+        </section>` : ''}
+        <section class="profile-preference-group">
+          <div class="profile-preference-heading"><strong>Takipçi listeleri</strong><small>Takipçi ve takip edilen listelerinin açılabilirliğini yönet.</small></div>
+          <div class="profile-visibility-list">${followItems.map(renderOption).join('')}</div>
+        </section>
+        <div class="settings-autosave-status" id="profile-visibility-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
+      </div>
+    </div>`;
     let visibilitySaving = false;
     el.querySelectorAll('[data-visibility]').forEach(input => input.addEventListener('change', async () => {
       if (visibilitySaving) return;
@@ -11106,35 +11135,34 @@ async function renderSettingsSection(section) {
     });
   } else if (section === 'account') {
     el.innerHTML = `
-      <div class="card" style="border-color:rgba(220,38,38,0.3)">
-        <div class="card-header" style="background:rgba(220,38,38,0.06)">
-          <span style="color:var(--accent-red2)"><i class="fas fa-exclamation-triangle"></i> Tehlikeli Bölge</span>
+      <div class="card account-delete-card">
+        <div class="card-header account-delete-header">
+          <span><i class="fas fa-triangle-exclamation"></i> Dikkat!!</span>
         </div>
         <div class="card-body">
-          <div style="font-size:14px;font-weight:600;margin-bottom:8px">Hesabı Sil</div>
-          <ul style="font-size:13px;color:var(--text-secondary);margin:0 0 16px 18px;line-height:1.8">
-            <li>Silme talebinden sonra içeriklerin (forum, kitap, yorumlar) hemen gizlenir</li>
-            <li>Hesap <strong>10 gün</strong> içinde kalıcı olarak silinir</li>
-            <li>10 gün içinde giriş yaparak silme işlemini iptal edebilirsin</li>
-            <li>Bu işlem geri alınamazsa tüm veriler kalıcı silinir</li>
-          </ul>
-          <div class="form-group">
+          <section class="account-delete-notice">
+            <span class="account-delete-notice-icon"><i class="fas fa-user-xmark" aria-hidden="true"></i></span>
+            <div><strong>Hesap silme talebi</strong><p>Talep gönderilince profilindeki içerikler hemen gizlenir. Hesabın 10 gün sonra kalıcı olarak silinir. Bu süre içinde tekrar giriş yaparak talebi iptal edebilirsin.</p></div>
+          </section>
+          <div class="form-group account-delete-password">
             <label>Şifreni Girerek Onayla</label>
             <div style="position:relative">
-              <input type="password" id="delete-pw" placeholder="••••••" style="padding-right:40px" />
+              <input type="password" id="delete-pw" autocomplete="current-password" placeholder="Hesap şifren" style="padding-right:40px" />
               <button type="button" id="delete-pw-toggle" tabindex="-1" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px;font-size:14px">
                 <i class="fas fa-eye" id="delete-pw-icon"></i>
               </button>
             </div>
           </div>
-          <div class="form-group">
+          <div class="form-group account-delete-confirm">
             <label class="checkbox-label">
               <input type="checkbox" id="delete-confirm-cb" />
-              <span>Hesabımın silineceğini ve bu işlemin 10 gün içinde geri alınabileceğini anlıyorum</span>
+              <span>Hesabımın 10 gün sonra kalıcı olarak silineceğini ve bu sürede talebi iptal edebileceğimi anlıyorum.</span>
             </label>
           </div>
-          <button class="btn btn-danger" id="delete-account-btn" style="width:100%;justify-content:center;background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.4);color:var(--accent-red2)">
-            <i class="fas fa-trash-alt"></i> Hesabımı Silmek İstiyorum
+          <button type="button" class="account-delete-action" id="delete-account-btn">
+            <span class="account-delete-action-icon"><i class="fas fa-trash-can" aria-hidden="true"></i></span>
+            <span><strong>Silme talebi oluştur</strong><small>İşlemden önce şifreni ve onay kutusunu doğrula</small></span>
+            <i class="fas fa-arrow-right account-delete-action-arrow" aria-hidden="true"></i>
           </button>
           <div id="delete-msg" class="form-error mt-4" style="text-align:center"></div>
         </div>
@@ -11155,7 +11183,9 @@ async function renderSettingsSection(section) {
       if (!confirmed) { msg.textContent = 'Onay kutusunu işaretleyin'; return; }
       if (!await CigCigDialogs.confirm('Emin misiniz? Hesabınız ve içerikleriniz gizlenecek, 10 gün içinde kalıcı silinecek.')) return;
       const btn = $('#delete-account-btn');
-      btn.disabled = true; btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div>';
+      const idleMarkup = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner" aria-hidden="true"></span><span><strong>Talep gönderiliyor…</strong></span>';
       try {
         await api('/auth/request-delete', { method: 'POST', body: JSON.stringify({ password: pw }) });
         // Oturumu kapat
@@ -11168,7 +11198,7 @@ async function renderSettingsSection(section) {
       } catch(e) {
         msg.textContent = e.message;
         btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-trash-alt"></i> Hesabımı Silmek İstiyorum';
+        btn.innerHTML = idleMarkup;
       }
     });
   }
@@ -12580,8 +12610,8 @@ async function renderMessages(app, targetUsername) {
                 <span class="dm-suggestion-avatar">${avatar}</span>
                 <span class="dm-suggestion-copy"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
               </a>
-              <button type="button" class="dm-suggestion-add${requestStatus ? ' is-sent' : ''}" data-username="${escHtml(user.username)}" aria-label="${escHtml(user.nickname || user.username)} kişisine istek gönder"${requestStatus ? ' disabled' : ''}>
-                <i class="fas fa-${requestStatus ? 'check' : 'plus'}" aria-hidden="true"></i><span>${requestStatus ? escHtml(requestStatus) : 'İstek gönder'}</span>
+              <button type="button" class="dm-suggestion-add${requestStatus ? ' is-sent' : ''}" data-username="${escHtml(user.username)}" aria-label="${escHtml(user.nickname || user.username)} kişisini takip et"${requestStatus ? ' disabled' : ''}>
+                <i class="fas fa-${requestStatus ? 'check' : 'user-plus'}" aria-hidden="true"></i><span>${requestStatus ? escHtml(requestStatus) : 'Takip et'}</span>
               </button>
             </article>`;
             }).join('')}</div>`
