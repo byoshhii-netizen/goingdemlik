@@ -9458,14 +9458,14 @@ async function renderProfile(app, username) {
       ? api('/users/' + encodeURIComponent(user.username || username) + '/follow-status').catch(() => null)
       : Promise.resolve(null)
   ]);
-  let profileTabOrder = ['forums', 'books', 'photos', 'groups', 'videos', 'reals', 'saved', 'songs', 'archive'];
+  let profileTabOrder = ['forums', 'books', 'photos', 'videos', 'reals', 'saved', 'songs', 'archive'];
   let combinedContentCount = false;
   if (settings) {
     combinedContentCount = settings.content_count_combined === '1';
     try {
       const configured = JSON.parse(settings.profile_tabs || '[]');
       if (Array.isArray(configured)) {
-        const configuredWithoutVideos = configured.filter(tab => tab !== 'videos' && tab !== 'badges');
+        const configuredWithoutVideos = configured.filter(tab => tab !== 'videos' && tab !== 'badges' && tab !== 'groups');
         profileTabOrder = [...configuredWithoutVideos, ...profileTabOrder.filter(tab => !configuredWithoutVideos.includes(tab))];
       }
     } catch {}
@@ -9610,7 +9610,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab]}</button>` : '').join('')}</div>
+    <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Konular', books:'Kitaplar', photos:'Medya', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Konular', books:'Kitaplar', photos:'Medya', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => profileArchiveCard('forum', f.id, forumCardHTML(f))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -9830,7 +9830,6 @@ async function renderProfile(app, username) {
         searchInput.focus();
       });
       rows.forEach(row => row.addEventListener('click', () => hideModal(), { once: true }));
-      searchInput?.focus();
     } catch (e) { toast(e.message, 'error'); }
   }));
 
@@ -19403,7 +19402,7 @@ async function renderMyPlaylists(app) {
       <div class="page-title my-playlists-title">
         <i class="fas fa-list" aria-hidden="true"></i> Playlistlerim
       </div>
-      <button class="btn btn-primary btn-sm my-playlists-create" id="pl-create-btn"><i class="fas fa-plus"></i> Playlist Oluştur</button>
+      <button class="btn btn-primary btn-sm my-playlists-create" id="pl-create-btn" aria-label="Playlist oluştur"><i class="fas fa-plus"></i> Oluştur</button>
     </div>
     <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
   </div>`;

@@ -5530,7 +5530,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .playlist-picker-empty-icon { display:grid; place-items:center; width:52px; height:52px; border:1px solid rgba(var(--accent-rgb),.25); border-radius:16px; color:var(--accent-red2); background:rgba(var(--accent-rgb),.09); font-size:21px; }
 .playlist-picker-empty strong { color:var(--text-primary); font-size:16px; }
 .playlist-picker-empty p { max-width:320px; line-height:1.55; }
-.playlist-picker-empty .btn { margin-top:4px; }
+.playlist-picker-empty .btn { display:flex; width:min(100%,300px); min-height:46px; box-sizing:border-box; align-items:center; justify-content:center; margin-top:4px; padding:10px 14px; text-align:center; white-space:normal; }
 @media (max-width:600px) {
   .modal.playlist-picker-modal { max-height:88dvh; }
   .playlist-picker-modal .modal-header { padding-bottom:13px; }
@@ -5538,6 +5538,11 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .playlist-picker-list { grid-template-columns:minmax(0,1fr); gap:7px; }
   .playlist-picker-card { min-height:70px; }
   .playlist-picker-cover { width:50px; height:50px; flex-basis:50px; }
+}
+@media (max-width:768px) {
+  .my-playlists-header { flex-direction:row !important; align-items:center !important; justify-content:space-between !important; flex-wrap:nowrap !important; gap:8px !important; margin-bottom:18px; }
+  .my-playlists-title { gap:7px; font-size:clamp(18px,5vw,23px); line-height:1.2; }
+  .page-header.my-playlists-header > .my-playlists-create { display:inline-flex !important; flex:0 0 auto !important; align-items:center; justify-content:center; min-height:42px; gap:6px; padding:0 12px; font-size:11px; }
 }
 
 /* Playlist search modal row */
@@ -7029,9 +7034,10 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
     align-items:center;
     justify-content:center;
     width:100%;
-    height:auto;
+    height:min(56dvh,440px);
+    max-height:56dvh;
     min-height:0;
-    aspect-ratio:3 / 4;
+    aspect-ratio:auto;
     background:#080808;
   }
   .photos-feed .photo-media-backdrop { display:block; }
