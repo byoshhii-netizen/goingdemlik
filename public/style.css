@@ -2177,8 +2177,8 @@ body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; pad
   }
   .profile-header-actions.is-other { top:66px; }
   .profile-header-actions .profile-admin-icon-btn { position:static;grid-column:1;grid-row:1; }
-  .profile-header-actions .profile-edit-settings-btn { grid-column:2;grid-row:1; }
-  .profile-header-actions.is-own .profile-badges-icon-button { grid-column:2;grid-row:2; }
+  .profile-header-actions .profile-edit-settings-btn { grid-column:2;grid-row:2; }
+  .profile-header-actions.is-own .profile-badges-icon-button { grid-column:2;grid-row:1; }
   .profile-header-actions.is-other .profile-badges-icon-button { grid-column:2;grid-row:1; }
 }
 .profile-badge {
