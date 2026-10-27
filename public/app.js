@@ -6851,6 +6851,28 @@ function groupCardHTML(g) {
   </div>`;
 }
 
+function groupVisibilityOptionsHTML(selectedVisibility, idPrefix) {
+  const isPrivate = selectedVisibility === 'private';
+  return `<div class="group-visibility-options" role="radiogroup" aria-label="Grup görünürlüğü">
+    <label class="group-visibility-option" for="${idPrefix}-public">
+      <input type="radio" name="group-visibility" id="${idPrefix}-public" value="public" ${!isPrivate ? 'checked' : ''} />
+      <span class="group-visibility-option-card">
+        <span class="group-visibility-option-icon"><i class="fas fa-globe" aria-hidden="true"></i></span>
+        <span class="group-visibility-option-copy"><strong>Herkese açık</strong><small>Herkes grubu bulup direkt katılabilir</small></span>
+        <span class="group-visibility-option-check"><i class="fas fa-check" aria-hidden="true"></i></span>
+      </span>
+    </label>
+    <label class="group-visibility-option" for="${idPrefix}-private">
+      <input type="radio" name="group-visibility" id="${idPrefix}-private" value="private" ${isPrivate ? 'checked' : ''} />
+      <span class="group-visibility-option-card">
+        <span class="group-visibility-option-icon"><i class="fas fa-lock" aria-hidden="true"></i></span>
+        <span class="group-visibility-option-copy"><strong>Gizli grup</strong><small>Listelerde görünmez, yalnızca davet koduyla katılım</small></span>
+        <span class="group-visibility-option-check"><i class="fas fa-check" aria-hidden="true"></i></span>
+      </span>
+    </label>
+  </div>`;
+}
+
 function showNewGroupModal() {
   showModal('Yeni Grup', `
     <div class="form-group"><label>Grup Adı</label><input id="gr-name" type="text" /></div>
@@ -6866,7 +6888,7 @@ function showNewGroupModal() {
       <input type="file" id="gr-cover-file" accept="image/*" style="margin-bottom:8px" />
       <div id="gr-cover-preview" style="display:none"></div>
     </div>
-    <div class="form-group"><label>Bu tür</label><select id="gr-visibility"><option value="public">Herkese açık · Herkes direkt katılabilir</option><option value="private">Gizli · Listelerde görünmez, kod ile girilir</option></select></div>
+    <div class="form-group"><label>Grup görünürlüğü</label>${groupVisibilityOptionsHTML('public', 'gr-visibility')}</div>
     <div class="form-group">
       <label class="checkbox-label"><input type="checkbox" id="gr-chat" checked /> Sohbete izin ver</label>
       <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gr-photos" checked /> Fotoğrafa izin ver</label>
@@ -6926,7 +6948,7 @@ function showNewGroupModal() {
         const r = await apiForm('/upload', fd);
         logo_url = r.url;
       }
-      const visibility = $('#gr-visibility').value;
+      const visibility = document.querySelector('input[name="group-visibility"]:checked')?.value || 'public';
       const g = await api('/groups', { method: 'POST', body: JSON.stringify({ name, description: $('#gr-desc').value.trim(), cover_image, banner_image, logo_url, visibility, allow_chat: $('#gr-chat').checked, allow_photos: $('#gr-photos').checked }) });
       toast('Grup oluşturuldu'); hideModal(); navigate('/grup/' + g.slug);
     } catch (e) { $('#gr-error').textContent = e.message; }
@@ -7812,7 +7834,7 @@ async function renderGroupDetail(app, slug) {
         <input type="file" id="gs-cover-file" accept="image/*" style="margin-bottom:8px" />
         ${group.cover_image ? `<img id="gs-cover-preview" src="${escHtml(group.cover_image)}" style="width:100%;max-height:120px;object-fit:cover;border-radius:8px" />` : `<div id="gs-cover-preview" style="display:none"></div>`}
       </div>
-      <div class="form-group"><label>Bu tür</label><select id="gs-visibility"><option value="public" ${visibility === 'public' ? 'selected' : ''}>Herkese açık</option><option value="private" ${visibility === 'private' ? 'selected' : ''}>Gizli · Kod ile</option></select></div>
+      <div class="form-group"><label>Grup görünürlüğü</label>${groupVisibilityOptionsHTML(visibility, 'gs-visibility')}</div>
       <div class="form-group">
         <label class="checkbox-label"><input type="checkbox" id="gs-chat" ${group.allow_chat ? 'checked' : ''} /> Sohbet</label>
         <label class="checkbox-label" style="margin-top:8px"><input type="checkbox" id="gs-photos" ${group.allow_photos ? 'checked' : ''} /> Fotoğraf</label>
@@ -7858,7 +7880,8 @@ async function renderGroupDetail(app, slug) {
           const r = await apiForm('/upload', fd);
           cover_image = r.url;
         }
-        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, banner_image, visibility: $('#gs-visibility').value, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
+        const visibility = document.querySelector('input[name="group-visibility"]:checked')?.value || 'public';
+        await api('/group/' + slug, { method: 'PUT', body: JSON.stringify({ name: $('#gs-name').value.trim(), description: $('#gs-desc').value.trim(), cover_image, banner_image, visibility, allow_chat: $('#gs-chat').checked, allow_photos: $('#gs-photos').checked }) });
         toast('Grup güncellendi'); hideModal(); renderRoute(location.pathname);
       } catch (e) { $('#gs-error').textContent = e.message; }
     });
