@@ -9479,8 +9479,8 @@ async function renderProfile(app, username) {
       <div class="profile-avatar-wrap">
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
-      ${isOwn && currentUser?.is_admin ? '<a href="/gubukgak" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
       <div class="profile-header-actions${isOwn ? ' is-own' : ' is-other'}">
+        ${isOwn && currentUser?.is_admin ? '<a href="/gubukgak" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
         ${isOwn ? '<a href="/ayarlar" data-link class="profile-edit-settings-btn" aria-label="Profili düzenle" title="Profili düzenle"><i class="fas fa-gear" aria-hidden="true"></i></a>' : ''}
         ${profileBadgesButtonHTML(badges)}
       </div>
