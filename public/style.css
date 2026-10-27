@@ -1142,7 +1142,11 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .photo-sheet-comment-actions .photo-sheet-comment-like.liked { color:var(--accent-red2); }
 .photo-comments-sheet .reals-comment-login a { color:var(--accent-red2); }
 .reals-comment-form { display:flex; gap:8px; padding:12px 14px max(12px,env(safe-area-inset-bottom)); border-top:1px solid var(--border); background:#111; }
-.reals-comment-form textarea { min-width:0;min-height:42px;max-height:120px;flex:1;resize:vertical;border-radius:21px;padding:10px 15px;line-height:1.4; }
+.reals-comment-form textarea {
+  box-sizing:border-box;min-width:0;min-height:42px;max-height:120px;flex:1;resize:none;
+  overflow-y:hidden;scrollbar-width:none;border-radius:21px;padding:10px 15px;line-height:1.4;
+}
+.reals-comment-form textarea::-webkit-scrollbar { display:none; }
 .reals-comment-form button { align-self:flex-end;flex:0 0 42px;width:42px;height:42px;border:1px solid var(--accent-red2) !important;border-radius:50%;background:var(--accent-red) !important;color:#171717 !important;cursor:pointer;box-shadow:0 2px 10px rgba(var(--accent-rgb),.28); }
 .reals-comment-form button:disabled { opacity:.6; cursor:wait; }
 .reals-comment-login, .reals-comments-empty { padding:28px 16px; text-align:center; color:var(--text-muted); }

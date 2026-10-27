@@ -1895,6 +1895,15 @@ async function renderRealsFeed(app, initialId = null) {
     sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
     sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
     const list = sheet.querySelector('.reals-comments-list');
+    const commentInput = sheet.querySelector('.reals-comment-form textarea');
+    const resizeCommentInput = () => {
+      if (!commentInput) return;
+      commentInput.style.height = '42px';
+      const height = Math.min(commentInput.scrollHeight, 120);
+      commentInput.style.height = `${height}px`;
+      commentInput.style.overflowY = commentInput.scrollHeight > 120 ? 'auto' : 'hidden';
+    };
+    commentInput?.addEventListener('input', resizeCommentInput);
     let comments = [];
     const updateCommentCount = count => {
       const total = Math.max(0, Number(count) || 0);
@@ -1975,6 +1984,7 @@ async function renderRealsFeed(app, initialId = null) {
         renderComments(comments);
         updateCommentCount(result.comment_count);
         input.value = '';
+        resizeCommentInput();
         list.scrollTop = list.scrollHeight;
       } catch (error) { toast(error.message, 'error'); } finally { button.disabled = false; }
     });
