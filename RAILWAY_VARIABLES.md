@@ -67,4 +67,4 @@ Müzik sözlerini OpenAI Whisper ile otomatik çıkarmak için `OPENAI_API_KEY` 
 
 E-posta kodlari Resend API ile gonderilir. Resend'de alan adini dogrulayip bir API key olusturun, sonra yukaridaki `RESEND_API_KEY` ve `EMAIL_FROM` degiskenlerini Railway > Service > Variables alanina ekleyin. `EMAIL_FROM` icindeki alan adi Resend'de dogrulanmis olmalidir.
 
-Kullanicilarin kayit veya ayarlardan e-posta kodlu 2AD kullanabilmesi icin `APP_SECRET` de zorunludur. Bu degeri sonradan degistirmek mevcut bekleyen kodlari gecersizlestirir; eski degeri kaybetmeyin.
+Kullanicilarin kayit veya ayarlardan e-posta kodlu 2AD kullanabilmesi ve Ultra Ban sinyallerinin HMAC ile korunmasi icin `APP_SECRET` zorunludur. Degeri sabit tutun: sonradan degistirmek bekleyen dogrulama kodlarini ve mevcut Ultra Ban sinyal eslesmelerini gecersizlestirir. Eski degeri kaybetmeyin.

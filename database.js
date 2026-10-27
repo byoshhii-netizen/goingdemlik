@@ -203,6 +203,25 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
     );
+    CREATE TABLE IF NOT EXISTS user_access_signals (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      signal_type TEXT NOT NULL,
+      signal_hash TEXT NOT NULL,
+      last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, signal_type, signal_hash)
+    );
+    CREATE TABLE IF NOT EXISTS ultra_ban_signals (
+      target_user_id BIGINT NOT NULL,
+      signal_type TEXT NOT NULL,
+      signal_hash TEXT NOT NULL,
+      created_by BIGINT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      revoked_at TIMESTAMP,
+      PRIMARY KEY (target_user_id, signal_type, signal_hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ultra_ban_signals_active_hash
+      ON ultra_ban_signals(signal_type, signal_hash) WHERE is_active=1;
     CREATE TABLE IF NOT EXISTS auth_challenges (
       id BIGSERIAL PRIMARY KEY,
       challenge_hash TEXT UNIQUE NOT NULL,
@@ -1798,7 +1817,7 @@ TeaTube olarak, 6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında k
 TeaTube platformu, veri sorumlusu sıfatıyla hareket etmektedir.
 
 2. İŞLENEN KİŞİSEL VERİLER
-Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) işlenmektedir.
+Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) ve hesap güvenliği için Ultra Ban kapsamında IP alt ağı ile tarayıcı özelliklerinden sunucu anahtarı kullanılarak üretilen özetler işlenmektedir.
 
 3. KİŞİSEL VERİLERİN İŞLENME AMACI
 Kişisel verileriniz; platform hizmetlerinin sunulması, hesap yönetimi, güvenlik ve sahteciliğin önlenmesi amacıyla işlenmektedir.

@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const { randomUUID } = require('crypto');
 const crypto = require('crypto');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 const { once } = require('events');
@@ -143,7 +144,7 @@ app.get('/ads.txt', (req, res) => {
 const SITE_URL = process.env.SITE_URL || 'https://cigcig.xyz';
 const APP_SECRET = String(process.env.APP_SECRET || '').trim();
 if (!APP_SECRET) {
-  console.warn('[SECURITY] APP_SECRET is not configured. Email verification and challenge hashing will remain unavailable until APP_SECRET is set.');
+  console.warn('[SECURITY] APP_SECRET is not configured. Email verification, challenge hashing and Ultra Ban signals are unavailable until APP_SECRET is set.');
 }
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const EMAIL_FROM = process.env.EMAIL_FROM || '';
@@ -221,6 +222,33 @@ app.use('/api/auth', authLimiter);
 app.use(['/api/admin/auth', '/api/reklampanel'], adminAuthLimiter);
 app.use('/api/vmb-admin/auth', vmbAdminAuthLimiter);
 
+app.use('/api', async (req, res, next) => {
+  if (!APP_SECRET) return next();
+  try {
+    const signals = getUltraBanSignals(req);
+    if (!signals.length) return next();
+    const conditions = signals.map((signal, index) => {
+      const offset = index * 2;
+      return `(signal_type=$${offset + 1} AND signal_hash=$${offset + 2})`;
+    });
+    const values = signals.flatMap(signal => [signal.type, signal.hash]);
+    const { rows } = await query(
+      `SELECT target_user_id FROM ultra_ban_signals
+       WHERE is_active=1 AND (${conditions.join(' OR ')}) LIMIT 1`,
+      values
+    );
+    if (!rows.length) return next();
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(403).json({
+      error: 'Site verileri yüklenemiyor',
+      code: 'ULTRA_BANNED'
+    });
+  } catch (error) {
+    console.error('Ultra ban kontrolü başarısız:', error.message);
+    return res.status(503).json({ error: 'Site verileri şu anda yüklenemiyor.' });
+  }
+});
+
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -233,7 +261,57 @@ function normalizeMediaFilter(value) {
 }
 
 function getIp(req) {
-  return (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || '').split(',')[0].trim();
+  return String(req.ip || '').trim();
+}
+
+function hashUltraBanSignal(type, value) {
+  if (!APP_SECRET) throw new Error('Ultra Ban için APP_SECRET yapılandırılmalıdır.');
+  return crypto.createHmac('sha256', APP_SECRET)
+    .update(`ultra-ban:${type}:${value}`)
+    .digest('hex');
+}
+
+function getUltraBanSignals(req) {
+  const signals = [];
+  let ip = getIp(req).toLowerCase();
+  const mappedIpv4 = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (mappedIpv4) ip = mappedIpv4[1];
+  if (net.isIP(ip) === 4) {
+    const octets = ip.split('.');
+    signals.push({ type: 'ipv4_subnet', value: `${octets[0]}.${octets[1]}.${octets[2]}.0/24` });
+  } else if (net.isIP(ip) === 6 && !ip.includes('.')) {
+    const [leftValue, rightValue = ''] = ip.split('::');
+    const left = leftValue ? leftValue.split(':') : [];
+    const right = rightValue ? rightValue.split(':') : [];
+    const groups = [...left, ...Array(8 - left.length - right.length).fill('0'), ...right];
+    if (groups.length === 8) {
+      const prefix = groups.slice(0, 4)
+        .map(group => Number.parseInt(group || '0', 16).toString(16).padStart(4, '0'))
+        .join(':');
+      signals.push({ type: 'ipv6_subnet', value: `${prefix}::/64` });
+    }
+  }
+  const fingerprint = String(req.get('x-device-fingerprint') || '').toLowerCase();
+  if (/^[a-f0-9]{64}$/.test(fingerprint)) {
+    signals.push({ type: 'device_fingerprint', value: fingerprint });
+  }
+  return signals.map(signal => ({
+    type: signal.type,
+    hash: hashUltraBanSignal(signal.type, signal.value)
+  }));
+}
+
+async function recordUserAccessSignals(userId, req) {
+  if (!APP_SECRET) return;
+  for (const signal of getUltraBanSignals(req)) {
+    await query(
+      `INSERT INTO user_access_signals(user_id,signal_type,signal_hash)
+       VALUES($1,$2,$3)
+       ON CONFLICT(user_id,signal_type,signal_hash)
+       DO UPDATE SET last_seen_at=NOW()`,
+      [userId, signal.type, signal.hash]
+    );
+  }
 }
 
 function getClientInfo(req) {
@@ -775,6 +853,7 @@ async function adminMiddleware(req, res, next) {
   if (req.method !== 'GET') {
     const allowed = [
       /^\/api\/admin\/user\/\d+\/2fa$/,
+      /^\/api\/admin\/user\/\d+\/(ban|unban)$/,
       /^\/api\/admin\/user\/\d+\/ad-panels(?:\/\d+)?$/,
       /^\/api\/admin\/account-deletions\/\d+\/cancel$/,
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
@@ -787,6 +866,8 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/levels?(?:\/\d+)?$/
     ];
     if (!allowed.some(pattern => pattern.test(req.path))) return res.status(403).json({ error: 'Bu işlem ana admin yetkisi gerektirir' });
+    if (/\/user\/\d+\/(ban|unban)$/.test(req.path) && !hasAdminPermission(permissions, 'can_ban_users')) return res.status(403).json({ error: 'Kullanıcı banlama yetkiniz yok' });
+    if (/\/user\/\d+\/ban$/.test(req.path) && req.body?.ban_type === 'ultra' && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Ultra Ban yalnızca ana admin tarafından uygulanabilir' });
     if (/\/restrictions/.test(req.path) && !permissions.can_restrict_users) return res.status(403).json({ error: 'Kullanıcı kısıtlama yetkisi yok' });
     if (/\/user\/\d+\/ad-panels/.test(req.path) && !hasAdminPermission(permissions, 'can_view_users')) return res.status(403).json({ error: 'Üye yönetimi yetkisi yok' });
     if (/\/invite-codes/.test(req.path) && !hasAdminPermission(permissions, 'can_view_users')) return res.status(403).json({ error: 'Davet kodu yönetme yetkisi yok' });
@@ -2015,6 +2096,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     await trackInviteRegistration(inviteCode, user, ip);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
+    await recordUserAccessSignals(user.id, req);
     await logAction(usernameValue, 'register', '', '', ip);
     setSessionCookie(res, token);
     res.json({ token, user: sanitizeUserForFeatures(user, await getSiteFeatureStates()) });
@@ -2064,6 +2146,7 @@ app.post('/api/auth/login', async (req, res) => {
     await query('UPDATE users SET last_active=NOW(), ip=$1 WHERE id=$2', [ip, user.id]);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
+    await recordUserAccessSignals(user.id, req);
     await logAction(user.username, 'login', '', '', ip);
     setSessionCookie(res, token);
     res.json({ token, user: sanitizeUserForFeatures(user, await getSiteFeatureStates()) });
@@ -2080,6 +2163,7 @@ app.post('/api/auth/2fa/verify', async (req, res) => {
     const { rows } = await query('SELECT * FROM users WHERE id=(SELECT user_id FROM sessions WHERE token=$1) LIMIT 1', [token]);
     if (!rows.length) return res.status(401).json({ error: 'Oturum oluşturulamadı' });
     await query('UPDATE users SET last_active=NOW() WHERE id=$1', [rows[0].id]);
+    await recordUserAccessSignals(rows[0].id, req);
     setSessionCookie(res, token);
     res.json({ token, user: sanitizeUserForFeatures(rows[0], await getSiteFeatureStates()) });
   } catch (e) { res.status(500).json({ error: 'Doğrulama işlemi başarısız' }); }
@@ -7167,18 +7251,64 @@ app.post('/api/admin/user/:id/ban', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const user = rows[0];
-  const { ban_type } = req.body;
+  const banType = String(req.body?.ban_type || 'soft');
+  if (!['soft', 'ip', 'ultra'].includes(banType)) return res.status(400).json({ error: 'Geçersiz ban türü' });
+  if (banType === 'ultra') {
+    if (!APP_SECRET) return res.status(503).json({ error: 'Ultra Ban için sunucuda APP_SECRET yapılandırılmalıdır.' });
+    if (!pool) return res.status(503).json({ error: 'Ultra Ban için veritabanı bağlantısı gerekli.' });
+    const { rows: savedSignals } = await query(
+      'SELECT signal_type AS type, signal_hash AS hash FROM user_access_signals WHERE user_id=$1',
+      [user.id]
+    );
+    const targetIpSignals = user.ip
+      ? getUltraBanSignals({ ip: user.ip, get: () => '' })
+      : [];
+    const signals = [...new Map(
+      [...savedSignals, ...targetIpSignals].map(signal => [`${signal.type}:${signal.hash}`, signal])
+    ).values()];
+    if (!signals.length) {
+      return res.status(400).json({ error: 'Bu kullanıcı için engellenecek IP veya tarayıcı sinyali bulunamadı.' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const signal of signals) {
+        await client.query(
+          `INSERT INTO ultra_ban_signals(target_user_id,signal_type,signal_hash,created_by,is_active,revoked_at)
+           VALUES($1,$2,$3,$4,1,NULL)
+           ON CONFLICT(target_user_id,signal_type,signal_hash)
+           DO UPDATE SET created_by=EXCLUDED.created_by,is_active=1,created_at=NOW(),revoked_at=NULL`,
+          [user.id, signal.type, signal.hash, req.adminUser.id]
+        );
+      }
+      await client.query("UPDATE users SET banned=1,ban_type='ultra',banned_ip='' WHERE id=$1", [user.id]);
+      await client.query('DELETE FROM sessions WHERE user_id=$1', [user.id]);
+      await client.query('DELETE FROM admin_user_sessions WHERE user_id=$1', [user.id]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    io.in(`user:${user.id}`).disconnectSockets(true);
+    await logAction(req.adminUser.username || 'admin', 'ultra_ban_user', user.username, `${signals.length} sinyal`);
+    return res.json({ ok: true, signal_count: signals.length });
+  }
+
   await query('UPDATE users SET banned=1,ban_type=$1,banned_ip=$2 WHERE id=$3',
-    [ban_type||'soft', ban_type==='ip' ? user.ip : '', user.id]);
-  await logAction('admin', 'ban_user', user.username, ban_type||'soft');
+    [banType, banType === 'ip' ? user.ip : '', user.id]);
+  await logAction(req.adminUser.username || 'admin', 'ban_user', user.username, banType);
   res.json({ ok: true });
 });
 
 app.post('/api/admin/user/:id/unban', adminMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  await query("UPDATE ultra_ban_signals SET is_active=0,revoked_at=NOW() WHERE target_user_id=$1 AND is_active=1", [req.params.id]);
   await query("UPDATE users SET banned=0,ban_type='',banned_ip='' WHERE id=$1", [req.params.id]);
-  await logAction('admin', 'unban_user', rows[0].username);
+  await logAction(req.adminUser.username || 'admin', 'unban_user', rows[0].username);
   res.json({ ok: true });
 });
 

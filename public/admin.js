@@ -1,3 +1,62 @@
+const adminNativeFetch = window.fetch.bind(window);
+let adminFingerprintPromise = null;
+function getAdminDeviceFingerprint() {
+  if (!window.crypto?.subtle) return Promise.resolve('');
+  if (!adminFingerprintPromise) {
+    const screenSize = [screen.width, screen.height].sort((a, b) => a - b).join('x');
+    const values = [
+      navigator.userAgent,
+      navigator.platform,
+      (navigator.languages || [navigator.language]).join(','),
+      Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      screenSize,
+      screen.colorDepth,
+      window.devicePixelRatio,
+      navigator.hardwareConcurrency || '',
+      navigator.deviceMemory || '',
+      navigator.maxTouchPoints || 0
+    ];
+    adminFingerprintPromise = window.crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(values.join('|'))
+    ).then(hash => Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join(''))
+      .catch(error => {
+        console.warn('Tarayıcı parmak izi oluşturulamadı:', error.message);
+        return '';
+      });
+  }
+  return adminFingerprintPromise;
+}
+
+function showUltraBanScreen() {
+  if (document.getElementById('ultra-ban-screen')) return;
+  const screen = document.createElement('div');
+  screen.id = 'ultra-ban-screen';
+  screen.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:24px;background:#0b0b0f;color:#f5f5f7;font-family:system-ui,sans-serif;text-align:center';
+  screen.innerHTML = '<div style="max-width:420px"><div style="font-size:42px;margin-bottom:16px">⚠</div><h1 style="font-size:24px;margin:0 0 12px">Site verileri yüklenemiyor</h1><p style="color:#aaa;line-height:1.6;margin:0">Bu cihaz veya ağ üzerinden site verilerine erişilemiyor.</p></div>';
+  document.body.appendChild(screen);
+}
+
+window.fetch = (input, options = {}) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url || '';
+  const isApiRequest = url.startsWith('/api/') || url.startsWith(`${location.origin}/api/`);
+  if (!isApiRequest) return adminNativeFetch(input, options);
+  const headers = new Headers(input instanceof Request ? input.headers : undefined);
+  new Headers(options.headers || {}).forEach((value, key) => headers.set(key, value));
+  const request = getAdminDeviceFingerprint().then(fingerprint => {
+    if (fingerprint) headers.set('X-Device-Fingerprint', fingerprint);
+    return adminNativeFetch(input, { ...options, headers });
+  });
+  return request.then(response => {
+    if (response.headers.get('content-type')?.includes('application/json')) {
+      response.clone().json().then(data => {
+        if (data?.code === 'ULTRA_BANNED') showUltraBanScreen();
+      }).catch(error => console.warn('Ultra ban yanıtı okunamadı:', error.message));
+    }
+    return response;
+  });
+};
+
 // ===== TEMA RENGİ SİSTEMİ =====
 function applyThemeColor(hex) {
   if (!hex || !/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
@@ -1140,6 +1199,7 @@ function showEditInviteModal(id, code, active, onSaved) {
 function renderUsersTable(users) {
   const tbody = $('#users-tbody'); if (!tbody) return;
   if (!users.length) { tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;color:var(--text3);padding:32px">Kullanıcı bulunamadı</td></tr>'; return; }
+  const canBanUsers = adminProfile?.is_super_admin || hasPermission('can_ban_users');
   tbody.innerHTML = users.map(u => `<tr>
     <td style="color:var(--text3);font-size:11px">#${u.id}</td>
     <td>
@@ -1164,7 +1224,7 @@ function renderUsersTable(users) {
     </td>
     <td style="font-size:11px;color:var(--text3)">${escHtml(u.ip||'-')}</td>
     <td style="font-size:11px">${timeAgo(u.created_at)}</td>
-    <td>${u.banned ? '<span class="badge badge-red"><i class="fas fa-ban"></i> Banlı</span>' : '<span class="badge badge-green"><i class="fas fa-check"></i> Aktif</span>'}</td>
+    <td>${u.banned ? `<span class="badge badge-red"><i class="fas fa-ban"></i> ${u.ban_type === 'ultra' ? 'Ultra Banlı' : 'Banlı'}</span>` : '<span class="badge badge-green"><i class="fas fa-check"></i> Aktif</span>'}</td>
     <td>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-outline btn-xs edit-user-btn" data-id="${u.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
@@ -1172,9 +1232,9 @@ function renderUsersTable(users) {
         <button class="btn btn-blue btn-xs perm-user-btn" data-id="${u.id}" title="Yetkiler"><i class="fas fa-shield"></i></button>
         <button class="btn btn-ad-panel btn-xs ad-panel-user-btn" data-id="${u.id}" title="Reklam Paneli"><i class="fas fa-bullhorn"></i>${u.ad_panel_count ? ` <span>${u.ad_panel_count}</span>` : ''}</button>
         <button class="btn btn-outline btn-xs restrict-user-btn" data-id="${u.id}" title="Kısıtlama"><i class="fas fa-user-lock"></i></button>
-        ${u.banned
+        ${canBanUsers ? (u.banned
           ? `<button class="btn btn-green btn-xs unban-user-btn" data-id="${u.id}" title="Ban Kaldır"><i class="fas fa-unlock"></i></button>`
-          : `<button class="btn btn-danger btn-xs ban-user-btn" data-id="${u.id}" title="Banla"><i class="fas fa-ban"></i></button>`}
+          : `<button class="btn btn-danger btn-xs ban-user-btn" data-id="${u.id}" title="Banla"><i class="fas fa-ban"></i></button>`) : ''}
         <button class="btn btn-danger btn-xs del-user-btn" data-id="${u.id}" title="Sil"><i class="fas fa-trash"></i></button>
       </div>
     </td>
@@ -1353,18 +1413,34 @@ function showEditUserModal(user) {
 }
 
 function showBanModal(userId) {
+  const isSuperAdmin = adminProfile?.is_super_admin;
   showModal('Kullanıcıyı Banla', `
     <div class="form-group"><label>Ban Türü</label>
       <select id="ban-type">
         <option value="soft">Soft Ban (hesap kilitli)</option>
         <option value="ip">IP Ban (IP engeli)</option>
+        <option value="ultra" ${isSuperAdmin ? '' : 'disabled'}>Ultra Ban (kalıcı ağ ve tarayıcı engeli)${isSuperAdmin ? '' : ' — ana admin gerekli'}</option>
       </select>
     </div>
+    ${isSuperAdmin ? `<div id="ultra-ban-warning" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(239,68,68,.45);border-radius:10px;background:rgba(239,68,68,.08);font-size:12px;line-height:1.55">
+      <strong style="display:block;margin-bottom:5px;color:#ef4444">Kalıcı engel uyarısı</strong>
+      Bu işlem kullanıcının daha önce kullandığı tarayıcı parmak izlerini ve IPv4 /24 veya IPv6 /64 ağlarını engeller. Aynı ağı kullanan başka kişiler de etkilenebilir. Ban kaldırılana kadar bu sinyallerden siteye erişilemez.
+      <label class="checkbox-label" style="margin-top:10px"><input type="checkbox" id="ultra-ban-confirm" /> Etki alanını anladım ve Ultra Ban uygulamak istiyorum.</label>
+    </div>` : ''}
     <button class="btn btn-primary" id="ban-submit" style="width:100%;justify-content:center"><i class="fas fa-ban"></i> Banla</button>
     <div id="ban-error" class="form-error mt-4"></div>
   `);
+  $('#ban-type').addEventListener('change', event => {
+    const warning = $('#ultra-ban-warning');
+    if (warning) warning.style.display = event.target.value === 'ultra' ? 'block' : 'none';
+  });
   $('#ban-submit').addEventListener('click', async () => {
-    try { await adminApi('/user/'+userId+'/ban',{method:'POST',body:JSON.stringify({ban_type:$('#ban-type').value})}); toast('Banlandı'); hideModal(); loadSection('users'); }
+    const banType = $('#ban-type').value;
+    if (banType === 'ultra' && !$('#ultra-ban-confirm')?.checked) {
+      $('#ban-error').textContent = 'Ultra Ban için uyarıyı okuyup onaylamalısınız.';
+      return;
+    }
+    try { await adminApi('/user/'+userId+'/ban',{method:'POST',body:JSON.stringify({ban_type:banType})}); toast(banType === 'ultra' ? 'Ultra Ban uygulandı' : 'Banlandı'); hideModal(); loadSection('users'); }
     catch (e) { $('#ban-error').textContent = e.message; }
   });
 }

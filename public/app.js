@@ -13,12 +13,71 @@ let activeGroupChannelRefresh = null;
 // Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
 // atama kontrollü PUT isteklerine mevcut oturum tokenını da ekle.
 const nativeFetch = window.fetch.bind(window);
-window.fetch = (input, options = {}) => {
-  const url = typeof input === 'string' ? input : input?.url || '';
-  if (options.method === 'PUT' && url.startsWith('/api/reklampanel/') && currentToken) {
-    options = { ...options, headers: { ...(options.headers || {}), Authorization: 'Bearer ' + currentToken } };
+let browserFingerprintPromise = null;
+function getBrowserFingerprint() {
+  if (!window.crypto?.subtle) return Promise.resolve('');
+  if (!browserFingerprintPromise) {
+    const screenSize = [screen.width, screen.height].sort((a, b) => a - b).join('x');
+    const values = [
+      navigator.userAgent,
+      navigator.platform,
+      (navigator.languages || [navigator.language]).join(','),
+      Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      screenSize,
+      screen.colorDepth,
+      window.devicePixelRatio,
+      navigator.hardwareConcurrency || '',
+      navigator.deviceMemory || '',
+      navigator.maxTouchPoints || 0
+    ];
+    browserFingerprintPromise = window.crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(values.join('|'))
+    ).then(hash => Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join(''))
+      .catch(error => {
+        console.warn('Tarayıcı parmak izi oluşturulamadı:', error.message);
+        return '';
+      });
   }
-  return nativeFetch(input, options);
+  return browserFingerprintPromise;
+}
+
+function showUltraBanScreen() {
+  if (document.getElementById('ultra-ban-screen')) return;
+  const show = () => {
+    if (document.getElementById('ultra-ban-screen')) return;
+    const screen = document.createElement('div');
+    screen.id = 'ultra-ban-screen';
+    screen.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;padding:24px;background:#0b0b0f;color:#f5f5f7;font-family:system-ui,sans-serif;text-align:center';
+    screen.innerHTML = '<div style="max-width:420px"><div style="font-size:42px;margin-bottom:16px">⚠</div><h1 style="font-size:24px;margin:0 0 12px">Site verileri yüklenemiyor</h1><p style="color:#aaa;line-height:1.6;margin:0">Bu cihaz veya ağ üzerinden site verilerine erişilemiyor.</p></div>';
+    document.body.appendChild(screen);
+  };
+  if (document.body) show();
+  else document.addEventListener('DOMContentLoaded', show, { once: true });
+}
+
+window.fetch = (input, options = {}) => {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input?.url || '';
+  const isApiRequest = url.startsWith('/api/') || url.startsWith(`${location.origin}/api/`);
+  const shouldAttachToken = options.method === 'PUT' && url.startsWith('/api/reklampanel/') && currentToken;
+  if (!isApiRequest && !shouldAttachToken) return nativeFetch(input, options);
+  const headers = new Headers(input instanceof Request ? input.headers : undefined);
+  new Headers(options.headers || {}).forEach((value, key) => headers.set(key, value));
+  if (shouldAttachToken) headers.set('Authorization', 'Bearer ' + currentToken);
+  const request = isApiRequest
+    ? getBrowserFingerprint().then(fingerprint => {
+      if (fingerprint) headers.set('X-Device-Fingerprint', fingerprint);
+      return nativeFetch(input, { ...options, headers });
+    })
+    : nativeFetch(input, { ...options, headers });
+  return request.then(response => {
+    if (isApiRequest && response.headers.get('content-type')?.includes('application/json')) {
+      response.clone().json().then(data => {
+        if (data?.code === 'ULTRA_BANNED') showUltraBanScreen();
+      }).catch(error => console.warn('Ultra ban yanıtı okunamadı:', error.message));
+    }
+    return response;
+  });
 };
 let activeStoryAudio = null;
 let storyRouteStoriesCache = [];
