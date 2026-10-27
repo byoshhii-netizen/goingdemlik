@@ -19939,7 +19939,7 @@ async function renderMyOrders(app) {
   }).join('') : `<div class="orders-empty-state"><i class="fas fa-receipt"></i><h2>Henüz siparişin yok</h2><p>Mağazayı keşfet, sana uygun üyelik ve ürün seçeneklerine göz at.</p><a href="/magaza" data-link class="btn btn-primary"><i class="fas fa-store"></i> Mağazayı keşfet</a></div>`;
 
   app.innerHTML = `
-    <div class="container page orders-page" style="max-width:800px;margin:0 auto;padding:24px 16px">
+    <div class="container page orders-page">
       <div class="orders-page-header"><div><h1><i class="fas fa-receipt" style="color:var(--accent-red2);margin-right:8px"></i>Siparişlerim</h1><p>Siparişlerini ve aktif üyeliklerini buradan takip et.</p></div><a href="/magaza" data-link class="btn btn-outline btn-sm"><i class="fas fa-store"></i> Mağaza</a></div>
       ${subsHTML}
       <div class="orders-history-heading"><i class="fas fa-clock-rotate-left"></i> Sipariş Geçmişi</div>
