@@ -1571,6 +1571,9 @@ document.addEventListener('focusin', event => {
   if (link instanceof HTMLAnchorElement) prefetchRouteData(link.href);
 });
 
+let previousRenderedRoutePath = null;
+let dmSuggestionsReturningFromProfile = false;
+
 function renderRoute(fullPath) {
   window.__profileMenuCleanup?.();
   clearStoryRoutePlayback();
@@ -1586,6 +1589,8 @@ function renderRoute(fullPath) {
 
   // Query string'i ayır
   const [path, queryStr] = fullPath.split('?');
+  const previousPath = previousRenderedRoutePath;
+  let rotateDmSuggestions = false;
   const wasOnReals = document.body.classList.contains('reals-page');
   const isGoingToReals = path === '/reals' || path.startsWith('/reals/');
   if (wasOnReals && !isGoingToReals && window.__realsKeydownHandler) {
@@ -1595,6 +1600,26 @@ function renderRoute(fullPath) {
   if (loginRequiredEnabled && !currentUser && !isPublicGuestRoute(path)) {
     return navigate('/giris', false);
   }
+  const wasInMessages = previousPath === '/mesajlar' || previousPath?.startsWith('/mesajlar/');
+  const isInMessages = path === '/mesajlar' || path.startsWith('/mesajlar/');
+  if (wasInMessages && path.startsWith('/profil/')) dmSuggestionsReturningFromProfile = true;
+  const returnedFromProfile = isInMessages && previousPath?.startsWith('/profil/') && dmSuggestionsReturningFromProfile;
+  if (returnedFromProfile) dmSuggestionsReturningFromProfile = false;
+  if (path === '/mesajlar' && !wasInMessages) {
+    if (!returnedFromProfile && currentUser?.id) {
+      try {
+        const visitKey = `dm_suggestions_visits:${currentUser.id}`;
+        const visits = (Number(sessionStorage.getItem(visitKey)) || 0) + 1;
+        rotateDmSuggestions = visits >= 3;
+        sessionStorage.setItem(visitKey, String(visits));
+      } catch (error) {
+        console.warn('Önerilen kişiler giriş sayısı kaydedilemedi.', error);
+      }
+    }
+  } else if (!path.startsWith('/profil/') && !isInMessages) {
+    dmSuggestionsReturningFromProfile = false;
+  }
+  previousRenderedRoutePath = path;
   document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path));
   document.body.classList.toggle('forgot-password-route', isForgotPasswordRoute(path));
   const leavingSongDetail = !path.startsWith('/muzik/');
@@ -1674,7 +1699,7 @@ function renderRoute(fullPath) {
   if (path === '/giris') return renderLogin(app);
   if (path === '/kayit') return renderRegister(app);
   if (isForgotPasswordRoute(path)) return renderForgotPassword(app);
-  if (path === '/mesajlar') return renderMessages(app, null);
+  if (path === '/mesajlar') return renderMessages(app, null, rotateDmSuggestions);
   if (path.startsWith('/mesajlar/')) return renderMessages(app, segs[1]);
   if (path === '/arkadaslar') return renderFriends(app);
   if (path === '/bildirimler') return renderNotifications(app);
@@ -12445,7 +12470,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   });
 }
 
-async function renderMessages(app, targetUsername) {
+async function renderMessages(app, targetUsername, rotateSuggestions = false) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - ' + siteName;
 
@@ -12484,7 +12509,7 @@ async function renderMessages(app, targetUsername) {
     api('/friends'),
     api('/stories'),
     api('/dm-notes'),
-    hasCachedSuggestions ? Promise.resolve(suggestedPeople) : api('/friends/suggestions')
+    hasCachedSuggestions && !rotateSuggestions ? Promise.resolve(suggestedPeople) : api('/friends/suggestions')
   ]);
   if (conversationsResult.status === 'fulfilled') convs = conversationsResult.value;
   else toast(conversationsResult.reason?.message || 'Konuşmalar yüklenemedi', 'error');
@@ -12496,7 +12521,16 @@ async function renderMessages(app, targetUsername) {
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
   if (suggestionsResult.status === 'fulfilled') {
     suggestedPeople = suggestionsResult.value;
-    if (!hasCachedSuggestions) saveSuggestionsCache();
+    if (!hasCachedSuggestions || rotateSuggestions) {
+      saveSuggestionsCache();
+      if (rotateSuggestions) {
+        try {
+          sessionStorage.setItem(`dm_suggestions_visits:${currentUser.id}`, '0');
+        } catch (error) {
+          console.warn('Önerilen kişiler giriş sayısı sıfırlanamadı.', error);
+        }
+      }
+    }
   } else suggestedPeopleError = suggestionsResult.reason?.message || 'Önerilen kişiler yüklenemedi.';
   const dmStories = storiesResult.status === 'fulfilled' ? storiesResult.value : [];
   let dmNotes = notesResult.status === 'fulfilled' ? notesResult.value : [];
@@ -12635,7 +12669,8 @@ async function renderMessages(app, targetUsername) {
       </div>
       ${suggestedPeopleError
         ? `<div class="dm-suggestions-state"><span>${escHtml(suggestedPeopleError)}</span><button type="button" class="dm-suggestions-retry" id="dm-suggestions-retry">Tekrar dene</button></div>`
-        : suggestedUsers.length
+        : ''}
+      ${suggestedUsers.length
           ? `<div class="dm-suggestions-rail">${suggestedUsers.map(user => {
             const avatar = hasUsableAvatar(user)
               ? `<img src="${escHtml(user.avatar)}" alt="" />`
@@ -12651,7 +12686,7 @@ async function renderMessages(app, targetUsername) {
               </button>
             </article>`;
             }).join('')}</div>`
-          : '<div class="dm-suggestions-state">Şimdilik önerilecek yeni kişi yok.</div>'}
+          : suggestedPeopleError ? '' : '<div class="dm-suggestions-state">Şimdilik önerilecek yeni kişi yok.</div>'}
     </section>` : '';
     list.innerHTML = `${entries.length
       ? entries.map(entry => convItemHTML(entry.item, !!entry.hidden, entry.isGroup)).join('')
