@@ -5489,9 +5489,6 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .mobile-splash { display:none; }
 @media (max-width:768px) {
   .mobile-splash { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; overflow:hidden; background:radial-gradient(ellipse at 50% 42%,rgba(var(--accent-rgb),.17),transparent 44%),linear-gradient(155deg,#171511 0%,#090909 58%,#11100e 100%); opacity:1; visibility:visible; transition:opacity .28s ease,visibility .28s ease; }
-  .mobile-splash::before,.mobile-splash::after { content:""; position:absolute; width:min(86vw,380px); aspect-ratio:1; border:1px solid rgba(var(--accent-rgb),.14); border-radius:50%; pointer-events:none; }
-  .mobile-splash::before { transform:scale(1.25); box-shadow:0 0 80px rgba(var(--accent-rgb),.06),inset 0 0 80px rgba(var(--accent-rgb),.04); }
-  .mobile-splash::after { transform:scale(.88); border-color:rgba(255,255,255,.045); }
   .mobile-splash.is-leaving { opacity:0; visibility:hidden; pointer-events:none; }
   .mobile-splash-content { position:relative; z-index:1; display:grid; justify-items:center; gap:17px; padding:24px; animation:mobileSplashBrandIn .52s cubic-bezier(.2,.8,.2,1) both; }
   .mobile-splash-brand { display:flex; align-items:center; gap:12px; }

@@ -83,7 +83,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="/theme.js?v=20261024-dark-only"></script>
   <script src="/homepage-sections.js?v=20261014-homepage-sections"></script>
-  <link rel="stylesheet" href="/style.css?v=20261025-reals-performance-1" />
+  <link rel="stylesheet" href="/style.css?v=20261027-loading-screen-1" />
   <link rel="stylesheet" href="/dialogs.css?v=20261017-native-dialogs" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
@@ -101,15 +101,43 @@
     <div class="mobile-splash-content">
       <div class="mobile-splash-brand">
       <img src="/cigcig.png?v=20260829" alt="" draggable="false" />
-        <span>CigCig</span>
+        <span data-loading-screen-title>CigCig</span>
       </div>
-      <p class="mobile-splash-tagline">Topluluğun, kendi ritminde.</p>
+      <p class="mobile-splash-tagline" data-loading-screen-tagline>Topluluğun, kendi ritminde.</p>
       <div class="mobile-splash-progress" aria-hidden="true"><span></span></div>
     </div>
   </div>
   <script>
     (() => {
       const splash = document.getElementById('mobile-splash');
+      const applyLoadingScreenSettings = settings => {
+        const title = String(settings.loading_screen_title || '').trim();
+        const tagline = String(settings.loading_screen_tagline || '').trim();
+        const status = String(settings.loading_screen_status || '').trim();
+        if (title) {
+          splash?.querySelector('[data-loading-screen-title]')?.replaceChildren(document.createTextNode(title));
+          splash?.setAttribute('aria-label', `${title} açılıyor`);
+        }
+        if (tagline) {
+          splash?.querySelector('[data-loading-screen-tagline]')?.replaceChildren(document.createTextNode(tagline));
+        }
+        if (status) {
+          document.querySelector('.app-startup-state > span')?.replaceChildren(document.createTextNode(status));
+        }
+      };
+      fetch('/api/settings/public')
+        .then(response => {
+          if (!response.ok) throw new Error('Açılış ekranı ayarları yüklenemedi.');
+          return response.json();
+        })
+        .then(settings => {
+          window.__loadingScreenSettings = settings;
+          applyLoadingScreenSettings(settings);
+        })
+        .catch(error => console.warn('Açılış ekranı metinleri varsayılan değerlerle gösteriliyor:', error.message));
+      document.addEventListener('DOMContentLoaded', () => {
+        if (window.__loadingScreenSettings) applyLoadingScreenSettings(window.__loadingScreenSettings);
+      }, { once: true });
       window.hideMobileSplash = () => {
         if (!splash?.isConnected) return;
         splash.classList.add('is-leaving');

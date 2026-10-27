@@ -3564,6 +3564,17 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-spinner" style="color:var(--red2);margin-right:8px"></i>Açılış Ekranı</span></div>
+        <div class="card-body">
+          <div class="form-group"><label for="s-loading-screen-title">Başlık</label><input id="s-loading-screen-title" maxlength="50" value="${escHtml(settings['loading_screen_title'] || 'CigCig')}" /></div>
+          <div class="form-group"><label for="s-loading-screen-tagline">Alt yazı</label><input id="s-loading-screen-tagline" maxlength="120" value="${escHtml(settings['loading_screen_tagline'] || 'Topluluğun, kendi ritminde.')}" /></div>
+          <div class="form-group"><label for="s-loading-screen-status">Yükleniyor yazısı</label><input id="s-loading-screen-status" maxlength="40" value="${escHtml(settings['loading_screen_status'] || 'Yükleniyor')}" /></div>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Mobil açılış ekranındaki başlık ve alt yazı ile uygulama hazırlanırken gösterilen yükleniyor metnini düzenleyin.</small>
+          <button class="btn btn-primary" id="s-loading-screen-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Açılış ekranını kaydet</button>
+          <div id="s-loading-screen-msg" class="form-error mt-4" role="status"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Fotoğraf Müzik Süresi</span></div>
         <div class="card-body">
           <div class="form-group"><label>Fotoğraflarda müzik kaç saniye çalsın?</label><input id="s-photo-song-clip" type="number" min="1" max="300" step="1" value="${escHtml(settings['photo_song_clip_seconds'] || '30')}" /></div>
@@ -3962,6 +3973,19 @@ async function renderSettings(main) {
     const msg = document.getElementById('s-general-msg');
     await saveSetting('site_name', document.getElementById('s-sitename').value.trim(), msg);
     await saveSetting('site_description', document.getElementById('s-desc').value.trim(), msg);
+  });
+  document.getElementById('s-loading-screen-save')?.addEventListener('click', async () => {
+    const msg = document.getElementById('s-loading-screen-msg');
+    const values = [
+      ['loading_screen_title', 's-loading-screen-title'],
+      ['loading_screen_tagline', 's-loading-screen-tagline'],
+      ['loading_screen_status', 's-loading-screen-status']
+    ];
+    for (const [key, id] of values) {
+      if (!await saveSetting(key, document.getElementById(id).value.trim(), msg)) return;
+    }
+    msg.style.color = 'var(--green)';
+    msg.textContent = '✓ Açılış ekranı metinleri kaydedildi.';
   });
   document.getElementById('s-level-system-save')?.addEventListener('click', async () => {
     const checkbox = document.getElementById('s-level-system');

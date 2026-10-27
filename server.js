@@ -7431,6 +7431,17 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     newspaper_flag_url: 2048,
     newspaper_background_url: 2048
   };
+  const loadingScreenTextLimits = {
+    loading_screen_title: 50,
+    loading_screen_tagline: 120,
+    loading_screen_status: 40
+  };
+  if (Object.hasOwn(loadingScreenTextLimits, key)) {
+    value = String(value || '').trim();
+    if (value.length > loadingScreenTextLimits[key]) {
+      return res.status(400).json({ error: 'Açılış ekranı metni izin verilen uzunluğu aşıyor' });
+    }
+  }
   if (Object.hasOwn(newspaperTextLimits, key)) {
     value = String(value || '').trim();
     if (value.length > newspaperTextLimits[key]) {
@@ -8499,7 +8510,7 @@ app.get('/api/settings/public', async (req, res) => {
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
-    'newspaper_flag_url','newspaper_background_url'
+    'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
