@@ -8251,7 +8251,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals oluştur' : 'Video oluştur'), `
     <div class="social-compose social-compose-video${simplifiedRealsComposer ? ' social-compose-reals' : ' social-compose-video-standard'}">
       <section class="social-compose-preview-pane">
-        <div class="social-compose-preview-frame social-compose-video-frame">
+        <div class="social-compose-preview-frame social-compose-video-frame${existing?.video_url ? ' has-media' : ''}">
           <video id="video-upload-preview" controls muted playsinline preload="metadata"></video>
           ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(existing.video_url)}" controls muted playsinline preload="metadata"></video>` : ''}
           <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
@@ -8396,6 +8396,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       }, { once: true });
       uploadPreview.src = activeVideoPreviewObjectUrl;
       uploadPreview.style.display = 'block';
+      videoFrame?.classList.add('has-media');
       $('#video-preview-empty')?.classList.add('hidden');
       document.querySelector('.social-compose-existing-preview')?.remove();
     }
@@ -18963,7 +18964,7 @@ function showPhotoUploadModal() {
   showModal('Fotoğraf oluştur', `
     <div class="social-compose social-compose-photo">
       <section class="social-compose-preview-pane">
-        <div class="social-compose-preview-frame social-compose-photo-frame">
+        <div class="social-compose-preview-frame social-compose-photo-frame${pendingPhotoFile ? ' has-media' : ''}">
           <div id="photo-file-preview" class="photo-file-preview" hidden></div>
           <div class="social-compose-preview-empty" id="photo-preview-empty"><i class="fas fa-image"></i><strong>Fotoğrafını ekle</strong><span>Paylaşım önizlemen burada görünür</span></div>
           <label class="social-compose-pick"><i class="fas fa-plus"></i> Fotoğraf seç<input id="photo-file" type="file" accept="image/*" /></label>
