@@ -9326,3 +9326,8 @@ body.music-list-page .music-playlists-copy small { color:var(--text-muted); font
   body.music-list-page .music-page-header .music-playlists-link { gap:6px; padding-inline:7px; }
   body.music-list-page .music-playlists-copy small { display:none; }
 }
+@media (max-width:768px) {
+  .page-header.my-playlists-header { display:flex; flex-direction:row !important; align-items:center !important; justify-content:space-between !important; flex-wrap:nowrap !important; }
+  .page-header.my-playlists-header > .my-playlists-title { display:flex; width:auto !important; flex:1 1 auto; min-width:0; margin:0; white-space:nowrap; }
+  .page-header.my-playlists-header > .my-playlists-create { width:auto !important; max-width:none !important; flex:0 0 auto !important; }
+}
