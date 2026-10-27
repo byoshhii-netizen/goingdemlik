@@ -1136,7 +1136,7 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   .reals-list { position:relative; width:100%; height:calc(100vh - 72px); }
   .reals-item { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
   .reals-video-box { width:360px; height:640px; position:relative; border-radius:12px; overflow:hidden; background:#000; box-shadow:0 8px 32px rgba(0,0,0,.6); }
-  .reals-video { width:100%; height:100%; object-fit:cover; background:#000; }
+  .reals-video { width:100%; height:100%; object-fit:contain; background:#000; }
   .reals-meta { position:absolute; bottom:0; left:0; right:0; padding:16px; color:var(--reals-fg); text-shadow:0 1px 4px rgba(0,0,0,.8); pointer-events:none; background:linear-gradient(to top,rgba(0,0,0,.9),rgba(0,0,0,.2) 72%,transparent); }
   .reals-right-actions { position:absolute; right:-68px; bottom:8px; display:flex; flex-direction:column; align-items:center; gap:18px; color:var(--reals-fg); pointer-events:auto; }
   .reals-action-btn { display:flex; flex-direction:column; align-items:center; gap:4px; border:0; background:none; color:var(--reals-fg); cursor:pointer; font-size:24px; text-decoration:none; pointer-events:auto; touch-action:manipulation; }
@@ -4971,7 +4971,7 @@ body.reals-page #navbar[hidden] { display: none !important; }
   body.reals-page .reals-list { height: 100dvh !important; }
   .reals-list { width: min(100%, 520px); }
   .reals-video-box { width: 400px; height: min(720px, calc(100vh - 88px)); border-radius: 18px; }
-  .reals-video { object-fit: cover; }
+  .reals-video { object-fit: contain; }
   .reals-right-actions { right: -76px; }
 }
 @media (max-width:768px) {
@@ -4979,7 +4979,7 @@ body.reals-page #navbar[hidden] { display: none !important; }
   .reals-list, .reals-item, .reals-video-box { width: 100%; max-width: 100%; min-width: 0; }
   .reals-list { height: calc(100dvh - 56px - env(safe-area-inset-bottom)); }
   .reals-video-box { box-shadow: none !important; }
-  .reals-video { object-fit: cover; }
+  .reals-video { object-fit: contain; }
   .reals-meta { padding: 24px 78px 18px 16px !important; }
   .reals-right-actions { right: 10px; bottom: max(28px, env(safe-area-inset-bottom)); max-width: calc(100% - 20px); }
   .reals-action-btn { min-width: 42px; }
@@ -4993,7 +4993,7 @@ body.reals-page #navbar[hidden] { display: none !important; }
   .reals-list { position: relative; width: 100% !important; max-width: none !important; height: 100% !important; margin: 0; overflow: hidden !important; }
   .reals-item { position: absolute !important; inset: 0 !important; width: 100% !important; max-width: none !important; height: 100% !important; margin: 0; padding: 0 !important; overflow: hidden; }
   .reals-video-box { width: 100% !important; max-width: none !important; height: 100% !important; max-height: none !important; margin: 0; border-radius: 0 !important; }
-  .reals-video { width: 100% !important; max-width: none !important; height: 100% !important; object-fit: cover !important; border-radius: 0 !important; }
+  .reals-video { width: 100% !important; max-width: none !important; height: 100% !important; object-fit: contain !important; border-radius: 0 !important; }
   .reals-meta { left: 0; right: 72px !important; bottom: 0; max-width: none; box-sizing: border-box; }
   .reals-right-actions { right: 10px !important; bottom: max(28px, env(safe-area-inset-bottom)) !important; width: 50px; max-width: 50px; gap: 10px !important; }
   .reals-action-btn { width: 50px; min-width: 50px; padding: 6px 2px; }
@@ -5028,7 +5028,7 @@ body.reals-page #navbar[hidden] { display: none !important; }
     border-radius: 18px !important;
     box-shadow: 0 12px 36px rgba(0,0,0,.42) !important;
   }
-  .reals-video { width: 100% !important; height: 100% !important; object-fit: cover !important; border-radius: inherit !important; }
+  .reals-video { width: 100% !important; height: 100% !important; object-fit: contain !important; border-radius: inherit !important; }
   .reals-right-actions { bottom: 18px !important; }
   .reals-desc { max-width: calc(100% - 4px); }
 }
@@ -9075,7 +9075,7 @@ body.reals-page .reals-close-btn:focus-visible {
     border-radius: 0 !important;
     box-shadow: none !important;
   }
-  body.reals-page .reals-video { object-fit: cover !important; border-radius: 0 !important; }
+  body.reals-page .reals-video { object-fit: contain !important; border-radius: 0 !important; }
   body.reals-page .reals-meta {
     right: 72px !important;
     padding: 24px 14px max(30px,env(safe-area-inset-bottom)) 16px !important;
@@ -9177,8 +9177,9 @@ body.reals-page .reals-close-btn:focus-visible {
   body.reals-page .reals-video {
     width:100% !important;
     height:100% !important;
-    object-fit:cover !important;
+    object-fit:contain !important;
     border-radius:0 !important;
+    background:#000;
   }
 }
 

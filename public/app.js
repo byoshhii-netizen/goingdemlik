@@ -1652,6 +1652,10 @@ function renderRoute(fullPath) {
   let rotateDmSuggestions = false;
   const wasOnReals = document.body.classList.contains('reals-page');
   const isGoingToReals = path === '/reals' || path.startsWith('/reals/');
+  if (wasOnReals && !isGoingToReals && window.__realsVideoResizeHandler) {
+    window.removeEventListener('resize', window.__realsVideoResizeHandler);
+    window.__realsVideoResizeHandler = null;
+  }
   if (wasOnReals && !isGoingToReals && window.__realsKeydownHandler) {
     window.removeEventListener('keydown', window.__realsKeydownHandler);
     window.__realsKeydownHandler = null;
@@ -2116,6 +2120,20 @@ async function renderRealsFeed(app, initialId = null) {
     videoEl.src = src;
     videoEl.load();
   }
+  function fitRealsVideoFrame(videoEl) {
+    const videoWidth = videoEl.videoWidth;
+    const videoHeight = videoEl.videoHeight;
+    const item = videoEl.closest('.reals-item');
+    const frame = videoEl.closest('.reals-video-box');
+    if (!videoWidth || !videoHeight || !item || !frame) return;
+
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    const maxWidth = Math.max(1, isMobile ? item.clientWidth - 28 : Math.min(400, item.clientWidth - 28));
+    const maxHeight = Math.max(1, isMobile ? item.clientHeight - 28 : Math.min(720, item.clientHeight - 88));
+    const scale = Math.min(maxWidth / videoWidth, maxHeight / videoHeight, 1);
+    frame.style.setProperty('width', `${Math.round(videoWidth * scale)}px`, 'important');
+    frame.style.setProperty('height', `${Math.round(videoHeight * scale)}px`, 'important');
+  }
   const showRealsPlaybackError = (item, message) => {
     const retry = item?.querySelector('.reals-video-retry');
     if (!retry) return;
@@ -2219,6 +2237,9 @@ async function renderRealsFeed(app, initialId = null) {
       </div>`;
     }).join('');
     items = Array.from(document.querySelectorAll('.reals-item'));
+    if (window.__realsVideoResizeHandler) window.removeEventListener('resize', window.__realsVideoResizeHandler);
+    window.__realsVideoResizeHandler = () => items.forEach(item => fitRealsVideoFrame(item.querySelector('video')));
+    window.addEventListener('resize', window.__realsVideoResizeHandler, { passive: true });
     const feedItemByKey = new Map(feedItems.map(feedItem => [
       String(feedItem.isRealsAd ? `ad-${feedItem.id}` : feedItem.id),
       feedItem
@@ -2239,6 +2260,7 @@ async function renderRealsFeed(app, initialId = null) {
         if (isLoading && !it.classList.contains('is-active')) return;
         it.classList.toggle('reals-is-loading', isLoading);
       };
+      vid.addEventListener('loadedmetadata', () => fitRealsVideoFrame(vid));
       it.addEventListener('reals-cancel-replay', () => clearReplayCountdown(it));
       vid.addEventListener('loadstart', () => setVideoLoading(true));
       vid.addEventListener('waiting', () => setVideoLoading(true));
