@@ -9258,7 +9258,7 @@ async function renderProfile(app, username) {
           </article>`;
         }).join('')}</div>`;
       } catch (error) {
-        itemsNode.innerHTML = `<div class="profile-archive-empty is-error"><i class="fas fa-triangle-exclamation"></i><strong>İçerikler yüklenemedi</strong><span>${escHtml(error.message || 'Bir hata oluştu.')}</span></div>`;
+        itemsNode.innerHTML = `<div class="profile-archive-empty is-error"><i class="fas fa-triangle-exclamation"></i><strong>İçerikler yüklenemedi</strong><span>${escHtml(error.message || 'Bir hata oluştu.')}</span><button type="button" class="btn btn-outline btn-sm" data-archive-retry><i class="fas fa-rotate-right"></i> Tekrar dene</button></div>`;
       }
     };
 
@@ -9275,6 +9275,10 @@ async function renderProfile(app, username) {
     });
 
     panel.addEventListener('click', async event => {
+      if (event.target.closest('[data-archive-retry]')) {
+        await loadItems();
+        return;
+      }
       const button = event.target.closest('[data-archive-action]');
       if (!button) return;
       const action = button.dataset.archiveAction;
@@ -9495,7 +9499,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşiv' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşiv' })[tab]}</button>` : '').join('')}</div>
+    <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Forumlar', books:'Kitaplar', photos:'Medya', groups:'Gruplar', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab]}</button>` : '').join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => profileArchiveCard('forum', f.id, forumCardHTML(f))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -9530,11 +9534,11 @@ async function renderProfile(app, username) {
     const tabs = app.querySelector('.tabs');
     tabs?.parentElement.insertBefore(panel, tabs);
   }
-  const tabPanels = profileTabOrder.map(tab => document.getElementById('tab-' + tab)).filter(Boolean);
+  const tabPanels = profileTabOrder.map(tab => app.querySelector('#tab-' + tab)).filter(Boolean);
   const tabsContainer = app.querySelector('.tabs');
   tabPanels.forEach(panel => tabsContainer?.parentElement.appendChild(panel));
-  const firstTab = profileTabOrder.find(tab => document.getElementById('tab-' + tab));
-  profileTabOrder.forEach(tab => document.getElementById('tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
+  const firstTab = profileTabOrder.find(tab => app.querySelector('#tab-' + tab));
+  profileTabOrder.forEach(tab => app.querySelector('#tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
   bindProfileAvatarViewer(app, user, data.avatar_photos || [], isOwn);
   app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(badges, isOwn));
@@ -9732,12 +9736,12 @@ async function renderProfile(app, username) {
       }
     }
   }
-  $$('.tab').forEach(btn => {
+  app.querySelectorAll('.tabs .tab').forEach(btn => {
     btn.addEventListener('click', () => {
-      $$('.tab').forEach(t => t.classList.remove('active'));
+      app.querySelectorAll('.tabs .tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       profileTabOrder.forEach(name => {
-        const tab = $('#tab-' + name);
+        const tab = app.querySelector('#tab-' + name);
         if (tab) tab.classList.toggle('hidden', name !== btn.dataset.tab);
       });
       if (btn.dataset.tab === 'archive') {
@@ -12666,9 +12670,9 @@ async function renderMessages(app, targetUsername) {
           <button class="btn dm-header-action-btn dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj" aria-label="Yeni mesaj"><i class="fas fa-plus"></i></button>
           ${dmLockSettings.icon_unlock_enabled ? '<button class="btn dm-header-action-btn dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" aria-label="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>' : ''}
         </div>
-      </div>
-      <div class="dm-search-wrap hidden">
-        <input id="dm-search" type="text" placeholder="Kişi ara..." class="dm-search" />
+        <div class="dm-search-wrap hidden" role="search">
+          <input id="dm-search" type="text" placeholder="Kişi ara..." class="dm-search" aria-label="Konuşmalarda kişi ara" />
+        </div>
       </div>
       <div class="dm-notes-strip" id="dm-notes-strip" aria-label="Notlar"></div>
       <div id="dm-hidden-panel" class="dm-hidden-panel hidden">
@@ -12702,14 +12706,14 @@ async function renderMessages(app, targetUsername) {
   </div>`;
   renderInboxList();
   renderDmNotes();
-  const searchWrap = document.querySelector('.dm-search-wrap');
-  const searchToggle = document.getElementById('dm-search-toggle');
+  const searchWrap = app.querySelector('.dm-search-wrap');
+  const searchToggle = app.querySelector('#dm-search-toggle');
   searchToggle?.addEventListener('click', event => {
     event.stopPropagation();
     const isOpen = !searchWrap?.classList.contains('hidden');
     searchWrap?.classList.toggle('hidden', isOpen);
     searchToggle.setAttribute('aria-expanded', String(!isOpen));
-    if (!isOpen) document.getElementById('dm-search')?.focus();
+    if (!isOpen) app.querySelector('#dm-search')?.focus();
   });
   if (window.__dmSearchOutsideHandler) document.removeEventListener('click', window.__dmSearchOutsideHandler);
   window.__dmSearchOutsideHandler = event => {
@@ -12719,6 +12723,12 @@ async function renderMessages(app, targetUsername) {
     searchToggle?.setAttribute('aria-expanded', 'false');
   };
   document.addEventListener('click', window.__dmSearchOutsideHandler);
+  app.querySelector('#dm-search')?.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    searchWrap?.classList.add('hidden');
+    searchToggle?.setAttribute('aria-expanded', 'false');
+    searchToggle?.focus();
+  });
   if (dmPresencePollTimer) clearInterval(dmPresencePollTimer);
   dmPresencePollTimer = setInterval(async () => {
     if (!document.getElementById('dm-conv-list')) {

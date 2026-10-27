@@ -718,6 +718,17 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 }
 @media (max-width: 768px) {
   .nav-container { width: 100%; max-width: 100%; }
+  .navbar {
+    position: fixed;
+    top: env(safe-area-inset-top, 0px);
+    left: 0;
+    right: 0;
+    width: 100%;
+    -webkit-backdrop-filter: none;
+  }
+  body:not(.auth-route):not(.reals-page):not(.story-page):not(.dm-chat-route) {
+    padding-top: calc(58px + env(safe-area-inset-top, 0px));
+  }
   .nav-links { display: none; }
   .nav-mobile-toggle { display: block; margin-left: 4px; }
   /* Mobilde yalnızca ortadaki CigCig yazısı görünsün; logo görseli görünmesin. */
@@ -1701,9 +1712,37 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .photos-feed { max-width:1120px; }
 .photo-card { break-inside: avoid; scroll-snap-align: start; margin: 0 0 16px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-card); }
 .photo-card-head { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:13px; font-weight:700; }
-.photo-card-head .avatar-sm { width:28px; height:28px; }
+.photo-card-head > .avatar-sm,
+.photo-card-head > .avatar-placeholder {
+  box-sizing:border-box;
+  display:block;
+  flex:0 0 28px;
+  width:28px;
+  height:28px;
+  min-width:28px;
+  min-height:28px;
+  max-width:28px;
+  max-height:28px;
+  border-radius:50%;
+}
+.photo-card-head > .avatar-sm { object-fit:cover; object-position:center; }
+.photo-card-head > .avatar-placeholder {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
 body.home-page #home-photos .photo-card-head { gap:12px; }
-body.home-page #home-photos .photo-card-head > .avatar-sm { width:36px; height:36px; min-width:36px; flex:0 0 36px; }
+body.home-page #home-photos .photo-card-head > .avatar-sm,
+body.home-page #home-photos .photo-card-head > .avatar-placeholder {
+  flex-basis:36px;
+  width:36px;
+  height:36px;
+  min-width:36px;
+  min-height:36px;
+  max-width:36px;
+  max-height:36px;
+}
 body.home-page #home-photos .photo-card-head > .avatar-placeholder { font-size:14px; }
 body.home-page #home-photos .photo-card-head .user-display-identity { gap:4px; line-height:1.25; }
 body.home-page #home-photos .photo-card-head .user-display-identity strong { font-size:15px; line-height:1.25; }
@@ -3188,6 +3227,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-sidebar { width: 360px; }
 }
 .dm-sidebar-header {
+  position: relative;
   padding: 12px 12px 10px;
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -3274,15 +3314,25 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   cursor: pointer; font-size: 15px; line-height: 1; flex-shrink: 0;
 }
 .dm-hidden-toggle-btn:hover { color: var(--text-primary); background: var(--bg-card2); }
-.dm-search-wrap { padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.dm-search-wrap {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  right: 12px;
+  width: min(250px, calc(100% - 24px));
+  padding: 0;
+  transform: translateY(-50%);
+}
 .dm-search {
   width: 100%; padding: 8px 14px;
-  background: rgba(255,255,255,0.02);
+  box-sizing: border-box;
+  background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text-primary);
   font-size: 13px;
   outline: none;
+  box-shadow: 0 8px 22px rgba(0,0,0,.24);
   transition: border-color 0.2s, background 0.2s;
 }
 .dm-search:focus { border-color: var(--border-hover); }
@@ -3459,6 +3509,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   width: 44px;
   height: 44px;
   min-width: 44px;
+  max-width: 44px;
   flex: 0 0 44px;
 }
 .dm-conv-item > .dm-conv-avatar-link > .avatar-sm {
@@ -3471,6 +3522,25 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   max-height: 44px;
   flex: 0 0 44px;
   line-height: 1;
+}
+.dm-conv-item > .dm-conv-avatar-link > .avatar-sm.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.dm-conv-item > .dm-story-avatar-link,
+.dm-conv-item > .dm-conv-avatar-link,
+.dm-conv-item > .dm-group-avatar {
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  max-width: 44px;
+  flex: 0 0 44px;
+}
+.dm-conv-item > .dm-story-avatar-link .dm-story-ring {
+  box-sizing: border-box;
+  flex: 0 0 44px;
 }
 .dm-story-ring > .dm-story-avatar-media.avatar-placeholder {
   box-sizing: border-box;
@@ -6430,7 +6500,7 @@ body.reals-page .reals-right-actions .reals-action-btn .count {
     overflow-x: hidden;
     overflow-y: visible;
   }
-  .navbar.mobile-menu-expanded { position: relative; }
+  .navbar.mobile-menu-expanded { position: fixed; }
   .mobile-menu.hidden { display: none !important; }
   .dm-conv-item { box-sizing: border-box; min-height: 68px; }
   .dm-conv-item > .dm-story-avatar-link,
@@ -6696,11 +6766,28 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
   .photos-feed .photo-card-head { box-sizing:border-box; width:100%; min-width:0; min-height:48px; margin:0; padding:8px 14px !important; }
   .photos-feed .photo-card-head > .avatar-sm,
   .photos-feed .photo-card-head > .avatar-placeholder { flex:0 0 28px; }
-  body.home-page #home-photos .photo-card-head > .avatar-placeholder { width:42px; height:42px; min-width:42px; flex:0 0 42px; }
+  body.home-page #home-photos .photo-card-head > .avatar-placeholder {
+    flex-basis:42px;
+    width:42px;
+    height:42px;
+    min-width:42px;
+    min-height:42px;
+    max-width:42px;
+    max-height:42px;
+  }
   .photos-feed .photo-card-head .user-badge,
   .photos-feed .photo-card-head .user-display-identity { min-width:0; max-width:100%; }
   body.home-page #home-photos .photo-card-head { min-height:68px; gap:14px; padding:11px 16px !important; }
-  body.home-page #home-photos .photo-card-head > .avatar-sm { width:42px; height:42px; min-width:42px; flex:0 0 42px; }
+  body.home-page #home-photos .photo-card-head > .avatar-sm,
+  body.home-page #home-photos .photo-card-head > .avatar-placeholder {
+    flex-basis:42px;
+    width:42px;
+    height:42px;
+    min-width:42px;
+    min-height:42px;
+    max-width:42px;
+    max-height:42px;
+  }
   body.home-page #home-photos .photo-card-head > .avatar-placeholder { font-size:16px; }
   body.home-page #home-photos .photo-card-head .user-display-identity strong { font-size:16px; }
   body.home-page #home-photos .photo-card-head .user-display-identity small { font-size:13px; }
