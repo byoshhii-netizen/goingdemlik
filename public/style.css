@@ -3132,7 +3132,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .video-card-body { min-width: 0; }
   .video-card-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-  .profile-links, .profile-stats, .forum-actions { width: 100%; }
+  .profile-stats, .forum-actions { width: 100%; }
   .profile-links { justify-content: flex-start; flex-wrap: wrap; }
 
   .book-detail-header { flex-direction: column; }
