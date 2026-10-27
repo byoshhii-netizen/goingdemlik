@@ -1088,6 +1088,7 @@ function showProfileBadges(badges, canManage = false) {
     ? '<div class="profile-badges-manage"><a href="/rozetler" data-link class="btn btn-outline btn-sm"><i class="fas fa-sliders"></i> Rozetleri yönet</a></div>'
     : '';
   showModal('Rozetler', `${panel}${manageLink}`, 'profile-badges-modal');
+  document.querySelector('.profile-badges-manage a')?.addEventListener('click', hideModal);
 }
 
 function showProfileLinks(links) {
@@ -1229,12 +1230,7 @@ function userDisplayName(u) {
   const redVerification = redVerificationIconHTML(redVerified ? 1 : 0, u.red_verified_at);
   const adminBadge = u.is_admin ? ` <i class="fas fa-shield user-admin" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" style="color:#5865F2;cursor:pointer;font-size:13px"></i>` : '';
   const founderMark = isFounder ? ` <button type="button" class="founder-name-mark" aria-label="Kurucu bilgisi" title="Kurucu" style="color:${escHtml(founderColor)}" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : '';
-  const journalist = journalistDirectory.get(String(u.username || '').toLocaleLowerCase('tr-TR'));
-  const journalistSince = journalist?.assigned_at;
-  const journalistMark = journalist && journalistSince && journalist.show_journalist_icon !== 0
-    ? ` <button type="button" class="journalist-name-mark" aria-label="Gazetecilik bilgisi" title="Gazeteci bilgisi" data-journalist-since="${escHtml(journalistSince)}" onclick="event.preventDefault();event.stopPropagation();showJournalistSince(this.dataset.journalistSince)"><i class="fas fa-newspaper"></i></button>`
-    : '';
-  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}${redVerification}${founderMark}</strong><small>@${escHtml(u.username)}</small></span>${journalistMark}${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
+  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}${redVerification}${founderMark}</strong><small>@${escHtml(u.username)}</small></span>${u.is_vip ? ' <i class="fas fa-gem user-vip" title="VIP"></i>' : ''}${u.is_plus ? ' <i class="fas fa-plus user-plus" title="Plus"></i>' : ''}${adminBadge}</span>`;
 }
 
 window.showFounderInfo = function () {
@@ -8959,6 +8955,13 @@ async function renderBadges(app) {
   }
 
   const typeLabels = { custom: 'Topluluk rozeti', level: 'Seviye rozeti', vip: 'Üyelik rozeti', plus: 'Üyelik rozeti', admin: 'Yetkili rozeti', artist: 'Artist rozeti', journalist: 'Gazeteci rozeti', vmb: 'Topluluk rozeti', red_verified: 'Görsel profil işareti' };
+  const formatBadgeDate = value => {
+    if (!value) return 'Veriliş tarihi kayıtlı değil';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? 'Veriliş tarihi kayıtlı değil'
+      : `${date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} tarihinde verildi`;
+  };
   const badgeRows = badges.length ? badges.map(badge => {
     const isLockedAdminBadge = badge.key === 'admin';
     return `
@@ -8969,6 +8972,7 @@ async function renderBadges(app) {
       <div class="badge-setting-copy">
         <strong>${badge.type === 'red_verified' ? 'Doğrulanmış hesap' : escHtml(badge.name)}</strong>
         <small>${typeLabels[badge.type] || 'Rozet'} · <span class="badge-setting-status">${isLockedAdminBadge ? 'Zorunlu · Profilde görünüyor' : (badge.is_active ? 'Profilde görünüyor' : 'Profilde gizli')}</span></small>
+        <small class="badge-setting-date"><i class="fas fa-calendar-check" aria-hidden="true"></i> ${escHtml(formatBadgeDate(badge.assigned_at))}</small>
       </div>
       <label class="badge-visibility-toggle${isLockedAdminBadge ? ' is-locked' : ''}" title="${isLockedAdminBadge ? 'Yetkili rozeti zorunludur' : (badge.is_active ? 'Profilde gizle' : 'Profilde göster')}">
         <input type="checkbox" data-badge-toggle="${escHtml(badge.key)}" ${badge.is_active ? 'checked' : ''} ${isLockedAdminBadge ? 'disabled' : ''} />
@@ -9503,7 +9507,7 @@ async function renderProfile(app, username) {
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
       <div class="profile-header-actions${isOwn ? ' is-own' : ' is-other'}">
-        ${isOwn && currentUser?.is_admin ? '<a href="/gubukgak" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
+        ${isOwn && currentUser?.is_admin ? '<a href="/gubukgak?from=profile" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
         ${isOwn ? '<a href="/ayarlar" data-link class="profile-edit-settings-btn" aria-label="Profili düzenle" title="Profili düzenle"><i class="fas fa-gear" aria-hidden="true"></i></a>' : ''}
         ${profileBadgesButtonHTML(badges)}
       </div>
@@ -10091,8 +10095,7 @@ async function renderSettingsSection(section) {
             <div id="links-container" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
             <button type="button" class="btn btn-outline btn-sm" id="add-link-btn"><i class="fas fa-plus"></i> Link Ekle</button>
           </div>
-          <div class="settings-autosave-status" id="profile-autosave-status" aria-live="polite">Biyografi, ünvan ve konum alanları değiştirildiğinde otomatik kaydedilir.</div>
-          <button class="btn btn-primary" id="save-profile-btn">Fotoğrafı ve linkleri kaydet</button>
+          <div class="settings-autosave-status" id="profile-autosave-status" aria-live="polite">Profil değişiklikleri otomatik kaydedilir.</div>
           <div id="profile-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
@@ -10109,7 +10112,33 @@ async function renderSettingsSection(section) {
 
     let currentLinks = [...links];
     let profileAutosaveQueue = Promise.resolve();
+    let profileLinksSaveTimer = null;
     renderLinkRows(currentLinks);
+    const saveProfileFields = (fields, savingText = 'Profil değişiklikleri kaydediliyor…') => {
+      const status = $('#profile-autosave-status');
+      const save = profileAutosaveQueue.then(async () => {
+        if (status) status.textContent = savingText;
+        const fd = new FormData();
+        Object.entries(fields).forEach(([key, value]) => fd.append(key, value));
+        currentUser = await apiForm('/profile', fd, 'PUT');
+        updateNavUI();
+        if (status) status.textContent = 'Profil değişiklikleri kaydedildi.';
+        return currentUser;
+      });
+      profileAutosaveQueue = save.catch(() => {});
+      return save;
+    };
+    const saveProfileLinks = async () => {
+      clearTimeout(profileLinksSaveTimer);
+      const validLinks = currentLinks.filter(link => link.url && link.url.trim());
+      try {
+        await saveProfileFields({ links: JSON.stringify(validLinks) });
+        if ($('#profile-msg')) $('#profile-msg').textContent = '';
+      } catch (error) {
+        if ($('#profile-autosave-status')) $('#profile-autosave-status').textContent = error.message || 'Bağlantılar kaydedilemedi.';
+        toast(error.message || 'Bağlantılar kaydedilemedi.', 'error');
+      }
+    };
     const profileFieldLimits = { 's-bio': 500, 's-title': 100, 's-location': 100 };
     Object.entries(profileFieldLimits).forEach(([id, limit]) => {
       const field = document.getElementById(id);
@@ -10125,19 +10154,10 @@ async function renderSettingsSection(section) {
       field.addEventListener('change', async () => {
         if (field.disabled) return;
         const value = field.value;
-        field.disabled = true;
         const status = $('#profile-autosave-status');
-        const save = profileAutosaveQueue.then(async () => {
-          if (status) status.textContent = 'Profil alanı kaydediliyor…';
-          const fd = new FormData();
-          fd.append(profileKey, value);
-          currentUser = await apiForm('/profile', fd, 'PUT');
-          updateNavUI();
-          if (status) status.textContent = 'Profil alanı kaydedildi.';
-        });
-        profileAutosaveQueue = save.catch(() => {});
+        field.disabled = true;
         try {
-          await save;
+          await saveProfileFields({ [profileKey]: value }, 'Profil alanı kaydediliyor…');
         } catch (error) {
           field.value = String(currentUser[profileKey] || '');
           updateCounter();
@@ -10153,13 +10173,16 @@ async function renderSettingsSection(section) {
     $('#add-link-btn').addEventListener('click', () => {
       currentLinks.push({ label: '', url: '' });
       renderLinkRows(currentLinks);
+      $('#links-container').querySelector('.link-row:last-child input')?.focus();
     });
 
     $('#links-container').addEventListener('click', e => {
       const rem = e.target.closest('.remove-link-btn');
       if (rem) {
+        clearTimeout(profileLinksSaveTimer);
         currentLinks.splice(parseInt(rem.dataset.idx), 1);
         renderLinkRows(currentLinks);
+        saveProfileLinks();
       }
     });
 
@@ -10168,24 +10191,32 @@ async function renderSettingsSection(section) {
       if (!row) return;
       const idx = parseInt(row.dataset.idx);
       const field = e.target.dataset.field;
-      if (field && currentLinks[idx] !== undefined) currentLinks[idx][field] = e.target.value;
+      if (field && currentLinks[idx] !== undefined) {
+        currentLinks[idx][field] = e.target.value;
+        clearTimeout(profileLinksSaveTimer);
+        profileLinksSaveTimer = setTimeout(saveProfileLinks, 500);
+        const status = $('#profile-autosave-status');
+        if (status) status.textContent = 'Bağlantı değişikliği kaydedilecek…';
+      }
     });
+    $('#links-container').addEventListener('change', saveProfileLinks);
 
-    $('#save-profile-btn').addEventListener('click', async () => {
-      await profileAutosaveQueue;
-      const fd = new FormData();
-      const validLinks = currentLinks.filter(l => l.url && l.url.trim());
-      fd.append('links', JSON.stringify(validLinks));
-      if (selectedAvatarFile) fd.append('avatar', selectedAvatarFile);
-      fd.append('avatar_removed', $('#s-remove-avatar').checked ? '1' : '0');
+    $('#s-remove-avatar').addEventListener('change', async event => {
+      const checkbox = event.currentTarget;
+      const previousValue = !checkbox.checked;
+      checkbox.disabled = true;
       try {
-        const updated = await apiForm('/profile', fd, 'PUT');
-        currentUser = updated;
-        updateNavUI();
-        toast('Fotoğraf ve linkler kaydedildi');
-        $('#profile-msg').style.color = 'var(--accent-red2)';
-        $('#profile-msg').textContent = '';
-      } catch (e) { $('#profile-msg').textContent = e.message; }
+        await saveProfileFields({ avatar_removed: checkbox.checked ? '1' : '0' }, 'Profil fotoğrafı güncelleniyor…');
+        selectedAvatarFile = null;
+        $('#avatar-file-status').textContent = checkbox.checked ? 'Profil fotoğrafı kaldırıldı.' : 'Profil fotoğrafı tekrar gösteriliyor.';
+        $('#avatar-file-status').classList.remove('is-ready', 'is-error');
+      } catch (error) {
+        checkbox.checked = previousValue;
+        if ($('#profile-autosave-status')) $('#profile-autosave-status').textContent = error.message || 'Profil fotoğrafı güncellenemedi.';
+        toast(error.message || 'Profil fotoğrafı güncellenemedi.', 'error');
+      } finally {
+        checkbox.disabled = false;
+      }
     });
     $('#avatar-file').addEventListener('change', e => {
       const file = e.target.files?.[0];
@@ -10197,8 +10228,18 @@ async function renderSettingsSection(section) {
       openAvatarCrop(file, croppedFile => {
         selectedAvatarFile = croppedFile;
         $('#s-remove-avatar').checked = false;
-        status.textContent = `${file.name} hazır · Değişikliği kaydetmek için Kaydet'e bas`;
         status.classList.add('is-ready');
+        status.textContent = `${file.name} hazır · Profil fotoğrafı güncelleniyor…`;
+        saveProfileFields({ avatar: croppedFile, avatar_removed: '0' }, 'Profil fotoğrafı yükleniyor…')
+          .then(() => {
+            selectedAvatarFile = null;
+            status.textContent = `${file.name} profil fotoğrafına kaydedildi.`;
+          })
+          .catch(error => {
+            status.classList.add('is-error');
+            status.textContent = error.message || 'Profil fotoğrafı kaydedilemedi.';
+            toast(error.message || 'Profil fotoğrafı kaydedilemedi.', 'error');
+          });
       });
     });
     if (!nicknameBlocked) {
@@ -15483,11 +15524,18 @@ function showAdSubmissionModal() {
 }
 async function renderMusicList(app) {
   document.title = 'Müzikler – ' + siteName;
+  let musicPageTagline = 'Fevkalade gönenç ezgiler.';
+  try {
+    const settings = await api('/settings/public');
+    if (typeof settings.music_page_tagline === 'string') musicPageTagline = settings.music_page_tagline;
+  } catch (error) {
+    console.warn('Müzik sayfası alt yazısı yüklenemedi:', error.message);
+  }
   app.innerHTML = `<div class="container page">
     <div class="page-header music-page-header">
       <div class="page-title music-page-title">
         <span class="music-page-title-icon"><i class="fas fa-music"></i></span>
-        <span><strong>Müzik</strong><small>Dinle, keşfet ve koleksiyonunu oluştur</small></span>
+        <span><strong>Müzik</strong><small>${escHtml(musicPageTagline)}</small></span>
       </div>
       ${currentUser ? `<div class="music-page-header-actions">
         <a href="/playlistlerim" data-link class="music-playlists-link" aria-label="Playlistlerim">

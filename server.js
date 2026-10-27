@@ -334,6 +334,14 @@ function hasAdminPermission(permissions, name) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
+function hasAdminPanelAccess(permissions) {
+  return [
+    'can_view_users', 'can_suspend_content', 'can_restrict_users', 'can_review_artists',
+    'can_assign_badges', 'can_view_store', 'can_view_groups', 'can_view_stories',
+    'can_view_reals', 'can_view_levels'
+  ].some(permission => hasAdminPermission(permissions, permission));
+}
+
 function generateToken(userId) {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -469,13 +477,14 @@ async function getUserProfileBadges(user, { includeInactive = false, featureStat
       name: legacyName,
       icon: user.badge_icon || '',
       color: user.badge_color || '#6b7280',
+      assigned_at: user.created_at,
     });
   }
 
   const level = levelResult.rows[0];
-  if (level) addBadge({ key: 'level', type: 'level', name: level.name, icon: level.icon || 'fas fa-star', color: level.color || '#dc2626' });
-  if (Number(user.is_vip) === 1) addBadge({ key: 'vip', type: 'vip', name: 'VIP', icon: 'fas fa-gem', color: '#fbbf24' });
-  if (Number(user.is_plus) === 1) addBadge({ key: 'plus', type: 'plus', name: 'Plus', icon: 'fas fa-plus-circle', color: '#818cf8' });
+  if (level) addBadge({ key: 'level', type: 'level', name: level.name, icon: level.icon || 'fas fa-star', color: level.color || '#dc2626', assigned_at: user.level_since });
+  if (Number(user.is_vip) === 1) addBadge({ key: 'vip', type: 'vip', name: 'VIP', icon: 'fas fa-gem', color: '#fbbf24', assigned_at: user.vip_since });
+  if (Number(user.is_plus) === 1) addBadge({ key: 'plus', type: 'plus', name: 'Plus', icon: 'fas fa-plus-circle', color: '#818cf8', assigned_at: user.plus_since });
   if (Number(user.is_red_verified) === 1) {
     addBadge({
       key: 'red_verified',
@@ -486,8 +495,8 @@ async function getUserProfileBadges(user, { includeInactive = false, featureStat
       assigned_at: user.red_verified_at,
     });
   }
-  if (Number(user.is_admin) === 1) addBadge({ key: 'admin', type: 'admin', name: 'Yetkili', icon: 'fas fa-shield-halved', color: '#5865F2' });
-  if (Number(user.is_artist) === 1) addBadge({ key: 'artist', type: 'artist', name: 'Artist', icon: 'fas fa-microphone-alt', color: '#a855f7' });
+  if (Number(user.is_admin) === 1) addBadge({ key: 'admin', type: 'admin', name: 'Yetkili', icon: 'fas fa-shield-halved', color: '#5865F2', assigned_at: user.admin_since });
+  if (Number(user.is_artist) === 1) addBadge({ key: 'artist', type: 'artist', name: 'Artist', icon: 'fas fa-microphone-alt', color: '#a855f7', assigned_at: user.artist_since });
   if (journalistResult.rows.length) {
     addBadge({
       key: 'journalist',
@@ -506,6 +515,7 @@ async function getUserProfileBadges(user, { includeInactive = false, featureStat
       name: isManager ? 'VMB Yönetim' : 'VMB',
       icon: isManager ? 'fas fa-crown' : 'fas fa-shield-halved',
       color: isManager ? '#fbbf24' : '#facc15',
+      assigned_at: user.vmb_granted_at,
     });
   }
   if (Number(user.id) === Number(features.founderUserId)) {
@@ -745,11 +755,11 @@ async function adminMiddleware(req, res, next) {
     req.adminUser = { id: null, username: master.admin_username || 'Tarator', isSuperAdmin: true };
     return next();
   }
-  const { rows: users } = await query('SELECT u.id, u.username, u.is_admin, p.* FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE s.token=$1 AND s.expires_at > NOW() AND u.is_admin=1', [token]);
-  if (!users.length) return res.status(403).json({ error: 'Geçersiz admin token' });
+  const { rows: users } = await query('SELECT u.id AS account_user_id, u.username, u.is_admin, p.* FROM admin_user_sessions a JOIN users u ON u.id=a.user_id LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE a.token=$1 AND a.expires_at > NOW() AND u.is_admin=1', [token]);
+  if (!users.length) return res.status(401).json({ error: 'Yetkili paneli oturumu geçersiz veya süresi dolmuş' });
   const user = users[0];
-  if (!hasAdminPermission(user, 'can_view_users') && !hasAdminPermission(user, 'can_suspend_content') && !hasAdminPermission(user, 'can_restrict_users') && !hasAdminPermission(user, 'can_review_artists') && !hasAdminPermission(user, 'can_assign_badges') && !hasAdminPermission(user, 'can_view_store') && !hasAdminPermission(user, 'can_view_groups') && !hasAdminPermission(user, 'can_view_stories') && !hasAdminPermission(user, 'can_view_reals') && !hasAdminPermission(user, 'can_view_levels')) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
-  req.adminUser = { id: user.id, username: user.username, isSuperAdmin: false, permissions: user };
+  if (!hasAdminPanelAccess(user)) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
+  req.adminUser = { id: user.account_user_id, username: user.username, isSuperAdmin: false, permissions: user };
   const permissions = user;
   if (req.method === 'GET') {
     const readRules = [
@@ -858,7 +868,7 @@ async function updateUserLevel(userId) {
 
     if (meets) bestLevel = lv;
   }
-  await query('UPDATE users SET level_id=$1 WHERE id=$2', [bestLevel.id, userId]);
+  await query('UPDATE users SET level_since=CASE WHEN level_id IS DISTINCT FROM $1 THEN NOW() ELSE level_since END, level_id=$1 WHERE id=$2', [bestLevel.id, userId]);
 }
 
 function getDailyLimit(user, lv, type) {
@@ -1322,10 +1332,53 @@ app.delete('/api/vmb-admin/auth/logout', vmbAdminMiddleware, async (req, res) =>
   res.json({ ok: true });
 });
 
+app.get('/api/admin/auth/identity', authMiddleware, async (req, res) => {
+  if (Number(req.user.is_admin) !== 1) return res.status(403).json({ error: 'Bu hesabın yetkili paneline erişimi yok' });
+  const { rows } = await query('SELECT * FROM admin_permissions WHERE user_id=$1', [req.user.id]);
+  const permissions = rows[0] || {};
+  if (!hasAdminPanelAccess(permissions)) return res.status(403).json({ error: 'Bu yetkili hesabında kullanılabilir yetki yok' });
+  res.json({ username: req.user.username, permissions });
+});
+
+app.post('/api/admin/auth/logout', async (req, res) => {
+  const token = String(req.headers['x-admin-token'] || '').trim();
+  if (token) {
+    await query('DELETE FROM admin_sessions WHERE token=$1', [token]);
+    await query('DELETE FROM admin_user_sessions WHERE token=$1', [token]);
+  }
+  res.json({ ok: true });
+});
+
 app.post('/api/admin/auth/login', async (req, res) => {
-  const username = String(req.body.username || '').trim();
+  const sessionToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
   const password = String(req.body.password || '');
-  if (!username || !password) return res.status(400).json({ error: 'Kullanıcı adı ve şifre gerekli' });
+  if (!password) return res.status(400).json({ error: 'Şifre gerekli' });
+  if (sessionToken) {
+    const { rows } = await query(
+      'SELECT u.id, u.username, u.is_admin, u.password_hash, u.banned FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token=$1 AND s.expires_at > NOW()',
+      [sessionToken]
+    );
+    const user = rows[0];
+    if (!user || user.banned) return res.status(401).json({ error: 'Oturum geçersiz. Siteye yeniden giriş yapın.' });
+    const { rows: permissionRows } = await query('SELECT * FROM admin_permissions WHERE user_id=$1', [user.id]);
+    const permissions = permissionRows[0] || {};
+    if (Number(user.is_admin) !== 1 || !hasAdminPanelAccess(permissions)) {
+      return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkili paneli erişimi yok' });
+    }
+    if (!verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: 'Yetkili paneli şifresi yanlış' });
+    }
+    const token = generateToken(user.id);
+    const { rows: adminSessions } = await query(
+      'INSERT INTO admin_user_sessions (token,user_id) VALUES ($1,$2) RETURNING expires_at',
+      [token, user.id]
+    );
+    await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));
+    return res.json({ token, is_super_admin: false, username: user.username, permissions, expires_at: adminSessions[0].expires_at });
+  }
+
+  const username = String(req.body.username || '').trim();
+  if (!username) return res.status(400).json({ error: 'Ana admin kullanıcı adı gerekli' });
   const { rows: settings } = await query("SELECT key, value FROM settings WHERE key IN ('admin_username','admin_password')");
   const config = Object.fromEntries(settings.map(row => [row.key, row.value]));
   const storedMasterPassword = String(config.admin_password || '').trim();
@@ -1338,14 +1391,26 @@ app.post('/api/admin/auth/login', async (req, res) => {
     await query('INSERT INTO admin_sessions (token) VALUES ($1)', [token]);
     return res.json({ token, is_super_admin: true, username });
   }
-  const { rows } = await query('SELECT u.*, p.* FROM users u LEFT JOIN admin_permissions p ON p.user_id=u.id WHERE LOWER(u.username)=LOWER($1) AND u.is_admin=1', [username]);
-  const user = rows[0];
-  if (!user || !verifyPassword(password, user.password_hash)) return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
-  if (!hasAdminPermission(user, 'can_view_users') && !hasAdminPermission(user, 'can_suspend_content') && !hasAdminPermission(user, 'can_restrict_users') && !hasAdminPermission(user, 'can_review_artists') && !hasAdminPermission(user, 'can_assign_badges') && !hasAdminPermission(user, 'can_view_store') && !hasAdminPermission(user, 'can_view_groups') && !hasAdminPermission(user, 'can_view_stories') && !hasAdminPermission(user, 'can_view_reals') && !hasAdminPermission(user, 'can_view_levels')) return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  const { rows: users } = await query(
+    'SELECT id, username, is_admin, password_hash, banned FROM users WHERE LOWER(username)=LOWER($1) AND is_admin=1',
+    [username]
+  );
+  const user = users[0];
+  if (!user || user.banned || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: 'Yetkili bilgileri doğrulanamadı' });
+  }
+  const { rows: permissionRows } = await query('SELECT * FROM admin_permissions WHERE user_id=$1', [user.id]);
+  const permissions = permissionRows[0] || {};
+  if (!hasAdminPanelAccess(permissions)) {
+    return res.status(403).json({ error: 'Bu hesabın atanmış bir yetkisi yok' });
+  }
   const token = generateToken(user.id);
-  await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
+  const { rows: adminSessions } = await query(
+    'INSERT INTO admin_user_sessions (token,user_id) VALUES ($1,$2) RETURNING expires_at',
+    [token, user.id]
+  );
   await logAction(user.username, 'authority_login', '', 'Yetkili paneli girişi', getIp(req));
-  res.json({ token, is_super_admin: false, username: user.username, permissions: user });
+  return res.json({ token, is_super_admin: false, username: user.username, permissions, expires_at: adminSessions[0].expires_at });
 });
 
 // Site genelinde giriş zorunluluğu açıkken yalnızca içerik gezinme rotaları misafirlere açıktır.
@@ -2193,9 +2258,9 @@ app.post('/api/purchase', authMiddleware, async (req, res) => {
     if (process.env.ENABLE_PAYMENTS !== '1') return res.status(502).json({ error: 'Ödeme hizmeti şu an devre dışı. Üyelik aktif edilemedi.' });
     const userId = req.user.id;
     if (type === 'vip') {
-      await query('UPDATE users SET is_vip=1 WHERE id=$1', [userId]);
+      await query('UPDATE users SET is_vip=1,vip_since=CASE WHEN COALESCE(is_vip,0)=0 THEN NOW() ELSE vip_since END WHERE id=$1', [userId]);
     } else if (type === 'plus') {
-      await query('UPDATE users SET is_plus=1 WHERE id=$1', [userId]);
+      await query('UPDATE users SET is_plus=1,plus_since=CASE WHEN COALESCE(is_plus,0)=0 THEN NOW() ELSE plus_since END WHERE id=$1', [userId]);
     }
     const { rows } = await query('SELECT * FROM users WHERE id=$1', [userId]);
     res.json(sanitizeUser(rows[0]));
@@ -2241,8 +2306,8 @@ app.post('/api/gift', authMiddleware, async (req, res) => {
     await query('INSERT INTO gifts(code,sender_id,recipient_id,recipient_username,type,created_at) VALUES($1,$2,$3,$4,$5,NOW())', [code, sender.id, recipient_id, to_username || '', type]);
     // If recipient exists, immediately redeem (assign membership)
     if (recipient) {
-      if (type === 'vip') await query('UPDATE users SET is_vip=1 WHERE id=$1', [recipient.id]);
-      if (type === 'plus') await query('UPDATE users SET is_plus=1 WHERE id=$1', [recipient.id]);
+      if (type === 'vip') await query('UPDATE users SET is_vip=1,vip_since=CASE WHEN COALESCE(is_vip,0)=0 THEN NOW() ELSE vip_since END WHERE id=$1', [recipient.id]);
+      if (type === 'plus') await query('UPDATE users SET is_plus=1,plus_since=CASE WHEN COALESCE(is_plus,0)=0 THEN NOW() ELSE plus_since END WHERE id=$1', [recipient.id]);
       await query('UPDATE gifts SET redeemed=1, redeemed_at=NOW() WHERE code=$1', [code]);
       await logAction(sender.username, 'gift_sent', `${type} -> ${recipient.username}`);
       // return recipient sanitized
@@ -2265,8 +2330,8 @@ app.post('/api/redeem-gift', authMiddleware, async (req, res) => {
     if (gift.redeemed) return res.status(400).json({ error: 'Hediye zaten kullanılmış' });
     const userId = req.user.id;
     if (gift.recipient_id && gift.recipient_id !== userId) return res.status(403).json({ error: 'Bu hediye sizin için değil' });
-    if (gift.type === 'vip') await query('UPDATE users SET is_vip=1 WHERE id=$1', [userId]);
-    if (gift.type === 'plus') await query('UPDATE users SET is_plus=1 WHERE id=$1', [userId]);
+    if (gift.type === 'vip') await query('UPDATE users SET is_vip=1,vip_since=CASE WHEN COALESCE(is_vip,0)=0 THEN NOW() ELSE vip_since END WHERE id=$1', [userId]);
+    if (gift.type === 'plus') await query('UPDATE users SET is_plus=1,plus_since=CASE WHEN COALESCE(is_plus,0)=0 THEN NOW() ELSE plus_since END WHERE id=$1', [userId]);
     await query('UPDATE gifts SET redeemed=1, redeemed_at=NOW(), recipient_id=$1, recipient_username=(SELECT username FROM users WHERE id=$1) WHERE code=$2', [userId, code]);
     await logAction(req.user.username, 'gift_redeemed', code);
     const { rows: updated } = await query('SELECT * FROM users WHERE id=$1', [userId]);
@@ -7436,6 +7501,12 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     loading_screen_tagline: 120,
     loading_screen_status: 40
   };
+  if (key === 'music_page_tagline') {
+    value = String(value || '').trim();
+    if (value.length > 120) {
+      return res.status(400).json({ error: 'Müzik sayfası alt yazısı en fazla 120 karakter olabilir' });
+    }
+  }
   if (Object.hasOwn(loadingScreenTextLimits, key)) {
     value = String(value || '').trim();
     if (value.length > loadingScreenTextLimits[key]) {
@@ -7592,7 +7663,7 @@ app.post('/api/admin/user/:id/set-admin', adminMiddleware, async (req, res) => {
   const { is_admin } = req.body;
   const { rows } = await query('SELECT * FROM users WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-  const adminSince = is_admin ? 'NOW()' : 'NULL';
+  const adminSince = is_admin ? 'COALESCE(admin_since,NOW())' : 'NULL';
   await query(`UPDATE users SET is_admin=$1, admin_since=${adminSince} WHERE id=$2`, [is_admin ? 1 : 0, req.params.id]);
   await logAction('admin', is_admin ? 'grant_admin' : 'revoke_admin', rows[0].username);
   res.json({ ok: true });
@@ -8401,7 +8472,7 @@ app.post('/api/admin/permissions/:userId', adminMiddleware, async (req, res) => 
     can_view_store, can_view_groups, can_view_stories, can_view_reals, can_view_levels
   } = req.body;
   // Kullanıcıyı admin yap (is_admin=1 yoksa set et)
-  await query('UPDATE users SET is_admin=1 WHERE id=$1', [uid]);
+  await query('UPDATE users SET is_admin=1,admin_since=COALESCE(admin_since,NOW()) WHERE id=$1', [uid]);
   const { rows: existing } = await query('SELECT id FROM admin_permissions WHERE user_id=$1', [uid]);
   if (existing.length) {
     await query(`UPDATE admin_permissions SET
@@ -8509,7 +8580,7 @@ app.get('/api/settings/public', async (req, res) => {
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
     'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
-    'photo_song_clip_seconds','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
+    'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
@@ -11149,14 +11220,14 @@ function shopierSign(randomNr, amount, currency, orderId, apiSecret) {
 
 // ---- Üyelik verme / alma ----
 async function grantMembership(userId, type) {
-  if (type === 'vip') await query('UPDATE users SET is_vip=1 WHERE id=$1', [userId]);
-  else if (type === 'plus') await query('UPDATE users SET is_plus=1 WHERE id=$1', [userId]);
+  if (type === 'vip') await query('UPDATE users SET is_vip=1,vip_since=CASE WHEN COALESCE(is_vip,0)=0 THEN NOW() ELSE vip_since END WHERE id=$1', [userId]);
+  else if (type === 'plus') await query('UPDATE users SET is_plus=1,plus_since=CASE WHEN COALESCE(is_plus,0)=0 THEN NOW() ELSE plus_since END WHERE id=$1', [userId]);
   else if (type === 'admin') await query('UPDATE users SET is_admin=1, admin_since=NOW() WHERE id=$1', [userId]);
 }
 
 async function revokeMembership(userId, type) {
-  if (type === 'vip') await query('UPDATE users SET is_vip=0 WHERE id=$1', [userId]);
-  else if (type === 'plus') await query('UPDATE users SET is_plus=0 WHERE id=$1', [userId]);
+  if (type === 'vip') await query('UPDATE users SET is_vip=0,vip_since=NULL WHERE id=$1', [userId]);
+  else if (type === 'plus') await query('UPDATE users SET is_plus=0,plus_since=NULL WHERE id=$1', [userId]);
   else if (type === 'admin') await query('UPDATE users SET is_admin=0, admin_since=NULL WHERE id=$1', [userId]);
 }
 

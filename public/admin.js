@@ -299,6 +299,17 @@ async function renderBadges(main) {
 let adminToken = sessionStorage.getItem('admin_token') || '';
 let adminProfile = JSON.parse(sessionStorage.getItem('admin_profile') || 'null');
 let currentSection = 'dashboard';
+const profileEntry = new URLSearchParams(location.search).get('from') === 'profile';
+let profileEntryReady = !profileEntry;
+let adminExpiryTimer = null;
+
+if (profileEntry) {
+  adminToken = '';
+  adminProfile = null;
+  sessionStorage.removeItem('admin_token');
+  sessionStorage.removeItem('admin_profile');
+  sessionStorage.removeItem('admin_expires_at');
+}
 
 function $(s) { return document.querySelector(s); }
 function $$(s) { return document.querySelectorAll(s); }
@@ -341,8 +352,38 @@ async function adminApi(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken, ...(options.headers || {}) };
   const res = await fetch('/api/admin' + path, { ...options, headers });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Hata');
+  if (!res.ok) {
+    if (res.status === 401 && adminToken) {
+      adminToken = '';
+      adminProfile = null;
+      sessionStorage.removeItem('admin_token');
+      sessionStorage.removeItem('admin_profile');
+      sessionStorage.removeItem('admin_expires_at');
+      location.reload();
+    }
+    throw new Error(data.error || 'Hata');
+  }
   return data;
+}
+
+function scheduleAdminExpiry() {
+  clearTimeout(adminExpiryTimer);
+  const expiresAt = Date.parse(adminProfile?.expires_at || sessionStorage.getItem('admin_expires_at') || '');
+  if (!Number.isFinite(expiresAt)) return;
+  const expireSession = () => {
+    adminToken = '';
+    adminProfile = null;
+    sessionStorage.removeItem('admin_token');
+    sessionStorage.removeItem('admin_profile');
+    sessionStorage.removeItem('admin_expires_at');
+    location.reload();
+  };
+  const remaining = expiresAt - Date.now();
+  if (remaining <= 0) {
+    expireSession();
+    return;
+  }
+  adminExpiryTimer = setTimeout(expireSession, Math.min(remaining, 2147483647));
 }
 
 function showModal(title, bodyHTML) {
@@ -357,26 +398,57 @@ $('#modal-overlay').addEventListener('click', e => { if (e.target === $('#modal-
 
 // ===== AUTH =====
 if (adminToken) {
+  scheduleAdminExpiry();
   fetch('/api/admin/me', { headers: { 'X-Admin-Token': adminToken } })
     .then(response => { if (!response.ok) throw new Error('Geçersiz oturum'); showPanel(); })
-    .catch(() => { adminToken = ''; adminProfile = null; sessionStorage.removeItem('admin_token'); sessionStorage.removeItem('admin_profile'); });
+    .catch(() => { adminToken = ''; adminProfile = null; sessionStorage.removeItem('admin_token'); sessionStorage.removeItem('admin_profile'); sessionStorage.removeItem('admin_expires_at'); });
+}
+if (profileEntry) {
+  const usernameInput = $('#admin-username-input');
+  const loginButton = $('#admin-login-btn');
+  usernameInput.readOnly = true;
+  usernameInput.placeholder = 'Kullanıcı adı yükleniyor...';
+  $('#admin-username-group').querySelector('label').textContent = 'Yetkili kullanıcı adı';
+  loginButton.disabled = true;
+  const userToken = localStorage.getItem('token') || '';
+  if (!userToken) {
+    $('#admin-login-err').textContent = 'Yetkili paneline giriş için önce CigCig hesabınıza giriş yapın.';
+  } else {
+    fetch('/api/admin/auth/identity', { headers: { Authorization: 'Bearer ' + userToken } })
+      .then(async response => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Yetkili hesabı doğrulanamadı');
+        usernameInput.value = result.username;
+        usernameInput.placeholder = '';
+        profileEntryReady = true;
+        loginButton.disabled = false;
+        $('#admin-pw-input').focus();
+      })
+      .catch(error => { $('#admin-login-err').textContent = error.message; });
+  }
 }
 $('#admin-login-btn').addEventListener('click', tryLogin);
 $('#admin-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
 async function tryLogin() {
+  if (profileEntry && !profileEntryReady) return;
   const username = $('#admin-username-input').value.trim();
   const pw = $('#admin-pw-input').value;
-  if (!username || !pw) return;
+  if ((!profileEntry && !username) || !pw) return;
   try {
-    const response = await fetch('/api/admin/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ username, password:pw }) });
+    const headers = { 'Content-Type': 'application/json' };
+    if (profileEntry) headers.Authorization = 'Bearer ' + (localStorage.getItem('token') || '');
+    const body = profileEntry ? { password: pw } : { username, password: pw };
+    const response = await fetch('/api/admin/auth/login', { method:'POST', headers, body:JSON.stringify(body) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Giriş başarısız');
     adminToken = result.token;
     adminProfile = result;
     sessionStorage.setItem('admin_token', adminToken);
     sessionStorage.setItem('admin_profile', JSON.stringify(result));
+    if (result.expires_at) sessionStorage.setItem('admin_expires_at', result.expires_at);
+    scheduleAdminExpiry();
     showPanel();
   } catch (error) {
     adminToken = ''; sessionStorage.removeItem('admin_token');
@@ -412,8 +484,15 @@ function applyAuthorityNav() {
   $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
 }
 
-$('#admin-logout-btn').addEventListener('click', () => {
+$('#admin-logout-btn').addEventListener('click', async () => {
+  try {
+    await fetch('/api/admin/auth/logout', { method: 'POST', headers: { 'X-Admin-Token': adminToken } });
+  } catch (error) {
+    console.warn('Yetkili paneli oturumu sunucuda kapatılamadı:', error.message);
+  }
   adminToken = ''; sessionStorage.removeItem('admin_token');
+  sessionStorage.removeItem('admin_profile');
+  sessionStorage.removeItem('admin_expires_at');
   location.reload();
 });
 
@@ -3584,6 +3663,15 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-music" style="color:var(--red2);margin-right:8px"></i>Müzik Sayfası Alt Yazısı</span></div>
+        <div class="card-body">
+          <div class="form-group"><label for="s-music-page-tagline">Müzik başlığının altındaki metin</label><input id="s-music-page-tagline" maxlength="120" value="${escHtml(settings['music_page_tagline'] || 'Fevkalade gönenç ezgiler.')}" /></div>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Müzik sayfasındaki başlığın altında görünen kısa açıklamayı değiştirin.</small>
+          <button class="btn btn-primary" id="s-music-page-tagline-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Alt yazıyı kaydet</button>
+          <div id="s-music-page-tagline-msg" class="form-error mt-4"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-comments" style="color:var(--red2);margin-right:8px"></i>Varsayılan Mesaj Teması</span></div>
         <div class="card-body">
           <div class="form-group"><label for="s-dm-default-theme">Yeni ve varsayılan temayı kullanan üyeler</label><select id="s-dm-default-theme">
@@ -3902,6 +3990,15 @@ async function renderSettings(main) {
     await saveSetting('photo_song_clip_seconds', String(seconds), msg);
     msg.style.color = 'var(--green)';
     msg.textContent = `✓ Fotoğraf müziği ${seconds} saniye olarak kaydedildi.`;
+  });
+  document.getElementById('s-music-page-tagline-save')?.addEventListener('click', async () => {
+    const input = document.getElementById('s-music-page-tagline');
+    const msg = document.getElementById('s-music-page-tagline-msg');
+    msg.style.color = '';
+    msg.textContent = '';
+    if (!await saveSetting('music_page_tagline', input.value.trim(), msg)) return;
+    msg.style.color = 'var(--green)';
+    msg.textContent = '✓ Müzik sayfası alt yazısı kaydedildi.';
   });
 
   document.getElementById('s-dm-default-theme-save')?.addEventListener('click', async () => {

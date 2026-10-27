@@ -244,6 +244,12 @@ async function initDb() {
       token TEXT PRIMARY KEY,
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '8 hours')
     );
+    CREATE TABLE IF NOT EXISTS admin_user_sessions (
+      token TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
+    );
     CREATE TABLE IF NOT EXISTS vmb_admin_sessions (
       token TEXT PRIMARY KEY,
       username TEXT NOT NULL DEFAULT 'Cambaz',
@@ -1163,6 +1169,9 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_voice_calls_caller ON voice_calls(caller_id, status, created_at DESC);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS vip_since TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS plus_since TIMESTAMP;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS level_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_token TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_refresh TEXT DEFAULT '';
