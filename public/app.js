@@ -333,7 +333,7 @@ function toast(msg, type = 'success', duration = 2200) {
   setTimeout(() => t.remove(), duration);
 }
 
-function showModal(title, bodyHTML, modalClass = '') {
+function showModal(title, bodyHTML, modalClass = '', { pauseMedia = true } = {}) {
   stopProfileNoteAudio();
   const photoEditAudio = $('#edit-photo-song-audio');
   if (photoEditAudio) {
@@ -341,16 +341,16 @@ function showModal(title, bodyHTML, modalClass = '') {
     photoEditAudio.removeAttribute('src');
     photoEditAudio.load();
   }
-  if (activePlaylistPreviewAudio) {
+  if (pauseMedia && activePlaylistPreviewAudio) {
     activePlaylistPreviewAudio.pause();
     untrackMediaAudio(activePlaylistPreviewAudio);
     activePlaylistPreviewAudio = null;
     activePlaylistPreviewButton = null;
   }
-  managedMediaAudio.forEach(audio => audio.pause());
+  if (pauseMedia) managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal');
+  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -15490,31 +15490,69 @@ async function renderMusicList(app) {
     try { userPlaylists = await api('/playlists'); } catch {}
   }
 
-  const showAddToPlaylistMenu = (songId, btnEl) => {
-    document.querySelectorAll('.pl-add-dropdown').forEach(d => d.remove());
+  const showAddToPlaylistMenu = songId => {
     const editablePlaylists = userPlaylists.filter(pl => !pl.source_playlist_id);
     if (!editablePlaylists.length) {
-      toast('Önce bir playlist oluşturun!', 'error'); return;
+      showModal('Playlist oluştur', `
+        <div class="playlist-picker-empty">
+          <span class="playlist-picker-empty-icon"><i class="fas fa-record-vinyl" aria-hidden="true"></i></span>
+          <strong>Henüz playlistin yok</strong>
+          <p>Bu şarkıyı ekleyebilmek için önce kendi playlistini oluştur.</p>
+          <a class="btn btn-primary" href="/playlistlerim" data-link id="playlist-picker-create"><i class="fas fa-plus"></i> Playlist oluştur</a>
+        </div>`, 'playlist-picker-modal', { pauseMedia: false });
+      document.getElementById('playlist-picker-create')?.addEventListener('click', hideModal);
+      return;
     }
-    const menu = document.createElement('div');
-    menu.className = 'pl-add-dropdown dropdown-menu';
-    menu.style.cssText = 'position:absolute;right:0;top:calc(100% + 4px);z-index:9999;min-width:180px';
-    menu.innerHTML = editablePlaylists.map(pl =>
-      `<button class="dropdown-item" data-plid="${pl.id}" data-songid="${songId}"><i class="fas fa-list"></i> ${escHtml(pl.name)}</button>`
-    ).join('');
-    btnEl.style.position = 'relative';
-    btnEl.appendChild(menu);
-    menu.querySelectorAll('.dropdown-item').forEach(item => {
-      item.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        menu.remove();
-        try {
-          await api('/playlists/' + item.dataset.plid + '/songs', { method: 'POST', body: JSON.stringify({ song_id: item.dataset.songid }) });
-          toast('Playlist\'e eklendi!');
-        } catch(err) { toast(err.message, 'error'); }
+    const renderPlaylists = (query = '') => {
+      const playlistList = document.getElementById('playlist-picker-list');
+      if (!playlistList) return;
+      const normalizedQuery = query.trim().toLocaleLowerCase('tr-TR');
+      const filteredPlaylists = editablePlaylists.filter(playlist =>
+        String(playlist.name || '').toLocaleLowerCase('tr-TR').includes(normalizedQuery)
+        || String(playlist.description || '').toLocaleLowerCase('tr-TR').includes(normalizedQuery)
+      );
+      playlistList.innerHTML = filteredPlaylists.length
+        ? filteredPlaylists.map(playlist => `
+          <button type="button" class="playlist-picker-card" data-playlist-id="${escHtml(playlist.id)}" aria-label="${escHtml(playlist.name)} playlistine ekle">
+            <span class="playlist-picker-cover">${playlist.cover_url
+              ? `<img src="${escHtml(playlist.cover_url)}" alt="" loading="lazy" />`
+              : '<span class="pl-cover-placeholder"><i class="fas fa-music" aria-hidden="true"></i></span>'}
+            </span>
+            <span class="playlist-picker-copy">
+              <strong>${escHtml(playlist.name)}</strong>
+              <small>${Number(playlist.song_count) || 0} şarkı · ${Number(playlist.is_public) === 1 ? 'Herkese açık' : 'Gizli'}</small>
+            </span>
+            <span class="playlist-picker-add-icon"><i class="fas fa-plus" aria-hidden="true"></i></span>
+          </button>`).join('')
+        : '<div class="playlist-picker-no-results"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><span>Bu aramayla eşleşen playlist yok.</span></div>';
+      playlistList.querySelectorAll('.playlist-picker-card').forEach(card => {
+        card.addEventListener('click', async () => {
+          if (card.disabled) return;
+          card.disabled = true;
+          card.classList.add('is-adding');
+          try {
+            await api(`/playlists/${encodeURIComponent(card.dataset.playlistId)}/songs`, {
+              method: 'POST',
+              body: JSON.stringify({ song_id: songId })
+            });
+            hideModal();
+            toast('Şarkı playlist’e eklendi!');
+          } catch (error) {
+            card.disabled = false;
+            card.classList.remove('is-adding');
+            toast(error.message || 'Şarkı playliste eklenemedi.', 'error');
+          }
+        });
       });
+    };
+    showModal('Şarkıyı playliste ekle', `
+      <div class="playlist-picker-intro"><i class="fas fa-record-vinyl" aria-hidden="true"></i><span>Eklemek istediğin playlisti seç</span></div>
+      <label class="playlist-picker-search"><i class="fas fa-search" aria-hidden="true"></i><input id="playlist-picker-search" type="search" placeholder="Playlistlerinde ara..." autocomplete="off" /></label>
+      <div class="playlist-picker-list" id="playlist-picker-list"></div>`, 'playlist-picker-modal', { pauseMedia: false });
+    renderPlaylists();
+    document.getElementById('playlist-picker-search')?.addEventListener('input', event => {
+      renderPlaylists(event.currentTarget.value);
     });
-    setTimeout(() => document.addEventListener('click', () => menu.remove(), { once: true }), 10);
   };
 
   const loadSongs = async (q = '') => {
@@ -15573,7 +15611,7 @@ async function renderMusicList(app) {
       el.querySelectorAll('.btn-pl-add').forEach(btn => {
         btn.addEventListener('click', e => {
           e.stopPropagation();
-          showAddToPlaylistMenu(btn.dataset.songId, btn.parentElement);
+          showAddToPlaylistMenu(btn.dataset.songId);
         });
       });
     } catch(err) {
