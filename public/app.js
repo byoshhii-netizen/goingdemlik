@@ -12817,11 +12817,17 @@ async function renderMessages(app, targetUsername) {
   renderDmNotes();
   const searchWrap = app.querySelector('.dm-search-wrap');
   const searchToggle = app.querySelector('#dm-search-toggle');
+  const searchHeader = app.querySelector('.dm-sidebar-header');
+  const closeDmSearch = () => {
+    searchWrap?.classList.add('hidden');
+    searchHeader?.classList.remove('is-search-open');
+    searchToggle?.setAttribute('aria-expanded', 'false');
+  };
   searchToggle?.addEventListener('click', event => {
     event.stopPropagation();
     const isOpen = !searchWrap?.classList.contains('hidden');
     searchWrap?.classList.toggle('hidden', isOpen);
-    app.querySelector('.dm-sidebar-header')?.classList.toggle('is-search-open', !isOpen);
+    searchHeader?.classList.toggle('is-search-open', !isOpen);
     searchToggle.setAttribute('aria-expanded', String(!isOpen));
     if (!isOpen) app.querySelector('#dm-search')?.focus();
   });
@@ -12829,17 +12835,14 @@ async function renderMessages(app, targetUsername) {
   window.__dmSearchOutsideHandler = event => {
     if (!searchWrap?.isConnected || searchWrap.classList.contains('hidden')) return;
     if (event.target.closest('.dm-search-wrap, #dm-search-toggle')) return;
-    searchWrap.classList.add('hidden');
-    app.querySelector('.dm-sidebar-header')?.classList.remove('is-search-open');
-    searchToggle?.setAttribute('aria-expanded', 'false');
+    closeDmSearch();
   };
   document.addEventListener('click', window.__dmSearchOutsideHandler);
   app.querySelector('#dm-search')?.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return;
-    searchWrap?.classList.add('hidden');
-    app.querySelector('.dm-sidebar-header')?.classList.remove('is-search-open');
-    searchToggle?.setAttribute('aria-expanded', 'false');
-    searchToggle?.focus();
+    if (event.key === 'Enter' && dmLockSettings.search_unlock_enabled) return;
+    if (event.key !== 'Escape' && event.key !== 'Enter') return;
+    closeDmSearch();
+    if (event.key === 'Escape') searchToggle?.focus();
   });
   if (dmPresencePollTimer) clearInterval(dmPresencePollTimer);
   dmPresencePollTimer = setInterval(async () => {
@@ -12896,6 +12899,7 @@ async function renderMessages(app, targetUsername) {
       dmSearchUnlockedConvs = await api('/conversations/hidden', { headers: { 'X-DM-Search-Code': code } });
       input.value = '';
       renderInboxList();
+      closeDmSearch();
       toast(dmSearchUnlockedConvs.length ? 'Kilitli sohbetler bu sayfa yenilenene kadar açıldı' : 'Açılacak kilitli sohbet yok');
     } catch (error) {
       toast(error.message, 'error');
