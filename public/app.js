@@ -10051,6 +10051,15 @@ async function renderSettings(app) {
     item.addEventListener('click', event => {
       $$('.settings-nav-item').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
+      const nav = item.parentElement;
+      if (nav) {
+        const navRect = nav.getBoundingClientRect();
+        const itemRect = item.getBoundingClientRect();
+        nav.scrollTo({
+          left: nav.scrollLeft + itemRect.left - navRect.left - (nav.clientWidth - item.clientWidth) / 2,
+          behavior: 'smooth'
+        });
+      }
       renderSettingsSection(item.dataset.section);
     });
   });
@@ -10463,10 +10472,18 @@ async function renderSettingsSection(section) {
             <div class="settings-dm-theme-heading"><span><i class="fas fa-palette"></i></span><div><strong>Varsayılan mesaj teması</strong><small>Kişisel tema seçmemiş olduğun sohbetlerde kullanılacak görünümü belirle.</small></div></div>
             <div class="dm-theme-options settings-dm-theme-options">${dmThemeOptionsHTML(selectedDmTheme, true)}</div>
             <div class="settings-dm-theme-preview">
-              <span>Seçili tema: <strong id="s-dm-theme-name">${DM_THEME_LABELS[selectedDmTheme]}</strong></span>
+              <span class="settings-dm-theme-label">Seçili tema <strong id="s-dm-theme-name">${DM_THEME_LABELS[selectedDmTheme]}</strong></span>
               <div class="settings-dm-theme-bubbles dm-chat" data-dm-theme="${selectedDmTheme}">
-                <div class="dm-msg-wrap"><div class="dm-msg-bubble">Karşı tarafın mesajı</div></div>
-                <div class="dm-msg-wrap dm-own"><div class="dm-msg-bubble">Senin mesajın</div></div>
+                <div class="settings-dm-preview-header">
+                  <span class="settings-dm-preview-avatar"><i class="fas fa-user"></i></span>
+                  <span><strong>Mesaj önizlemesi</strong><small>Şimdi</small></span>
+                  <i class="fas fa-ellipsis" aria-hidden="true"></i>
+                </div>
+                <div class="settings-dm-preview-messages">
+                  <div class="dm-msg-wrap"><div class="dm-msg-content"><div class="dm-msg-bubble">Selam! Bugün nasılsın?<small class="settings-dm-preview-time">14:32</small></div></div></div>
+                  <div class="dm-msg-wrap dm-own"><div class="dm-msg-content"><div class="dm-msg-bubble">İyiyim, teşekkürler! 😊<small class="settings-dm-preview-time">14:33 <i class="fas fa-check-double" aria-hidden="true"></i></small></div></div></div>
+                </div>
+                <div class="settings-dm-preview-compose"><span>Mesaj yaz...</span><i class="fas fa-paper-plane" aria-hidden="true"></i></div>
               </div>
             </div>
           </section>
@@ -12368,6 +12385,32 @@ async function renderMessages(app, targetUsername) {
 
   let convs = [], hiddenConvs = [], groups = [], suggestedPeople = [];
   let suggestedPeopleError = '';
+  const suggestionsCacheKey = `dm_suggestions:${currentUser.id}`;
+  let suggestionStatuses = Object.create(null);
+  let hasCachedSuggestions = false;
+  try {
+    const cachedSuggestions = JSON.parse(sessionStorage.getItem(suggestionsCacheKey) || 'null');
+    if (cachedSuggestions && Array.isArray(cachedSuggestions.people)) {
+      suggestedPeople = cachedSuggestions.people;
+      const cachedStatuses = cachedSuggestions.requested;
+      suggestionStatuses = cachedStatuses && typeof cachedStatuses === 'object' && !Array.isArray(cachedStatuses)
+        ? Object.assign(Object.create(null), cachedStatuses)
+        : Object.create(null);
+      hasCachedSuggestions = true;
+    }
+  } catch (error) {
+    console.warn('Önerilen kişiler önbelleği okunamadı.', error);
+  }
+  const saveSuggestionsCache = () => {
+    try {
+      sessionStorage.setItem(suggestionsCacheKey, JSON.stringify({
+        people: suggestedPeople,
+        requested: suggestionStatuses
+      }));
+    } catch (error) {
+      console.warn('Önerilen kişiler önbelleği kaydedilemedi.', error);
+    }
+  };
   const [conversationsResult, groupsResult, lockResult, friendsResult, storiesResult, notesResult, suggestionsResult] = await Promise.allSettled([
     api('/conversations'),
     api('/my-groups'),
@@ -12375,7 +12418,7 @@ async function renderMessages(app, targetUsername) {
     api('/friends'),
     api('/stories'),
     api('/dm-notes'),
-    api('/friends/suggestions')
+    hasCachedSuggestions ? Promise.resolve(suggestedPeople) : api('/friends/suggestions')
   ]);
   if (conversationsResult.status === 'fulfilled') convs = conversationsResult.value;
   else toast(conversationsResult.reason?.message || 'Konuşmalar yüklenemedi', 'error');
@@ -12385,8 +12428,10 @@ async function renderMessages(app, targetUsername) {
   else toast(lockResult.reason?.message || 'Sohbet kilidi ayarları yüklenemedi', 'error');
   const friends = friendsResult.status === 'fulfilled' ? friendsResult.value : null;
   const hasAcceptedFriends = Array.isArray(friends) && friends.some(friend => friend.status === 'accepted');
-  if (suggestionsResult.status === 'fulfilled') suggestedPeople = suggestionsResult.value;
-  else suggestedPeopleError = suggestionsResult.reason?.message || 'Önerilen kişiler yüklenemedi.';
+  if (suggestionsResult.status === 'fulfilled') {
+    suggestedPeople = suggestionsResult.value;
+    if (!hasCachedSuggestions) saveSuggestionsCache();
+  } else suggestedPeopleError = suggestionsResult.reason?.message || 'Önerilen kişiler yüklenemedi.';
   const dmStories = storiesResult.status === 'fulfilled' ? storiesResult.value : [];
   let dmNotes = notesResult.status === 'fulfilled' ? notesResult.value : [];
   const dmStoryByUsername = new Map();
@@ -12529,16 +12574,17 @@ async function renderMessages(app, targetUsername) {
             const avatar = hasUsableAvatar(user)
               ? `<img src="${escHtml(user.avatar)}" alt="" />`
               : '<span class="avatar-placeholder"><i class="fas fa-user"></i></span>';
+            const requestStatus = suggestionStatuses[String(user.username || '').toLocaleLowerCase('tr-TR')];
             return `<article class="dm-suggestion-card">
               <a class="dm-suggestion-identity" href="${profileRoute(user.username)}" data-link>
                 <span class="dm-suggestion-avatar">${avatar}</span>
                 <span class="dm-suggestion-copy"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
               </a>
-              <button type="button" class="dm-suggestion-add" data-username="${escHtml(user.username)}" aria-label="${escHtml(user.nickname || user.username)} kişisine istek gönder">
-                <i class="fas fa-plus" aria-hidden="true"></i><span>İstek gönder</span>
+              <button type="button" class="dm-suggestion-add${requestStatus ? ' is-sent' : ''}" data-username="${escHtml(user.username)}" aria-label="${escHtml(user.nickname || user.username)} kişisine istek gönder"${requestStatus ? ' disabled' : ''}>
+                <i class="fas fa-${requestStatus ? 'check' : 'plus'}" aria-hidden="true"></i><span>${requestStatus ? escHtml(requestStatus) : 'İstek gönder'}</span>
               </button>
             </article>`;
-          }).join('')}</div>`
+            }).join('')}</div>`
           : '<div class="dm-suggestions-state">Şimdilik önerilecek yeni kişi yok.</div>'}
     </section>` : '';
     list.innerHTML = `${entries.length
@@ -12553,6 +12599,7 @@ async function renderMessages(app, targetUsername) {
       button.disabled = true;
       try {
         suggestedPeople = await api('/friends/suggestions');
+        saveSuggestionsCache();
         suggestedPeopleError = '';
         renderInboxList();
       } catch (error) {
@@ -12568,7 +12615,10 @@ async function renderMessages(app, targetUsername) {
       button.disabled = true;
       try {
         const result = await api(`/friends/request/${encodeURIComponent(button.dataset.username)}`, { method: 'POST' });
-        button.innerHTML = `<i class="fas fa-check" aria-hidden="true"></i><span>${result.pending ? 'İstek gönderildi' : 'Takiptesin'}</span>`;
+        const requestStatus = result.pending ? 'İstek gönderildi' : 'Takiptesin';
+        suggestionStatuses[String(button.dataset.username || '').toLocaleLowerCase('tr-TR')] = requestStatus;
+        saveSuggestionsCache();
+        button.innerHTML = `<i class="fas fa-check" aria-hidden="true"></i><span>${requestStatus}</span>`;
         button.classList.add('is-sent');
       } catch (error) {
         button.disabled = false;
