@@ -4341,6 +4341,11 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
     clip-path:inset(0);transition:clip-path .22s ease,opacity .16s ease,transform .22s ease,visibility 0s;
   }
   .dm-sidebar-header .dm-search { min-height:42px;font-size:15px; }
+  .dm-sidebar-header.is-search-open .dm-header-links { visibility:hidden; }
+  .dm-sidebar-header.is-search-open .dm-sidebar-actions { position:absolute;top:50%;right:8px;z-index:5;transform:translateY(-50%); }
+  .dm-sidebar-header.is-search-open .dm-sidebar-actions > :not(.dm-search-toggle) { display:none; }
+  .dm-sidebar-header.is-search-open .dm-search-wrap { left:8px;right:54px;width:auto; }
+  .dm-sidebar-header.is-search-open .dm-search-toggle { width:38px;min-width:38px;flex-basis:38px;height:38px; }
 }
 
 /* ---- Touch: always show menu btn ---- */

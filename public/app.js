@@ -13047,6 +13047,8 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     searchWrap?.classList.add('hidden');
     searchHeader?.classList.remove('is-search-open');
     searchToggle?.setAttribute('aria-expanded', 'false');
+    const icon = searchToggle?.querySelector('i');
+    if (icon) icon.className = 'fas fa-search';
   };
   searchToggle?.addEventListener('click', event => {
     event.stopPropagation();
@@ -13054,6 +13056,8 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     searchWrap?.classList.toggle('hidden', isOpen);
     searchHeader?.classList.toggle('is-search-open', !isOpen);
     searchToggle.setAttribute('aria-expanded', String(!isOpen));
+    const icon = searchToggle.querySelector('i');
+    if (icon) icon.className = `fas fa-${isOpen ? 'search' : 'times'}`;
     if (!isOpen) app.querySelector('#dm-search')?.focus();
   });
   if (window.__dmSearchOutsideHandler) document.removeEventListener('click', window.__dmSearchOutsideHandler);
