@@ -964,12 +964,16 @@ async function initDb() {
       default_theme_key TEXT NOT NULL DEFAULT 'default',
       default_theme_custom INTEGER NOT NULL DEFAULT 0,
       first_dm_theme_prompt_completed INTEGER NOT NULL DEFAULT 0,
+      read_receipts_enabled INTEGER NOT NULL DEFAULT 1,
+      show_online_status INTEGER NOT NULL DEFAULT 1,
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
     ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS default_theme_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS default_theme_custom INTEGER NOT NULL DEFAULT 0;
     UPDATE dm_user_settings SET default_theme_custom=1 WHERE default_theme_key<>'default' AND default_theme_custom=0;
     ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS first_dm_theme_prompt_completed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS read_receipts_enabled INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS show_online_status INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_key TEXT DEFAULT '';
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;

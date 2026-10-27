@@ -29,7 +29,6 @@
   --reals-control-bg: rgba(12,12,12,.78);
   --reals-control-border: rgba(255,255,255,.24);
 }
-
 /* TeaTube'den uyarlanan tema sistemi: CigCig'in mevcut değişkenlerini kullanır. */
 :where(body[data-theme="light"], html[data-theme="light"] body) {
   color-scheme: light;
@@ -2112,6 +2111,28 @@ body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; pad
   line-height:1; cursor:pointer; transition:background .16s,border-color .16s,color .16s,transform .16s;
 }
 .profile-badges-slot { display:flex; justify-content:center; width:100%; min-width:0; margin:0 0 8px; }
+.profile-header-actions {
+  position:absolute;z-index:3;top:18px;right:18px;display:grid;justify-items:center;gap:8px;
+}
+.profile-header-actions .profile-badges-icon-button { margin:0; }
+.profile-edit-settings-btn,.profile-admin-icon-btn,.profile-badges-icon-button {
+  box-sizing:border-box;display:grid;place-items:center;width:40px;height:40px;
+  border:1px solid var(--border);border-radius:50%;color:var(--text-secondary);
+  background:var(--bg-card2);font-size:15px;text-decoration:none;cursor:pointer;
+  transition:color .16s,border-color .16s,background .16s,transform .16s;
+}
+.profile-edit-settings-btn:hover,.profile-edit-settings-btn:focus-visible,
+.profile-admin-icon-btn:hover,.profile-admin-icon-btn:focus-visible,
+.profile-badges-icon-button:hover,.profile-badges-icon-button:focus-visible {
+  border-color:rgba(var(--accent-rgb),.55);color:var(--accent-red2);
+  background:rgba(var(--accent-rgb),.1);transform:translateY(-1px);
+}
+.profile-admin-icon-btn { position:absolute;z-index:3;top:18px;left:18px;color:#8aa3ff; }
+.profile-badges-icon-button { position:relative;width:40px;height:40px;min-height:40px;padding:0;font-size:15px; }
+.profile-badges-icon-button .profile-badges-count {
+  position:absolute;right:-5px;top:-5px;display:grid;place-items:center;min-width:17px;height:17px;
+  padding:0 4px;border:2px solid var(--bg-primary);font-size:9px;
+}
 .profile-badges-button:hover,.profile-badges-button:focus-visible { border-color:rgba(var(--accent-rgb),.5); background:rgba(var(--accent-rgb),.1); color:var(--text-primary); }
 .profile-badges-button:active { transform:scale(.97); }
 .profile-badges-button > i { color:var(--accent-red2); }
@@ -4219,6 +4240,18 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-groups-button, .dm-friends-header-button { min-height:36px; padding:6px 8px; gap:5px; font-size:13px; }
   .dm-new-message-btn { width:36px; height:36px; }
 }
+@media (max-width:600px) {
+  .dm-sidebar-header.is-search-open {
+    display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+  }
+  .dm-sidebar-header .dm-header-links { grid-column:1;grid-row:1;min-width:0; }
+  .dm-sidebar-header .dm-sidebar-actions { grid-column:2;grid-row:1; }
+  .dm-sidebar-header.is-search-open .dm-search-wrap {
+    position:static;grid-column:1/-1;grid-row:2;width:100%;max-width:none;
+    box-sizing:border-box;margin-top:4px;padding:0;transform:none;
+  }
+  .dm-sidebar-header .dm-search { min-height:42px;font-size:15px; }
+}
 
 /* ---- Touch: always show menu btn ---- */
 @media (pointer: coarse) {
@@ -6252,16 +6285,6 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .dm-lock-prompt-actions { display:flex; gap:8px; }
 .dm-lock-prompt-actions .btn { min-height:43px; flex:1; justify-content:center; border-radius:11px; }
 .profile-owner-tools { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; margin-top:16px; }
-.profile-edit-settings-btn {
-  position:absolute;z-index:2;top:18px;right:18px;display:grid;place-items:center;
-  width:40px;height:40px;border:1px solid var(--border);border-radius:50%;
-  color:var(--text-secondary);background:var(--bg-card2);font-size:15px;
-  text-decoration:none;transition:color .16s,border-color .16s,background .16s,transform .16s;
-}
-.profile-edit-settings-btn:hover,.profile-edit-settings-btn:focus-visible {
-  border-color:rgba(var(--accent-rgb),.55);color:var(--accent-red2);
-  background:rgba(var(--accent-rgb),.1);transform:rotate(12deg);
-}
 .profile-more-menu {
   display:none;position:fixed;z-index:9500;box-sizing:border-box;
   width:min(240px,calc(100vw - 24px));max-width:calc(100vw - 24px);
@@ -8534,6 +8557,9 @@ input[type="file"].designed-file-picker-native {
 .modal:has(#profile-note-likers-list) { max-height:min(92vh,calc(100dvh - 32px)); }
 .modal:has(#profile-note-likers-list) .modal-body { overscroll-behavior:contain; }
 .profile-note-likers-list[hidden] { display:none; }
+.dm-privacy-settings { display:grid;gap:10px;margin-top:24px;padding-top:20px;border-top:1px solid var(--border); }
+.dm-privacy-settings .settings-dm-theme-heading { margin-bottom:2px; }
+.settings-messages-open { display:flex;width:fit-content;align-items:center;gap:8px;margin-top:10px; }
 .profile-note-likers-heading { padding:2px 3px 5px;color:var(--text-muted);font-size:12px;font-weight:650; }
 .profile-note-liker { display:flex;min-width:0;align-items:center;gap:10px;padding:7px 8px;border-radius:10px;color:var(--text-primary);text-decoration:none; }
 .profile-note-liker:hover { background:var(--bg-hover); }

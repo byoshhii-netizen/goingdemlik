@@ -5025,6 +5025,37 @@ app.put('/api/me/dm-theme-settings', authMiddleware, async (req, res) => {
   });
 });
 
+app.get('/api/me/dm-privacy-settings', authMiddleware, async (req, res) => {
+  const { rows } = await query(
+    'SELECT read_receipts_enabled,show_online_status FROM dm_user_settings WHERE user_id=$1',
+    [req.user.id]
+  );
+  res.json({
+    read_receipts_enabled: Number(rows[0]?.read_receipts_enabled ?? 1) === 1,
+    show_online_status: Number(rows[0]?.show_online_status ?? 1) === 1
+  });
+});
+
+app.put('/api/me/dm-privacy-settings', authMiddleware, async (req, res) => {
+  const { read_receipts_enabled: readReceiptsEnabled, show_online_status: showOnlineStatus } = req.body || {};
+  if (typeof readReceiptsEnabled !== 'boolean' || typeof showOnlineStatus !== 'boolean') {
+    return res.status(400).json({ error: 'Mesaj gizlilik ayarları geçersiz.' });
+  }
+  const { rows } = await query(`
+    INSERT INTO dm_user_settings(user_id,read_receipts_enabled,show_online_status,updated_at)
+    VALUES($1,$2,$3,NOW())
+    ON CONFLICT(user_id) DO UPDATE SET
+      read_receipts_enabled=EXCLUDED.read_receipts_enabled,
+      show_online_status=EXCLUDED.show_online_status,
+      updated_at=NOW()
+    RETURNING read_receipts_enabled,show_online_status
+  `, [req.user.id, readReceiptsEnabled ? 1 : 0, showOnlineStatus ? 1 : 0]);
+  res.json({
+    read_receipts_enabled: Number(rows[0].read_receipts_enabled) === 1,
+    show_online_status: Number(rows[0].show_online_status) === 1
+  });
+});
+
 app.get('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
   const { rows } = await query(
     'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash FROM dm_user_settings WHERE user_id=$1',
@@ -10035,9 +10066,18 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user2,0) ELSE COALESCE(c.read_until_user1,0) END AS other_read_until,
-      COALESCE(presence.is_online, FALSE) as other_is_online,
-      presence.last_active as other_last_active,
+      CASE WHEN COALESCE(viewer_dm_settings.read_receipts_enabled,1)=1
+        AND COALESCE(other_dm_settings.read_receipts_enabled,1)=1
+        THEN CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user2,0) ELSE COALESCE(c.read_until_user1,0) END
+        ELSE 0 END AS other_read_until,
+      COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1 AS other_presence_visible,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN COALESCE(presence.is_online,FALSE) ELSE FALSE END as other_is_online,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN presence.last_active ELSE NULL END as other_last_active,
       (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
         FROM dm_messages m WHERE m.conversation_id=c.id
         AND (m.deleted_for_all=1 OR CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END)
@@ -10053,6 +10093,8 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
     JOIN users u2 ON c.user2_id=u2.id
     LEFT JOIN dm_conversation_user_themes ct ON ct.conversation_id=c.id AND ct.user_id=$1
     LEFT JOIN dm_user_settings dus ON dus.user_id=$1
+    LEFT JOIN dm_user_settings viewer_dm_settings ON viewer_dm_settings.user_id=$1
+    LEFT JOIN dm_user_settings other_dm_settings ON other_dm_settings.user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
     LEFT JOIN settings dm_global_theme ON dm_global_theme.key='dm_default_theme_key'
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
@@ -10087,8 +10129,14 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      COALESCE(presence.is_online, FALSE) as other_is_online,
-      presence.last_active as other_last_active,
+      COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1 AS other_presence_visible,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN COALESCE(presence.is_online,FALSE) ELSE FALSE END as other_is_online,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN presence.last_active ELSE NULL END as other_last_active,
       (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
         FROM dm_messages m WHERE m.conversation_id=c.id
         AND (m.deleted_for_all=1 OR CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END)
@@ -10096,6 +10144,8 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
     JOIN users u2 ON c.user2_id=u2.id
+    LEFT JOIN dm_user_settings viewer_dm_settings ON viewer_dm_settings.user_id=$1
+    LEFT JOIN dm_user_settings other_dm_settings ON other_dm_settings.user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
         MAX(last_heartbeat) as last_active
@@ -10126,11 +10176,19 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.avatar_removed ELSE u1.avatar_removed END as other_avatar_removed,
       CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END as other_id,
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
-      COALESCE(presence.is_online, FALSE) as other_is_online,
-      presence.last_active as other_last_active,
+      COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1 AS other_presence_visible,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN COALESCE(presence.is_online,FALSE) ELSE FALSE END as other_is_online,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN presence.last_active ELSE NULL END as other_last_active,
       (SELECT CASE WHEN deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE content END
         FROM dm_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
+    LEFT JOIN dm_user_settings viewer_dm_settings ON viewer_dm_settings.user_id=$1
+    LEFT JOIN dm_user_settings other_dm_settings ON other_dm_settings.user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
         MAX(last_heartbeat) as last_active
@@ -10228,9 +10286,17 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: target } = await query(`
     SELECT u.id,u.username,u.nickname,u.avatar,u.avatar_removed,u.name_color,u.is_private,
-      COALESCE(presence.is_online, FALSE) as is_online,
-      presence.last_active
+      COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1 AS presence_visible,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN COALESCE(presence.is_online,FALSE) ELSE FALSE END as is_online,
+      CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
+        AND COALESCE(other_dm_settings.show_online_status,1)=1
+        THEN presence.last_active ELSE NULL END as last_active
     FROM users u
+    LEFT JOIN dm_user_settings viewer_dm_settings ON viewer_dm_settings.user_id=$2
+    LEFT JOIN dm_user_settings other_dm_settings ON other_dm_settings.user_id=u.id
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
         MAX(last_heartbeat) as last_active
@@ -10238,7 +10304,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       WHERE user_id=u.id
     ) presence ON TRUE
     WHERE u.username=$1
-  `, [req.params.username]);
+  `, [req.params.username, req.user.id]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
@@ -10288,7 +10354,9 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_song_id END AS shared_song_id,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_gif_url END AS shared_gif_url,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.reply_to_id END AS reply_to_id,
-      m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.deleted_for_all_at, m.created_at, m.read_at,
+      m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.deleted_for_all_at, m.created_at,
+      CASE WHEN COALESCE(viewer_receipt_settings.read_receipts_enabled,1)=1
+        AND COALESCE(sender_receipt_settings.read_receipts_enabled,1)=1 THEN m.read_at ELSE NULL END AS read_at,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.edited_at END AS edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE f.title END as forum_title,
@@ -10328,6 +10396,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN songs song ON m.shared_song_id=song.id
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
+    LEFT JOIN dm_user_settings viewer_receipt_settings ON viewer_receipt_settings.user_id=$3
+    LEFT JOIN dm_user_settings sender_receipt_settings ON sender_receipt_settings.user_id=m.sender_id
     WHERE m.conversation_id=$1
       AND ($6=0 OR m.id>$6 OR (m.deleted_for_all=1 AND m.deleted_for_all_at>$7::timestamptz))
       AND (m.deleted_for_all=0 OR $6=0 OR m.deleted_for_all_at>$7::timestamptz)
@@ -10409,6 +10479,13 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   const isUser1 = String(conversation.user1_id) === String(uid);
   if (isUser1 ? conversation.hidden_by_user1 : conversation.hidden_by_user2) return res.json({ ok: true });
   const otherUserId = isUser1 ? conversation.user2_id : conversation.user1_id;
+  const { rows: receiptSettings } = await query(
+    'SELECT user_id,read_receipts_enabled FROM dm_user_settings WHERE user_id=ANY($1::bigint[])',
+    [[uid, otherUserId]]
+  );
+  const receiptSettingsByUser = new Map(receiptSettings.map(settings => [String(settings.user_id), Number(settings.read_receipts_enabled ?? 1) === 1]));
+  const canSendReadReceipt = receiptSettingsByUser.get(String(uid)) !== false
+    && receiptSettingsByUser.get(String(otherUserId)) !== false;
   const { rows: latestRead } = await query(
     'SELECT COALESCE(MAX(id),0) AS message_id FROM dm_messages WHERE conversation_id=$1 AND deleted_for_all=0',
     [conversation.id]
@@ -10419,7 +10496,7 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   const readColumn = isUser1 ? 'read_until_user1' : 'read_until_user2';
   await query(`UPDATE dm_conversations SET ${readColumn}=GREATEST(COALESCE(${readColumn},0),$1) WHERE id=$2`,
     [readThroughMessageId, conversation.id]);
-  if (readThroughMessageId > 0) {
+  if (readThroughMessageId > 0 && canSendReadReceipt) {
     io.to(`user:${otherUserId}`).emit('dm:read', {
       conversationId: conversation.id,
       readerId: uid,

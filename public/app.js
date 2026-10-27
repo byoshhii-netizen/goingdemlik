@@ -964,7 +964,8 @@ function isDmPresenceOnline(lastActive) {
   return age >= -5000 && age < 30000;
 }
 
-function dmPresenceMarkup(_isOnline, lastActive) {
+function dmPresenceMarkup(_isOnline, lastActive, visible = true) {
+  if (!visible) return '';
   if (isDmPresenceOnline(lastActive)) {
     return '<span class="dm-presence-label is-online"><span class="dm-presence-indicator"></span>Çevrimiçi</span>';
   }
@@ -975,16 +976,18 @@ function dmPresenceMarkup(_isOnline, lastActive) {
     : '<span class="dm-presence-label">Çevrimdışı</span>';
 }
 
-function updateDmPresence(root, _isOnline, lastActive) {
+function updateDmPresence(root, _isOnline, lastActive, visible = true) {
   const online = isDmPresenceOnline(lastActive);
   const slot = root.querySelector('.dm-presence-slot');
-  if (slot) slot.innerHTML = dmPresenceMarkup(online, lastActive);
-  const avatar = root.matches('.dm-presence-avatar') ? root : root.querySelector('.dm-presence-avatar');
+  if (slot) slot.innerHTML = dmPresenceMarkup(online, lastActive, visible);
+  const avatar = root.matches('.dm-presence-avatar, .dm-story-avatar-link')
+    ? root
+    : root.querySelector('.dm-presence-avatar, .dm-story-avatar-link');
   if (!avatar) return;
   const dot = avatar.querySelector('.dm-presence-dot');
-  if (online && !dot) {
+  if (visible && online && !dot) {
     avatar.insertAdjacentHTML('beforeend', '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>');
-  } else if (!online) {
+  } else if (!visible || !online) {
     dot?.remove();
   }
 }
@@ -1072,8 +1075,8 @@ function profileBadgeHTML(badge, compact = false) {
 }
 
 function profileBadgesButtonHTML(badges) {
-  return `<button type="button" class="profile-badges-button" data-profile-badges aria-haspopup="dialog">
-    <i class="fas fa-award" aria-hidden="true"></i><span>Rozetler</span><span class="profile-badges-count">${badges.length}</span>
+  return `<button type="button" class="profile-badges-button profile-badges-icon-button" data-profile-badges aria-haspopup="dialog" aria-label="Rozetleri gör" title="Rozetleri gör">
+    <i class="fas fa-award" aria-hidden="true"></i><span class="profile-badges-count">${badges.length}</span>
   </button>`;
 }
 
@@ -9390,10 +9393,10 @@ async function renderProfile(app, username) {
   if (data.private_profile && !isOwn) {
     app.innerHTML = `<div class="container page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
+      <div class="profile-header-actions is-other">${profileBadgesButtonHTML(data.badges || [])}</div>
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
       <div class="profile-stats" style="margin-top:12px">${profileVisibility.followers ? `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>` : ''}${profileVisibility.following ? `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>` : ''}</div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      <div class="profile-badges-slot">${profileBadgesButtonHTML(data.badges || [])}</div>
       ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>` : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
     bindProfileAvatarViewer(app, user);
@@ -9464,7 +9467,11 @@ async function renderProfile(app, username) {
       <div class="profile-avatar-wrap">
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
-      ${isOwn ? '<a href="/ayarlar" data-link class="profile-edit-settings-btn" aria-label="Profili düzenle" title="Profili düzenle"><i class="fas fa-gear" aria-hidden="true"></i></a>' : ''}
+      ${isOwn && currentUser?.is_admin ? '<a href="/gubukgak" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
+      <div class="profile-header-actions${isOwn ? ' is-own' : ' is-other'}">
+        ${isOwn ? '<a href="/ayarlar" data-link class="profile-edit-settings-btn" aria-label="Profili düzenle" title="Profili düzenle"><i class="fas fa-gear" aria-hidden="true"></i></a>' : ''}
+        ${profileBadgesButtonHTML(badges)}
+      </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
           <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span>
@@ -9479,7 +9486,6 @@ async function renderProfile(app, username) {
           if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
           return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
         }).join('')}</div>` : ''}
-        <div class="profile-badges-slot">${profileBadgesButtonHTML(badges)}</div>
         <div class="profile-stats" style="margin-top:12px">
           ${combinedContentCount
             ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></button>`
@@ -9492,7 +9498,6 @@ async function renderProfile(app, username) {
               ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
               ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}` : ''}
         </div>
-        ${isOwn && currentUser?.is_admin ? `<div class="profile-owner-tools"><a href="/gubukgak" class="btn btn-sm profile-admin-panel-btn"><i class="fas fa-shield"></i> Yetkili Paneli</a></div>` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
@@ -10359,8 +10364,12 @@ async function renderSettingsSection(section) {
 
   } else if (section === 'messages') {
     let themeSettings;
+    let privacySettings;
     try {
-      themeSettings = await api('/me/dm-theme-settings');
+      [themeSettings, privacySettings] = await Promise.all([
+        api('/me/dm-theme-settings'),
+        api('/me/dm-privacy-settings')
+      ]);
     } catch (error) {
       el.innerHTML = `<div class="card card-body"><div class="form-error">${escHtml(error.message || 'Mesaj ayarları yüklenemedi.')}</div></div>`;
       return;
@@ -10381,11 +10390,25 @@ async function renderSettingsSection(section) {
               </div>
             </div>
           </section>
-          <div id="dm-settings-save-status" class="settings-autosave-status" aria-live="polite">Tema değişiklikleri otomatik kaydedilir.</div>
+          <section class="dm-privacy-settings" aria-labelledby="dm-privacy-settings-title">
+            <div class="settings-dm-theme-heading"><span><i class="fas fa-user-shield"></i></span><div><strong id="dm-privacy-settings-title">Gizlilik</strong><small>Okundu ve çevrimiçi bilgilerini karşılıklı olarak yönet.</small></div></div>
+            <label class="profile-visibility-option">
+              <span class="profile-visibility-icon"><i class="fas fa-check-double"></i></span>
+              <span><b>Okundu bilgisini göster</b><small>Kapatınca ne sen başkalarının okundu bilgisini görürsün ne de onlar seninkini.</small></span>
+              <input type="checkbox" id="dm-read-receipts-enabled" ${privacySettings.read_receipts_enabled ? 'checked' : ''} />
+            </label>
+            <label class="profile-visibility-option">
+              <span class="profile-visibility-icon"><i class="fas fa-circle"></i></span>
+              <span><b>Çevrimiçi durumunu göster</b><small>Kapatınca ne sen başkalarının çevrimiçi durumunu görürsün ne de onlar seninkini.</small></span>
+              <input type="checkbox" id="dm-online-status-enabled" ${privacySettings.show_online_status ? 'checked' : ''} />
+            </label>
+          </section>
+          <div id="dm-settings-save-status" class="settings-autosave-status" aria-live="polite">Mesaj ve gizlilik ayarları otomatik kaydedilir.</div>
           <a href="/mesajlar" data-link class="btn btn-outline settings-messages-open"><i class="fas fa-inbox"></i> Mesajlarımı aç</a>
         </div>
       </div>`;
     const controls = [...el.querySelectorAll('.settings-dm-theme-options .dm-theme-option')];
+    const privacyControls = [...el.querySelectorAll('#dm-read-receipts-enabled, #dm-online-status-enabled')];
     const status = $('#dm-settings-save-status');
     let saving = false;
     controls.forEach(button => button.addEventListener('click', async () => {
@@ -10414,6 +10437,34 @@ async function renderSettingsSection(section) {
       } finally {
         controls.forEach(option => { option.disabled = false; });
         saving = false;
+      }
+    }));
+    let privacySaving = false;
+    privacyControls.forEach(control => control.addEventListener('change', async () => {
+      if (privacySaving) return;
+      const previousSettings = { ...privacySettings };
+      privacySettings = {
+        read_receipts_enabled: $('#dm-read-receipts-enabled').checked,
+        show_online_status: $('#dm-online-status-enabled').checked
+      };
+      privacySaving = true;
+      privacyControls.forEach(input => { input.disabled = true; });
+      status.textContent = 'Gizlilik ayarları kaydediliyor…';
+      try {
+        privacySettings = await api('/me/dm-privacy-settings', {
+          method: 'PUT',
+          body: JSON.stringify(privacySettings)
+        });
+        status.textContent = 'Gizlilik ayarları kaydedildi.';
+      } catch (error) {
+        privacySettings = previousSettings;
+        $('#dm-read-receipts-enabled').checked = previousSettings.read_receipts_enabled;
+        $('#dm-online-status-enabled').checked = previousSettings.show_online_status;
+        status.textContent = error.message || 'Gizlilik ayarları kaydedilemedi.';
+        toast(status.textContent, 'error');
+      } finally {
+        privacyControls.forEach(input => { input.disabled = false; });
+        privacySaving = false;
       }
     }));
 
@@ -12287,11 +12338,11 @@ async function renderMessages(app, targetUsername) {
     const avatarHTML = hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed })
       ? `<img src="${escHtml(c.other_avatar)}" class="avatar-sm" />`
       : `<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>`;
-    const presenceHTML = isSelf ? '' : dmPresenceMarkup(c.other_is_online, c.other_last_active);
+    const presenceHTML = isSelf ? '' : dmPresenceMarkup(c.other_is_online, c.other_last_active, c.other_presence_visible);
     const dmStory = dmStoryByUsername.get(String(c.other_username || '').toLowerCase());
     const storyAvatarHTML = dmStory
-      ? `<button type="button" class="dm-story-avatar-link" data-story-id="${escHtml(dmStory.public_id || dmStory.id)}" aria-label="${escHtml(c.other_nickname || c.other_username)} hikayesini aç"><span class="dm-story-ring${isStoryViewed(dmStory) ? ' viewed' : ''}">${hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed }) ? `<img src="${escHtml(c.other_avatar)}" class="dm-story-avatar-media" alt="" />` : '<span class="dm-story-avatar-media avatar-placeholder"><i class="fas fa-user"></i></span>'}</span>${!isSelf && isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</button>`
-      : `<span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${!isSelf && isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>`;
+      ? `<button type="button" class="dm-story-avatar-link" data-story-id="${escHtml(dmStory.public_id || dmStory.id)}" aria-label="${escHtml(c.other_nickname || c.other_username)} hikayesini aç"><span class="dm-story-ring${isStoryViewed(dmStory) ? ' viewed' : ''}">${hasUsableAvatar({ avatar: c.other_avatar, avatar_removed: c.other_avatar_removed }) ? `<img src="${escHtml(c.other_avatar)}" class="dm-story-avatar-media" alt="" />` : '<span class="dm-story-avatar-media avatar-placeholder"><i class="fas fa-user"></i></span>'}</span>${!isSelf && c.other_presence_visible && isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</button>`
+      : `<span class="dm-conv-avatar-link dm-presence-avatar" aria-label="${escHtml(c.other_username)} sohbetini aç">${avatarHTML}${!isSelf && c.other_presence_visible && isDmPresenceOnline(c.other_last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}</span>`;
     const isUser1 = String(c.user1_id) === String(currentUser.id);
     const muteForever = Number(c[isUser1 ? 'mute_forever_user1' : 'mute_forever_user2']) === 1;
     const mutedUntil = c[isUser1 ? 'muted_until_user1' : 'muted_until_user2'];
@@ -12765,6 +12816,7 @@ async function renderMessages(app, targetUsername) {
     event.stopPropagation();
     const isOpen = !searchWrap?.classList.contains('hidden');
     searchWrap?.classList.toggle('hidden', isOpen);
+    app.querySelector('.dm-sidebar-header')?.classList.toggle('is-search-open', !isOpen);
     searchToggle.setAttribute('aria-expanded', String(!isOpen));
     if (!isOpen) app.querySelector('#dm-search')?.focus();
   });
@@ -12773,12 +12825,14 @@ async function renderMessages(app, targetUsername) {
     if (!searchWrap?.isConnected || searchWrap.classList.contains('hidden')) return;
     if (event.target.closest('.dm-search-wrap, #dm-search-toggle')) return;
     searchWrap.classList.add('hidden');
+    app.querySelector('.dm-sidebar-header')?.classList.remove('is-search-open');
     searchToggle?.setAttribute('aria-expanded', 'false');
   };
   document.addEventListener('click', window.__dmSearchOutsideHandler);
   app.querySelector('#dm-search')?.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     searchWrap?.classList.add('hidden');
+    app.querySelector('.dm-sidebar-header')?.classList.remove('is-search-open');
     searchToggle?.setAttribute('aria-expanded', 'false');
     searchToggle?.focus();
   });
@@ -12794,7 +12848,7 @@ async function renderMessages(app, targetUsername) {
       updatedConversations.forEach(conversation => {
         const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(conversation.other_username)}"]`);
         if (item && item.dataset.username?.toLocaleLowerCase('tr-TR') !== String(currentUser.username).toLocaleLowerCase('tr-TR')) {
-          updateDmPresence(item, conversation.other_is_online, conversation.other_last_active);
+          updateDmPresence(item, conversation.other_is_online, conversation.other_last_active, conversation.other_presence_visible);
         }
       });
       if (targetUsername) {
@@ -12803,13 +12857,13 @@ async function renderMessages(app, targetUsername) {
           conversation => String(conversation.other_username).toLowerCase() === String(targetUsername).toLowerCase()
         );
         if (chat && activeConversation && chat.dataset.selfConversation !== 'true') {
-          updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active);
+          updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active, activeConversation.other_presence_visible);
         } else if (chat && chat.dataset.selfConversation !== 'true') {
           const headers = {};
           if (dmSearchUnlockCode) headers['X-DM-Search-Code'] = dmSearchUnlockCode;
           if (dmIconUnlockCode) headers['X-DM-Conversation-Code'] = dmIconUnlockCode;
           const detail = await api(`/conversation/${encodeURIComponent(targetUsername)}?limit=1`, { headers });
-          if (detail.other && chat.dataset.selfConversation !== 'true') updateDmPresence(chat, detail.other.is_online, detail.other.last_active);
+          if (detail.other && chat.dataset.selfConversation !== 'true') updateDmPresence(chat, detail.other.is_online, detail.other.last_active, detail.other.presence_visible);
         }
       }
     } catch (error) {
@@ -12977,7 +13031,7 @@ async function renderDMChat(username) {
           <button class="btn btn-ghost btn-sm dm-mobile-back-btn" id="dm-mobile-back-btn" style="display:none;padding:4px 8px"><i class="fas fa-arrow-left"></i></button>
           <i class="fas fa-lock" style="color:var(--accent-red2)"></i>
           <span class="dm-chat-username">${escHtml(other.nickname || other.username)}${isSelfConversation ? ' (Siz)' : ''}</span>
-          ${isSelfConversation ? '' : `<span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>`}
+          ${isSelfConversation ? '' : `<span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active, other.presence_visible)}</span>`}
         </div>
       </div>
       <div class="dm-empty">
@@ -13031,13 +13085,13 @@ async function renderDMChat(username) {
           ${hasUsableAvatar(other)
             ? `<img src="${escHtml(other.avatar)}" class="avatar-sm" style="flex-shrink:0" />`
             : `<div class="avatar-sm avatar-placeholder" style="flex-shrink:0"><i class="fas fa-user"></i></div>`}
-          ${!isSelfConversation && isDmPresenceOnline(other.last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}
+          ${!isSelfConversation && other.presence_visible && isDmPresenceOnline(other.last_active) ? '<span class="dm-presence-dot" aria-label="Çevrimiçi"></span>' : ''}
         </a>
         <div class="dm-chat-identity-wrap" style="display:flex;flex-direction:column;min-width:0">
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
             <strong>${escHtml(other.nickname || other.username)}${isSelfConversation ? ' (Siz)' : ''}</strong>
           </a>
-          ${isSelfConversation ? '' : `<span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active)}</span>`}
+          ${isSelfConversation ? '' : `<span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active, other.presence_visible)}</span>`}
           ${isSelfConversation ? '' : '<span class="dm-chat-typing" hidden aria-live="polite">Mesaj yazıyor<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>'}
           <span id="dm-chat-now-playing"></span>
         </div>
@@ -13592,17 +13646,17 @@ async function renderDMChat(username) {
       const conversationList = await api('/conversations').catch(() => []);
       conversationList.forEach(conversation => {
         const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(conversation.other_username)}"]`);
-        if (item) updateDmPresence(item, conversation.other_is_online, conversation.other_last_active);
+        if (item) updateDmPresence(item, conversation.other_is_online, conversation.other_last_active, conversation.other_presence_visible);
       });
       if (conversationUpdate?.other) {
         const header = document.querySelector('.dm-chat');
-        if (header) updateDmPresence(header, conversationUpdate.other.is_online, conversationUpdate.other.last_active);
+        if (header) updateDmPresence(header, conversationUpdate.other.is_online, conversationUpdate.other.last_active, conversationUpdate.other.presence_visible);
       }
       const activeConversation = conversationList.find(item => String(item.other_username).toLowerCase() === String(username).toLowerCase());
       if (activeConversation) {
         const chat = document.querySelector('.dm-chat');
         if (chat) {
-          updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active);
+          updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active, activeConversation.other_presence_visible);
           updateDmReadReceipts(chat.dataset.conversationId, activeConversation.other_read_until);
         }
       }
