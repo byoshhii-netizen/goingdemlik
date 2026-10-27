@@ -3579,6 +3579,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-suggestion-identity { display:flex; align-items:center; gap:9px; min-width:0; color:inherit; text-decoration:none; }
 .dm-suggestion-avatar { display:grid; place-items:center; width:38px; height:38px; flex:0 0 38px; overflow:hidden; border:1px solid var(--border); border-radius:50%; background:var(--bg-card2); color:var(--text-muted); }
 .dm-suggestion-avatar > img,.dm-suggestion-avatar > .avatar-placeholder { display:grid; place-items:center; width:100%; height:100%; border-radius:inherit; object-fit:cover; }
+.dm-suggestion-avatar > img { object-fit:cover !important; object-position:center; }
 .dm-suggestion-avatar > .avatar-placeholder { font-size:14px; }
 .dm-suggestion-copy { display:grid; gap:3px; min-width:0; }
 .dm-suggestion-copy strong,.dm-suggestion-copy small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
