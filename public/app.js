@@ -1838,9 +1838,42 @@ function generateVideoPoster(file) {
   });
 }
 
+function renderRealsMaintenanceScreen(app, message) {
+  app.innerHTML = `
+      <div class="reals-container reals-maintenance-shell">
+        <section class="reals-maintenance-card" role="status" aria-labelledby="reals-maintenance-title">
+          <div class="reals-maintenance-art" aria-hidden="true">
+            <span class="reals-maintenance-orbit reals-maintenance-orbit-one"></span>
+            <span class="reals-maintenance-orbit reals-maintenance-orbit-two"></span>
+            <span class="reals-maintenance-icon"><i class="fas fa-screwdriver-wrench"></i></span>
+            <span class="reals-maintenance-spark reals-maintenance-spark-one"><i class="fas fa-star"></i></span>
+            <span class="reals-maintenance-spark reals-maintenance-spark-two"><i class="fas fa-sparkles"></i></span>
+          </div>
+          <span class="reals-maintenance-eyebrow"><span></span> BİR ŞEYLER YENİLENİYOR</span>
+          <h1 id="reals-maintenance-title">Reals yeniden tasarlanıyor</h1>
+          <p class="reals-maintenance-message">${escHtml(message || 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.')}</p>
+          <div class="reals-maintenance-progress" aria-hidden="true"><span></span></div>
+          <div class="reals-maintenance-footnote"><i class="fas fa-heart"></i><span>En iyi deneyim için çalışıyoruz</span></div>
+        </section>
+      </div>`;
+}
+
 async function renderRealsFeed(app, initialId = null) {
   document.title = 'Reals – ' + siteName;
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
+  let realsInfoSettings;
+  try {
+    realsInfoSettings = await api('/reals-settings');
+  } catch (error) {
+    app.innerHTML = `<div class="reals-container"><div class="reals-feed-message" role="alert"><span class="reals-feed-message-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Reals ayarları yüklenemedi</strong><span>${escHtml(error.message || 'Lütfen tekrar deneyin.')}</span><button type="button" class="btn btn-outline btn-sm" id="reals-settings-retry">Tekrar dene</button></div></div>`;
+    app.querySelector('#reals-settings-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
+    return;
+  }
+  if (!app.isConnected || !(location.pathname === '/reals' || location.pathname.startsWith('/reals/'))) return;
+  if (realsInfoSettings.maintenanceEnabled) {
+    renderRealsMaintenanceScreen(app, realsInfoSettings.maintenanceMessage);
+    return;
+  }
   if (!currentUser) {
     try {
       const access = await api('/guest-reals/status');
@@ -1850,9 +1883,14 @@ async function renderRealsFeed(app, initialId = null) {
         return;
       }
     } catch (error) {
+      if (error.data?.code === 'REALS_MAINTENANCE') {
+        renderRealsMaintenanceScreen(app, error.data.error);
+        return;
+      }
       app.innerHTML = `<div class="container page"><div class="empty-state"><p>${escHtml(error.message || 'Reals erişimi doğrulanamadı.')}</p></div></div>`;
       return;
     }
+    if (!app.isConnected || !(location.pathname === '/reals' || location.pathname.startsWith('/reals/'))) return;
   }
   app.innerHTML = `
     <div class="reals-container">
@@ -1866,18 +1904,10 @@ async function renderRealsFeed(app, initialId = null) {
     </div>`;
   const listEl = document.getElementById('reals-list');
 
-  let realsInfoSettings = null;
-  const realsInfoSettingsPromise = api('/reals-settings').then(settings => {
-    realsInfoSettings = settings;
-    const infoButton = document.getElementById('reals-info-btn');
-    const shouldShow = settings.infoEnabled !== false && !localStorage.getItem('cigcig_reals_info_seen');
-    if (infoButton) infoButton.hidden = !shouldShow;
-    if (shouldShow) localStorage.setItem('cigcig_reals_info_seen', '1');
-    return settings;
-  }).catch(error => {
-    console.error('Reals bilgi ayarları yüklenemedi:', error);
-    return null;
-  });
+  const infoButton = document.getElementById('reals-info-btn');
+  const shouldShowInfo = realsInfoSettings.infoEnabled !== false && !localStorage.getItem('cigcig_reals_info_seen');
+  if (infoButton) infoButton.hidden = !shouldShowInfo;
+  if (shouldShowInfo) localStorage.setItem('cigcig_reals_info_seen', '1');
 
   // Reals ve reklamları tek seferde, birbirinden bağımsız sonuçlarla yükle.
   const [realsResult, adsResult] = await Promise.allSettled([
@@ -1886,6 +1916,10 @@ async function renderRealsFeed(app, initialId = null) {
   ]);
   if (!listEl?.isConnected || !app.contains(listEl)) return;
   if (realsResult.status === 'rejected') {
+    if (realsResult.reason?.data?.code === 'REALS_MAINTENANCE') {
+      renderRealsMaintenanceScreen(app, realsResult.reason.data.error);
+      return;
+    }
     const message = realsResult.reason?.message || 'Reals akışı yüklenemedi.';
     listEl.innerHTML = `<div class="reals-feed-message" role="alert"><span class="reals-feed-message-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Akışa ulaşılamadı</strong><span>${escHtml(message)}</span><button type="button" class="btn btn-outline btn-sm" id="reals-feed-retry">Tekrar dene</button></div>`;
     listEl.querySelector('#reals-feed-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
@@ -1927,9 +1961,7 @@ async function renderRealsFeed(app, initialId = null) {
   const followRequests = new Map();
 
   document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
-    const data = await realsInfoSettingsPromise;
-    if (!data) return toast('Reals bilgisi yüklenemedi.', 'error');
-    showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(data.reminder || '')}</p></div>`);
+    showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(realsInfoSettings.reminder || '')}</p></div>`);
   });
 
   let watchedIds = new Set();
@@ -3540,6 +3572,13 @@ async function renderHome(app) {
   }
 
   async function renderRealsSection() {
+    let maintenanceEnabled = false;
+    try {
+      maintenanceEnabled = (await api('/reals-settings')).maintenanceEnabled;
+    } catch (error) {
+      console.warn('Reals bakım durumu yüklenemedi:', error.message || error);
+    }
+    if (maintenanceEnabled) return;
     const html = `<div class="section"><div class="section-header"><div class="section-title"><div class="section-title-bar"></div>Öne Çıkan Reals</div><a href="/reals" data-link class="btn btn-ghost btn-sm">Tümü <i class="fas fa-arrow-right"></i></a></div><div id="home-reals" class="video-list-grid"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     try {
@@ -8232,7 +8271,7 @@ async function runVideoUploadJob(job) {
     if (!job.uploadId) {
       const started = await api('/upload-video/resumable', {
         method: 'POST',
-        body: JSON.stringify({ filename: job.videoFile.name, mimetype: job.videoFile.type || 'video/mp4', size: job.videoFile.size }),
+        body: JSON.stringify({ filename: job.videoFile.name, mimetype: job.videoFile.type || 'video/mp4', size: job.videoFile.size, is_reals: !!job.fields.is_reals }),
         signal
       });
       job.uploadId = started.id;
@@ -8386,6 +8425,18 @@ function pauseRealsForComposer() {
 }
 
 async function showNewVideoModal(existing = null, forceReals = false) {
+  if (forceReals || existing?.is_reals) {
+    try {
+      const settings = await api('/reals-settings');
+      if (settings.maintenanceEnabled) {
+        navigate('/reals');
+        return;
+      }
+    } catch (error) {
+      toast(error.message || 'Reals durumu kontrol edilemedi.', 'error');
+      return;
+    }
+  }
   pauseRealsForComposer();
   let videoSettings = { defaultDescription: '', uploadSuccessText: 'YÜKLENDİ', uploadSuccessDuration: '3' };
   const defaultDescription = existing?.description || '';

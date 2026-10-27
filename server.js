@@ -478,6 +478,27 @@ function boolValue(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
 }
 
+const DEFAULT_REALS_MAINTENANCE_MESSAGE = 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.';
+
+async function getRealsMaintenanceSettings() {
+  const { rows } = await query(
+    "SELECT key,value FROM settings WHERE key = ANY($1::text[])",
+    [['reals_maintenance_enabled', 'reals_maintenance_message']]
+  );
+  const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  return {
+    enabled: settings.reals_maintenance_enabled === '1',
+    message: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE
+  };
+}
+
+function denyRealsDuringMaintenance(res, settings) {
+  return res.status(503).json({
+    error: settings.message,
+    code: 'REALS_MAINTENANCE'
+  });
+}
+
 async function getSiteFeatureStates() {
   const keys = ['level_system_enabled', 'badge_system_enabled', 'founder_user_id', 'founder_color'];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1::text[])', [keys]);
@@ -5743,6 +5764,7 @@ async function writeResumableVideoMetadata(metadata) {
     originalName: metadata.originalName,
     mimetype: metadata.mimetype,
     size: metadata.size,
+    isReals: !!metadata.isReals,
     uploadedBytes: metadata.uploadedBytes,
     completedUrl: metadata.completedUrl || '',
     createdAt: metadata.createdAt
@@ -5751,6 +5773,11 @@ async function writeResumableVideoMetadata(metadata) {
 }
 
 app.post('/api/upload-video/resumable', authMiddleware, uploadLimiter, async (req, res) => {
+  const isReals = boolValue(req.body?.is_reals);
+  if (isReals) {
+    const maintenance = await getRealsMaintenanceSettings();
+    if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+  }
   const originalName = path.basename(String(req.body?.filename || 'video.mp4')).slice(0, 240);
   const mimetype = String(req.body?.mimetype || 'video/mp4');
   const size = Number(req.body?.size);
@@ -5768,6 +5795,7 @@ app.post('/api/upload-video/resumable', authMiddleware, uploadLimiter, async (re
       originalName,
       mimetype,
       size,
+      isReals,
       uploadedBytes: 0,
       createdAt: Date.now(),
       ...paths
@@ -5796,6 +5824,10 @@ app.put('/api/upload-video/resumable/:id', authMiddleware, express.raw({ type: '
   try {
     const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
     if (!metadata) return res.status(404).json({ error: 'Devam eden video yüklemesi bulunamadı.' });
+    if (metadata.isReals) {
+      const maintenance = await getRealsMaintenanceSettings();
+      if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+    }
     if (metadata.completedUrl) return res.status(409).json({ error: 'Video yüklemesi zaten tamamlandı.', uploaded_bytes: metadata.uploadedBytes });
     if (!Buffer.isBuffer(req.body) || req.body.length < 1 || req.body.length > RESUMABLE_VIDEO_CHUNK_SIZE) {
       return res.status(400).json({ error: 'Video parçası geçersiz.' });
@@ -5830,6 +5862,10 @@ app.post('/api/upload-video/resumable/:id/complete', authMiddleware, async (req,
   try {
     const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
     if (!metadata) return res.status(404).json({ error: 'Devam eden video yüklemesi bulunamadı.' });
+    if (metadata.isReals) {
+      const maintenance = await getRealsMaintenanceSettings();
+      if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+    }
     if (metadata.completedUrl) return res.json({ url: metadata.completedUrl });
     if (metadata.uploadedBytes !== metadata.size) {
       return res.status(409).json({ error: 'Video yüklemesi henüz tamamlanmadı.', uploaded_bytes: metadata.uploadedBytes });
@@ -5877,6 +5913,8 @@ app.delete('/api/upload-video/resumable/:id', authMiddleware, async (req, res) =
 });
 
 app.post('/api/reals/upload-url', authMiddleware, uploadLimiter, async (req, res) => {
+  const maintenance = await getRealsMaintenanceSettings();
+  if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
   if (await denyIfRestricted(req, res, 'reals')) return;
   if (!USE_R2) return res.status(503).json({ error: 'Reals R2 depolama ayarlanmamış.' });
   const contentType = String(req.body?.content_type || 'video/mp4');
@@ -7826,7 +7864,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled'].includes(key)) {
+  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled'].includes(key)) {
     if (!['0', '1', 0, 1, true, false].includes(value)) {
       return res.status(400).json({ error: 'Özellik durumu 0 veya 1 olmalı' });
     }
@@ -7860,6 +7898,12 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     value = String(value || '').trim();
     if (value.length > 120) {
       return res.status(400).json({ error: 'Müzik sayfası alt yazısı en fazla 120 karakter olabilir' });
+    }
+    if (key === 'reals_maintenance_message') {
+      value = String(value || '').trim();
+      if (value.length > 400) {
+        return res.status(400).json({ error: 'Reals bakım metni en fazla 400 karakter olabilir' });
+      }
     }
   }
   if (Object.hasOwn(loadingScreenTextLimits, key)) {
@@ -12294,6 +12338,8 @@ function guestRealsVisitorKey(req) {
 }
 
 app.get('/api/guest-reals/status', optionalAuth, async (req, res) => {
+  const maintenance = await getRealsMaintenanceSettings();
+  if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
   if (req.user) return res.json({ allowed: true });
   await ensureGuestRealsSchema();
   const { rows } = await query('SELECT cooldown_until FROM guest_reals_access WHERE visitor_key=$1', [guestRealsVisitorKey(req)]);
@@ -12303,6 +12349,8 @@ app.get('/api/guest-reals/status', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/guest-reals/view', optionalAuth, async (req, res) => {
+  const maintenance = await getRealsMaintenanceSettings();
+  if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
   if (req.user) return res.json({ allowed: true });
   const videoId = String(req.body?.video_id || '').trim();
   if (!/^\d{1,18}$/.test(videoId)) return res.status(400).json({ error: 'Geçersiz Reals videosu.' });
@@ -12362,16 +12410,20 @@ app.post('/api/guest-reals/view', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals', optionalAuth, async (req, res) => {
+  const maintenance = await getRealsMaintenanceSettings();
+  if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
   const { rows } = await query(`${videoSelect} AND v.is_reals=1 AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted')) ORDER BY v.created_at DESC LIMIT 100`, [req.user?.id || 0]);
   res.json(rows);
 });
 
 app.get('/api/reals-settings', async (req, res) => {
-  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled']]);
+  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message']]);
   const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
   res.json({
     reminder: settings.reals_reminder || 'Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.',
-    infoEnabled: settings.reals_info_enabled !== '0'
+    infoEnabled: settings.reals_info_enabled !== '0',
+    maintenanceEnabled: settings.reals_maintenance_enabled === '1',
+    maintenanceMessage: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE
   });
 });
 
@@ -12382,11 +12434,19 @@ app.get('/api/video-settings', async (req, res) => {
 app.get('/api/video/:slug', optionalAuth, async (req, res) => {
   const { rows } = await query(`${videoSelect} AND (v.slug=$2 OR v.id::text=$2) AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted'))`, [req.user?.id || 0, req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Video bulunamadı' });
+  if (rows[0].is_reals) {
+    const maintenance = await getRealsMaintenanceSettings();
+    if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+  }
   res.json(rows[0]);
 });
 
 app.post('/api/videos', authMiddleware, async (req, res) => {
   const { title, description, video_url, banner_image, location, sound_name, song_id, song_start_seconds, media_filter, allow_comments, show_likes, is_reals } = req.body;
+  if (is_reals) {
+    const maintenance = await getRealsMaintenanceSettings();
+    if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+  }
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
   const durationSeconds = Math.ceil(Number(req.body.duration_seconds) || 0);
   if (durationSeconds < 0 || durationSeconds > 86400) return res.status(400).json({ error: 'Video süresi geçersiz.' });
@@ -12409,6 +12469,10 @@ app.put('/api/video/:slug', authMiddleware, async (req, res) => {
   const b = req.body;
   const durationSeconds = Math.ceil(Number(b.duration_seconds ?? rows[0].duration_seconds) || 0);
   const isReals = b.is_reals === undefined ? Boolean(rows[0].is_reals) : Boolean(b.is_reals);
+  if (isReals) {
+    const maintenance = await getRealsMaintenanceSettings();
+    if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+  }
   const songId = b.song_id ? Number(b.song_id) : null;
   if (durationSeconds < 0 || durationSeconds > 86400) return res.status(400).json({ error: 'Video süresi geçersiz.' });
   if (isReals && durationSeconds > 180) return res.status(400).json({ error: 'Reals videoları en fazla 3 dakika olabilir.' });

@@ -3905,6 +3905,9 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-bolt" style="color:var(--red2);margin-right:8px"></i>Reals</span></div>
         <div class="card-body">
+          <div class="adm-feature-copy"><strong>Reals bakım modu</strong><p>Açıldığında Reals akışı ve yeni Reals paylaşımları durdurulur. Ziyaretçiler için gösterilecek duyuruyu aşağıdan değiştirebilirsiniz.</p></div>
+          <label class="adm-toggle-row" for="s-reals-maintenance-enabled"><span><i class="fas fa-screwdriver-wrench"></i> Reals bakım modunu etkinleştir</span><span class="adm-toggle"><input type="checkbox" id="s-reals-maintenance-enabled" ${settings['reals_maintenance_enabled'] === '1' ? 'checked' : ''}><span></span></span></label>
+          <div class="form-group"><label>Bakım duyurusu (en fazla 400 karakter)</label><textarea id="s-reals-maintenance-message" rows="3" maxlength="400">${escHtml(settings['reals_maintenance_message'] || 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.')}</textarea></div>
           <div class="adm-feature-copy"><strong>Reals bilgi düğmesi</strong><p>Açıksa soru işareti, her kullanıcının Reals sayfasına ilk girişinde bir kez görünür. Kapalıysa hiç gösterilmez.</p></div>
           <label class="adm-toggle-row" for="s-reals-info-enabled"><span><i class="fas fa-circle-question"></i> İlk Reals ziyaretinde göster</span><span class="adm-toggle"><input type="checkbox" id="s-reals-info-enabled" ${settings['reals_info_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Reals ilk hatırlatma metni (kısa)</label><textarea id="s-reals-reminder" rows="3">${escHtml(settings['reals_reminder']||'')}</textarea></div>
@@ -4044,12 +4047,12 @@ async function renderSettings(main) {
       </div>
     </div>`;
 
-  async function saveSetting(key, value, msgEl) {
+  async function saveSetting(key, value, msgEl, notify = true) {
     try {
       const response = await fetch('/api/admin/settings', { method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':adminToken}, body:JSON.stringify({key,value}) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || 'Ayar kaydedilemedi');
-      toast('Kaydedildi');
+      if (notify) toast('Kaydedildi');
       return true;
     } catch(e) { if(msgEl) msgEl.textContent=e.message; return false; }
   }
@@ -4323,8 +4326,11 @@ async function renderSettings(main) {
   document.getElementById('s-reals-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-reals-msg');
     msg.textContent = '';
-    if (!await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg)) return;
-    if (!await saveSetting('reals_info_enabled', document.getElementById('s-reals-info-enabled').checked ? '1' : '0', msg)) return;
+    if (!await saveSetting('reals_maintenance_message', document.getElementById('s-reals-maintenance-message').value.trim(), msg, false)) return;
+    if (!await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg, false)) return;
+    if (!await saveSetting('reals_info_enabled', document.getElementById('s-reals-info-enabled').checked ? '1' : '0', msg, false)) return;
+    if (!await saveSetting('reals_maintenance_enabled', document.getElementById('s-reals-maintenance-enabled').checked ? '1' : '0', msg, false)) return;
+    toast('Reals ayarları kaydedildi');
     msg.style.color='var(--green)'; msg.textContent='✓ Reals ayarları kaydedildi';
   });
 
