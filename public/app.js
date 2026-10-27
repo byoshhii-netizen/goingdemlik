@@ -1090,6 +1090,22 @@ function showProfileBadges(badges, canManage = false) {
   showModal('Rozetler', `${panel}${manageLink}`, 'profile-badges-modal');
 }
 
+function showProfileLinks(links) {
+  const entries = (Array.isArray(links) ? links : [])
+    .filter(link => link && String(link.url || '').trim())
+    .map(link => {
+      const label = String(link.label || link.url).trim();
+      const url = String(link.url).trim();
+      return `<a class="profile-link-dialog-item" href="${escHtml(normalizeExternalUrl(url))}" target="_blank" rel="noopener noreferrer">
+        <span class="profile-link-dialog-icon"><i class="fas fa-link" aria-hidden="true"></i></span>
+        <span class="profile-link-dialog-copy"><strong>${escHtml(label)}</strong><small>${escHtml(url)}</small></span>
+        <i class="fas fa-arrow-up-right-from-square profile-link-dialog-open" aria-hidden="true"></i>
+      </a>`;
+    })
+    .join('');
+  showModal('Profil bağlantıları', `<div class="profile-links-dialog">${entries}</div>`, 'profile-links-modal');
+}
+
 document.addEventListener('click', event => {
   const badge = event.target.closest?.('[data-red-verified-at]');
   if (!badge) return;
@@ -1868,7 +1884,7 @@ async function renderRealsFeed(app, initialId = null) {
     sheet.innerHTML = `<div class="reals-comments-backdrop"></div><section class="reals-comments-panel" role="dialog" aria-modal="true" aria-label="Yorumlar">
       <header class="reals-comments-header"><strong>Yorumlar</strong><button type="button" class="reals-comments-close" aria-label="Yorumları kapat"><i class="fas fa-times"></i></button></header>
       <div class="reals-comments-list"><div class="loading-center"><div class="spinner"></div></div></div>
-      ${currentUser ? '<form class="reals-comment-form"><input type="text" maxlength="2000" placeholder="Yorum yaz..." autocomplete="off" /><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için giriş yapın.</div>'}
+      ${currentUser ? '<form class="reals-comment-form"><textarea maxlength="2000" rows="1" placeholder="Yorum yaz..." aria-label="Yorum yaz"></textarea><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için giriş yapın.</div>'}
     </section>`;
     document.body.appendChild(sheet);
     const close = () => {
@@ -1948,7 +1964,7 @@ async function renderRealsFeed(app, initialId = null) {
     }
     sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
       event.preventDefault();
-      const input = event.currentTarget.querySelector('input');
+      const input = event.currentTarget.querySelector('textarea');
       const content = input.value.trim();
       if (!content) return;
       const button = event.currentTarget.querySelector('button');
@@ -5339,13 +5355,6 @@ async function renderPoemDetail(app, slug) {
     const count = $('#comment-char-count');
     if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000`;
   });
-  $('#comment-input')?.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      $('#comment-submit')?.click();
-    }
-  });
-
   $('#comments-list').addEventListener('click', async e => {
     const replyBtn = e.target.closest('.reply-comment-btn');
     if (replyBtn) {
@@ -5825,13 +5834,6 @@ async function renderForumDetail(app, slug) {
     const count = $('#comment-char-count');
     if (count) count.textContent = `${e.target.value.length.toLocaleString('tr-TR')} / 2.000`;
   });
-  $('#comment-input')?.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      $('#comment-submit')?.click();
-    }
-  });
-
   $('#comments-list').addEventListener('click', async e => {
     const replyBtn = e.target.closest('.reply-comment-btn');
     if (replyBtn) {
@@ -9481,11 +9483,13 @@ async function renderProfile(app, username) {
         <div id="profile-spotify-now-playing" data-username="${escHtml(user.username)}"></div>
         ${progressHTML}
         ${user.bio ? descriptionPreviewHTML(user.bio, 'profile-bio', 160) : ''}
-        ${links.length ? `<div class="profile-links">${links.map(l => {
-          let url = (l.url||'').trim();
-          if (url && !/^https?:\/\//i.test(url)) url = 'https://' + url;
-          return `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" class="profile-link"><i class="fas fa-link"></i> ${escHtml(l.label || l.url)}</a>`;
-        }).join('')}</div>` : ''}
+        ${links.length ? `<div class="profile-links">${links.length > 3
+          ? `<button type="button" class="profile-link profile-links-more" data-profile-links aria-haspopup="dialog" aria-label="Profildeki tüm bağlantıları gör" title="Profil bağlantılarını gör"><i class="fas fa-link" aria-hidden="true"></i><span>...</span></button>`
+          : links.map(link => {
+            const label = String(link.label || link.url || '').trim();
+            const shortLabel = label.length > 20 ? `${label.slice(0, 19).trimEnd()}…` : label;
+            return `<button type="button" class="profile-link" data-profile-links aria-haspopup="dialog" aria-label="${escHtml(label)} bağlantısının tamamını gör" title="${escHtml(label)}"><i class="fas fa-link" aria-hidden="true"></i><span>${escHtml(shortLabel)}</span></button>`;
+          }).join('')}</div>` : ''}
         <div class="profile-stats" style="margin-top:12px">
           ${combinedContentCount
             ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></button>`
@@ -9550,6 +9554,7 @@ async function renderProfile(app, username) {
 
   bindProfileAvatarViewer(app, user, data.avatar_photos || [], isOwn);
   app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(badges, isOwn));
+  app.querySelectorAll('[data-profile-links]').forEach(button => button.addEventListener('click', () => showProfileLinks(links)));
   let ownerActionHoldTimer = null;
   let suppressProfileCardClick = false;
   let pendingProfileCardNavigation = null;
