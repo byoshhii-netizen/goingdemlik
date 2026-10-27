@@ -3313,6 +3313,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 /* ---- Layout ---- */
 .dm-layout {
+  --dm-sidebar-width: 440px;
   display: flex;
   height: calc(100svh - 60px);
   overflow: hidden;
@@ -3333,7 +3334,36 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 /* Masaüstünde konuşma listesi biraz daha ferah; mobildeki mevcut görünüm değişmez. */
 @media (min-width: 769px) {
-  .dm-sidebar { width: 360px; }
+  .dm-sidebar {
+    width: var(--dm-sidebar-width);
+    max-width: calc(100% - 368px);
+    flex: 0 0 var(--dm-sidebar-width);
+    transition: none;
+  }
+  .dm-sidebar-resizer {
+    position: relative;
+    z-index: 4;
+    flex: 0 0 8px;
+    width: 8px;
+    margin: 0 -4px;
+    cursor: col-resize;
+    touch-action: none;
+    background: transparent;
+  }
+  .dm-sidebar-resizer::after {
+    position: absolute;
+    inset: 0 3px;
+    content: "";
+    background: var(--border);
+    transition: background .15s ease, transform .15s ease;
+  }
+  .dm-sidebar-resizer:hover::after,
+  .dm-sidebar-resizer:focus-visible::after,
+  .dm-layout.dm-is-resizing .dm-sidebar-resizer::after {
+    background: var(--accent-red2);
+    transform: scaleX(1.5);
+  }
+  .dm-sidebar-resizer:focus-visible { outline: none; }
 }
 .dm-sidebar-header {
   position: relative;
@@ -4255,6 +4285,7 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 /* ---- Mobile responsive ---- */
 @media (max-width: 768px) {
+  .dm-sidebar-resizer { display: none; }
   /* Conversation list should grow with the page instead of scrolling inside a short panel. */
   .dm-layout:not(.dm-mobile-chat-open) {
     height: auto;

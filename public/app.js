@@ -13108,6 +13108,7 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
           || '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">Henüz mesaj yok</div>'}
       </div>
     </div>
+    <div class="dm-sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="Sohbet listesinin genişliğini ayarla" aria-valuemin="260" aria-valuemax="560" aria-valuenow="440" tabindex="0"></div>
     <div class="dm-main" id="dm-main">
       ${!targetUsername ? `<div class="dm-empty">
         ${friends && !hasAcceptedFriends && convs.length === 0
@@ -13119,6 +13120,64 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       </div>` : ''}
     </div>
   </div>`;
+  const dmLayout = app.querySelector('.dm-layout');
+  const dmSidebar = app.querySelector('.dm-sidebar');
+  const dmResizer = app.querySelector('.dm-sidebar-resizer');
+  const dmSidebarWidthKey = `dm_sidebar_width:${currentUser?.id || 'guest'}`;
+  const getDmSidebarBounds = () => ({
+    min: 260,
+    max: Math.max(260, Math.min(560, dmLayout.clientWidth - 368))
+  });
+  const applyDmSidebarWidth = width => {
+    const bounds = getDmSidebarBounds();
+    const clampedWidth = Math.round(Math.max(bounds.min, Math.min(bounds.max, width)));
+    dmLayout.style.setProperty('--dm-sidebar-width', `${clampedWidth}px`);
+    dmResizer.setAttribute('aria-valuemax', String(bounds.max));
+    dmResizer.setAttribute('aria-valuenow', String(clampedWidth));
+    return clampedWidth;
+  };
+  let savedDmSidebarWidth = 440;
+  try {
+    const storedWidth = Number(localStorage.getItem(dmSidebarWidthKey));
+    if (Number.isFinite(storedWidth) && storedWidth > 0) savedDmSidebarWidth = storedWidth;
+  } catch (error) {
+    console.warn('Sohbet listesi genişliği okunamadı:', error.message);
+  }
+  applyDmSidebarWidth(savedDmSidebarWidth);
+  let dmResizePointerId = null;
+  dmResizer.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || window.matchMedia('(max-width: 768px)').matches) return;
+    event.preventDefault();
+    dmResizePointerId = event.pointerId;
+    dmResizer.setPointerCapture(event.pointerId);
+    dmLayout.classList.add('dm-is-resizing');
+  });
+  dmResizer.addEventListener('pointermove', event => {
+    if (dmResizePointerId !== event.pointerId) return;
+    applyDmSidebarWidth(event.clientX - dmLayout.getBoundingClientRect().left);
+  });
+  const finishDmSidebarResize = event => {
+    if (dmResizePointerId !== event.pointerId) return;
+    dmResizePointerId = null;
+    dmLayout.classList.remove('dm-is-resizing');
+    try {
+      localStorage.setItem(dmSidebarWidthKey, String(dmSidebar.getBoundingClientRect().width));
+    } catch (error) {
+      console.warn('Sohbet listesi genişliği kaydedilemedi:', error.message);
+    }
+  };
+  dmResizer.addEventListener('pointerup', finishDmSidebarResize);
+  dmResizer.addEventListener('pointercancel', finishDmSidebarResize);
+  dmResizer.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const nextWidth = applyDmSidebarWidth(dmSidebar.getBoundingClientRect().width + (event.key === 'ArrowRight' ? 20 : -20));
+    try {
+      localStorage.setItem(dmSidebarWidthKey, String(nextWidth));
+    } catch (error) {
+      console.warn('Sohbet listesi genişliği kaydedilemedi:', error.message);
+    }
+  });
   renderInboxList();
   renderDmNotes();
   const searchWrap = app.querySelector('.dm-search-wrap');
