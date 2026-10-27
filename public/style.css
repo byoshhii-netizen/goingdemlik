@@ -5413,7 +5413,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 @media (max-width: 600px) {
   .my-playlists-header { align-items: stretch; display: grid; grid-template-columns: 1fr; }
   .my-playlists-title { width: 100%; }
-  .my-playlists-create { width: 100%; justify-content: center; }
+  .my-playlists-create { width: auto; max-width: 100%; min-width: 0; justify-self: start; justify-content: center; }
   .pl-card { gap: 9px; padding: 9px; }
   .pl-card-icon { width: 48px; height: 48px; flex-basis: 48px; }
   .pl-card-actions { margin-left: auto; }

@@ -7820,7 +7820,7 @@ app.post('/api/songs', authMiddleware, upload.fields([
     if (settings[0]?.value === '0') return res.status(403).json({ error: 'Başkasının şarkısını paylaşma şu anda kapalı.' });
   }
   // Kendi müziği için artist rozeti zorunlu, başkasının müziği için değil
-  if ((song_type === 'own' || !song_type) && !req.user.is_artist) {
+  if ((song_type === 'own' || !song_type) && Number(req.user.is_artist) !== 1) {
     return res.status(403).json({ error: 'Kendi müziğini yüklemek için artist rozeti gerekli' });
   }
   if (!rules_accepted) return res.status(400).json({ error: 'Kuralları kabul etmelisiniz' });

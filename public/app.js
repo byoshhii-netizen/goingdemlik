@@ -17098,7 +17098,7 @@ async function renderArtistApply(app) {
   const isAccepted = existing?.status === 'accepted';
   const isRejected = existing?.status === 'rejected';
 
-  if (isAccepted || currentUser.is_artist) {
+  if (isAccepted || Number(currentUser.is_artist) === 1) {
     app.innerHTML = `<div class="container page" style="max-width:600px;margin:0 auto">
       <div style="text-align:center;padding:60px 20px">
         <div style="font-size:48px;margin-bottom:16px">🎤</div>
@@ -17184,7 +17184,7 @@ async function renderArtistApply(app) {
 // ===== ARTİST PANELİ =====
 async function renderArtistPanel(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  if (!currentUser.is_artist) { navigate('/artist-basvuru'); return; }
+  if (Number(currentUser.is_artist) !== 1) { navigate('/artist-basvuru'); return; }
   document.title = 'Artist Panel – ' + siteName;
 
   let rules = { own_rules: '', other_rules: '' };
@@ -17284,7 +17284,7 @@ async function renderArtistPanel(app) {
 async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
   // Artist olanlar kendi panelini kullansın
-  if (currentUser.is_artist) { navigate('/artist-panel'); return; }
+  if (Number(currentUser.is_artist) === 1) { navigate('/artist-panel'); return; }
   if (window.otherSongsEnabled === false) {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Artist özelliğine sahip değilsiniz. Başkasının şarkısı paylaşma şu an kapalı; lütfen artist başvurusu yapın.</p><a class="btn btn-primary" href="/artist-basvuru" data-link>Artist başvurusu yap</a></div></div>';
     return;
