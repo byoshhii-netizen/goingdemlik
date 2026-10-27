@@ -75,6 +75,7 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       last_active TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS banned INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_message_permission TEXT NOT NULL DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
