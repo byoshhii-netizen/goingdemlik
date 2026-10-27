@@ -5751,11 +5751,6 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .social-compose-upload-hint { display:flex; align-items:center; gap:9px; color:var(--text-muted); font-size:10px; line-height:1.45; }
 .social-compose-upload-hint i { flex:0 0 auto; color:var(--accent-red2); }
 .social-compose-fields { display:flex; flex-direction:column; gap:14px; min-width:0; max-height:min(690px,78vh); overflow-y:auto; padding:20px 22px 24px; overscroll-behavior:contain; }
-.social-compose-profile { display:grid; grid-template-columns:34px minmax(0,1fr); grid-template-rows:auto auto; align-content:center; column-gap:9px; row-gap:2px; min-width:0; min-height:40px; padding-bottom:12px; border-bottom:1px solid var(--border); }
-.social-compose-profile .social-compose-avatar { grid-column:1; grid-row:1/3; }
-.social-compose-profile strong { grid-column:2; grid-row:1; min-width:0; overflow:hidden; color:var(--text-primary); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
-.social-compose-profile > span:last-child { grid-column:2; grid-row:2; margin:0; color:var(--text-muted); font-size:10px; line-height:1.25; }
-.social-compose-avatar { width:34px !important; height:34px !important; flex:0 0 34px; border-radius:50%; object-fit:cover; }
 .social-compose-fields .form-group { margin:0; }
 .social-compose-fields .form-group label:not(.checkbox-label) { display:block; margin-bottom:6px; color:var(--text-secondary); font-size:11px; font-weight:700; }
 .social-compose-fields .form-row { gap:10px; margin:0; }

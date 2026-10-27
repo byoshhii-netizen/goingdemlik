@@ -8298,7 +8298,6 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       </section>
       <section class="social-compose-fields">
         ${!simplifiedRealsComposer ? '<div class="video-compose-intro"><span><i class="fas fa-video"></i></span><div><strong>Uzun video paylaş</strong><small>Videonu ekle, başlık ve açıklamayla paylaşımını tamamla.</small></div></div>' : ''}
-        <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>${forceReals ? 'Reals paylaşımı' : 'Video paylaşımı'}</span></div>
         <div class="form-group"><label>${simplifiedRealsComposer ? 'Başlık (isteğe bağlı)' : 'Başlık'}</label><input id="video-title" type="text" value="${escHtml(existing?.title || '')}" placeholder="${simplifiedRealsComposer ? 'Reals için kısa bir başlık…' : 'Videona bir başlık ekle…'}" /></div>
         <div class="form-group"><label>Açıklama <span class="text-muted">(isteğe bağlı)</span></label><textarea id="video-description" rows="${simplifiedRealsComposer ? '3' : '4'}" placeholder="Ne düşünüyorsun?">${escHtml(defaultDescription)}</textarea></div>
         <div class="form-group"><label>Kapak görseli</label><label class="social-compose-secondary-pick" for="video-banner-file"><i class="fas fa-image"></i> Kapak seç veya videodan otomatik oluştur</label><input type="file" id="video-banner-file" accept="image/*" /><img id="video-banner-preview" alt="Kapak önizleme" />${existing?.banner_image ? `<img class="social-compose-existing-cover" src="${escHtml(existing.banner_image)}" alt="Mevcut kapak" style="display:block" />` : ''}</div>
@@ -17824,7 +17823,6 @@ function showStoryUploadModal() {
       <div class="social-compose-upload-hint"><i class="fas fa-clock"></i><span>Hikayen seçtiğin süre boyunca yayında kalır.</span></div>
     </section>
     <section class="social-compose-fields story-compose">
-      <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>Hikaye paylaşımı</span></div>
       <div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div>
       <div class="form-group story-duration-field"><label>Yayında kalma süresi</label>
         <input type="hidden" id="story-duration" value="${escHtml(savedDraft?.duration || '24')}" />
@@ -19149,7 +19147,6 @@ function showPhotoUploadModal() {
         <div class="social-compose-upload-hint"><i class="fas fa-crop-simple"></i><span>Paylaşmadan önce fotoğrafını kırpıp düzenleyebilirsin.</span></div>
       </section>
       <section class="social-compose-fields">
-        <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>Fotoğraf paylaşımı</span></div>
         <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" placeholder="Paylaşımına bir başlık ekle…" /></div>
         <div class="form-group"><label>Açıklama</label><textarea id="photo-caption" rows="3" placeholder="Fotoğrafınla ilgili bir şeyler yaz…"></textarea></div>
         <div class="form-group"><label>Konum</label><input id="photo-location" placeholder="Konum ekle" /></div>
