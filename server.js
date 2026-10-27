@@ -7839,7 +7839,14 @@ function parseTimedLyrics(value) {
   });
 }
 
-app.post('/api/songs/transcribe', authMiddleware, uploadLimiter, lyricsTranscriptionUpload.single('audio'), async (req, res) => {
+const requireArtistBadge = (req, res, next) => {
+  if (Number(req.user?.is_artist) !== 1) {
+    return res.status(403).json({ error: 'Müzik paylaşmak için onaylı artist rozeti gerekli. Artist başvurusu yapabilirsiniz.' });
+  }
+  next();
+};
+
+app.post('/api/songs/transcribe', authMiddleware, requireArtistBadge, uploadLimiter, lyricsTranscriptionUpload.single('audio'), async (req, res) => {
   if (await denyIfRestricted(req, res, 'music')) return;
   if (!req.file) return res.status(400).json({ error: 'Önce şarkı ses dosyasını seçin.' });
   if (!process.env.OPENAI_API_KEY) {
@@ -7879,7 +7886,7 @@ app.post('/api/songs/transcribe', authMiddleware, uploadLimiter, lyricsTranscrip
   }
 });
 
-app.post('/api/songs', authMiddleware, upload.fields([
+app.post('/api/songs', authMiddleware, requireArtistBadge, upload.fields([
   { name: 'audio', maxCount: 1 },
   { name: 'cover', maxCount: 1 }
 ]), async (req, res) => {
@@ -7889,10 +7896,6 @@ app.post('/api/songs', authMiddleware, upload.fields([
   if (song_type === 'other') {
     const { rows: settings } = await query("SELECT value FROM settings WHERE key='other_songs_enabled'");
     if (settings[0]?.value === '0') return res.status(403).json({ error: 'Başkasının şarkısını paylaşma şu anda kapalı.' });
-  }
-  // Kendi müziği için artist rozeti zorunlu, başkasının müziği için değil
-  if ((song_type === 'own' || !song_type) && Number(req.user.is_artist) !== 1) {
-    return res.status(403).json({ error: 'Kendi müziğini yüklemek için artist rozeti gerekli' });
   }
   if (!rules_accepted) return res.status(400).json({ error: 'Kuralları kabul etmelisiniz' });
   if (!title || !artist_name) return res.status(400).json({ error: 'Başlık ve sanatçı adı gerekli' });

@@ -497,6 +497,20 @@ function mediaFilterOptions(selected = 'none') {
   return MEDIA_FILTERS.map(item => `<option value="${item.value}" ${item.value === selected ? 'selected' : ''}>${item.label}</option>`).join('');
 }
 
+function mediaFilterChoicesMarkup(previewUrl, selected = 'none', hasMedia = Boolean(previewUrl)) {
+  if (!previewUrl) {
+    if (!hasMedia) return '<p class="media-filter-empty">Filtre önizlemelerini görmek için önce bir fotoğraf seç.</p>';
+    return MEDIA_FILTERS.map(filter => `<button type="button" class="media-filter-choice${filter.value === selected ? ' is-selected' : ''}" data-media-filter="${filter.value}" aria-pressed="${filter.value === selected}">
+      <span class="media-filter-choice-preview is-sample" style="filter:${filter.css}"><i class="fas fa-image" aria-hidden="true"></i></span>
+      <span class="media-filter-choice-label">${filter.label}</span>
+    </button>`).join('');
+  }
+  return MEDIA_FILTERS.map(filter => `<button type="button" class="media-filter-choice${filter.value === selected ? ' is-selected' : ''}" data-media-filter="${filter.value}" aria-pressed="${filter.value === selected}">
+    <span class="media-filter-choice-preview"><img src="${escHtml(previewUrl)}" alt="" style="filter:${filter.css}" /></span>
+    <span class="media-filter-choice-label">${filter.label}</span>
+  </button>`).join('');
+}
+
 function openAvatarCrop(file, onApply) {
   if (!file || !file.type.startsWith('image/')) return;
   const url = URL.createObjectURL(file);
@@ -542,7 +556,7 @@ function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initia
     <div class="media-editor-stage"><canvas id="media-editor-canvas" width="${canvasWidth}" height="${canvasHeight}"></canvas><div class="media-editor-guide"></div></div>
     <div class="media-editor-toolbar">
       <label><span>Yakınlaştır</span><input id="media-editor-zoom" type="range" min="1" max="3" step="0.01" value="1" /></label>
-      <label><span>Filtre</span><select id="media-editor-filter">${mediaFilterOptions(initialFilter)}</select></label>
+      <div class="media-editor-filter-field"><span>Filtre önizlemesi</span><div class="media-filter-choices" id="media-editor-filters" role="group" aria-label="Fotoğraf filtresi">${mediaFilterChoicesMarkup(url, initialFilter)}</div></div>
       <div class="media-editor-actions-inline"><button type="button" class="btn btn-ghost btn-sm" id="media-editor-rotate"><i class="fas fa-rotate-right"></i> Döndür</button><button type="button" class="btn btn-ghost btn-sm" id="media-editor-reset"><i class="fas fa-undo"></i> Sıfırla</button></div>
     </div>
     <p class="media-editor-hint"><i class="fas fa-hand-pointer"></i> Görseli sürükleyerek kadrajı ayarla</p>
@@ -571,9 +585,32 @@ function openMediaEditor(file, { title = 'Medyayı düzenle', aspect = 1, initia
   image.onload = draw;
   image.src = url;
   $('#media-editor-zoom').addEventListener('input', e => { scale = Number(e.target.value); draw(); });
-  $('#media-editor-filter').addEventListener('change', e => { filter = e.target.value; draw(); });
+  $('#media-editor-filters').addEventListener('click', event => {
+    const option = event.target.closest('[data-media-filter]');
+    if (!option) return;
+    filter = option.dataset.mediaFilter;
+    $('#media-editor-filters').querySelectorAll('[data-media-filter]').forEach(button => {
+      const selected = button === option;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    draw();
+  });
   $('#media-editor-rotate').addEventListener('click', () => { rotation = (rotation + 90) % 360; draw(); });
-  $('#media-editor-reset').addEventListener('click', () => { scale = 1; offsetX = 0; offsetY = 0; rotation = 0; filter = 'none'; $('#media-editor-zoom').value = '1'; $('#media-editor-filter').value = 'none'; draw(); });
+  $('#media-editor-reset').addEventListener('click', () => {
+    scale = 1;
+    offsetX = 0;
+    offsetY = 0;
+    rotation = 0;
+    filter = 'none';
+    $('#media-editor-zoom').value = '1';
+    $('#media-editor-filters').querySelectorAll('[data-media-filter]').forEach(button => {
+      const selected = button.dataset.mediaFilter === 'none';
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    draw();
+  });
   canvas.addEventListener('pointerdown', e => { dragging = true; startX = e.clientX - offsetX; startY = e.clientY - offsetY; canvas.setPointerCapture(e.pointerId); });
   canvas.addEventListener('pointermove', e => { if (!dragging) return; offsetX = e.clientX - startX; offsetY = e.clientY - startY; draw(); });
   canvas.addEventListener('pointerup', () => { dragging = false; });
@@ -17278,11 +17315,50 @@ async function renderMusicDetail(app, slug) {
   });
 }
 
+async function renderArtistAccessGate(app) {
+  document.title = 'Artist başvurusu gerekli – ' + siteName;
+  let application;
+  try {
+    application = await api('/artist/my-application');
+  } catch (error) {
+    app.innerHTML = `<div class="container page artist-access-page"><section class="artist-access-card">
+      <span class="artist-access-icon"><i class="fas fa-triangle-exclamation"></i></span>
+      <h1>Başvuru durumu alınamadı</h1>
+      <p>${escHtml(error.message || 'Başvuru bilgilerine şu anda ulaşılamıyor.')}</p>
+      <button type="button" class="btn btn-primary" id="artist-access-retry"><i class="fas fa-rotate-right"></i> Tekrar dene</button>
+    </section></div>`;
+    app.querySelector('#artist-access-retry').addEventListener('click', () => renderArtistAccessGate(app));
+    return;
+  }
+  const isPending = application?.status === 'pending';
+  const isRejected = application?.status === 'rejected';
+  app.innerHTML = `<div class="container page artist-access-page"><section class="artist-access-card">
+    <span class="artist-access-icon"><i class="fas fa-music"></i></span>
+    <span class="artist-access-kicker">CigCig Müzik</span>
+    <h1>Artist rozeti gerekli</h1>
+    <p>Müzik paylaşım panelini açmak için onaylı artist rozeti gerekir. Artist başvurunu gönder; başvurun onaylandığında panelin açılır.</p>
+    ${isPending ? `<div class="artist-application-status is-pending"><span><i class="fas fa-hourglass-half"></i></span><div><strong>Başvurunuz onay bekliyor</strong><p>Başvurunuz sonuçlanana kadar müzik paylaşım paneli kapalıdır.</p></div></div>` : ''}
+    ${isRejected ? `<div class="artist-application-status is-rejected"><span><i class="fas fa-circle-xmark"></i></span><div><strong>Son başvurunuz reddedildi</strong><p>Bilgilerinizi güncelleyip yeniden başvurabilirsiniz.</p></div></div>` : ''}
+    <a class="btn btn-primary artist-access-action" href="/artist-basvuru" data-link><i class="fas fa-microphone"></i> ${isPending ? 'Başvuru durumunu görüntüle' : isRejected ? 'Yeniden başvur' : 'Artist başvurusu yap'} <i class="fas fa-arrow-right"></i></a>
+  </section></div>`;
+}
+
 async function renderArtistApply(app) {
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Artist Başvurusu – ' + siteName;
   let existing = null;
-  try { existing = await api('/artist/my-application'); } catch {}
+  try {
+    existing = await api('/artist/my-application');
+  } catch (error) {
+    app.innerHTML = `<div class="container page artist-access-page"><section class="artist-access-card">
+      <span class="artist-access-icon"><i class="fas fa-triangle-exclamation"></i></span>
+      <h1>Başvuru durumu alınamadı</h1>
+      <p>${escHtml(error.message || 'Başvuru bilgilerine şu anda ulaşılamıyor.')}</p>
+      <button type="button" class="btn btn-primary" id="artist-application-retry"><i class="fas fa-rotate-right"></i> Tekrar dene</button>
+    </section></div>`;
+    app.querySelector('#artist-application-retry').addEventListener('click', () => renderArtistApply(app));
+    return;
+  }
 
   const isPending = existing?.status === 'pending';
   const isAccepted = existing?.status === 'accepted';
@@ -17300,29 +17376,25 @@ async function renderArtistApply(app) {
     return;
   }
 
-  app.innerHTML = `<div class="container page" style="max-width:600px;margin:0 auto">
-    <div class="page-title"><i class="fas fa-microphone" style="color:var(--accent-red2);margin-right:8px"></i>Artist Rozeti Başvurusu</div>
+  app.innerHTML = `<div class="container page artist-application-page">
+    <header class="artist-application-heading"><span class="artist-access-icon"><i class="fas fa-microphone"></i></span><div><h1>Artist rozeti başvurusu</h1><p>Şarkılarını CigCig topluluğuyla paylaşmak için başvurunu gönder.</p></div></header>
     ${isPending ? `
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-body" style="text-align:center;padding:40px">
-          <div style="font-size:40px;margin-bottom:12px">⏳</div>
-          <div style="font-size:18px;font-weight:700">Başvurunuz Bekliyor</div>
-          <p style="color:var(--text-secondary);margin-top:8px">Ekibimiz başvurunuzu inceliyor. Onaylanınca bildirim alacaksınız.</p>
+      <section class="artist-application-status is-pending">
+        <span><i class="fas fa-hourglass-half"></i></span><div>
+          <strong>Başvurunuz onay bekliyor</strong>
+          <p>Ekibimiz başvurunuzu inceliyor. Sonuçlandığında bildirim alacaksınız.</p>
         </div>
-      </div>` : ''}
+      </section>` : ''}
     ${isRejected ? `
-      <div class="card" style="margin-bottom:20px;border-color:rgba(220,38,38,0.4)">
-        <div class="card-body" style="padding:16px">
-          <div style="color:var(--accent-red2);font-weight:600"><i class="fas fa-times-circle"></i> Başvurunuz Reddedildi</div>
-          <p style="font-size:13px;color:var(--text-secondary);margin-top:6px">Yeniden başvurabilirsiniz.</p>
+      <section class="artist-application-status is-rejected">
+        <span><i class="fas fa-circle-xmark"></i></span><div>
+          <strong>Başvurunuz reddedildi</strong>
+          <p>Bilgilerinizi güncelleyerek yeniden başvurabilirsiniz.</p>
         </div>
-      </div>` : ''}
+      </section>` : ''}
     ${!isPending ? `
-    <div class="card">
-      <div class="card-body">
-        <p style="font-size:14px;color:var(--text-secondary);margin-bottom:20px">
-          Artist rozeti alarak kendi şarkılarınızı CigCig'te yayınlayabilirsiniz.
-        </p>
+    <section class="artist-application-form">
+        <div class="artist-application-form-intro"><strong>Başvuru bilgileri</strong><span>Yıldızlı alanlar zorunludur.</span></div>
         <div class="form-group"><label>Müzik Türünüz *</label>
           <input id="apply-genre" placeholder="Pop, Rock, Hip-Hop, Elektronik..." />
         </div>
@@ -17339,8 +17411,7 @@ async function renderArtistApply(app) {
           <i class="fas fa-paper-plane"></i> Başvuruyu Gönder
         </button>
         <div id="apply-msg" style="margin-top:8px;font-size:12px"></div>
-      </div>
-    </div>` : ''}
+    </section>` : ''}
   </div>`;
 
   document.getElementById('apply-submit')?.addEventListener('click', async () => {
@@ -17360,13 +17431,7 @@ async function renderArtistApply(app) {
       fd.append('note', note||'');
       if (file) fd.append('sample_file', file);
       await apiForm('/artist/apply', fd);
-      msg.style.color='var(--accent-red2)'; // green
-      app.innerHTML = `<div class="container page" style="max-width:600px;margin:0 auto;text-align:center;padding:60px 20px">
-        <div style="font-size:48px">⏳</div>
-        <div style="font-size:22px;font-weight:700;margin-top:12px">Başvurunuz Alındı!</div>
-        <p style="color:var(--text-secondary);margin-top:8px">Ekibimiz inceleyecek, onaylanınca bildirim alırsınız.</p>
-        <a href="/" data-link class="btn btn-outline" style="margin-top:20px">Ana Sayfaya Dön</a>
-      </div>`;
+      await renderArtistApply(app);
     } catch(e) { msg.style.color='var(--accent-red2)'; msg.textContent=e.message; btn.disabled=false; btn.innerHTML='<i class="fas fa-paper-plane"></i> Başvuruyu Gönder'; }
   });
 }
@@ -17374,7 +17439,7 @@ async function renderArtistApply(app) {
 // ===== ARTİST PANELİ =====
 async function renderArtistPanel(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  if (Number(currentUser.is_artist) !== 1) { navigate('/artist-basvuru'); return; }
+  if (Number(currentUser.is_artist) !== 1) { await renderArtistAccessGate(app); return; }
   document.title = 'Artist Panel – ' + siteName;
 
   let rules = { own_rules: '', other_rules: '' };
@@ -17473,7 +17538,7 @@ async function renderArtistPanel(app) {
 // ===== BAŞKASININ ŞARKISINI PAYLAŞ (artist rozeti gerekmez) =====
 async function renderShareSong(app) {
   if (!currentUser) { navigate('/giris'); return; }
-  // Artist olanlar kendi panelini kullansın
+  if (Number(currentUser.is_artist) !== 1) { await renderArtistAccessGate(app); return; }
   if (Number(currentUser.is_artist) === 1) { navigate('/artist-panel'); return; }
   if (window.otherSongsEnabled === false) {
     app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-music"></i><p>Artist özelliğine sahip değilsiniz. Başkasının şarkısı paylaşma şu an kapalı; lütfen artist başvurusu yapın.</p><a class="btn btn-primary" href="/artist-basvuru" data-link>Artist başvurusu yap</a></div></div>';
@@ -17761,10 +17826,13 @@ function showStoryUploadModal() {
     <section class="social-compose-fields story-compose">
       <div class="social-compose-profile">${avatarImg(currentUser, 'social-compose-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><span>Hikaye paylaşımı</span></div>
       <div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div>
-      <div class="form-row">
-        <div class="form-group"><label>Yayında kalma süresi</label><select id="story-duration"><option value="5">5 saat</option><option value="10">10 saat</option><option value="24" selected>24 saat</option></select></div>
-        <div class="form-group"><label>Filtre</label><select id="story-media-filter">${mediaFilterOptions(savedDraft?.filter || 'none')}</select><small class="text-muted">Fotoğraflarda kaydedilir, videolarda izleme ekranında uygulanır.</small></div>
+      <div class="form-group story-duration-field"><label>Yayında kalma süresi</label>
+        <input type="hidden" id="story-duration" value="${escHtml(savedDraft?.duration || '24')}" />
+        <div class="story-duration-choices" id="story-duration-choices" role="group" aria-label="Hikayenin yayında kalma süresi">
+          ${[['5','5 saat'],['10','10 saat'],['24','24 saat']].map(([value,label]) => `<button type="button" class="story-duration-choice${String(savedDraft?.duration || '24') === value ? ' is-selected' : ''}" data-story-duration="${value}" aria-pressed="${String(savedDraft?.duration || '24') === value}"><i class="fas fa-${value === '24' ? 'clock' : 'hourglass-half'}" aria-hidden="true"></i><span>${label}</span></button>`).join('')}
+        </div>
       </div>
+      <div class="form-group story-filter-field"><label>Fotoğraf filtresi</label><div class="media-filter-choices story-media-filter-choices" id="story-media-filter-choices" role="group" aria-label="Hikaye fotoğrafı filtresi"></div><small class="text-muted">Önizlemeler seçtiğin fotoğrafa göre gösterilir. Videolarda seçilen filtre izleme ekranında uygulanır.</small></div>
       <details class="social-compose-advanced story-compose-music">
         <summary><i class="fas fa-music"></i> İsteğe bağlı müzik ve başlangıç noktası</summary>
         <div class="social-compose-advanced-fields">
@@ -17776,6 +17844,7 @@ function showStoryUploadModal() {
     </section>
   </div>`, 'social-compose-modal');
   let songs = [], selectedSong = null, selectedStoryFiles = pendingStoryFiles, selectedStoryFilters = pendingStoryFilters;
+  let selectedStoryDefaultFilter = savedDraft?.filter || 'none';
   const mediaInput = $('#story-media'), preview = $('#story-media-preview'), songList = $('#story-song-list');
   let storyPreviewUrls = [];
   let activeStoryPreviewIndex = 0;
@@ -17786,6 +17855,16 @@ function showStoryUploadModal() {
   const storySongWaveform = $('#story-song-waveform');
   const storySongPreviewButton = $('#story-song-preview');
   const storySongPlayer = $('#story-song-player');
+  $('#story-duration-choices').addEventListener('click', event => {
+    const option = event.target.closest('[data-story-duration]');
+    if (!option) return;
+    $('#story-duration').value = option.dataset.storyDuration;
+    $('#story-duration-choices').querySelectorAll('[data-story-duration]').forEach(button => {
+      const selected = button === option;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  });
   const formatStorySongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
   $('#story-song-waveform-bars').innerHTML = Array.from({ length: 64 }, (_, index) => {
     const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
@@ -17918,6 +17997,12 @@ function showStoryUploadModal() {
     if (selectedSong?.audio_url || selectedSong?.remastered_audio_url) playStorySongPreview(Number(storySongStart.value) || 0);
   });
   const renderStoryPreviewLayers = () => `<div class="story-compose-preview-top"><div class="story-compose-preview-progress">${selectedStoryFiles.map((_, index) => `<span class="${index <= activeStoryPreviewIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-compose-preview-user">${avatarImg(currentUser, 'story-compose-preview-avatar')}<strong>${escHtml(currentUser?.nickname || currentUser?.username || '')}</strong><small>Şimdi</small></div></div><div class="story-compose-preview-bottom">${$('#story-caption').value.trim() ? `<p>${escHtml($('#story-caption').value.trim())}</p>` : ''}${selectedSong ? `<button type="button" class="story-compose-preview-song" data-story-song-sticker aria-label="Müzik bilgisini büyüt">${selectedSong.cover_url ? `<img src="${escHtml(selectedSong.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}<span><b>${escHtml(selectedSong.title)}</b><small>${escHtml(selectedSong.artist_name || '')}</small></span><i class="fas fa-expand-alt story-compose-preview-song-expand"></i></button>` : ''}</div>`;
+  const renderStoryFilterChoices = file => {
+    const choices = $('#story-media-filter-choices');
+    if (!choices) return;
+    const mediaImage = file?.type.startsWith('image/') ? preview.querySelector('.story-media-preview-item > img') : null;
+    choices.innerHTML = mediaFilterChoicesMarkup(mediaImage?.src || '', selectedStoryFilters[activeStoryPreviewIndex] || selectedStoryDefaultFilter, Boolean(file));
+  };
   const updateStoryPreviewLayers = () => {
     preview.querySelectorAll('.story-media-preview-item,.story-media-lightbox-content').forEach(item => {
       item.querySelectorAll('.story-compose-preview-top,.story-compose-preview-bottom').forEach(layer => layer.remove());
@@ -17932,6 +18017,7 @@ function showStoryUploadModal() {
       preview.parentElement.classList.remove('has-media');
       $('#story-media-pick-label').textContent = '1-3 fotoğraf veya bir video seç';
       $('#story-preview-empty')?.classList.remove('hidden');
+      renderStoryFilterChoices(null);
       return;
     }
     activeStoryPreviewIndex = Math.min(Math.max(requestedIndex, 0), files.length - 1);
@@ -17946,11 +18032,12 @@ function showStoryUploadModal() {
       ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss(selectedStoryFilters[activeStoryPreviewIndex] || 'none')}"></video>`
       : `<img src="${url}" alt="Hikaye önizlemesi" draggable="false" style="filter:${mediaFilterCss(selectedStoryFilters[activeStoryPreviewIndex] || 'none')}" />`;
     preview.innerHTML = `<div class="story-media-preview-item">${media}${renderStoryPreviewLayers()}<div class="story-media-preview-actions"><button type="button" data-story-view="${activeStoryPreviewIndex}" aria-label="Hikayeyi büyük görüntüle"><i class="fas fa-expand"></i><span>Tam ekran</span></button>${file.type.startsWith('image/') ? `<button type="button" data-story-edit="${activeStoryPreviewIndex}" aria-label="Fotoğrafı düzenle"><i class="fas fa-crop-simple"></i><span>Düzenle</span></button>` : ''}</div>${files.length > 1 ? `<button type="button" class="story-preview-nav story-preview-prev" data-story-step="-1" ${activeStoryPreviewIndex === 0 ? 'disabled' : ''} aria-label="Önceki medya"><i class="fas fa-chevron-left"></i></button><span class="story-preview-count">${activeStoryPreviewIndex + 1} / ${files.length}</span><button type="button" class="story-preview-nav story-preview-next" data-story-step="1" ${activeStoryPreviewIndex === files.length - 1 ? 'disabled' : ''} aria-label="Sonraki medya"><i class="fas fa-chevron-right"></i></button>` : ''}</div>`;
+    renderStoryFilterChoices(file);
   };
   const storyDraft = () => ({
     caption: $('#story-caption').value,
     duration: $('#story-duration').value,
-    filter: $('#story-media-filter').value,
+    filter: selectedStoryFilters[activeStoryPreviewIndex] || selectedStoryDefaultFilter,
     songId: $('#story-song').value,
     songStart: $('#story-song-start').value
   });
@@ -18027,20 +18114,30 @@ function showStoryUploadModal() {
       return;
     }
     selectedStoryFiles = files;
-    selectedStoryFilters = files.map(() => $('#story-media-filter').value);
+    selectedStoryFilters = files.map(() => selectedStoryDefaultFilter);
     renderMediaPreview(files, 0);
   };
-  $('#story-media-filter').onchange = () => {
-    selectedStoryFilters = selectedStoryFiles.map(() => $('#story-media-filter').value);
+  $('#story-media-filter-choices').addEventListener('click', event => {
+    const option = event.target.closest('[data-media-filter]');
+    if (!option) return;
+    selectedStoryDefaultFilter = option.dataset.mediaFilter;
+    selectedStoryFilters = selectedStoryFiles.map(() => selectedStoryDefaultFilter);
     if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
-  };
+    else renderStoryFilterChoices(null);
+  });
   $('#story-caption').oninput = () => {
     updateStoryPreviewLayers();
   };
   if (pendingStoryFiles.length) renderMediaPreview(pendingStoryFiles);
+  else renderStoryFilterChoices(null);
   if (savedDraft) {
     $('#story-caption').value = savedDraft.caption || '';
     $('#story-duration').value = savedDraft.duration || '24';
+    $('#story-duration-choices').querySelectorAll('[data-story-duration]').forEach(button => {
+      const selected = button.dataset.storyDuration === $('#story-duration').value;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
     if (selectedStoryFiles.length) renderMediaPreview(selectedStoryFiles);
   }
   const renderSongs = list => {
@@ -18090,7 +18187,7 @@ function showStoryUploadModal() {
       submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
       const caption = $('#story-caption').value.trim();
       const duration = $('#story-duration').value;
-      const filter = $('#story-media-filter').value;
+      const filter = selectedStoryFilters[0] || selectedStoryDefaultFilter;
       let postedCount = 0;
       try {
         const file = files[0];
