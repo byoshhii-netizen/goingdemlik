@@ -1520,6 +1520,7 @@ document.addEventListener('focusin', event => {
 });
 
 function renderRoute(fullPath) {
+  window.__profileMenuCleanup?.();
   clearStoryRoutePlayback();
   // Sayfa değişiminde fotoğraf ses kontrolünü kaldır
   document.getElementById('photo-audio-control')?.remove();
@@ -9162,6 +9163,7 @@ document.addEventListener('click', event => {
 }, true);
 
 async function renderProfile(app, username) {
+  window.__profileMenuCleanup?.();
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
   let data;
   try { data = await api('/profile/' + username); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-user-slash"></i><p>Kullanıcı bulunamadı.</p></div></div>'; return; }
@@ -9462,6 +9464,7 @@ async function renderProfile(app, username) {
       <div class="profile-avatar-wrap">
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
+      ${isOwn ? '<a href="/ayarlar" data-link class="profile-edit-settings-btn" aria-label="Profili düzenle" title="Profili düzenle"><i class="fas fa-gear" aria-hidden="true"></i></a>' : ''}
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
           <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span>
@@ -9489,12 +9492,12 @@ async function renderProfile(app, username) {
               ${profileVisibility.comments ? `<div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>` : ''}
               ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}` : ''}
         </div>
-        ${isOwn ? `<div class="profile-owner-tools"><a href="/ayarlar" data-link class="btn btn-outline btn-sm"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm profile-admin-panel-btn"><i class="fas fa-shield"></i> Yetkili Paneli</a>` : ''}</div>` : ''}
+        ${isOwn && currentUser?.is_admin ? `<div class="profile-owner-tools"><a href="/gubukgak" class="btn btn-sm profile-admin-panel-btn"><i class="fas fa-shield"></i> Yetkili Paneli</a></div>` : ''}
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takiptesin' : 'Takip et'}</button>
           ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
-          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative"><i class="fas fa-ellipsis-h"></i></button>
-          <div id="profile-more-menu" style="display:none;position:absolute;top:36px;right:0;left:auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.5);z-index:500;width:min(240px, calc(100vw - 24px));max-width:calc(100vw - 24px);overflow-y:auto;max-height:320px"></div>
+          <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative" aria-label="Profil seçenekleri" aria-expanded="false"><i class="fas fa-ellipsis-h"></i></button>
+          <div id="profile-more-menu" class="profile-more-menu" role="menu"></div>
         </div>` : ''}
       </div>
     </div>
@@ -9834,25 +9837,23 @@ async function renderProfile(app, username) {
       }
 
       function renderMenu(fs) {
-        moreMenu.style.width = 'min(240px, calc(100vw - 24px))';
-        moreMenu.style.maxWidth = 'calc(100vw - 24px)';
-        moreMenu.style.left = 'auto';
-        moreMenu.style.right = '0';
         const items = buildMenuItems(fs);
         moreMenu.innerHTML = items.map(item =>
-          `<div class="profile-menu-item${item.danger ? ' danger' : ''}" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
+          `<div class="profile-menu-item${item.danger ? ' danger' : ''}" role="menuitem" tabindex="0" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
             <i class="fas ${item.icon}" style="width:18px;text-align:center;flex-shrink:0"></i> <span>${item.label}</span>
           </div>`
         ).join('');
         // Son item'ın border'ını kaldır
         const lastItem = moreMenu.querySelector('.profile-menu-item:last-child');
         if (lastItem) lastItem.style.borderBottom = 'none';
+        if (moreMenu.style.display === 'block') positionProfileMenu(moreBtn);
         
         moreMenu.querySelectorAll('.profile-menu-item').forEach(el => {
           el.addEventListener('mouseover', () => el.style.background = 'var(--bg-hover)');
           el.addEventListener('mouseout', () => el.style.background = '');
           el.addEventListener('click', async () => {
             moreMenu.style.display = 'none';
+            moreBtn.setAttribute('aria-expanded', 'false');
             const action = el.dataset.action;
             const fid = el.dataset.id;
             try {
@@ -9916,21 +9917,52 @@ async function renderProfile(app, username) {
         })
       ]).then(([blockStatus]) => renderMenu(blockStatus)).catch(() => renderMenu({}));
 
+      const positionProfileMenu = anchor => {
+        const rect = anchor.getBoundingClientRect();
+        moreMenu.style.display = 'block';
+        moreMenu.style.position = 'fixed';
+        moreMenu.style.width = 'min(240px, calc(100vw - 24px))';
+        moreMenu.style.maxWidth = 'calc(100vw - 24px)';
+        moreMenu.style.maxHeight = `${Math.max(80, window.innerHeight - 24)}px`;
+        moreMenu.style.overflowY = 'auto';
+        const menuRect = moreMenu.getBoundingClientRect();
+        const left = Math.max(12, Math.min(rect.right - menuRect.width, window.innerWidth - menuRect.width - 12));
+        const below = window.innerHeight - rect.bottom - 12;
+        const top = menuRect.height <= below
+          ? rect.bottom + 8
+          : Math.max(12, rect.top - menuRect.height - 8);
+        moreMenu.style.left = `${left}px`;
+        moreMenu.style.right = 'auto';
+        moreMenu.style.top = `${top}px`;
+      };
       const toggleProfileMenu = (event) => {
         if (event) event.stopPropagation();
         const isOpen = moreMenu.style.display === 'block';
-        moreMenu.style.display = isOpen ? 'none' : 'block';
+        if (isOpen) moreMenu.style.display = 'none';
+        else positionProfileMenu(event?.currentTarget || moreBtn);
         moreBtn.setAttribute('aria-expanded', String(!isOpen));
       };
 
       document.getElementById('profile-friend-btn')?.addEventListener('click', toggleProfileMenu);
       moreBtn.addEventListener('click', toggleProfileMenu);
-      document.addEventListener('click', (event) => {
+      const closeProfileMenu = event => {
         if (!event.target.closest('#profile-more-btn') && !event.target.closest('#profile-more-menu')) {
           if (moreMenu) moreMenu.style.display = 'none';
           moreBtn.setAttribute('aria-expanded', 'false');
         }
-      }, { once: false });
+      };
+      document.addEventListener('click', closeProfileMenu);
+      window.__profileMenuCleanup = () => document.removeEventListener('click', closeProfileMenu);
+      moreMenu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+          moreMenu.style.display = 'none';
+          moreBtn.setAttribute('aria-expanded', 'false');
+          moreBtn.focus();
+        } else if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.target.click();
+        }
+      });
     }
   }
   profileSpotifyPromise.then(profileSpotify => {
@@ -9954,6 +9986,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
         <div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>
+        <div class="settings-nav-item" data-section="messages"><i class="fas fa-comments"></i> Mesajlar</div>
         <div class="settings-nav-item" data-section="account-status"><i class="fas fa-user-shield"></i> Hesap Durumu</div>
         <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-sliders"></i> Profil Seçenekleri</div>
         <div class="settings-nav-item" data-section="dm-lock"><i class="fas fa-lock"></i> Sohbet Kilidi</div>
@@ -10324,8 +10357,67 @@ async function renderSettingsSection(section) {
       } catch (e) { msg.style.color = ''; msg.textContent = e.message; }
     });
 
+  } else if (section === 'messages') {
+    let themeSettings;
+    try {
+      themeSettings = await api('/me/dm-theme-settings');
+    } catch (error) {
+      el.innerHTML = `<div class="card card-body"><div class="form-error">${escHtml(error.message || 'Mesaj ayarları yüklenemedi.')}</div></div>`;
+      return;
+    }
+    let selectedDmTheme = DM_THEME_LABELS[themeSettings.default_theme_key] ? themeSettings.default_theme_key : 'default';
+    el.innerHTML = `
+      <div class="card">
+        <div class="card-header"><span>Mesaj Ayarları</span></div>
+        <div class="card-body">
+          <section class="settings-dm-theme">
+            <div class="settings-dm-theme-heading"><span><i class="fas fa-palette"></i></span><div><strong>Varsayılan mesaj teması</strong><small>Kişisel tema seçmemiş olduğun sohbetlerde kullanılacak görünümü belirle.</small></div></div>
+            <div class="dm-theme-options settings-dm-theme-options">${dmThemeOptionsHTML(selectedDmTheme, true)}</div>
+            <div class="settings-dm-theme-preview">
+              <span>Seçili tema: <strong id="s-dm-theme-name">${DM_THEME_LABELS[selectedDmTheme]}</strong></span>
+              <div class="settings-dm-theme-bubbles dm-chat" data-dm-theme="${selectedDmTheme}">
+                <div class="dm-msg-wrap"><div class="dm-msg-bubble">Karşı tarafın mesajı</div></div>
+                <div class="dm-msg-wrap dm-own"><div class="dm-msg-bubble">Senin mesajın</div></div>
+              </div>
+            </div>
+          </section>
+          <div id="dm-settings-save-status" class="settings-autosave-status" aria-live="polite">Tema değişiklikleri otomatik kaydedilir.</div>
+          <a href="/mesajlar" data-link class="btn btn-outline settings-messages-open"><i class="fas fa-inbox"></i> Mesajlarımı aç</a>
+        </div>
+      </div>`;
+    const controls = [...el.querySelectorAll('.settings-dm-theme-options .dm-theme-option')];
+    const status = $('#dm-settings-save-status');
+    let saving = false;
+    controls.forEach(button => button.addEventListener('click', async () => {
+      if (saving) return;
+      const previousTheme = selectedDmTheme;
+      selectedDmTheme = button.dataset.themeKey;
+      controls.forEach(option => option.setAttribute('aria-pressed', String(option === button)));
+      $('#s-dm-theme-name').textContent = DM_THEME_LABELS[selectedDmTheme];
+      $('.settings-dm-theme-bubbles').dataset.dmTheme = selectedDmTheme;
+      saving = true;
+      controls.forEach(option => { option.disabled = true; });
+      status.textContent = 'Kaydediliyor…';
+      try {
+        await api('/me/dm-theme-settings', {
+          method: 'PUT',
+          body: JSON.stringify({ default_theme_key: selectedDmTheme, default_theme_custom: true })
+        });
+        status.textContent = 'Mesaj teması kaydedildi.';
+      } catch (error) {
+        selectedDmTheme = previousTheme;
+        controls.forEach(option => option.setAttribute('aria-pressed', String(option.dataset.themeKey === previousTheme)));
+        $('#s-dm-theme-name').textContent = DM_THEME_LABELS[previousTheme];
+        $('.settings-dm-theme-bubbles').dataset.dmTheme = previousTheme;
+        status.textContent = error.message || 'Tema kaydedilemedi.';
+        toast(status.textContent, 'error');
+      } finally {
+        controls.forEach(option => { option.disabled = false; });
+        saving = false;
+      }
+    }));
+
   } else if (section === 'appearance') {
-    let defaultDmTheme = 'default';
     let levelsEnabled = false;
     try {
       const siteSettings = await api('/settings/public');
@@ -10333,13 +10425,6 @@ async function renderSettingsSection(section) {
     } catch (error) {
       toast(error.message, 'error');
     }
-    try {
-      const themeSettings = await api('/me/dm-theme-settings');
-      defaultDmTheme = themeSettings.default_theme_key || 'default';
-    } catch (error) {
-      toast(error.message, 'error');
-    }
-    let selectedDmTheme = DM_THEME_LABELS[defaultDmTheme] ? defaultDmTheme : 'default';
     const nameColorPalette = ['#e11d48', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#0ea5e9', '#6366f1', '#a855f7', '#ec4899', '#f5f5f5'];
     const selectedNameColor = /^#[0-9a-f]{6}$/i.test(currentUser.name_color || '') ? currentUser.name_color : '#f5f5f5';
     el.innerHTML = `
@@ -10357,21 +10442,10 @@ async function renderSettingsSection(section) {
             <label class="name-color-custom-label" for="s-name-color">Özel renk kodu</label>
             <div class="name-color-custom-input"><input type="color" id="s-name-color-picker" value="${selectedNameColor}" aria-label="Özel isim rengi seç" /><span>#</span><input type="text" id="s-name-color" value="${selectedNameColor.slice(1)}" maxlength="6" inputmode="text" autocomplete="off" aria-describedby="s-name-color-hint" /><small id="s-name-color-hint">HEX</small></div>
           </section>` : ''}
-          <section class="settings-dm-theme">
-            <div class="settings-dm-theme-heading"><span><i class="fas fa-palette"></i></span><div><strong>Varsayılan mesaj teması</strong><small>Tüm sohbetlerinde kullanılacak görünümü seç.</small></div></div>
-            <div class="dm-theme-options settings-dm-theme-options">${dmThemeOptionsHTML(selectedDmTheme, true)}</div>
-            <div class="settings-dm-theme-preview">
-              <span>Seçili tema: <strong id="s-dm-theme-name">${DM_THEME_LABELS[selectedDmTheme]}</strong></span>
-              <div class="settings-dm-theme-bubbles dm-chat" data-dm-theme="${selectedDmTheme}">
-                <div class="dm-msg-wrap"><div class="dm-msg-bubble">Karşı tarafın mesajı</div></div>
-                <div class="dm-msg-wrap dm-own"><div class="dm-msg-bubble">Senin mesajın</div></div>
-              </div>
-            </div>
-          </section>
           <div id="appearance-save-status" class="settings-autosave-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
         </div>
       </div>`;
-    const appearanceControls = [...el.querySelectorAll('.settings-dm-theme-options .dm-theme-option, #s-show-progress, #s-show-color, #s-name-color, #s-name-color-picker, .name-color-swatch')];
+    const appearanceControls = [...el.querySelectorAll('#s-show-progress, #s-show-color, #s-name-color, #s-name-color-picker, .name-color-swatch')];
     const appearanceStatus = $('#appearance-save-status');
     let appearanceSaving = false;
     const saveAppearanceChange = async (save, rollback, successMessage) => {
@@ -10399,27 +10473,6 @@ async function renderSettingsSection(section) {
       currentUser = await apiForm('/profile', fd, 'PUT');
       updateNavUI();
     };
-    el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(button => button.addEventListener('click', async () => {
-      if (appearanceSaving) return;
-      const previousTheme = selectedDmTheme;
-      selectedDmTheme = button.dataset.themeKey;
-      el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(option => option.setAttribute('aria-pressed', String(option === button)));
-      $('#s-dm-theme-name').textContent = DM_THEME_LABELS[selectedDmTheme];
-      $('.settings-dm-theme-bubbles').dataset.dmTheme = selectedDmTheme;
-      await saveAppearanceChange(
-        () => api('/me/dm-theme-settings', {
-          method: 'PUT',
-          body: JSON.stringify({ default_theme_key: selectedDmTheme, default_theme_custom: true })
-        }),
-        () => {
-          selectedDmTheme = previousTheme;
-          el.querySelectorAll('.settings-dm-theme-options .dm-theme-option').forEach(option => option.setAttribute('aria-pressed', String(option.dataset.themeKey === previousTheme)));
-          $('#s-dm-theme-name').textContent = DM_THEME_LABELS[previousTheme];
-          $('.settings-dm-theme-bubbles').dataset.dmTheme = previousTheme;
-        },
-        'Mesaj teması kaydedildi.'
-      );
-    }));
     const nameColorInput = $('#s-name-color');
     const nameColorPicker = $('#s-name-color-picker');
     const syncNameColor = value => {
@@ -12867,6 +12920,7 @@ async function renderDMChat(username) {
   window.__dmSharedSongAudio?.pause();
   window.__dmSharedSongAudio = null;
   window.__dmSharedSongButton = null;
+  exitDmSelection();
   // Önceki poll'u temizle
   if (dmPollTimer) { clearInterval(dmPollTimer); dmPollTimer = null; }
   stopLocalDmTyping();
@@ -12992,8 +13046,8 @@ async function renderDMChat(username) {
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
-    <div class="dm-sel-actions-bar" id="dm-sel-actions-bar">
-      <span class="dm-selection-label">Mesaj seçildi</span>
+    <div class="dm-sel-actions-bar" id="dm-sel-actions-bar" role="toolbar" aria-label="Seçilen mesaj işlemleri">
+      <span class="dm-selection-label" aria-live="polite">0 mesaj seçildi</span>
       <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
       <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
       <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i> İptal</button>
@@ -13314,6 +13368,7 @@ async function renderDMChat(username) {
 
   // Msg menu button clicks
   let lastPollMsgId = messages.length > 0 ? Number(messages[messages.length - 1].id) : 0;
+  const lastPollDeletionAt = new Date(Date.now() - 60_000).toISOString();
   const sendDmAttachment = async payload => {
     const message = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
       method: 'POST',
@@ -13363,6 +13418,20 @@ async function renderDMChat(username) {
   });
   const dmMessageList = document.getElementById('dm-messages');
   dmMessageList?.addEventListener('click', async e => {
+    const selectionRow = e.target.closest('.dm-msg-wrap');
+    if (dmSelectionMode && selectionRow && !e.target.closest('.dm-msg-cb')) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (selectionRow.classList.contains('dm-deleted-for-all')) return;
+      const id = String(selectionRow.dataset.id);
+      if (dmSelectedIds.has(id)) dmSelectedIds.delete(id); else dmSelectedIds.add(id);
+      const checked = dmSelectedIds.has(id);
+      const checkbox = selectionRow.querySelector('.dm-msg-cb');
+      if (checkbox) checkbox.checked = checked;
+      selectionRow.classList.toggle('dm-msg-selected', checked);
+      updateDmSelActions();
+      return;
+    }
     const musicButton = e.target.closest('.dm-shared-song-play');
     if (musicButton) {
       e.preventDefault();
@@ -13445,15 +13514,6 @@ async function renderDMChat(username) {
       updateDmSelActions();
       return;
     }
-    const messageRow = e.target.closest('.dm-msg-wrap');
-    if (messageRow && dmSelectionMode && !e.target.closest('a, button, input, textarea, select, label')) {
-      const id = String(messageRow.dataset.id);
-      if (dmSelectedIds.has(id)) dmSelectedIds.delete(id); else dmSelectedIds.add(id);
-      const checked = dmSelectedIds.has(id);
-      messageRow.querySelector('.dm-msg-cb').checked = checked;
-      messageRow.classList.toggle('dm-msg-selected', checked);
-      updateDmSelActions();
-    }
   });
   document.getElementById('dm-messages')?.addEventListener('contextmenu', event => {
     if (event.target.closest('.dm-message-image, .dm-ephemeral-open')) event.preventDefault();
@@ -13505,13 +13565,19 @@ async function renderDMChat(username) {
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
     try {
-      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100&after_id=${lastPollMsgId}`, { headers: searchUnlockHeaders });
+      const deletionCheckpoint = lastPollDeletionAt;
+      const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100&after_id=${lastPollMsgId}&after_deleted_at=${encodeURIComponent(deletionCheckpoint)}`, { headers: searchUnlockHeaders });
       const refreshedMsgs = Array.isArray(conversationUpdate) ? conversationUpdate : conversationUpdate?.messages || [];
       const el = document.getElementById('dm-messages');
       if (!el) return;
       const wasBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
       refreshedMsgs.forEach(message => {
-        if (!el.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`)) {
+        const existing = el.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`);
+        if (existing && message.deleted_for_all && existing.dataset.deletedForAll !== 'true') {
+          existing.outerHTML = dmMessageHTML(message, currentUser.id, dmSelectionMode);
+          dmSelectedIds.delete(String(message.id));
+          updateDmSelActions();
+        } else if (!existing && Number(message.id) > lastPollMsgId) {
           appendDMMessage(el, message, currentUser.id, dmSelectionMode);
         }
       });
@@ -13551,18 +13617,23 @@ async function renderDMChat(username) {
 function exitDmSelection() {
   dmSelectionMode = false;
   dmSelectedIds = new Set();
+  document.querySelector('.dm-chat')?.classList.remove('dm-selection-mode');
   document.querySelectorAll('.dm-msg-cb-wrap').forEach(el => el.style.display = 'none');
   document.querySelectorAll('.dm-msg-cb').forEach(el => el.checked = false);
   document.querySelectorAll('.dm-msg-wrap').forEach(el => el.classList.remove('dm-msg-selected'));
   const bar = document.getElementById('dm-sel-actions-bar');
-  if (bar) bar.classList.remove('visible');
+  if (bar) {
+    bar.classList.remove('visible');
+    bar.setAttribute('aria-hidden', 'true');
+  }
 }
 
 function enterDmSelection(messageId) {
   const id = String(messageId);
   const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(id)}"]`);
-  if (!row) return;
+  if (!row || row.classList.contains('dm-deleted-for-all')) return;
   dmSelectionMode = true;
+  document.querySelector('.dm-chat')?.classList.add('dm-selection-mode');
   dmSelectedIds.add(id);
   document.querySelectorAll('.dm-msg-cb-wrap').forEach(element => { element.style.display = 'flex'; });
   const checkbox = row.querySelector('.dm-msg-cb');
@@ -13573,11 +13644,17 @@ function enterDmSelection(messageId) {
 
 function updateDmSelActions() {
   const bar = document.getElementById('dm-sel-actions-bar');
+  const deleteMeButton = document.getElementById('dm-sel-delete-me');
   const deleteAllButton = document.getElementById('dm-sel-delete-all');
   const onlyOwnMessages = [...dmSelectedIds].every(id => document.querySelector(`.dm-msg-wrap[data-id="${id}"]`)?.classList.contains('dm-own'));
-  if (bar) { if (dmSelectedIds.size > 0) bar.classList.add('visible'); else bar.classList.remove('visible'); }
+  if (bar) {
+    if (dmSelectionMode) bar.classList.add('visible');
+    else bar.classList.remove('visible');
+    bar.setAttribute('aria-hidden', String(!dmSelectionMode));
+  }
   const selectionLabel = bar?.querySelector('.dm-selection-label');
-  if (selectionLabel) selectionLabel.textContent = `${dmSelectedIds.size} mesaj seçildi`;
+  if (selectionLabel) selectionLabel.textContent = dmSelectedIds.size ? `${dmSelectedIds.size} mesaj seçildi` : 'Mesaj seçimi';
+  if (deleteMeButton) deleteMeButton.disabled = dmSelectedIds.size === 0;
   if (deleteAllButton) deleteAllButton.hidden = !dmSelectedIds.size || !onlyOwnMessages;
 }
 
@@ -13721,7 +13798,7 @@ function appendDMMessage(container, message, myId, selMode) {
     ? container.lastElementChild
     : null;
   const previousMessage = previousElement
-    ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt }
+    ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt, deleted_for_all: previousElement.dataset.deletedForAll === 'true' }
     : null;
   container.insertAdjacentHTML('beforeend', dmMessageHTML(message, myId, selMode, previousMessage));
 }
@@ -14085,7 +14162,12 @@ function showDmSongPicker(onSelect) {
 
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const isOwn = m.sender_id == myId;
-  if (m.deleted_for_all) return '';
+  if (m.deleted_for_all) {
+    const timeLabel = m.created_at ? new Date(m.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
+    return `<div class="dm-msg-wrap dm-deleted-for-all${isOwn ? ' dm-own' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="" data-deleted-for-all="true">
+      <div class="dm-msg-content"><div class="dm-deleted-for-all-note"><i class="fas fa-ban" aria-hidden="true"></i><span>Bu mesaj herkesten silindi</span>${timeLabel ? `<time>${timeLabel}</time>` : ''}</div></div>
+    </div>`;
+  }
   const messageText = String(m.content || '');
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe) return '';
@@ -14095,6 +14177,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const previousTime = Date.parse(previousMessage?.created_at);
   const imageUrls = dmMessageImageUrls(m);
   const isContinued = previousMessage
+    && !previousMessage.deleted_for_all
     && String(previousMessage.sender_id) === String(m.sender_id)
     && Number.isFinite(messageTime)
     && Number.isFinite(previousTime)

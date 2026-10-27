@@ -10038,8 +10038,9 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN COALESCE(c.read_until_user2,0) ELSE COALESCE(c.read_until_user1,0) END AS other_read_until,
       COALESCE(presence.is_online, FALSE) as other_is_online,
       presence.last_active as other_last_active,
-      (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
-        AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
+      (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
+        FROM dm_messages m WHERE m.conversation_id=c.id
+        AND (m.deleted_for_all=1 OR CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END)
         ORDER BY m.created_at DESC LIMIT 1) as last_message,
       (SELECT COUNT(*) FROM dm_messages WHERE conversation_id=c.id AND sender_id!=$1 AND 
         CASE WHEN c.user1_id=$1 THEN deleted_by_receiver=0 ELSE deleted_by_sender=0 END
@@ -10088,8 +10089,9 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       COALESCE(presence.is_online, FALSE) as other_is_online,
       presence.last_active as other_last_active,
-      (SELECT content FROM dm_messages m WHERE m.conversation_id=c.id AND m.deleted_for_all=0
-        AND CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END
+      (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
+        FROM dm_messages m WHERE m.conversation_id=c.id
+        AND (m.deleted_for_all=1 OR CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END)
         ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
@@ -10126,7 +10128,8 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN c.user1_id=$1 THEN u2.name_color ELSE u1.name_color END as other_name_color,
       COALESCE(presence.is_online, FALSE) as other_is_online,
       presence.last_active as other_last_active,
-      (SELECT content FROM dm_messages WHERE conversation_id=c.id AND deleted_for_all=0 ORDER BY created_at DESC LIMIT 1) as last_message
+      (SELECT CASE WHEN deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE content END
+        FROM dm_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
     LEFT JOIN LATERAL (
       SELECT BOOL_OR(last_heartbeat >= NOW() - INTERVAL '30 seconds') as is_online,
@@ -10263,21 +10266,56 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const requestedLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 100);
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
+  const requestedDeletionCheckpoint = req.query.after_deleted_at
+    ? new Date(String(req.query.after_deleted_at))
+    : new Date(0);
+  const afterDeletedAt = Number.isNaN(requestedDeletionCheckpoint.getTime())
+    ? new Date(0).toISOString()
+    : requestedDeletionCheckpoint.toISOString();
   const { rows: msgs } = await query(`
-    SELECT     m.id, m.conversation_id, m.sender_id, m.content,
-    CASE WHEN m.sender_id!=$3 AND m.image_view_limit>0 THEN '' ELSE m.image_url END AS image_url,
-    CASE WHEN m.sender_id!=$3 AND m.image_view_limit>0 THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
-    m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.shared_gif_url,
-      m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
+    SELECT m.id, m.conversation_id, m.sender_id,
+      CASE WHEN m.deleted_for_all=1 THEN '' ELSE m.content END AS content,
+      CASE WHEN m.deleted_for_all=1 OR (m.sender_id!=$3 AND m.image_view_limit>0) THEN '' ELSE m.image_url END AS image_url,
+      CASE WHEN m.deleted_for_all=1 OR (m.sender_id!=$3 AND m.image_view_limit>0) THEN '[]'::jsonb ELSE m.image_urls END AS image_urls,
+      CASE WHEN m.deleted_for_all=1 THEN 0 ELSE m.image_view_limit END AS image_view_limit,
+      CASE WHEN m.deleted_for_all=1 THEN 0 ELSE m.image_view_count END AS image_view_count,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_forum_id END AS shared_forum_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_video_id END AS shared_video_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_book_id END AS shared_book_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_photo_id END AS shared_photo_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_story_id END AS shared_story_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_newspaper_id END AS shared_newspaper_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_song_id END AS shared_song_id,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_gif_url END AS shared_gif_url,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.reply_to_id END AS reply_to_id,
+      m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.deleted_for_all_at, m.created_at, m.read_at,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.edited_at END AS edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
-      f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
-      v.title as video_title, v.slug as video_slug, v.thumbnail_url as video_banner,
-      b.title as book_title, b.slug as book_slug, b.cover_image as book_cover,
-      p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
-      st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
-      nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
-      song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
-      r.content as reply_content, r.deleted_for_all as reply_deleted_for_all, ru.username as reply_username
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE f.title END as forum_title,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE f.slug END as forum_slug,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE f.banner_image END as forum_banner,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE v.title END as video_title,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE v.slug END as video_slug,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE v.thumbnail_url END as video_banner,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE b.title END as book_title,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE b.slug END as book_slug,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE b.cover_image END as book_cover,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE p.url END as photo_url,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE p.title END as photo_title,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE p.caption END as photo_caption,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE st.media_url END as story_media_url,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE st.caption END as story_caption,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE su.username END as story_username,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE nw.newspaper_name END as newspaper_name,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE nw.newspaper_date END as newspaper_date,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE nw.image_url END as newspaper_image,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.title END as song_title,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.artist_name END as song_artist,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.cover_url END as song_cover_url,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.audio_url END as song_audio_url,
+      CASE WHEN m.deleted_for_all=1 OR r.deleted_for_all=1 THEN NULL ELSE r.content END as reply_content,
+      r.deleted_for_all as reply_deleted_for_all,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -10291,13 +10329,15 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.conversation_id=$1
-      AND m.id>$6
-      AND m.deleted_for_all=0
-      AND ($2=1 OR m.deleted_by_sender=0 OR m.sender_id!=$3)
-      AND ($2=1 OR m.deleted_by_receiver=0 OR m.sender_id=$3)
-    ORDER BY m.created_at ASC
+      AND ($6=0 OR m.id>$6 OR (m.deleted_for_all=1 AND m.deleted_for_all_at>$7::timestamptz))
+      AND (m.deleted_for_all=0 OR $6=0 OR m.deleted_for_all_at>$7::timestamptz)
+      AND (m.deleted_for_all=1 OR $2=1 OR m.deleted_by_sender=0 OR m.sender_id!=$3)
+      AND (m.deleted_for_all=1 OR $2=1 OR m.deleted_by_receiver=0 OR m.sender_id=$3)
+    ORDER BY CASE WHEN m.id>$6 THEN 0 ELSE 1 END ASC,
+      CASE WHEN m.id>$6 THEN m.id END ASC,
+      m.deleted_for_all_at DESC NULLS LAST, m.id DESC
     LIMIT $4 OFFSET $5
-  `, [conv.id, 0, uid, requestedLimit, offset, afterId]);
+  `, [conv.id, 0, uid, requestedLimit, offset, afterId, afterDeletedAt]);
 
   if (afterId) return res.json(msgs);
 
