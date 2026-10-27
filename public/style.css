@@ -3076,6 +3076,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   /* Modal */
   .modal { max-height: 95vh; max-width: 100%; margin: 0; border-radius: 16px 16px 0 0; }
   .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal-overlay:has(.logout-confirm) { align-items: center; padding: 20px; }
+  .modal:has(.logout-confirm) { width: min(100%, 440px); max-width: 440px; margin: auto; border-radius: var(--radius); }
   .modal-header { padding: 16px 16px 0; }
   .modal-body { padding: 0 16px 20px; }
 
