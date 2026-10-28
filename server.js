@@ -11049,7 +11049,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 OR r.deleted_for_all=1 THEN NULL ELSE r.content END as reply_content,
       r.deleted_for_all as reply_deleted_for_all,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username,
-      CASE WHEN m.deleted_for_all=1 THEN '[]'::jsonb ELSE COALESCE((
+      CASE WHEN m.deleted_for_all=1 THEN '[]'::json ELSE COALESCE((
         SELECT json_agg(json_build_object('emoji',reaction.emoji,'user_id',reaction.user_id) ORDER BY reaction.created_at)
         FROM dm_message_reactions reaction WHERE reaction.message_id=m.id
       ), '[]'::json) END AS reactions
