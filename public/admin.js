@@ -537,6 +537,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_view_groups')) visible.add('groups');
   if (hasPermission('can_view_levels')) visible.add('levels');
   if (hasPermission('can_view_store')) visible.add('shop');
+  if (hasPermission('can_review_artists')) visible.add('artists');
   if (hasPermission('can_review_artists')) visible.add('artist-apps');
   if (hasPermission('can_assign_badges')) visible.add('badges');
   if (hasPermission('can_view_users')) { visible.add('messages'); visible.add('message-reports'); }
@@ -2472,7 +2473,10 @@ async function renderArtists(main) {
         Artistler
         <span style="font-size:13px;font-weight:400;color:var(--text2)">(${artists.length})</span>
       </div>
-      <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="artist-search" placeholder="Artist veya kullanıcı ara..." style="min-width:240px" /></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button type="button" class="btn btn-primary" id="artist-grant-open"><i class="fas fa-user-plus"></i> Artist ver</button>
+        <div class="adm-search"><i class="fas fa-search"></i><input type="text" id="artist-search" placeholder="Artist veya kullanıcı ara..." style="min-width:240px" /></div>
+      </div>
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -2491,6 +2495,58 @@ async function renderArtists(main) {
       (a.artist_display_name||'').toLowerCase().includes(q) ||
       (a.artist_genre||'').toLowerCase().includes(q)
     ));
+  });
+
+  $('#artist-grant-open')?.addEventListener('click', () => {
+    showModal('Artist yetkisi ver', `
+      <div class="form-group">
+        <label for="artist-candidate-search">Kullanıcı ara</label>
+        <input type="search" id="artist-candidate-search" placeholder="Kullanıcı adı veya görünen ad..." autocomplete="off" />
+      </div>
+      <div id="artist-candidate-results" aria-live="polite"><div class="loading-center" style="padding:20px"><div class="spinner"></div></div></div>
+    `);
+    const results = $('#artist-candidate-results');
+    let requestId = 0;
+    const searchCandidates = async search => {
+      const currentRequest = ++requestId;
+      results.innerHTML = '<div class="loading-center" style="padding:20px"><div class="spinner"></div></div>';
+      try {
+        const users = await adminApi('/artists/candidates?q=' + encodeURIComponent(search));
+        if (currentRequest !== requestId || !results.isConnected) return;
+        results.innerHTML = users.length ? `<div style="display:grid;gap:8px;max-height:360px;overflow:auto">${users.map(user => `
+          <div style="display:flex;align-items:center;gap:10px;padding:8px;border:1px solid var(--border);border-radius:10px">
+            ${user.avatar ? `<img src="${escHtml(user.avatar)}" alt="" style="width:36px;height:36px;border-radius:50%;object-fit:cover" />` : '<span class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></span>'}
+            <span style="flex:1;min-width:0"><strong>${escHtml(user.nickname || user.username)}</strong><small style="display:block;color:var(--text3)">@${escHtml(user.username)}</small></span>
+            <button type="button" class="btn btn-primary btn-xs grant-artist-btn" data-id="${escHtml(user.id)}" data-username="${escHtml(user.username)}"><i class="fas fa-microphone"></i> Ver</button>
+          </div>`).join('')}</div>` : '<div class="empty-state" style="padding:20px"><i class="fas fa-user-slash"></i><p>Artist olmayan kullanıcı bulunamadı.</p></div>';
+      } catch (error) {
+        if (currentRequest !== requestId || !results.isConnected) return;
+        results.innerHTML = `<div class="card-body" style="color:var(--red2);padding:16px">${escHtml(error.message || 'Kullanıcılar yüklenemedi.')}</div>`;
+      }
+    };
+    let searchTimer;
+    $('#artist-candidate-search')?.addEventListener('input', event => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => searchCandidates(event.target.value.trim()), 250);
+    });
+    results.addEventListener('click', async event => {
+      const button = event.target.closest('.grant-artist-btn');
+      if (!button) return;
+      button.disabled = true;
+      try {
+        await adminApi('/artists/' + encodeURIComponent(button.dataset.id), {
+          method: 'PUT',
+          body: JSON.stringify({ is_artist: 1 })
+        });
+        toast(`@${button.dataset.username} kullanıcısına artist yetkisi verildi`);
+        hideModal();
+        await renderArtists(main);
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message || 'Artist yetkisi verilemedi.', 'error');
+      }
+    });
+    searchCandidates('');
   });
 }
 

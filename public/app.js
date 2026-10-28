@@ -10075,6 +10075,7 @@ async function renderProfile(app, username) {
     const moreMenu = document.getElementById('profile-more-menu');
     if (moreBtn && moreMenu) {
       let storyHidden = false;
+      let isCloseFriend = data.is_close_friend === true;
       const getBlockStatus = async () => {
         const blocks = await api('/blocks').catch(() => []);
         return { blocked_by_me: Array.isArray(blocks) && blocks.some(block => block.username === username) };
@@ -10130,6 +10131,13 @@ async function renderProfile(app, username) {
         const items = [
           { icon: 'fa-share-nodes', label: 'Profili Paylaş', action: 'share-profile' }
         ];
+        if (data.is_mutual_friend && !fs?.blocked_by_me) {
+          items.push({
+            icon: 'fa-star',
+            label: isCloseFriend ? 'Yakın arkadaşlardan çıkar' : 'Yakın arkadaşlara ekle',
+            action: 'toggle-close-friend'
+          });
+        }
         items.push({
           icon: storyHidden ? 'fa-eye' : 'fa-eye-slash',
           label: storyHidden ? 'Hikayelerini göster' : 'Hikayelerini gizle',
@@ -10190,6 +10198,12 @@ async function renderProfile(app, username) {
                 storyRouteStoriesCacheAt = 0;
                 document.querySelectorAll('[id$="stories-bar"]').forEach(storiesBar => loadStoriesBar(storiesBar));
                 toast(hide ? 'Bu kişinin hikayeleri gizlendi.' : 'Bu kişinin hikayeleri yeniden gösteriliyor.');
+              } else if (action === 'toggle-close-friend') {
+                const result = await api('/friends/close/' + encodeURIComponent(username), {
+                  method: isCloseFriend ? 'DELETE' : 'POST'
+                });
+                isCloseFriend = result.is_close_friend === true;
+                toast(isCloseFriend ? 'Yakın arkadaşlara eklendi.' : 'Yakın arkadaşlardan çıkarıldı.');
               } else if (action === 'block-user') {
                 const settings = await askBlockSettings(username);
                 if (!settings) return;
@@ -15741,6 +15755,10 @@ async function renderFriends(app) {
   const pending_in = friends.filter(f => f.status === 'pending' && f.addressee_id == currentUser.id);
   const pending_out = friends.filter(f => f.status === 'pending' && f.requester_id == currentUser.id);
   const accepted = friends.filter(f => f.status === 'accepted');
+  let closeFriends = [];
+  let closeFriendsError = '';
+  try { closeFriends = await api('/friends/close'); }
+  catch (error) { closeFriendsError = error.message || 'Yakın arkadaşlar yüklenemedi.'; }
 
   app.innerHTML = `<div class="container page">
     <div class="page-header"><div class="page-title"><i class="fas fa-user-friends" style="color:var(--accent-red)"></i> Arkadaşlar</div></div>
@@ -15756,6 +15774,7 @@ async function renderFriends(app) {
       <div>
         <div class="tabs" style="margin-bottom:16px">
           <button class="tab active" id="tab-friends" onclick="showFriendsTab('friends')">Takipleştiklerin (${accepted.length})</button>
+          <button class="tab" id="tab-close" onclick="showFriendsTab('close')" aria-label="Yakın arkadaşlar"><i class="fas fa-star" aria-hidden="true"></i> Yakın arkadaşlar (${closeFriends.length})</button>
           <button class="tab${pending_in.length ? ' tab-has-notice' : ''}" id="tab-requests" onclick="showFriendsTab('requests')">Takip istekleri${pending_in.length ? ` <span class="tab-dot"></span>` : ''} (${pending_in.length})</button>
           <button class="tab" id="tab-sent" onclick="showFriendsTab('sent')">Gönderdiğin istekler (${pending_out.length})</button>
           <button class="tab" id="tab-blocked" onclick="showFriendsTab('blocked')">Engellenenler (${blocks.length})</button>
@@ -15765,6 +15784,18 @@ async function renderFriends(app) {
             <div class="friends-panel">
               ${accepted.length === 0 ? '<div class="empty-state"><i class="fas fa-user-friends"></i><p>Henüz arkadaşın yok</p></div>'
                 : accepted.map(f => friendItemHTML(f, 'accepted', currentUser.id)).join('')}
+            </div>
+          </div>
+          <div id="tab-content-close" style="display:none">
+            <div class="friends-panel">
+              <div class="friends-panel-heading"><span class="friends-panel-icon"><i class="fas fa-star"></i></span><span><b>Yakın arkadaşların</b><small>Profildeki üç nokta menüsünden karşılıklı arkadaşlarını ekleyebilirsin.</small></span></div>
+              ${closeFriendsError ? `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(closeFriendsError)}</p></div>` : closeFriends.length ? closeFriends.map(friend => `<div class="friend-suggestion-card close-friend-card">
+                <a class="friend-suggestion-identity" href="${profileRoute(friend.username)}" data-link>
+                  ${hasUsableAvatar(friend) ? `<img src="${escHtml(friend.avatar)}" class="avatar-sm" alt="" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}
+                  <span><strong>${escHtml(friend.nickname || friend.username)}</strong><small>@${escHtml(friend.username)}</small></span>
+                </a>
+                <button type="button" class="btn btn-ghost btn-sm close-friend-remove" data-username="${escHtml(friend.username)}" title="Yakın arkadaşlardan çıkar" aria-label="@${escHtml(friend.username)} kullanıcısını yakın arkadaşlardan çıkar"><i class="fas fa-star"></i></button>
+              </div>`).join('') : '<div class="empty-state"><i class="fas fa-star"></i><p>Henüz yakın arkadaş eklemedin.</p></div>'}
             </div>
           </div>
           <div id="tab-content-requests" style="display:none">
@@ -15806,7 +15837,7 @@ async function renderFriends(app) {
   window.showFriendsTab = (tab) => {
     $$('.tab').forEach(t => t.classList.remove('active'));
     $(`#tab-${tab}`)?.classList.add('active');
-    ['friends','requests','sent','blocked'].forEach(t => {
+    ['friends','close','requests','sent','blocked'].forEach(t => {
       const el = $(`#tab-content-${t}`);
       if (el) el.style.display = t === tab ? '' : 'none';
     });
@@ -15862,6 +15893,20 @@ async function renderFriends(app) {
     const unblock = e.target.closest('.friend-unblock');
     const block = e.target.closest('.friend-block');
     const msgBtn = e.target.closest('.friend-msg');
+    const closeFriendRemove = e.target.closest('.close-friend-remove');
+    if (closeFriendRemove) {
+      if (closeFriendRemove.disabled) return;
+      closeFriendRemove.disabled = true;
+      try {
+        await api(`/friends/close/${encodeURIComponent(closeFriendRemove.dataset.username)}`, { method: 'DELETE' });
+        await renderFriends(app);
+        window.showFriendsTab?.('close');
+      } catch (error) {
+        closeFriendRemove.disabled = false;
+        toast(error.message || 'Yakın arkadaş kaldırılamadı.', 'error');
+      }
+      return;
+    }
     // Aksiyon butonu varsa önce onu işle, kart navigasyonunu engelle
     if (accept || reject || remove || block || unblock || msgBtn) {
       if (accept) { try { await api(`/friends/respond/${accept.dataset.id}`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) }); renderFriends(app); } catch (err) { toast(err.message,'error'); } }
@@ -17770,10 +17815,10 @@ async function renderArtistApply(app) {
   }
 
   const isPending = existing?.status === 'pending';
-  const isAccepted = existing?.status === 'accepted';
   const isRejected = existing?.status === 'rejected';
+  currentUser.is_artist = Number(existing?.is_artist) === 1 ? 1 : 0;
 
-  if (isAccepted || Number(currentUser.is_artist) === 1) {
+  if (Number(existing?.is_artist) === 1) {
     app.innerHTML = `<div class="container page" style="max-width:600px;margin:0 auto">
       <div style="text-align:center;padding:60px 20px">
         <div style="font-size:48px;margin-bottom:16px">🎤</div>

@@ -888,6 +888,7 @@ async function adminMiddleware(req, res, next) {
     const readRules = [
       [/\/(route-logs|authority-logs)/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
+      [/\/artists(?:\/|$)/, hasAdminPermission(permissions, 'can_review_artists')],
       [/\/user\/\d+\/ad-panels/, hasAdminPermission(permissions, 'can_view_users')],
       [/\/(users|invite-codes)/, hasAdminPermission(permissions, 'can_view_users')], [/\/stories/, hasAdminPermission(permissions, 'can_view_stories')], [/\/videos/, hasAdminPermission(permissions, 'can_view_reals')], [/\/reals-ads/, hasAdminPermission(permissions, 'can_view_reals')], [/\/content-analytics/, hasAdminPermission(permissions, 'can_view_stories') || hasAdminPermission(permissions, 'can_view_reals')], [/\/groups/, hasAdminPermission(permissions, 'can_view_groups')],
       [/\/levels/, hasAdminPermission(permissions, 'can_view_levels')], [/\/shop(\/|$)/, hasAdminPermission(permissions, 'can_view_store')], [/\/logs/, hasAdminPermission(permissions, 'can_view_logs')]
@@ -903,6 +904,7 @@ async function adminMiddleware(req, res, next) {
       /^\/api\/admin\/account-deletions\/\d+\/cancel$/,
       /^\/api\/admin\/user\/\d+\/restrictions/, /^\/api\/admin\/content\/[^/]+\/\d+\/suspend$/,
       /^\/api\/admin\/artist-applications\/\d+\/review$/,
+      /^\/api\/admin\/artists\/\d+$/,
       /^\/api\/admin\/user\/\d+\/(badge|vmb)$/, /^\/api\/admin\/songs\/\d+\/ban$/,
       /^\/api\/admin\/invite-codes(?:\/\d+(?:\/registrations)?)?$/,
       /^\/api\/admin\/badges(?:\/\d+(?:\/users(?:\/\d+)?)?)?$/,
@@ -918,6 +920,7 @@ async function adminMiddleware(req, res, next) {
     if (/\/invite-codes/.test(req.path) && !hasAdminPermission(permissions, 'can_view_users')) return res.status(403).json({ error: 'Davet kodu yönetme yetkisi yok' });
     if (/\/content\/|\/songs\/\d+\/ban/.test(req.path) && !permissions.can_suspend_content) return res.status(403).json({ error: 'İçerik askıya alma yetkisi yok' });
     if (/artist-applications/.test(req.path) && !permissions.can_review_artists) return res.status(403).json({ error: 'Artist başvurusu yetkisi yok' });
+    if (/\/artists\/\d+$/.test(req.path) && !hasAdminPermission(permissions, 'can_review_artists')) return res.status(403).json({ error: 'Artist yönetme yetkisi yok' });
     if (/\/group\//.test(req.path) && !req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Grup yönetimi yalnızca ana admin yetkisindedir' });
     if (/\/badge(?:s|\/|$)/.test(req.path) && !permissions.can_assign_badges) return res.status(403).json({ error: 'Rozet verme yetkisi yok' });
     if (/\/levels?(?:\/\d+)?$/.test(req.path) && !permissions.can_manage_levels) return res.status(403).json({ error: 'Seviye yönetme yetkisi yok' });
@@ -5195,12 +5198,29 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   const badges = await getUserProfileBadges(user, { featureStates: features });
   const isOwner = req.user && req.user.id === user.id;
   const isFollower = req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length > 0;
+  const relationshipState = req.user && !isOwner
+    ? (await query(`
+      SELECT
+        EXISTS (
+          SELECT 1 FROM follows f
+          WHERE f.follower_id=$1 AND f.following_id=$2 AND f.status='accepted'
+            AND EXISTS (
+              SELECT 1 FROM follows reciprocal
+              WHERE reciprocal.follower_id=$2 AND reciprocal.following_id=$1 AND reciprocal.status='accepted'
+            )
+        ) AS is_mutual_friend,
+        EXISTS (
+          SELECT 1 FROM close_friends
+          WHERE user_id=$1 AND friend_id=$2
+        ) AS is_close_friend
+    `, [req.user.id, user.id])).rows[0]
+    : { is_mutual_friend: false, is_close_friend: false };
   const graceViewer = !!block && new Date(block.hide_until).getTime() > Date.now();
   const { rows: followCounts } = await query(`SELECT
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower && !graceViewer) {
-    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false });
+    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false, ...relationshipState });
   }
   await ensureProfileAvatarArchiveSchema();
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos] = await Promise.all([
@@ -5260,7 +5280,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     reals: Number(contentCounts.reals_count || 0),
     songs: Number(contentCounts.song_count || 0)
   } : undefined;
-  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length) });
+  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length), ...relationshipState });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -8233,7 +8253,7 @@ app.post('/api/artist/apply', authMiddleware, upload.single('sample_file'), asyn
 
 app.get('/api/artist/my-application', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT * FROM artist_applications WHERE user_id=$1 ORDER BY id DESC LIMIT 1', [req.user.id]);
-  res.json(rows[0] || null);
+  res.json({ ...(rows[0] || {}), is_artist: req.user.is_artist });
 });
 
 // Müzik yükleme (sadece artist)
@@ -8599,25 +8619,50 @@ app.get('/api/admin/artists', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/admin/artists/candidates', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !hasAdminPermission(req.adminUser.permissions, 'can_review_artists')) {
+    return res.status(403).json({ error: 'Artist yönetme yetkisi yok' });
+  }
+  const search = String(req.query.q || '').trim().slice(0, 80);
+  const { rows } = await query(`
+    SELECT id, username, nickname, avatar
+    FROM users
+    WHERE COALESCE(is_deleted,0)=0 AND COALESCE(is_artist,0)<>1
+      AND ($1 = '' OR username ILIKE '%' || $1 || '%' OR COALESCE(nickname,'') ILIKE '%' || $1 || '%')
+    ORDER BY LOWER(username) ASC
+    LIMIT 30
+  `, [search]);
+  res.json(rows);
+});
+
 // Artist bilgilerini düzenle
 app.put('/api/admin/artists/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !hasAdminPermission(req.adminUser.permissions, 'can_review_artists')) {
+    return res.status(403).json({ error: 'Artist yönetme yetkisi yok' });
+  }
   const { artist_display_name, artist_bio, artist_genre, artist_website, is_artist } = req.body;
   const { rows } = await query('SELECT id FROM users WHERE id=$1', [req.params.id]);
   if (!rows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const isArtistValue = is_artist === undefined ? null
+    : [true, 1, '1'].includes(is_artist) ? 1
+      : [false, 0, '0'].includes(is_artist) ? 0
+        : NaN;
+  if (Number.isNaN(isArtistValue)) return res.status(400).json({ error: 'Geçersiz artist durumu' });
   await query(`
     UPDATE users SET
       artist_display_name = COALESCE($1, artist_display_name),
       artist_bio          = COALESCE($2, artist_bio),
       artist_genre        = COALESCE($3, artist_genre),
       artist_website      = COALESCE($4, artist_website),
-      is_artist           = $5
+      is_artist           = COALESCE($5, is_artist),
+      artist_since        = CASE WHEN $5=1 THEN COALESCE(artist_since,NOW()) WHEN $5=0 THEN NULL ELSE artist_since END
     WHERE id = $6
   `, [
     artist_display_name ?? null,
     artist_bio ?? null,
     artist_genre ?? null,
     artist_website ?? null,
-    is_artist !== undefined ? (is_artist ? 1 : 0) : 1,
+    isArtistValue,
     req.params.id
   ]);
   await logAction('admin', 'edit_artist', req.params.id);
@@ -9910,6 +9955,69 @@ app.get('/api/friends', authMiddleware, async (req, res) => {
       f.created_at DESC
   `, [uid]);
   res.json(rows.filter(row => row.status !== 'following'));
+});
+
+app.get('/api/friends/close', authMiddleware, async (req, res) => {
+  const { rows } = await query(`
+    SELECT u.id, u.username, u.nickname, u.avatar, u.avatar_removed,
+           cf.created_at AS close_friend_since
+    FROM close_friends cf
+    JOIN users u ON u.id=cf.friend_id
+    WHERE cf.user_id=$1
+      AND COALESCE(u.is_deleted,0)=0
+      AND EXISTS (
+        SELECT 1 FROM follows f
+        WHERE f.follower_id=$1 AND f.following_id=u.id AND f.status='accepted'
+          AND EXISTS (
+            SELECT 1 FROM follows reciprocal
+            WHERE reciprocal.follower_id=u.id AND reciprocal.following_id=$1 AND reciprocal.status='accepted'
+          )
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM blocks b
+        WHERE (b.blocker_id=$1 AND b.blocked_id=u.id)
+           OR (b.blocker_id=u.id AND b.blocked_id=$1)
+      )
+    ORDER BY cf.created_at DESC, LOWER(u.username) ASC
+  `, [req.user.id]);
+  res.json(rows);
+});
+
+app.post('/api/friends/close/:username', authMiddleware, async (req, res) => {
+  const { rows: targetRows } = await query('SELECT id FROM users WHERE username=$1 AND COALESCE(is_deleted,0)=0', [req.params.username]);
+  if (!targetRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const friendId = targetRows[0].id;
+  if (String(friendId) === String(req.user.id)) return res.status(400).json({ error: 'Kendinizi yakın arkadaşlara ekleyemezsiniz' });
+  const { rows: friendshipRows } = await query(`
+    SELECT EXISTS (
+      SELECT 1 FROM follows f
+      WHERE f.follower_id=$1 AND f.following_id=$2 AND f.status='accepted'
+        AND EXISTS (
+          SELECT 1 FROM follows reciprocal
+          WHERE reciprocal.follower_id=$2 AND reciprocal.following_id=$1 AND reciprocal.status='accepted'
+        )
+    ) AS is_mutual_friend,
+    EXISTS (
+      SELECT 1 FROM blocks
+      WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)
+    ) AS is_blocked
+  `, [req.user.id, friendId]);
+  if (!friendshipRows[0]?.is_mutual_friend || friendshipRows[0]?.is_blocked) {
+    return res.status(403).json({ error: 'Yalnızca karşılıklı arkadaşlarını yakın arkadaşlara ekleyebilirsin' });
+  }
+  await query(
+    'INSERT INTO close_friends (user_id,friend_id) VALUES ($1,$2) ON CONFLICT (user_id,friend_id) DO NOTHING',
+    [req.user.id, friendId]
+  );
+  res.json({ ok: true, is_close_friend: true });
+});
+
+app.delete('/api/friends/close/:username', authMiddleware, async (req, res) => {
+  const { rows: targetRows } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!targetRows.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (String(targetRows[0].id) === String(req.user.id)) return res.status(400).json({ error: 'Geçersiz kullanıcı' });
+  await query('DELETE FROM close_friends WHERE user_id=$1 AND friend_id=$2', [req.user.id, targetRows[0].id]);
+  res.json({ ok: true, is_close_friend: false });
 });
 
 app.get('/api/friends/suggestions', authMiddleware, async (req, res) => {

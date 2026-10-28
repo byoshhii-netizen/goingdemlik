@@ -128,6 +128,14 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
     CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id);
 
+    CREATE TABLE IF NOT EXISTS close_friends (
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      friend_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (user_id, friend_id),
+      CHECK (user_id <> friend_id)
+    );
+
     CREATE TABLE IF NOT EXISTS stories (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
