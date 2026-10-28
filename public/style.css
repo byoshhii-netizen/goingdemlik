@@ -4022,11 +4022,10 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 .dm-msg-bubble { box-shadow: 0 1px 3px rgba(0,0,0,.10); }
 .dm-msg-bubble { display: block; width: fit-content; height: fit-content !important; min-height: 0 !important; align-self: flex-start; text-align: left; }
 .dm-msg-wrap.dm-own .dm-msg-bubble { align-self: flex-end; }
-.dm-msg-reactions { display:flex; flex-wrap:wrap; gap:5px; max-width:100%; margin-top:4px; align-self:flex-start; }
-.dm-msg-wrap.dm-own .dm-msg-reactions { align-self:flex-end; }
-.dm-reaction-pill { display:inline-flex; min-width:38px; min-height:27px; align-items:center; justify-content:center; gap:5px; padding:2px 8px; border:1px solid rgba(255,255,255,.12); border-radius:999px; background:rgba(24,24,27,.92); color:var(--text-primary); cursor:pointer; touch-action:manipulation; }
-.dm-reaction-pill span { font-size:15px; line-height:1; }
-.dm-reaction-pill small { color:var(--text-secondary); font-size:10px; font-weight:700; }
+.dm-msg-reactions { position:absolute; z-index:3; top:-10px; right:-5px; display:flex; flex-wrap:wrap; gap:3px; max-width:calc(100% - 8px); }
+.dm-reaction-pill { display:inline-flex; min-width:0; min-height:20px; align-items:center; justify-content:center; gap:3px; padding:1px 5px; border:1px solid rgba(255,255,255,.16); border-radius:999px; background:rgba(24,24,27,.96); color:var(--text-primary); cursor:pointer; touch-action:manipulation; box-shadow:0 2px 6px rgba(0,0,0,.24); }
+.dm-reaction-pill span { font-size:12px; line-height:1; }
+.dm-reaction-pill small { color:var(--text-secondary); font-size:9px; font-weight:700; }
 .dm-reaction-pill.is-mine { border-color:rgba(239,51,64,.75); background:rgba(239,51,64,.12); }
 .dm-reaction-picker { position:fixed; z-index:10010; box-sizing:border-box; max-width:calc(100vw - 24px); padding:10px; border:1px solid rgba(255,255,255,.13); border-radius:16px; background:rgba(20,20,23,.98); box-shadow:0 16px 44px rgba(0,0,0,.5); animation:dmReactionPickerIn .16s ease both; backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px); }
 .dm-reaction-grid { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:3px; }

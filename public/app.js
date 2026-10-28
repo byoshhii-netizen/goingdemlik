@@ -15002,6 +15002,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
                   </a>`
                : ''}
              ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
+             ${dmMessageReactionsHTML(m.reactions, myId)}
              ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}
            </div>
       <div class="dm-msg-meta">
@@ -15013,7 +15014,6 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
           : ''}
         <button class="dm-msg-menu-btn btn btn-ghost" data-id="${m.id}" data-own="${isOwn ? 1 : 0}" style="padding:0 4px;font-size:12px;color:var(--text-muted)"><i class="fas fa-ellipsis-h"></i></button>
       </div>
-      ${dmMessageReactionsHTML(m.reactions, myId)}
     </div>
   </div>`;
 }
@@ -15037,7 +15037,8 @@ function dmMessageReactionsHTML(reactions, myId) {
 
 function updateDmMessageReactions(row, reactions) {
   const html = dmMessageReactionsHTML(reactions, currentUser?.id);
-  const existing = row.querySelector('.dm-msg-reactions');
+  const bubble = row.querySelector('.dm-msg-bubble');
+  const existing = bubble?.querySelector('.dm-msg-reactions');
   if (!html) {
     existing?.remove();
     return;
@@ -15046,7 +15047,7 @@ function updateDmMessageReactions(row, reactions) {
     existing.outerHTML = html;
     return;
   }
-  row.querySelector('.dm-msg-content')?.insertAdjacentHTML('beforeend', html);
+  bubble?.insertAdjacentHTML('beforeend', html);
 }
 
 // Hover: show/hide menu btn on desktop
