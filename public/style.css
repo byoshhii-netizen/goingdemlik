@@ -2592,6 +2592,13 @@ body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; pad
 
 /* ===== GROUP CHAT ===== */
 .legacy-group-chat { display: none !important; }
+.group-chat-mode-tabs { display:flex; gap:8px; margin-bottom:12px; padding:4px; border:1px solid var(--border); border-radius:10px; background:var(--bg-card); }
+.group-chat-mode-tabs button { flex:1; display:flex; align-items:center; justify-content:center; gap:8px; min-height:38px; border:0; border-radius:7px; background:transparent; color:var(--text-secondary); font:inherit; cursor:pointer; }
+.group-chat-mode-tabs button:hover { background:var(--bg-hover); color:var(--text-primary); }
+.group-chat-mode-tabs button.active { background:var(--bg-active); color:var(--text-primary); font-weight:700; }
+.group-detail-page:not(.show-group-channels) .group-channel-workspace { display:none !important; }
+.group-detail-page:not(.show-group-channels) .legacy-group-chat { display:flex !important; }
+.group-detail-page.show-group-channels .legacy-group-chat { display:none !important; }
 .group-channel-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 560px; height: min(760px, calc(100vh - 230px)); overflow: hidden; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-card); }
 .group-channel-sidebar { display: flex; flex-direction: column; min-width: 0; background: var(--bg-card2); border-right: 1px solid var(--border); }
 .group-channel-sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 14px; border-bottom: 1px solid var(--border); color: var(--text-primary); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }

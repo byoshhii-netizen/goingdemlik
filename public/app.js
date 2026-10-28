@@ -7344,6 +7344,10 @@ async function renderGroupDetail(app, slug) {
     <div class="group-detail-layout">
       <div>
         ${group.allow_chat ? `
+          <div class="group-chat-mode-tabs" aria-label="Grup mesaj alanı">
+            <button type="button" class="active" data-group-chat-mode="chat" aria-pressed="true"><i class="fas fa-comments"></i> Sohbet</button>
+            <button type="button" data-group-chat-mode="channels" aria-pressed="false"><i class="fas fa-hashtag"></i> Kanallar</button>
+          </div>
           <div class="group-channel-workspace" id="group-channel-workspace">
             <aside class="group-channel-sidebar">
               <div class="group-channel-sidebar-header">
@@ -7396,6 +7400,19 @@ async function renderGroupDetail(app, slug) {
     </div>
   </div>`;
   enhanceLinkPreviews(app);
+
+  const groupChatModeTabs = app.querySelector('.group-chat-mode-tabs');
+  groupChatModeTabs?.addEventListener('click', event => {
+    const button = event.target.closest('[data-group-chat-mode]');
+    if (!button) return;
+    const showChannels = button.dataset.groupChatMode === 'channels';
+    app.querySelector('.group-detail-page')?.classList.toggle('show-group-channels', showChannels);
+    groupChatModeTabs.querySelectorAll('[data-group-chat-mode]').forEach(tab => {
+      const active = tab === button;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-pressed', String(active));
+    });
+  });
 
   const channelWorkspace = $('#group-channel-workspace');
   const channelList = $('#group-channel-list');
