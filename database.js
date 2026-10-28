@@ -764,6 +764,9 @@ async function initDb() {
       user_id BIGINT,
       content TEXT,
       image_url TEXT DEFAULT '',
+      image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+      shared_gif_url TEXT NOT NULL DEFAULT '',
+      shared_song_id BIGINT,
       reply_to_id BIGINT,
       edited_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
@@ -799,6 +802,9 @@ async function initDb() {
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT REFERENCES group_messages(id) ON DELETE SET NULL;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
 
     CREATE TABLE IF NOT EXISTS photos (
       id BIGSERIAL PRIMARY KEY,

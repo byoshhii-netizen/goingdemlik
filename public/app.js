@@ -7372,10 +7372,23 @@ async function renderGroupDetail(app, slug) {
             ${canSend ? `<div class="group-reply-bar dm-reply-bar" id="group-reply-bar">
               <div style="display:flex;align-items:center;gap:6px;min-width:0"><i class="fas fa-reply" style="font-size:11px;color:var(--accent-red2)"></i><span id="group-reply-text" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span></div>
               <button type="button" id="group-reply-cancel" aria-label="Yanıtı iptal et" style="background:none;border:none;color:var(--text-muted);padding:2px 6px;cursor:pointer;font-size:14px">✕</button>
-            </div><div class="chat-input-bar">
-              ${group.allow_photos ? `<label class="btn btn-ghost btn-sm" for="chat-img-input" title="Fotoğraf ekle" style="flex-shrink:0"><i class="fas fa-image"></i></label><input id="chat-img-input" type="file" accept="image/*" style="display:none" />` : ''}
-              <input id="chat-input" type="text" placeholder="Mesaj yaz..." style="flex:1;min-width:0" />
-              <button class="btn btn-primary btn-sm" id="send-msg-btn" style="flex-shrink:0"><i class="fas fa-paper-plane"></i></button>
+            </div><div class="dm-input-bar group-message-input-bar">
+              <div class="dm-attach-slot">
+                <button class="dm-input-img-btn dm-attach-plus" id="group-attach-btn" type="button" title="Ek seçenekler" aria-label="Ek seçenekler" aria-expanded="false"><i class="fas fa-plus"></i></button>
+                <div class="dm-attach-menu" id="group-attach-menu" hidden>
+                  <div class="dm-attach-menu-heading"><strong>Paylaş</strong><small>Mesajına ekle</small></div>
+                  ${group.allow_photos ? '<button type="button" data-group-attach="photo"><i class="fas fa-image"></i><span>Fotoğraf</span></button><button type="button" data-group-attach="camera"><i class="fas fa-camera"></i><span>Kamera</span></button>' : ''}
+                  <button type="button" data-group-attach="gif"><i class="fas fa-photo-film"></i><span>GIF</span></button>
+                  <button type="button" data-group-attach="music"><i class="fas fa-music"></i><span>Müzik</span></button>
+                </div>
+              </div>
+              <div class="dm-input-wrap" id="group-chat-input-wrap">
+                ${group.allow_photos ? '<input type="file" id="group-img-input" accept="image/*" multiple hidden /><input type="file" id="group-camera-input" accept="image/*" capture="environment" hidden />' : ''}
+                <div class="dm-img-preview-wrap" id="group-img-preview-wrap" hidden></div>
+                <span class="dm-img-upload-status" id="group-img-upload-status" aria-live="polite"></span>
+                <textarea id="chat-input" placeholder="Mesaj yaz..." rows="1"></textarea>
+              </div>
+              <button class="dm-send-btn" id="send-msg-btn" type="button" aria-label="Mesaj gönder"><i class="fas fa-paper-plane"></i></button>
             </div>` : isMuted ? `<div style="padding:14px 12px;text-align:center;color:var(--text-muted);font-size:13px;background:rgba(255,81,81,0.08);border:1px solid rgba(255,81,81,0.18);border-radius:10px"><i class="fas fa-volume-xmark" style="font-size:18px;color:var(--accent-red2);margin-bottom:6px;display:block"></i><strong style="color:var(--accent-red2)">SUSTURULDUN</strong><div style="margin-top:6px">Kalan süre: ${escHtml(mutedRemainingText)}</div></div>` : (currentUser && !isMember ? `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Mesaj göndermek için gruba katılın.</div>` : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Giriş yaparak katılabilirsiniz.</div>`)}
           </div>` : `<div class="card card-body" style="text-align:center;color:var(--text-muted)"><i class="fas fa-comment-slash" style="font-size:32px;margin-bottom:8px;display:block"></i>Sohbet kapatılmış.</div>`}
       </div>
@@ -7545,7 +7558,7 @@ async function renderGroupDetail(app, slug) {
   };
   $('#group-reply-cancel')?.addEventListener('click', clearGroupReply);
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
-  const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', message.edited_at || '', message.deleted_for_me ? 1 : 0].join(':')).join('|');
+  const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', JSON.stringify(message.image_urls || []), message.shared_gif_url || '', message.shared_song_id || '', message.edited_at || '', message.deleted_for_me ? 1 : 0].join(':')).join('|');
   const messageIdToRow = id => chatEl?.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(id))}"]`);
   const getChatSelectionCount = () => groupChatSelection.size;
   const updateSelectionToolbar = () => {
@@ -7729,7 +7742,7 @@ async function renderGroupDetail(app, slug) {
       if (wasBottom) chatEl2.scrollTop = chatEl2.scrollHeight;
       if (Number(message.user_id) !== Number(currentUser?.id) && document.hidden && !groupInboxMuted) {
         await triggerGroupMessageNotification(group.name, message.username || 'Birisi',
-          message.content || (message.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı'));
+          message.content || (message.image_url || message.shared_gif_url ? 'Medya gönderdi.' : message.shared_song_id ? 'Müzik gönderdi.' : 'Yeni grup mesajı'));
       }
       return;
     }
@@ -7743,7 +7756,7 @@ async function renderGroupDetail(app, slug) {
         if (incoming.length && document.hidden && !groupInboxMuted) {
           const first = incoming[0];
           const senderName = first.username || 'Birisi';
-          const preview = first.content || (first.image_url ? 'Bir fotoğraf gönderdi.' : 'Yeni grup mesajı');
+          const preview = first.content || (first.image_url || first.shared_gif_url ? 'Medya gönderdi.' : first.shared_song_id ? 'Müzik gönderdi.' : 'Yeni grup mesajı');
           await triggerGroupMessageNotification(group.name, senderName, preview);
         }
         chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod, !!canSend)).join('');
@@ -7770,34 +7783,52 @@ async function renderGroupDetail(app, slug) {
         closeOpenMessageMenu();
       }
     });
-    let pendingChatImage = null;
-    const attachmentPreview = document.createElement('div');
-    attachmentPreview.id = 'chat-attachment-preview';
-    attachmentPreview.className = 'chat-attachment-preview hidden';
-    attachmentPreview.innerHTML = '<img alt="Fotoğraf önizlemesi" /><div><strong>Fotoğraf hazır</strong><small>Mesajını yazıp gönder tuşuna bas</small></div><button type="button" class="btn btn-ghost btn-sm" id="chat-attachment-remove" title="Fotoğrafı kaldır"><i class="fas fa-times"></i></button>';
-    $('#chat-input')?.parentElement?.insertAdjacentElement('beforebegin', attachmentPreview);
-    const prepareChatImage = file => {
-      if (!file || !file.type.startsWith('image/')) return;
-      pendingChatImage = file;
-      const preview = attachmentPreview.querySelector('img');
-      if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
-      preview.src = URL.createObjectURL(file);
-      attachmentPreview.classList.remove('hidden');
-      const input = $('#chat-input');
-      if (input) { input.placeholder = 'Fotoğrafın altına bir şey yaz...'; input.focus(); }
+    const maxGroupImages = 10;
+    let pendingGroupImages = [];
+    let groupMessageSending = false;
+    const groupImagePreview = $('#group-img-preview-wrap');
+    const groupInputWrap = $('#group-chat-input-wrap');
+    const renderGroupImagePreview = () => {
+      if (!groupImagePreview) return;
+      groupImagePreview.hidden = pendingGroupImages.length === 0;
+      groupInputWrap?.classList.toggle('dm-has-images', pendingGroupImages.length > 0);
+      groupImagePreview.innerHTML = pendingGroupImages.map((item, index) => `<span class="dm-img-preview-item">
+        <img src="${escHtml(item.previewUrl)}" alt="Seçilen fotoğraf ${index + 1}" />
+        <button class="dm-img-clear" data-remove-group-image="${index}" type="button" aria-label="${index + 1}. fotoğrafı kaldır">×</button>
+      </span>`).join('');
     };
-    const resetAttachment = () => {
-      pendingChatImage = null;
-      attachmentPreview.classList.add('hidden');
-      const preview = attachmentPreview.querySelector('img');
-      if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
-      preview.removeAttribute('src');
-      const fileInput = $('#chat-img-input');
+    const addGroupImage = file => {
+      if (!file?.type?.startsWith('image/')) {
+        toast('Yalnızca fotoğraf dosyaları eklenebilir.', 'error');
+        return;
+      }
+      if (pendingGroupImages.length >= maxGroupImages) {
+        toast(`Bir mesajda en fazla ${maxGroupImages} fotoğraf gönderebilirsin.`, 'error');
+        return;
+      }
+      pendingGroupImages.push({ file, previewUrl: URL.createObjectURL(file) });
+      renderGroupImagePreview();
+    };
+    groupImagePreview?.addEventListener('click', event => {
+      const removeButton = event.target.closest('[data-remove-group-image]');
+      if (removeButton) {
+        const [removed] = pendingGroupImages.splice(Number(removeButton.dataset.removeGroupImage), 1);
+        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+        renderGroupImagePreview();
+        return;
+      }
+      const image = event.target.closest('.dm-img-preview-item img');
+      if (image) showDmImageViewer([image.src]);
+    });
+    const clearGroupImages = () => {
+      pendingGroupImages.forEach(item => URL.revokeObjectURL(item.previewUrl));
+      pendingGroupImages = [];
+      renderGroupImagePreview();
+      const fileInput = $('#group-img-input');
+      const cameraInput = $('#group-camera-input');
       if (fileInput) fileInput.value = '';
-      const input = $('#chat-input');
-      if (input) input.placeholder = 'Mesaj yaz...';
+      if (cameraInput) cameraInput.value = '';
     };
-    $('#chat-attachment-remove')?.addEventListener('click', resetAttachment);
 
     const suggestMention = () => {
       const input = $('#chat-input');
@@ -7844,51 +7875,140 @@ async function renderGroupDetail(app, slug) {
       });
     };
 
-    const sendMsg = async () => {
+    const sendMsg = async (attachment = {}) => {
       const input = $('#chat-input');
-      const content = input?.value.trim();
-      if (!content && !pendingChatImage) return;
+      const content = input?.value || '';
+      if (groupMessageSending || (!content.trim() && !pendingGroupImages.length && !attachment.shared_gif_url && !attachment.shared_song_id)) return;
+      groupMessageSending = true;
+      const sendButton = $('#send-msg-btn');
+      const uploadStatus = $('#group-img-upload-status');
+      if (sendButton) sendButton.disabled = true;
       try {
-        let image_url = '';
-        if (pendingChatImage) {
-          const fd = new FormData(); fd.append('image', pendingChatImage);
+        const image_urls = [];
+        for (const [index, item] of pendingGroupImages.entries()) {
+          const fd = new FormData(); fd.append('image', item.file);
+          if (uploadStatus) uploadStatus.textContent = `Fotoğraf yükleniyor ${index + 1}/${pendingGroupImages.length}`;
           const uploaded = await apiForm('/group/' + groupSlugPath + '/upload', fd);
-          image_url = uploaded.url;
+          image_urls.push(uploaded.url);
         }
-        const msg = await api('/group/' + groupSlugPath + '/messages', { method: 'POST', body: JSON.stringify({ content, image_url, reply_to_id: groupReplyToId }) });
+        const msg = await api('/group/' + groupSlugPath + '/messages', {
+          method: 'POST',
+          body: JSON.stringify({ content, image_urls, reply_to_id: groupReplyToId, ...attachment })
+        });
         if (!messages.some(item => String(item.id) === String(msg.id))) {
           $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod, !!canSend));
           enhanceLinkPreviews(chatEl);
           messages.push(msg);
           lastChatSignature = chatSignature(messages);
         }
-        input.value = '';
-        resetAttachment();
+        if (input) { input.value = ''; input.style.height = '40px'; }
+        clearGroupImages();
         clearGroupReply();
         chatEl.scrollTop = chatEl.scrollHeight;
         lastId = Math.max(lastId, Number(msg.id));
       } catch (e) { toast(e.message, 'error'); }
+      finally {
+        groupMessageSending = false;
+        if (sendButton) sendButton.disabled = false;
+        if (uploadStatus) uploadStatus.textContent = '';
+      }
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
+    const attachButton = $('#group-attach-btn');
+    const attachMenu = $('#group-attach-menu');
+    const closeGroupAttachMenu = () => {
+      if (!attachMenu || !attachButton) return;
+      attachMenu.hidden = true;
+      attachButton.setAttribute('aria-expanded', 'false');
+      attachButton.setAttribute('aria-label', 'Ek seçenekler');
+      attachButton.title = 'Ek seçenekler';
+      attachButton.innerHTML = '<i class="fas fa-plus" aria-hidden="true"></i>';
+    };
+    attachButton?.addEventListener('click', () => {
+      if (!attachMenu) return;
+      attachMenu.hidden = !attachMenu.hidden;
+      attachButton.setAttribute('aria-expanded', String(!attachMenu.hidden));
+      attachButton.setAttribute('aria-label', attachMenu.hidden ? 'Ek seçenekler' : 'Menüyü kapat');
+      attachButton.title = attachMenu.hidden ? 'Ek seçenekler' : 'Menüyü kapat';
+      attachButton.innerHTML = `<i class="fas fa-${attachMenu.hidden ? 'plus' : 'xmark'}" aria-hidden="true"></i>`;
+    });
+    attachMenu?.addEventListener('click', event => {
+      const option = event.target.closest('[data-group-attach]');
+      if (!option) return;
+      closeGroupAttachMenu();
+      if (option.dataset.groupAttach === 'photo') $('#group-img-input')?.click();
+      else if (option.dataset.groupAttach === 'camera') $('#group-camera-input')?.click();
+      else if (option.dataset.groupAttach === 'gif') showDmGifPicker(gif => sendMsg({ shared_gif_url: gif.url }));
+      else if (option.dataset.groupAttach === 'music') showDmSongPicker(song => sendMsg({ shared_song_id: song.id }));
+    });
+    app.addEventListener('click', event => {
+      if (!event.target.closest('.group-message-input-bar .dm-attach-slot')) closeGroupAttachMenu();
+    });
     $('#chat-input')?.addEventListener('input', suggestMention);
     $('#chat-input')?.addEventListener('keyup', suggestMention);
-    $('#chat-input')?.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); } });
-    $('#chat-input')?.addEventListener('focus', () => emojiPicker.classList.add('hidden'));
-
-    $('#chat-img-input')?.addEventListener('change', async e => {
-      prepareChatImage(e.target.files[0]);
+    $('#chat-input')?.addEventListener('input', event => {
+      event.currentTarget.style.height = 'auto';
+      event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 120)}px`;
+    });
+    $('#chat-input')?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMsg(); }
+    });
+    $('#group-img-input')?.addEventListener('change', event => {
+      Array.from(event.target.files || []).forEach(addGroupImage);
+      event.target.value = '';
+      $('#chat-input')?.focus();
+    });
+    $('#group-camera-input')?.addEventListener('change', event => {
+      const file = event.target.files?.[0];
+      if (file) addGroupImage(file);
+      event.target.value = '';
     });
     $('#chat-input')?.addEventListener('paste', e => {
-      const imageItem = [...(e.clipboardData?.items || [])].find(item => item.type.startsWith('image/'));
-      const file = imageItem?.getAsFile();
-      if (!file) return;
+      const files = Array.from(e.clipboardData?.items || [])
+        .filter(item => item.type.startsWith('image/'))
+        .map(item => item.getAsFile())
+        .filter(Boolean);
+      if (!files.length) return;
       e.preventDefault();
-      prepareChatImage(file);
+      files.forEach(addGroupImage);
     });
-
   }
 
   $('#chat-messages')?.addEventListener('click', async e => {
+    const imageButton = e.target.closest('.group-message-image-open');
+    if (imageButton) {
+      showDmImageViewer([imageButton.dataset.imageUrl]);
+      return;
+    }
+    const songButton = e.target.closest('.group-shared-song-play');
+    if (songButton) {
+      e.preventDefault();
+      let audio = window.__dmSharedSongAudio;
+      if (audio && window.__dmSharedSongButton === songButton) {
+        if (audio.paused) audio.play().catch(error => toast(error.message || 'Müzik oynatılamadı.', 'error'));
+        else audio.pause();
+        return;
+      }
+      audio?.pause();
+      const previousButton = window.__dmSharedSongButton;
+      if (previousButton?.isConnected) {
+        previousButton.innerHTML = '<i class="fas fa-play" aria-hidden="true"></i>';
+        previousButton.setAttribute('aria-label', 'Müziği oynat');
+      }
+      audio = new Audio(songButton.dataset.audioUrl);
+      window.__dmSharedSongAudio = audio;
+      window.__dmSharedSongButton = songButton;
+      const update = () => {
+        if (!songButton.isConnected) return;
+        songButton.innerHTML = `<i class="fas fa-${audio.paused ? 'play' : 'pause'}" aria-hidden="true"></i>`;
+        songButton.setAttribute('aria-label', audio.paused ? 'Müziği oynat' : 'Müziği durdur');
+      };
+      audio.addEventListener('play', update);
+      audio.addEventListener('pause', update);
+      audio.addEventListener('ended', update);
+      audio.play().catch(error => toast(error.message || 'Müzik oynatılamadı.', 'error'));
+      return;
+    }
     const reply = e.target.closest('.group-reply-btn');
     const del = e.target.closest('.del-msg');
     const edit = e.target.closest('.edit-msg');
@@ -7904,7 +8024,8 @@ async function renderGroupDetail(app, slug) {
       const replyBar = $('#group-reply-bar');
       const replyText = $('#group-reply-text');
       if (replyBar) replyBar.classList.add('visible');
-      if (replyText) replyText.textContent = `${message.username || 'Silinmiş kullanıcı'}: ${(message.content || (message.image_url ? 'Fotoğraf' : 'Mesaj')).slice(0, 100)}`;
+      const attachmentLabel = message.image_url || message.shared_gif_url ? 'Medya' : message.shared_song_id ? 'Müzik' : 'Mesaj';
+      if (replyText) replyText.textContent = `${message.username || 'Silinmiş kullanıcı'}: ${(message.content || attachmentLabel).slice(0, 100)}`;
       $('#chat-input')?.focus();
       return;
     }
@@ -8218,12 +8339,18 @@ async function renderGroupDetail(app, slug) {
 }
 
 function chatMsgHTML(m, canModerate = false, canReply = false) {
-  const isOwn = currentUser && currentUser.id === m.user_id;
+  const isOwn = currentUser && String(currentUser.id) === String(m.user_id);
   if (m.deleted_for_me) return `<div class="chat-msg deleted-for-me"><div class="chat-msg-body"><div class="chat-msg-text"><i class="fas fa-eye-slash"></i> Sadece sizden silindi</div></div></div>`;
   const profileLink = m.username ? profileRoute(m.username) : '#';
   const displayName = m.username || 'Silinmiş kullanıcı';
   const avatar = hasUsableAvatar(m) ? `<img src="${escHtml(m.avatar)}" class="chat-msg-avatar" alt="" />` : `<div class="chat-msg-avatar avatar-placeholder"><i class="fas fa-user"></i></div>`;
   const canAction = currentUser && (isOwn || canModerate);
+  let imageUrls = m.image_urls;
+  if (typeof imageUrls === 'string') {
+    try { imageUrls = JSON.parse(imageUrls); } catch { imageUrls = []; }
+  }
+  imageUrls = Array.isArray(imageUrls) ? imageUrls.filter(url => typeof url === 'string' && url.trim()) : [];
+  if (!imageUrls.length && m.image_url) imageUrls = [m.image_url];
   const selectBox = `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" aria-label="Mesajı seç" style="display:${groupChatSelectionMode ? 'block' : 'none'}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />`;
   return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}">
     ${selectBox}
@@ -8238,7 +8365,13 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
       </div>
       ${m.reply_to_id && (m.reply_content || m.reply_image_url) ? `<div class="chat-reply-preview"><span>${escHtml(m.reply_username || 'Silinmiş kullanıcı')}</span><div>${escHtml((m.reply_content || 'Fotoğraf').slice(0, 100))}</div></div>` : ''}
       ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}
-      ${m.image_url ? `<img src="${escHtml(m.image_url)}" class="chat-msg-img" alt="" onclick="window.open(this.src)" />` : ''}
+      ${imageUrls.length ? `<div class="group-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<button type="button" class="group-message-image-open" data-image-url="${escHtml(url)}" aria-label="Fotoğrafı görüntüle"><img src="${escHtml(url)}" class="chat-msg-img" alt="Mesaj fotoğrafı ${index + 1}" loading="lazy" decoding="async" /></button>`).join('')}</div>` : ''}
+      ${m.shared_gif_url ? `<img class="dm-shared-gif group-message-gif" src="${escHtml(m.shared_gif_url)}" alt="GIF" loading="lazy" decoding="async" />` : ''}
+      ${m.shared_song_id ? `<div class="dm-shared-song">
+        <span class="dm-shared-song-art">${m.song_cover_url ? `<img src="${escHtml(m.song_cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music" aria-hidden="true"></i>'}</span>
+        <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
+        ${m.song_audio_url ? `<button type="button" class="group-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
+      </div>` : ''}
       <button class="edit-msg" data-id="${m.id}" data-content="${escHtml(m.content || '')}" style="display:none"></button>
     </div>
   </div>`;
