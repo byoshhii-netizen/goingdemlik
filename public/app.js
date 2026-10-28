@@ -508,7 +508,6 @@ function showDescriptionModal(text, sourceElement = null) {
     };
   }
   showModal('Açıklama', `<div class="description-modal">
-    <div class="description-modal-heading"><span><i class="fas fa-align-left"></i></span><div><strong>Tam açıklama</strong><small>Paylaşımın tüm detayları</small></div></div>
     <div class="description-modal-content">${escHtml(text)}</div>
     <button type="button" class="btn btn-primary description-modal-close" id="description-modal-close">Kapat</button>
   </div>`, sourceElement?.closest('.photo-card') ? 'photo-description-modal' : '');
