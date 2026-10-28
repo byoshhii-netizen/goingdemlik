@@ -10606,6 +10606,14 @@ app.post('/api/dm-notes/:username/like', authMiddleware, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const { rows: currentNote } = await client.query(
+      'SELECT user_id FROM dm_notes WHERE user_id=$1 AND expires_at>NOW() FOR UPDATE',
+      [noteUserId]
+    );
+    if (!currentNote.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Not bulunamadı veya beğenme iznin yok.' });
+    }
     const { rowCount } = await client.query(
       'DELETE FROM dm_note_likes WHERE note_user_id=$1 AND user_id=$2',
       [noteUserId, req.user.id]
@@ -10663,15 +10671,31 @@ app.put('/api/dm-notes', authMiddleware, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Seçilen müzik bulunamadı.' });
     song = rows[0];
   }
-  const { rows } = await query(`
-    INSERT INTO dm_notes (user_id,content,song_id,song_start_seconds,created_at,expires_at)
-    VALUES ($1,$2,$3,$4,NOW(),NOW()+INTERVAL '24 hours')
-    ON CONFLICT (user_id) DO UPDATE SET
-      content=EXCLUDED.content,song_id=EXCLUDED.song_id,
-      song_start_seconds=EXCLUDED.song_start_seconds,created_at=NOW(),
-      expires_at=NOW()+INTERVAL '24 hours'
-    RETURNING user_id,content,song_id,song_start_seconds,created_at,expires_at
-  `, [req.user.id, content, song?.id || null, Math.floor(songStart)]);
+  const client = await pool.connect();
+  let rows;
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT user_id FROM dm_notes WHERE user_id=$1 FOR UPDATE', [req.user.id]);
+    await client.query('DELETE FROM dm_note_likes WHERE note_user_id=$1', [req.user.id]);
+    await client.query('DELETE FROM dm_note_views WHERE note_user_id=$1', [req.user.id]);
+    const result = await client.query(`
+      INSERT INTO dm_notes (user_id,content,song_id,song_start_seconds,created_at,expires_at)
+      VALUES ($1,$2,$3,$4,NOW(),NOW()+INTERVAL '24 hours')
+      ON CONFLICT (user_id) DO UPDATE SET
+        content=EXCLUDED.content,song_id=EXCLUDED.song_id,
+        song_start_seconds=EXCLUDED.song_start_seconds,created_at=NOW(),
+        expires_at=NOW()+INTERVAL '24 hours'
+      RETURNING user_id,content,song_id,song_start_seconds,created_at,expires_at
+    `, [req.user.id, content, song?.id || null, Math.floor(songStart)]);
+    rows = result.rows;
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(rollbackError => console.error('[dm-notes] Save rollback failed:', rollbackError));
+    console.error('[dm-notes] Save failed:', error);
+    return res.status(500).json({ error: 'Not kaydedilemedi.' });
+  } finally {
+    client.release();
+  }
   res.json({ ...rows[0], is_own: true });
 });
 

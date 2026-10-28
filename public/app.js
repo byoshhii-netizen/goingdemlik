@@ -12557,6 +12557,29 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
       activeIndex = Math.max(0, photos.findIndex(entry => entry.image_url === selectedUrl));
       renderSelection();
     };
+    const refreshOwnerPhotos = async () => {
+      if (!isOwner) return;
+      try {
+        const archive = await api('/profile/avatar-archive');
+        user.avatar = archive.current_avatar || '';
+        user.avatar_removed = archive.avatar_removed ? 1 : 0;
+        if (currentUser && String(currentUser.id) === String(user.id)) {
+          currentUser.avatar = user.avatar;
+          currentUser.avatar_removed = user.avatar_removed;
+          updateNavUI();
+        }
+        const profileAvatarWrap = root.querySelector('.profile-header .profile-avatar-wrap');
+        if (profileAvatarWrap) {
+          profileAvatarWrap.innerHTML = user.avatar && !user.avatar_removed
+            ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />`
+            : '<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>';
+        }
+        photos = profileAvatarPhotoList(user, Array.isArray(archive.photos) ? archive.photos : []);
+        renderSelection();
+      } catch (error) {
+        toast(error.message || 'Profil fotoğrafları yüklenemedi.', 'error');
+      }
+    };
     const confirmDelete = () => new Promise(resolve => {
       const confirmation = document.createElement('div');
       confirmation.className = 'profile-avatar-gallery-confirm';
@@ -12655,6 +12678,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     });
     document.addEventListener('keydown', onKeydown);
     renderSelection();
+    refreshOwnerPhotos();
     overlay.querySelector('.profile-avatar-gallery-close').focus();
   };
 
