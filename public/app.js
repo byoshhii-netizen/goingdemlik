@@ -12682,27 +12682,11 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     overlay.querySelector('.profile-avatar-gallery-close').focus();
   };
 
-  let holdTimer = null;
-  let suppressClick = false;
-  trigger.addEventListener('pointerdown', event => {
-    suppressClick = false;
-    holdTimer = setTimeout(() => {
-      suppressClick = true;
-      openViewer(0);
-    }, 450);
-  });
-  const cancelHold = () => {
-    if (holdTimer) clearTimeout(holdTimer);
-    holdTimer = null;
-  };
-  trigger.addEventListener('pointerup', cancelHold);
-  trigger.addEventListener('pointercancel', cancelHold);
-  trigger.addEventListener('pointerleave', cancelHold);
   trigger.addEventListener('click', event => {
     event.preventDefault();
-    if (suppressClick) suppressClick = false;
-    else openViewer(0);
-  });
+    event.stopPropagation();
+    openViewer(0);
+  }, true);
   trigger.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
