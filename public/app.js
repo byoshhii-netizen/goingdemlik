@@ -9672,7 +9672,12 @@ async function renderProfile(app, username) {
     await loadItems();
   };
 
-  const isOwn = !!currentUser && String(currentUser.id) === String(user.id);
+  const isOwn = !!currentUser && (
+    String(currentUser.id) === String(user.id)
+    || (!!currentUser.username && String(currentUser.username).trim().toLocaleLowerCase('tr-TR')
+      === String(user.username || '').trim().toLocaleLowerCase('tr-TR')
+    )
+  );
   const [settings, loadedFollowState] = await Promise.all([
     api('/settings/public').catch(() => null),
     !isOwn && currentUser
