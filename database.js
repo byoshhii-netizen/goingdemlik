@@ -12,9 +12,8 @@ const isRemoteDatabase = Boolean(
   !process.env.DATABASE_URL.includes('127.0.0.1')
 );
 
-const connectionString = process.env.DATABASE_URL && String(process.env.DATABASE_URL).trim() ? String(process.env.DATABASE_URL).trim() : '';
-const pool = connectionString ? new Pool({
-  connectionString,
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
   max: Number(process.env.PGPOOL_MAX || 10),
   connectionTimeoutMillis: 5000,
   idleTimeoutMillis: 30000,
@@ -23,12 +22,9 @@ const pool = connectionString ? new Pool({
     : isRemoteDatabase
       ? { rejectUnauthorized: true }
       : false,
-}) : null;
+});
 
-async function query(text, params = []) {
-  if (!pool) {
-    return { rows: [], rowCount: 0, command: text };
-  }
+async function query(text, params) {
   const client = await pool.connect();
   try {
     return await client.query(text, params);
@@ -38,15 +34,11 @@ async function query(text, params = []) {
 }
 
 async function initDb() {
-  if (!pool) {
-    console.log('CigCig local demo mode: database disabled, app will run without PostgreSQL.');
-    return true;
-  }
   await query(`
     CREATE TABLE IF NOT EXISTS users (
       id BIGSERIAL PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
-      email TEXT UNIQUE,
+      email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       two_factor_method TEXT NOT NULL DEFAULT 'none',
       two_factor_question TEXT DEFAULT '',
@@ -61,8 +53,6 @@ async function initDb() {
       show_level_color INTEGER DEFAULT 1,
       is_vip INTEGER DEFAULT 0,
       is_plus INTEGER DEFAULT 0,
-      is_red_verified INTEGER NOT NULL DEFAULT 0,
-      red_verified_at TIMESTAMP,
       name_color TEXT DEFAULT '',
       banned INTEGER DEFAULT 0,
       ban_type TEXT DEFAULT '',
@@ -75,46 +65,22 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       last_active TIMESTAMP DEFAULT NOW()
     );
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS banned INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_message_permission TEXT NOT NULL DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_required INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS show_level_progress INTEGER DEFAULT 1;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_red_verified INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS red_verified_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS birth_date DATE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tag_permission TEXT DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
     UPDATE users SET tag_permission='everyone' WHERE tag_permission IS NULL OR tag_permission='';
-
-    CREATE TABLE IF NOT EXISTS red_verification_events (
-      id BIGSERIAL PRIMARY KEY,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      action TEXT NOT NULL CHECK (action IN ('granted','revoked')),
-      performed_by TEXT NOT NULL DEFAULT '',
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_red_verification_events_user
-      ON red_verification_events(user_id, created_at DESC, id DESC);
-
-    CREATE TABLE IF NOT EXISTS user_presence_sessions (
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      client_id TEXT NOT NULL,
-      last_heartbeat TIMESTAMP NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (user_id, client_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_user_presence_sessions_user_heartbeat
-      ON user_presence_sessions(user_id, last_heartbeat DESC);
 
     CREATE TABLE IF NOT EXISTS follows (
       id BIGSERIAL PRIMARY KEY,
@@ -127,14 +93,6 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_follows_follower ON follows(follower_id);
     CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id);
-
-    CREATE TABLE IF NOT EXISTS close_friends (
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      friend_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (user_id, friend_id),
-      CHECK (user_id <> friend_id)
-    );
 
     CREATE TABLE IF NOT EXISTS stories (
       id BIGSERIAL PRIMARY KEY,
@@ -211,25 +169,6 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
     );
-    CREATE TABLE IF NOT EXISTS user_access_signals (
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      signal_type TEXT NOT NULL,
-      signal_hash TEXT NOT NULL,
-      last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (user_id, signal_type, signal_hash)
-    );
-    CREATE TABLE IF NOT EXISTS ultra_ban_signals (
-      target_user_id BIGINT NOT NULL,
-      signal_type TEXT NOT NULL,
-      signal_hash TEXT NOT NULL,
-      created_by BIGINT,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      revoked_at TIMESTAMP,
-      PRIMARY KEY (target_user_id, signal_type, signal_hash)
-    );
-    CREATE INDEX IF NOT EXISTS idx_ultra_ban_signals_active_hash
-      ON ultra_ban_signals(signal_type, signal_hash) WHERE is_active=1;
     CREATE TABLE IF NOT EXISTS auth_challenges (
       id BIGSERIAL PRIMARY KEY,
       challenge_hash TEXT UNIQUE NOT NULL,
@@ -244,38 +183,12 @@ async function initDb() {
     );
     ALTER TABLE auth_challenges ADD COLUMN IF NOT EXISTS target_value TEXT DEFAULT '';
     CREATE INDEX IF NOT EXISTS idx_auth_challenges_expiry ON auth_challenges(expires_at);
-    CREATE TABLE IF NOT EXISTS invite_codes (
-      id BIGSERIAL PRIMARY KEY,
-      code TEXT NOT NULL UNIQUE,
-      is_active INTEGER NOT NULL DEFAULT 1,
-      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      deleted_at TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS invite_registrations (
-      id BIGSERIAL PRIMARY KEY,
-      invite_code_id BIGINT REFERENCES invite_codes(id) ON DELETE SET NULL,
-      invite_code TEXT NOT NULL,
-      user_id BIGINT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-      username TEXT NOT NULL,
-      registration_ip TEXT NOT NULL DEFAULT '',
-      registered_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_invite_registrations_code_time
-      ON invite_registrations(invite_code_id, registered_at DESC);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
     UPDATE sessions SET expires_at=created_at + INTERVAL '30 days' WHERE expires_at IS NULL;
     ALTER TABLE sessions ALTER COLUMN expires_at SET DEFAULT (NOW() + INTERVAL '30 days');
     CREATE TABLE IF NOT EXISTS admin_sessions (
       token TEXT PRIMARY KEY,
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '8 hours')
-    );
-    CREATE TABLE IF NOT EXISTS admin_user_sessions (
-      token TEXT PRIMARY KEY,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
     );
     CREATE TABLE IF NOT EXISTS vmb_admin_sessions (
       token TEXT PRIMARY KEY,
@@ -315,6 +228,7 @@ async function initDb() {
       ('route_protection_enabled', '0'),
       ('protected_routes', '["/admin","/yonetim","/yonetici","/yonet"]'),
       ('route_redirect', '/'),
+      ('auth_required', '0'),
       ('vmb_group_url', '/grup/vmb'),
       ('vmb_intro', 'Vecd ile Müdafaa Birliği: güven, dayanışma ve sorumluluk etrafında bir araya gelen özel topluluk.'),
       ('vmb_founder', 'VMB Kurucusu'),
@@ -322,7 +236,6 @@ async function initDb() {
       ('vmb_files', '[]'),
       ('photo_song_clip_seconds', '30')
     ON CONFLICT (key) DO NOTHING;
-    DELETE FROM settings WHERE key='auth_required';
     UPDATE settings SET value='#121212' WHERE key='background_color' AND value='#2596be';
 
     -- VMB dosya kütüphanesi: eski vmb_files ayarı geriye dönük olarak korunur.
@@ -477,67 +390,6 @@ async function initDb() {
       UNIQUE(comment_id, user_id),
       FOREIGN KEY(comment_id) REFERENCES forum_comments(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS journalists (
-      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      assigned_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      assigned_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    CREATE TABLE IF NOT EXISTS newspapers (
-      id BIGSERIAL PRIMARY KEY,
-      journalist_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      newspaper_name TEXT NOT NULL,
-      newspaper_date DATE NOT NULL,
-      image_url TEXT NOT NULL,
-      journalist_since TIMESTAMP,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      share_count INTEGER NOT NULL DEFAULT 0
-    );
-    ALTER TABLE newspapers ADD COLUMN IF NOT EXISTS journalist_since TIMESTAMP;
-    ALTER TABLE newspapers ADD COLUMN IF NOT EXISTS issue_number BIGINT;
-    CREATE SEQUENCE IF NOT EXISTS newspaper_issue_number_seq;
-    WITH numbered AS (
-      SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS issue_number
-      FROM newspapers
-      WHERE issue_number IS NULL
-    )
-    UPDATE newspapers n
-    SET issue_number = numbered.issue_number
-    FROM numbered
-    WHERE n.id = numbered.id;
-    SELECT setval(
-      'newspaper_issue_number_seq',
-      GREATEST(COALESCE((SELECT MAX(issue_number) FROM newspapers), 1), 1),
-      COALESCE((SELECT MAX(issue_number) FROM newspapers), 0) > 0
-    );
-    ALTER TABLE newspapers ALTER COLUMN issue_number SET DEFAULT nextval('newspaper_issue_number_seq');
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_newspapers_issue_number ON newspapers(issue_number);
-    CREATE INDEX IF NOT EXISTS idx_newspapers_date ON newspapers(newspaper_date DESC, created_at DESC);
-    CREATE TABLE IF NOT EXISTS newspaper_likes (
-      id BIGSERIAL PRIMARY KEY,
-      newspaper_id BIGINT NOT NULL REFERENCES newspapers(id) ON DELETE CASCADE,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      UNIQUE(newspaper_id, user_id)
-    );
-    CREATE TABLE IF NOT EXISTS newspaper_comments (
-      id BIGSERIAL PRIMARY KEY,
-      newspaper_id BIGINT NOT NULL REFERENCES newspapers(id) ON DELETE CASCADE,
-      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      parent_comment_id BIGINT REFERENCES newspaper_comments(id) ON DELETE CASCADE,
-      content TEXT NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    ALTER TABLE newspaper_comments ADD COLUMN IF NOT EXISTS parent_comment_id BIGINT REFERENCES newspaper_comments(id) ON DELETE CASCADE;
-    CREATE INDEX IF NOT EXISTS idx_newspaper_comments_issue ON newspaper_comments(newspaper_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_newspaper_comments_parent ON newspaper_comments(parent_comment_id);
-    CREATE TABLE IF NOT EXISTS newspaper_comment_likes (
-      id BIGSERIAL PRIMARY KEY,
-      comment_id BIGINT NOT NULL REFERENCES newspaper_comments(id) ON DELETE CASCADE,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      UNIQUE(comment_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS poems (
@@ -712,7 +564,6 @@ async function initDb() {
       FOREIGN KEY(owner_id) REFERENCES users(id) ON DELETE SET NULL
     );
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS banner_image TEXT DEFAULT '';
-    ALTER TABLE groups ADD COLUMN IF NOT EXISTS logo_url TEXT DEFAULT '';
 
     CREATE TABLE IF NOT EXISTS group_members (
       id BIGSERIAL PRIMARY KEY,
@@ -764,9 +615,6 @@ async function initDb() {
       user_id BIGINT,
       content TEXT,
       image_url TEXT DEFAULT '',
-      image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
-      shared_gif_url TEXT NOT NULL DEFAULT '',
-      shared_song_id BIGINT,
       reply_to_id BIGINT,
       edited_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
@@ -802,9 +650,6 @@ async function initDb() {
     ALTER TABLE group_invites ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT REFERENCES group_messages(id) ON DELETE SET NULL;
-    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
-    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
-    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
 
     CREATE TABLE IF NOT EXISTS photos (
       id BIGSERIAL PRIMARY KEY,
@@ -923,31 +768,6 @@ async function initDb() {
     ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';
     ALTER TABLE system_logs ADD COLUMN IF NOT EXISTS city TEXT DEFAULT '';
 
-    CREATE TABLE IF NOT EXISTS quick_registration_logs (
-      id UUID PRIMARY KEY,
-      ip TEXT NOT NULL DEFAULT '',
-      user_agent TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'started',
-      username TEXT NOT NULL DEFAULT '',
-      nickname TEXT NOT NULL DEFAULT '',
-      email TEXT NOT NULL DEFAULT '',
-      birth_date DATE,
-      tag_permission TEXT NOT NULL DEFAULT 'everyone',
-      is_private INTEGER NOT NULL DEFAULT 0,
-      homepage_sections JSONB NOT NULL DEFAULT '[]'::jsonb,
-      profile_visibility JSONB NOT NULL DEFAULT '{}'::jsonb,
-      show_level_badge INTEGER NOT NULL DEFAULT 1,
-      show_level_progress INTEGER NOT NULL DEFAULT 1,
-      two_factor_method TEXT NOT NULL DEFAULT 'none',
-      avatar_url TEXT NOT NULL DEFAULT '',
-      selected_avatar_url TEXT NOT NULL DEFAULT '',
-      user_id BIGINT,
-      created_at TIMESTAMP DEFAULT NOW(),
-      completed_at TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_quick_registration_logs_created_at
-      ON quick_registration_logs(created_at DESC);
-
     CREATE TABLE IF NOT EXISTS friendships (
       id BIGSERIAL PRIMARY KEY,
       requester_id BIGINT NOT NULL,
@@ -975,8 +795,6 @@ async function initDb() {
       FOREIGN KEY(blocker_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(blocked_id) REFERENCES users(id) ON DELETE CASCADE
     );
-    ALTER TABLE blocks ADD COLUMN IF NOT EXISTS hide_until TIMESTAMP NOT NULL DEFAULT NOW();
-    ALTER TABLE blocks ADD COLUMN IF NOT EXISTS fake_profile INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS dm_conversations (
       id BIGSERIAL PRIMARY KEY,
@@ -986,44 +804,11 @@ async function initDb() {
       hidden_by_user2 INTEGER DEFAULT 0,
       hidden_pass_user1 TEXT DEFAULT '',
       hidden_pass_user2 TEXT DEFAULT '',
-      shared_theme_key TEXT DEFAULT '',
-      shared_theme_updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      shared_theme_updated_at TIMESTAMP,
       last_message_at TIMESTAMP DEFAULT NOW(),
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(user1_id, user2_id),
       FOREIGN KEY(user1_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(user2_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS dm_user_settings (
-      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      search_code_hash TEXT DEFAULT '',
-      search_unlock_enabled INTEGER NOT NULL DEFAULT 0,
-      icon_unlock_enabled INTEGER NOT NULL DEFAULT 0,
-      icon_code_hash TEXT DEFAULT '',
-      default_theme_key TEXT NOT NULL DEFAULT 'default',
-      default_theme_custom INTEGER NOT NULL DEFAULT 0,
-      first_dm_theme_prompt_completed INTEGER NOT NULL DEFAULT 0,
-      read_receipts_enabled INTEGER NOT NULL DEFAULT 1,
-      show_online_status INTEGER NOT NULL DEFAULT 1,
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS default_theme_key TEXT NOT NULL DEFAULT 'default';
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS default_theme_custom INTEGER NOT NULL DEFAULT 0;
-    UPDATE dm_user_settings SET default_theme_custom=1 WHERE default_theme_key<>'default' AND default_theme_custom=0;
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS first_dm_theme_prompt_completed INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS read_receipts_enabled INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS show_online_status INTEGER NOT NULL DEFAULT 1;
-    ALTER TABLE dm_user_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
-    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_key TEXT DEFAULT '';
-    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
-    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS shared_theme_updated_at TIMESTAMP;
-    CREATE TABLE IF NOT EXISTS dm_conversation_user_themes (
-      conversation_id BIGINT NOT NULL REFERENCES dm_conversations(id) ON DELETE CASCADE,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      theme_key TEXT NOT NULL DEFAULT 'default',
-      updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      PRIMARY KEY(conversation_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS videos (
@@ -1045,7 +830,6 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL
     );
-    ALTER TABLE videos ADD COLUMN IF NOT EXISTS duration_seconds INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS sound_name TEXT DEFAULT '';
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
@@ -1076,31 +860,8 @@ async function initDb() {
       video_id BIGINT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content TEXT NOT NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP,
-      is_pinned BOOLEAN NOT NULL DEFAULT FALSE
+      created_at TIMESTAMP DEFAULT NOW()
     );
-    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
-    ALTER TABLE video_comments ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT FALSE;
-    DO $$
-    DECLARE
-      pinned_data_type TEXT;
-    BEGIN
-      SELECT data_type INTO pinned_data_type
-      FROM information_schema.columns
-      WHERE table_schema = current_schema()
-        AND table_name = 'video_comments'
-        AND column_name = 'is_pinned';
-
-      IF pinned_data_type IS NOT NULL AND pinned_data_type <> 'boolean' THEN
-        ALTER TABLE video_comments ALTER COLUMN is_pinned DROP DEFAULT;
-        ALTER TABLE video_comments
-          ALTER COLUMN is_pinned TYPE BOOLEAN
-          USING LOWER(TRIM(is_pinned::text)) IN ('1', 't', 'true', 'yes', 'on');
-        ALTER TABLE video_comments ALTER COLUMN is_pinned SET DEFAULT FALSE;
-        ALTER TABLE video_comments ALTER COLUMN is_pinned SET NOT NULL;
-      END IF;
-    END $$;
     CREATE TABLE IF NOT EXISTS photo_comment_likes (
       id BIGSERIAL PRIMARY KEY,
       comment_id BIGINT NOT NULL REFERENCES photo_comments(id) ON DELETE CASCADE,
@@ -1115,24 +876,15 @@ async function initDb() {
       sender_id BIGINT NOT NULL,
       content TEXT DEFAULT '',
       image_url TEXT DEFAULT '',
-      image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
-      image_view_limit INTEGER NOT NULL DEFAULT 0,
-      image_view_count INTEGER NOT NULL DEFAULT 0,
       shared_forum_id BIGINT,
       shared_video_id BIGINT,
       shared_book_id BIGINT,
       shared_photo_id BIGINT,
       shared_story_id BIGINT,
-      shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL,
-      shared_song_id BIGINT,
-      shared_gif_url TEXT NOT NULL DEFAULT '',
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
       deleted_by_receiver INTEGER DEFAULT 0,
       deleted_for_all INTEGER DEFAULT 0,
-      deleted_by_sender_at TIMESTAMP,
-      deleted_by_receiver_at TIMESTAMP,
-      deleted_for_all_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(conversation_id) REFERENCES dm_conversations(id) ON DELETE CASCADE,
       FOREIGN KEY(sender_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1141,15 +893,6 @@ async function initDb() {
       FOREIGN KEY(shared_book_id) REFERENCES books(id) ON DELETE SET NULL,
       FOREIGN KEY(reply_to_id) REFERENCES dm_messages(id) ON DELETE SET NULL
     );
-    CREATE TABLE IF NOT EXISTS dm_message_reactions (
-      id BIGSERIAL PRIMARY KEY,
-      message_id BIGINT NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      emoji TEXT NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      UNIQUE(message_id,user_id,emoji)
-    );
-    CREATE INDEX IF NOT EXISTS idx_dm_message_reactions_message ON dm_message_reactions(message_id);
 
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS allow_sharing INTEGER DEFAULT 1;
     ALTER TABLE forums ADD COLUMN IF NOT EXISTS share_count INTEGER DEFAULT 0;
@@ -1157,30 +900,6 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_book_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_photo_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_by_sender_at TIMESTAMP;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_by_receiver_at TIMESTAMP;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_for_all_at TIMESTAMP;
-    UPDATE dm_messages SET shared_newspaper_id=NULL
-      WHERE shared_newspaper_id IS NOT NULL
-        AND NOT EXISTS (SELECT 1 FROM newspapers WHERE newspapers.id=dm_messages.shared_newspaper_id);
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname='dm_messages_shared_newspaper_id_fkey'
-          AND conrelid='dm_messages'::regclass
-      ) THEN
-        ALTER TABLE dm_messages
-          ADD CONSTRAINT dm_messages_shared_newspaper_id_fkey
-          FOREIGN KEY(shared_newspaper_id) REFERENCES newspapers(id) ON DELETE SET NULL;
-      END IF;
-    END $$;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS read_until_user1 BIGINT DEFAULT 0;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS show_likes INTEGER DEFAULT 1;
       ALTER TABLE photos ADD COLUMN IF NOT EXISTS allow_comments INTEGER DEFAULT 1;
@@ -1211,9 +930,6 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_voice_calls_caller ON voice_calls(caller_id, status, created_at DESC);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS vip_since TIMESTAMP;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS plus_since TIMESTAMP;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS level_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_id TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_token TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS spotify_refresh TEXT DEFAULT '';
@@ -1222,7 +938,6 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS title TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMP;
-    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
     CREATE INDEX IF NOT EXISTS idx_dm_messages_conversation_created ON dm_messages(conversation_id, created_at, id);
 
     CREATE TABLE IF NOT EXISTS announcements (
@@ -1291,20 +1006,6 @@ async function initDb() {
       created_at TIMESTAMP DEFAULT NOW(),
       UNIQUE(content_type, content_id)
     );
-    CREATE TABLE IF NOT EXISTS user_content_archive (
-      owner_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      content_type TEXT NOT NULL CHECK (content_type IN ('song','forum','book','photo','story','newspaper','poem','video','reals','playlist')),
-      content_id TEXT NOT NULL,
-      state TEXT NOT NULL CHECK (state IN ('archived','trash')),
-      content_data JSONB NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      PRIMARY KEY (owner_id, content_type, content_id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_user_content_archive_state
-      ON user_content_archive (owner_id, state, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_user_content_archive_content
-      ON user_content_archive (content_type, content_id);
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_status TEXT NOT NULL DEFAULT 'active';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderation_reason TEXT DEFAULT '';
     ALTER TABLE groups ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMP;
@@ -1395,6 +1096,17 @@ async function initDb() {
     ALTER TABLE ad_submissions DROP CONSTRAINT IF EXISTS ad_submissions_type_check;
     ALTER TABLE ad_submissions ADD CONSTRAINT ad_submissions_type_check CHECK (type IN ('music','photo','reals'));
 
+    CREATE TABLE IF NOT EXISTS notification_broadcasts (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      link TEXT DEFAULT '',
+      recipient_username TEXT DEFAULT NULL,
+      expires_at TIMESTAMP,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS notifications (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL,
@@ -1404,10 +1116,13 @@ async function initDb() {
       title TEXT DEFAULT '',
       body TEXT DEFAULT '',
       link TEXT DEFAULT '',
+      broadcast_id BIGINT REFERENCES notification_broadcasts(id) ON DELETE CASCADE,
       is_read INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    ALTER TABLE notifications ADD COLUMN IF NOT EXISTS broadcast_id BIGINT REFERENCES notification_broadcasts(id) ON DELETE CASCADE;
+    CREATE INDEX IF NOT EXISTS idx_notifications_broadcast_id ON notifications(broadcast_id);
     CREATE TABLE IF NOT EXISTS store_products (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
@@ -1418,19 +1133,12 @@ async function initDb() {
       original_price NUMERIC(10,2) DEFAULT NULL,
       duration_days INTEGER NOT NULL DEFAULT 30,
       visible INTEGER NOT NULL DEFAULT 1,
-      purchase_enabled INTEGER NOT NULL DEFAULT 1,
       badge_color TEXT DEFAULT '#fbbf24',
       badge_icon TEXT DEFAULT 'fas fa-gem',
       sort_order INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
-    ALTER TABLE store_products ADD COLUMN IF NOT EXISTS purchase_enabled INTEGER NOT NULL DEFAULT 1;
-    INSERT INTO store_products (name,description,features,type,price,duration_days,visible,purchase_enabled,badge_color,badge_icon,sort_order)
-    SELECT 'Kırmızı Tik','CigCig tarafından doğrulanmış hesap rozeti. Bu ürün şu anda satın alınamaz.',
-      '[\"Doğrulanmış hesap rozeti\"]','red_tick',0,0,1,0,'#ef3340','fas fa-check',-10
-    WHERE NOT EXISTS (SELECT 1 FROM store_products WHERE type='red_tick');
-    UPDATE store_products SET purchase_enabled=0 WHERE type='red_tick';
 
     CREATE TABLE IF NOT EXISTS subscriptions (
       id BIGSERIAL PRIMARY KEY,
@@ -1534,7 +1242,6 @@ async function initDb() {
       distributor TEXT DEFAULT '',
       genre TEXT DEFAULT '',
       lyrics TEXT DEFAULT '',
-      lyrics_timed JSONB NOT NULL DEFAULT '[]'::jsonb,
       cover_url TEXT DEFAULT '',
       audio_url TEXT NOT NULL,
       share_reason TEXT DEFAULT '',
@@ -1548,7 +1255,6 @@ async function initDb() {
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_reason TEXT DEFAULT '';
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS ban_until TIMESTAMP;
     ALTER TABLE songs ADD COLUMN IF NOT EXISTS remastered_audio_url TEXT DEFAULT '';
-    ALTER TABLE songs ADD COLUMN IF NOT EXISTS lyrics_timed JSONB NOT NULL DEFAULT '[]'::jsonb;
 
     CREATE TABLE IF NOT EXISTS song_recommendations (
       id BIGSERIAL PRIMARY KEY,
@@ -1582,35 +1288,9 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS music_ad_states (
       user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       completed_song_count INTEGER DEFAULT 0,
-      listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
       pending_ad_id BIGINT REFERENCES music_ads(id) ON DELETE SET NULL,
-      pending_ad_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
       ad_started_at TIMESTAMP,
       updated_at TIMESTAMP DEFAULT NOW()
-    );
-    ALTER TABLE music_ad_states ADD COLUMN IF NOT EXISTS listening_date DATE NOT NULL DEFAULT CURRENT_DATE;
-    ALTER TABLE music_ad_states ADD COLUMN IF NOT EXISTS pending_ad_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
-
-    CREATE TABLE IF NOT EXISTS music_listen_sessions (
-      id UUID PRIMARY KEY,
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
-      last_position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
-      listened_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
-      last_ping_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
-      counted_at TIMESTAMP,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_music_listen_sessions_user_song_date
-      ON music_listen_sessions(user_id, song_id, listening_date, created_at DESC);
-    CREATE TABLE IF NOT EXISTS music_ad_listens (
-      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
-      listening_date DATE NOT NULL DEFAULT CURRENT_DATE,
-      listened_seconds DOUBLE PRECISION NOT NULL,
-      counted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      PRIMARY KEY(user_id, song_id, listening_date)
     );
 
     -- Reals video reklamları. Reklamlar normal Reals içeriklerinden ayrıdır:
@@ -1725,40 +1405,6 @@ async function initDb() {
       WHERE public_id IS NULL OR btrim(public_id) = '';
     CREATE UNIQUE INDEX IF NOT EXISTS playlists_public_id_unique ON playlists(public_id) WHERE public_id IS NOT NULL;
 
-    CREATE TABLE IF NOT EXISTS group_channels (
-      id BIGSERIAL PRIMARY KEY,
-      group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      icon TEXT DEFAULT 'fas fa-hashtag',
-      description TEXT DEFAULT '',
-      is_default INTEGER DEFAULT 0,
-      can_view_history INTEGER DEFAULT 1,
-      can_write INTEGER DEFAULT 1,
-      visibility TEXT DEFAULT 'all',
-      created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      created_at TIMESTAMP DEFAULT NOW(),
-      UNIQUE(group_id, name)
-    );
-    CREATE INDEX IF NOT EXISTS idx_group_channels_group ON group_channels(group_id);
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS icon TEXT DEFAULT 'fas fa-hashtag';
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS is_default INTEGER DEFAULT 0;
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS can_view_history INTEGER DEFAULT 1;
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS can_write INTEGER DEFAULT 1;
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'all';
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS created_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
-
-    CREATE TABLE IF NOT EXISTS group_channel_messages (
-      id BIGSERIAL PRIMARY KEY,
-      channel_id BIGINT NOT NULL REFERENCES group_channels(id) ON DELETE CASCADE,
-      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-      content TEXT NOT NULL,
-      image_url TEXT DEFAULT '',
-      edited_at TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_group_channel_messages_channel ON group_channel_messages(channel_id, created_at DESC);
-
     CREATE TABLE IF NOT EXISTS group_approval_systems (
       id BIGSERIAL PRIMARY KEY,
       group_id BIGINT NOT NULL UNIQUE REFERENCES groups(id) ON DELETE CASCADE,
@@ -1783,14 +1429,6 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_group_approval_requests_pending ON group_approval_requests(group_id, status);
 
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS moderators_can_manage INTEGER DEFAULT 0;
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS moderators_can_write INTEGER DEFAULT 0;
-    ALTER TABLE group_channels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
-    INSERT INTO group_channels (group_id, name, icon, is_default, created_by)
-      SELECT g.id, 'kanal', 'fas fa-hashtag', 1, g.owner_id
-      FROM groups g
-      WHERE NOT EXISTS (SELECT 1 FROM group_channels gc WHERE gc.group_id = g.id);
-    UPDATE group_channels SET can_write=1 WHERE is_default=1 AND COALESCE(can_write, 0)=0;
   `);
 
   // Seed default levels
@@ -1840,7 +1478,7 @@ TeaTube olarak, 6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında k
 TeaTube platformu, veri sorumlusu sıfatıyla hareket etmektedir.
 
 2. İŞLENEN KİŞİSEL VERİLER
-Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) ve hesap güvenliği için Ultra Ban kapsamında IP alt ağı ile tarayıcı özelliklerinden sunucu anahtarı kullanılarak üretilen özetler işlenmektedir.
+Kullanıcı adı, e-posta adresi, IP adresi, platform içi içerikleriniz (forum gönderileri, kitap sayfaları, grup mesajları) işlenmektedir.
 
 3. KİŞİSEL VERİLERİN İŞLENME AMACI
 Kişisel verileriniz; platform hizmetlerinin sunulması, hesap yönetimi, güvenlik ve sahteciliğin önlenmesi amacıyla işlenmektedir.
@@ -1891,11 +1529,9 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
       added_by BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       position INTEGER NOT NULL DEFAULT 0,
       state TEXT NOT NULL DEFAULT 'queued',
-      position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
       started_at TIMESTAMP,
       created_at TIMESTAMP DEFAULT NOW()
     );
-    ALTER TABLE listening_room_tracks ADD COLUMN IF NOT EXISTS position_seconds DOUBLE PRECISION NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS idx_listening_room_tracks ON listening_room_tracks(room_id, position, id);
 
     CREATE TABLE IF NOT EXISTS listening_room_requests (

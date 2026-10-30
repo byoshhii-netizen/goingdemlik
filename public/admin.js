@@ -588,7 +588,7 @@ function loadSection(section) {
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages, 'message-reports': renderMessageReports,
-    announcements: renderAnnouncements,
+    announcements: renderAnnouncements, notifications: renderAdminNotifications,
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
     'content-analytics': renderContentAnalytics,
     'shop': renderShop,
@@ -598,6 +598,87 @@ function loadSection(section) {
     , 'homepage-sections': renderHomepageSections
   };
   if (map[section]) map[section](main);
+}
+
+async function renderAdminNotifications(main) {
+  if (!adminProfile?.is_super_admin) {
+    main.innerHTML = '<div class="card"><div class="card-body" style="color:var(--red2);padding:20px">Bildirim yönetimi yalnızca ana admin tarafından kullanılabilir.</div></div>';
+    return;
+  }
+  main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+  try {
+    const broadcasts = await adminApi('/notifications');
+    main.innerHTML = `
+      <div class="adm-section-header">
+        <div><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bell"></i></div>Bildirimler</div><div class="adm-section-subtitle">Kullanıcılara CigCig logolu, süreli veya kalıcı bildirim gönder.</div></div>
+      </div>
+      <div class="card" style="margin-bottom:18px">
+        <div class="card-body" style="padding:20px">
+          <div class="form-row">
+            <div class="form-group"><label for="broadcast-title">Başlık</label><input id="broadcast-title" maxlength="120" placeholder="Bildirim başlığı" /></div>
+            <div class="form-group"><label for="broadcast-user">Alıcı (boş bırakılırsa herkese gönderilir)</label><input id="broadcast-user" maxlength="40" placeholder="Kullanıcı adı" /></div>
+          </div>
+          <div class="form-group"><label for="broadcast-body">Mesaj</label><textarea id="broadcast-body" rows="4" maxlength="2000" placeholder="Bildirim metni"></textarea></div>
+          <div class="form-row">
+            <div class="form-group"><label for="broadcast-link">Site içi bağlantı (isteğe bağlı)</label><input id="broadcast-link" maxlength="500" placeholder="/medyakesfet" /></div>
+            <div class="form-group"><label for="broadcast-duration">Bildirim süresi</label><select id="broadcast-duration"><option value="">Kalıcı (geçmişte kalsın)</option><option value="1">1 saat</option><option value="6">6 saat</option><option value="24">1 gün</option><option value="72">3 gün</option><option value="168">7 gün</option><option value="720">30 gün</option></select></div>
+          </div>
+          <div id="broadcast-error" class="form-error" style="margin-bottom:10px"></div>
+          <button class="btn btn-primary" id="broadcast-send"><i class="fas fa-paper-plane"></i> Bildirimi gönder</button>
+        </div>
+      </div>
+      <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-clock-rotate-left"></i></div>Gönderim geçmişi</div></div>
+      <div class="card"><div class="table-wrap"><table class="adm-table">
+        <thead><tr><th>Başlık / Mesaj</th><th>Alıcı</th><th>Gönderim</th><th>Süre</th><th>Kişi</th><th>İşlem</th></tr></thead>
+        <tbody>${broadcasts.length ? broadcasts.map(item => {
+          const expiry = item.expires_at ? new Date(item.expires_at) : null;
+          const expired = expiry && expiry <= new Date();
+          return `<tr>
+            <td><b>${escHtml(item.title)}</b><small style="display:block;max-width:360px;white-space:normal;color:var(--text3)">${escHtml(item.body)}</small></td>
+            <td>${item.recipient_username ? '@' + escHtml(item.recipient_username) : 'Herkes'}</td>
+            <td>${formatDate(item.created_at)}</td>
+            <td>${!expiry ? 'Kalıcı' : expired ? 'Süresi doldu' : formatDate(item.expires_at)}</td>
+            <td>${Number(item.recipient_count || 0).toLocaleString('tr-TR')}</td>
+            <td><button class="btn btn-ghost btn-sm broadcast-delete" data-id="${item.id}" title="Geçmişten ve kullanıcılardan sil"><i class="fas fa-trash"></i> Sil</button></td>
+          </tr>`;
+        }).join('') : '<tr><td colspan="6" style="padding:30px;text-align:center;color:var(--text3)">Henüz bildirim gönderilmemiş.</td></tr>'}</tbody>
+      </table></div></div>`;
+    $('#broadcast-send').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const errorEl = $('#broadcast-error');
+      const payload = {
+        title: $('#broadcast-title').value.trim(),
+        body: $('#broadcast-body').value.trim(),
+        recipient_username: $('#broadcast-user').value.trim(),
+        link: $('#broadcast-link').value.trim(),
+        duration_hours: $('#broadcast-duration').value
+      };
+      button.disabled = true;
+      errorEl.textContent = '';
+      try {
+        const result = await adminApi('/notifications', { method: 'POST', body: JSON.stringify(payload) });
+        toast(`Bildirim ${Number(result.recipient_count).toLocaleString('tr-TR')} kişiye gönderildi.`);
+        loadSection('notifications');
+      } catch (error) {
+        errorEl.textContent = error.message || 'Bildirim gönderilemedi';
+        button.disabled = false;
+      }
+    });
+    main.querySelectorAll('.broadcast-delete').forEach(button => button.addEventListener('click', async () => {
+      if (!confirm('Bu bildirimi hem geçmişten hem kullanıcıların bildirimlerinden silmek istiyor musunuz?')) return;
+      button.disabled = true;
+      try {
+        await adminApi('/notifications/' + encodeURIComponent(button.dataset.id), { method: 'DELETE' });
+        toast('Bildirim silindi');
+        loadSection('notifications');
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message || 'Bildirim silinemedi', 'error');
+      }
+    }));
+  } catch (error) {
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2);padding:20px">${escHtml(error.message || 'Bildirim geçmişi yüklenemedi')}</div></div>`;
+  }
 }
 
 async function renderAccountDeletions(main) {
