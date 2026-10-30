@@ -3162,6 +3162,12 @@ $('#nav-user-btn').addEventListener('click', event => {
   if (event.target.closest('a[data-link]')) return;
   $('#dropdown-menu').classList.toggle('hidden');
 });
+$('#mbb-auth')?.addEventListener('click', event => {
+  if (!currentUser) return;
+  event.preventDefault();
+  event.stopPropagation();
+  navigate(profileRoute(currentUser.username));
+});
 document.addEventListener('click', e => {
   if (!$('#nav-dropdown')?.contains(e.target)) $('#dropdown-menu')?.classList.add('hidden');
   if (!$('#new-btn-wrap')?.contains(e.target)) closeDesktopCreateMenu();
