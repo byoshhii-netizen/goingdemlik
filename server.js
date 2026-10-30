@@ -5226,12 +5226,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     return res.json({ blocked_by_me: true, user: sanitizeUserForFeatures(user, features) });
   }
   const badges = await getUserProfileBadges(user, { featureStates: features });
-  const isOwner = req.user && (
-    String(req.user.id) === String(user.id)
-    || (!!req.user.username && String(req.user.username).trim().toLocaleLowerCase('tr-TR')
-      === String(user.username || '').trim().toLocaleLowerCase('tr-TR')
-    )
-  );
+  const isOwner = req.user && String(req.user.id) === String(user.id);
   const isFollower = req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length > 0;
   const relationshipState = req.user && !isOwner
     ? (await query(`
