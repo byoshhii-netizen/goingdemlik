@@ -3012,7 +3012,7 @@ function updateNavUI() {
     const btn = $('#nav-user-btn');
     btn.title = `${currentUser.nickname || currentUser.username} (@${currentUser.username})`;
     btn.setAttribute('aria-label', 'Hesap menüsünü aç');
-    btn.innerHTML = nav;
+    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link">${nav}</a><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
     $('#dropdown-profile').setAttribute('href', profileRoute(currentUser.username));
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -3158,7 +3158,8 @@ document.addEventListener('touchend', event => {
 
 document.addEventListener('touchcancel', () => { mobileSwipeStart = null; }, { passive: true });
 
-$('#nav-user-btn').addEventListener('click', () => {
+$('#nav-user-btn').addEventListener('click', event => {
+  if (event.target.closest('a[data-link]')) return;
   $('#dropdown-menu').classList.toggle('hidden');
 });
 document.addEventListener('click', e => {
