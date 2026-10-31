@@ -156,6 +156,7 @@ async function initDb() {
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS duration_hours INTEGER NOT NULL DEFAULT 24;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS public_id TEXT;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_suspended INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS close_friends_only INTEGER NOT NULL DEFAULT 0;
     UPDATE stories SET public_id='h' || substr(md5(random()::text || id::text), 1, 10) WHERE public_id IS NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_stories_public_id ON stories(public_id);
     CREATE INDEX IF NOT EXISTS idx_stories_active ON stories(expires_at, user_id);
@@ -814,6 +815,7 @@ async function initDb() {
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS photos (
       id BIGSERIAL PRIMARY KEY,
@@ -1134,6 +1136,7 @@ async function initDb() {
       shared_story_id BIGINT,
       shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL,
       shared_song_id BIGINT,
+      song_start_seconds INTEGER NOT NULL DEFAULT 0,
       shared_gif_url TEXT NOT NULL DEFAULT '',
       reply_to_id BIGINT,
       deleted_by_sender INTEGER DEFAULT 0,
@@ -1168,6 +1171,7 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_story_id BIGINT;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_newspaper_id BIGINT REFERENCES newspapers(id) ON DELETE SET NULL;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
@@ -1368,6 +1372,7 @@ async function initDb() {
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS song_id BIGINT;
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER DEFAULT 0;
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS close_friends_only INTEGER NOT NULL DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS photo_ads (
       id BIGSERIAL PRIMARY KEY,

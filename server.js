@@ -43,11 +43,31 @@ async function query(text, params = []) {
     : text;
   const result = await databaseQuery(statement, params);
   if (isNotificationInsert) {
-    for (const notification of result.rows || []) {
+    const notifications = result.rows || [];
+    const selfNotificationIds = notifications.filter(notification =>
+      notification.actor_username
+      && !['restriction', 'content_suspended'].includes(notification.type)
+    ).map(notification => notification.id);
+    if (selfNotificationIds.length) {
+      await databaseQuery(
+        `DELETE FROM notifications n USING users u
+         WHERE n.id=ANY($1::bigint[]) AND n.user_id=u.id
+           AND LOWER(LTRIM(BTRIM(n.actor_username),'@'))=LOWER(u.username)`,
+        [selfNotificationIds]
+      );
+    }
+    for (const notification of notifications) {
+      if (selfNotificationIds.includes(notification.id)) continue;
       io.to(`user:${notification.user_id}`).emit('notification:new', notification);
     }
   }
   return result;
+}
+function closeFriendsVisibilitySql(contentAlias, viewerIdParam) {
+  return `(COALESCE(${contentAlias}.close_friends_only,0)=0
+    OR ${contentAlias}.user_id=${viewerIdParam}
+    OR EXISTS (SELECT 1 FROM close_friends cf
+      WHERE cf.user_id=${contentAlias}.user_id AND cf.friend_id=${viewerIdParam}))`;
 }
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
@@ -794,15 +814,22 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
     preview: message.content || (message.image_url ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
   });
   if (String(sender.id) !== String(recipient.id)) {
-    io.to(`user:${recipient.id}`).emit('dm:incoming', {
-      conversationId,
-      senderId: sender.id,
-      username: sender.username,
-      name: sender.nickname || sender.username,
-      avatar: sender.avatar || '',
-      avatarRemoved: sender.avatar_removed,
-      preview: message.content || (message.image_url || message.image_urls?.length ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
-    });
+    query(`SELECT CASE WHEN user1_id=$2 THEN
+        (COALESCE(mute_forever_user1,0)=1 OR (muted_until_user1 IS NOT NULL AND muted_until_user1>NOW()))
+      ELSE (COALESCE(mute_forever_user2,0)=1 OR (muted_until_user2 IS NOT NULL AND muted_until_user2>NOW()))
+      END AS muted
+      FROM dm_conversations WHERE id=$1`, [conversationId, recipient.id])
+      .then(({ rows }) => io.to(`user:${recipient.id}`).emit('dm:incoming', {
+        conversationId,
+        senderId: sender.id,
+        username: sender.username,
+        name: sender.nickname || sender.username,
+        avatar: sender.avatar || '',
+        avatarRemoved: sender.avatar_removed,
+        muted: rows[0]?.muted === true,
+        preview: message.content || (message.image_url || message.image_urls?.length ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
+      }))
+      .catch(error => console.warn('DM notification mute state could not be loaded:', error.message || error));
   }
 }
 
@@ -1353,7 +1380,7 @@ app.get('/sitemap.xml', async (req, res) => {
     query("SELECT s.slug, s.title, s.cover_url, s.published_at FROM songs s LEFT JOIN users u ON u.id=s.uploader_id WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='song' AND a.content_id=s.id::text) ORDER BY s.published_at DESC LIMIT 2000").then(r => r.rows),
     query(`SELECT p.id, p.url, p.title, p.caption, p.created_at FROM photos p
       LEFT JOIN users u ON u.id=p.user_id
-      WHERE COALESCE(u.is_private,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(p.close_friends_only,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
       ORDER BY p.created_at DESC LIMIT 10000`).then(r => r.rows),
     query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
@@ -2706,6 +2733,16 @@ async function notifyFollowersOfContent(actorUser, type, title, body, link) {
   const { rows: followers } = await query("SELECT follower_id FROM follows WHERE following_id=$1 AND status='accepted' AND follower_id<>$1", [actorUser.id]);
   for (const follower of followers) {
     await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [follower.follower_id, type, actorUser.username, actorUser.avatar || '', title, body, link]);
+  }
+}
+
+async function notifyCloseFriendsOfContent(actorUser, type, title, body, link) {
+  const { rows: friends } = await query('SELECT friend_id FROM close_friends WHERE user_id=$1 AND friend_id<>$1', [actorUser.id]);
+  for (const friend of friends) {
+    await query(
+      'INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [friend.friend_id, type, actorUser.username, actorUser.avatar || '', title, body, link]
+    );
   }
 }
 
@@ -4725,11 +4762,11 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const limit = 60;
   let sql, params;
   if (before_id) {
-    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url, song.slug AS song_slug FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.group_id=$1 AND gm.id < $2 ORDER BY gm.created_at DESC LIMIT $3`;
     sql = sql.replace(' ORDER BY gm.created_at DESC LIMIT $3', '');
     params = [group.id, before_id];
   } else {
-    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.group_id=$1`;
+    sql = `SELECT gm.*, EXISTS (SELECT 1 FROM group_message_deletions gmd WHERE gmd.message_id=gm.id AND gmd.user_id=${Number(req.user?.id || 0)}) AS deleted_for_me, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url, song.slug AS song_slug FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.group_id=$1`;
     params = [group.id];
   }
   sql += ` ORDER BY gm.created_at DESC LIMIT $${params.length + 1}`;
@@ -4779,6 +4816,8 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     }
   }
   let shared_song_id = null;
+  const songStartSeconds = Number(req.body?.song_start_seconds ?? 0);
+  if (!Number.isInteger(songStartSeconds) || songStartSeconds < 0 || songStartSeconds > 3600) return res.status(400).json({ error: 'Müzik başlangıç zamanı geçersiz.' });
   if (req.body?.shared_song_id !== undefined && req.body.shared_song_id !== null && req.body.shared_song_id !== '') {
     shared_song_id = Number(req.body.shared_song_id);
     if (!Number.isSafeInteger(shared_song_id) || shared_song_id < 1) return res.status(400).json({ error: 'Geçersiz müzik.' });
@@ -4794,10 +4833,10 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     const { rows: replyRows } = await query('SELECT id FROM group_messages WHERE id=$1 AND group_id=$2', [replyId, group.id]);
     if (!replyRows.length) return res.status(400).json({ error: 'Yanıtlanacak mesaj bulunamadı' });
   }
-  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url,image_urls,shared_gif_url,shared_song_id,reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) RETURNING id',
-    [group.id, req.user.id, content, image_url, JSON.stringify(imageUrls), shared_gif_url, shared_song_id, replyId]);
+  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url,image_urls,shared_gif_url,shared_song_id,song_start_seconds,reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING id',
+    [group.id, req.user.id, content, image_url, JSON.stringify(imageUrls), shared_gif_url, shared_song_id, shared_song_id ? songStartSeconds : 0, replyId]);
   await notifyGroupMentions(group, req.user, content || '').catch(() => {});
-  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.id=$1`, [rows[0].id]);
+  const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url, song.slug AS song_slug FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.id=$1`, [rows[0].id]);
   const { rows: memberRows } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [group.id]);
   io.to(memberRows.map(member => `user:${member.user_id}`)).emit('group:message', {
     slug: group.slug,
@@ -4823,7 +4862,7 @@ app.put('/api/group/:slug/messages/:id', authMiddleware, async (req, res) => {
   const content = String(req.body.content || '').trim();
   if (!content && !msg.image_url && !msg.shared_gif_url && !msg.shared_song_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows } = await query('UPDATE group_messages SET content=$1,edited_at=NOW() WHERE id=$2 RETURNING *', [content, msg.id]);
-  const { rows: full } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.id=$1`, [msg.id]);
+  const { rows: full } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url, song.slug AS song_slug FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.id=$1`, [msg.id]);
   res.json(full[0] || rows[0]);
 });
 
@@ -5339,10 +5378,11 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     features.levels ? query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null) : Promise.resolve(null),
     features.levels ? query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows) : Promise.resolve([]),
     query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
-    query(`SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,s.title AS song_title,s.artist_name AS song_artist
+    query(`SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,p.close_friends_only,s.title AS song_title,s.artist_name AS song_artist
       FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1
+        AND ${closeFriendsVisibilitySql('p', '$2')}
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='photo' AND a.content_id=p.id::text)
-      ORDER BY p.created_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
+      ORDER BY p.created_at DESC LIMIT 50`, [user.id, req.user?.id || 0]).then(r => r.rows),
     query(`SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.avatar, u.avatar_removed,
       (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
       (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count
@@ -5360,7 +5400,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='song' AND a.content_id=s.id::text)
       ORDER BY s.published_at DESC LIMIT 50`, [user.id]).then(r => r.rows),
     query(`SELECT
-      (SELECT COUNT(*) FROM photos p WHERE p.user_id=$1
+      (SELECT COUNT(*) FROM photos p WHERE p.user_id=$1 AND ${closeFriendsVisibilitySql('p', '$2')}
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='photo' AND a.content_id=p.id::text)) AS photo_count,
       (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1 AND v.is_reals=0
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='video' AND a.content_id=v.id::text)) AS regular_video_count,
@@ -5369,7 +5409,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND a.content_id=v.id::text)) AS video_count,
       (SELECT COUNT(*) FROM songs s WHERE s.uploader_id=$1 AND s.status='active'
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='song' AND a.content_id=s.id::text)) AS song_count`, [user.id]).then(r => r.rows[0]),
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='song' AND a.content_id=s.id::text)) AS song_count`, [user.id, req.user?.id || 0]).then(r => r.rows[0]),
     query('SELECT id,image_url,created_at FROM profile_avatar_archive WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20', [user.id]).then(r => r.rows),
   ]);
   const ad_panels = isOwner ? await listAdPanelAssignments(user.id) : [];
@@ -6195,12 +6235,12 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
   if (requestedHashtag && !/^[\p{L}\p{N}_]{1,80}$/u.test(requestedHashtag)) {
     return res.status(400).json({ error: 'Hashtag geçersiz.' });
   }
-  const base = `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
+  const base = `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, p.close_friends_only, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)`;
-  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted')) AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())`;
+  const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted')) AND ${closeFriendsVisibilitySql('p', '$1')} AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())`;
   const params = [userId];
   const filters = [visibility];
   if (username) {
@@ -6221,14 +6261,14 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   await ensurePhotoInteractionSchema();
   const userId = req.user ? req.user.id : 0;
   const { rows } = await query(
-    `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds,
+    `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, p.close_friends_only,
     s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
       p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
       (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id
-    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text) AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW()) AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
+    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text) AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW()) AND ${closeFriendsVisibilitySql('p', '$2')} AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
     [req.params.id, userId]
   );
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
@@ -6236,7 +6276,10 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
 });
 
 app.post('/api/photos/:id/view', optionalAuth, async (req, res) => {
-  const { rows } = await query('SELECT id FROM photos WHERE id=$1', [req.params.id]);
+  const viewerId = req.user?.id || 0;
+  const { rows } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id
+    WHERE p.id=$1 AND ${closeFriendsVisibilitySql('p', '$2')}
+      AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   await recordContentView('photo', rows[0].id, req);
   res.json({ ok: true });
@@ -6255,12 +6298,17 @@ app.post('/api/photos', authMiddleware, uploadLimiter, upload.fields([{ name: 'i
     const url = imageUrls[0];
     const b = req.body;
     const songStart = Math.max(0, parseInt(b.song_start_seconds, 10) || 0);
-    const { rows } = await query(`INSERT INTO photos (user_id,url,image_urls,public_id,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares)
-      VALUES ($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`, [
+    const { rows } = await query(`INSERT INTO photos (user_id,url,image_urls,public_id,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares,close_friends_only)
+      VALUES ($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`, [
       req.user.id, url, JSON.stringify(imageUrls), files[0].cloudinary_public_id || '', (b.title || '').trim(), (b.caption || '').trim(), (b.location || '').trim(), b.song_id || null,
-      songStart, parseFormBoolean(b.show_likes, true) ? 1 : 0, parseFormBoolean(b.allow_comments, true) ? 1 : 0, parseFormBoolean(b.allow_shares, true) ? 1 : 0
+      songStart, parseFormBoolean(b.show_likes, true) ? 1 : 0, parseFormBoolean(b.allow_comments, true) ? 1 : 0, parseFormBoolean(b.allow_shares, true) ? 1 : 0, parseFormBoolean(b.close_friends_only, false) ? 1 : 0
     ]);
-    await notifyFollowersOfContent(req.user, 'new_photo', 'Yeni fotoğraf', `@${req.user.username} yeni bir fotoğraf paylaştı.`, '/foto/' + rows[0].id).catch(() => {});
+    const notifyNewPhoto = parseFormBoolean(b.close_friends_only, false)
+      ? notifyCloseFriendsOfContent
+      : notifyFollowersOfContent;
+    await notifyNewPhoto(req.user, 'new_photo', 'Yeni fotoğraf', `@${req.user.username} yeni bir fotoğraf paylaştı.`, '/foto/' + rows[0].id).catch(error => {
+      console.warn('Photo follower notifications failed:', error.message || error);
+    });
     res.json(rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -6530,7 +6578,7 @@ app.put('/api/users/:username/story-visibility', authMiddleware, async (req, res
 app.get('/api/stories', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.close_friends_only,s.created_at,s.expires_at,
       u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
@@ -6543,6 +6591,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
       AND (s.is_suspended=0 OR s.user_id=$1)
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=s.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())
       AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$1 AND usv.hidden_user_id=s.user_id)
+      AND ${closeFriendsVisibilitySql('s', '$1')}
       AND (s.user_id=$1 OR COALESCE(u.is_private,0)=0 OR EXISTS(
       SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=s.user_id AND f.status='accepted'))
     ORDER BY (CASE WHEN s.user_id=$1 THEN 0 WHEN EXISTS(
@@ -6553,7 +6602,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
 app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.created_at,s.expires_at,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.close_friends_only,s.created_at,s.expires_at,
   u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
@@ -6564,6 +6613,7 @@ app.get('/api/stories/:id', optionalAuth, async (req, res) => {
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=s.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW())
       AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
+      AND ${closeFriendsVisibilitySql('s', '$2')}
       AND (s.user_id=$2 OR s.is_suspended=0)`, [req.params.id, viewerId]);
   if (!rows.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = rows[0];
@@ -6589,9 +6639,11 @@ app.post('/api/stories', authMiddleware, uploadLimiter, async (req, res, next) =
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
-    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,media_filter,duration_hours,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::integer,NOW() + ($9::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, normalizeMediaFilter(req.body.media_filter), durationHours]);
+    const closeFriendsOnly = parseFormBoolean(req.body.close_friends_only, false) ? 1 : 0;
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,media_filter,duration_hours,close_friends_only,expires_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::integer,$10,NOW() + ($9::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), mediaUrl, mediaType, (req.body.caption || '').trim(), songId, songStart, normalizeMediaFilter(req.body.media_filter), durationHours, closeFriendsOnly]);
     res.json(rows[0]);
-    notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(error => {
+    const notifyNewStory = closeFriendsOnly ? notifyCloseFriendsOfContent : notifyFollowersOfContent;
+    notifyNewStory(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(error => {
       console.warn('Story follower notifications failed:', error.message || error);
     });
   } catch (e) {
@@ -6618,22 +6670,26 @@ app.post('/api/stories/upload-url', authMiddleware, async (req, res) => {
 
 app.post('/api/stories/from-url', authMiddleware, uploadLimiter, async (req, res) => {
   if (await denyIfRestricted(req, res, 'story')) return;
-  const { media_url, caption, song_id, song_start_seconds, media_filter, duration_hours } = req.body;
+  const { media_url, caption, song_id, song_start_seconds, media_filter, duration_hours, close_friends_only } = req.body;
   if (!media_url) return res.status(400).json({ error: 'Hikaye videosu gerekli' });
   const songId = song_id ? Number(song_id) : null;
   const songStart = Math.max(0, parseInt(song_start_seconds, 10) || 0);
   const durationHours = [5, 10, 24].includes(Number(duration_hours)) ? Number(duration_hours) : 24;
   try {
-    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,media_filter,duration_hours,expires_at) VALUES ($1,$2,$3,'video',$4,$5,$6,$7,$8::integer,NOW() + ($8::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), media_url, String(caption || '').trim(), songId, songStart, normalizeMediaFilter(media_filter), durationHours]);
+    const closeFriendsOnly = parseFormBoolean(close_friends_only, false) ? 1 : 0;
+    const { rows } = await query(`INSERT INTO stories (user_id,public_id,media_url,media_type,caption,song_id,song_start_seconds,media_filter,duration_hours,close_friends_only,expires_at) VALUES ($1,$2,$3,'video',$4,$5,$6,$7,$8::integer,$9,NOW() + ($8::integer * INTERVAL '1 hour')) RETURNING *`, [req.user.id, randomStoryPublicId(), media_url, String(caption || '').trim(), songId, songStart, normalizeMediaFilter(media_filter), durationHours, closeFriendsOnly]);
     res.json(rows[0]);
-    notifyFollowersOfContent(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(() => {});
+    const notifyNewStory = closeFriendsOnly ? notifyCloseFriendsOfContent : notifyFollowersOfContent;
+    notifyNewStory(req.user, 'new_story', 'Yeni hikaye', `@${req.user.username} yeni bir hikaye paylaştı.`, '/hikaye/' + rows[0].public_id).catch(error => {
+      console.warn('Story follower notifications failed:', error.message || error);
+    });
   } catch (error) { res.status(500).json({ error: 'Hikaye kaydedilemedi: ' + error.message }); }
 });
 
 app.post('/api/stories/:id/view', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND ${closeFriendsVisibilitySql('s', '$2')} AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   await recordContentView('story', story[0].id, req);
   if (req.user?.id) {
@@ -6736,7 +6792,13 @@ app.delete('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
 });
 
 app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
-  const { rows: stories } = await query('SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0', [req.params.id]);
+  const { rows: stories } = await query(`SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar
+    FROM stories s JOIN users u ON u.id=s.user_id
+    WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0
+      AND ${closeFriendsVisibilitySql('s', '$2')}
+      AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
+      AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`,
+  [req.params.id, req.user.id]);
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = stories[0];
   const { rows: existing } = await query('SELECT id FROM story_likes WHERE story_id=$1 AND user_id=$2', [story.id, req.user.id]);
@@ -6764,8 +6826,11 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
     `SELECT s.id, s.user_id, u.username AS owner_username
      FROM stories s
      JOIN users u ON u.id=s.user_id
-     WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0`,
-    [req.params.id]
+     WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0
+       AND ${closeFriendsVisibilitySql('s', '$2')}
+       AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
+       AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`,
+    [req.params.id, req.user.id]
   );
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = stories[0];
@@ -6810,7 +6875,7 @@ app.post('/api/photos/:id/like', authMiddleware, async (req, res) => {
     }
     const photo = photoRows[0];
     const { rows } = await query(`SELECT p.id, COALESCE(p.show_likes,1) AS show_likes FROM photos p LEFT JOIN users u ON u.id=p.user_id
-      WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
+      WHERE p.id=$1 AND ${closeFriendsVisibilitySql('p', '$2')} AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
     if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     if (Number(rows[0].show_likes ?? photo.show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni kapalı.' });
     const { rows: exists } = await query('SELECT id FROM photo_likes WHERE photo_id=$1 AND user_id=$2', [photoId, userId]);
@@ -6838,7 +6903,7 @@ app.get('/api/photos/:id/comments', optionalAuth, async (req, res) => {
     await ensurePhotoInteractionSchema();
     const photoId = req.params.id;
     const userId = req.user ? req.user.id : 0;
-    const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
+    const { rows: visible } = await query(`SELECT p.id FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND ${closeFriendsVisibilitySql('p', '$2')} AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, userId]);
     if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     const { rows } = await query(`SELECT pc.id, pc.content, pc.created_at, pc.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at,
       (SELECT COUNT(*) FROM photo_comment_likes pcl WHERE pcl.comment_id=pc.id) AS like_count,
@@ -6864,7 +6929,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
       await query('DELETE FROM photo_comments WHERE photo_id=$1', [photoId]);
       return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     }
-    const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
+    const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND ${closeFriendsVisibilitySql('p', '$2')} AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
     if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     if (Number(rows[0].allow_comments ?? photoExists[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
     await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
@@ -6901,7 +6966,14 @@ app.post('/api/photos/comments/:id/like', authMiddleware, async (req, res) => {
       await query('DELETE FROM photo_comment_likes WHERE id=$1', [existing[0].id]);
       return res.json({ liked: false });
     }
-    const { rows: comment } = await query('SELECT id FROM photo_comments WHERE id=$1', [commentId]);
+    const { rows: comment } = await query(`SELECT pc.id FROM photo_comments pc
+      JOIN photos p ON p.id=pc.photo_id
+      LEFT JOIN users u ON u.id=p.user_id
+      WHERE pc.id=$1 AND ${closeFriendsVisibilitySql('p', '$2')}
+        AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2
+          OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted')
+          OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
+      [commentId, req.user.id]);
     if (!comment.length) return res.status(404).json({ error: 'Yorum bulunamadı' });
     await query('INSERT INTO photo_comment_likes (comment_id,user_id) VALUES ($1,$2) ON CONFLICT (comment_id,user_id) DO NOTHING', [commentId, req.user.id]);
     res.json({ liked: true });
@@ -9914,7 +9986,7 @@ app.get('/fotograflar', async (req, res) => {
   try {
     const { rows } = await query(`SELECT p.id, p.url, p.title, p.caption, p.location, p.created_at, u.username
       FROM photos p LEFT JOIN users u ON u.id=p.user_id
-      WHERE COALESCE(u.is_private,0)=0
+      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(p.close_friends_only,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
       ORDER BY p.created_at DESC LIMIT 100`);
     photos = rows;
@@ -9937,7 +10009,7 @@ app.get('/fotograflar', async (req, res) => {
 app.get('/foto/:id', async (req, res) => {
   const { rows } = await query(`SELECT p.*, u.username, u.avatar, s.title AS song_title, s.artist_name AS song_artist
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
-    WHERE p.id=$1 AND COALESCE(u.is_private,0)=0
+    WHERE p.id=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(p.close_friends_only,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`, [req.params.id]);
   if (!rows.length) return sendUncachedAppHtml(res);
   const photo = rows[0];
@@ -9997,12 +10069,13 @@ app.get('/api/search/users', async (req, res) => {
 });
 
 // Site geneli arama: içerik ve yorumların ait oldukları gerçek route'ları döndürür.
-app.get('/api/search', async (req, res) => {
+app.get('/api/search', optionalAuth, async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q || q.length < 1) return res.json([]);
     const limit = Math.min(20, Math.max(5, parseInt(req.query.limit, 10) || 12));
     const term = `%${q}%`;
+    const viewerId = req.user?.id || 0;
 
     const results = [];
     const queries = [
@@ -10031,9 +10104,10 @@ app.get('/api/search', async (req, res) => {
       query(`SELECT p.id, p.caption, p.created_at, u.username AS author
         FROM photos p JOIN users u ON u.id=p.user_id
         WHERE p.caption ILIKE $1 AND COALESCE(u.is_deleted,0)=0
+          AND ${closeFriendsVisibilitySql('p', '$3')}
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
           AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
-        ORDER BY p.created_at DESC LIMIT $2`, [term, limit]),
+        ORDER BY p.created_at DESC LIMIT $2`, [term, limit, viewerId]),
       query(`SELECT pc.id, pc.content, pc.created_at, p.id AS photo_id, pu.username AS author
         FROM photo_comments pc
         JOIN photos p ON p.id=pc.photo_id
@@ -10041,9 +10115,10 @@ app.get('/api/search', async (req, res) => {
         JOIN users pu ON pu.id=p.user_id
         WHERE pc.content ILIKE $1
           AND COALESCE(cu.is_deleted,0)=0 AND COALESCE(pu.is_deleted,0)=0
+          AND ${closeFriendsVisibilitySql('p', '$3')}
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
           AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
-        ORDER BY pc.created_at DESC LIMIT $2`, [term, limit]),
+        ORDER BY pc.created_at DESC LIMIT $2`, [term, limit, viewerId]),
       // Video ve Reals başlık/açıklama/ses alanları
       query(`SELECT v.id, v.slug, v.title, v.description, v.sound_name, v.is_reals, v.created_at, u.username AS author
         FROM videos v JOIN users u ON u.id=v.user_id
@@ -10751,6 +10826,17 @@ function ensureDmNotesSchema() {
   return dmNotesSchemaPromise;
 }
 
+async function expireDmNotes() {
+  try {
+    await ensureDmNotesSchema();
+    await query('DELETE FROM dm_notes WHERE expires_at <= NOW()');
+  } catch (error) {
+    console.error('[dm-notes] Expired note cleanup failed:', error.message);
+  }
+}
+
+setInterval(expireDmNotes, 60 * 1000);
+
 app.get('/api/dm-notes', authMiddleware, async (req, res) => {
   await ensureDmNotesSchema();
   const { rows } = await query(`
@@ -11255,6 +11341,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_story_id END AS shared_story_id,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_newspaper_id END AS shared_newspaper_id,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_song_id END AS shared_song_id,
+      CASE WHEN m.deleted_for_all=1 THEN 0 ELSE m.song_start_seconds END AS song_start_seconds,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_gif_url END AS shared_gif_url,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.reply_to_id END AS reply_to_id,
       m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.deleted_for_all_at, m.created_at,
@@ -11284,6 +11371,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.artist_name END as song_artist,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.cover_url END as song_cover_url,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.audio_url END as song_audio_url,
+      CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.slug END as song_slug,
       CASE WHEN m.deleted_for_all=1 OR r.deleted_for_all=1 THEN NULL ELSE r.content END as reply_content,
       r.deleted_for_all as reply_deleted_for_all,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username,
@@ -11482,6 +11570,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
   let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id, image_url: bodyImageUrl } = req.body;
+  const songStartSeconds = Number(req.body?.song_start_seconds ?? 0);
+  if (!Number.isInteger(songStartSeconds) || songStartSeconds < 0 || songStartSeconds > 3600) return res.status(400).json({ error: 'Müzik başlangıç zamanı geçersiz.' });
   content = content == null ? '' : String(content);
   const requestedImageUrls = Array.isArray(req.body?.image_urls)
     ? req.body.image_urls.map(url => String(url || '').trim()).filter(Boolean)
@@ -11533,8 +11623,8 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   }
   if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id && !shared_song_id && !shared_gif_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *',
-    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, song_start_seconds, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *',
+    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_song_id ? songStartSeconds : 0, shared_gif_url, reply_to_id||null]
   );
   await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
   if (shared_forum_id) {
@@ -11550,7 +11640,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
   }
   const { rows: full } = await query(`
-    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.shared_gif_url,
+    SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.song_start_seconds,m.shared_gif_url,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -11559,7 +11649,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
       p.url as photo_url, p.title as photo_title, p.caption as photo_caption,
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
-      song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url,
+      song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url, song.slug as song_slug,
       r.content as reply_content, ru.username as reply_username,
       '[]'::json AS reactions
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
@@ -11818,6 +11908,8 @@ app.put('/api/messages/:id/music', authMiddleware, async (req, res) => {
   if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası.' });
   const songId = Number(req.body?.shared_song_id);
   if (!Number.isSafeInteger(songId) || songId < 1) return res.status(400).json({ error: 'Bir müzik seçin.' });
+  const songStartSeconds = Number(req.body?.song_start_seconds ?? 0);
+  if (!Number.isInteger(songStartSeconds) || songStartSeconds < 0 || songStartSeconds > 3600) return res.status(400).json({ error: 'Müzik başlangıç zamanı geçersiz.' });
   const { rows: messageRows } = await query('SELECT * FROM dm_messages WHERE id=$1', [req.params.id]);
   const message = messageRows[0];
   if (!message) return res.status(404).json({ error: 'Mesaj bulunamadı.' });
@@ -11826,18 +11918,18 @@ app.put('/api/messages/:id/music', authMiddleware, async (req, res) => {
   const { rows: songs } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [songId]);
   if (!songs.length) return res.status(404).json({ error: 'Bu müzik bulunamadı veya kullanılamıyor.' });
   const { rows: updated } = await query(
-    `UPDATE dm_messages SET shared_song_id=$1, edited_at=NOW()
-     WHERE id=$2 AND sender_id=$3 AND shared_song_id IS NOT NULL
+    `UPDATE dm_messages SET shared_song_id=$1, song_start_seconds=$2, edited_at=NOW()
+     WHERE id=$3 AND sender_id=$4 AND shared_song_id IS NOT NULL
        AND created_at >= NOW() - INTERVAL '3 hours'
        AND COALESCE(deleted_for_all,0)=0 AND COALESCE(deleted_by_sender,0)=0
      RETURNING *`,
-    [songId, message.id, req.user.id]
+    [songId, songStartSeconds, message.id, req.user.id]
   );
   if (!updated.length) return res.status(403).json({ error: 'Müzik yalnızca gönderildikten sonraki 3 saat içinde değiştirilebilir.' });
   const { rows: full } = await query(`
     SELECT m.*,u.username AS sender_username,u.nickname AS sender_nickname,u.avatar AS sender_avatar,
       u.avatar_removed AS sender_avatar_removed,u.name_color AS sender_name_color,
-      song.title AS song_title,song.artist_name AS song_artist,song.cover_url AS song_cover_url,song.audio_url AS song_audio_url
+      song.title AS song_title,song.artist_name AS song_artist,song.cover_url AS song_cover_url,song.audio_url AS song_audio_url,song.slug AS song_slug
     FROM dm_messages m
     JOIN users u ON u.id=m.sender_id
     LEFT JOIN songs song ON song.id=m.shared_song_id
@@ -12751,6 +12843,7 @@ app.get('/api/hashtags', optionalAuth, async (req, res) => {
       WHERE (COALESCE(u.is_private,0)=0 OR p.user_id=$3
         OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$3 AND f.following_id=p.user_id AND f.status='accepted')
         OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$3 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$3)) AND fr.status='accepted'))
+        AND ${closeFriendsVisibilitySql('p', '$3')}
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
         AND ($1='' OR p.caption ~* ('#' || $1 || '[[:alnum:]_]*'))
