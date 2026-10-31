@@ -1909,18 +1909,14 @@ function navigate(path, push = true) {
 }
 
 function initPullToRefresh() {
-  const indicator = $('#pull-to-refresh');
-  if (!indicator || !('ontouchstart' in window)) return;
+  if (!('ontouchstart' in window)) return;
 
   const activationDistance = 132;
-  const state = { startX: 0, startY: 0, distance: 0, active: false, refreshing: false };
+  const state = { startX: 0, startY: 0, distance: 0, active: false };
   const isMobileTouch = () => window.matchMedia('(max-width: 768px) and (pointer: coarse)').matches;
   const reset = () => {
     state.active = false;
     state.distance = 0;
-    indicator.classList.remove('is-pulling');
-    indicator.setAttribute('aria-hidden', 'true');
-    indicator.style.removeProperty('--pull-offset');
   };
   const hasScrollableParent = target => {
     for (let element = target; element instanceof Element && element.id !== 'app'; element = element.parentElement) {
@@ -1933,7 +1929,7 @@ function initPullToRefresh() {
   };
 
   document.addEventListener('touchstart', event => {
-    if (!isMobileTouch() || state.refreshing || event.touches.length !== 1) return;
+    if (!isMobileTouch() || event.touches.length !== 1) return;
     const touch = event.touches[0];
     const target = event.target instanceof Element ? event.target : null;
     const app = $('#app');
@@ -1947,10 +1943,9 @@ function initPullToRefresh() {
   }, { passive: true });
 
   document.addEventListener('touchmove', event => {
-    if (!state.active || state.refreshing) return;
+    if (!state.active) return;
     if (event.touches.length !== 1) {
       reset();
-      indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
       return;
     }
     const touch = event.touches[0];
@@ -1958,44 +1953,22 @@ function initPullToRefresh() {
     const deltaX = touch.clientX - state.startX;
     if (deltaY < 0 || Math.abs(deltaX) > Math.max(24, deltaY * 0.6)) {
       reset();
-      indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
       return;
     }
     if (deltaY < 12) return;
 
     event.preventDefault();
     state.distance = deltaY;
-    indicator.classList.add('is-pulling');
-    indicator.setAttribute('aria-hidden', 'false');
-    indicator.style.setProperty('--pull-offset', `${Math.min(96, deltaY * 0.72)}px`);
-    indicator.querySelector('.pull-to-refresh-label').textContent = deltaY >= activationDistance
-      ? 'Yenilemek için bırak'
-      : 'Yenilemek için biraz daha çek';
   }, { passive: false });
 
   document.addEventListener('touchend', () => {
     if (!state.active) return;
     const shouldRefresh = state.distance >= activationDistance;
-    state.active = false;
-    if (!shouldRefresh) {
-      reset();
-      indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
-      return;
-    }
-
-    state.refreshing = true;
-    indicator.classList.add('is-pulling', 'is-refreshing');
-    indicator.setAttribute('aria-hidden', 'false');
-    indicator.style.setProperty('--pull-offset', '96px');
-    indicator.querySelector('.pull-to-refresh-label').textContent = 'Sayfa yenileniyor…';
-    window.setTimeout(() => window.location.reload(), 250);
-  }, { passive: true });
-
-  document.addEventListener('touchcancel', () => {
-    if (!state.active) return;
     reset();
-    indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
+    if (shouldRefresh) window.location.reload();
   }, { passive: true });
+
+  document.addEventListener('touchcancel', reset, { passive: true });
 }
 
 initPullToRefresh();
@@ -2676,10 +2649,10 @@ async function renderRealsFeed(app, initialId = null) {
           <div class="reals-ad-byline"><span class="reals-ad-badge"><i class="fas fa-bullhorn"></i> REKLAM</span><span>Sponsorlu içerik</span></div>
           <a class="reals-ad-title-link" href="${escHtml(site)}" target="_blank" rel="noopener noreferrer" data-ad-click>${escHtml(r.title || '')}<i class="fas fa-arrow-up-right-from-square"></i></a>
           ${hashtagDescriptionPreviewHTML(r.description, 'reals-desc', 40)}
-          <div class="reals-right-actions">
-            ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn ad-like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
-            ${r.allow_comments !== 0 ? `<button class="reals-action-btn comment-btn ad-comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>` : ''}
-          </div>
+        </div>
+        <div class="reals-right-actions">
+          ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn ad-like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
+          ${r.allow_comments !== 0 ? `<button class="reals-action-btn comment-btn ad-comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>` : ''}
         </div>
         </div>
       </div>`;
@@ -2710,13 +2683,13 @@ async function renderRealsFeed(app, initialId = null) {
           ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
           ${hashtagDescriptionPreviewHTML(r.description, 'reals-desc', 40)}
-          <div class="reals-right-actions">
-            ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
-            <button class="reals-action-btn comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>
-            <button class="reals-action-btn save-btn" title="Kaydet"><i class="far fa-bookmark"></i><span>Kaydet</span></button>
-            <button class="reals-action-btn resend-btn" title="Bağlantıyı paylaş"><i class="fas fa-share-alt"></i><span>Paylaş</span></button>
-            <button class="reals-action-btn share-btn" title="Mesaj olarak ilet"><i class="fas fa-paper-plane"></i><span>İlet</span></button>
-          </div>
+        </div>
+        <div class="reals-right-actions">
+          ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
+          <button class="reals-action-btn comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>
+          <button class="reals-action-btn save-btn" title="Kaydet"><i class="far fa-bookmark"></i><span>Kaydet</span></button>
+          <button class="reals-action-btn resend-btn" title="Bağlantıyı paylaş"><i class="fas fa-share-alt"></i><span>Paylaş</span></button>
+          <button class="reals-action-btn share-btn" title="Mesaj olarak ilet"><i class="fas fa-paper-plane"></i><span>İlet</span></button>
         </div>
         </div>
       </div>`;
