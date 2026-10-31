@@ -6,6 +6,9 @@ let dmTypingTimer = null;
 let dmTypingConversationId = null;
 let dmTypingActive = false;
 let dmPeerTypingTimer = null;
+let dmChatRenderGeneration = 0;
+let dmMessagesRenderGeneration = 0;
+const seenDmIncomingNotifications = new Map();
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
@@ -1852,6 +1855,7 @@ let previousRenderedRoutePath = null;
 let dmSuggestionsReturningFromProfile = false;
 
 function renderRoute(fullPath) {
+  dmChatRenderGeneration++;
   window.__profileMenuCleanup?.();
   clearStoryRoutePlayback();
   // Sayfa değişiminde fotoğraf ses kontrolünü kaldır
@@ -2931,8 +2935,9 @@ function syncRealtimeSocket() {
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
   realtimeSocket.on('dm:incoming', handleRealtimeIncomingMessage);
   realtimeSocket.on('notification:new', notification => {
-    showRealtimeAlert('notification', notification);
     loadNotifCount();
+    if (notification?.type === 'dm_mention') return;
+    showRealtimeAlert('notification', notification);
     playConfiguredNotificationSound(notification?.type?.includes('mention') ? 'mention' : 'message');
   });
   realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
@@ -2965,6 +2970,32 @@ function handleRealtimeIncomingMessage(event) {
   const currentChat = location.pathname.match(/^\/mesajlar\/([^/?]+)/);
   if (currentChat && decodeURIComponent(currentChat[1]).toLocaleLowerCase('tr-TR') === String(event.username).toLocaleLowerCase('tr-TR')
     && document.visibilityState === 'visible' && document.hasFocus()) return;
+  if (event.messageId != null) {
+    const now = Date.now();
+    const messageKey = `${event.conversationId || ''}:${event.messageId}`;
+    for (const [key, receivedAt] of seenDmIncomingNotifications) {
+      if (now - receivedAt > 300000) seenDmIncomingNotifications.delete(key);
+    }
+    if (seenDmIncomingNotifications.has(messageKey)) return;
+    seenDmIncomingNotifications.set(messageKey, now);
+    while (seenDmIncomingNotifications.size > 200) {
+      seenDmIncomingNotifications.delete(seenDmIncomingNotifications.keys().next().value);
+    }
+    const storageKey = `dm-incoming-notifications:${currentUser.id}`;
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      const notifications = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+      Object.keys(notifications).forEach(key => {
+        if (now - Number(notifications[key]) > 300000) delete notifications[key];
+      });
+      if (notifications[messageKey]) return;
+      notifications[messageKey] = now;
+      const recentNotifications = Object.entries(notifications).slice(-200);
+      localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(recentNotifications)));
+    } catch (error) {
+      console.warn('Mesaj bildirimi tekilleştirilemedi:', error.message);
+    }
+  }
   showRealtimeAlert('message', event);
   playConfiguredNotificationSound('message');
 }
@@ -2995,12 +3026,19 @@ function handleRealtimeDmTyping(event) {
   if (!event?.conversationId || String(event.senderId) === String(currentUser?.id)) return;
   const chat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(event.conversationId))}"]`);
   const indicator = chat?.querySelector('.dm-chat-typing');
-  if (!indicator) return;
+  const messageIndicator = chat?.querySelector('.dm-peer-typing-row');
+  if (!indicator && !messageIndicator) return;
   if (dmPeerTypingTimer) clearTimeout(dmPeerTypingTimer);
   dmPeerTypingTimer = null;
-  indicator.hidden = !event.active;
-  if (event.active) dmPeerTypingTimer = setTimeout(() => {
-    indicator.hidden = true;
+  const isTyping = event.active === true;
+  if (indicator) indicator.hidden = !isTyping;
+  if (messageIndicator) messageIndicator.hidden = !isTyping;
+  const presence = chat?.querySelector('.dm-chat-presence');
+  if (presence) presence.hidden = isTyping;
+  if (isTyping) dmPeerTypingTimer = setTimeout(() => {
+    if (indicator) indicator.hidden = true;
+    if (messageIndicator) messageIndicator.hidden = true;
+    if (presence) presence.hidden = false;
     dmPeerTypingTimer = null;
   }, 4500);
 }
@@ -13079,6 +13117,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
 }
 
 async function renderMessages(app, targetUsername, rotateSuggestions = false) {
+  const renderGeneration = ++dmMessagesRenderGeneration;
   if (!currentUser) { navigate('/giris'); return; }
   document.title = 'Mesajlar - ' + siteName;
 
@@ -13119,6 +13158,11 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     api('/dm-notes'),
     hasCachedSuggestions && !rotateSuggestions ? Promise.resolve(suggestedPeople) : api('/friends/suggestions')
   ]);
+  if (renderGeneration !== dmMessagesRenderGeneration) return;
+  const currentPath = location.pathname;
+  if (targetUsername
+    ? currentPath !== `/mesajlar/${encodeURIComponent(targetUsername)}`
+    : currentPath !== '/mesajlar') return;
   if (conversationsResult.status === 'fulfilled') convs = conversationsResult.value;
   else toast(conversationsResult.reason?.message || 'Konuşmalar yüklenemedi', 'error');
   if (groupsResult.status === 'fulfilled') groups = groupsResult.value;
@@ -13909,6 +13953,7 @@ let dmPresencePollTimer = null;
 const dmTemporaryUnlocks = new Map();
 
 async function renderDMChat(username) {
+  const renderGeneration = ++dmChatRenderGeneration;
   window.__dmSharedSongAudio?.pause();
   window.__dmSharedSongAudio = null;
   window.__dmSharedSongButton = null;
@@ -13927,24 +13972,37 @@ async function renderDMChat(username) {
   const temporaryUnlock = dmTemporaryUnlocks.get(String(username).toLocaleLowerCase('tr-TR'));
   if (temporaryUnlock?.password) searchUnlockHeaders['X-DM-Conversation-Password'] = temporaryUnlock.password;
   if (temporaryUnlock?.accountCode) searchUnlockHeaders['X-DM-Conversation-Code'] = temporaryUnlock.accountCode;
+  const isCurrentChatRender = () => {
+    if (renderGeneration !== dmChatRenderGeneration) return false;
+    const currentChatPath = location.pathname.match(/^\/mesajlar\/([^/?]+)/);
+    return Boolean(currentChatPath
+      && decodeURIComponent(currentChatPath[1]).toLocaleLowerCase('tr-TR') === String(username).toLocaleLowerCase('tr-TR'));
+  };
   let data;
   try { data = await api(`/conversation/${encodeURIComponent(username)}`, { headers: searchUnlockHeaders }); }
   catch (e) {
+    if (!isCurrentChatRender()) return;
     if (String(e.message || '').includes('Engellenen kullanıcılarla')) {
       const blocks = await api('/blocks').catch(() => []);
+      if (!isCurrentChatRender()) return;
       const blockedByMe = Array.isArray(blocks) && blocks.some(block => String(block.username).toLocaleLowerCase('tr-TR') === String(username).toLocaleLowerCase('tr-TR'));
       if (blockedByMe && await CigCigDialogs.confirm(`@${username} kullanıcısına mesaj göndermek için engelini kaldırmak istiyor musun?`)) {
+        if (!isCurrentChatRender()) return;
         try {
           await api(`/block/${encodeURIComponent(username)}`, { method: 'DELETE' });
+          if (!isCurrentChatRender()) return;
           return renderDMChat(username);
         } catch (error) { toast(error.message, 'error'); }
       }
+      if (!isCurrentChatRender()) return;
       mainEl.innerHTML = `<div class="dm-empty"><i class="fas fa-ban" style="font-size:32px;opacity:0.55"></i><p style="color:var(--accent-red2);margin-top:8px">${blockedByMe ? 'Mesaj göndermek için önce engeli kaldırmalısın.' : 'Bu kullanıcı seni engellediği için mesaj gönderemezsin.'}</p></div>`;
       return;
     }
+    if (!isCurrentChatRender()) return;
     mainEl.innerHTML = `<div class="dm-empty"><i class="fas fa-exclamation-circle" style="font-size:32px;opacity:0.4"></i><p style="color:var(--accent-red2);margin-top:8px">${escHtml(e.message)}</p></div>`;
     return;
   }
+  if (!isCurrentChatRender()) return;
 
   const isSelfConversation = currentUser && (
     String(data.other?.id) === String(currentUser.id)
@@ -14036,8 +14094,7 @@ async function renderDMChat(username) {
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
             <strong>${escHtml(other.nickname || other.username)}${isSelfConversation ? ' (Siz)' : ''}</strong>
           </a>
-          ${isSelfConversation ? '' : `<span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active, other.presence_visible)}</span>`}
-          ${isSelfConversation ? '' : '<span class="dm-chat-typing" hidden aria-live="polite">Mesaj yazıyor<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>'}
+          ${isSelfConversation ? '' : `<span class="dm-chat-status"><span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active, other.presence_visible)}</span><span class="dm-chat-typing" hidden aria-live="polite">Yazıyor...<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span></span>`}
           <span id="dm-chat-now-playing"></span>
         </div>
       </div>
@@ -14055,6 +14112,7 @@ async function renderDMChat(username) {
     <!-- Messages -->
     <div class="dm-messages" id="dm-messages">
       ${dmMessagesHTML(messages, currentUser.id)}
+      <div class="dm-peer-typing-row" hidden aria-live="polite"><span>Yazıyor</span><span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
     </div>
 
     <!-- Reply bar -->
@@ -14313,10 +14371,12 @@ async function renderDMChat(username) {
   }
 
   // Send message
+  let dmSendInFlight = false;
   const sendDmMessage = async () => {
     const inputEl = document.getElementById('dm-input');
     const content = inputEl?.value;
-    if ((!content || !content.trim()) && !pendingImgs.length) return;
+    if (dmSendInFlight || ((!content || !content.trim()) && !pendingImgs.length)) return;
+    dmSendInFlight = true;
     stopLocalDmTyping();
     const imageViewLimit = pendingImgs.length ? Number(document.getElementById('dm-image-view-limit')?.value || 0) : 0;
     const sendBtn = document.getElementById('dm-send-btn');
@@ -14357,6 +14417,7 @@ async function renderDMChat(username) {
       const uploadStatus = document.getElementById('dm-img-upload-status');
       if (uploadStatus) uploadStatus.textContent = '';
       if (sendBtn) sendBtn.disabled = false;
+      dmSendInFlight = false;
     }
   };
 
@@ -14563,8 +14624,11 @@ async function renderDMChat(username) {
   });
 
   // Poll for new messages
+  let dmPollInFlight = false;
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
+    if (dmPollInFlight) return;
+    dmPollInFlight = true;
     try {
       const deletionCheckpoint = lastPollDeletionAt;
       const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100&after_id=${lastPollMsgId}&after_deleted_at=${encodeURIComponent(deletionCheckpoint)}`, { headers: searchUnlockHeaders });
@@ -14590,27 +14654,10 @@ async function renderDMChat(username) {
           if (!isSelfConversation) await api(`/conversation/${encodeURIComponent(username)}/mark-read`, { method: 'POST' });
         }
       }
-      const conversationList = await api('/conversations').catch(() => []);
-      conversationList.forEach(conversation => {
-        const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(conversation.other_username)}"]`);
-        if (item) updateDmPresence(item, conversation.other_is_online, conversation.other_last_active, conversation.other_presence_visible);
-      });
-      if (conversationUpdate?.other) {
-        const header = document.querySelector('.dm-chat');
-        if (header) updateDmPresence(header, conversationUpdate.other.is_online, conversationUpdate.other.last_active, conversationUpdate.other.presence_visible);
-      }
-      const activeConversation = conversationList.find(item => String(item.other_username).toLowerCase() === String(username).toLowerCase());
-      if (activeConversation) {
-        const chat = document.querySelector('.dm-chat');
-        if (chat) {
-          updateDmPresence(chat, activeConversation.other_is_online, activeConversation.other_last_active, activeConversation.other_presence_visible);
-          updateDmReadReceipts(chat.dataset.conversationId, activeConversation.other_read_until);
-        }
-      }
-      const activeConversationEl = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(username)}"] .dm-conv-last`);
-      if (activeConversationEl) activeConversationEl.textContent = (activeConversation?.last_message || '').substring(0, 40);
     } catch (error) {
       console.error('Özel mesajlar yenilenemedi:', error.message);
+    } finally {
+      dmPollInFlight = false;
     }
   }, 2500);
 }
@@ -15439,6 +15486,8 @@ function playSharedMessageSong(button) {
 
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const isOwn = m.sender_id == myId;
+  const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
+  if (hiddenForMe) return '';
   if (m.deleted_for_all) {
     const timeLabel = m.created_at ? new Date(m.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
     return `<div class="dm-msg-wrap dm-deleted-for-all${isOwn ? ' dm-own' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="" data-deleted-for-all="true">
@@ -15446,8 +15495,6 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     </div>`;
   }
   const messageText = String(m.content || '');
-  const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
-  if (hiddenForMe) return '';
   const senderName = m.sender_nickname || m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
   const messageTime = Date.parse(m.created_at);

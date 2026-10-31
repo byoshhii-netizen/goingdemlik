@@ -821,6 +821,7 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
       FROM dm_conversations WHERE id=$1`, [conversationId, recipient.id])
       .then(({ rows }) => io.to(`user:${recipient.id}`).emit('dm:incoming', {
         conversationId,
+        messageId: message.id,
         senderId: sender.id,
         username: sender.username,
         name: sender.nickname || sender.username,
@@ -11190,7 +11191,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
         THEN presence.last_active ELSE NULL END as other_last_active,
       (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
         FROM dm_messages m WHERE m.conversation_id=c.id
-        AND (m.deleted_for_all=1 OR CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END)
+          AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message,
       (SELECT COUNT(*) FROM dm_messages WHERE conversation_id=c.id AND sender_id!=$1 AND 
         CASE WHEN c.user1_id=$1 THEN deleted_by_receiver=0 ELSE deleted_by_sender=0 END
@@ -11249,7 +11250,7 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
         THEN presence.last_active ELSE NULL END as other_last_active,
       (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
         FROM dm_messages m WHERE m.conversation_id=c.id
-        AND (m.deleted_for_all=1 OR CASE WHEN c.user1_id=$1 THEN (m.deleted_by_sender=0 OR m.sender_id!=$1) ELSE (m.deleted_by_receiver=0 OR m.sender_id=$1) END)
+          AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c
     JOIN users u1 ON c.user1_id=u1.id
@@ -11294,8 +11295,11 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT CASE WHEN deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE content END
-        FROM dm_messages WHERE conversation_id=c.id ORDER BY created_at DESC LIMIT 1) as last_message
+      (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
+        FROM dm_messages m
+        WHERE m.conversation_id=c.id
+          AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
+        ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
     LEFT JOIN dm_user_settings viewer_dm_settings ON viewer_dm_settings.user_id=$1
     LEFT JOIN dm_user_settings other_dm_settings ON other_dm_settings.user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
@@ -11522,8 +11526,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     WHERE m.conversation_id=$1
       AND ($6=0 OR m.id>$6 OR (m.deleted_for_all=1 AND m.deleted_for_all_at>$7::timestamptz))
       AND (m.deleted_for_all=0 OR $6=0 OR m.deleted_for_all_at>$7::timestamptz)
-      AND (m.deleted_for_all=1 OR $2=1 OR m.deleted_by_sender=0 OR m.sender_id!=$3)
-      AND (m.deleted_for_all=1 OR $2=1 OR m.deleted_by_receiver=0 OR m.sender_id=$3)
+      AND ($2=1 OR COALESCE(m.deleted_by_sender,0)=0 OR m.sender_id!=$3)
+      AND ($2=1 OR COALESCE(m.deleted_by_receiver,0)=0 OR m.sender_id=$3)
     ORDER BY CASE WHEN m.id>$6 THEN 0 ELSE 1 END ASC,
       CASE WHEN m.id>$6 THEN m.id END ASC,
       m.deleted_for_all_at DESC NULLS LAST, m.id DESC
