@@ -3956,7 +3956,32 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   flex-shrink: 0;
 }
 .dm-chat-header-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; overflow: hidden; }
-.dm-chat-header-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.dm-chat-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.dm-chat-header-right #dm-options-btn {
+  display:inline-flex;
+  width:44px;
+  min-width:44px;
+  height:44px;
+  align-items:center;
+  justify-content:center;
+  padding:0 !important;
+  border:1px solid var(--border) !important;
+  border-radius:12px !important;
+  font-size:17px;
+  touch-action:manipulation;
+}
+.dm-sidebar-actions { gap:10px; }
+.dm-sidebar-actions .dm-search-toggle { flex-basis:46px; width:46px; min-width:46px; height:46px; }
+.dm-conv-options-btn {
+  width:42px;
+  min-width:42px;
+  height:42px;
+  flex:0 0 42px;
+  display:grid;
+  place-items:center;
+  border-radius:12px;
+  touch-action:manipulation;
+}
 .dm-call-btn { color: #55d89a; border: 1px solid rgba(85,216,154,.28); }
 .dm-call-btn:hover { color: #fff; background: rgba(85,216,154,.16); }
 .dm-call-confirm-modal { max-width: 410px; border-color: rgba(85,216,154,.3); background: radial-gradient(ellipse at 50% 0,rgba(85,216,154,.12),transparent 58%),var(--bg-card); }
@@ -4615,6 +4640,10 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   .dm-chat-header { padding: 9px 12px; min-height:52px; }
   .dm-call-btn span { display:none; }
   .dm-call-btn { width:32px; height:32px; padding:0 !important; display:flex; align-items:center; justify-content:center; }
+  .dm-chat-header-right { gap:10px; }
+  .dm-chat-header-right #dm-options-btn { width:46px; min-width:46px; height:46px; }
+  .dm-sidebar-actions { gap:9px; }
+  .dm-sidebar-actions .dm-search-toggle { flex-basis:46px; width:46px; min-width:46px; height:46px; }
   .dm-sel-actions-bar { gap: 4px; padding: 6px 8px; }
   .dm-selection-label { flex:1 0 100%; min-width:0; font-size:11px; }
   .dm-sel-actions-bar .btn { padding: 4px 7px; font-size: 11px; }
@@ -5094,7 +5123,7 @@ body.music-list-page .music-search-bar { margin-bottom: 14px !important; }
   .dm-conv-item > .dm-story-avatar-link,
   .dm-conv-item > .dm-conv-avatar-link,
   .dm-conv-item > .dm-group-avatar { flex: 0 0 44px; }
-  .dm-conv-options-btn { width: 28px; flex: 0 0 28px; }
+  .dm-conv-options-btn { width: 40px; min-width:40px; height:40px; flex:0 0 40px; }
 }
 
 
@@ -6985,6 +7014,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .dm-groups-button, .dm-friends-header-button { gap:4px; padding-inline:6px; font-size:11px; }
   .dm-header-links { gap:4px; }
   .dm-header-action-btn { flex-basis:42px; width:42px; min-width:42px; height:42px; }
+  .dm-sidebar-actions .dm-search-toggle { flex-basis:46px; width:46px; min-width:46px; height:46px; }
   .comment-compose-footer { gap:6px; }
   .comment-compose-footer > span { font-size:9px; }
   .comment-compose-footer .btn { min-width:78px; padding-inline:8px; }
@@ -7006,6 +7036,7 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .dm-friends-header-button .friend-request-dot { top:1px; right:1px; }
   .dm-sidebar-actions { flex:0 0 auto; }
   .dm-header-action-btn { flex:0 0 38px; width:38px; min-width:38px; height:38px; }
+  .dm-sidebar-actions .dm-search-toggle { flex:0 0 42px; width:42px; min-width:42px; height:42px; }
 }
 @container dm-sidebar-header (max-width: 390px) {
   .dm-header-label { display:none; }
@@ -8190,8 +8221,10 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
   }
   .dm-layout:not(.dm-mobile-chat-open) .dm-conv-item > .dm-conv-options-btn {
     grid-column: 3;
-    width: 28px;
-    flex: 0 0 28px;
+    width: 40px;
+    min-width:40px;
+    height:40px;
+    flex: 0 0 40px;
   }
 }
 

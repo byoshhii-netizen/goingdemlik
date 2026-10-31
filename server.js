@@ -8446,7 +8446,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled', 'mobile_home_auth_required'].includes(key)) {
+  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled', 'reals_in_media_enabled', 'mobile_home_auth_required'].includes(key)) {
     if (!['0', '1', 0, 1, true, false].includes(value)) {
       return res.status(400).json({ error: 'Özellik durumu 0 veya 1 olmalı' });
     }
@@ -13475,6 +13475,10 @@ app.post('/api/guest-reals/view', optionalAuth, async (req, res) => {
 app.get('/api/reals', optionalAuth, async (req, res) => {
   const maintenance = await getRealsMaintenanceSettings();
   if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
+  if (req.query.source === 'media') {
+    const { rows: mediaSetting } = await query("SELECT value FROM settings WHERE key='reals_in_media_enabled' LIMIT 1");
+    if (mediaSetting[0]?.value === '0') return res.json([]);
+  }
   const params = [req.user?.id || 0];
   const requestedHashtag = String(req.query.hashtag || '').trim().replace(/^#/, '').toLocaleLowerCase('tr-TR');
   if (requestedHashtag && !/^[\p{L}\p{N}_]{1,80}$/u.test(requestedHashtag)) {
@@ -13486,11 +13490,12 @@ app.get('/api/reals', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/reals-settings', async (req, res) => {
-  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message']]);
+  const { rows } = await query("SELECT key,value FROM settings WHERE key = ANY($1)", [['reals_reminder', 'reals_info_enabled', 'reals_maintenance_enabled', 'reals_maintenance_message', 'reals_in_media_enabled']]);
   const settings = Object.fromEntries(rows.map(row => [row.key, row.value]));
   res.json({
     reminder: settings.reals_reminder || 'Evet, reals. Reels olmasını beklerdiniz. Ama reals işte. Gerçekler var burada.',
     infoEnabled: settings.reals_info_enabled !== '0',
+    mediaEnabled: settings.reals_in_media_enabled !== '0',
     maintenanceEnabled: settings.reals_maintenance_enabled === '1',
     maintenanceMessage: settings.reals_maintenance_message || DEFAULT_REALS_MAINTENANCE_MESSAGE
   });

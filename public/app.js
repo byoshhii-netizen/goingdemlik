@@ -8,6 +8,8 @@ let dmTypingActive = false;
 let dmPeerTypingTimer = null;
 let dmChatRenderGeneration = 0;
 let dmMessagesRenderGeneration = 0;
+let dmMessageResizeObserver = null;
+let dmMessageMutationObserver = null;
 const seenDmIncomingNotifications = new Map();
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
@@ -14588,6 +14590,10 @@ const dmTemporaryUnlocks = new Map();
 
 async function renderDMChat(username) {
   const renderGeneration = ++dmChatRenderGeneration;
+  dmMessageResizeObserver?.disconnect();
+  dmMessageMutationObserver?.disconnect();
+  dmMessageResizeObserver = null;
+  dmMessageMutationObserver = null;
   window.__dmSharedSongAudio?.pause();
   window.__dmSharedSongAudio = null;
   window.__dmSharedSongButton = null;
@@ -14844,7 +14850,52 @@ async function renderDMChat(username) {
 
   // Scroll to bottom
   const msgsEl = document.getElementById('dm-messages');
-  if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+  if (msgsEl) {
+    let keepNewestVisible = true;
+    let initialScrollPending = true;
+    let scrollFrame = 0;
+    const scrollToNewest = () => {
+      if (!msgsEl.isConnected) return;
+      msgsEl.scrollTop = msgsEl.scrollHeight;
+    };
+    const scheduleScrollToNewest = () => {
+      if (!keepNewestVisible || scrollFrame) return;
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0;
+        if (keepNewestVisible) scrollToNewest();
+      });
+    };
+    const observeMessageRows = rows => {
+      rows.forEach(row => {
+        if (row.matches?.('.dm-msg-wrap')) dmMessageResizeObserver?.observe(row);
+      });
+    };
+    msgsEl.addEventListener('scroll', () => {
+      if (initialScrollPending) return;
+      keepNewestVisible = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 60;
+    }, { passive: true });
+    dmMessageResizeObserver = 'ResizeObserver' in window
+      ? new ResizeObserver(scheduleScrollToNewest)
+      : null;
+    observeMessageRows([...msgsEl.children]);
+    dmMessageMutationObserver = new MutationObserver(records => {
+      records.forEach(record => observeMessageRows([...record.addedNodes].filter(node => node instanceof Element)));
+      scheduleScrollToNewest();
+      if (!msgsEl.isConnected) {
+        dmMessageResizeObserver?.disconnect();
+        dmMessageMutationObserver?.disconnect();
+      }
+    });
+    dmMessageMutationObserver.observe(msgsEl, { childList: true });
+    scrollToNewest();
+    requestAnimationFrame(() => {
+      scrollToNewest();
+      requestAnimationFrame(() => {
+        scrollToNewest();
+        initialScrollPending = false;
+      });
+    });
+  }
   enhanceLinkPreviews(msgsEl);
   installMessageSelectionGestures(msgsEl, '.dm-msg-wrap', enterDmSelection);
 
@@ -20553,7 +20604,7 @@ async function renderPhotos(app) {
       api('/photos'),
       api('/photo-ads/random').catch(() => null),
       loadStoriesBar($('#stories-bar')),
-      api('/reals').catch(error => {
+      api('/reals?source=media').catch(error => {
         console.warn('Medya akışındaki Reals içerikleri yüklenemedi:', error.message || error);
         return [];
       })
@@ -20610,7 +20661,7 @@ async function renderMediaExplore(app) {
         loadedPhotos.push(...batch);
         offset += batch.length;
       } while (batch.length === 100);
-      const loadedReals = await api('/reals').catch(error => {
+      const loadedReals = await api('/reals?source=media').catch(error => {
         console.warn('Medya keşfette Reals içerikleri yüklenemedi:', error.message || error);
         return [];
       });
@@ -20644,7 +20695,7 @@ async function renderMediaExplore(app) {
         api('/hashtags?q=' + encodeURIComponent(tag)),
         api('/photos?hashtag=' + encodeURIComponent(tag)),
         api('/videos?hashtag=' + encodeURIComponent(tag)),
-        api('/reals?hashtag=' + encodeURIComponent(tag)).then(value => ({ value }), error => ({ error }))
+        api('/reals?source=media&hashtag=' + encodeURIComponent(tag)).then(value => ({ value }), error => ({ error }))
       ]);
       if (requestId !== hashtagSearchRequestId || !feed.isConnected) return;
       const matchingReals = matchingRealsResult.value || [];

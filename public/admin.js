@@ -4054,6 +4054,8 @@ async function renderSettings(main) {
       <div class="card">
         <div class="card-header"><span><i class="fas fa-bolt" style="color:var(--red2);margin-right:8px"></i>Reals</span></div>
         <div class="card-body">
+          <div class="adm-feature-copy"><strong>Medya akışında Reals</strong><p>Kapalı olduğunda Reals videoları Medya ve Medya Keşfet akışlarından kaldırılır. Reals sayfası ve diğer video bölümleri etkilenmez.</p></div>
+          <label class="adm-toggle-row" for="s-reals-in-media-enabled"><span><i class="fas fa-images"></i> Reals videolarını Medya'da göster</span><span class="adm-toggle"><input type="checkbox" id="s-reals-in-media-enabled" ${settings['reals_in_media_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <div class="adm-feature-copy"><strong>Reals bakım modu</strong><p>Açıldığında Reals akışı ve yeni Reals paylaşımları durdurulur. Ziyaretçiler için gösterilecek duyuruyu aşağıdan değiştirebilirsiniz.</p></div>
           <label class="adm-toggle-row" for="s-reals-maintenance-enabled"><span><i class="fas fa-screwdriver-wrench"></i> Reals bakım modunu etkinleştir</span><span class="adm-toggle"><input type="checkbox" id="s-reals-maintenance-enabled" ${settings['reals_maintenance_enabled'] === '1' ? 'checked' : ''}><span></span></span></label>
           <div class="form-group"><label>Bakım duyurusu (en fazla 400 karakter)</label><textarea id="s-reals-maintenance-message" rows="3" maxlength="400">${escHtml(settings['reals_maintenance_message'] || 'Reals şu anda bakımda. En iyi hizmeti verebilmek için baştan tasarlıyoruz.')}</textarea></div>
@@ -4547,6 +4549,7 @@ async function renderSettings(main) {
     if (!await saveSetting('reals_reminder', document.getElementById('s-reals-reminder').value.trim(), msg, false)) return;
     if (!await saveSetting('reals_info_enabled', document.getElementById('s-reals-info-enabled').checked ? '1' : '0', msg, false)) return;
     if (!await saveSetting('reals_maintenance_enabled', document.getElementById('s-reals-maintenance-enabled').checked ? '1' : '0', msg, false)) return;
+    if (!await saveSetting('reals_in_media_enabled', document.getElementById('s-reals-in-media-enabled').checked ? '1' : '0', msg, false)) return;
     toast('Reals ayarları kaydedildi');
     msg.style.color='var(--green)'; msg.textContent='✓ Reals ayarları kaydedildi';
   });
