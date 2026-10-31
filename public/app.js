@@ -1720,9 +1720,110 @@ function spotifyNowPlayingMarkup(data, compact = false) {
 
 function updateAppIcon(user) {
   const favicon = document.querySelector('link[rel="icon"]');
-  if (favicon) favicon.href = '/cigcig.png';
+  if (favicon) favicon.href = '/icons/cigcig-192.png';
   const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-  if (appleIcon) appleIcon.href = '/cigcig.png';
+  if (appleIcon) appleIcon.href = '/icons/cigcig-512.png';
+}
+
+const PWA_INSTALL_KEY = 'cigcig_pwa_installed';
+let deferredPwaInstallPrompt = null;
+let pwaInstallDialogShown = false;
+
+function isPwaInstallSupportedDevice() {
+  return /android|iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function isPwaRunningStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches
+    || window.navigator.standalone === true;
+}
+
+function isPwaAlreadyInstalled() {
+  try {
+    return isPwaRunningStandalone() || localStorage.getItem(PWA_INSTALL_KEY) === '1';
+  } catch (error) {
+    console.warn('PWA kurulum durumu okunamadı:', error.message);
+    return isPwaRunningStandalone();
+  }
+}
+
+function syncPwaInstallMenu() {
+  $('#pwa-install-menu-item')?.classList.toggle('hidden', isPwaAlreadyInstalled());
+}
+
+function showPwaInstallHelp() {
+  const isApple = /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const help = $('#pwa-install-help');
+  if (!help) return;
+  help.innerHTML = isApple
+    ? '<div class="pwa-install-help"><strong>iPhone veya iPad’e eklemek için</strong><ol><li>Safari’nin altındaki <i class="fas fa-arrow-up-from-bracket"></i> Paylaş düğmesine dokun.</li><li><i class="fas fa-plus-square"></i> Ana Ekrana Ekle seçeneğini seç.</li><li>Ekle’ye dokun. CigCig, mevcut logosuyla ana ekranda görünür.</li></ol></div>'
+    : '<div class="pwa-install-help"><strong>Tarayıcı menüsünden yükleyebilirsin</strong><ol><li>Sağ üstteki <i class="fas fa-ellipsis-vertical"></i> menüye dokun.</li><li>Uygulamayı yükle veya Ana ekrana ekle seçeneğini seç.</li><li>Onayla. CigCig, mevcut logosuyla ana ekranda görünür.</li></ol></div>';
+  help.classList.remove('hidden');
+}
+
+function showPwaInstallDialog({ force = false } = {}) {
+  if ((!force && pwaInstallDialogShown) || isPwaAlreadyInstalled() || !isPwaInstallSupportedDevice()) return;
+  pwaInstallDialogShown = true;
+  showModal('CigCig’i indirmek ister misiniz?', `
+    <div class="pwa-install-content">
+      <img class="pwa-install-logo" src="/icons/cigcig-192.png" alt="CigCig logosu" />
+      <p>CigCig’i ana ekranına ekle; uygulama gibi hızlıca açıp kullan.</p>
+      <div class="pwa-install-actions">
+        <button type="button" class="btn btn-primary" id="pwa-install-now"><i class="fas fa-download"></i> Ana ekrana ekle</button>
+        <button type="button" class="btn btn-ghost" id="pwa-install-later">Şimdi değil</button>
+      </div>
+      <div class="pwa-install-help hidden" id="pwa-install-help"></div>
+    </div>
+  `, 'pwa-install-modal');
+  $('#pwa-install-now')?.addEventListener('click', async () => {
+    if (!deferredPwaInstallPrompt) {
+      showPwaInstallHelp();
+      return;
+    }
+    const installPrompt = deferredPwaInstallPrompt;
+    deferredPwaInstallPrompt = null;
+    const button = $('#pwa-install-now');
+    if (button) button.disabled = true;
+    try {
+      await installPrompt.prompt();
+      await installPrompt.userChoice;
+      hideModal();
+    } catch (error) {
+      console.error('CigCig yükleme penceresi açılamadı:', error);
+      toast('Yükleme penceresi açılamadı. Menüden “Uygulamayı indir” seçeneğini deneyin.', 'error');
+      if (button) button.disabled = false;
+    }
+  });
+  $('#pwa-install-later')?.addEventListener('click', hideModal);
+}
+
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  deferredPwaInstallPrompt = event;
+});
+
+window.addEventListener('appinstalled', () => {
+  try {
+    localStorage.setItem(PWA_INSTALL_KEY, '1');
+  } catch (error) {
+    console.warn('PWA kurulum durumu kaydedilemedi:', error.message);
+  }
+  syncPwaInstallMenu();
+  if ($('#modal')?.classList.contains('pwa-install-modal')) hideModal();
+});
+
+if (isPwaRunningStandalone()) {
+  try {
+    localStorage.setItem(PWA_INSTALL_KEY, '1');
+  } catch (error) {
+    console.warn('PWA kurulum durumu kaydedilemedi:', error.message);
+  }
+}
+syncPwaInstallMenu();
+if (isPwaInstallSupportedDevice() && !isPwaAlreadyInstalled()) {
+  window.setTimeout(showPwaInstallDialog, 1200);
 }
 
 // ===== IÇERIK RENDER (hashtag + mention) =====
@@ -3637,6 +3738,11 @@ $('#mobile-toggle').addEventListener('click', () => {
   $('#mobile-toggle').setAttribute('aria-label', isOpening ? 'Menüyü kapat' : 'Menüyü aç');
   $('#mobile-toggle i').classList.toggle('fa-bars', !isOpening);
   $('#mobile-toggle i').classList.toggle('fa-xmark', isOpening);
+});
+
+$('#pwa-install-menu-item')?.addEventListener('click', () => {
+  closeMobileMenu();
+  showPwaInstallDialog({ force: true });
 });
 
 $('#mobile-new-toggle')?.addEventListener('click', async e => {
