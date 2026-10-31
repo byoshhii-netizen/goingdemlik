@@ -84,6 +84,14 @@
   <link rel="manifest" href="/manifest.json" />
   <script>
     if ('serviceWorker' in navigator) {
+      if (navigator.serviceWorker.controller) {
+        let refreshingForServiceWorkerUpdate = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshingForServiceWorkerUpdate) return;
+          refreshingForServiceWorkerUpdate = true;
+          window.location.reload();
+        });
+      }
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/service-worker.js')
           .catch(error => console.error('CigCig service worker registration failed:', error));
