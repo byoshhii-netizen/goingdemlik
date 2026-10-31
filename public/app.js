@@ -8551,7 +8551,7 @@ function realsMediaCardHTML(v) {
   return `<article class="photo-card reals-media-card" data-reals-route="${route}" style="padding:0;overflow:hidden">
     <div class="photo-card-head" style="padding:12px">
       ${avatarImg(v)}
-      <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}">${escHtml(formatDate(v.created_at))}</time></a>` : ''}
+      <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}">${escHtml(formatDate(v.created_at))}</time></a>` : ''}</div>
     </div>
     <div class="photo-media-wrap">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
