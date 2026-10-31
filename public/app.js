@@ -2429,17 +2429,29 @@ function renderRealsMaintenanceScreen(app, message) {
       </div>`;
 }
 
-function getCompatibleRealsVideoUrl(src) {
+function isAppleMobileBrowser() {
+  const userAgent = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(userAgent)
+    || (navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints) > 1);
+}
+
+function getCompatibleVideoUrl(src) {
   try {
     const url = new URL(src, location.href);
     if (url.hostname.toLowerCase() !== 'res.cloudinary.com' || !url.pathname.includes('/video/upload/')
       || /\/s--[^/]+--\//.test(url.pathname)) return null;
+    if (url.pathname.includes('/video/upload/vc_h264,f_mp4/')) return url.href;
     url.pathname = url.pathname.replace('/video/upload/', '/video/upload/vc_h264,f_mp4/');
     return url.href;
   } catch (error) {
-    console.warn('Reals video adresi çözümlenemedi:', error.message);
+    console.warn('Video adresi çözümlenemedi:', error.message);
     return null;
   }
+}
+
+function getVideoPlaybackUrl(src) {
+  if (!src || !isAppleMobileBrowser()) return src;
+  return getCompatibleVideoUrl(src) || src;
 }
 
 async function renderRealsFeed(app, initialId = null) {
@@ -2741,8 +2753,9 @@ async function renderRealsFeed(app, initialId = null) {
       videoEl.load();
       return;
     }
-    if (videoEl.src === new URL(src, location.href).href) return;
-    videoEl.src = src;
+    const playbackUrl = getVideoPlaybackUrl(src);
+    if (videoEl.src === new URL(playbackUrl, location.href).href) return;
+    videoEl.src = playbackUrl;
     videoEl.load();
   }
   function fitRealsVideoFrame(videoEl) {
@@ -2904,7 +2917,7 @@ async function renderRealsFeed(app, initialId = null) {
       };
       const retryCompatibleVideo = () => {
         if (it.dataset.realsCompatibilityRetry === '1') return false;
-        const compatibleUrl = getCompatibleRealsVideoUrl(it.dataset.videoUrl);
+        const compatibleUrl = getCompatibleVideoUrl(it.dataset.videoUrl);
         if (!compatibleUrl || compatibleUrl === vid.currentSrc) return false;
         it.dataset.realsCompatibilityRetry = '1';
         setVideoLoading(true);
@@ -9232,7 +9245,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
       <section class="social-compose-preview-pane">
         <div class="social-compose-preview-frame social-compose-video-frame${existing?.video_url ? ' has-media' : ''}">
           <video id="video-upload-preview" controls muted playsinline preload="metadata"></video>
-          ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(existing.video_url)}" controls muted playsinline preload="metadata"></video>` : ''}
+          ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(getVideoPlaybackUrl(existing.video_url))}" controls muted playsinline preload="metadata"></video>` : ''}
           <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
           <label class="social-compose-pick"><i class="fas fa-plus"></i> ${forceReals ? 'Reals videosu seç' : 'Video seç'}<input type="file" id="video-file" accept="video/mp4,video/quicktime,video/webm,video/ogg,.mp4,.m4v,.mov,.webm,.ogv" /></label>
         </div>
@@ -9733,7 +9746,7 @@ async function renderVideoDetail(app, slug) {
         <div class="video-player-card">
           <div class="video-player-shell">
             <video controls preload="none" playsinline class="video-player" poster="${escHtml(video.banner_image || '')}" id="video-player-el">
-              <source src="${escHtml(video.video_url)}" />
+              <source src="${escHtml(getVideoPlaybackUrl(video.video_url))}" />
             </video>
             <div class="video-ad-overlay hidden" id="video-ad-overlay"></div>
           </div>
@@ -9833,7 +9846,7 @@ async function renderVideoDetail(app, slug) {
         if (adEl) {
           const safeSiteUrl = normalizeExternalUrl(ad.site_url || '#');
           adEl.innerHTML = `<a href="${escHtml(safeSiteUrl)}" target="_blank" rel="noopener noreferrer" class="video-ad-link">
-            ${ad.video_url ? `<video src="${escHtml(ad.video_url)}" class="video-ad-video" autoplay muted loop playsinline></video>` : ''}
+            ${ad.video_url ? `<video src="${escHtml(getVideoPlaybackUrl(ad.video_url))}" class="video-ad-video" autoplay muted loop playsinline></video>` : ''}
             <div class="video-ad-copy"><strong>${escHtml(ad.title)}</strong><span>${escHtml(ad.site_url || '')}</span></div>
           </a>`;
           adEl.className = `video-ad-overlay hidden ${escHtml(ad.position || 'bottom-right')}`;
@@ -19818,7 +19831,7 @@ async function loadStoriesBar(container) {
         const previousStoryAudio = activeStoryAudio;
         const previousStoryAudioPlaying = Boolean(previousStoryAudio && !previousStoryAudio.paused);
         if (activeStoryAudio) { activeStoryAudio.pause(); untrackMediaAudio(activeStoryAudio); activeStoryAudio.src = ''; activeStoryAudio = null; }
-        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-tap-zone story-tap-left" id="story-tap-left" aria-label="Önceki hikaye"></div><div class="story-tap-zone story-tap-right" id="story-tap-right" aria-label="Sonraki hikaye"></div>${story.media_type === 'video' ? `<video id="story-video" src="${escHtml(story.media_url)}" autoplay playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle" id="story-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img src="${escHtml(story.media_url)}" alt="" style="filter:${mediaFilterCss(story.media_filter)}" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><button class="btn btn-ghost" id="story-share"><i class="fas fa-share-alt"></i> Paylaş</button>${!story.is_owner ? `<button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(story.like_count)}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>` : ''}${story.is_owner ? `<button type="button" class="btn btn-ghost" id="story-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button type="button" class="btn btn-ghost" id="story-edit"><i class="fas fa-pen"></i> Düzenle</button><button type="button" class="btn btn-ghost text-danger" id="story-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>${story.is_owner ? '<small class="story-owner-hint">Hikayeni görenleri ve tekrar görüntüleme sayılarını inceleyebilirsin.</small>' : ''}${!story.is_owner ? `<div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div>` : ''}</div>`);
+        showModal('@' + group.username, `<div class="story-viewer"><div class="story-progress">${group.stories.map((_, i) => `<span class="${i <= storyIndex ? 'active' : ''}"></span>`).join('')}</div><div class="story-tap-zone story-tap-left" id="story-tap-left" aria-label="Önceki hikaye"></div><div class="story-tap-zone story-tap-right" id="story-tap-right" aria-label="Sonraki hikaye"></div>${story.media_type === 'video' ? `<video id="story-video" src="${escHtml(getVideoPlaybackUrl(story.media_url))}" autoplay playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle" id="story-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img src="${escHtml(story.media_url)}" alt="" style="filter:${mediaFilterCss(story.media_filter)}" />`}${story.caption ? `<p>${escHtml(story.caption)}</p>` : ''}${story.song_audio_url ? `<button class="story-song" id="story-song-play"><img src="${escHtml(story.song_cover_url || '')}" alt="" /><span><b>${escHtml(story.song_title)}</b><small>${escHtml(story.song_artist || '')}</small></span><i class="fas fa-volume-up"></i></button>` : ''}<div class="story-viewer-actions"><button class="btn btn-ghost" id="story-share"><i class="fas fa-share-alt"></i> Paylaş</button>${!story.is_owner ? `<button type="button" class="btn btn-ghost story-like ${story.liked ? 'active' : ''}" id="story-like"><i class="${story.liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(story.like_count)}</span></button><button type="button" class="btn btn-ghost" id="story-reply-open"><i class="far fa-comment"></i> Yanıtla</button>` : ''}${story.is_owner ? `<button type="button" class="btn btn-ghost" id="story-viewers"><i class="fas fa-eye"></i> ${story.total_views || 0} görüntülenme</button><button type="button" class="btn btn-ghost" id="story-edit"><i class="fas fa-pen"></i> Düzenle</button><button type="button" class="btn btn-ghost text-danger" id="story-delete"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>${story.is_owner ? '<small class="story-owner-hint">Hikayeni görenleri ve tekrar görüntüleme sayılarını inceleyebilirsin.</small>' : ''}${!story.is_owner ? `<div id="story-reply-box" class="story-reply-box" hidden><div class="story-reply-preview"><img src="${escHtml(story.media_url)}" alt="" /><span>Bu hikayeye yanıt veriyorsun</span></div><div class="story-reply-form"><input id="story-reply-input" maxlength="500" placeholder="Yanıtını yaz..." /><button type="button" class="btn btn-primary" id="story-reply-send"><i class="fas fa-paper-plane"></i></button></div></div>` : ''}</div>`);
         bindStoryVideoToggle($('#story-video'), $('#story-video-toggle'));
         const storySongButton = $('#story-song-play');
         if (storySongButton) {
@@ -20364,7 +20377,7 @@ async function renderStoryRoute(app, storyId) {
       if (item.media_type === 'video') {
         const video = document.createElement('video');
         video.preload = 'auto';
-        video.src = item.media_url;
+        video.src = getVideoPlaybackUrl(item.media_url);
         video.load();
       }
     });
@@ -20393,7 +20406,7 @@ async function renderStoryRoute(app, storyId) {
             <a class="story-route-icon" href="/fotograflar" data-link aria-label="Hikayelerden çık" title="Kapat"><i class="fas fa-times"></i></a>
           </header>
           <div class="story-route-media">
-            ${story.media_type === 'video' ? `<video id="story-route-video" class="story-route-asset" src="${escHtml(story.media_url)}" autoplay preload="auto" playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle story-route-video-toggle" id="story-route-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
+            ${story.media_type === 'video' ? `<video id="story-route-video" class="story-route-asset" src="${escHtml(getVideoPlaybackUrl(story.media_url))}" autoplay preload="auto" playsinline disablepictureinpicture style="filter:${mediaFilterCss(story.media_filter)}"></video><button type="button" class="story-video-toggle story-route-video-toggle" id="story-route-video-toggle" aria-label="Hikayeyi durdur" title="Durdur"><i class="fas fa-pause" aria-hidden="true"></i></button>` : `<img class="story-route-asset" src="${escHtml(story.media_url)}" alt="Hikaye" style="filter:${mediaFilterCss(story.media_filter)}" />`}
             <button class="story-route-tap story-route-tap-left" id="story-route-tap-prev" aria-label="Önceki hikaye" ${previousStory ? '' : 'disabled'}></button>
             <button class="story-route-tap story-route-tap-right" id="story-route-tap-next" aria-label="Sonraki hikaye"></button>
             <div class="story-route-overlay-copy">
@@ -20843,7 +20856,7 @@ function bindPhotoFeed(feed) {
         video.dataset.mediaNetworkRetry = '1';
         window.setTimeout(() => {
           if (!video.isConnected) return;
-          video.src = video.dataset.videoUrl;
+          video.src = getVideoPlaybackUrl(video.dataset.videoUrl);
           video.load();
           if (video.classList.contains('is-visible')) video.play().catch(() => {});
         }, 350);
@@ -20851,7 +20864,7 @@ function bindPhotoFeed(feed) {
       }
       if ([MediaError.MEDIA_ERR_DECODE, MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED].includes(errorCode)
         && video.dataset.mediaCompatibilityRetry !== '1') {
-        const compatibleUrl = getCompatibleRealsVideoUrl(video.dataset.videoUrl || video.currentSrc);
+        const compatibleUrl = getCompatibleVideoUrl(video.dataset.videoUrl || video.currentSrc);
         if (compatibleUrl && compatibleUrl !== video.currentSrc) {
           video.dataset.mediaCompatibilityRetry = '1';
           video.src = compatibleUrl;
@@ -20868,7 +20881,7 @@ function bindPhotoFeed(feed) {
       delete video.dataset.mediaNetworkRetry;
       delete video.dataset.mediaCompatibilityRetry;
       retryButton.hidden = true;
-      video.src = video.dataset.videoUrl;
+      video.src = getVideoPlaybackUrl(video.dataset.videoUrl);
       video.load();
       video.play().catch(error => {
         if (error.name !== 'AbortError') {
@@ -20902,7 +20915,7 @@ function bindPhotoFeed(feed) {
           video.classList.add('is-visible');
           video.muted = true;
           if (!video.hasAttribute('src') && video.dataset.videoUrl) {
-            video.src = video.dataset.videoUrl;
+            video.src = getVideoPlaybackUrl(video.dataset.videoUrl);
             video.load();
           }
           video.play().then(() => {
@@ -20934,7 +20947,7 @@ function bindPhotoFeed(feed) {
     realsCards.slice(0, 1).forEach(card => {
       const video = card.querySelector('.reals-media-preview');
       if (video && !video.hasAttribute('src') && video.dataset.videoUrl) {
-        video.src = video.dataset.videoUrl;
+        video.src = getVideoPlaybackUrl(video.dataset.videoUrl);
         video.load();
       }
       video?.play().then(() => {
