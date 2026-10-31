@@ -19971,9 +19971,10 @@ function bindPhotoFeed(feed) {
     imageLink.addEventListener('contextmenu', event => event.preventDefault());
     imageLink.addEventListener('dragstart', event => event.preventDefault());
     imageLink.addEventListener('click', event => {
-      if (event.target.closest('button')) return;
+      if (event.target.closest('button, a')) return;
+      event.preventDefault();
+      event.stopPropagation();
       if (Date.now() < suppressClickUntil) {
-        event.preventDefault();
         return;
       }
       if (event.detail > 1) {
@@ -19986,7 +19987,7 @@ function bindPhotoFeed(feed) {
       openTimer = setTimeout(() => navigate('/foto/' + encodeURIComponent(imageLink.dataset.photoOpen)), 360);
     });
     imageLink.addEventListener('pointerup', event => {
-      if (event.pointerType !== 'touch' || event.target.closest('button')) return;
+      if (event.pointerType !== 'touch' || event.target.closest('button, a')) return;
       const now = Date.now();
       if (now - lastTouchTapAt <= 320) {
         clearTimeout(openTimer);

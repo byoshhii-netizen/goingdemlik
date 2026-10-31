@@ -1862,7 +1862,7 @@ body.home-page #home-photos .photo-card-head > .avatar-placeholder { font-size:1
 body.home-page #home-photos .photo-card-head .user-display-identity { gap:4px; line-height:1.25; }
 body.home-page #home-photos .photo-card-head .user-display-identity strong { font-size:15px; line-height:1.25; }
 body.home-page #home-photos .photo-card-head .user-display-identity small { font-size:12px; line-height:1.25; }
-.photo-media-wrap { position:relative; overflow:hidden; aspect-ratio:3 / 4; background:var(--bg-card2); isolation:isolate; }
+.photo-media-wrap { position:relative; overflow:hidden; aspect-ratio:4 / 5; background:var(--bg-card2); isolation:isolate; }
 .photo-media-backdrop { position:absolute; inset:-18px; background-position:center; background-size:cover; filter:blur(18px); opacity:.42; transform:scale(1.06); }
 .photo-media-backdrop::after { content:''; position:absolute; inset:0; background:rgba(0,0,0,.28); }
 .photo-song-overlay { position:absolute; left:10px; right:10px; top:10px; z-index:2; display:flex; align-items:center; gap:7px; max-width:calc(100% - 20px); padding:8px 11px; border:1px solid rgba(255,255,255,.18); border-radius:9px; background:rgba(15,15,15,.78); color:#fff; text-align:left; backdrop-filter:blur(8px); }
@@ -5988,8 +5988,8 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
 .social-compose-preview-pane { display:flex; flex-direction:column; justify-content:center; gap:14px; min-width:0; padding:22px; background:radial-gradient(ellipse at 50% 45%,rgba(255,255,255,.055),transparent 70%),#090a0c; border-right:1px solid var(--border); }
 .social-compose-preview-frame { position:relative; display:grid; place-items:center; width:100%; min-height:360px; overflow:hidden; border:1px solid rgba(255,255,255,.09); border-radius:16px; background:linear-gradient(145deg,#17191e,#090a0c); }
 .social-compose-story-frame { width:min(100%,310px); aspect-ratio:9/16; min-height:0; max-height:62vh; justify-self:center; }
-.social-compose-photo-frame { aspect-ratio:1; min-height:0; }
-.social-compose-photo .social-compose-photo-frame { width:min(100%,min(62vh,540px)); align-self:center; }
+.social-compose-photo-frame { aspect-ratio:4 / 5; min-height:0; }
+.social-compose-photo .social-compose-photo-frame { width:min(100%,min(48vh,480px)); align-self:center; }
 .social-compose-photo-frame.has-media { border-color:rgba(255,255,255,.13); background:#080808; }
 .photo-compose-gallery-controls { position:absolute; inset:0; z-index:4; display:flex; align-items:center; justify-content:space-between; padding:0 10px; pointer-events:none; }
 .photo-compose-gallery-controls[hidden], .photo-compose-action[hidden] { display:none; }
@@ -6077,8 +6077,8 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   .social-compose-story-frame { width:min(28dvh,270px,calc(100vw - 32px)); height:min(50dvh,470px); max-width:100%; max-height:none; min-height:0; align-self:center; box-sizing:border-box; aspect-ratio:9/16; flex:0 0 auto; }
   .social-compose-video-frame:not(.is-landscape) { width:min(28dvh,270px,calc(100vw - 32px)); height:min(50dvh,470px); max-width:100%; max-height:none; min-height:0; align-self:center; box-sizing:border-box; aspect-ratio:9/16; flex:0 0 auto; }
   .social-compose-video-frame.is-landscape { width:min(100%,560px); height:min(42dvh,360px); max-height:none; aspect-ratio:16/9; }
-  .social-compose-photo-frame { width:min(100%,44dvh,420px); height:min(calc(100vw - 32px),44dvh,420px); max-height:none; align-self:center; aspect-ratio:1; }
-  .social-compose-photo .social-compose-photo-frame { width:min(100%,44dvh,420px); }
+  .social-compose-photo-frame { width:min(100%,42dvh,420px); height:auto; max-height:none; align-self:center; aspect-ratio:4 / 5; }
+  .social-compose-photo .social-compose-photo-frame { width:min(100%,42dvh,420px); }
   .social-compose-preview-empty { gap:5px; padding:12px; }
   .social-compose-preview-empty > i { width:38px; height:38px; border-radius:13px; font-size:16px; }
   .social-compose-preview-empty strong { font-size:12px; }
@@ -7321,10 +7321,10 @@ body.song-detail-route #global-music-player:not(.music-ad-player) { display: non
     align-items:center;
     justify-content:center;
     width:100%;
-    height:min(56dvh,440px);
-    max-height:56dvh;
+    height:auto;
+    max-height:none;
     min-height:0;
-    aspect-ratio:auto;
+    aspect-ratio:4 / 5;
     background:#080808;
   }
   .photos-feed .photo-media-backdrop { display:block; }
