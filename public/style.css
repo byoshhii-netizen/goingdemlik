@@ -1947,6 +1947,16 @@ article.photo-card .photo-media-wrap button.photo-audio-toggle.is-playing i,
 .group-hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; flex-shrink: 0; min-width: 0; max-width: 100%; }
 .group-hero-actions .btn { max-width: 100%; white-space: nowrap; }
 .chat-msg-body { min-width: 0; }
+.chat-msg.chat-msg-arriving .chat-msg-body { animation:groupMessageArrive .34s cubic-bezier(.2,.8,.25,1) both; transform-origin:left bottom; }
+.chat-msg.own.chat-msg-arriving .chat-msg-body { animation-name:groupOwnMessageArrive;transform-origin:right bottom; }
+@keyframes groupMessageArrive {
+  from { opacity:0; transform:translate3d(-12px,9px,0) scale(.96); }
+  to { opacity:1; transform:translate3d(0,0,0) scale(1); }
+}
+@keyframes groupOwnMessageArrive {
+  from { opacity:0; transform:translate3d(12px,9px,0) scale(.96); }
+  to { opacity:1; transform:translate3d(0,0,0) scale(1); }
+}
 .chat-msg-meta { min-width: 0; }
 .chat-msg-name { min-width: 0; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
@@ -4010,6 +4020,16 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 
 /* Message bubbles */
 .dm-msg-wrap { position:relative; display: flex; align-items: flex-start; gap: 8px; width: 100%; min-width: 0; height: auto; min-height: 0; flex: 0 0 auto; touch-action:pan-y; }
+.dm-msg-wrap.dm-msg-arriving .dm-msg-content { animation:dmMessageArrive .34s cubic-bezier(.2,.8,.25,1) both; transform-origin:left bottom; }
+.dm-msg-wrap.dm-own.dm-msg-arriving .dm-msg-content { animation-name:dmOwnMessageArrive;transform-origin:right bottom; }
+@keyframes dmMessageArrive {
+  from { opacity:0; transform:translate3d(-12px,9px,0) scale(.96); }
+  to { opacity:1; transform:translate3d(0,0,0) scale(1); }
+}
+@keyframes dmOwnMessageArrive {
+  from { opacity:0; transform:translate3d(12px,9px,0) scale(.96); }
+  to { opacity:1; transform:translate3d(0,0,0) scale(1); }
+}
 .dm-msg-content { transition:transform .18s ease; }
 .dm-msg-wrap.dm-swipe-replying { touch-action:pan-y; }
 .dm-msg-wrap.dm-swipe-replying .dm-msg-content { transform:translateX(var(--dm-swipe-x,0)); transition:none; }
@@ -10167,4 +10187,9 @@ body { min-height:100vh; min-height:100dvh; }
     white-space:nowrap;
   }
   body.reals-page .reals-meta { right:0 !important;padding-right:78px !important; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .dm-msg-wrap.dm-msg-arriving .dm-msg-content,
+  .chat-msg.chat-msg-arriving .chat-msg-body { animation:none; }
 }

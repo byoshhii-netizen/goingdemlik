@@ -8085,6 +8085,7 @@ async function renderGroupDetail(app, slug) {
       const chatEl2 = $('#chat-messages');
       const wasBottom = chatEl2.scrollHeight - chatEl2.scrollTop - chatEl2.clientHeight < 60;
       chatEl2.insertAdjacentHTML('beforeend', chatMsgHTML(message, window._chatCanMod, !!canSend));
+      animateMessageEntry(chatEl2.lastElementChild);
       enhanceLinkPreviews(chatEl2);
       messages.push(message);
       lastChatSignature = chatSignature(messages);
@@ -8110,6 +8111,7 @@ async function renderGroupDetail(app, slug) {
           await triggerGroupMessageNotification(group.name, senderName, preview);
         }
         chatEl2.innerHTML = newMsgs.map(m => chatMsgHTML(m, window._chatCanMod, !!canSend)).join('');
+        newest.forEach(message => animateMessageEntry(chatEl2.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(message.id))}"]`)));
         enhanceLinkPreviews(chatEl2);
         lastChatSignature = chatSignature(newMsgs);
         lastId = Math.max(lastId, ...newMsgs.map(m => Number(m.id)));
@@ -8246,6 +8248,7 @@ async function renderGroupDetail(app, slug) {
         });
         if (!messages.some(item => String(item.id) === String(msg.id))) {
           $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod, !!canSend));
+          animateMessageEntry($('#chat-messages').lastElementChild);
           enhanceLinkPreviews(chatEl);
           messages.push(msg);
           lastChatSignature = chatSignature(messages);
@@ -15322,7 +15325,19 @@ function appendDMMessage(container, message, myId, selMode) {
   const previousMessage = previousElement
     ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt, deleted_for_all: previousElement.dataset.deletedForAll === 'true' }
     : null;
+  const childCount = container.childElementCount;
   container.insertAdjacentHTML('beforeend', dmMessageHTML(message, myId, selMode, previousMessage));
+  if (container.childElementCount > childCount) animateMessageEntry(container.lastElementChild);
+}
+
+function animateMessageEntry(row) {
+  if (!(row instanceof HTMLElement) || row.matches('.dm-deleted-for-all, .deleted-for-me')) return;
+  const className = row.matches('.dm-msg-wrap') ? 'dm-msg-arriving'
+    : row.matches('.chat-msg') ? 'chat-msg-arriving'
+      : '';
+  if (!className) return;
+  row.classList.add(className);
+  window.setTimeout(() => row.classList.remove(className), 500);
 }
 
 function showDmImageViewer(imageUrls, ephemeral = false) {
