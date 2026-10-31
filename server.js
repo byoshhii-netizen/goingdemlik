@@ -5289,7 +5289,15 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     });
   }
   if (blockByMe) {
-    return res.json({ blocked_by_me: true, user: sanitizeUserForFeatures(user, features) });
+    const { rows: followCounts } = await query(`SELECT
+      (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
+      (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
+    return res.json({
+      blocked_by_me: true,
+      user: sanitizeUserForFeatures(user, features),
+      followers_count: Number(followCounts[0]?.followers_count || 0),
+      following_count: Number(followCounts[0]?.following_count || 0)
+    });
   }
   const badges = await getUserProfileBadges(user, { featureStates: features });
   const isOwner = req.user && String(req.user.id) === String(user.id);

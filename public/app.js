@@ -9792,7 +9792,19 @@ async function renderProfile(app, username) {
   if (data.blocked_by_me) {
     const blockedUser = data.user || { username };
     app.innerHTML = `<div class="container page profile-blocked-page">
-      <section class="card profile-blocked-header">${avatarImg(blockedUser)}<div><h1>${escHtml(userDisplayName(blockedUser))}</h1><small>@${escHtml(blockedUser.username || username)}</small></div></section>
+      <section class="card profile-blocked-header">
+        ${avatarImg(blockedUser, 'profile-blocked-avatar')}
+        <div class="profile-blocked-identity">
+          <h1>${escHtml(userDisplayName(blockedUser))}</h1>
+          <small>@${escHtml(blockedUser.username || username)}</small>
+          ${blockedUser.title ? `<span class="profile-blocked-title">${escHtml(blockedUser.title)}</span>` : ''}
+          ${blockedUser.bio ? descriptionPreviewHTML(blockedUser.bio, 'profile-blocked-bio', 240) : ''}
+          <div class="profile-blocked-stats">
+            <span><strong>${Number(data.followers_count || 0).toLocaleString('tr-TR')}</strong> takipçi</span>
+            <span><strong>${Number(data.following_count || 0).toLocaleString('tr-TR')}</strong> takip</span>
+          </div>
+        </div>
+      </section>
       <section class="card card-body profile-blocked-content">
         <h2><i class="fas fa-images"></i> İçerikler</h2>
         <div class="profile-blocked-state">
@@ -13330,7 +13342,7 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     strip.innerHTML = `<button type="button" class="dm-note-card dm-note-create${ownNote ? ' has-note' : ''}" id="dm-note-create" style="--dm-note-color:${escHtml(/^#[0-9a-f]{6}$/i.test(ownNote?.background_color || '') ? ownNote.background_color : '#242731')}" aria-label="${ownNote ? 'Notunu düzenle' : 'Not ekle'}">
       <span class="dm-note-avatar">${ownNote && hasUsableAvatar(currentUser) ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-plus"></i>'}${ownNote?.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
       <span class="dm-note-label">${ownNote ? 'Notun' : 'Not ekle'}</span>
-      <span class="dm-note-preview">${escHtml(ownNote?.content || ownNote?.song_title || 'Bir not paylaş')}</span>
+      ${ownNote ? `<span class="dm-note-preview">${escHtml(ownNote.content || ownNote.song_title || '♪')}</span>` : ''}
       ${noteLikersHTML(ownRecentLikers)}
     </button>${otherNotes.map(note => noteButton(note)).join('')}`;
     strip.querySelector('#dm-note-create')?.addEventListener('click', () => {
@@ -16619,7 +16631,7 @@ async function renderMusicList(app) {
       </div>
       ${currentUser ? `<div class="music-page-header-actions">
         <a href="/playlistlerim" data-link class="music-playlists-link" aria-label="Playlistlerim">
-          <span class="music-playlists-icon"><i class="fas fa-record-vinyl"></i></span>
+          <span class="music-playlists-icon"><i class="fas fa-list-ul" aria-hidden="true"></i></span>
           <span class="music-playlists-copy"><strong>Playlistlerim</strong><small>Koleksiyonunu aç</small></span>
           <i class="fas fa-arrow-right music-playlists-arrow" aria-hidden="true"></i>
         </a>
@@ -17847,8 +17859,8 @@ async function renderMusicDetail(app, slug) {
                 <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" aria-label="Ses seviyesi" />
                 <output id="detail-vol-value" class="sdp-vol-value" for="detail-vol">80%</output>
               </div>
-              ${currentUser ? '<button class="sdp-together-btn" id="detail-listen-together" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast"></i></button>' : ''}
             </div>
+            ${currentUser ? '<div class="sdp-together-row"><button class="sdp-together-btn" id="detail-listen-together" type="button"><i class="fas fa-tower-broadcast" aria-hidden="true"></i><span>Ortak dinleyiş başlat</span></button></div>' : ''}
             ${song.remastered_audio_url ? `<button class="song-remastered-toggle" id="song-remastered-toggle" type="button"><span class="song-remastered-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered</strong><small>Daha temiz ses sürümünü dinle</small></span><i class="fas fa-arrow-right song-remastered-arrow"></i></button>` : ''}
           </div>
 
