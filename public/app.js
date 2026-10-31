@@ -10973,6 +10973,27 @@ async function renderSettingsSection(section) {
           <div id="profile-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    el.insertAdjacentHTML('beforeend', `
+      <section class="card profile-discovery-card" aria-labelledby="profile-discovery-title">
+        <div class="card-header">
+          <span id="profile-discovery-title"><i class="fas fa-compass" aria-hidden="true"></i> Hesap Önerileri</span>
+          <span class="profile-discovery-badge"><i class="fas fa-user-group" aria-hidden="true"></i> Keşfedilebilirlik</span>
+        </div>
+        <div class="card-body">
+          <label class="profile-discovery-toggle" for="s-show-in-suggestions">
+            <span class="profile-discovery-icon"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i></span>
+            <span class="profile-discovery-copy">
+              <strong>Hesabım önerilenlerde çıksın</strong>
+              <small>Yeni kişiler seni takip önerilerinde görebilir. Kapatırsan önerilerden kaldırılırsın; profilin ve mevcut takipçilerin etkilenmez.</small>
+              <span class="profile-discovery-state" id="profile-discovery-state" role="status">${currentUser.show_in_suggestions === 0 || currentUser.show_in_suggestions === false ? 'Önerilerde görünmüyorsun' : 'Önerilerde görünüyorsun'}</span>
+            </span>
+            <span class="profile-discovery-switch">
+              <input type="checkbox" id="s-show-in-suggestions" ${currentUser.show_in_suggestions === 0 || currentUser.show_in_suggestions === false ? '' : 'checked'} />
+              <span class="profile-discovery-switch-track" aria-hidden="true"><span></span></span>
+            </span>
+          </label>
+        </div>
+      </section>`);
 
     function renderLinkRows(linksArr) {
       const container = $('#links-container');
@@ -11002,6 +11023,23 @@ async function renderSettingsSection(section) {
       profileAutosaveQueue = save.catch(() => {});
       return save;
     };
+    const suggestionToggle = $('#s-show-in-suggestions');
+    suggestionToggle?.addEventListener('change', async () => {
+      const enabled = suggestionToggle.checked;
+      const state = $('#profile-discovery-state');
+      suggestionToggle.disabled = true;
+      if (state) state.textContent = 'Ayar kaydediliyor…';
+      try {
+        await saveProfileFields({ show_in_suggestions: enabled ? '1' : '0' }, 'Öneri görünürlüğü kaydediliyor…');
+        if (state) state.textContent = enabled ? 'Önerilerde görünüyorsun' : 'Önerilerde görünmüyorsun';
+      } catch (error) {
+        suggestionToggle.checked = !enabled;
+        if (state) state.textContent = `Ayar kaydedilemedi: ${error.message || 'Bir hata oluştu.'}`;
+        toast(error.message || 'Öneri görünürlüğü kaydedilemedi.', 'error');
+      } finally {
+        suggestionToggle.disabled = false;
+      }
+    });
     const saveProfileLinks = async () => {
       clearTimeout(profileLinksSaveTimer);
       const validLinks = currentLinks.filter(link => link.url && link.url.trim());

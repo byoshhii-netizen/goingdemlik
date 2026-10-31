@@ -77,6 +77,7 @@ async function initDb() {
     );
     ALTER TABLE users ADD COLUMN IF NOT EXISTS banned INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS show_in_suggestions INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS dm_message_permission TEXT NOT NULL DEFAULT 'everyone';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';

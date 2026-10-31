@@ -6054,10 +6054,13 @@ app.put('/api/me/badges/:key', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res) => {
-  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_progress, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, dm_message_permission, avatar_removed } = req.body;
+  const { bio, links, name_color, name_color_mode, name_gradient, show_level_badge, show_level_progress, show_level_color, title, location, allow_mentions, tag_permission, badge_name, badge_icon, badge_color, badge_display, is_private, show_in_suggestions, dm_message_permission, avatar_removed } = req.body;
   if (bio !== undefined && String(bio).length > 500) return res.status(400).json({ error: 'Biyografi en fazla 500 karakter olabilir.' });
   if (title !== undefined && String(title).length > 100) return res.status(400).json({ error: 'Ünvan en fazla 100 karakter olabilir.' });
   if (location !== undefined && String(location).length > 100) return res.status(400).json({ error: 'Konum en fazla 100 karakter olabilir.' });
+  if (show_in_suggestions !== undefined && !['true', 'false', '1', '0', 1, 0, true, false].includes(show_in_suggestions)) {
+    return res.status(400).json({ error: 'Önerilerde görünme ayarı geçersiz.' });
+  }
   const canSetBadge = req.user.is_vip || req.user.is_plus;
   if (canSetBadge && isReservedVmbBadgeName(badge_name)) return res.status(400).json({ error: 'VMB özel rozeti profil ayarlarından verilemez' });
   const canSetCustomColor = req.user.is_vip || req.user.is_plus;
@@ -6105,7 +6108,7 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
   const resolvedTagPermission = ['friends', 'everyone', 'nobody'].includes(tag_permission) ? tag_permission : (req.user.tag_permission || 'everyone');
   const resolvedDmPermission = ['everyone', 'friends', 'followers'].includes(dm_message_permission)
     ? dm_message_permission : (req.user.dm_message_permission || 'everyone');
-  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_progress=$7,show_level_color=$8,avatar=$9,avatar_removed=$10,title=$11,location=$12,allow_mentions=$13,tag_permission=$14,badge_name=$15,badge_icon=$16,badge_color=$17,badge_display=$18,is_private=$19,dm_message_permission=$20 WHERE id=$21',
+  await query('UPDATE users SET bio=$1,links=$2,name_color=$3,name_color_mode=$4,name_gradient=$5,show_level_badge=$6,show_level_progress=$7,show_level_color=$8,avatar=$9,avatar_removed=$10,title=$11,location=$12,allow_mentions=$13,tag_permission=$14,badge_name=$15,badge_icon=$16,badge_color=$17,badge_display=$18,is_private=$19,show_in_suggestions=$20,dm_message_permission=$21 WHERE id=$22',
     [bio??req.user.bio, newLinks,
      canSetCustomColor ? (name_color??req.user.name_color) : req.user.name_color,
      canSetCustomColor ? resolvedColorMode : (req.user.name_color_mode || 'solid'),
@@ -6121,6 +6124,7 @@ app.put('/api/profile', authMiddleware, upload.single('avatar'), async (req, res
     canSetBadge ? (badge_color??req.user.badge_color) : req.user.badge_color,
     allowedBadgeDisplay,
     is_private!==undefined?(parseBool(is_private)?1:0):(req.user.is_private??0),
+    show_in_suggestions!==undefined?(parseBool(show_in_suggestions)?1:0):(req.user.show_in_suggestions??1),
     resolvedDmPermission,
     req.user.id]);
   if (show_level_badge !== undefined) {
@@ -10686,6 +10690,7 @@ app.get('/api/friends/suggestions', authMiddleware, async (req, res) => {
         WHERE (f.follower_id=$1 AND f.following_id=u.id)
            OR (f.follower_id=u.id AND f.following_id=$1)
       )
+      AND COALESCE(u.show_in_suggestions,1)=1
     ORDER BY RANDOM()
     LIMIT 8
   `, [req.user.id]);
