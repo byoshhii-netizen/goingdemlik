@@ -9606,8 +9606,10 @@ app.post('/api/admin/notifications', adminMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'Bildirim süresi geçersiz.' });
   }
 
-  const client = await pool.connect();
+  let client;
+  let committed = false;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const campaign = await client.query(
       `INSERT INTO admin_notification_broadcasts (title,body,link,expires_at,created_by)
@@ -9618,22 +9620,43 @@ app.post('/api/admin/notifications', adminMiddleware, async (req, res) => {
     const recipients = await client.query(
       `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link,expires_at,broadcast_id)
        SELECT id,'announcement','CigCig','/cigcig.png',$1,$2,$3,$4,$5
-       FROM users WHERE COALESCE(is_deleted,0)=0
-       RETURNING id,user_id,type,actor_username,actor_avatar,title,body,link,is_read,expires_at,broadcast_id,created_at`,
+       FROM users WHERE COALESCE(is_deleted,0)=0`,
       [title, body, rawLink, expiresAt, broadcast.id]
     );
     await client.query('UPDATE admin_notification_broadcasts SET recipient_count=$1 WHERE id=$2', [recipients.rowCount, broadcast.id]);
     await client.query('COMMIT');
-    for (const notification of recipients.rows) {
-      io.to(`user:${notification.user_id}`).emit('notification:new', notification);
+    committed = true;
+    const activeUserIds = new Set(
+      [...io.sockets.adapter.rooms.keys()]
+        .filter(room => room.startsWith('user:'))
+        .map(room => room.slice(5))
+        .filter(userId => /^\d+$/.test(userId))
+    );
+    const liveNotification = {
+      type: 'announcement',
+      actor_username: 'CigCig',
+      actor_avatar: '/cigcig.png',
+      title,
+      body,
+      link: rawLink
+    };
+    try {
+      for (const userId of activeUserIds) {
+        io.to(`user:${userId}`).emit('notification:new', liveNotification);
+      }
+    } catch (error) {
+      console.error('[admin-notifications] Live delivery failed after broadcast was saved:', error);
     }
     res.status(201).json({ ...broadcast, recipient_count: recipients.rowCount });
   } catch (error) {
-    await client.query('ROLLBACK').catch(rollbackError => console.error('[admin-notifications] Broadcast rollback failed:', rollbackError));
-    console.error('[admin-notifications] Broadcast failed:', error);
-    res.status(500).json({ error: 'Bildirim gönderilemedi.' });
+    if (client && !committed) {
+      await client.query('ROLLBACK').catch(rollbackError => console.error('[admin-notifications] Broadcast rollback failed:', rollbackError));
+    }
+    const diagnosticId = randomUUID();
+    console.error(`[admin-notifications] Broadcast failed (${diagnosticId}, ${error.code || 'no-code'}):`, error);
+    res.status(500).json({ error: `Bildirim gönderilemedi. Hata kodu: ${error.code || diagnosticId}` });
   } finally {
-    client.release();
+    client?.release();
   }
 });
 
