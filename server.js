@@ -9619,11 +9619,14 @@ app.post('/api/admin/notifications', adminMiddleware, async (req, res) => {
       `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link,expires_at,broadcast_id)
        SELECT id,'announcement','CigCig','/cigcig.png',$1,$2,$3,$4,$5
        FROM users WHERE COALESCE(is_deleted,0)=0
-       RETURNING id`,
+       RETURNING id,user_id,type,actor_username,actor_avatar,title,body,link,is_read,expires_at,broadcast_id,created_at`,
       [title, body, rawLink, expiresAt, broadcast.id]
     );
     await client.query('UPDATE admin_notification_broadcasts SET recipient_count=$1 WHERE id=$2', [recipients.rowCount, broadcast.id]);
     await client.query('COMMIT');
+    for (const notification of recipients.rows) {
+      io.to(`user:${notification.user_id}`).emit('notification:new', notification);
+    }
     res.status(201).json({ ...broadcast, recipient_count: recipients.rowCount });
   } catch (error) {
     await client.query('ROLLBACK').catch(rollbackError => console.error('[admin-notifications] Broadcast rollback failed:', rollbackError));
