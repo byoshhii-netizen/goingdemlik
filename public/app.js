@@ -1146,6 +1146,10 @@ async function pollVoiceCall(id) {
   try {
     const call = await api('/voice-calls/' + id);
     if (call.status === 'ended') return endVoiceCall(true);
+    if (['accepted', 'connected'].includes(call.status) && Date.now() - (activeVoiceCall.lastHeartbeatAt || 0) >= 20000) {
+      activeVoiceCall.lastHeartbeatAt = Date.now();
+      await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'heartbeat' }) });
+    }
     if (activeVoiceCall.role === 'caller' && call.answer && activeVoiceCall.peer.signalingState === 'have-local-offer') await activeVoiceCall.peer.setRemoteDescription(call.answer);
     const ice = activeVoiceCall.role === 'caller' ? (call.callee_ice || []) : (call.caller_ice || []);
     while (activeVoiceCall.seenIce < ice.length) await activeVoiceCall.peer.addIceCandidate(ice[activeVoiceCall.seenIce++]);
@@ -10944,7 +10948,7 @@ async function renderSettings(app) {
   </div>`;
 
   const requestedSection = new URLSearchParams(location.search).get('section');
-  const settingsSections = $$('.settings-nav-item');
+  const settingsSections = Array.from($$('.settings-nav-item'));
   const initialSection = settingsSections.some(item => item.dataset.section === requestedSection) ? requestedSection : 'profile';
   $$('.settings-nav-item').forEach(item => item.classList.toggle('active', item.dataset.section === initialSection));
   renderSettingsSection(initialSection);

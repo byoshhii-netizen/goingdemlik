@@ -11154,7 +11154,20 @@ async function getCallForUser(callId, userId) {
   return rows[0];
 }
 
+async function expireStaleVoiceCallsForUser(userId) {
+  await query(`
+    UPDATE voice_calls
+    SET status='ended', ended_at=COALESCE(ended_at,NOW()), updated_at=NOW()
+    WHERE (caller_id=$1 OR callee_id=$1)
+      AND (
+        (status='ringing' AND created_at <= NOW() - INTERVAL '2 minutes')
+        OR (status IN ('accepted','connected') AND updated_at <= NOW() - INTERVAL '3 minutes')
+      )
+  `, [userId]);
+}
+
 app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
+  await expireStaleVoiceCallsForUser(req.user.id);
   const { rows } = await query(`
     SELECT c.id, c.status, c.created_at, u.username, u.nickname, u.avatar, u.avatar_removed, u.name_color
     FROM voice_calls c JOIN users u ON u.id=c.caller_id
@@ -11165,6 +11178,7 @@ app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
 });
 
 app.post('/api/voice-calls', authMiddleware, async (req, res) => {
+  await expireStaleVoiceCallsForUser(req.user.id);
   const username = String(req.body?.username || '').trim();
   const { rows: target } = await query('SELECT id,username,nickname,avatar,avatar_removed,name_color FROM users WHERE username=$1', [username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
@@ -11176,7 +11190,7 @@ app.post('/api/voice-calls', authMiddleware, async (req, res) => {
     SELECT 1 FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'
   `, [req.user.id, target[0].id]);
   if (!mutual.length) return res.status(403).json({ error: 'Arama için birbirinizi takip etmelisiniz' });
-  const { rows: active } = await query("SELECT id FROM voice_calls WHERE status IN ('ringing','connected') AND (caller_id=$1 OR callee_id=$1) LIMIT 1", [req.user.id]);
+  const { rows: active } = await query("SELECT id FROM voice_calls WHERE status IN ('ringing','accepted','connected') AND (caller_id=$1 OR callee_id=$1) LIMIT 1", [req.user.id]);
   if (active.length) return res.status(409).json({ error: 'Zaten aktif bir aramanız var' });
   const id = randomUUID();
   await query('INSERT INTO voice_calls (id,caller_id,callee_id) VALUES ($1,$2,$3)', [id, req.user.id, target[0].id]);
@@ -11191,12 +11205,14 @@ app.post('/api/voice-calls', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/voice-calls/:id', authMiddleware, async (req, res) => {
+  await expireStaleVoiceCallsForUser(req.user.id);
   const call = await getCallForUser(req.params.id, req.user.id);
   if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
   res.json(call);
 });
 
 app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
+  await expireStaleVoiceCallsForUser(req.user.id);
   const call = await getCallForUser(req.params.id, req.user.id);
   if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
   const action = String(req.body?.action || '');
@@ -11207,6 +11223,8 @@ app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
     await query("UPDATE voice_calls SET status='accepted', updated_at=NOW() WHERE id=$1", [call.id]);
   } else if (action === 'connect') {
     await query("UPDATE voice_calls SET status='connected', updated_at=NOW() WHERE id=$1", [call.id]);
+  } else if (action === 'heartbeat' && ['accepted', 'connected'].includes(call.status)) {
+    await query("UPDATE voice_calls SET updated_at=NOW() WHERE id=$1 AND status IN ('accepted','connected')", [call.id]);
   } else if (action === 'offer' || action === 'answer') {
     const value = req.body?.value;
     if (!value || typeof value !== 'object') return res.status(400).json({ error: 'Geçersiz sinyal' });
