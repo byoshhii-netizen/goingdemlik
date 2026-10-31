@@ -2393,9 +2393,10 @@ async function renderRealsFeed(app, initialId = null) {
     const isMobile = window.matchMedia('(max-width: 768px)').matches;
     const maxWidth = Math.max(1, isMobile ? item.clientWidth - 28 : Math.min(400, item.clientWidth - 28));
     const maxHeight = Math.max(1, isMobile ? item.clientHeight - 28 : Math.min(720, item.clientHeight - 88));
-    const scale = Math.min(maxWidth / videoWidth, maxHeight / videoHeight, 1);
-    frame.style.setProperty('width', `${Math.round(videoWidth * scale)}px`, 'important');
-    frame.style.setProperty('height', `${Math.round(videoHeight * scale)}px`, 'important');
+    const frameHeight = Math.min(maxHeight, maxWidth * 16 / 9);
+    const frameWidth = frameHeight * 9 / 16;
+    frame.style.setProperty('width', `${Math.round(frameWidth)}px`, 'important');
+    frame.style.setProperty('height', `${Math.round(frameHeight)}px`, 'important');
   }
   const showRealsPlaybackError = (item, message) => {
     const retry = item?.querySelector('.reals-video-retry');
@@ -3528,7 +3529,7 @@ async function openNotifDropdown() {
           <div style="display:flex;gap:10px;align-items:flex-start">
             ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" />` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-bell" style="font-size:12px;color:var(--accent-red2)"></i></div>`}
             <div style="flex:1;min-width:0">
-              ${n.type === 'announcement' && n.title ? `<strong style="display:block;margin-bottom:3px;font-size:13px">${escHtml(n.title)}</strong>` : ''}
+              ${['announcement', 'account_email_reminder', 'listening_room_manager'].includes(n.type) && n.title ? `<strong style="display:block;margin-bottom:3px;font-size:13px">${escHtml(n.title)}</strong>` : ''}
               <div style="font-size:13px;line-height:1.4">${escHtml(n.body)}</div>
               <div style="font-size:11px;color:var(--text-muted);margin-top:3px">${timeAgo(n.created_at)}</div>
             </div>
@@ -10669,7 +10670,11 @@ async function renderSettings(app) {
     </div>
   </div>`;
 
-  renderSettingsSection('profile');
+  const requestedSection = new URLSearchParams(location.search).get('section');
+  const settingsSections = $$('.settings-nav-item');
+  const initialSection = settingsSections.some(item => item.dataset.section === requestedSection) ? requestedSection : 'profile';
+  $$('.settings-nav-item').forEach(item => item.classList.toggle('active', item.dataset.section === initialSection));
+  renderSettingsSection(initialSection);
 
   $$('.settings-nav-item').forEach(item => {
     item.addEventListener('click', event => {
@@ -11034,7 +11039,7 @@ async function renderSettingsSection(section) {
           <button class="btn btn-primary" id="save-2fa-btn"><i class="fas fa-save"></i> 2AD ayarını kaydet</button>
           <div id="s-2fa-msg" class="form-error mt-4"></div>
           <div style="margin-top:24px;padding-top:18px;border-top:1px solid var(--border)">
-            <div style="font-weight:700;margin-bottom:5px"><i class="fas fa-envelope" style="color:var(--accent-red2);margin-right:6px"></i>E-posta adresini değiştir</div>
+            <div style="font-weight:700;margin-bottom:5px"><i class="fas fa-envelope" style="color:var(--accent-red2);margin-right:6px"></i>${currentUser.email ? 'E-posta adresini değiştir' : 'E-posta adresi ekle'}</div>
             <div class="form-hint" style="margin-bottom:12px">Yeni adrese kod gönderilir. Değişiklik için hesap şifren de gerekir.</div>
             <div class="form-group"><label>Yeni e-posta</label><input type="email" id="s-new-email" placeholder="yeni@ornek.com" autocomplete="email" /></div>
             <div class="form-group"><label>Hesap şifren</label><input type="password" id="s-email-password" autocomplete="current-password" /></div>
@@ -11044,6 +11049,12 @@ async function renderSettingsSection(section) {
           </div>
         </div>
       </div>`;
+    const settingsQuery = new URLSearchParams(location.search);
+    if (settingsQuery.get('action') === 'add-email') {
+      const emailInput = $('#s-new-email');
+      emailInput?.focus({ preventScroll: true });
+      emailInput?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
     const syncTwoFactorFields = () => {
       const method = $('#s-2fa-method').value;
       $('#s-2fa-question-fields').style.display = method === 'question' ? 'block' : 'none';
@@ -12793,7 +12804,8 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   const trigger = root.querySelector('.profile-header .profile-avatar-wrap');
   if (!trigger || trigger.dataset.viewerBound === 'true' || !user) return;
   let photos = profileAvatarPhotoList(user, archivePhotos);
-  if (!photos.length && !isOwner) return;
+  const canViewOwnAvatar = isOwner || (currentUser && String(currentUser.id) === String(user.id));
+  if (!photos.length && !canViewOwnAvatar) return;
   trigger.dataset.viewerBound = 'true';
   trigger.setAttribute('role', 'button');
   trigger.setAttribute('tabindex', '0');
@@ -13030,7 +13042,30 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     overlay.querySelector('.profile-avatar-gallery-close').focus();
   };
 
+  let touchStart = null;
+  let suppressClickUntil = 0;
+  trigger.addEventListener('pointerdown', event => {
+    if (event.pointerType === 'touch' && event.isPrimary) {
+      touchStart = { x: event.clientX, y: event.clientY };
+    }
+  }, true);
+  trigger.addEventListener('pointerup', event => {
+    if (event.pointerType !== 'touch' || !event.isPrimary || !touchStart) return;
+    const moved = Math.hypot(event.clientX - touchStart.x, event.clientY - touchStart.y);
+    touchStart = null;
+    if (moved > 12) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClickUntil = Date.now() + 700;
+    openViewer(0);
+  }, true);
+  trigger.addEventListener('pointercancel', () => { touchStart = null; }, true);
   trigger.addEventListener('click', event => {
+    if (Date.now() < suppressClickUntil) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     openViewer(0);
@@ -13593,8 +13628,8 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     <div class="dm-sidebar">
       <div class="dm-sidebar-header">
         <div class="dm-header-links">
-          <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button" title="Gruplar" aria-label="Gruplar"><i class="fas fa-users"></i> Gruplar</button>
-          <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button" title="Arkadaşlar" aria-label="Arkadaşlar"><i class="fas fa-user-friends"></i> Arkadaşlar<span id="dm-friends-badge" class="friend-request-dot"></span></button>
+          <button class="dm-sidebar-title dm-groups-button" id="dm-groups-btn" type="button" title="Gruplar" aria-label="Gruplar"><i class="fas fa-users"></i><span class="dm-header-label">Gruplar</span></button>
+          <button class="dm-sidebar-title dm-friends-header-button" id="dm-friends-btn" type="button" title="Arkadaşlar" aria-label="Arkadaşlar"><i class="fas fa-user-friends"></i><span class="dm-header-label">Arkadaşlar</span><span id="dm-friends-badge" class="friend-request-dot"></span></button>
         </div>
         <div class="dm-sidebar-actions">
           <button class="btn dm-header-action-btn dm-search-toggle" id="dm-search-toggle" type="button" title="Konuşma ara" aria-label="Konuşma ara" aria-expanded="false"><i class="fas fa-search"></i></button>
@@ -16027,7 +16062,7 @@ async function renderNotifications(app) {
       <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}${n.link ? ' notif-page-clickable' : ''}"${n.link ? ` data-notification-link="${escHtml(n.link)}" role="group" aria-label="Bildirim: ${escHtml(n.body)}" tabindex="0"` : ''}>
         ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" class="notification-avatar" alt="" />` : `<div class="notification-avatar notification-avatar-placeholder"><i class="fas fa-bell"></i></div>`}
         <div class="notif-page-copy">
-          ${n.type === 'announcement' && n.title ? `<strong class="notif-page-title">${escHtml(n.title)}</strong>` : ''}
+          ${['announcement', 'account_email_reminder', 'listening_room_manager'].includes(n.type) && n.title ? `<strong class="notif-page-title">${escHtml(n.title)}</strong>` : ''}
           <div class="notif-page-body">${escHtml(n.body)}</div>
           <div class="notif-page-time">${timeAgo(n.created_at)}</div>
         </div>
@@ -17014,6 +17049,7 @@ let musicAdBypass = false;
 let listeningRoom = null;
 let listeningRoomPoll = null;
 let listeningInternalOpen = false;
+let listeningRoomLeaving = false;
 
 function readSavedMusicPlayback() {
   try {
@@ -17405,12 +17441,16 @@ function startListeningRoomPolling() {
     try {
       const room = await api('/listening-rooms/' + encodeURIComponent(listeningRoom.public_id));
       const wasMember = listeningRoom.isMember;
-      listeningRoom = { ...listeningRoom, ...room, isMember: !!room.is_member };
+      const wasOwner = listeningRoom.isOwner;
+      const isOwner = String(room.owner_id) === String(currentUser?.id);
+      listeningRoom = { ...listeningRoom, ...room, isMember: !!room.is_member, isOwner };
       if (listeningRoom.isMember) renderListeningRoomMini();
       else document.getElementById('listening-room-mini')?.remove();
       syncListeningAudio();
       const app = document.getElementById('app');
-      if (app?.querySelector('.listening-room-page')) renderListeningRoomView(app, wasMember === listeningRoom.isMember);
+      if (app?.querySelector('.listening-room-page')) {
+        renderListeningRoomView(app, wasMember === listeningRoom.isMember && wasOwner === isOwner);
+      }
     } catch {}
   }, 1000);
 }
@@ -17445,7 +17485,10 @@ function syncListeningAudio() {
   }
   if (!currentAudio || currentAudio.dataset.listeningTrackId !== String(track.id)) {
     listeningInternalOpen = true;
-    openMiniPlayer(track.audio_url, track.slug, { ...track, is_music_ad: true });
+    openMiniPlayer(track.audio_url, track.slug, { ...track, is_music_ad: true }, undefined, undefined, {
+      autoplay: track.state === 'playing',
+      countPlay: false
+    });
     listeningInternalOpen = false;
     if (currentAudio) currentAudio.dataset.listeningTrackId = String(track.id);
   }
@@ -17498,7 +17541,12 @@ async function createListeningRoomFromQueue(queue) {
 async function refreshListeningRoom() {
   if (!listeningRoom) return;
   const room = await api('/listening-rooms/' + encodeURIComponent(listeningRoom.public_id));
-  listeningRoom = { ...listeningRoom, ...room, isMember: !!room.is_member };
+  listeningRoom = {
+    ...listeningRoom,
+    ...room,
+    isMember: !!room.is_member,
+    isOwner: String(room.owner_id) === String(currentUser?.id)
+  };
   if (listeningRoom.isMember) renderListeningRoomMini();
   else document.getElementById('listening-room-mini')?.remove();
   syncListeningAudio();
@@ -17604,18 +17652,93 @@ function renderListeningRoomMini() {
 }
 
 async function leaveListeningRoom() {
-  if (!listeningRoom || !await CigCigDialogs.confirm('Ortak dinleyişten çıkmak istiyor musun?')) return;
-  const wasViewingRoom = !!document.getElementById('app')?.querySelector('.listening-room-page');
-  try {
-    await api(`/listening-rooms/${listeningRoom.public_id}/leave`, { method: 'POST' });
-  } catch (error) {
-    toast(error.message || 'Dinleyişten çıkılamadı.', 'error');
+  if (!listeningRoom) return;
+  if (listeningRoom.isOwner) {
+    openListeningRoomHandoffDialog();
     return;
   }
-  clearInterval(listeningRoomPoll); listeningRoomPoll = null; listeningRoom = null;
-  document.getElementById('listening-room-mini')?.remove();
-  if (currentAudio?.dataset?.listeningTrackId) { currentAudio.pause(); currentAudio = null; }
-  if (wasViewingRoom) navigate('/muzikler');
+  if (!await CigCigDialogs.confirm('Ortak dinleyişten çıkmak istiyor musun?')) return;
+  await completeListeningRoomLeave();
+}
+
+function openListeningRoomHandoffDialog() {
+  if (!listeningRoom || !listeningRoom.isOwner) return;
+  const members = (listeningRoom.state?.members || []).filter(member =>
+    String(member.user_id) !== String(currentUser?.id)
+  );
+  const memberOptions = members.map(member => `
+    <button type="button" class="listening-handoff-member" data-handoff-user="${escHtml(String(member.user_id))}" aria-pressed="false">
+      ${avatarImg(member, 'listening-handoff-avatar')}
+      <span class="listening-handoff-identity"><strong>${escHtml(member.nickname || member.username)}</strong><small>@${escHtml(member.username)}</small></span>
+      <span class="listening-handoff-check"><i class="fas fa-check"></i></span>
+    </button>`).join('');
+  showModal('Dinleyiş yönetimini devret', `
+    <div class="listening-handoff">
+      <div class="listening-handoff-hero"><span><i class="fas fa-tower-broadcast"></i></span><div><strong>Dinleyiş devam etsin</strong><p>Çıkmadan önce yönetimi dinleyişteki birine devret.</p></div></div>
+      ${members.length
+        ? `<div class="listening-handoff-list" role="group" aria-label="Yeni dinleyiş yöneticisi seç">${memberOptions}</div>
+           <button type="button" class="btn btn-outline listening-handoff-random" id="listening-handoff-random"><i class="fas fa-shuffle"></i> Rastgele seç ve çık</button>
+           <button type="button" class="btn btn-primary listening-handoff-submit" id="listening-handoff-submit" disabled><i class="fas fa-crown"></i> Seçtiğim kişiye devret ve çık</button>`
+        : `<div class="listening-handoff-empty"><i class="fas fa-user-group"></i><strong>Şimdilik yalnızsın</strong><span>Dinleyişi bitirip çıkabilirsin. Biri daha katılırsa yönetimi ona devredebilirsin.</span></div>
+           <button type="button" class="btn btn-danger listening-handoff-submit" id="listening-handoff-end"><i class="fas fa-power-off"></i> Dinleyişi bitir ve çık</button>`}
+      <button type="button" class="listening-handoff-cancel" id="listening-handoff-cancel">Vazgeç</button>
+    </div>`, 'listening-handoff-modal', { pauseMedia: false });
+
+  let selectedUserId = '';
+  document.getElementById('listening-handoff-cancel')?.addEventListener('click', hideModal);
+  document.querySelectorAll('.listening-handoff-member').forEach(button => {
+    button.addEventListener('click', () => {
+      selectedUserId = button.dataset.handoffUser;
+      document.querySelectorAll('.listening-handoff-member').forEach(option => {
+        const selected = option === button;
+        option.classList.toggle('is-selected', selected);
+        option.setAttribute('aria-pressed', String(selected));
+      });
+      const submit = document.getElementById('listening-handoff-submit');
+      if (submit) submit.disabled = !selectedUserId;
+    });
+  });
+  document.getElementById('listening-handoff-submit')?.addEventListener('click', () => {
+    if (selectedUserId) completeListeningRoomLeave(selectedUserId);
+  });
+  document.getElementById('listening-handoff-random')?.addEventListener('click', () => {
+    if (!members.length) return;
+    const selected = members[Math.floor(Math.random() * members.length)];
+    completeListeningRoomLeave(String(selected.user_id));
+  });
+  document.getElementById('listening-handoff-end')?.addEventListener('click', () => completeListeningRoomLeave());
+}
+
+async function completeListeningRoomLeave(transferToUserId = null) {
+  if (!listeningRoom || listeningRoomLeaving) return;
+  listeningRoomLeaving = true;
+  const wasViewingRoom = !!document.getElementById('app')?.querySelector('.listening-room-page');
+  const roomPublicId = listeningRoom.public_id;
+  try {
+    const result = await api(`/listening-rooms/${roomPublicId}/leave`, {
+      method: 'POST',
+      body: JSON.stringify(transferToUserId ? { transfer_to_user_id: transferToUserId } : {})
+    });
+    const transferredTo = result.transferred_to || (transferToUserId
+      ? (listeningRoom.state?.members || []).find(member => String(member.user_id) === String(transferToUserId))
+      : null);
+    hideModal();
+    clearInterval(listeningRoomPoll); listeningRoomPoll = null; listeningRoom = null;
+    document.getElementById('listening-room-mini')?.remove();
+    if (currentAudio?.dataset?.listeningTrackId) { currentAudio.pause(); currentAudio = null; }
+    if (wasViewingRoom) navigate('/muzikler');
+    if (transferredTo) {
+      toast(`Yönetici olarak @${transferredTo.username} seçildi. Dinleyişten çıktın.`, 'success', 4000);
+    } else if (result.ended) {
+      toast('Dinleyiş sona erdi.', 'success');
+    } else {
+      toast('Dinleyişten çıktın.', 'success');
+    }
+  } catch (error) {
+    toast(error.message || 'Dinleyişten çıkılamadı.', 'error');
+  } finally {
+    listeningRoomLeaving = false;
+  }
 }
 
 function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
@@ -17705,7 +17828,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
         ${!inListeningRoom ? `<button class="gplayer-mode-btn" id="gp-shuffle" type="button" title="Sırayı karıştır" aria-label="Sıradaki şarkıları karıştır"><i class="fas fa-random"></i><span class="gplayer-mode-label">Karıştır</span></button>
         <button class="${autoShuffleActive}" id="gp-auto-shuffle" type="button" title="${autoShuffleTitle}" aria-label="${autoShuffleTitle}"><i class="fas fa-${playerAutoShuffle ? 'shuffle' : 'list-ol'}"></i><span class="gplayer-mode-label">${playerAutoShuffle ? 'Karışık çal' : 'Sıralı çal'}</span></button>` : ''}
         <button class="gplayer-btn" id="gp-prev" type="button" title="Önceki şarkı" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-step-backward"></i></button>
-        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="${options.autoplay === false ? 'Devam et' : 'Duraklat'}" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-${options.autoplay === false ? 'play' : 'pause'}"></i></button>
+        <button class="gplayer-btn gplayer-play" id="gp-play" type="button" title="${(listeningRoom ? currentListeningTrack()?.state !== 'playing' : options.autoplay === false) ? 'Devam et' : 'Duraklat'}" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-${(listeningRoom ? currentListeningTrack()?.state !== 'playing' : options.autoplay === false) ? 'play' : 'pause'}"></i></button>
         <button class="gplayer-btn" id="gp-next" type="button" title="Sonraki şarkı" ${canControlListeningRoom ? '' : 'disabled'}><i class="fas fa-step-forward"></i></button>
         ${!inListeningRoom ? `<button class="${repeatActive}" id="gp-repeat" type="button" title="${playerRepeatOne ? 'Şarkıyı tekrarla açık' : 'Şarkıyı tekrarla kapalı'}" aria-label="Şarkıyı tekrarla ${playerRepeatOne ? 'açık' : 'kapalı'}"><i class="fas fa-redo-alt"></i></button>` : ''}
       </div>
@@ -17824,8 +17947,13 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
   document.getElementById('gp-play').addEventListener('click', () => {
     if (listeningRoom) {
       if (!listeningRoom.isOwner) return toast('Ortak dinleyişi yalnızca sahibi duraklatabilir.', 'error');
-      const action = audio.paused ? 'resume' : 'pause';
-      api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action }) }).then(refreshListeningRoom).catch(error => toast(error.message, 'error'));
+      const playButton = document.getElementById('gp-play');
+      const action = currentListeningTrack()?.state === 'playing' ? 'pause' : 'resume';
+      playButton.disabled = true;
+      api(`/listening-rooms/${listeningRoom.public_id}/control`, { method: 'POST', body: JSON.stringify({ action }) })
+        .then(refreshListeningRoom)
+        .catch(error => toast(error.message, 'error'))
+        .finally(() => { if (playButton.isConnected) playButton.disabled = false; });
       return;
     }
     if (audio.paused) {

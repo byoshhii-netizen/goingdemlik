@@ -2789,6 +2789,34 @@ app.delete('/api/notifications/:id', authMiddleware, async (req, res) => {
   res.json({ ok: true });
 });
 
+let accountEmailReminderRunning = false;
+async function sendAccountEmailReminders() {
+  if (accountEmailReminderRunning) return;
+  accountEmailReminderRunning = true;
+  try {
+    await query(
+      `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
+       SELECT u.id,'account_email_reminder','', '/cigcig.png',
+         'Hesabını güvende tut',
+         'Hesabının güvende olması ve şifreni unuttuğunda hesabını kaybetmemen için bir e-posta adresi eklemelisin.',
+         '/ayarlar?section=two-factor&action=add-email'
+       FROM users u
+       WHERE (u.email IS NULL OR BTRIM(u.email)='')
+         AND COALESCE(u.is_deleted,0)=0
+         AND u.created_at <= NOW() - INTERVAL '3 hours'
+         AND NOT EXISTS (
+           SELECT 1 FROM notifications n
+           WHERE n.user_id=u.id AND n.type='account_email_reminder'
+             AND n.created_at >= NOW() - INTERVAL '24 hours'
+         )
+       RETURNING *`
+    );
+  } catch (error) {
+    console.error('[account-email-reminder] Notification delivery failed:', error.message);
+  } finally {
+    accountEmailReminderRunning = false;
+  }
+}
 // ===== VMB ÖZEL ALANI =====
 app.get('/api/vmb/public', async (req, res) => {
   try {
@@ -5076,10 +5104,14 @@ async function blockHidesContent(viewerId, ownerId) {
   return !!block && new Date(block.hide_until).getTime() <= Date.now();
 }
 
-async function maySendDm(senderId, recipientId) {
-  const { rows: recipients } = await query('SELECT dm_message_permission FROM users WHERE id=$1', [recipientId]);
-  const permission = ['everyone', 'friends', 'followers'].includes(recipients[0]?.dm_message_permission)
-    ? recipients[0].dm_message_permission : 'everyone';
+async function maySendDm(senderId, recipientId, configuredPermission) {
+  let permissionValue = configuredPermission;
+  if (permissionValue === undefined) {
+    const { rows: recipients } = await query('SELECT dm_message_permission FROM users WHERE id=$1', [recipientId]);
+    permissionValue = recipients[0]?.dm_message_permission;
+  }
+  const permission = ['everyone', 'friends', 'followers'].includes(permissionValue)
+    ? permissionValue : 'everyone';
   if (permission === 'everyone') return true;
   const { rows: follows } = await query(`SELECT follower_id,following_id FROM follows
     WHERE status='accepted' AND ((follower_id=$1 AND following_id=$2) OR (follower_id=$2 AND following_id=$1))`, [senderId, recipientId]);
@@ -10554,11 +10586,105 @@ app.post('/api/listening-rooms/:publicId/join', authMiddleware, async (req, res)
 });
 
 app.post('/api/listening-rooms/:publicId/leave', authMiddleware, async (req, res) => {
-  const room = await getListeningRoom(req.params.publicId, req.user.id);
-  if (!room) return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı' });
-  if (String(room.owner_id) === String(req.user.id)) await query('UPDATE listening_rooms SET is_active=0,updated_at=NOW() WHERE id=$1', [room.id]);
-  else await query('DELETE FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
-  res.json({ ok: true });
+  const client = await pool.connect();
+  let newOwner = null;
+  let ended = false;
+  let notification = null;
+  try {
+    await client.query('BEGIN');
+    const { rows: rooms } = await client.query(
+      `SELECT r.* FROM listening_rooms r
+       WHERE r.public_id=$1 AND r.is_active=1
+       FOR UPDATE`,
+      [req.params.publicId]
+    );
+    if (!rooms.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Ortak dinleyiş bulunamadı' });
+    }
+    const room = rooms[0];
+    const isOwner = String(room.owner_id) === String(req.user.id);
+    const { rows: memberships } = await client.query(
+      'SELECT user_id FROM listening_room_members WHERE room_id=$1 AND user_id=$2 FOR UPDATE',
+      [room.id, req.user.id]
+    );
+    if (!memberships.length) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Bu dinleyişin üyesi değilsiniz.' });
+    }
+    if (isOwner) {
+      const transferToUserId = String(req.body?.transfer_to_user_id || '').trim();
+      if (transferToUserId) {
+        if (!/^\d+$/.test(transferToUserId) || transferToUserId === String(req.user.id)) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Seçilen dinleyiş yöneticisi geçersiz.' });
+        }
+        const { rows: candidates } = await client.query(
+          `SELECT u.id,u.username,u.nickname
+           FROM listening_room_members m JOIN users u ON u.id=m.user_id
+           WHERE m.room_id=$1 AND m.user_id=$2
+           FOR UPDATE OF m`,
+          [room.id, transferToUserId]
+        );
+        if (!candidates.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Yönetici olarak seçilen kişi artık bu dinleyişte değil.' });
+        }
+        newOwner = candidates[0];
+        await client.query(
+          'UPDATE listening_rooms SET owner_id=$1,updated_at=NOW() WHERE id=$2',
+          [newOwner.id, room.id]
+        );
+        await client.query(
+          `UPDATE listening_room_members SET role=CASE WHEN user_id=$2 THEN 'owner' ELSE 'listener' END
+           WHERE room_id=$1`,
+          [room.id, newOwner.id]
+        );
+        await client.query('DELETE FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+        const { rows: notifications } = await client.query(
+          `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
+           VALUES ($1,'listening_room_manager',$2,$3,'Dinleyiş yöneticisi seçildiniz',
+             $4,$5) RETURNING *`,
+          [
+            newOwner.id,
+            req.user.username,
+            req.user.avatar || '',
+            `@${req.user.username} ortak dinleyiş yönetimini sana devretti.`,
+            `/ortak-dinleyis/${room.public_id}`
+          ]
+        );
+        notification = notifications[0];
+      } else {
+        const { rows: others } = await client.query(
+          'SELECT COUNT(*)::int AS count FROM listening_room_members WHERE room_id=$1 AND user_id<>$2',
+          [room.id, req.user.id]
+        );
+        if (Number(others[0]?.count) > 0) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Dinleyişte başka kişiler var. Çıkmadan önce yönetimi devredin.' });
+        }
+        await client.query('UPDATE listening_rooms SET is_active=0,updated_at=NOW() WHERE id=$1', [room.id]);
+        await client.query('DELETE FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+        ended = true;
+      }
+    } else {
+      await client.query('DELETE FROM listening_room_members WHERE room_id=$1 AND user_id=$2', [room.id, req.user.id]);
+      await client.query('UPDATE listening_rooms SET updated_at=NOW() WHERE id=$1', [room.id]);
+    }
+    await client.query('COMMIT');
+    if (notification) io.to(`user:${newOwner.id}`).emit('notification:new', notification);
+    res.json({
+      ok: true,
+      ended,
+      transferred_to: newOwner ? { id: newOwner.id, username: newOwner.username, nickname: newOwner.nickname } : null
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[listening-room-leave] Leave or handoff failed:', error.message);
+    res.status(500).json({ error: 'Dinleyişten çıkılırken bir sorun oluştu. Lütfen tekrar deneyin.' });
+  } finally {
+    client.release();
+  }
 });
 
 async function getListeningRoomForOwner(publicId, userId) {
@@ -11433,10 +11559,6 @@ app.put('/api/conversation/:username/theme', authMiddleware, async (req, res) =>
   const { rows: targets } = await query('SELECT id,is_private FROM users WHERE username=$1', [req.params.username]);
   if (!targets.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = targets[0];
-  if (Number(other.is_private) === 1 && other.id !== req.user.id &&
-      !(await hasPrivateDmAccess(req.user.id, other.id))) {
-    return res.status(403).json({ error: 'Bu konuşmanın temasını değiştirme yetkiniz yok.' });
-  }
   const user1Id = Math.min(req.user.id, other.id);
   const user2Id = Math.max(req.user.id, other.id);
   const { rows: conversations } = await query(
@@ -11548,15 +11670,18 @@ app.get('/api/giphy/search', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {  const { rows: target } = await query('SELECT id,username,is_private FROM users WHERE username=$1', [req.params.username]);
+app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {
+  const { rows: target } = await query('SELECT id,username,is_private,dm_message_permission FROM users WHERE username=$1', [req.params.username]);
   if (await denyIfRestricted(req, res, 'message')) return;
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
   const uid = req.user.id;
-  const { rows: blk } = await query('SELECT id FROM blocks WHERE (blocker_id=$1 AND blocked_id=$2) OR (blocker_id=$2 AND blocked_id=$1)', [uid, other.id]);
-  if (blk.length) return res.status(403).json({ error: 'Bu kullanıcıyla mesajlaşamazsınız' });
-  if (await getBlockBetween(uid, other.id)) return res.status(403).json({ error: 'Engellenen kullanıcılarla mesajlaşamazsınız. Mesaj göndermek için önce engeli kaldırın.' });
-  if (!(await maySendDm(uid, other.id))) return res.status(403).json({ error: 'Bu kullanıcı yalnızca belirli kişilerin kendisine mesaj göndermesine izin veriyor.' });
+  const [block, canSend] = await Promise.all([
+    getBlockBetween(uid, other.id),
+    maySendDm(uid, other.id, other.dm_message_permission)
+  ]);
+  if (block) return res.status(403).json({ error: 'Engellenen kullanıcılarla mesajlaşamazsınız. Mesaj göndermek için önce engeli kaldırın.' });
+  if (!canSend) return res.status(403).json({ error: 'Bu kullanıcı yalnızca belirli kişilerin kendisine mesaj göndermesine izin veriyor.' });
   const u1 = Math.min(uid, other.id), u2 = Math.max(uid, other.id);
   let { rows: convRows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
   if (!convRows.length) {
@@ -11626,20 +11751,9 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, song_start_seconds, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *',
     [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_song_id ? songStartSeconds : 0, shared_gif_url, reply_to_id||null]
   );
-  await query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]);
-  if (shared_forum_id) {
-    await query('UPDATE forums SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_forum_id]);
-  }
-  if (shared_book_id) {
-    await query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_book_id]);
-  }
-  if (shared_newspaper_id) {
-    await query('UPDATE newspapers SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_newspaper_id]);
-  }
-  if (content?.trim()) {
-    await parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username).catch(() => {});
-  }
-  const { rows: full } = await query(`
+  const postInsertTasks = [
+    query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]),
+    query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.song_start_seconds,m.shared_gif_url,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
@@ -11664,7 +11778,16 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     LEFT JOIN dm_messages r ON m.reply_to_id=r.id
     LEFT JOIN users ru ON r.sender_id=ru.id
     WHERE m.id=$1
-  `, [msgRows[0].id]);
+    `, [msgRows[0].id])
+  ];
+  if (shared_forum_id) postInsertTasks.push(query('UPDATE forums SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_forum_id]));
+  if (shared_book_id) postInsertTasks.push(query('UPDATE books SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_book_id]));
+  if (shared_newspaper_id) postInsertTasks.push(query('UPDATE newspapers SET share_count=COALESCE(share_count,0)+1 WHERE id=$1', [shared_newspaper_id]));
+  const [, { rows: full }] = await Promise.all(postInsertTasks);
+  if (content?.trim()) {
+    parseMentionsAndNotify(content, req.user, 'dm_mention', '/mesajlar/' + req.params.username)
+      .catch(error => console.error('DM mention notification failed:', error.message));
+  }
   const sentMessage = full[0];
   emitDirectMessage(conv.id, req.user, other, imageViewLimit > 0 ? { ...sentMessage, image_url: '', image_urls: [] } : sentMessage);
   res.json(sentMessage);
@@ -13355,6 +13478,8 @@ app.get('*', (req, res) => {
 });
 
 initDb().then(() => {
+  sendAccountEmailReminders();
+  setInterval(sendAccountEmailReminders, 15 * 60 * 1000);
   return query(`CREATE TABLE IF NOT EXISTS photo_likes (
     id BIGSERIAL PRIMARY KEY,
     photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
