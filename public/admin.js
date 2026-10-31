@@ -4085,6 +4085,9 @@ async function renderSettings(main) {
           <label class="adm-toggle-row" for="s-device-theme"><span><i class="fas fa-sun"></i> Telefon temasına otomatik uyum</span><span class="adm-toggle"><input type="checkbox" id="s-device-theme" ${settings['device_theme_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <label class="adm-toggle-row" for="s-theme-picker"><span><i class="fas fa-eye"></i> Koyu/açık tema seçimini göster</span><span class="adm-toggle"><input type="checkbox" id="s-theme-picker" ${settings['theme_picker_enabled'] !== '0' ? 'checked' : ''}><span></span></span></label>
           <p style="font-size:12px;color:var(--text3);margin:8px 0 16px">Kapalıysa kullanıcılar yalnızca açık veya koyu temayı seçebilir.</p>
+          <label class="adm-toggle-row" for="s-mobile-home-auth"><span><i class="fas fa-mobile-screen-button"></i> Telefonda ana sayfa için giriş zorunlu</span><span class="adm-toggle"><input type="checkbox" id="s-mobile-home-auth" ${settings['mobile_home_auth_required'] === '1' ? 'checked' : ''}><span></span></span></label>
+          <p style="font-size:12px;color:var(--text3);margin:8px 0 16px">Açıksa giriş yapmamış telefon ziyaretçileri yalnızca ana sayfaya erişirken giriş ekranını görür. Diğer sayfalar etkilenmez.</p>
+          <div id="s-mobile-home-auth-msg" class="form-error" role="status"></div>
           <div style="display:flex;gap:24px;flex-wrap:wrap">
             <div><label>Açık tema hat rengi</label><input type="color" id="s-light-primary" value="${settings['light_primary_color'] || '#dc2626'}" style="width:64px;height:42px;padding:3px" /></div>
             <div><label>Açık tema arka plan rengi</label><input type="color" id="s-light-background" value="${settings['light_background_color'] || '#f8f9fa'}" style="width:64px;height:42px;padding:3px" /></div>
@@ -4205,6 +4208,22 @@ async function renderSettings(main) {
       return true;
     } catch(e) { if(msgEl) msgEl.textContent=e.message; return false; }
   }
+
+  document.getElementById('s-mobile-home-auth')?.addEventListener('change', async event => {
+    const toggle = event.currentTarget;
+    const enabled = toggle.checked;
+    const message = document.getElementById('s-mobile-home-auth-msg');
+    toggle.disabled = true;
+    message.textContent = '';
+    if (!await saveSetting('mobile_home_auth_required', enabled ? '1' : '0', message, false)) {
+      toggle.checked = !enabled;
+      toggle.disabled = false;
+      return;
+    }
+    message.style.color = 'var(--green)';
+    message.textContent = enabled ? 'Telefon ana sayfası girişi zorunlu.' : 'Telefon ana sayfası herkese açık.';
+    toggle.disabled = false;
+  });
 
   document.getElementById('s-photo-song-clip-save')?.addEventListener('click', async () => {
     const input = document.getElementById('s-photo-song-clip');

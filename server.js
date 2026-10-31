@@ -2713,7 +2713,10 @@ async function notifyFollowersOfContent(actorUser, type, title, body, link) {
 app.get('/api/notifications', authMiddleware, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const { rows } = await query(
-    `SELECT n.* FROM notifications n WHERE n.user_id=$1
+    `SELECT n.*,
+      EXISTS (SELECT 1 FROM follows f JOIN users actor ON actor.id=f.following_id
+        WHERE f.follower_id=$1 AND f.status='accepted' AND LOWER(actor.username)=LOWER(n.actor_username)) AS viewer_follows_actor
+      FROM notifications n WHERE n.user_id=$1
       AND (n.expires_at IS NULL OR n.expires_at>NOW())
       AND (n.actor_username IS NULL OR LOWER(n.actor_username)<>LOWER($2) OR n.type IN ('restriction','content_suspended','announcement'))
       AND (n.type<>'new_story' OR NOT EXISTS (SELECT 1 FROM user_story_visibility usv JOIN users actor ON actor.id=usv.hidden_user_id
@@ -5059,12 +5062,14 @@ function fakeProfileCounts(userId, blockCreatedAt) {
 app.get('/api/users/:username/follow-status', optionalAuth, async (req, res) => {
   const { rows: target } = await query('SELECT id, is_private FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-  if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, is_private: !!target[0].is_private, friendship_status: null, friendship_id: null, friend_request_incoming: false });
+  if (!req.user || req.user.id === target[0].id) return res.json({ following: false, pending: false, blocked: false, is_private: !!target[0].is_private, friendship_status: null, friendship_id: null, friend_request_incoming: false });
+  const blocked = !!(await getBlockBetween(req.user.id, target[0].id));
   const { rows } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [req.user.id, target[0].id]);
   const { rows: reciprocal } = await query('SELECT status FROM follows WHERE follower_id=$1 AND following_id=$2', [target[0].id, req.user.id]);
   res.json({
     following: rows[0]?.status === 'accepted',
     pending: rows[0]?.status === 'pending',
+    blocked,
     is_private: !!target[0].is_private,
     friendship_status: rows[0]?.status === 'accepted' && reciprocal[0]?.status === 'accepted' ? 'accepted' : null,
     friendship_id: null,
@@ -5255,6 +5260,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
   const features = await getSiteFeatureStates();
   const block = req.user && !isNaN(Number(req.user.id)) ? await getBlockForViewer(req.user.id, user.id) : null;
   const blockByMe = req.user && !isNaN(Number(req.user.id)) ? await getBlockForViewer(user.id, req.user.id) : null;
+  const blockedRelationship = !!block || !!blockByMe;
   const hideBlockedProfile = !!block && new Date(block.hide_until).getTime() <= Date.now();
   if (hideBlockedProfile) {
     const counts = fakeProfileCounts(user.id, block.created_at);
@@ -5310,7 +5316,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower && !graceViewer) {
-    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false, ...relationshipState });
+    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, blocked_relationship: blockedRelationship, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false, ...relationshipState });
   }
   await ensureProfileAvatarArchiveSchema();
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos] = await Promise.all([
@@ -5370,7 +5376,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     reals: Number(contentCounts.reals_count || 0),
     songs: Number(contentCounts.song_count || 0)
   } : undefined;
-  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length), ...relationshipState });
+  res.json({ user: sanitizeUserForFeatures(user, features), badges, forums, books, groups, photos, videos, reals, songs, avatar_photos: avatarPhotos, content_count, content_breakdown, ad_panels, level, levels, book_page_count: bpCount, features, private_profile: false, blocked_relationship: blockedRelationship, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: !!(req.user && (await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, user.id])).rows.length), ...relationshipState });
 });
 
 app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => {
@@ -8031,7 +8037,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
   const { key } = req.body;
   let { value } = req.body;
   if (!key) return res.status(400).json({ error: 'Key zorunlu' });
-  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled'].includes(key)) {
+  if (['level_system_enabled', 'badge_system_enabled', 'beta_mode_enabled', 'other_songs_enabled', 'reals_maintenance_enabled', 'mobile_home_auth_required'].includes(key)) {
     if (!['0', '1', 0, 1, true, false].includes(value)) {
       return res.status(400).json({ error: 'Özellik durumu 0 veya 1 olmalı' });
     }
@@ -8175,7 +8181,7 @@ app.get('/api/kvkk', async (req, res) => {
 
 app.get('/api/public-settings', async (req, res) => {
   setNoStoreHeaders(res);
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'photo_song_clip_seconds', 'beta_mode_enabled', 'founder_color', 'default_avatar_url'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'mobile_home_auth_required', 'photo_song_clip_seconds', 'beta_mode_enabled', 'founder_color', 'default_avatar_url'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -9289,7 +9295,7 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
-    'first_visit_auth','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
+    'first_visit_auth','mobile_home_auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url'
   ];
@@ -12773,6 +12779,9 @@ function makeVideoSlug(title, id) {
 }
 
 const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.nickname, u.avatar, u.avatar_removed, u.is_private, u.is_red_verified, u.red_verified_at,
+  EXISTS(SELECT 1 FROM blocks rel_block WHERE (rel_block.blocker_id=$1 AND rel_block.blocked_id=u.id) OR (rel_block.blocker_id=u.id AND rel_block.blocked_id=$1)) AS blocked_relationship,
+  CASE WHEN $1::bigint=0 THEN false ELSE EXISTS(SELECT 1 FROM follows vf WHERE vf.follower_id=$1 AND vf.following_id=u.id AND vf.status='accepted') END AS viewer_following,
+  CASE WHEN $1::bigint=0 THEN false ELSE EXISTS(SELECT 1 FROM follows vf WHERE vf.follower_id=$1 AND vf.following_id=u.id AND vf.status='pending') END AS viewer_follow_pending,
   (u.id=COALESCE((SELECT value FROM settings WHERE key='founder_user_id'),'0')::bigint) AS is_founder,
   (SELECT value FROM settings WHERE key='founder_color') AS founder_color,
   s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,

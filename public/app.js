@@ -89,6 +89,7 @@ let photoAudioObserver = null;
 let siteName = 'CigCig';
 let defaultAvatarUrl = '';
 let loginRequiredEnabled = false;
+let mobileHomeAuthRequired = false;
 let appVersionPollTimer = null;
 const journalistDirectory = new Map();
 let dmSearchUnlockCode = '';
@@ -1926,6 +1927,9 @@ function renderRoute(fullPath) {
   const segs = path.split('/').filter(Boolean);
 
   if (path === '/') {
+    if (mobileHomeAuthRequired && !currentUser && window.matchMedia('(max-width: 768px)').matches) {
+      return renderLogin(app);
+    }
     return renderHome(app);
   }
   if (path === '/gazeteler') return renderNewspaperList(app);
@@ -2224,7 +2228,16 @@ async function renderRealsFeed(app, initialId = null) {
         followStates.set(username, state);
         if (!document.body.contains(item)) return;
         const followButton = item.querySelector('.reals-follow-btn');
-        if (followButton) followButton.textContent = state.following ? 'Takip edildi' : state.pending ? 'İstek gönderildi' : 'Takip et';
+        if (state.blocked) {
+          followButton?.remove();
+        } else if (state.following && followButton) {
+          const status = document.createElement('span');
+          status.className = 'reals-follow-status';
+          status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
+          followButton.replaceWith(status);
+        } else if (followButton) {
+          followButton.textContent = state.pending ? 'İstek gönderildi' : 'Takip et';
+        }
       })
       .catch(() => {})
       .finally(() => followRequests.delete(username));
@@ -2444,6 +2457,13 @@ async function renderRealsFeed(app, initialId = null) {
         </div>
       </div>`;
       }
+      if (currentUser && r.username && !followStates.has(r.username)) {
+        followStates.set(r.username, {
+          following: !!r.viewer_following,
+          pending: !!r.viewer_follow_pending,
+          blocked: !!r.blocked_relationship
+        });
+      }
       return `
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
         <div class="reals-video-box">
@@ -2456,7 +2476,9 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
         <div class="reals-meta">
-          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r, 'avatar-sm reals-user-avatar')} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private ? `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.following ? 'Takip edildi' : followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>
+          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r, 'avatar-sm reals-user-avatar')} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private && !r.blocked_relationship ? (followStates.get(r.username)?.following
+            ? '<span class="reals-follow-status"><i class="fas fa-check"></i> Takip edildi</span>'
+            : `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}</div>
           <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
@@ -2688,7 +2710,14 @@ async function renderRealsFeed(app, initialId = null) {
         btn.classList.add('is-loading');
         const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: isFollowing ? 'DELETE' : 'POST' });
         followStates.set(username, { ...state, ...result });
-        btn.textContent = result.following ? 'Takip edildi' : result.pending ? 'İstek gönderildi' : 'Takip et';
+        if (result.following) {
+          const status = document.createElement('span');
+          status.className = 'reals-follow-status';
+          status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
+          btn.replaceWith(status);
+        } else {
+          btn.textContent = result.pending ? 'İstek gönderildi' : 'Takip et';
+        }
       } catch (error) { toast(error.message, 'error'); }
       finally { btn.disabled = false; btn.classList.remove('is-loading'); }
     }));
@@ -3414,6 +3443,9 @@ function notificationRequestAction(n, friends, followRequests) {
 
 function notificationActionsHTML(n, friends, followRequests) {
   if (n.type === 'follow' && n.actor_username && n.actor_username !== currentUser?.username) {
+    if (n.viewer_follows_actor) {
+      return '<div class="notification-actions"><span class="profile-follow-status"><i class="fas fa-check"></i> Takip edildi</span></div>';
+    }
     return `<div class="notification-actions" data-request-type="follow_back" data-username="${escHtml(n.actor_username)}">
       <button type="button" class="btn btn-outline btn-sm notification-request-action" data-action="follow"><i class="fas fa-user-plus"></i><span>Takip et</span></button>
     </div>`;
@@ -3478,7 +3510,7 @@ async function openNotifDropdown() {
         <span><i class="fas fa-bell" style="color:var(--accent-red2);margin-right:6px"></i>Bildirimler</span>
       </div>
       ${notifs.map(n => `
-        <div class="notif-item${n.is_read ? '' : ' notif-unread'}" data-link="${escHtml(n.link||'')}" data-id="${n.id}" style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
+        <div class="notif-item${n.is_read ? '' : ' notif-unread'}" data-link="${escHtml(n.link||'')}" data-id="${n.id}"${n.link ? ' role="group" tabindex="0"' : ''} style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
           <div style="display:flex;gap:10px;align-items:flex-start">
             ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" />` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-bell" style="font-size:12px;color:var(--accent-red2)"></i></div>`}
             <div style="flex:1;min-width:0">
@@ -3492,11 +3524,18 @@ async function openNotifDropdown() {
         </div>`).join('')}`;
     bindNotificationRequestActions(dd, async item => item.remove());
     dd.querySelectorAll('.notif-item').forEach(item => {
-      item.addEventListener('click', () => {
-        if (item.querySelector('.notification-actions')) return;
+      const openNotification = event => {
+        if (event.target.closest('button, a, input, textarea, select, .notification-actions')) return;
         const link = item.dataset.link;
+        if (!link) return;
         $('#notif-dropdown').classList.add('hidden');
-        if (link) navigate(link);
+        navigate(link);
+      };
+      item.addEventListener('click', openNotification);
+      item.addEventListener('keydown', event => {
+        if (!item.dataset.link || (event.key !== 'Enter' && event.key !== ' ')) return;
+        event.preventDefault();
+        openNotification(event);
       });
     });
   } catch(e) {
@@ -3805,7 +3844,28 @@ async function renderHome(app) {
     const html = `<div class="section home-media-section"><div id="home-stories-bar"></div><div id="home-photos" class="photos-feed"></div></div>`;
     const container = $('#home-sections'); container.insertAdjacentHTML('beforeend', html);
     loadStoriesBar($('#home-stories-bar'));
-    try { const ps = shuffleArray(await api('/photos?limit=20')); const el = $('#home-photos'); el.innerHTML = ps.length ? ps.slice(0,6).map(photoCardHTML).join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(el); if (ps.length) setupPhotoAudio(el); } catch {}
+    try {
+      const [photos, reals] = await Promise.all([
+        api('/photos?limit=20'),
+        api('/reals').catch(error => {
+          console.warn('Ana sayfa Reals içerikleri yüklenemedi:', error.message || error);
+          return [];
+        })
+      ]);
+      const media = shuffleArray([
+        ...photos.map(photo => ({ type: 'photo', content: photo })),
+        ...reals.map(real => ({ type: 'reals', content: real }))
+      ]).slice(0, 6);
+      const el = $('#home-photos');
+      el.innerHTML = media.length
+        ? media.map(item => item.type === 'reals' ? realsMediaCardHTML(item.content) : photoCardHTML(item.content)).join('')
+        : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf veya Reals yok.</p></div>';
+      bindPhotoFeed(el);
+      if (photos.length) setupPhotoAudio(el);
+    } catch (error) {
+      const el = $('#home-photos');
+      if (el) el.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Medya yüklenemedi.')}</p></div>`;
+    }
   }
 
   async function renderRealsSection() {
@@ -8470,6 +8530,33 @@ function realsProfileCardHTML(v) {
   </a>`;
 }
 
+function realsMediaCardHTML(v) {
+  const cover = v.banner_image || v.thumbnail_url || v.cover_url || v.poster || '';
+  const route = `/reals/${encodeURIComponent(v.id)}`;
+  const displayName = userDisplayName(v);
+  return `<article class="photo-card reals-media-card" data-reals-route="${route}" style="padding:0;overflow:hidden">
+    <div class="photo-card-head" style="padding:12px">
+      ${avatarImg(v)}
+      <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a><time class="photo-card-date" datetime="${escHtml(v.created_at || '')}">${v.created_at ? escHtml(formatDate(v.created_at)) : ''}</time></div>
+    </div>
+    <div class="photo-media-wrap">
+      <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
+        ${cover ? `<img src="${escHtml(siteImageUrl(cover))}" class="photo-native" alt="${escHtml(v.title || 'Reals videosu')}" loading="lazy" />` : '<span class="reals-media-placeholder"><i class="fas fa-circle-play"></i></span>'}
+        <span class="reals-media-play"><i class="fas fa-play"></i></span>
+      </a>
+    </div>
+    <div class="photo-card-content">
+      ${v.title ? `<h3>${escHtml(v.title)}</h3>` : ''}
+      ${v.description ? hashtagDescriptionPreviewHTML(v.description, 'photo-caption-preview', 180) : ''}
+      <div class="photo-actions reals-media-stats">
+        ${v.show_likes !== 0 ? `<span><i class="far fa-heart"></i> ${formatCount(v.like_count)}</span>` : ''}
+        <span><i class="far fa-comment"></i> ${formatCount(v.comment_count)}</span>
+        <span><i class="fas fa-play"></i> ${formatCount(v.views)}</span>
+      </div>
+    </div>
+  </article>`;
+}
+
 let videoUploadDbPromise = null;
 
 function openVideoUploadDb() {
@@ -9198,8 +9285,17 @@ async function renderVideoDetail(app, slug) {
   updatePageMeta(video.title + ' – ' + siteName, video.description || 'CigCig videoları', video.banner_image || '');
   const isOwner = currentUser && Number(currentUser.id) === Number(video.user_id);
   let followState = false;
+  let followPending = false;
+  let followBlocked = !!video.blocked_relationship;
   if (currentUser && currentUser.username !== video.username) {
-    try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
+    try {
+      const state = await api('/users/' + encodeURIComponent(video.username) + '/follow-status');
+      followState = !!state.following;
+      followPending = !!state.pending;
+      followBlocked = followBlocked || !!state.blocked;
+    } catch (error) {
+      console.warn('Video sahibi takip durumu yüklenemedi:', error.message || error);
+    }
   }
   const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
   const formattedDescription = contentTextHTML(descriptionText);
@@ -9225,7 +9321,9 @@ async function renderVideoDetail(app, slug) {
           <div class="video-title">${escHtml(video.title)}</div>
           <div class="video-author-row">
             <a href="${profileRoute(video.username)}" data-link class="video-author-link">${avatarImg(video, 'avatar-sm')} ${userDisplayName(video)}</a>
-            ${currentUser && currentUser.username !== video.username ? `<button class="btn btn-outline btn-sm" id="follow-btn">${followState ? 'Takip edildi' : 'Takip et'}</button>` : ''}
+            ${currentUser && currentUser.username !== video.username && !followBlocked ? (followState
+              ? '<span class="profile-follow-status"><i class="fas fa-check"></i> Takip edildi</span>'
+              : `<button class="btn btn-outline btn-sm" id="follow-btn">${followPending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}
           </div>
           <div class="video-stats-row"><span><i class="fas fa-eye"></i> ${video.views || 0} izlenme</span><span><i class="fas fa-heart"></i> <span id="video-like-count">${video.like_count || 0}</span></span><span><i class="fas fa-comment"></i> ${comments.length}</span></div>
           <div class="video-actions"><button class="btn btn-outline btn-sm" id="video-like-btn"><i class="fas fa-thumbs-up"></i> Beğen</button><button class="btn btn-outline btn-sm" id="video-dislike-btn"><i class="fas fa-thumbs-down"></i> Beğenme</button><button class="btn btn-outline btn-sm" id="video-copy-btn"><i class="fas fa-share-nodes"></i> Paylaş</button><button class="btn btn-outline btn-sm" id="video-save-btn"><i class="fas fa-bookmark"></i> ${saved ? 'Kaydedildi' : 'Kaydet'}</button>${currentUser ? `<button class="btn btn-outline btn-sm" id="video-share-btn"><i class="fas fa-paper-plane"></i> İlet</button>` : ''}${isOwner ? `<button class="btn btn-outline btn-sm" id="video-edit-btn"><i class="fas fa-edit"></i> Düzenle</button>` : ''}${isOwner ? `<button class="btn btn-danger btn-sm" id="video-delete-btn"><i class="fas fa-trash"></i> Sil</button>` : ''}</div>
@@ -9279,10 +9377,17 @@ async function renderVideoDetail(app, slug) {
   $('#follow-btn')?.addEventListener('click', async () => {
     if (!currentUser) { navigate('/giris'); return; }
     try {
-      const r = await api('/user/' + encodeURIComponent(video.username) + '/follow', { method: 'POST' });
-      followState = r.following;
-      $('#follow-btn').textContent = followState ? 'Takip edildi' : 'Takip et';
-    } catch {}
+      const r = await api('/users/' + encodeURIComponent(video.username) + '/follow', { method: followPending ? 'DELETE' : 'POST' });
+      followState = !!r.following;
+      followPending = !!r.pending;
+      const button = $('#follow-btn');
+      if (followState && button) {
+        const status = document.createElement('span');
+        status.className = 'profile-follow-status';
+        status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
+        button.replaceWith(status);
+      } else if (button) button.textContent = followPending ? 'İstek gönderildi' : 'Takip et';
+    } catch (error) { toast(error.message || 'Takip işlemi tamamlanamadı.', 'error'); }
   });
 
   $('#video-share-btn')?.addEventListener('click', async () => {
@@ -9501,20 +9606,28 @@ async function renderBadges(app) {
 
 function askBlockSettings(username) {
   return new Promise(resolve => {
-    showModal('Engelleme seçenekleri', `<div class="account-status-confirm">
-      <p><b>@${escHtml(username)}</b> hesabını engellemek üzeresin. Engelleme hemen etkinleşir; profilini ne zaman gizleyeceğini seç.</p>
-      <label class="form-group"><span>Profil ve içerik gizleme zamanı</span>
+    showModal('Engelleme seçenekleri', `<div class="block-options">
+      <div class="block-options-intro">
+        <span class="block-options-icon"><i class="fas fa-user-slash"></i></span>
+        <span><strong>@${escHtml(username)}</strong><small>Engelleme hemen etkinleşir.</small></span>
+      </div>
+      <p class="block-options-description">Bu kişiyle takip ve mesaj etkileşimleri kapatılır. Profilini ve paylaşımlarını ne zaman gizleyeceğini seçebilirsin.</p>
+      <label class="block-options-field" for="block-grace-hours">
+        <span><i class="fas fa-eye-slash"></i><span><strong>Profil ve içerik gizleme zamanı</strong><small>Engelleme anında etkin, gizleme seçtiğin zamanda uygulanır.</small></span></span>
         <select id="block-grace-hours" class="form-control">
           <option value="0">Hemen gizle</option><option value="2">2 saat sonra</option>
           <option value="10">10 saat sonra</option><option value="24">24 saat sonra</option>
         </select>
       </label>
-      <label class="checkbox-label" style="margin-top:12px"><input type="checkbox" id="block-fake-profile" />
-        Engellenen kişiye sabit ama dönemsel değişen sahte profil bilgileri göster</label>
-      <div class="account-status-confirm-actions" style="margin-top:18px">
-        <button type="button" class="btn btn-danger" id="confirm-block">Engelle</button>
+      <label class="block-options-fake-profile">
+        <input type="checkbox" id="block-fake-profile" />
+        <span><strong>Sahte profil bilgileri göster</strong><small>Engellendiğini fark etmemesi için sabit, dönemsel değişen profil bilgileri kullanılır.</small></span>
+      </label>
+      <div class="block-options-actions">
         <button type="button" class="btn btn-outline" id="cancel-block">Vazgeç</button>
-      </div></div>`);
+        <button type="button" class="btn btn-danger" id="confirm-block"><i class="fas fa-ban"></i> Engelle</button>
+      </div>
+    </div>`);
     $('#cancel-block')?.addEventListener('click', () => { hideModal(); resolve(null); });
     $('#confirm-block')?.addEventListener('click', () => {
       const choice = { grace_hours: Number($('#block-grace-hours')?.value || 0), fake_profile: !!$('#block-fake-profile')?.checked };
@@ -9677,12 +9790,19 @@ async function renderProfile(app, username) {
   try { data = await api('/profile/' + username); } catch { app.innerHTML = '<div class="container page"><div class="empty-state"><i class="fas fa-user-slash"></i><p>Kullanıcı bulunamadı.</p></div></div>'; return; }
 
   if (data.blocked_by_me) {
-    app.innerHTML = `<div class="container page"><section class="card card-body" style="max-width:600px;margin:48px auto;text-align:center;padding:32px">
-      <i class="fas fa-user-lock" style="font-size:32px;color:var(--accent-red2)"></i>
-      <h2 style="margin:14px 0 8px">Bu hesabı engelledin</h2>
-      <p style="color:var(--text-muted)">Takipler ve doğrudan mesajlaşma kaldırıldı.</p>
-      <button type="button" class="btn btn-outline" id="profile-unblock-user"><i class="fas fa-unlock"></i> Engeli kaldır</button>
-    </section></div>`;
+    const blockedUser = data.user || { username };
+    app.innerHTML = `<div class="container page profile-blocked-page">
+      <section class="card profile-blocked-header">${avatarImg(blockedUser)}<div><h1>${escHtml(userDisplayName(blockedUser))}</h1><small>@${escHtml(blockedUser.username || username)}</small></div></section>
+      <section class="card card-body profile-blocked-content">
+        <h2><i class="fas fa-images"></i> İçerikler</h2>
+        <div class="profile-blocked-state">
+          <span class="profile-blocked-icon"><i class="fas fa-user-slash"></i></span>
+          <strong>BU KULLANICI ENGELLENDİ</strong>
+          <p>Bu hesap engelli olduğu için içerikleri görüntülenmiyor. Takip ve doğrudan mesajlaşma kapalı.</p>
+          <button type="button" class="btn btn-outline" id="profile-unblock-user"><i class="fas fa-unlock"></i> Engeli kaldır</button>
+        </div>
+      </section>
+    </div>`;
     app.querySelector('#profile-unblock-user')?.addEventListener('click', async event => {
       if (!await CigCigDialogs.confirm(`@${username} kullanıcısının engelini kaldırmak istiyor musun?`)) return;
       event.currentTarget.disabled = true;
@@ -9698,8 +9818,8 @@ async function renderProfile(app, username) {
   if (data.blocked_profile) {
     app.innerHTML = `<div class="container page">
       <section class="card card-body" style="max-width:620px;margin:48px auto;text-align:center;padding:36px">
-        <i class="fas fa-ban" style="font-size:36px;color:var(--accent-red2)"></i>
-        <h2 style="margin:16px 0 8px">Bu profil görüntülenemiyor</h2>
+        <i class="fas fa-user-slash" style="font-size:36px;color:var(--accent-red2)"></i>
+        <h2 style="margin:16px 0 8px">Bu kullanıcı seni engelledi</h2>
         <p style="color:var(--text-muted)">Hesap gizli. Bu hesap seni engellediği için profil bilgileri ve paylaşımları gizlendi.</p>
         ${data.fake_profile ? `<p style="color:var(--text-muted)">Hesap gizli · Biyografi: ...</p><div class="profile-stats">
           <div class="profile-stat"><div class="profile-stat-num">${Number(data.followers_count || 0)}</div><div class="profile-stat-label">Takipçi</div></div>
@@ -9880,6 +10000,7 @@ async function renderProfile(app, username) {
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (loadedFollowState) followState = loadedFollowState;
+  const blockedRelationship = !!data.blocked_relationship;
   const bindFollowButton = () => {
     const button = document.getElementById('profile-follow-btn');
     if (!button) return;
@@ -9889,6 +10010,13 @@ async function renderProfile(app, username) {
         followState = followState.following || followState.pending
           ? await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'DELETE' })
           : await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
+        if (followState.following) {
+          const status = document.createElement('span');
+          status.className = 'profile-follow-status';
+          status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
+          button.replaceWith(status);
+          return;
+        }
         button.textContent = followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip edildi' : 'Takip et');
         if (user.is_private && followState.pending) toast('Takip isteği gönderildi');
         button.classList.toggle('btn-outline', followState.following || followState.pending);
@@ -9904,7 +10032,9 @@ async function renderProfile(app, username) {
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
       <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${currentUser ? `<button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'İstek gönderildi' : followState.following ? 'Takip edildi' : 'Takip et'}</button>` : ''}</div></div></div>`;
+      ${!blockedRelationship && currentUser ? (followState.following
+        ? '<span class="profile-follow-status" style="margin-top:12px"><i class="fas fa-check"></i> Takip edildi</span>'
+        : `<button id="profile-follow-btn" class="btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
     bindProfileAvatarViewer(app, user);
     bindFollowButton();
@@ -10008,8 +10138,10 @@ async function renderProfile(app, username) {
               ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}` : ''}
         </div>
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
-          <button id="profile-follow-btn" class="btn ${followState.following || followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : followState.following ? 'Takip edildi' : 'Takip et'}</button>
-          ${user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
+          ${!blockedRelationship ? (followState.following
+            ? '<span class="profile-follow-status"><i class="fas fa-check"></i> Takip edildi</span>'
+            : `<button id="profile-follow-btn" class="btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>`) : ''}
+          ${blockedRelationship || user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative" aria-label="Profil seçenekleri" aria-expanded="false"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" class="profile-more-menu" role="menu"></div>
         </div>` : ''}
@@ -12339,6 +12471,7 @@ async function init() {
     document.body.classList.toggle('beta-mode-enabled', ps.beta_mode_enabled !== '0');
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     loginRequiredEnabled = ps.first_visit_auth === '1';
+    mobileHomeAuthRequired = ps.mobile_home_auth_required === '1';
     const configuredPhotoClip = Number(ps.photo_song_clip_seconds);
     if (Number.isInteger(configuredPhotoClip) && configuredPhotoClip >= 1 && configuredPhotoClip <= 300) {
       photoSongClipSeconds = configuredPhotoClip;
@@ -15708,7 +15841,7 @@ async function renderNotifications(app) {
       return;
     }
     list.innerHTML = `<div class="notif-page-list">${notifs.map(n => `
-      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}">
+      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}${n.link ? ' notif-page-clickable' : ''}"${n.link ? ` data-notification-link="${escHtml(n.link)}" role="group" aria-label="Bildirim: ${escHtml(n.body)}" tabindex="0"` : ''}>
         ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" class="notification-avatar" alt="" />` : `<div class="notification-avatar notification-avatar-placeholder"><i class="fas fa-bell"></i></div>`}
         <div class="notif-page-copy">
           ${n.type === 'announcement' && n.title ? `<strong class="notif-page-title">${escHtml(n.title)}</strong>` : ''}
@@ -15723,6 +15856,18 @@ async function renderNotifications(app) {
       await renderNotifications(app);
     });
     list.querySelectorAll('.notification-open').forEach(button => button.addEventListener('click', () => navigate(button.dataset.link)));
+    list.querySelectorAll('.notif-page-clickable').forEach(item => {
+      const openNotification = event => {
+        if (event.target.closest('button, a, input, textarea, select, .notification-actions')) return;
+        navigate(item.dataset.notificationLink);
+      };
+      item.addEventListener('click', openNotification);
+      item.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openNotification(event);
+      });
+    });
   } catch(e) {
     const list = $('#notif-page-list');
     if (list) list.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${e.message}</p></div>`;
@@ -19327,7 +19472,32 @@ async function renderPhotos(app) {
   document.title = 'Medya – ' + siteName;
   app.innerHTML = `<div class="container page photos-page"><div id="stories-bar"></div><div id="photos-feed" class="photos-feed"><div class="loading-center"><div class="spinner"></div></div></div></div>`;
   const feed = document.getElementById('photos-feed');
-  try { const [photos, ad] = await Promise.all([api('/photos'), api('/photo-ads/random').catch(()=>null), loadStoriesBar($('#stories-bar'))]); const cards=[]; shuffleArray(photos).forEach((p,i)=>{ cards.push(photoCardHTML(p)); if(ad && (i+1)%4===0) cards.push(photoAdCardHTML(ad)); }); if(ad && !photos.length) cards.push(photoAdCardHTML(ad)); feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf yok.</p></div>'; bindPhotoFeed(feed); setupPhotoAudio(feed); } catch (e) { feed.innerHTML = `<div class="empty-state"><p>${escHtml(e.message)}</p></div>`; }
+  try {
+    const [photos, ad, , reals] = await Promise.all([
+      api('/photos'),
+      api('/photo-ads/random').catch(() => null),
+      loadStoriesBar($('#stories-bar')),
+      api('/reals').catch(error => {
+        console.warn('Medya akışındaki Reals içerikleri yüklenemedi:', error.message || error);
+        return [];
+      })
+    ]);
+    const media = shuffleArray([
+      ...photos.map(photo => ({ type: 'photo', content: photo })),
+      ...reals.map(real => ({ type: 'reals', content: real }))
+    ]);
+    const cards = [];
+    media.forEach((item, index) => {
+      cards.push(item.type === 'reals' ? realsMediaCardHTML(item.content) : photoCardHTML(item.content));
+      if (ad && (index + 1) % 4 === 0) cards.push(photoAdCardHTML(ad));
+    });
+    if (ad && !media.length) cards.push(photoAdCardHTML(ad));
+    feed.innerHTML = cards.length ? cards.join('') : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz fotoğraf veya Reals yok.</p></div>';
+    bindPhotoFeed(feed);
+    setupPhotoAudio(feed);
+  } catch (error) {
+    feed.innerHTML = `<div class="empty-state"><p>${escHtml(error.message || 'Medya yüklenemedi.')}</p></div>`;
+  }
 }
 async function renderMediaExplore(app) {
   document.title = 'Medya Keşfet – ' + siteName;
@@ -19344,9 +19514,10 @@ async function renderMediaExplore(app) {
     const initialTag = new URLSearchParams(location.search).get('tag')?.replace(/^#/, '').trim() || '';
     const hasInitialTag = /^[\p{L}\p{N}_]{1,80}$/u.test(initialTag);
     if (hasInitialTag) search.value = `#${initialTag}`;
-    const photos = [];
+    let photos = [];
+    let reals = [];
     let photosLoaded = false;
-    let shuffledPhotos = [];
+    let shuffledMedia = [];
     const loadAllPhotos = async () => {
       if (photosLoaded) return;
       const loadedPhotos = [];
@@ -19357,15 +19528,29 @@ async function renderMediaExplore(app) {
         loadedPhotos.push(...batch);
         offset += batch.length;
       } while (batch.length === 100);
-      photos.push(...loadedPhotos);
-      shuffledPhotos = shuffleArray(photos);
+      const loadedReals = await api('/reals').catch(error => {
+        console.warn('Medya keşfette Reals içerikleri yüklenemedi:', error.message || error);
+        return [];
+      });
+      photos = loadedPhotos;
+      reals = Array.isArray(loadedReals) ? loadedReals : [];
+      shuffledMedia = shuffleArray([
+        ...photos.map(photo => ({ type: 'photo', content: photo })),
+        ...reals.map(real => ({ type: 'reals', content: real }))
+      ]);
       photosLoaded = true;
     };
     if (!hasInitialTag) await loadAllPhotos();
     const renderPhotoResults = values => {
       feed.innerHTML = values.length
-        ? values.map(photo => `<div class="media-explore-result" data-search-index="${escHtml([photo.title, photo.caption, photo.username, photo.nickname].filter(Boolean).join(' ').toLocaleLowerCase('tr-TR'))}">${photoCardHTML(photo)}</div>`).join('')
-        : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık fotoğraf yok.</p></div>';
+        ? values.map(item => {
+          const content = item.content;
+          const searchIndex = [content.title, item.type === 'reals' ? content.description : content.caption, content.username, content.nickname]
+            .filter(Boolean).join(' ').toLocaleLowerCase('tr-TR');
+          const html = item.type === 'reals' ? realsMediaCardHTML(content) : photoCardHTML(content);
+          return `<div class="media-explore-result" data-search-index="${escHtml(searchIndex)}">${html}</div>`;
+        }).join('')
+        : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık fotoğraf veya Reals yok.</p></div>';
       bindPhotoFeed(feed);
       setupPhotoAudio(feed);
     };
@@ -19385,7 +19570,7 @@ async function renderMediaExplore(app) {
       const content = [
         ...matchingPhotos.map(photo => ({ createdAt: photo.created_at, search: [photo.title, photo.caption, photo.username, photo.nickname], html: photoCardHTML(photo) })),
         ...matchingVideos.map(video => ({ createdAt: video.created_at, search: [video.title, video.description, video.username], html: videoCardHTML(video) })),
-        ...matchingReals.map(real => ({ createdAt: real.created_at, search: [real.title, real.description, real.username], html: realsProfileCardHTML(real) }))
+        ...matchingReals.map(real => ({ createdAt: real.created_at, search: [real.title, real.description, real.username], html: realsMediaCardHTML(real) }))
       ].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
       const summary = `<section class="hashtag-search-summary"><strong>#${escHtml(tag)}</strong><span>${formatCount(exactTag?.usage_count)} kullanım · ${formatCount(exactTag?.post_count)} gönderi</span></section>`;
       const results = content.map(item => `<div class="media-explore-result" data-search-index="${escHtml(item.search.filter(Boolean).join(' ').toLocaleLowerCase('tr-TR'))}">${item.html}</div>`).join('');
@@ -19398,7 +19583,7 @@ async function renderMediaExplore(app) {
     if (hasInitialTag) {
       await loadHashtagResults(initialTag);
     } else {
-      renderPhotoResults(shuffledPhotos);
+      renderPhotoResults(shuffledMedia);
     }
     search.addEventListener('input', async () => {
       const query = search.value.trim().toLocaleLowerCase('tr-TR');
@@ -19432,7 +19617,7 @@ async function renderMediaExplore(app) {
         if (!result.hidden) visibleCount++;
       });
       feed.querySelector('.media-explore-empty')?.remove();
-      if (visibleCount === 0 && shuffledPhotos.length) {
+      if (visibleCount === 0 && shuffledMedia.length) {
         feed.insertAdjacentHTML('beforeend', '<div class="empty-state media-explore-empty"><i class="fas fa-magnifying-glass"></i><p>Bu aramayla eşleşen fotoğraf bulunamadı.</p></div>');
       }
     });
@@ -19469,6 +19654,12 @@ function setPhotoGalleryIndex(card, index) {
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
+  feed.querySelectorAll('.reals-media-card').forEach(card => {
+    card.addEventListener('click', event => {
+      if (event.target.closest('a, button')) return;
+      navigate(card.dataset.realsRoute);
+    });
+  });
   feed.querySelectorAll('.photo-gallery-controls').forEach(controls => {
     const card = controls.closest('[data-photo-id]');
     controls.querySelectorAll('[data-gallery-step]').forEach(button => button.addEventListener('click', event => {
@@ -20928,6 +21119,7 @@ async function renderStore(app) {
     plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
     admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
     red_tick: { icon: 'fas fa-check', color: '#ef3340', label: 'Kırmızı Tik', gradient: 'linear-gradient(135deg,#ef3340,#b91c1c)' },
+    ad_boost: { icon: 'fas fa-music', color: '#dc2626', label: 'Müzik Reklamı Boost', gradient: 'linear-gradient(135deg,#dc2626,#991b1b)' },
   };
 
   function daysLeft(expiresAt) {
@@ -20949,13 +21141,13 @@ async function renderStore(app) {
     return `<div class="store-card" data-product-id="${p.id}" data-product-type="${p.type}">
       <div class="store-card-header" style="background:${cfg.gradient}">
         ${hasSale ? `<div class="store-badge-sale">%${discountPct} İNDİRİM</div>` : ''}
-        <div class="store-card-icon"><i class="${escHtml(p.badge_icon || cfg.icon)}"></i></div>
+        <div class="store-card-icon"><i class="${escHtml(p.type === 'red_tick' ? 'fas fa-check' : p.type === 'ad_boost' ? 'fas fa-music' : p.badge_icon || cfg.icon)}"></i></div>
         <div class="store-card-type">${escHtml(p.name)}</div>
         <div class="store-card-price-row">
           ${hasSale ? `<span class="store-price-old">${parseFloat(p.original_price).toFixed(2)} ₺</span>` : ''}
           <span class="store-price-new">${Number(p.purchase_enabled) === 1 ? `${parseFloat(p.price).toFixed(2)} ₺` : 'Satın alım kapalı'}</span>
         </div>
-        <div class="store-card-duration"><i class="fas ${p.type === 'red_tick' ? 'fa-shield-check' : 'fa-clock'}"></i> ${p.type === 'red_tick' ? 'Yalnızca yönetici verebilir' : `${p.duration_days} günlük üyelik`}</div>
+        <div class="store-card-duration"><i class="fas ${p.type === 'red_tick' ? 'fa-check' : 'fa-clock'}"></i> ${p.type === 'red_tick' ? 'Doğrulanmış hesap rozeti' : `${p.duration_days} günlük üyelik`}</div>
       </div>
       <div class="store-card-body">
         ${descriptionPreviewHTML(p.description, 'store-card-desc', 120)}

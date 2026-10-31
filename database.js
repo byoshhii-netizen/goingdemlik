@@ -1532,7 +1532,7 @@ async function initDb() {
 
 
     INSERT INTO store_products (name, description, features, type, price, duration_days, visible, badge_color, badge_icon, sort_order)
-    SELECT 'Müzik Reklamı Boost', 'Ses reklamını reklam havuzunda öne çıkarır.', '["Reklam havuzunda öncelik","Daha fazla gösterim"]', 'ad_boost', 39.99, 30, 1, '#dc2626', 'fas fa-bolt', 4
+    SELECT 'Müzik Reklamı Boost', 'Ses reklamını reklam havuzunda öne çıkarır.', '["Reklam havuzunda öncelik","Daha fazla gösterim"]', 'ad_boost', 39.99, 30, 1, '#dc2626', 'fas fa-music', 4
     WHERE NOT EXISTS (SELECT 1 FROM store_products WHERE type='ad_boost');
 
     CREATE TABLE IF NOT EXISTS artist_applications (
