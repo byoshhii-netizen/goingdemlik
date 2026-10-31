@@ -10264,25 +10264,30 @@ async function renderProfile(app, username) {
   const bindFollowButton = () => {
     const button = document.getElementById('profile-follow-btn');
     if (!button) return;
+    const syncButton = () => {
+      button.className = followState.following
+        ? 'profile-follow-status profile-follow-status-button'
+        : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`;
+      button.innerHTML = followState.following
+        ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi'
+        : (followState.pending ? 'İstek gönderildi' : 'Takip et');
+      button.setAttribute('aria-label', followState.following ? 'Takipten çık' : (followState.pending ? 'Takip isteğini iptal et' : 'Takip et'));
+    };
+    syncButton();
     button.addEventListener('click', async () => {
       button.disabled = true;
       try {
+        if (followState.following && !await CigCigDialogs.confirm(`@${profileUsername} hesabını takipten çıkmak istiyor musun?`)) {
+          button.disabled = false;
+          return;
+        }
         followState = followState.following || followState.pending
           ? await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'DELETE' })
           : await api('/users/' + encodeURIComponent(profileUsername) + '/follow', { method: 'POST' });
-        if (followState.following) {
-          const status = document.createElement('span');
-          status.className = 'profile-follow-status';
-          status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
-          button.replaceWith(status);
-          return;
-        }
-        button.textContent = followState.pending ? 'İstek gönderildi' : (followState.following ? 'Takip edildi' : 'Takip et');
+        syncButton();
         if (user.is_private && followState.pending) toast('Takip isteği gönderildi');
-        button.classList.toggle('btn-outline', followState.following || followState.pending);
-        button.classList.toggle('btn-primary', !followState.following && !followState.pending);
-        button.disabled = false;
-      } catch (e) { toast(e.message, 'error'); button.disabled = false; }
+      } catch (e) { toast(e.message, 'error'); }
+      finally { button.disabled = false; }
     });
   };
   if (data.private_profile && !isOwn) {
@@ -10292,9 +10297,7 @@ async function renderProfile(app, username) {
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
       <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
-      ${!blockedRelationship && currentUser ? (followState.following
-        ? '<span class="profile-follow-status" style="margin-top:12px"><i class="fas fa-check"></i> Takip edildi</span>'
-        : `<button id="profile-follow-btn" class="btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm" style="margin-top:12px">${followState.pending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}</div></div></div>`;
+      ${!blockedRelationship && currentUser ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}" style="margin-top:12px">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'İstek gönderildi' : 'Takip et')}</button>` : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
     bindProfileAvatarViewer(app, user);
     bindFollowButton();
@@ -10398,9 +10401,7 @@ async function renderProfile(app, username) {
               ${profileVisibility.photos ? `<div class="profile-stat"><div class="profile-stat-num">${photos.length + profileVideos.length + profileReals.length}</div><div class="profile-stat-label">Medya</div></div>` : ''}` : ''}
         </div>
         ${!isOwn && currentUser ? `<div class="profile-actions" style="display:flex;gap:8px;margin-top:16px;position:relative">
-          ${!blockedRelationship ? (followState.following
-            ? '<span class="profile-follow-status"><i class="fas fa-check"></i> Takip edildi</span>'
-            : `<button id="profile-follow-btn" class="btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm">${followState.pending ? 'Takip isteği gönderildi' : 'Takip et'}</button>`) : ''}
+          ${!blockedRelationship ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'Takip isteği gönderildi' : 'Takip et')}</button>` : ''}
           ${blockedRelationship || user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative" aria-label="Profil seçenekleri" aria-expanded="false"><i class="fas fa-ellipsis-h"></i></button>
           <div id="profile-more-menu" class="profile-more-menu" role="menu"></div>
