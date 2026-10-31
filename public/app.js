@@ -8577,13 +8577,14 @@ function realsMediaCardHTML(v) {
       </a>
     </div>
     <div class="photo-card-content">
-      ${v.title ? `<h3>${escHtml(v.title)}</h3>` : ''}
-      ${v.description ? hashtagDescriptionPreviewHTML(v.description, 'photo-caption-preview', 180) : ''}
+      <h3>${escHtml(v.title || 'Reals')}</h3>
+      ${v.description?.trim() ? hashtagDescriptionPreviewHTML(v.description, 'photo-caption-preview', 180) : ''}
       <div class="photo-actions reals-media-stats">
         ${v.show_likes !== false && Number(v.show_likes) !== 0 ? `<button type="button" class="btn btn-ghost btn-sm reals-media-like${liked ? ' liked' : ''}" data-liked="${liked}" data-like-count="${Number(v.like_count) || 0}" aria-label="${liked ? 'Beğeniyi kaldır' : 'Reals videosunu beğen'}"><i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(v.like_count)}</span></button>` : ''}
         ${v.allow_comments !== false && Number(v.allow_comments) !== 0 ? `<button type="button" class="btn btn-ghost btn-sm reals-media-comment" data-comment-count="${Number(v.comment_count) || 0}" aria-label="Yorumları aç"><i class="far fa-comment"></i> <span>${formatCount(v.comment_count)}</span></button>` : ''}
         <span><i class="fas fa-play"></i> ${formatCount(v.views)}</span>
-        <button type="button" class="btn btn-ghost btn-sm photo-share reals-media-share" aria-label="Reals bağlantısını paylaş"><i class="fas fa-share-alt"></i> Paylaş</button>
+        <button type="button" class="btn btn-ghost btn-sm reals-media-share" aria-label="Reals bağlantısını paylaş"><i class="fas fa-share-alt"></i> Paylaş</button>
+        <button type="button" class="btn btn-ghost btn-sm reals-media-forward" aria-label="Reals videosunu ilet"><i class="fas fa-paper-plane"></i> İlet</button>
       </div>
     </div>
   </article>`;
@@ -20671,10 +20672,12 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
 }
 
 document.addEventListener('click', e => {
-  const btn=e.target.closest('.photo-forward'); if(!btn) return;
+  const btn=e.target.closest('.photo-forward, .reals-media-forward'); if(!btn) return;
   e.preventDefault(); e.stopImmediatePropagation();
   if(!currentUser) return toast('İletmek için giriş yapın.', 'error');
-  showForwardPhotoModal(btn.closest('[data-photo-id]')?.dataset.photoId);
+  const realsCard = btn.closest('.reals-media-card');
+  if (realsCard) showForwardVideoModal({ id: realsCard.dataset.realsId });
+  else showForwardPhotoModal(btn.closest('[data-photo-id]')?.dataset.photoId);
 }, true);
 async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
   try {

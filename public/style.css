@@ -7536,6 +7536,7 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 .media-explore-result { display:contents; }
 .media-explore-result[hidden] { display:none !important; }
 .reals-media-card .photo-card-head { gap:10px; }
+.reals-media-card .photo-card-content { display:block;min-width:0;overflow-wrap:anywhere; }
 .reals-media-card .reals-media-open { z-index:2; }
 .reals-media-play { position:absolute;top:50%;left:50%;display:grid;place-items:center;width:54px;height:54px;border:1px solid rgba(255,255,255,.5);border-radius:50%;background:rgba(0,0,0,.46);color:#fff;font-size:18px;transform:translate(-50%,-50%);backdrop-filter:blur(8px);opacity:1;transition:opacity .18s ease,transform .18s ease,background .18s ease; }
 .reals-media-card.is-playing .reals-media-play { opacity:0; }
@@ -9791,10 +9792,10 @@ html.has-default-avatar .call-avatar-placeholder > i {
   place-items:center;
 }
 
-.photos-feed .reals-media-card .photo-media-wrap {
+.media-explore-page .photos-feed .reals-media-card .photo-media-wrap {
   height:auto !important;
   max-height:none !important;
-  aspect-ratio:9 / 16 !important;
+  aspect-ratio:4 / 5 !important;
 }
 
 @media (max-width:600px) {
