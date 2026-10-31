@@ -2086,7 +2086,7 @@ function renderRoute(fullPath) {
     window.__realsKeydownHandler = null;
   }
   if (loginRequiredEnabled && !currentUser && !isPublicGuestRoute(path)) {
-    return navigate('/giris', false);
+    return navigate(`/kayit?returnTo=${encodeURIComponent(fullPath)}`, false);
   }
   const wasInMessages = previousPath === '/mesajlar' || previousPath?.startsWith('/mesajlar/');
   const isInMessages = path === '/mesajlar' || path.startsWith('/mesajlar/');
@@ -2149,7 +2149,7 @@ function renderRoute(fullPath) {
 
   if (path === '/') {
     if (mobileHomeAuthRequired && !currentUser && window.matchMedia('(max-width: 768px)').matches) {
-      return renderLogin(app);
+      return renderRegister(app);
     }
     return renderHome(app);
   }
@@ -12494,7 +12494,7 @@ function renderRegister(app) {
       </div>
       <button class="btn btn-primary" style="width:100%;margin-top:4px" id="reg-btn">Kayıt Ol</button>
       <div id="reg-error" class="form-error mt-4" style="text-align:center"></div>
-      <div class="auth-footer">Zaten hesabın var mı? <a href="/giris" data-link class="auth-link">Giriş Yap</a></div>
+      <div class="auth-footer">Hesabın var mı? <a href="${returnTo === '/' ? '/giris' : '/giris?returnTo=' + encodeURIComponent(returnTo)}" data-link class="auth-link">Hesabım var · Giriş yap</a></div>
     </div>
   </div>`;
 
