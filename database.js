@@ -784,6 +784,15 @@ async function initDb() {
       FOREIGN KEY(message_id) REFERENCES group_messages(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS group_message_reactions (
+      id BIGSERIAL PRIMARY KEY,
+      message_id BIGINT NOT NULL REFERENCES group_messages(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      emoji TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE(message_id,user_id,emoji)
+    );
+    CREATE INDEX IF NOT EXISTS idx_group_message_reactions_message ON group_message_reactions(message_id);
 
     CREATE TABLE IF NOT EXISTS group_invites (
       id BIGSERIAL PRIMARY KEY,
@@ -1358,6 +1367,7 @@ async function initDb() {
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS location TEXT DEFAULT '';
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS song_id BIGINT;
     ALTER TABLE photos ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER DEFAULT 0;
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
 
     CREATE TABLE IF NOT EXISTS photo_ads (
       id BIGSERIAL PRIMARY KEY,

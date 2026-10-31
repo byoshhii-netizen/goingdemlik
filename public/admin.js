@@ -3854,6 +3854,20 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><span><i class="fas fa-user-circle" style="color:var(--red2);margin-right:8px"></i>Varsayılan profilsiz görseli</span></div>
+        <div class="card-body">
+          <div id="s-default-avatar-preview" style="display:grid;width:76px;height:76px;place-items:center;margin:0 auto 14px;overflow:hidden;border:1px solid var(--border);border-radius:50%;background:var(--bg2);color:var(--text2)">
+            ${settings['default_avatar_url'] ? `<img src="${escHtml(settings['default_avatar_url'])}" alt="Varsayılan profilsiz görseli" style="width:100%;height:100%;object-fit:cover" />` : '<i class="fas fa-user"></i>'}
+          </div>
+          <div class="form-group"><label for="s-default-avatar-url">Görsel adresi</label><input id="s-default-avatar-url" type="url" maxlength="2048" value="${escHtml(settings['default_avatar_url'] || '')}" placeholder="https://..." /></div>
+          <div class="form-group"><label for="s-default-avatar-file">Cihazdan görsel yükle</label><input id="s-default-avatar-file" type="file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" /></div>
+          <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Profil fotoğrafı olmayan üyelerde bu görsel gösterilir. Görsel tıklanınca büyük olarak açılır.</small>
+          <button class="btn btn-primary" id="s-default-avatar-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Görseli kaydet</button>
+          <button class="btn btn-outline" id="s-default-avatar-clear" style="width:100%;justify-content:center;margin-top:8px"><i class="fas fa-trash"></i> Görseli kaldır</button>
+          <div id="s-default-avatar-msg" class="form-error mt-4" role="status"></div>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-header"><span><i class="fas fa-spinner" style="color:var(--red2);margin-right:8px"></i>Açılış Ekranı</span></div>
         <div class="card-body">
           <div class="form-group"><label for="s-loading-screen-title">Başlık</label><input id="s-loading-screen-title" maxlength="50" value="${escHtml(settings['loading_screen_title'] || 'CigCig')}" /></div>
@@ -4284,6 +4298,55 @@ async function renderSettings(main) {
     const msg = document.getElementById('s-general-msg');
     await saveSetting('site_name', document.getElementById('s-sitename').value.trim(), msg);
     await saveSetting('site_description', document.getElementById('s-desc').value.trim(), msg);
+  });
+  const defaultAvatarUrlInput = document.getElementById('s-default-avatar-url');
+  const defaultAvatarPreview = document.getElementById('s-default-avatar-preview');
+  const defaultAvatarMsg = document.getElementById('s-default-avatar-msg');
+  defaultAvatarUrlInput?.addEventListener('input', () => {
+    const url = defaultAvatarUrlInput.value.trim();
+    defaultAvatarPreview.innerHTML = url
+      ? `<img src="${escHtml(url)}" alt="Varsayılan profilsiz görseli" style="width:100%;height:100%;object-fit:cover" onerror="this.parentElement.innerHTML='<i class=&quot;fas fa-triangle-exclamation&quot;></i>'" />`
+      : '<i class="fas fa-user"></i>';
+  });
+  document.getElementById('s-default-avatar-save')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    defaultAvatarMsg.textContent = '';
+    try {
+      let url = defaultAvatarUrlInput.value.trim();
+      const file = document.getElementById('s-default-avatar-file').files?.[0];
+      if (file) {
+        const form = new FormData();
+        form.append('image', file);
+        const response = await fetch('/api/admin/upload-default-avatar', {
+          method: 'POST',
+          headers: { 'X-Admin-Token': adminToken },
+          body: form
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Görsel yüklenemedi.');
+        url = result.url;
+        defaultAvatarUrlInput.value = url;
+      }
+      if (!await saveSetting('default_avatar_url', url, defaultAvatarMsg, false)) return;
+      defaultAvatarMsg.style.color = 'var(--green)';
+      defaultAvatarMsg.textContent = '✓ Varsayılan profilsiz görseli kaydedildi.';
+      document.getElementById('s-default-avatar-file').value = '';
+      toast('Varsayılan profilsiz görseli kaydedildi.');
+    } catch (error) {
+      defaultAvatarMsg.style.color = 'var(--red2)';
+      defaultAvatarMsg.textContent = error.message || 'Görsel kaydedilemedi.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+  document.getElementById('s-default-avatar-clear')?.addEventListener('click', async () => {
+    if (!await saveSetting('default_avatar_url', '', defaultAvatarMsg, false)) return;
+    defaultAvatarUrlInput.value = '';
+    document.getElementById('s-default-avatar-file').value = '';
+    defaultAvatarPreview.innerHTML = '<i class="fas fa-user"></i>';
+    defaultAvatarMsg.style.color = 'var(--green)';
+    defaultAvatarMsg.textContent = 'Varsayılan görsel kaldırıldı.';
   });
   document.getElementById('s-loading-screen-save')?.addEventListener('click', async () => {
     const msg = document.getElementById('s-loading-screen-msg');

@@ -9,7 +9,6 @@ let dmPeerTypingTimer = null;
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
-let activeGroupChannelRefresh = null;
 // Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
 // atama kontrollü PUT isteklerine mevcut oturum tokenını da ekle.
 const nativeFetch = window.fetch.bind(window);
@@ -88,6 +87,7 @@ let storyComposerAudio = null;
 let activePhotoAudio = null;
 let photoAudioObserver = null;
 let siteName = 'CigCig';
+let defaultAvatarUrl = '';
 let loginRequiredEnabled = false;
 let appVersionPollTimer = null;
 const journalistDirectory = new Map();
@@ -105,6 +105,23 @@ let activePlaylistPreviewButton = null;
 let designedFilePickerSequence = 0;
 let storyAvatarHoldTimer = null;
 let longPressedStoryAvatar = null;
+
+function applyDefaultAvatar(url) {
+  defaultAvatarUrl = String(url || '').trim();
+  const root = document.documentElement;
+  root.classList.toggle('has-default-avatar', Boolean(defaultAvatarUrl));
+  if (defaultAvatarUrl) root.style.setProperty('--default-avatar-image', `url(${JSON.stringify(defaultAvatarUrl)})`);
+  else root.style.removeProperty('--default-avatar-image');
+}
+
+document.addEventListener('click', event => {
+  if (!(event.target instanceof Element) || !defaultAvatarUrl) return;
+  const placeholder = event.target.closest('.avatar-placeholder, .profile-avatar-placeholder, .call-avatar-placeholder');
+  if (!placeholder) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  showDmImageViewer([defaultAvatarUrl]);
+}, true);
 
 document.addEventListener('contextmenu', event => {
   if (!(event.target instanceof Element)) return;
@@ -456,7 +473,7 @@ function showModal(title, bodyHTML, modalClass = '', { pauseMedia = true } = {})
   if (pauseMedia) managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal');
+  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -482,7 +499,7 @@ function hideModal({ resumeReals = true } = {}) {
   }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'dm-image-viewer-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -491,6 +508,132 @@ function descriptionPreviewHTML(description, className, maxLength = 150) {
   const preview = text.replace(/\s+/g, ' ').trim();
   if (preview.length <= maxLength) return `<div class="${className}">${escHtml(text)}</div>`;
   return `<button type="button" class="${className} description-preview" data-full-description="${escHtml(text)}" aria-label="Açıklamanın tamamını görüntüle">${escHtml(preview.slice(0, maxLength).trimEnd())}... <span>Devamını gör</span></button>`;
+}
+
+function hashtagTextHTML(text) {
+  const content = String(text || '');
+  const pattern = /#([\p{L}\p{N}_]+)/gu;
+  let html = '';
+  let position = 0;
+  for (const match of content.matchAll(pattern)) {
+    const tag = match[1];
+    html += escHtml(content.slice(position, match.index));
+    const encodedTag = encodeURIComponent(tag.toLocaleLowerCase('tr-TR'));
+    html += `<a class="content-hashtag" href="/medyakesfet?tag=${encodedTag}" data-hashtag="${escHtml(tag)}">#${escHtml(tag)}</a>`;
+    position = match.index + match[0].length;
+  }
+  return html + escHtml(content.slice(position));
+}
+
+function contentTextHTML(text) {
+  const content = String(text || '');
+  const pattern = /https?:\/\/[^\s]+|#([\p{L}\p{N}_]+)/gu;
+  let html = '';
+  let position = 0;
+  for (const match of content.matchAll(pattern)) {
+    html += escHtml(content.slice(position, match.index));
+    if (match[0].startsWith('#')) {
+      const tag = match[1];
+      html += `<a class="content-hashtag" href="/medyakesfet?tag=${encodeURIComponent(tag.toLocaleLowerCase('tr-TR'))}" data-hashtag="${escHtml(tag)}">#${escHtml(tag)}</a>`;
+    } else {
+      const url = escHtml(match[0]);
+      html += `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">${url}</a>`;
+    }
+    position = match.index + match[0].length;
+  }
+  return html + escHtml(content.slice(position));
+}
+
+function hashtagDescriptionPreviewHTML(description, className, maxLength = 150) {
+  const text = String(description || '');
+  if (!text) return '';
+  const preview = text.replace(/\s+/g, ' ').trim();
+  if (preview.length <= maxLength) return `<div class="${className}">${hashtagTextHTML(text)}</div>`;
+  return `<div class="${className} description-preview"><span class="description-preview-text">${hashtagTextHTML(preview.slice(0, maxLength).trimEnd())}...</span> <button type="button" class="description-preview-more" data-full-description="${escHtml(text)}">Devamını gör</button></div>`;
+}
+
+function setupHashtagAutocomplete(field) {
+  if (!field || field.dataset.hashtagAutocomplete === 'true') return;
+  const parent = field.parentElement;
+  if (!parent) return;
+  field.dataset.hashtagAutocomplete = 'true';
+  parent.classList.add('hashtag-input-wrap');
+  const suggestions = document.createElement('div');
+  suggestions.className = 'hashtag-suggestions';
+  suggestions.hidden = true;
+  suggestions.setAttribute('role', 'listbox');
+  parent.appendChild(suggestions);
+  let debounceTimer;
+  let requestId = 0;
+  let activeContext = null;
+
+  const findContext = () => {
+    const caret = field.selectionStart ?? field.value.length;
+    const before = field.value.slice(0, caret);
+    const active = /(?:^|[\s([{])#([\p{L}\p{N}_]*)$/u.exec(before);
+    if (active) {
+      const start = caret - active[0].length + active[0].lastIndexOf('#');
+      return { query: active[1], start, end: caret, trailing: '' };
+    }
+    const completed = /(?:^|[\s([{])#([\p{L}\p{N}_]+)([ \t]+)$/u.exec(before);
+    if (!completed) return null;
+    const start = caret - completed[0].length + completed[0].lastIndexOf('#');
+    return {
+      query: completed[1],
+      start,
+      end: caret,
+      trailing: completed[2]
+    };
+  };
+  const hide = () => {
+    suggestions.hidden = true;
+    suggestions.innerHTML = '';
+    activeContext = null;
+  };
+  const loadSuggestions = async () => {
+    const context = findContext();
+    if (!context) { hide(); return; }
+    activeContext = context;
+    const currentRequestId = ++requestId;
+    try {
+      const matches = await api('/hashtags?q=' + encodeURIComponent(context.query));
+      if (currentRequestId !== requestId || !field.isConnected || activeContext !== context) return;
+      suggestions.innerHTML = matches.length
+        ? matches.map(item => `<button type="button" class="hashtag-suggestion" role="option" data-tag="${escHtml(item.tag)}"><strong>#${escHtml(item.tag)}</strong><small>${formatCount(item.usage_count)} kullanım · ${formatCount(item.post_count)} gönderi</small></button>`).join('')
+        : `<div class="hashtag-suggestion-empty">#${escHtml(context.query)} etiketi henüz kullanılmamış.</div>`;
+      suggestions.hidden = false;
+    } catch (error) {
+      if (currentRequestId === requestId) {
+        hide();
+        console.warn('Hashtag önerileri yüklenemedi:', error.message || error);
+      }
+    }
+  };
+  field.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    requestId++;
+    activeContext = null;
+    suggestions.hidden = true;
+    debounceTimer = setTimeout(loadSuggestions, 180);
+  });
+  field.addEventListener('click', loadSuggestions);
+  field.addEventListener('keyup', event => {
+    if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) loadSuggestions();
+  });
+  suggestions.addEventListener('mousedown', event => event.preventDefault());
+  suggestions.addEventListener('click', event => {
+    const button = event.target.closest('[data-tag]');
+    if (!button || !activeContext) return;
+    const { start, end, trailing } = activeContext;
+    const replacement = `#${button.dataset.tag}${trailing || ' '}`;
+    field.value = field.value.slice(0, start) + replacement + field.value.slice(end);
+    const caret = start + replacement.length;
+    field.focus();
+    field.setSelectionRange(caret, caret);
+    hide();
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  field.addEventListener('blur', () => setTimeout(hide, 120));
 }
 
 function formatCount(value) {
@@ -508,7 +651,7 @@ function showDescriptionModal(text, sourceElement = null) {
     };
   }
   showModal('Açıklama', `<div class="description-modal">
-    <div class="description-modal-content">${escHtml(text)}</div>
+    <div class="description-modal-content">${hashtagTextHTML(text)}</div>
     <button type="button" class="btn btn-primary description-modal-close" id="description-modal-close">Kapat</button>
   </div>`, sourceElement?.closest('.photo-card') ? 'photo-description-modal' : '');
   document.getElementById('description-modal-close')?.addEventListener('click', hideModal);
@@ -551,7 +694,21 @@ document.addEventListener('click', event => {
   longPressedStoryAvatar = null;
 }, true);
 
+document.addEventListener('keydown', event => {
+  if (!(event.target instanceof Element) || !event.target.matches('[data-full-description]')) return;
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+  event.preventDefault();
+  showDescriptionModal(event.target.dataset.fullDescription || '', event.target);
+});
+
 document.addEventListener('click', event => {
+  const hashtag = event.target.closest('a.content-hashtag');
+  if (hashtag) {
+    event.preventDefault();
+    event.stopPropagation();
+    navigate('/medyakesfet?tag=' + encodeURIComponent(hashtag.dataset.hashtag || ''));
+    return;
+  }
   const description = event.target.closest('[data-full-description]');
   if (description) {
     event.preventDefault();
@@ -1186,10 +1343,7 @@ function siteImageUrl(value) {
 }
 
 function profileRoute(username) {
-  const routeKey = String(username || '').toLocaleLowerCase('tr-TR')
-    .replace(/[çğıöşüÇĞİÖŞÜ]/g, char => ({ ç: 'c', ğ: 'g', ı: 'i', ö: 'o', ş: 's', ü: 'u', Ç: 'c', Ğ: 'g', İ: 'i', Ö: 'o', Ş: 's', Ü: 'u' }[char] || char))
-    .replace(/[^a-z0-9]/g, '');
-  return '/profil/' + encodeURIComponent(routeKey);
+  return '/profil/' + encodeURIComponent(String(username || '').trim());
 }
 
 function redVerificationIconHTML(enabled, verifiedAt) {
@@ -2281,7 +2435,7 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="reals-meta">
           <div class="reals-ad-byline"><span class="reals-ad-badge"><i class="fas fa-bullhorn"></i> REKLAM</span><span>Sponsorlu içerik</span></div>
           <a class="reals-ad-title-link" href="${escHtml(site)}" target="_blank" rel="noopener noreferrer" data-ad-click>${escHtml(r.title || '')}<i class="fas fa-arrow-up-right-from-square"></i></a>
-          ${descriptionPreviewHTML(r.description, 'reals-desc', 40)}
+          ${hashtagDescriptionPreviewHTML(r.description, 'reals-desc', 40)}
           <div class="reals-right-actions">
             ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn ad-like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
             ${r.allow_comments !== 0 ? `<button class="reals-action-btn comment-btn ad-comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>` : ''}
@@ -2306,7 +2460,7 @@ async function renderRealsFeed(app, initialId = null) {
           <div class="reals-title">${escHtml(r.title || '')}</div>
           ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
           ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
-          ${descriptionPreviewHTML(r.description, 'reals-desc', 40)}
+          ${hashtagDescriptionPreviewHTML(r.description, 'reals-desc', 40)}
           <div class="reals-right-actions">
             ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
             <button class="reals-action-btn comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>
@@ -2739,6 +2893,7 @@ function syncRealtimeSocket() {
   });
   realtimeSocket.on('dm:message-edited', handleRealtimeDirectMessageEdit);
   realtimeSocket.on('dm:reaction', handleRealtimeDmReaction);
+  realtimeSocket.on('group:reaction', handleRealtimeGroupReaction);
   realtimeSocket.on('dm:conversation-cleared', handleRealtimeDmConversationCleared);
   realtimeSocket.on('dm:read', handleRealtimeDmRead);
   realtimeSocket.on('dm:typing', handleRealtimeDmTyping);
@@ -2750,11 +2905,6 @@ function syncRealtimeSocket() {
   realtimeSocket.on('group:message', event => {
     if (event?.slug && activeGroupMessageRefresh) {
       activeGroupMessageRefresh(event);
-    }
-  });
-  realtimeSocket.on('group-channel:message', event => {
-    if (event?.slug && activeGroupChannelRefresh) {
-      activeGroupChannelRefresh(event.slug, event.channelId, event.message);
     }
   });
   realtimeSocket.on('friends:updated', event => {
@@ -2778,6 +2928,12 @@ function handleRealtimeIncomingMessage(event) {
 function handleRealtimeDmReaction(event) {
   if (!event?.messageId || !Array.isArray(event.reactions)) return;
   const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(event.messageId))}"]`);
+  if (row) updateDmMessageReactions(row, event.reactions);
+}
+
+function handleRealtimeGroupReaction(event) {
+  if (!event?.messageId || !Array.isArray(event.reactions)) return;
+  const row = document.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(event.messageId))}"]`);
   if (row) updateDmMessageReactions(row, event.reactions);
 }
 
@@ -7224,14 +7380,12 @@ async function renderGroupDetail(app, slug) {
   if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
 
-  let groupData, members = [], messages = [], channels = [];
+  let groupData, members = [], messages = [];
   try {
     groupData = await api('/group/' + groupSlugPath);
     members = await api('/group/' + groupSlugPath + '/members');
     try { messages = await api('/group/' + groupSlugPath + '/messages'); }
     catch (error) { toast(error.message || 'Grup mesajları yüklenemedi', 'error'); }
-    try { channels = await api('/group/' + groupSlugPath + '/channels'); }
-    catch (error) { toast(error.message || 'Grup kanalları yüklenemedi', 'error'); }
   } catch (error) {
     const status = error.data?.group_status;
     if (status === 'suspended' || status === 'banned' || status === 'member_banned') {
@@ -7269,7 +7423,6 @@ async function renderGroupDetail(app, slug) {
   let groupReplyToId = null;
   const heroBanner = group.banner_image || group.cover_image || '';
   const previewCover = group.cover_image || group.banner_image || '';
-  const canManageChannels = !!currentUser && (isOwner || isMod);
 
   // Üye olmayan kullanıcılar için önizleme sayfası göster
   if (!isMember && !isOwner && !approvalPending) {
@@ -7358,26 +7511,7 @@ async function renderGroupDetail(app, slug) {
     <div class="group-detail-layout">
       <div>
         ${group.allow_chat ? `
-          <div class="group-chat-mode-tabs" aria-label="Grup mesaj alanı">
-            <button type="button" class="active" data-group-chat-mode="chat" aria-pressed="true"><i class="fas fa-comments"></i> Sohbet</button>
-            <button type="button" data-group-chat-mode="channels" aria-pressed="false"><i class="fas fa-hashtag"></i> Kanallar</button>
-          </div>
-          <div class="group-channel-workspace" id="group-channel-workspace">
-            <aside class="group-channel-sidebar">
-              <div class="group-channel-sidebar-header">
-                <span><i class="fas fa-hashtag"></i> Kanallar</span>
-                ${canManageChannels ? '<button type="button" class="channel-icon-btn" id="channel-create-btn" title="Kanal oluştur"><i class="fas fa-plus"></i></button>' : ''}
-              </div>
-              <div class="group-channel-list" id="group-channel-list"></div>
-              ${canManageChannels ? '<button type="button" class="channel-approval-btn" id="channel-approval-btn"><i class="fas fa-user-check"></i><span>Onay sistemi</span></button>' : ''}
-            </aside>
-            <section class="group-channel-main">
-              <header class="group-channel-header"><div><i class="fas fa-hashtag" id="active-channel-icon"></i><strong id="active-channel-name">Kanal</strong><small id="active-channel-description"></small></div><button type="button" class="channel-mobile-btn" id="channel-mobile-btn"><i class="fas fa-list"></i></button></header>
-              <div class="group-channel-messages" id="group-channel-messages"><div class="loading-center"><div class="spinner"></div></div></div>
-              <div class="group-channel-composer" id="group-channel-composer"><input id="group-channel-input" type="text" placeholder="Mesaj yaz..." /><button type="button" class="btn btn-primary btn-sm" id="group-channel-send"><i class="fas fa-paper-plane"></i></button></div>
-            </section>
-          </div>
-          <div class="chat-container legacy-group-chat">
+          <div class="chat-container">
             <div id="load-more-msgs-wrap" style="text-align:center;padding:8px;display:${messages.length >= 60 ? 'block' : 'none'}">
               <button class="btn btn-outline btn-sm" id="load-more-msgs"><i class="fas fa-history"></i> Önceki Mesajlar</button>
             </div>
@@ -7428,140 +7562,6 @@ async function renderGroupDetail(app, slug) {
   </div>`;
   enhanceLinkPreviews(app);
 
-  const groupChatModeTabs = app.querySelector('.group-chat-mode-tabs');
-  groupChatModeTabs?.addEventListener('click', event => {
-    const button = event.target.closest('[data-group-chat-mode]');
-    if (!button) return;
-    const showChannels = button.dataset.groupChatMode === 'channels';
-    app.querySelector('.group-detail-page')?.classList.toggle('show-group-channels', showChannels);
-    groupChatModeTabs.querySelectorAll('[data-group-chat-mode]').forEach(tab => {
-      const active = tab === button;
-      tab.classList.toggle('active', active);
-      tab.setAttribute('aria-pressed', String(active));
-    });
-  });
-
-  const channelWorkspace = $('#group-channel-workspace');
-  const channelList = $('#group-channel-list');
-  const channelMessages = $('#group-channel-messages');
-  let activeChannel = channels.find(channel => Number(channel.is_default) === 1) || channels[0] || null;
-  let channelLoadVersion = 0;
-  const visibleChannels = () => channels.filter(channel => isOwner || isMod ? true : approvalPending ? channel.visibility === 'approval_only' : channel.visibility !== 'approval_only');
-  const channelMessageHTML = message => `<article class="channel-message" data-message-id="${escHtml(message.id)}">
-    ${message.username ? `<a href="${profileRoute(message.username)}" data-link><img class="channel-message-avatar" src="${escHtml(message.avatar || '/icons/cigcig-192.png')}" alt="${escHtml(message.username)}" /></a>` : '<div class="channel-message-avatar"></div>'}
-    <div><div class="channel-message-meta"><strong>${escHtml(message.username || 'Silinmiş kullanıcı')}</strong><time>${timeAgo(message.created_at)}</time></div><div class="channel-message-content">${renderContent(message.content || '')}</div></div>
-  </article>`;
-  const realtimeChannelMessages = new Map();
-  const appendChannelMessage = message => {
-    if (!message || Number(message.channel_id) !== Number(activeChannel?.id)) return;
-    const alreadyRendered = [...channelMessages.querySelectorAll('.channel-message')]
-      .some(element => element.dataset.messageId === String(message.id));
-    if (alreadyRendered) return;
-    if (channelMessages.querySelector('.empty-state, .loading-center')) channelMessages.innerHTML = '';
-    channelMessages.insertAdjacentHTML('beforeend', channelMessageHTML(message));
-    enhanceLinkPreviews(channelMessages);
-    channelMessages.scrollTop = channelMessages.scrollHeight;
-  };
-  const loadChannelMessages = async channel => {
-    const loadVersion = ++channelLoadVersion;
-    if (!channel) { channelMessages.innerHTML = '<div class="empty-state"><i class="fas fa-hashtag"></i><p>Henüz kanal yok.</p></div>'; return; }
-    $('#active-channel-name').textContent = channel.name;
-    $('#active-channel-description').textContent = channel.description || '';
-    $('#active-channel-icon').className = channel.icon || 'fas fa-hashtag';
-    const canWrite = !!currentUser && (isOwner || isMod && Number(channel.moderators_can_write) === 1 || Number(channel.can_write) === 1);
-    $('#group-channel-composer').style.display = canWrite ? 'flex' : 'none';
-    channelMessages.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
-    try {
-      const channelMessagesData = await api(`/group/${slug}/channel/${channel.id}/messages`);
-      if (loadVersion !== channelLoadVersion) return;
-      const mergedMessages = new Map(channelMessagesData.map(message => [String(message.id), message]));
-      for (const [id, message] of realtimeChannelMessages) {
-        if (Number(message.channel_id) === Number(channel.id)) mergedMessages.set(id, message);
-      }
-      channelMessagesData.forEach(message => realtimeChannelMessages.delete(String(message.id)));
-      const visibleMessages = [...mergedMessages.values()].sort((a, b) => {
-        const timeDifference = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-        return timeDifference || Number(a.id) - Number(b.id);
-      });
-      channelMessages.innerHTML = visibleMessages.length ? visibleMessages.map(channelMessageHTML).join('') : '<div class="empty-state"><i class="fas fa-comments"></i><p>Bu kanalda henüz mesaj yok.</p></div>';
-      enhanceLinkPreviews(channelMessages);
-      channelMessages.scrollTop = channelMessages.scrollHeight;
-    } catch (error) { channelMessages.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><p>${escHtml(error.message)}</p></div>`; }
-  };
-  activeGroupChannelRefresh = async (requestedSlug, channelId, message) => {
-    if (requestedSlug !== slug || location.pathname !== '/grup/' + slug || !channelMessages || !activeChannel
-      || Number(activeChannel.id) !== Number(channelId)) return;
-    if (message) {
-      realtimeChannelMessages.set(String(message.id), message);
-      while (realtimeChannelMessages.size > 120) {
-        realtimeChannelMessages.delete(realtimeChannelMessages.keys().next().value);
-      }
-      appendChannelMessage(message);
-      return;
-    }
-    await loadChannelMessages(activeChannel);
-  };
-  const renderChannels = () => {
-    const allowed = visibleChannels();
-    if (!activeChannel || !allowed.some(channel => Number(channel.id) === Number(activeChannel.id))) activeChannel = allowed[0] || null;
-    channelList.innerHTML = allowed.length ? allowed.map(channel => `<div class="group-channel-item${activeChannel && Number(activeChannel.id) === Number(channel.id) ? ' active' : ''}" data-channel-id="${channel.id}">
-      <i class="${escHtml(channel.icon || 'fas fa-hashtag')}"></i><span>${escHtml(channel.name)}</span>${canManageChannels && !Number(channel.is_default) ? `<button type="button" class="channel-manage-btn" data-channel-manage="${channel.id}" title="Kanal ayarları"><i class="fas fa-ellipsis"></i></button>` : ''}
-    </div>`).join('') : '<div class="empty-state" style="padding:18px 8px"><i class="fas fa-hashtag"></i><p>Kanal yok.</p></div>';
-    loadChannelMessages(activeChannel);
-  };
-  const showChannelModal = (channel = null) => {
-    const editing = !!channel;
-    showModal(editing ? 'Kanalı düzenle' : 'Yeni kanal oluştur', `<div class="form-group"><label>Kanal adı</label><input id="channel-name-input" maxlength="60" value="${escHtml(channel?.name || '')}" placeholder="genel" /></div><div class="form-group"><label>Açıklama</label><input id="channel-description-input" maxlength="180" value="${escHtml(channel?.description || '')}" placeholder="Bu kanalın amacı" /></div><div class="form-group"><label>Görünürlük</label><select id="channel-visibility-input"><option value="all" ${channel?.visibility === 'all' ? 'selected' : ''}>Üyeler görebilir</option><option value="members" ${channel?.visibility === 'members' ? 'selected' : ''}>Sadece üyeler</option><option value="approval_only" ${channel?.visibility === 'approval_only' ? 'selected' : ''}>Onaylananlar</option></select></div><label class="checkbox-label"><input id="channel-history-input" type="checkbox" ${channel?.can_view_history !== 0 ? 'checked' : ''}> Üyeler geçmiş mesajları okuyabilsin</label><label class="checkbox-label"><input id="channel-write-input" type="checkbox" ${channel?.can_write !== 0 ? 'checked' : ''}> Üyeler bu kanala yazabilsin</label><label class="checkbox-label"><input id="channel-mod-manage-input" type="checkbox" ${channel?.moderators_can_manage === 1 ? 'checked' : ''}> Moderatörler kanal ayarlarını yönetebilsin</label><label class="checkbox-label"><input id="channel-mod-write-input" type="checkbox" ${channel?.moderators_can_write === 1 ? 'checked' : ''}> Moderatörler yazabilsin</label><div style="display:flex;gap:8px;margin-top:16px"><button type="button" class="btn btn-primary" id="channel-save-btn"><i class="fas fa-check"></i> Kaydet</button>${editing ? '<button type="button" class="btn btn-danger" id="channel-delete-btn"><i class="fas fa-trash"></i> Sil</button>' : ''}</div><div id="channel-form-error" class="form-error mt-4"></div>`);
-    $('#channel-save-btn').onclick = async () => {
-      const name = $('#channel-name-input').value.trim();
-      if (!name) return $('#channel-form-error').textContent = 'Kanal adı gerekli.';
-      const payload = { name, description: $('#channel-description-input').value.trim(), visibility: $('#channel-visibility-input').value, can_view_history: $('#channel-history-input').checked, can_write: $('#channel-write-input').checked, moderators_can_manage: $('#channel-mod-manage-input').checked, moderators_can_write: $('#channel-mod-write-input').checked };
-      try { const saved = await api(editing ? `/group/${slug}/channel/${channel.id}` : `/group/${slug}/channels`, { method: editing ? 'PUT' : 'POST', body: JSON.stringify(payload) }); if (editing) channels = channels.map(item => Number(item.id) === Number(saved.id) ? { ...item, ...saved } : item); else channels.push(saved); activeChannel = saved; hideModal(); renderChannels(); toast(editing ? 'Kanal güncellendi.' : 'Kanal oluşturuldu.'); } catch (error) { $('#channel-form-error').textContent = error.message; }
-    };
-    $('#channel-delete-btn')?.addEventListener('click', async () => { if (!await CigCigDialogs.confirm('Bu kanal ve mesajları silinsin mi?')) return; try { await api(`/group/${slug}/channel/${channel.id}`, { method: 'DELETE' }); channels = channels.filter(item => Number(item.id) !== Number(channel.id)); activeChannel = channels[0] || null; hideModal(); renderChannels(); toast('Kanal silindi.'); } catch (error) { $('#channel-form-error').textContent = error.message; } });
-  };
-  channelList?.addEventListener('click', event => { const manage = event.target.closest('[data-channel-manage]'); const item = event.target.closest('.group-channel-item'); if (manage) { event.stopPropagation(); showChannelModal(channels.find(channel => Number(channel.id) === Number(manage.dataset.channelManage))); return; } if (item) { activeChannel = channels.find(channel => Number(channel.id) === Number(item.dataset.channelId)) || activeChannel; channelWorkspace.classList.remove('channels-open'); renderChannels(); } });
-  $('#channel-mobile-btn')?.addEventListener('click', () => channelWorkspace.classList.toggle('channels-open'));
-  $('#channel-create-btn')?.addEventListener('click', () => showChannelModal());
-  $('#group-channel-send')?.addEventListener('click', async () => {
-    const input = $('#group-channel-input');
-    const sendButton = $('#group-channel-send');
-    const channelId = activeChannel?.id;
-    const content = input.value.trim();
-    if (!content || !channelId || sendButton.disabled) return;
-    sendButton.disabled = true;
-    try {
-      const message = await api(`/group/${slug}/channel/${channelId}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
-      if (Number(activeChannel?.id) !== Number(channelId)) return;
-      appendChannelMessage({ ...message, username: currentUser.username, avatar: currentUser.avatar });
-      input.value = '';
-    } catch (error) { toast(error.message, 'error'); }
-    finally { sendButton.disabled = false; }
-  });
-  $('#group-channel-input')?.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); $('#group-channel-send').click(); } });
-  $('#channel-approval-btn')?.addEventListener('click', async () => {
-    try {
-      const result = await api(`/group/${slug}/approval/toggle`, { method: 'POST' });
-      toast(Number(result.is_enabled) ? 'Onay sistemi aktif edildi.' : 'Onay sistemi kapatıldı.');
-      channels = await api(`/group/${slug}/channels`);
-      renderChannels();
-      if (!Number(result.is_enabled)) return;
-      const requests = await api(`/group/${slug}/approval/requests`);
-      showModal('Onay bekleyenler', `<div id="approval-request-list">${requests.length ? requests.map(request => `<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)"><img src="${escHtml(request.avatar || '/icons/cigcig-192.png')}" style="width:34px;height:34px;border-radius:50%;object-fit:cover" alt="" /><strong style="flex:1">${escHtml(request.username || 'Kullanıcı')}</strong><button type="button" class="btn btn-primary btn-sm" data-approval-action="approve" data-request-id="${request.id}" title="Onayla"><i class="fas fa-check"></i></button><button type="button" class="btn btn-danger btn-sm" data-approval-action="reject" data-request-id="${request.id}" title="Reddet"><i class="fas fa-xmark"></i></button></div>`).join('') : '<div class="empty-state" style="padding:20px 8px"><i class="fas fa-user-check"></i><p>Bekleyen onay yok.</p></div>'}<div id="approval-form-error" class="form-error mt-4"></div>`);
-      $('#approval-request-list')?.addEventListener('click', async event => {
-        const button = event.target.closest('[data-approval-action]');
-        if (!button) return;
-        button.disabled = true;
-        try {
-          await api(`/group/${slug}/approval/respond/${button.dataset.requestId}`, { method: 'POST', body: JSON.stringify({ approved: button.dataset.approvalAction === 'approve' }) });
-          button.closest('div[style*="border-bottom"]')?.remove();
-          toast(button.dataset.approvalAction === 'approve' ? 'Üye onaylandı.' : 'Talep reddedildi.');
-        } catch (error) { button.disabled = false; $('#approval-form-error').textContent = error.message; }
-      });
-    } catch (error) { toast(error.message, 'error'); }
-  });
-  renderChannels();
-
   const chatEl = $('#chat-messages');
   const clearGroupReply = () => {
     groupReplyToId = null;
@@ -7570,9 +7570,19 @@ async function renderGroupDetail(app, slug) {
     const replyText = $('#group-reply-text');
     if (replyText) replyText.textContent = '';
   };
+  const startGroupReply = message => {
+    if (!canSend || !message) return;
+    groupReplyToId = message.id;
+    const replyBar = $('#group-reply-bar');
+    const replyText = $('#group-reply-text');
+    if (replyBar) replyBar.classList.add('visible');
+    const attachmentLabel = message.image_url || message.shared_gif_url ? 'Medya' : message.shared_song_id ? 'Müzik' : 'Mesaj';
+    if (replyText) replyText.textContent = `${message.username || 'Silinmiş kullanıcı'}: ${(message.content || attachmentLabel).slice(0, 100)}`;
+    $('#chat-input')?.focus();
+  };
   $('#group-reply-cancel')?.addEventListener('click', clearGroupReply);
   if (chatEl) chatEl.scrollTop = chatEl.scrollHeight;
-  const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', JSON.stringify(message.image_urls || []), message.shared_gif_url || '', message.shared_song_id || '', message.edited_at || '', message.deleted_for_me ? 1 : 0].join(':')).join('|');
+  const chatSignature = list => list.map(message => [message.id, message.content || '', message.image_url || '', JSON.stringify(message.image_urls || []), message.shared_gif_url || '', message.shared_song_id || '', message.edited_at || '', JSON.stringify(message.reactions || []), message.deleted_for_me ? 1 : 0].join(':')).join('|');
   const messageIdToRow = id => chatEl?.querySelector(`.chat-msg[data-message-id="${CSS.escape(String(id))}"]`);
   const getChatSelectionCount = () => groupChatSelection.size;
   const updateSelectionToolbar = () => {
@@ -7614,6 +7624,11 @@ async function renderGroupDetail(app, slug) {
     document.querySelectorAll('.chat-msg-select').forEach(box => { box.style.display = ''; });
     updateSelectionToolbar();
   };
+  installMessageSelectionGestures(chatEl, '.chat-msg', selectGroupMessage, '.group-message-image-open');
+  installMessageReplySwipeGesture(chatEl, row => {
+    const message = messages.find(item => String(item.id) === String(row.dataset.messageId));
+    startGroupReply(message);
+  }, { rowSelector: '.chat-msg', isSelecting: () => groupChatSelectionMode });
 
   const toolbar = document.createElement('div');
   toolbar.id = 'chat-selection-toolbar';
@@ -7643,7 +7658,6 @@ async function renderGroupDetail(app, slug) {
       box.closest('.chat-msg')?.classList.toggle('selected', checked);
     });
     updateSelectionToolbar();
-    installMessageSelectionGestures(chatEl, '.chat-msg', selectGroupMessage);
   });
   toolbar.querySelector('#chat-clear-selection')?.addEventListener('click', clearChatSelection);
   toolbar.querySelector('#chat-bulk-delete-me')?.addEventListener('click', async () => {
@@ -7787,7 +7801,6 @@ async function renderGroupDetail(app, slug) {
   if (currentUser && isMember) {
     chatPollInterval = setInterval(async () => {
       await refreshGroupMessages(slug);
-      if (activeChannel) await loadChannelMessages(activeChannel);
     }, 15000);
   }
 
@@ -7991,7 +8004,28 @@ async function renderGroupDetail(app, slug) {
   $('#chat-messages')?.addEventListener('click', async e => {
     const imageButton = e.target.closest('.group-message-image-open');
     if (imageButton) {
-      showDmImageViewer([imageButton.dataset.imageUrl]);
+      const messageRow = imageButton.closest('.chat-msg');
+      const imageUrls = [...(messageRow?.querySelectorAll('.group-message-image-open') || [])]
+        .map(button => button.dataset.imageUrl)
+        .filter(Boolean);
+      showDmImageViewer(imageUrls.length ? imageUrls : [imageButton.dataset.imageUrl]);
+      return;
+    }
+    const reactionPill = e.target.closest('.dm-reaction-pill');
+    if (reactionPill) {
+      const row = reactionPill.closest('.chat-msg');
+      if (!row || reactionPill.disabled) return;
+      reactionPill.disabled = true;
+      try {
+        const result = await api(`/group/${groupSlugPath}/messages/${encodeURIComponent(row.dataset.messageId)}/reactions`, {
+          method: 'POST',
+          body: JSON.stringify({ emoji: reactionPill.dataset.emoji })
+        });
+        updateDmMessageReactions(row, result.reactions);
+      } catch (error) {
+        reactionPill.disabled = false;
+        toast(error.message || 'Emoji tepkisi eklenemedi.', 'error');
+      }
       return;
     }
     const songButton = e.target.closest('.group-shared-song-play');
@@ -8031,16 +8065,8 @@ async function renderGroupDetail(app, slug) {
     const chatRow = e.target.closest('.chat-msg');
 
     if (reply) {
-      if (!canSend) return;
       const message = messages.find(item => String(item.id) === String(reply.dataset.id));
-      if (!message) return;
-      groupReplyToId = message.id;
-      const replyBar = $('#group-reply-bar');
-      const replyText = $('#group-reply-text');
-      if (replyBar) replyBar.classList.add('visible');
-      const attachmentLabel = message.image_url || message.shared_gif_url ? 'Medya' : message.shared_song_id ? 'Müzik' : 'Mesaj';
-      if (replyText) replyText.textContent = `${message.username || 'Silinmiş kullanıcı'}: ${(message.content || attachmentLabel).slice(0, 100)}`;
-      $('#chat-input')?.focus();
+      startGroupReply(message);
       return;
     }
 
@@ -8052,6 +8078,8 @@ async function renderGroupDetail(app, slug) {
       const menu = document.createElement('div');
       menu.className = 'msg-menu-popover';
       menu.innerHTML = `
+        ${currentUser ? `<button class="msg-menu-item" data-action="react" data-id="${msgId}"><i class="fas fa-face-smile"></i> Emoji tepkisi ekle</button>` : ''}
+        ${canSend ? `<button class="msg-menu-item" data-action="reply" data-id="${msgId}"><i class="fas fa-reply"></i> Yanıtla</button>` : ''}
         <button class="msg-menu-item" data-action="select" data-id="${msgId}"><i class="fas fa-check-square"></i> Seç</button>
         ${currentUser && isOwn ? `<button class="msg-menu-item" data-action="edit" data-id="${msgId}"><i class="fas fa-pen"></i> Düzenle</button>` : ''}
         ${currentUser ? `<button class="msg-menu-item" data-action="delete-me" data-id="${msgId}"><i class="fas fa-eye-slash"></i> Benden sil</button>` : ''}
@@ -8066,7 +8094,14 @@ async function renderGroupDetail(app, slug) {
         const action = item.dataset.action;
         const id = item.dataset.id;
         try {
-          if (action === 'select') {
+          if (action === 'react') {
+            showDmReactionPicker(msgToggle, id, {
+              endpoint: `/group/${groupSlugPath}/messages/${encodeURIComponent(id)}/reactions`,
+              rowSelector: `.chat-msg[data-message-id="${CSS.escape(String(id))}"]`
+            });
+          } else if (action === 'reply') {
+            startGroupReply(messages.find(message => String(message.id) === String(id)));
+          } else if (action === 'select') {
             selectGroupMessage(id);
           } else if (action === 'edit') {
             const target = document.querySelector(`.edit-msg[data-id="${CSS.escape(id)}"]`);
@@ -8117,7 +8152,7 @@ async function renderGroupDetail(app, slug) {
       const message = edit.closest('.chat-msg');
       showModal('Mesajı düzenle', `<div class="form-group"><label>Mesaj</label><textarea id="edit-group-message" rows="5">${escHtml(edit.dataset.content || '')}</textarea></div><button class="btn btn-primary" id="save-group-message-edit" style="width:100%">Kaydet</button><div id="edit-group-message-error" class="form-error mt-4"></div>`);
       $('#save-group-message-edit').addEventListener('click', async () => {
-        try { const updated = await api('/group/' + groupSlugPath + '/messages/' + edit.dataset.id, { method: 'PUT', body: JSON.stringify({ content: $('#edit-group-message').value }) }); message.outerHTML = chatMsgHTML(updated, isOwner || isMod, !!canSend); hideModal(); toast('Mesaj düzenlendi'); } catch (error) { $('#edit-group-message-error').textContent = error.message; }
+        try {         const updated = await api('/group/' + groupSlugPath + '/messages/' + edit.dataset.id, { method: 'PUT', body: JSON.stringify({ content: $('#edit-group-message').value }) }); message.outerHTML = chatMsgHTML({ ...updated, reactions: messages.find(item => String(item.id) === String(updated.id))?.reactions || [] }, isOwner || isMod, !!canSend); hideModal(); toast('Mesaj düzenlendi'); } catch (error) { $('#edit-group-message-error').textContent = error.message; }
       });
       return;
     }
@@ -8386,6 +8421,7 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
         <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
         ${m.song_audio_url ? `<button type="button" class="group-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
       </div>` : ''}
+      ${dmMessageReactionsHTML(m.reactions, currentUser?.id)}
       <button class="edit-msg" data-id="${m.id}" data-content="${escHtml(m.content || '')}" style="display:none"></button>
     </div>
   </div>`;
@@ -8418,7 +8454,7 @@ function videoCardHTML(v) {
         <span>•</span>
         <span>${v.views || 0} izlenme</span>
       </div>
-      ${descriptionPreviewHTML(v.description, 'video-card-desc', 100)}
+      ${hashtagDescriptionPreviewHTML(v.description, 'video-card-desc', 100)}
     </div>
   </div>`;
 }
@@ -8713,6 +8749,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   `, 'social-compose-modal');
 
   const descriptionField = $('#video-description');
+  setupHashtagAutocomplete(descriptionField);
   api('/video-settings').then(settings => {
     videoSettings = settings;
     if (!existing && descriptionField?.isConnected && !descriptionField.value.trim()) descriptionField.value = settings.defaultDescription || '';
@@ -9165,7 +9202,7 @@ async function renderVideoDetail(app, slug) {
     try { const res = await api('/user/' + encodeURIComponent(video.username) + '/following'); followState = res.following; } catch {}
   }
   const descriptionText = video.description && video.description.trim() ? video.description.trim() : (videoSettings.emptyDescriptionText || 'Bu videoya bir açıklama eklenmemiş.');
-  const formattedDescription = descriptionText.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#60a5fa;text-decoration:underline">$1</a>');
+  const formattedDescription = contentTextHTML(descriptionText);
   app.innerHTML = `<div class="container page">
     <div class="video-page-layout">
       <div class="video-main-column">
@@ -9501,14 +9538,15 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
   const username = profileUser.username || note.username || '';
   const displayName = profileUser.nickname || note.nickname || username || 'Kullanıcı';
   const avatar = hasUsableAvatar(profileUser) ? `<img src="${escHtml(profileUser.avatar)}" alt="" />` : '<i class="fas fa-user"></i>';
+  const noteColor = /^#[0-9a-f]{6}$/i.test(note.background_color || '') ? note.background_color : '#242731';
   const isOwnNote = Boolean(currentUser && String(currentUser.username).toLocaleLowerCase('tr-TR') === String(username).toLocaleLowerCase('tr-TR'));
   const audioUrl = note.remastered_audio_url || note.audio_url;
   const song = note.song_id ? `<div class="profile-note-song">
     <span class="profile-note-song-art">${note.cover_url ? `<img src="${escHtml(note.cover_url)}" alt="" />` : '<i class="fas fa-music"></i>'}</span>
     <span class="profile-note-song-info"><strong>${escHtml(note.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(note.song_artist || 'CigCig Müzik')}</small></span>
   </div><div class="profile-note-audio-progress" aria-hidden="true"><span id="profile-note-audio-progress"></span></div>` : '';
-  showModal('', `<div class="profile-note-viewer">
-    <div class="profile-note-viewer-profile"><span class="profile-note-viewer-avatar">${avatar}</span><span><strong>${escHtml(displayName)}</strong><small>@${escHtml(username)}</small></span></div>
+  showModal('', `<div class="profile-note-viewer" style="--dm-note-color:${noteColor}">
+    <div class="profile-note-viewer-profile"><span class="profile-note-viewer-avatar${hasUsableAvatar(profileUser) ? '' : ' avatar-placeholder'}">${avatar}</span><span><strong>${escHtml(displayName)}</strong><small>@${escHtml(username)}</small></span></div>
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
     ${song}
     ${isOwnNote
@@ -12297,6 +12335,7 @@ async function init() {
     const ps = await response.json();
     if (redirectForAppUpdate(ps.asset_version)) return;
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
+    applyDefaultAvatar(ps.default_avatar_url);
     document.body.classList.toggle('beta-mode-enabled', ps.beta_mode_enabled !== '0');
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     loginRequiredEnabled = ps.first_visit_auth === '1';
@@ -13912,7 +13951,7 @@ async function renderDMChat(username) {
     if (replyLabel) replyLabel.textContent = replyText.substring(0, 90);
     document.getElementById('dm-input')?.focus({ preventScroll: true });
   };
-  installDmReplySwipeGesture(msgsEl, startDmReply);
+  installMessageReplySwipeGesture(msgsEl, startDmReply);
   window.__dmClearReply = () => {
     replyToId = null;
     const rb = document.getElementById('dm-reply-bar');
@@ -14269,7 +14308,10 @@ async function renderDMChat(username) {
     const messageImage = e.target.closest('.dm-message-image');
     if (messageImage) {
       e.preventDefault();
-      showDmImageViewer(messageImage.dataset.dmImageUrl || messageImage.src);
+      const imageUrls = [...(messageImage.closest('.dm-msg-wrap')?.querySelectorAll('.dm-message-image') || [])]
+        .map(image => image.dataset.dmImageUrl || image.src)
+        .filter(Boolean);
+      showDmImageViewer(imageUrls.length ? imageUrls : [messageImage.dataset.dmImageUrl || messageImage.src]);
       return;
     }
     const menuBtn = e.target.closest('.dm-msg-menu-btn');
@@ -14432,7 +14474,7 @@ function updateDmSelActions() {
   if (deleteAllButton) deleteAllButton.hidden = !dmSelectedIds.size || !onlyOwnMessages;
 }
 
-function installMessageSelectionGestures(container, selector, onSelect) {
+function installMessageSelectionGestures(container, selector, onSelect, allowInteractiveSelector = '') {
   if (!container) return;
   let holdTimer = null;
   let activePointerId = null;
@@ -14443,7 +14485,8 @@ function installMessageSelectionGestures(container, selector, onSelect) {
   const getMessageRow = event => {
     if (!(event.target instanceof Element)) return null;
     const row = event.target.closest(selector);
-    if (!row || !container.contains(row) || event.target.closest('a, button, input, textarea, select, label, [contenteditable="true"]')) return null;
+    const interactive = event.target.closest('a, button, input, textarea, select, label, [contenteditable="true"]');
+    if (!row || !container.contains(row) || (interactive && !(allowInteractiveSelector && event.target.closest(allowInteractiveSelector)))) return null;
     if (!(row.dataset.messageId || row.dataset.id)) return null;
     return row;
   };
@@ -14491,7 +14534,7 @@ function installMessageSelectionGestures(container, selector, onSelect) {
   }, true);
 }
 
-function installDmReplySwipeGesture(container, onReply) {
+function installMessageReplySwipeGesture(container, onReply, { rowSelector = '.dm-msg-wrap', isSelecting = () => dmSelectionMode } = {}) {
   if (!container) return;
   let gesture = null;
   let suppressClickUntil = 0;
@@ -14506,9 +14549,9 @@ function installDmReplySwipeGesture(container, onReply) {
   };
 
   container.addEventListener('pointerdown', event => {
-    if (event.pointerType === 'mouse' || event.button !== 0 || dmSelectionMode) return;
+    if (event.pointerType === 'mouse' || event.button !== 0 || isSelecting()) return;
     if (!(event.target instanceof Element) || isInteractive(event.target)) return;
-    const row = event.target.closest('.dm-msg-wrap');
+    const row = event.target.closest(rowSelector);
     if (!row || !container.contains(row)) return;
     gesture = { row, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, distance: 0 };
   });
@@ -14521,7 +14564,7 @@ function installDmReplySwipeGesture(container, onReply) {
       return;
     }
     if (Math.abs(deltaX) < 12) return;
-    const towardCenter = gesture.row.classList.contains('dm-own') ? Math.min(0, deltaX) : Math.max(0, deltaX);
+    const towardCenter = gesture.row.matches('.dm-own, .own') ? Math.min(0, deltaX) : Math.max(0, deltaX);
     gesture.distance = Math.abs(towardCenter);
     gesture.row.classList.add('dm-swipe-replying');
     gesture.row.style.setProperty('--dm-swipe-x', `${Math.max(-72, Math.min(72, towardCenter))}px`);
@@ -14530,7 +14573,7 @@ function installDmReplySwipeGesture(container, onReply) {
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     const { row, distance } = gesture;
     resetGesture();
-    if (distance < 54 || dmSelectionMode) return;
+    if (distance < 54 || isSelecting()) return;
     suppressClickUntil = Date.now() + 450;
     suppressClickRow = row;
     onReply(row);
@@ -14578,18 +14621,130 @@ function appendDMMessage(container, message, myId, selMode) {
 }
 
 function showDmImageViewer(imageUrls, ephemeral = false) {
-  const urls = (Array.isArray(imageUrls) ? imageUrls : [imageUrls]).filter(Boolean);
+  const urls = (Array.isArray(imageUrls) ? imageUrls : [imageUrls]).filter(url => typeof url === 'string' && url.trim());
   if (!urls.length) return;
   showModal(ephemeral ? 'Fotoğraf' : 'Fotoğrafı Görüntüle', `
-    <div class="dm-ephemeral-view${urls.length > 1 ? ' dm-image-viewer-multiple' : ''}">
+    <div class="dm-image-viewer-stage">
+      <div class="dm-ephemeral-view${urls.length > 1 ? ' dm-image-viewer-multiple' : ''}">
       ${urls.map((url, index) => `<div class="dm-image-viewer-item"><img class="${ephemeral ? 'dm-image-view dm-ephemeral-image' : 'dm-image-view'}" src="${escHtml(url)}" alt="${urls.length > 1 ? `Mesaj fotoğrafı ${index + 1}` : 'Mesaj fotoğrafı'}" draggable="false" />${ephemeral ? `<span class="dm-ephemeral-watermark">@${escHtml(currentUser?.username || 'CigCig')} · CigCig</span>` : ''}</div>`).join('')}
+      </div>
+    </div>
+    <div class="dm-image-viewer-controls" role="group" aria-label="Fotoğraf yakınlaştırma">
+      <button type="button" data-image-zoom="out" aria-label="Uzaklaştır" title="Uzaklaştır"><i class="fas fa-minus"></i></button>
+      <span class="dm-image-viewer-zoom" aria-live="polite">100%</span>
+      <button type="button" data-image-zoom="in" aria-label="Yakınlaştır" title="Yakınlaştır"><i class="fas fa-plus"></i></button>
+      <button type="button" data-image-zoom="reset" aria-label="Yakınlaştırmayı sıfırla" title="Sıfırla"><i class="fas fa-expand"></i></button>
+      <span class="dm-image-viewer-help">Kaydırma tekerleği veya iki parmakla da yakınlaştırabilirsin</span>
     </div>
     ${ephemeral ? '<p class="form-hint">Bu fotoğraflar için sınırlı görüntüleme hakkı kullanıldı.</p>' : ''}
-  `);
-  document.querySelectorAll('.dm-image-view').forEach(image => {
-    image.addEventListener('contextmenu', event => event.preventDefault());
-    image.addEventListener('dragstart', event => event.preventDefault());
+  `, 'dm-image-viewer-modal');
+  const stage = document.querySelector('.dm-image-viewer-stage');
+  const items = [...(stage?.querySelectorAll('.dm-image-viewer-item') || [])];
+  const zoomLabel = document.querySelector('.dm-image-viewer-zoom');
+  let activeItem = items[0] || null;
+  const states = new WeakMap();
+  const stateFor = item => {
+    let state = states.get(item);
+    if (!state) {
+      state = { scale: 1, x: 0, y: 0, pointers: new Map(), pinchDistance: 0, pinchScale: 1, dragX: 0, dragY: 0, dragPanX: 0, dragPanY: 0, galleryX: 0, galleryScroll: 0 };
+      states.set(item, state);
+    }
+    return state;
+  };
+  const renderZoom = item => {
+    if (!item) return;
+    const state = stateFor(item);
+    item.querySelector('.dm-image-view')?.style.setProperty('transform', `translate3d(${state.x}px, ${state.y}px, 0) scale(${state.scale})`);
+    if (item === activeItem && zoomLabel) zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+  };
+  const setZoom = (item, scale) => {
+    if (!item) return;
+    const state = stateFor(item);
+    state.scale = Math.max(.5, Math.min(4, scale));
+    if (state.scale <= 1) state.x = state.y = 0;
+    renderZoom(item);
+  };
+  stage?.addEventListener('click', event => {
+    const item = event.target.closest('.dm-image-viewer-item');
+    if (!item) return;
+    activeItem = item;
+    renderZoom(item);
   });
+  document.querySelector('.dm-image-viewer-controls')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-image-zoom]');
+    if (!button || !activeItem) return;
+    const state = stateFor(activeItem);
+    if (button.dataset.imageZoom === 'reset') {
+      state.x = state.y = 0;
+      setZoom(activeItem, 1);
+    } else {
+      setZoom(activeItem, state.scale + (button.dataset.imageZoom === 'in' ? .25 : -.25));
+    }
+  });
+  stage?.addEventListener('wheel', event => {
+    const item = event.target.closest('.dm-image-viewer-item') || activeItem;
+    if (!item) return;
+    event.preventDefault();
+    activeItem = item;
+    const state = stateFor(item);
+    setZoom(item, state.scale + (event.deltaY < 0 ? .15 : -.15));
+  }, { passive: false });
+  stage?.addEventListener('pointerdown', event => {
+    const item = event.target.closest('.dm-image-viewer-item');
+    if (!item) return;
+    activeItem = item;
+    const state = stateFor(item);
+    state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.pointers.size === 1) {
+      state.dragX = event.clientX;
+      state.dragY = event.clientY;
+      state.dragPanX = state.x;
+      state.dragPanY = state.y;
+      state.galleryX = event.clientX;
+      state.galleryScroll = stage.scrollLeft;
+    } else if (state.pointers.size === 2) {
+      const points = [...state.pointers.values()];
+      state.pinchDistance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      state.pinchScale = state.scale;
+    }
+    stage.setPointerCapture?.(event.pointerId);
+  });
+  stage?.addEventListener('pointermove', event => {
+    const item = items.find(candidate => stateFor(candidate).pointers.has(event.pointerId));
+    if (!item) return;
+    const state = stateFor(item);
+    state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (state.pointers.size > 1) {
+      const points = [...state.pointers.values()];
+      const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+      if (state.pinchDistance) setZoom(item, state.pinchScale * distance / state.pinchDistance);
+    } else if (state.scale > 1) {
+      state.x = state.dragPanX + event.clientX - state.dragX;
+      state.y = state.dragPanY + event.clientY - state.dragY;
+      renderZoom(item);
+    } else if (items.length > 1) {
+      stage.scrollLeft = state.galleryScroll - (event.clientX - state.galleryX);
+    }
+  });
+  const releasePointer = event => {
+    items.forEach(item => {
+      const state = stateFor(item);
+      if (!state.pointers.delete(event.pointerId)) return;
+      if (state.pointers.size < 2) state.pinchDistance = 0;
+      if (state.pointers.size === 1) {
+        const [point] = state.pointers.values();
+        state.dragX = point.x;
+        state.dragY = point.y;
+        state.dragPanX = state.x;
+        state.dragPanY = state.y;
+      }
+    });
+  };
+  stage?.addEventListener('pointerup', releasePointer);
+  stage?.addEventListener('pointercancel', releasePointer);
+  items.forEach(item => item.querySelector('.dm-image-view')?.addEventListener('contextmenu', event => event.preventDefault()));
+  items.forEach(item => item.querySelector('.dm-image-view')?.addEventListener('dragstart', event => event.preventDefault()));
+  renderZoom(activeItem);
 }
 
 async function openDmCamera(onCapture) {
@@ -15061,7 +15216,7 @@ function dmMessageReactionsHTML(reactions, myId) {
 
 function updateDmMessageReactions(row, reactions) {
   const html = dmMessageReactionsHTML(reactions, currentUser?.id);
-  const bubble = row.querySelector('.dm-msg-bubble');
+  const bubble = row.querySelector('.dm-msg-bubble, .chat-msg-body');
   const existing = bubble?.querySelector('.dm-msg-reactions');
   if (!html) {
     existing?.remove();
@@ -15248,7 +15403,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
 }
 
-function showDmReactionPicker(anchor, messageId) {
+function showDmReactionPicker(anchor, messageId, { endpoint = `/messages/${encodeURIComponent(messageId)}/reactions`, rowSelector = `.dm-msg-wrap[data-id="${CSS.escape(String(messageId))}"]` } = {}) {
   document.getElementById('dm-reaction-picker')?.remove();
   const commonEmojis = ['❤️','😂','😍','😮','😢','👍','👎','🔥','👏','🎉','🙏','🥰','🤔','💯','😎','✨','🤗','😡'];
   let recent = [];
@@ -15269,11 +15424,11 @@ function showDmReactionPicker(anchor, messageId) {
     const emoji = choice.dataset.emoji;
     choice.disabled = true;
     try {
-      const result = await api(`/messages/${encodeURIComponent(messageId)}/reactions`, {
+      const result = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify({ emoji })
       });
-      const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(messageId))}"]`);
+      const row = document.querySelector(rowSelector);
       if (row) updateDmMessageReactions(row, result.reactions);
       const updatedRecent = [emoji, ...recent.filter(item => item !== emoji)].slice(0, 8);
       localStorage.setItem('cigcig_dm_recent_reactions', JSON.stringify(updatedRecent));
@@ -15397,7 +15552,7 @@ function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConve
 function dmThemeOptionsHTML(selectedTheme = 'default', buttons = false) {
   const options = Object.entries(DM_THEME_LABELS);
   if (buttons) return options.map(([key, label]) => `<button type="button" class="dm-theme-option" data-theme-key="${key}" aria-pressed="${key === selectedTheme}"><span class="dm-theme-swatch" style="--dm-theme-swatch:${({
-    default: 'linear-gradient(135deg,#334155,#64748b)', sunset: 'linear-gradient(135deg,#f97316,#be123c)',
+    default: 'linear-gradient(135deg,#796b52,#bda275)', sunset: 'linear-gradient(135deg,#f97316,#be123c)',
     ocean: 'linear-gradient(135deg,#0284c7,#1d4ed8)', rose: 'linear-gradient(135deg,#e11d48,#be185d)',
     forest: 'linear-gradient(135deg,#15803d,#065f46)', lavender: 'linear-gradient(135deg,#7c3aed,#6d28d9)'
   })[key]}"></span>${label}</button>`).join('');
@@ -19179,29 +19334,98 @@ async function renderMediaExplore(app) {
   app.innerHTML = `<div class="container page photos-page media-explore-page">
     <header class="media-explore-hero">
       <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Keşfet</h1></div></div>
-      <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Fotoğraf, başlık veya kullanıcı ara..." autocomplete="off" aria-label="Fotoğraf ve kullanıcı ara" /></label>
+      <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Fotoğraf, Reals, kullanıcı veya #etiket ara..." autocomplete="off" aria-label="Fotoğraf, video ve hashtag ara" /></label>
     </header>
     <div id="media-explore-feed" class="photos-feed" aria-live="polite"><div class="loading-center"><div class="spinner"></div></div></div>
   </div>`;
   const feed = document.getElementById('media-explore-feed');
   const search = document.getElementById('media-explore-search');
   try {
+    const initialTag = new URLSearchParams(location.search).get('tag')?.replace(/^#/, '').trim() || '';
+    const hasInitialTag = /^[\p{L}\p{N}_]{1,80}$/u.test(initialTag);
+    if (hasInitialTag) search.value = `#${initialTag}`;
     const photos = [];
-    let offset = 0;
-    let batch;
-    do {
-      batch = await api(`/photos?limit=100&offset=${offset}`);
-      photos.push(...batch);
-      offset += batch.length;
-    } while (batch.length === 100);
-    const shuffledPhotos = shuffleArray(photos);
-    feed.innerHTML = shuffledPhotos.length
-      ? shuffledPhotos.map(photo => `<div class="media-explore-result" data-search-index="${escHtml([photo.title, photo.caption, photo.username, photo.nickname].filter(Boolean).join(' ').toLocaleLowerCase('tr-TR'))}">${photoCardHTML(photo)}</div>`).join('')
-      : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık fotoğraf yok.</p></div>';
-    bindPhotoFeed(feed);
-    setupPhotoAudio(feed);
-    search.addEventListener('input', () => {
+    let photosLoaded = false;
+    let shuffledPhotos = [];
+    const loadAllPhotos = async () => {
+      if (photosLoaded) return;
+      const loadedPhotos = [];
+      let offset = 0;
+      let batch;
+      do {
+        batch = await api(`/photos?limit=100&offset=${offset}`);
+        loadedPhotos.push(...batch);
+        offset += batch.length;
+      } while (batch.length === 100);
+      photos.push(...loadedPhotos);
+      shuffledPhotos = shuffleArray(photos);
+      photosLoaded = true;
+    };
+    if (!hasInitialTag) await loadAllPhotos();
+    const renderPhotoResults = values => {
+      feed.innerHTML = values.length
+        ? values.map(photo => `<div class="media-explore-result" data-search-index="${escHtml([photo.title, photo.caption, photo.username, photo.nickname].filter(Boolean).join(' ').toLocaleLowerCase('tr-TR'))}">${photoCardHTML(photo)}</div>`).join('')
+        : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık fotoğraf yok.</p></div>';
+      bindPhotoFeed(feed);
+      setupPhotoAudio(feed);
+    };
+    const loadHashtagResults = async tag => {
+      const requestId = ++hashtagSearchRequestId;
+      feed.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+      const [tagMatches, matchingPhotos, matchingVideos, matchingRealsResult] = await Promise.all([
+        api('/hashtags?q=' + encodeURIComponent(tag)),
+        api('/photos?hashtag=' + encodeURIComponent(tag)),
+        api('/videos?hashtag=' + encodeURIComponent(tag)),
+        api('/reals?hashtag=' + encodeURIComponent(tag)).then(value => ({ value }), error => ({ error }))
+      ]);
+      if (requestId !== hashtagSearchRequestId || !feed.isConnected) return;
+      const matchingReals = matchingRealsResult.value || [];
+      if (matchingRealsResult.error) console.warn('Hashtag Reals sonuçları yüklenemedi:', matchingRealsResult.error.message || matchingRealsResult.error);
+      const exactTag = tagMatches.find(item => item.tag.toLocaleLowerCase('tr-TR') === tag.toLocaleLowerCase('tr-TR'));
+      const content = [
+        ...matchingPhotos.map(photo => ({ createdAt: photo.created_at, search: [photo.title, photo.caption, photo.username, photo.nickname], html: photoCardHTML(photo) })),
+        ...matchingVideos.map(video => ({ createdAt: video.created_at, search: [video.title, video.description, video.username], html: videoCardHTML(video) })),
+        ...matchingReals.map(real => ({ createdAt: real.created_at, search: [real.title, real.description, real.username], html: realsProfileCardHTML(real) }))
+      ].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+      const summary = `<section class="hashtag-search-summary"><strong>#${escHtml(tag)}</strong><span>${formatCount(exactTag?.usage_count)} kullanım · ${formatCount(exactTag?.post_count)} gönderi</span></section>`;
+      const results = content.map(item => `<div class="media-explore-result" data-search-index="${escHtml(item.search.filter(Boolean).join(' ').toLocaleLowerCase('tr-TR'))}">${item.html}</div>`).join('');
+      feed.innerHTML = summary + (results || '<div class="empty-state"><i class="fas fa-hashtag"></i><p>Bu hashtag ile eşleşen içerik bulunamadı.</p></div>');
+      bindPhotoFeed(feed);
+      setupPhotoAudio(feed);
+    };
+    let hashtagSearchRequestId = 0;
+    let hashtagSearchTimeout;
+    if (hasInitialTag) {
+      await loadHashtagResults(initialTag);
+    } else {
+      renderPhotoResults(shuffledPhotos);
+    }
+    search.addEventListener('input', async () => {
       const query = search.value.trim().toLocaleLowerCase('tr-TR');
+      const hashtagMatch = /^#([\p{L}\p{N}_]{1,80})$/u.exec(query);
+      if (hashtagMatch) {
+        clearTimeout(hashtagSearchTimeout);
+        hashtagSearchRequestId++;
+        hashtagSearchTimeout = setTimeout(() => loadHashtagResults(hashtagMatch[1]).catch(error => {
+          if (feed.isConnected && search.value.trim().toLocaleLowerCase('tr-TR') === `#${hashtagMatch[1]}`) {
+            feed.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(error.message || 'Hashtag sonuçları yüklenemedi.')}</p></div>`;
+          }
+        }), 220);
+        return;
+      }
+      clearTimeout(hashtagSearchTimeout);
+      const requestId = ++hashtagSearchRequestId;
+      if (!photosLoaded) {
+        feed.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+        try { await loadAllPhotos(); }
+        catch (error) {
+          if (requestId === hashtagSearchRequestId) feed.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(error.message || 'Fotoğraflar yüklenemedi.')}</p></div>`;
+          return;
+        }
+        if (requestId !== hashtagSearchRequestId) return;
+      }
+      renderPhotoResults(shuffledPhotos);
+      if (!query) return;
       let visibleCount = 0;
       feed.querySelectorAll('.media-explore-result').forEach(result => {
         result.hidden = query !== '' && !result.dataset.searchIndex.includes(query);
@@ -19217,10 +19441,47 @@ async function renderMediaExplore(app) {
   }
 }
 function photoCardHTML(p) {
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${currentUser&&currentUser.id===p.user_id?'<div style="margin-left:auto;display:flex;gap:2px"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(p.url)}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(p.url)}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div class="photo-card-content">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}${p.caption?descriptionPreviewHTML(p.caption, 'photo-caption-preview', 180):''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
+  const imageUrls = photoImageUrls(p);
+  const galleryControls = imageUrls.length > 1 ? `<div class="photo-gallery-controls" aria-label="Fotoğraf galerisi"><button type="button" class="photo-gallery-arrow photo-gallery-prev" data-gallery-step="-1" aria-label="Önceki fotoğraf"><i class="fas fa-chevron-left"></i></button><div class="photo-gallery-dots">${imageUrls.map((_, index) => `<button type="button" class="photo-gallery-dot${index === 0 ? ' active' : ''}" data-gallery-go="${index}" aria-label="${index + 1}. fotoğraf" aria-current="${index === 0 ? 'true' : 'false'}"></button>`).join('')}</div><button type="button" class="photo-gallery-arrow photo-gallery-next" data-gallery-step="1" aria-label="Sonraki fotoğraf"><i class="fas fa-chevron-right"></i></button></div>` : '';
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<div class="photo-card-identity"><a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a><time class="photo-card-date" datetime="${escHtml(p.created_at || '')}">${p.created_at ? escHtml(formatDate(p.created_at)) : ''}</time></div>${currentUser&&currentUser.id===p.user_id?'<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${galleryControls}${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div class="photo-card-content">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}  ${p.caption?hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180):''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
+}
+function photoImageUrls(photo) {
+  let urls = photo?.image_urls;
+  if (typeof urls === 'string') {
+    try { urls = JSON.parse(urls); } catch { urls = []; }
+  }
+  return Array.isArray(urls) && urls.length ? urls.filter(url => typeof url === 'string' && url) : (photo?.url ? [photo.url] : []);
+}
+function setPhotoGalleryIndex(card, index) {
+  const urls = photoImageUrls({ image_urls: card.dataset.galleryImages, url: card.dataset.photoUrl });
+  if (!urls.length) return;
+  const nextIndex = (index + urls.length) % urls.length;
+  card.dataset.galleryIndex = String(nextIndex);
+  const image = card.querySelector('.photo-native');
+  const backdrop = card.querySelector('.photo-media-backdrop');
+  if (image) image.src = urls[nextIndex];
+  if (backdrop) backdrop.style.backgroundImage = `url("${urls[nextIndex].replace(/["\\]/g, '\\$&')}")`;
+  card.querySelectorAll('.photo-gallery-dot').forEach((dot, dotIndex) => {
+    const active = dotIndex === nextIndex;
+    dot.classList.toggle('active', active);
+    dot.setAttribute('aria-current', active ? 'true' : 'false');
+  });
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
+  feed.querySelectorAll('.photo-gallery-controls').forEach(controls => {
+    const card = controls.closest('[data-photo-id]');
+    controls.querySelectorAll('[data-gallery-step]').forEach(button => button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPhotoGalleryIndex(card, Number(card.dataset.galleryIndex || 0) + Number(button.dataset.galleryStep));
+    }));
+    controls.querySelectorAll('[data-gallery-go]').forEach(button => button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPhotoGalleryIndex(card, Number(button.dataset.galleryGo));
+    }));
+  });
   feed.querySelectorAll('[data-photo-id]').forEach(card => {
     api('/photos/' + encodeURIComponent(card.dataset.photoId) + '/view', { method: 'POST' }).catch(() => {});
   });
@@ -19673,6 +19934,7 @@ async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
         <button class="btn btn-primary photo-edit-save" id="edit-photo-save"><i class="fas fa-check"></i> Değişiklikleri kaydet</button>
       </div>
     `, 'photo-edit-modal');
+    setupHashtagAutocomplete(document.getElementById('edit-photo-caption'));
     let selectedPhotoFile = pendingPhotoFile;
     let selectedPhotoSong = songs.find(song => String(song.id) === String(pendingDraft?.song ?? photo.song_id)) || null;
     let photoSongAudioEndTimer = null;
@@ -19840,18 +20102,28 @@ async function showPhotoEditModal(photoId, returnPath = '/fotograflar') {
 
 function showPhotoUploadModal() {
   const savedDraft = window.__photoUploadDraft || null;
-  const pendingPhotoFile = window.__pendingPhotoFile || null;
+  const pendingPhotoFiles = window.__pendingPhotoFiles || (window.__pendingPhotoFile ? [window.__pendingPhotoFile] : []);
+  const pendingPhotoIndex = Number(window.__pendingPhotoIndex) || 0;
   delete window.__photoUploadDraft;
+  delete window.__pendingPhotoFiles;
+  delete window.__pendingPhotoIndex;
   delete window.__pendingPhotoFile;
   showModal('Fotoğraf oluştur', `
     <div class="social-compose social-compose-photo">
       <section class="social-compose-preview-pane">
-        <div class="social-compose-preview-frame social-compose-photo-frame${pendingPhotoFile ? ' has-media' : ''}">
+        <div class="social-compose-preview-frame social-compose-photo-frame${pendingPhotoFiles.length ? ' has-media' : ''}">
           <div id="photo-file-preview" class="photo-file-preview" hidden></div>
+          <div class="photo-compose-gallery-controls" hidden>
+            <button type="button" class="photo-compose-gallery-arrow" data-photo-step="-1" aria-label="Önceki fotoğraf"><i class="fas fa-chevron-left"></i></button>
+            <div class="photo-compose-gallery-dots"></div>
+            <button type="button" class="photo-compose-gallery-arrow" data-photo-step="1" aria-label="Sonraki fotoğraf"><i class="fas fa-chevron-right"></i></button>
+          </div>
+          <button type="button" id="photo-crop-current" class="photo-compose-action photo-compose-crop" title="Fotoğrafı düzenle" aria-label="Seçili fotoğrafı düzenle" hidden><i class="fas fa-crop-simple"></i></button>
+          <button type="button" id="photo-remove-current" class="photo-compose-action photo-compose-remove" title="Fotoğrafı kaldır" aria-label="Seçili fotoğrafı kaldır" hidden><i class="fas fa-trash"></i></button>
           <div class="social-compose-preview-empty" id="photo-preview-empty"><i class="fas fa-image"></i><strong>Fotoğrafını ekle</strong><span>Paylaşım önizlemen burada görünür</span></div>
-          <label class="social-compose-pick"><i class="fas fa-plus"></i> Fotoğraf seç<input id="photo-file" type="file" accept="image/*" /></label>
+          <label class="social-compose-pick"><i class="fas fa-plus"></i> Fotoğraf ekle<input id="photo-file" type="file" accept="image/*" multiple /></label>
         </div>
-        <div class="social-compose-upload-hint"><i class="fas fa-crop-simple"></i><span>Paylaşmadan önce fotoğrafını kırpıp düzenleyebilirsin.</span></div>
+        <div class="social-compose-upload-hint"><i class="fas fa-images"></i><span>Tek bir gönderide en fazla 10 fotoğraf paylaş. Seçili görseli kırpmak için düzenleme simgesine dokun.</span></div>
       </section>
       <section class="social-compose-fields">
         <div class="form-group"><label>Başlık</label><input id="photo-title" maxlength="120" placeholder="Paylaşımına bir başlık ekle…" /></div>
@@ -19876,8 +20148,11 @@ function showPhotoUploadModal() {
       </section>
     </div>
   `, 'social-compose-modal');
+  $('#modal').classList.add('social-compose-photo-modal');
+  setupHashtagAutocomplete(document.getElementById('photo-caption'));
 
-  let selectedPhotoFile = pendingPhotoFile;
+  let selectedPhotoFiles = pendingPhotoFiles.map(file => ({ file, previewUrl: URL.createObjectURL(file) }));
+  let activePhotoIndex = Math.min(pendingPhotoIndex, Math.max(0, selectedPhotoFiles.length - 1));
   let songs = [];
   const songSearch = document.getElementById('photo-song-search');
   const songList = document.getElementById('photo-song-list');
@@ -19905,10 +20180,59 @@ function showPhotoUploadModal() {
     time.textContent = `${formatPhotoSongTime(Number(start.value) || 0)} – ${formatPhotoSongTime((Number(start.value) || 0) + 30)}`;
   };
   const savedSongStart = Math.max(0, Number(savedDraft?.start) || 0);
+  const preview = document.getElementById('photo-file-preview');
+  const galleryControls = document.querySelector('.photo-compose-gallery-controls');
+  const photoCropButton = document.getElementById('photo-crop-current');
+  const photoRemoveButton = document.getElementById('photo-remove-current');
+  const renderPhotoComposerGallery = () => {
+    const hasPhotos = selectedPhotoFiles.length > 0;
+    document.querySelector('.social-compose-photo-frame')?.classList.toggle('has-media', hasPhotos);
+    preview.hidden = !hasPhotos;
+    galleryControls.hidden = selectedPhotoFiles.length < 2;
+    photoCropButton.hidden = !hasPhotos;
+    photoRemoveButton.hidden = !hasPhotos;
+    $('#photo-preview-empty')?.classList.toggle('hidden', hasPhotos);
+    preview.innerHTML = hasPhotos
+      ? `<img src="${escHtml(selectedPhotoFiles[activePhotoIndex].previewUrl)}" alt="${activePhotoIndex + 1}. fotoğraf önizlemesi" />`
+      : '';
+    const dots = document.querySelector('.photo-compose-gallery-dots');
+    dots.innerHTML = selectedPhotoFiles.map((_, index) => `<button type="button" class="photo-compose-gallery-dot${index === activePhotoIndex ? ' active' : ''}" data-photo-index="${index}" aria-label="${index + 1}. fotoğraf" aria-current="${index === activePhotoIndex ? 'true' : 'false'}"></button>`).join('');
+    dots.querySelectorAll('[data-photo-index]').forEach(button => button.addEventListener('click', () => {
+      activePhotoIndex = Number(button.dataset.photoIndex);
+      renderPhotoComposerGallery();
+    }));
+    galleryControls.querySelectorAll('[data-photo-step]').forEach(button => {
+      button.onclick = () => {
+        activePhotoIndex = (activePhotoIndex + Number(button.dataset.photoStep) + selectedPhotoFiles.length) % selectedPhotoFiles.length;
+        renderPhotoComposerGallery();
+      };
+    });
+  };
   document.getElementById('photo-file')?.addEventListener('change', event => {
-    const file = event.target.files[0];
-    const preview = document.getElementById('photo-file-preview');
-    if (!file || !preview) return;
+    const newFiles = [...(event.target.files || [])];
+    event.target.value = '';
+    if (!newFiles.length) return;
+    if (selectedPhotoFiles.length + newFiles.length > 10) {
+      document.getElementById('photo-error').textContent = 'Bir gönderide en fazla 10 fotoğraf paylaşabilirsiniz.';
+      return;
+    }
+    newFiles.forEach(file => selectedPhotoFiles.push({ file, previewUrl: URL.createObjectURL(file) }));
+    activePhotoIndex = selectedPhotoFiles.length - newFiles.length;
+    document.getElementById('photo-error').textContent = '';
+    renderPhotoComposerGallery();
+  });
+  galleryControls.querySelectorAll('[data-photo-step]').forEach(button => {
+    button.addEventListener('click', event => event.stopPropagation());
+  });
+  photoRemoveButton.addEventListener('click', () => {
+    const [removed] = selectedPhotoFiles.splice(activePhotoIndex, 1);
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    activePhotoIndex = Math.min(activePhotoIndex, Math.max(0, selectedPhotoFiles.length - 1));
+    renderPhotoComposerGallery();
+  });
+  photoCropButton.addEventListener('click', () => {
+    const selected = selectedPhotoFiles[activePhotoIndex];
+    if (!selected) return;
     const draft = {
       title: $('#photo-title')?.value || '', caption: $('#photo-caption')?.value || '',
       location: $('#photo-location')?.value || '', songId: songInput.value || '',
@@ -19916,16 +20240,17 @@ function showPhotoUploadModal() {
       comments: $('#photo-comments')?.checked !== false, shares: $('#photo-shares')?.checked !== false
     };
     window.__photoUploadDraft = draft;
-    openMediaEditor(file, { title: 'Fotoğrafı düzenle', aspect: 1, onApply: editedFile => {
-      window.__pendingPhotoFile = editedFile;
+    openMediaEditor(selected.file, { title: 'Fotoğrafı düzenle', aspect: 1, onApply: editedFile => {
+      const currentIndex = activePhotoIndex;
+      selectedPhotoFiles[currentIndex] = { file: editedFile, previewUrl: URL.createObjectURL(editedFile) };
+      window.__pendingPhotoFiles = selectedPhotoFiles.map(item => item.file);
+      window.__pendingPhotoIndex = currentIndex;
+      selectedPhotoFiles.forEach(item => URL.revokeObjectURL(item.previewUrl));
       showPhotoUploadModal();
       toast('Fotoğraf düzenlendi — paylaşmadan önce bilgileri kontrol et');
     }});
   });
-  if (pendingPhotoFile) {
-    const preview = document.getElementById('photo-file-preview');
-    if (preview) { preview.hidden = false; preview.innerHTML = `<img src="${URL.createObjectURL(pendingPhotoFile)}" alt="Düzenlenen fotoğraf önizlemesi" />`; $('#photo-preview-empty')?.classList.add('hidden'); }
-  }
+  renderPhotoComposerGallery();
   if (savedDraft) {
     $('#photo-title').value = savedDraft.title;
     $('#photo-caption').value = savedDraft.caption;
@@ -20041,12 +20366,11 @@ function showPhotoUploadModal() {
   document.getElementById('photo-save')?.addEventListener('click', async e => {
     const save = e.currentTarget;
     if (save.disabled) return;
-    const file = selectedPhotoFile || document.getElementById('photo-file').files[0];
-    if (!file) { document.getElementById('photo-error').textContent = 'Fotoğraf seçin'; return; }
+    if (!selectedPhotoFiles.length) { document.getElementById('photo-error').textContent = 'Fotoğraf seçin'; return; }
     save.disabled = true;
     save.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Paylaşılıyor...';
     const fd = new FormData();
-    fd.append('image', file);
+    selectedPhotoFiles.forEach(({ file }) => fd.append('images', file));
     ['title', 'caption', 'location'].forEach(k => fd.append(k, document.getElementById('photo-' + k).value.trim()));
     fd.append('song_id', songInput.value);
     fd.append('song_start_seconds', start.value);
@@ -20056,6 +20380,7 @@ function showPhotoUploadModal() {
     try {
       await apiForm('/photos', fd);
       previewPlayer?.pause();
+      selectedPhotoFiles.forEach(item => URL.revokeObjectURL(item.previewUrl));
       hideModal();
       toast('Fotoğraf paylaşıldı');
       renderRoute('/fotograflar');
