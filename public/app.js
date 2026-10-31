@@ -12,6 +12,19 @@ const seenDmIncomingNotifications = new Map();
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
+let viewportHeightFrame = null;
+function syncViewportHeight() {
+  if (viewportHeightFrame !== null) return;
+  viewportHeightFrame = window.requestAnimationFrame(() => {
+    viewportHeightFrame = null;
+    const height = window.visualViewport?.height || window.innerHeight;
+    document.documentElement.style.setProperty('--cigcig-viewport-height', `${height}px`);
+  });
+}
+syncViewportHeight();
+window.addEventListener('resize', syncViewportHeight, { passive: true });
+window.visualViewport?.addEventListener('resize', syncViewportHeight, { passive: true });
+window.visualViewport?.addEventListener('scroll', syncViewportHeight, { passive: true });
 // Reklam paneli editörü eski bir FormData fetch akışı kullandığı için,
 // atama kontrollü PUT isteklerine mevcut oturum tokenını da ekle.
 const nativeFetch = window.fetch.bind(window);
@@ -2563,6 +2576,18 @@ async function renderRealsFeed(app, initialId = null) {
     videoEl.src = src;
     videoEl.load();
   }
+  function getCompatibleRealsVideoUrl(src) {
+    try {
+      const url = new URL(src, location.href);
+      if (url.hostname !== 'res.cloudinary.com' || !url.pathname.includes('/video/upload/')
+        || /\/s--[^/]+--\//.test(url.pathname)) return null;
+      url.pathname = url.pathname.replace('/video/upload/', '/video/upload/vc_h264,f_mp4/');
+      return url.href;
+    } catch (error) {
+      console.warn('Reals video adresi çözümlenemedi:', error.message);
+      return null;
+    }
+  }
   function fitRealsVideoFrame(videoEl) {
     const videoWidth = videoEl.videoWidth;
     const videoHeight = videoEl.videoHeight;
@@ -2641,7 +2666,7 @@ async function renderRealsFeed(app, initialId = null) {
         return `
       <div class="reals-item reals-ad-item" data-id="ad-${r.id}" data-ad-id="${r.id}" data-video-url="${escHtml(r.video_url)}">
         <div class="reals-video-box reals-ad-box">
-        <video class="reals-video reals-ad-video" preload="none" playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
+        <video class="reals-video reals-ad-video" preload="none" playsinline webkit-playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
         <div class="reals-video-loading" aria-hidden="true"><span class="reals-loader-ring"></span><span>Video yükleniyor</span></div>
         <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
         <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
@@ -2667,7 +2692,7 @@ async function renderRealsFeed(app, initialId = null) {
       return `
       <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
         <div class="reals-video-box">
-        <video class="reals-video" preload="none" playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
+        <video class="reals-video" preload="none" playsinline webkit-playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
         <div class="reals-video-loading" aria-hidden="true"><span class="reals-loader-ring"></span><span>Video yükleniyor</span></div>
         <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
         <button type="button" class="reals-video-retry" hidden><i class="fas fa-rotate-right"></i><span>Video başlatılamadı · Tekrar dene</span></button>
@@ -2717,6 +2742,22 @@ async function renderRealsFeed(app, initialId = null) {
       const setVideoLoading = isLoading => {
         if (isLoading && !it.classList.contains('is-active')) return;
         it.classList.toggle('reals-is-loading', isLoading);
+      };
+      const retryCompatibleVideo = () => {
+        if (it.dataset.realsCompatibilityRetry === '1') return false;
+        const compatibleUrl = getCompatibleRealsVideoUrl(it.dataset.videoUrl);
+        if (!compatibleUrl || compatibleUrl === vid.currentSrc) return false;
+        it.dataset.realsCompatibilityRetry = '1';
+        setVideoLoading(true);
+        setRealsVideoSource(vid, compatibleUrl);
+        vid.muted = true;
+        vid.play().catch(error => {
+          if (error.name === 'AbortError') return;
+          setVideoLoading(false);
+          showRealsPlaybackError(it, 'Video biçimi dönüştürülemedi · Tekrar dene');
+          console.error('Reals uyumlu video başlatılamadı:', error.message);
+        });
+        return true;
       };
       vid.addEventListener('loadedmetadata', () => fitRealsVideoFrame(vid));
       it.addEventListener('reals-cancel-replay', () => clearReplayCountdown(it));
@@ -2825,6 +2866,8 @@ async function renderRealsFeed(app, initialId = null) {
       vid.addEventListener('error', () => {
         if (!it.classList.contains('is-active')) return;
         const errorCode = vid.error?.code;
+        if ([MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED, MediaError.MEDIA_ERR_DECODE].includes(errorCode)
+          && retryCompatibleVideo()) return;
         if (errorCode === MediaError.MEDIA_ERR_NETWORK && it.dataset.realsNetworkRetry !== '1') {
           it.dataset.realsNetworkRetry = '1';
           setVideoLoading(true);
@@ -2857,6 +2900,7 @@ async function renderRealsFeed(app, initialId = null) {
         retry.disabled = true;
         retry.querySelector('span').textContent = 'Video yükleniyor...';
         delete it.dataset.realsNetworkRetry;
+        delete it.dataset.realsCompatibilityRetry;
         setRealsVideoSource(vid, '');
         requestAnimationFrame(() => {
           if (!it.isConnected || !it.classList.contains('is-active')) return;
@@ -2962,6 +3006,8 @@ async function renderRealsFeed(app, initialId = null) {
       if (video) {
         item?.classList.remove('is-active');
         item?.classList.remove('reals-is-loading');
+        delete item.dataset.realsNetworkRetry;
+        delete item.dataset.realsCompatibilityRetry;
         video.pause();
         setRealsVideoSource(video, '');
         video.currentTime = 0;
@@ -3021,10 +3067,12 @@ async function renderRealsFeed(app, initialId = null) {
               await vid.play();
             } catch (playError) {
               if (playError.name === 'AbortError') return;
+              if (playError.name !== 'NotAllowedError' && retryCompatibleVideo()) return;
               showRealsPlaybackError(it, 'Oynatmak için tekrar dokun');
               console.error('Reals videosu başlatılamadı:', playError.message);
             }
           } else {
+            if (error.name !== 'NotAllowedError' && retryCompatibleVideo()) return;
             showRealsPlaybackError(it, error.name === 'NotAllowedError' ? 'Oynatmak için dokun' : 'Video başlatılamadı · Tekrar dene');
             console.error('Reals videosu başlatılamadı:', error.message);
           }

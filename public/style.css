@@ -10071,7 +10071,7 @@ html,body { width:100%; min-width:0; max-width:100%; overflow-x:hidden; }
   html,body { overflow-x:clip; }
   #app { overflow-x:clip; }
 }
-body { min-height:100vh; min-height:100dvh; }
+body { min-height:var(--cigcig-viewport-height,100dvh); }
 #app { width:100%; min-width:0; max-width:100%; }
 @media (max-width:768px) {
   .navbar { padding-top:env(safe-area-inset-top); padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
@@ -10163,4 +10163,58 @@ body { min-height:100vh; min-height:100dvh; }
 @media (prefers-reduced-motion:reduce) {
   .dm-msg-wrap.dm-msg-arriving .dm-msg-content,
   .chat-msg.chat-msg-arriving .chat-msg-body { animation:none; }
+}
+
+@media (max-width:768px) {
+  html,body { width:100%; max-width:100%; }
+  body.reals-page {
+    width:100%;
+    height:var(--cigcig-viewport-height,100dvh);
+    min-height:0;
+    overflow:hidden !important;
+  }
+  body.reals-page #app {
+    width:100%;
+    height:var(--cigcig-viewport-height,100dvh);
+    min-height:0;
+    overflow:hidden !important;
+  }
+  body.reals-page .reals-container,
+  body.reals-page .reals-list {
+    width:100% !important;
+    max-width:100% !important;
+    height:calc(var(--cigcig-viewport-height,100dvh) - var(--reals-bottom-bar-clearance,56px)) !important;
+    min-height:0 !important;
+    margin:0 !important;
+  }
+  body.reals-page .reals-item,
+  body.reals-page .reals-video-box,
+  body.reals-page .reals-video {
+    height:100% !important;
+    max-height:100% !important;
+  }
+  body.reals-page .reals-item,
+  body.reals-page .reals-video-box {
+    width:100% !important;
+    max-width:100% !important;
+  }
+  body.reals-page .reals-right-actions {
+    top:auto !important;
+    right:8px !important;
+    bottom:24px !important;
+    max-height:calc(100% - 32px);
+    padding:0 !important;
+    border:0 !important;
+    border-radius:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+    transform:none !important;
+  }
+  body.reals-page .reals-right-actions .reals-action-btn {
+    background:transparent !important;
+    box-shadow:none !important;
+    text-shadow:0 2px 8px rgba(0,0,0,.8);
+  }
 }
