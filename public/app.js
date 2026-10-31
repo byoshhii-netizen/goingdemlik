@@ -478,7 +478,7 @@ function showModal(title, bodyHTML, modalClass = '', { pauseMedia = true } = {})
   if (pauseMedia) managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal');
+  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'dm-call-confirm-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -2496,8 +2496,13 @@ async function renderRealsFeed(app, initialId = null) {
     if (!videoWidth || !videoHeight || !item || !frame) return;
 
     const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    const maxWidth = Math.max(1, isMobile ? item.clientWidth - 28 : Math.min(400, item.clientWidth - 28));
-    const maxHeight = Math.max(1, isMobile ? item.clientHeight - 28 : Math.min(720, item.clientHeight - 88));
+    if (isMobile) {
+      frame.style.setProperty('width', `${item.clientWidth}px`, 'important');
+      frame.style.setProperty('height', `${item.clientHeight}px`, 'important');
+      return;
+    }
+    const maxWidth = Math.max(1, Math.min(400, item.clientWidth - 28));
+    const maxHeight = Math.max(1, Math.min(720, item.clientHeight - 88));
     const frameHeight = Math.min(maxHeight, maxWidth * 16 / 9);
     const frameWidth = frameHeight * 9 / 16;
     frame.style.setProperty('width', `${Math.round(frameWidth)}px`, 'important');
@@ -8678,8 +8683,7 @@ function realsMediaCardHTML(v) {
     </div>
     <div class="photo-media-wrap">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
-        <video class="photo-native reals-media-preview" src="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop preload="metadata" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
-        <span class="reals-media-play"><i class="fas fa-play"></i></span>
+        <video class="photo-native reals-media-preview" src="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop autoplay preload="metadata" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
       </a>
     </div>
     <div class="photo-card-content">
@@ -8993,23 +8997,6 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   const videoSongStart = $('#video-song-start');
   const videoSongWaveform = $('#video-song-waveform');
   const videoSongDuration = $('#video-song-duration');
-  const updateVideoSongWaveform = () => {
-    if (!videoSongStart || !videoSongWaveform) return;
-    const maxStart = Math.max(0, Number(videoSongStart.max) || 0);
-    const timeline = maxStart + 30;
-    const width = Math.min(100, 30 / Math.max(30, timeline) * 100);
-    const left = Math.min(100 - width, (Number(videoSongStart.value) || 0) / Math.max(30, timeline) * 100);
-    videoSongWaveform.style.setProperty('--clip-left', `${left}%`);
-    videoSongWaveform.style.setProperty('--clip-width', `${width}%`);
-    $('#video-song-time').textContent = `${formatVideoSongTime(Number(videoSongStart.value) || 0)} – ${formatVideoSongTime((Number(videoSongStart.value) || 0) + 30)}`;
-  };
-  const formatVideoSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-  if (videoSongField) {
-  $('#video-song-waveform-bars').innerHTML = Array.from({ length: 68 }, (_, index) => {
-    const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
-    return `<i style="--bar-height:${Math.round(height)}%"></i>`;
-  }).join('');
-  const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   let autoBannerFile = null;
   let autoBannerPromise = null;
   const getVideoDuration = file => new Promise(resolve => {
@@ -9033,6 +9020,23 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     probe.src = objectUrl;
     probe.load();
   });
+  const updateVideoSongWaveform = () => {
+    if (!videoSongStart || !videoSongWaveform) return;
+    const maxStart = Math.max(0, Number(videoSongStart.max) || 0);
+    const timeline = maxStart + 30;
+    const width = Math.min(100, 30 / Math.max(30, timeline) * 100);
+    const left = Math.min(100 - width, (Number(videoSongStart.value) || 0) / Math.max(30, timeline) * 100);
+    videoSongWaveform.style.setProperty('--clip-left', `${left}%`);
+    videoSongWaveform.style.setProperty('--clip-width', `${width}%`);
+    $('#video-song-time').textContent = `${formatVideoSongTime(Number(videoSongStart.value) || 0)} – ${formatVideoSongTime((Number(videoSongStart.value) || 0) + 30)}`;
+  };
+  const formatVideoSongTime = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  if (videoSongField) {
+  $('#video-song-waveform-bars').innerHTML = Array.from({ length: 68 }, (_, index) => {
+    const height = 18 + Math.abs(Math.sin(index * 1.71) * Math.cos(index * .23)) * 76;
+    return `<i style="--bar-height:${Math.round(height)}%"></i>`;
+  }).join('');
+  const savedVideoSongStart = Math.max(0, Number(existing?.song_start_seconds) || 0);
   const syncVideoComposer = () => {
     const isReals = forceReals || $('#video-is-reals')?.checked;
     videoFrame?.classList.toggle('is-landscape', !isReals);
@@ -14206,6 +14210,7 @@ async function renderDMChat(username) {
         </div>
       </div>
       <div class="dm-chat-header-right">
+        ${isSelfConversation ? '' : '<button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" type="button" title="Sesli ara" aria-label="Sesli ara"><i class="fas fa-phone"></i></button>'}
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -14219,7 +14224,14 @@ async function renderDMChat(username) {
     <!-- Messages -->
     <div class="dm-messages" id="dm-messages">
       ${dmMessagesHTML(messages, currentUser.id)}
-      <div class="dm-peer-typing-row" hidden aria-live="polite"><span>Yazıyor</span><span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+      <div class="dm-peer-typing-row" hidden aria-live="polite">
+        <a href="${profileRoute(other.username)}" data-link class="dm-peer-typing-avatar" aria-label="${escHtml(other.nickname || other.username)} profilini aç">
+          ${hasUsableAvatar(other)
+            ? `<img src="${escHtml(other.avatar)}" alt="" />`
+            : '<span class="avatar-placeholder"><i class="fas fa-user" aria-hidden="true"></i></span>'}
+        </a>
+        <span class="dm-peer-typing-bubble">Yazıyor<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
+      </div>
     </div>
 
     <!-- Reply bar -->
@@ -14309,6 +14321,33 @@ async function renderDMChat(username) {
   enhanceLinkPreviews(msgsEl);
   installMessageSelectionGestures(msgsEl, '.dm-msg-wrap', enterDmSelection);
 
+  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
+    showModal('Sesli arama', `
+      <div class="dm-call-confirm">
+        <div class="dm-call-confirm-icon"><i class="fas fa-phone-volume" aria-hidden="true"></i></div>
+        <div class="dm-call-confirm-person">
+          ${callAvatar(other)}
+          <strong>${escHtml(other.nickname || other.username)}</strong>
+          <span>@${escHtml(other.username)}</span>
+        </div>
+        <p>Bu kişiyi CigCig üzerinden sesli aramak üzeresin. Arama zil sesi çalar; karşı taraf yanıtladığında görüşme başlar.</p>
+        <div class="dm-call-confirm-actions">
+          <button class="btn btn-ghost" id="dm-call-cancel" type="button">Vazgeç</button>
+          <button class="btn btn-primary" id="dm-call-confirm" type="button"><i class="fas fa-phone" aria-hidden="true"></i> Ara</button>
+        </div>
+      </div>
+    `, 'dm-call-confirm-modal');
+    document.getElementById('dm-call-cancel')?.addEventListener('click', hideModal);
+    document.getElementById('dm-call-confirm')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      if (button.disabled) return;
+      button.disabled = true;
+      button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aranıyor...';
+      hideModal();
+      await requestMicrophoneThenCall(other.username, other);
+    });
+  });
+
   // Reply management
   const setReply = (id) => { replyToId = id; };
   const startDmReply = row => {
@@ -14321,7 +14360,10 @@ async function renderDMChat(username) {
     if (replyLabel) replyLabel.textContent = replyText.substring(0, 90);
     document.getElementById('dm-input')?.focus({ preventScroll: true });
   };
-  installMessageReplySwipeGesture(msgsEl, startDmReply);
+  installMessageReplySwipeGesture(msgsEl, row => {
+    if (row.matches('.dm-own')) openDmMessageEditor(row, username);
+    else startDmReply(row);
+  });
   window.__dmClearReply = () => {
     replyToId = null;
     const rb = document.getElementById('dm-reply-bar');
@@ -14668,7 +14710,7 @@ async function renderDMChat(username) {
     if (menuBtn) {
       const msgId = menuBtn.dataset.id;
       const isOwn = menuBtn.dataset.own === '1';
-      showDmMsgMenu(menuBtn, msgId, isOwn, username, replyToId, setReply);
+      showDmMsgMenu(menuBtn, msgId, isOwn, username, startDmReply);
       return;
     }
     // Checkbox
@@ -15789,20 +15831,68 @@ function showDmMessageLockPrompt(username) {
   });
 }
 
-function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
-  document.getElementById('dm-msg-ctx')?.remove();
-  const messageRow = [...document.querySelectorAll('.dm-msg-wrap')].find(row => row.dataset.id === String(msgId));
-  const canDeleteForAll = isOwn
-    && String(messageRow?.dataset.senderId) === String(currentUser?.id)
-    && messageRow?.dataset.deletedForAll !== 'true';
+function isDmMessageEditable(messageRow) {
   const createdAt = Date.parse(messageRow?.dataset.createdAt || '');
   const messageAge = Date.now() - createdAt;
-  const canEdit = isOwn
+  return Boolean(messageRow?.classList.contains('dm-own'))
     && Boolean(messageRow?.dataset.content?.trim())
     && !messageRow?.querySelector('.dm-deleted')
     && Number.isFinite(createdAt)
     && messageAge <= 3 * 60 * 60 * 1000
     && messageAge >= -5 * 60 * 1000;
+}
+
+function openDmMessageEditor(messageRow, username) {
+  if (!isDmMessageEditable(messageRow)) return false;
+  const msgId = messageRow.dataset.id;
+  showModal('Mesajı düzenle', `
+    <div class="form-group">
+      <label for="edit-dm-message">Mesaj metni</label>
+      <textarea id="edit-dm-message" rows="5" maxlength="5000">${escHtml(messageRow.dataset.content)}</textarea>
+    </div>
+    <button type="button" class="btn btn-primary" id="save-dm-message-edit" style="width:100%">Kaydet</button>
+    <div id="edit-dm-message-error" class="form-error mt-4"></div>`);
+  const input = document.getElementById('edit-dm-message');
+  const saveButton = document.getElementById('save-dm-message-edit');
+  const errorMessage = document.getElementById('edit-dm-message-error');
+  input?.focus();
+  input?.setSelectionRange(input.value.length, input.value.length);
+  saveButton?.addEventListener('click', async () => {
+    const content = input.value.trim();
+    if (!content) {
+      if (errorMessage) errorMessage.textContent = 'Mesaj boş olamaz.';
+      return;
+    }
+    saveButton.disabled = true;
+    try {
+      const updated = await api(`/messages/${encodeURIComponent(msgId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      });
+      handleRealtimeDirectMessageEdit({
+        usernames: [currentUser.username, username],
+        message: updated,
+      });
+    } catch (error) {
+      if (errorMessage) errorMessage.textContent = error.message || 'Mesaj düzenlenemedi.';
+      saveButton.disabled = false;
+      return;
+    }
+    if (document.getElementById('edit-dm-message') === input) hideModal();
+    toast('Mesaj düzenlendi.');
+  });
+  return true;
+}
+
+function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
+  document.getElementById('dm-msg-ctx')?.remove();
+  const messageRow = [...document.querySelectorAll('.dm-msg-wrap')].find(row => row.dataset.id === String(msgId));
+  const canDeleteForAll = isOwn
+    && String(messageRow?.dataset.senderId) === String(currentUser?.id)
+    && messageRow?.dataset.deletedForAll !== 'true';
+  const canEdit = isDmMessageEditable(messageRow);
+  const createdAt = Date.parse(messageRow?.dataset.createdAt || '');
+  const messageAge = Date.now() - createdAt;
   const canEditMusic = isOwn
     && Boolean(messageRow?.querySelector('.dm-shared-song'))
     && !messageRow?.querySelector('.dm-deleted')
@@ -15815,6 +15905,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
   menu.style.cssText = 'position:fixed;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;z-index:9999;min-width:160px;box-shadow:0 8px 24px rgba(0,0,0,0.5);overflow:hidden';
   const items = [
     { label: '<i class="fas fa-face-smile fa-fw"></i> Emoji tepkisi ekle', action: 'react' },
+    ...(messageRow?.dataset.deletedForAll !== 'true' ? [{ label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' }] : []),
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
     ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
     ...(canEditMusic ? [{ label: '<i class="fas fa-music fa-fw"></i> Müziği değiştir', action: 'edit-music' }] : []),
@@ -15832,52 +15923,11 @@ function showDmMsgMenu(btn, msgId, isOwn, username, replyToId, setReply) {
       if (item.action === 'react') {
         showDmReactionPicker(btn, msgId);
       } else if (item.action === 'reply') {
-        const msgEl = document.querySelector(`.dm-msg-wrap[data-id="${msgId}"]`);
-        const content = msgEl?.querySelector('.dm-msg-bubble span')?.textContent || '';
-        if (setReply) setReply(msgId);
-        const rb = document.getElementById('dm-reply-bar');
-        const rt = document.getElementById('dm-reply-text');
-        if (rb) rb.classList.add('visible');
-        if (rt) rt.textContent = content.substring(0, 60) || 'Fotoğraf';
+        startDmReply?.(messageRow);
       } else if (item.action === 'select') {
         enterDmSelection(msgId);
       } else if (item.action === 'edit') {
-        showModal('Mesajı düzenle', `
-          <div class="form-group">
-            <label for="edit-dm-message">Mesaj metni</label>
-            <textarea id="edit-dm-message" rows="5" maxlength="5000">${escHtml(messageRow.dataset.content)}</textarea>
-          </div>
-          <button type="button" class="btn btn-primary" id="save-dm-message-edit" style="width:100%">Kaydet</button>
-          <div id="edit-dm-message-error" class="form-error mt-4"></div>`);
-        const input = document.getElementById('edit-dm-message');
-        const saveButton = document.getElementById('save-dm-message-edit');
-        const errorMessage = document.getElementById('edit-dm-message-error');
-        input?.focus();
-        input?.setSelectionRange(input.value.length, input.value.length);
-        saveButton?.addEventListener('click', async () => {
-          const content = input.value.trim();
-          if (!content) {
-            if (errorMessage) errorMessage.textContent = 'Mesaj boş olamaz.';
-            return;
-          }
-          saveButton.disabled = true;
-          try {
-            const updated = await api(`/messages/${encodeURIComponent(msgId)}`, {
-              method: 'PUT',
-              body: JSON.stringify({ content }),
-            });
-            handleRealtimeDirectMessageEdit({
-              usernames: [currentUser.username, username],
-              message: updated,
-            });
-          } catch (error) {
-            if (errorMessage) errorMessage.textContent = error.message || 'Mesaj düzenlenemedi.';
-            saveButton.disabled = false;
-            return;
-          }
-          if (document.getElementById('edit-dm-message') === input) hideModal();
-          toast('Mesaj düzenlendi.');
-        });
+        openDmMessageEditor(messageRow, username);
       } else if (item.action === 'edit-music') {
         showDmSongPicker(async song => {
           const updated = await api(`/messages/${encodeURIComponent(msgId)}/music`, {
@@ -20186,13 +20236,12 @@ function bindPhotoFeed(feed) {
 
   realsMediaObserver?.disconnect();
   const realsCards = [...feed.querySelectorAll('.reals-media-card')];
+  let activeRealsCard = null;
   realsCards.forEach(card => {
     const video = card.querySelector('.reals-media-preview');
     if (!video) return;
     video.muted = true;
     video.playsInline = true;
-    video.addEventListener('playing', () => card.classList.add('is-playing'));
-    video.addEventListener('pause', () => card.classList.remove('is-playing'));
   });
   if (realsCards.length && 'IntersectionObserver' in window) {
     realsMediaObserver = new IntersectionObserver(entries => {
@@ -20200,11 +20249,16 @@ function bindPhotoFeed(feed) {
         const video = entry.target.querySelector('.reals-media-preview');
         if (!video) return;
         if (entry.isIntersecting && entry.intersectionRatio >= 0.35) {
+          if (activeRealsCard && activeRealsCard !== entry.target) {
+            activeRealsCard.querySelector('.reals-media-preview')?.pause();
+          }
+          activeRealsCard = entry.target;
           video.play().catch(error => {
             if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
           });
         } else {
           video.pause();
+          if (activeRealsCard === entry.target) activeRealsCard = null;
         }
       });
     }, { threshold: [0, 0.35, 0.6, 0.85] });
@@ -20212,7 +20266,7 @@ function bindPhotoFeed(feed) {
       realsMediaObserver.observe(card);
     });
   } else {
-    realsCards.forEach(card => card.querySelector('.reals-media-preview')?.play().catch(error => {
+    realsCards.slice(0, 1).forEach(card => card.querySelector('.reals-media-preview')?.play().catch(error => {
       if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
     }));
   }
