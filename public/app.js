@@ -19176,9 +19176,9 @@ async function renderPhotos(app) {
 }
 async function renderMediaExplore(app) {
   document.title = 'Medya Keşfet – ' + siteName;
-  app.innerHTML = `<div class="container page media-explore-page">
+  app.innerHTML = `<div class="container page photos-page media-explore-page">
     <header class="media-explore-hero">
-      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><span class="media-explore-kicker">CİGCİG MEDYA</span><h1>Keşfet</h1><p>Topluluğun paylaştığı herkese açık fotoğrafları bul.</p></div></div>
+      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Keşfet</h1></div></div>
       <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Fotoğraf, başlık veya kullanıcı ara..." autocomplete="off" aria-label="Fotoğraf ve kullanıcı ara" /></label>
     </header>
     <div id="media-explore-feed" class="photos-feed" aria-live="polite"><div class="loading-center"><div class="spinner"></div></div></div>

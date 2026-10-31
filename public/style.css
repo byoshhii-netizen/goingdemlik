@@ -7421,7 +7421,7 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 .orders-page .card-body { overflow-wrap:anywhere; }
 .resume-card-actions { display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px; }
 .resume-card-actions .btn { white-space:nowrap; }
-.media-explore-page { max-width:760px; }
+.media-explore-page { max-width:1120px; }
 .media-explore-hero { position:relative;display:grid;gap:18px;margin:0 0 18px;padding:22px;border:1px solid rgba(var(--accent-rgb),.2);border-radius:22px;background:radial-gradient(ellipse at 0 0,rgba(var(--accent-rgb),.16),transparent 58%),linear-gradient(145deg,var(--bg-card),var(--bg-secondary));box-shadow:0 16px 38px rgba(0,0,0,.12); }
 .media-explore-heading { display:flex;align-items:center;gap:13px;min-width:0; }
 .media-explore-icon { display:grid;place-items:center;width:48px;height:48px;flex:0 0 48px;border:1px solid rgba(var(--accent-rgb),.3);border-radius:16px;color:var(--accent-red2);background:rgba(var(--accent-rgb),.11);font-size:19px; }
@@ -7432,13 +7432,8 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 .media-explore-search:focus-within { transform:translateY(-1px);border-color:rgba(var(--accent-rgb),.6);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.09),0 10px 24px rgba(0,0,0,.12); }
 .media-explore-search input { width:100%;min-width:0;padding:12px 0;border:0;outline:0;background:transparent;color:var(--text-primary);box-shadow:none; }
 .media-explore-result[hidden] { display:none !important; }
-.media-explore-page .photos-feed { gap:14px; }
-.media-explore-page .photo-card { border:1px solid var(--border);border-radius:16px;background:var(--bg-card); }
 @media (max-width:600px) {
-  .media-explore-page { padding-left:12px !important;padding-right:12px !important; }
-  .media-explore-hero { padding:17px 14px;border-radius:18px; }
-  .media-explore-page .photos-feed { gap:0; }
-  .media-explore-page .photo-card { border:0;border-bottom:1px solid var(--border);border-radius:0; }
+  .media-explore-hero { margin-inline:12px;padding:17px 14px;border-radius:18px; }
   .orders-page .card-body[style*="justify-content:space-between"] { align-items:flex-start !important; }
   .resume-card-actions { align-items:stretch; }
 }
