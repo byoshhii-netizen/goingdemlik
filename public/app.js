@@ -86,6 +86,7 @@ let activeVideoPreviewObjectUrl = null;
 let storyComposerAudio = null;
 let activePhotoAudio = null;
 let photoAudioObserver = null;
+let realsMediaObserver = null;
 let siteName = 'CigCig';
 let defaultAvatarUrl = '';
 let loginRequiredEnabled = false;
@@ -8524,14 +8525,15 @@ function realsMediaCardHTML(v) {
   const route = `/reals/${encodeURIComponent(v.id)}`;
   const displayName = userDisplayName(v);
   const dateKey = mediaDateKey(v.created_at);
-  return `<article class="photo-card reals-media-card" data-reals-route="${route}" style="padding:0;overflow:hidden">
+  const liked = v.liked === true || v.liked === 1;
+  return `<article class="photo-card reals-media-card" data-reals-id="${escHtml(v.id)}" data-reals-slug="${escHtml(v.slug || v.id)}" data-owner-id="${escHtml(v.user_id)}" data-reals-route="${route}" style="padding:0;overflow:hidden">
     <div class="photo-card-head" style="padding:12px">
       ${avatarImg(v)}
       <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}">${escHtml(formatDate(v.created_at))}</time></a>` : ''}</div>
     </div>
     <div class="photo-media-wrap">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
-        ${cover ? `<img src="${escHtml(siteImageUrl(cover))}" class="photo-native" alt="${escHtml(v.title || 'Reals videosu')}" loading="lazy" />` : '<span class="reals-media-placeholder"><i class="fas fa-circle-play"></i></span>'}
+        <video class="photo-native reals-media-preview" src="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop preload="metadata" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
         <span class="reals-media-play"><i class="fas fa-play"></i></span>
       </a>
     </div>
@@ -8539,9 +8541,10 @@ function realsMediaCardHTML(v) {
       ${v.title ? `<h3>${escHtml(v.title)}</h3>` : ''}
       ${v.description ? hashtagDescriptionPreviewHTML(v.description, 'photo-caption-preview', 180) : ''}
       <div class="photo-actions reals-media-stats">
-        ${v.show_likes !== 0 ? `<span><i class="far fa-heart"></i> ${formatCount(v.like_count)}</span>` : ''}
-        <span><i class="far fa-comment"></i> ${formatCount(v.comment_count)}</span>
+        ${v.show_likes !== false && Number(v.show_likes) !== 0 ? `<button type="button" class="btn btn-ghost btn-sm reals-media-like${liked ? ' liked' : ''}" data-liked="${liked}" data-like-count="${Number(v.like_count) || 0}" aria-label="${liked ? 'Beğeniyi kaldır' : 'Reals videosunu beğen'}"><i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(v.like_count)}</span></button>` : ''}
+        ${v.allow_comments !== false && Number(v.allow_comments) !== 0 ? `<button type="button" class="btn btn-ghost btn-sm reals-media-comment" data-comment-count="${Number(v.comment_count) || 0}" aria-label="Yorumları aç"><i class="far fa-comment"></i> <span>${formatCount(v.comment_count)}</span></button>` : ''}
         <span><i class="fas fa-play"></i> ${formatCount(v.views)}</span>
+        <button type="button" class="btn btn-ghost btn-sm photo-share reals-media-share" aria-label="Reals bağlantısını paylaş"><i class="fas fa-share-alt"></i> Paylaş</button>
       </div>
     </div>
   </article>`;
@@ -9595,6 +9598,7 @@ async function renderBadges(app) {
 }
 
 function askBlockSettings(username) {
+  try { username = decodeURIComponent(username); } catch {}
   return new Promise(resolve => {
     showModal('Engelleme seçenekleri', `<div class="block-options">
       <div class="block-options-intro">
@@ -19898,6 +19902,161 @@ function bindPhotoFeed(feed) {
     }
   };
 
+  realsMediaObserver?.disconnect();
+  const realsCards = [...feed.querySelectorAll('.reals-media-card')];
+  realsCards.forEach(card => {
+    const video = card.querySelector('.reals-media-preview');
+    if (!video) return;
+    video.muted = true;
+    video.playsInline = true;
+    video.addEventListener('playing', () => card.classList.add('is-playing'));
+    video.addEventListener('pause', () => card.classList.remove('is-playing'));
+  });
+  if (realsCards.length && 'IntersectionObserver' in window) {
+    realsMediaObserver = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        const video = entry.target.querySelector('.reals-media-preview');
+        if (!video) return;
+        if (entry.isIntersecting && entry.intersectionRatio >= 0.35) {
+          video.play().catch(error => {
+            if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
+          });
+        } else {
+          video.pause();
+        }
+      });
+    }, { threshold: [0, 0.35, 0.6, 0.85] });
+    realsCards.forEach(card => {
+      realsMediaObserver.observe(card);
+    });
+  } else {
+    realsCards.forEach(card => card.querySelector('.reals-media-preview')?.play().catch(error => {
+      if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
+    }));
+  }
+
+  const openRealsMediaComments = async card => {
+    document.getElementById('photo-comments-sheet')?._closeComments?.();
+    const slug = card.dataset.realsSlug;
+    const sheet = document.createElement('div');
+    sheet.id = 'photo-comments-sheet';
+    sheet.className = 'reals-comments-sheet photo-comments-sheet';
+    sheet.innerHTML = `<div class="reals-comments-backdrop"></div><section class="reals-comments-panel" role="dialog" aria-modal="true" aria-label="Reals yorumları">
+      <header class="reals-comments-header"><strong>Yorumlar</strong><button type="button" class="reals-comments-close" aria-label="Yorumları kapat"><i class="fas fa-times"></i></button></header>
+      <div class="reals-comments-list"><div class="loading-center"><div class="spinner"></div></div></div>
+      ${currentUser ? '<form class="reals-comment-form"><textarea maxlength="1000" placeholder="Yorum yaz..." autocomplete="off"></textarea><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için <a href="/giris?returnTo=%2Fmedyakesfet" data-link>giriş yapın</a>.</div>'}
+    </section>`;
+    document.body.appendChild(sheet);
+    const closeOnEscape = event => {
+      if (event.key === 'Escape') sheet._closeComments();
+    };
+    const close = () => {
+      document.removeEventListener('keydown', closeOnEscape);
+      sheet.remove();
+    };
+    sheet._closeComments = close;
+    sheet.querySelector('.reals-comments-close').addEventListener('click', close);
+    sheet.querySelector('.reals-comments-backdrop').addEventListener('click', close);
+    document.addEventListener('keydown', closeOnEscape);
+    sheet.addEventListener('click', event => {
+      if (event.target.closest('a[data-link]')) close();
+    });
+    const list = sheet.querySelector('.reals-comments-list');
+    let comments = [];
+    const updateCommentCount = count => {
+      const button = card.querySelector('.reals-media-comment');
+      if (!button) return;
+      button.dataset.commentCount = String(count);
+      const label = button.querySelector('span');
+      if (label) label.textContent = formatCount(count);
+    };
+    const renderComments = () => {
+      list.innerHTML = comments.length
+        ? comments.map(comment => renderVideoComment(comment, Number(currentUser?.id) === Number(card.dataset.ownerId))).join('')
+        : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
+    };
+    const loadComments = async () => {
+      list.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+      try {
+        comments = await api('/video/' + encodeURIComponent(slug) + '/comments');
+        if (!document.body.contains(sheet)) return;
+        renderComments();
+        updateCommentCount(comments.length);
+      } catch (error) {
+        if (!document.body.contains(sheet)) return;
+        list.innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message || 'Yorumlar yüklenemedi.')}</p><button type="button" class="btn btn-outline btn-sm reals-media-comments-retry">Tekrar dene</button></div>`;
+      }
+    };
+    list.addEventListener('click', async event => {
+      const retryButton = event.target.closest('.reals-media-comments-retry');
+      if (retryButton) return loadComments();
+      const likeButton = event.target.closest('.video-comment-like');
+      if (likeButton) {
+        if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
+        likeButton.disabled = true;
+        try {
+          const result = await api('/video/' + encodeURIComponent(slug) + '/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
+          const count = likeButton.querySelector('.video-comment-count');
+          count.textContent = Math.max(0, (Number(count.textContent) || 0) + (result.liked ? 1 : -1));
+          likeButton.classList.toggle('liked', result.liked);
+          const icon = likeButton.querySelector('i');
+          if (icon) icon.className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+        } catch (error) { toast(error.message || 'Yorum beğenilemedi.', 'error'); }
+        finally { likeButton.disabled = false; }
+        return;
+      }
+      const editButton = event.target.closest('.video-comment-edit');
+      if (editButton) {
+        const content = await CigCigDialogs.prompt('Yorumunu güncelle', editButton.dataset.content, { title: 'Yorumu düzenle', multiline: true });
+        if (content === null) return;
+        try {
+          const updated = await api('/video/' + encodeURIComponent(slug) + '/comments/' + editButton.dataset.id, { method: 'PUT', body: JSON.stringify({ content: content.trim() }) });
+          comments = comments.map(comment => String(comment.id) === String(updated.id) ? { ...comment, ...updated } : comment);
+          renderComments();
+        } catch (error) { toast(error.message || 'Yorum düzenlenemedi.', 'error'); }
+        return;
+      }
+      const pinButton = event.target.closest('.video-comment-pin');
+      if (pinButton) {
+        try {
+          await api('/video/' + encodeURIComponent(slug) + '/comments/' + pinButton.dataset.id + '/pin', { method: 'POST' });
+          await loadComments();
+        } catch (error) { toast(error.message || 'Yorum sabitlenemedi.', 'error'); }
+        return;
+      }
+      const deleteButton = event.target.closest('.video-comment-delete');
+      if (deleteButton) {
+        if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
+        try {
+          const result = await api('/video/' + encodeURIComponent(slug) + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' });
+          comments = comments.filter(comment => String(comment.id) !== String(deleteButton.dataset.id));
+          renderComments();
+          updateCommentCount(result.comment_count ?? comments.length);
+        } catch (error) { toast(error.message || 'Yorum silinemedi.', 'error'); }
+      }
+    });
+    sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const input = form.querySelector('textarea');
+      const content = input.value.trim();
+      if (!content) return;
+      const button = form.querySelector('button');
+      button.disabled = true;
+      try {
+        const posted = await api('/video/' + encodeURIComponent(slug) + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        if (!document.body.contains(sheet)) return;
+        comments.push(posted);
+        renderComments();
+        input.value = '';
+        list.scrollTop = list.scrollHeight;
+        updateCommentCount(posted.comment_count ?? comments.length);
+      } catch (error) { toast(error.message || 'Yorum gönderilemedi.', 'error'); }
+      finally { button.disabled = false; }
+    });
+    await loadComments();
+  };
+
   const openPhotoComments = async card => {
     document.getElementById('photo-comments-sheet')?._closeComments?.();
     const sheet = document.createElement('div');
@@ -20069,6 +20228,28 @@ function bindPhotoFeed(feed) {
     if (!c) return;
     await openPhotoComments(c);
   });
+  feed.querySelectorAll('.reals-media-comment').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const card = button.closest('.reals-media-card');
+    if (card) await openRealsMediaComments(card);
+  }));
+  feed.querySelectorAll('.reals-media-share').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const card = button.closest('.reals-media-card');
+    if (!card) return;
+    const url = location.origin + card.dataset.realsRoute;
+    try {
+      if (navigator.share) await navigator.share({ title: 'CigCig Reals', text: 'Bu Reals videosuna göz at', url });
+      else {
+        await navigator.clipboard.writeText(url);
+        toast('Reals bağlantısı kopyalandı');
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') toast(error.message || 'Reals bağlantısı paylaşılamadı.', 'error');
+    }
+  }));
 
   feed.querySelectorAll('.photo-share').forEach(x => x.onclick = async e => {
     e.preventDefault();
@@ -20093,6 +20274,7 @@ function bindPhotoFeed(feed) {
     const icon = button.querySelector('i');
     if (icon) icon.className = (liked ? 'fas' : 'far') + ' fa-heart';
     button.classList.toggle('liked', liked);
+    if (button.classList.contains('reals-media-like')) button.setAttribute('aria-label', liked ? 'Beğeniyi kaldır' : 'Reals videosunu beğen');
     const label = button.querySelector('span');
     if (label && Number.isFinite(count)) label.textContent = formatCount(count);
   };
@@ -20122,6 +20304,28 @@ function bindPhotoFeed(feed) {
     if (!c) return;
     await submitPhotoLike(x, c);
   });
+  feed.querySelectorAll('.reals-media-like').forEach(button => button.addEventListener('click', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const card = button.closest('.reals-media-card');
+    if (!card) return;
+    if (!currentUser) return navigate('/giris?returnTo=' + encodeURIComponent(location.pathname + location.search));
+    if (button.disabled) return;
+    const liked = button.dataset.liked === 'true';
+    const count = Number(button.dataset.likeCount) || 0;
+    button.disabled = true;
+    updatePhotoLike(button, !liked, Math.max(0, count + (liked ? -1 : 1)));
+    if (!liked) showPhotoLikeAnimation(card);
+    try {
+      const result = await api('/video/' + encodeURIComponent(card.dataset.realsId) + '/like', { method: 'POST' });
+      updatePhotoLike(button, !!result.liked, Number(result.like_count));
+    } catch (error) {
+      updatePhotoLike(button, liked, count);
+      toast(error.message || 'Beğeni gönderilemedi.', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }));
   feed.querySelectorAll('.photo-native-link').forEach(imageLink => {
     let openTimer;
     let lastTouchTapAt = 0;
