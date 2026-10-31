@@ -16,8 +16,24 @@ const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const { Upload } = require('@aws-sdk/lib-storage');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { Server } = require('socket.io');
+const webpush = require('web-push');
 const { query: databaseQuery, pool, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
+
+const webPushPublicKey = String(process.env.WEB_PUSH_PUBLIC_KEY || '').trim();
+const webPushPrivateKey = String(process.env.WEB_PUSH_PRIVATE_KEY || '').trim();
+const webPushSubject = String(process.env.WEB_PUSH_SUBJECT || 'mailto:admin@cigcig.xyz').trim();
+let webPushConfigured = false;
+if (webPushPublicKey && webPushPrivateKey) {
+  try {
+    webpush.setVapidDetails(webPushSubject, webPushPublicKey, webPushPrivateKey);
+    webPushConfigured = true;
+  } catch (error) {
+    console.error('[web-push] VAPID settings are invalid:', error.message);
+  }
+} else {
+  console.warn('[web-push] Push delivery is disabled. Configure WEB_PUSH_PUBLIC_KEY and WEB_PUSH_PRIVATE_KEY.');
+}
 
 function createPlaylistPublicId() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -63,6 +79,180 @@ async function query(text, params = []) {
   }
   return result;
 }
+function pushCategoryForNotification(type) {
+  if (['announcement', 'restriction', 'content_suspended', 'account_email_reminder', 'purchase'].includes(type)) return 'system';
+  if (String(type || '').startsWith('group_') || String(type || '').startsWith('forum_')) return 'communities';
+  return 'social';
+}
+
+async function sendWebPushToUser(userId, category, notification) {
+  if (!webPushConfigured) return false;
+  try {
+    const { rows: subscriptions } = await query(
+      `SELECT s.id,s.endpoint,s.p256dh,s.auth,
+        COALESCE(p.messages,TRUE) AS allow_messages,
+        COALESCE(p.message_previews,TRUE) AS message_previews,
+        COALESCE(p.social,TRUE) AS allow_social,
+        COALESCE(p.communities,TRUE) AS allow_communities,
+        COALESCE(p.system,TRUE) AS allow_system
+       FROM push_subscriptions s
+       LEFT JOIN push_preferences p ON p.user_id=s.user_id
+       WHERE s.user_id=$1`,
+      [userId]
+    );
+    const allowedColumn = {
+      messages: 'allow_messages',
+      social: 'allow_social',
+      communities: 'allow_communities',
+      system: 'allow_system'
+    }[category];
+    if (!allowedColumn) return false;
+
+    const dataUrl = String(notification.url || notification.link || '/bildirimler');
+    const targetUrl = dataUrl.startsWith('/') && !dataUrl.startsWith('//') ? dataUrl : '/bildirimler';
+    const payload = JSON.stringify({
+      title: String(notification.title || 'CigCig').slice(0, 120),
+      body: String(category === 'messages' && subscriptions[0]?.message_previews === false
+        ? 'Sana yeni bir mesaj gönderdi.'
+        : notification.body || 'Yeni bir bildirimin var.').slice(0, 240),
+      tag: `cigcig-${category}-${notification.thread || notification.id || notification.messageId || Date.now()}`,
+      data: { url: targetUrl }
+    });
+
+    let deliveryFailed = false;
+    for (const subscription of subscriptions) {
+      if (!subscription[allowedColumn]) continue;
+      try {
+        await webpush.sendNotification({
+          endpoint: subscription.endpoint,
+          keys: { p256dh: subscription.p256dh, auth: subscription.auth }
+        }, payload, {
+          TTL: 86400,
+          urgency: category === 'messages' ? 'high' : 'normal'
+        });
+        await query('UPDATE push_subscriptions SET last_used_at=NOW() WHERE id=$1', [subscription.id]);
+      } catch (error) {
+        if (error.statusCode === 404 || error.statusCode === 410) {
+          await query('DELETE FROM push_subscriptions WHERE id=$1', [subscription.id]);
+        } else {
+          deliveryFailed = true;
+          console.error(`[web-push] Delivery failed for subscription ${subscription.id}:`, error.message);
+        }
+      }
+    }
+    return deliveryFailed;
+  } catch (error) {
+    console.error('[web-push] User notification delivery failed:', error.message);
+    throw error;
+  }
+}
+
+let processingPushQueue = false;
+async function processPushDeliveryQueue() {
+  if (processingPushQueue || !pool) return;
+  processingPushQueue = true;
+  let client;
+  let queued = [];
+  try {
+    await ensureStoryVisibilitySchema();
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const result = await client.query(
+      `SELECT q.notification_id,q.attempts,n.user_id,n.type,n.title,n.body,n.link,n.actor_username,
+        (n.expires_at IS NULL OR n.expires_at>NOW())
+        AND (n.type<>'new_story' OR NOT EXISTS (
+          SELECT 1 FROM user_story_visibility usv JOIN users actor ON actor.id=usv.hidden_user_id
+          WHERE usv.user_id=n.user_id AND LOWER(actor.username)=LOWER(n.actor_username)
+        ))
+        AND (n.type='announcement' OR NOT EXISTS (
+          SELECT 1 FROM users actor JOIN blocks b ON b.blocker_id=actor.id
+          WHERE actor.username=n.actor_username AND b.blocked_id=n.user_id
+        )) AS is_visible
+       FROM push_delivery_queue q
+       JOIN notifications n ON n.id=q.notification_id
+       WHERE q.next_attempt_at<=NOW()
+       ORDER BY q.created_at
+       FOR UPDATE OF q SKIP LOCKED
+       LIMIT 20`
+    );
+    queued = result.rows;
+    if (webPushConfigured && queued.length) {
+      await client.query(
+        `UPDATE push_delivery_queue
+         SET next_attempt_at=NOW() + INTERVAL '5 minutes'
+         WHERE notification_id=ANY($1::bigint[])`,
+        [queued.map(notification => notification.notification_id)]
+      );
+    } else if (queued.length) {
+      await client.query('DELETE FROM push_delivery_queue WHERE notification_id=ANY($1::bigint[])', [
+        queued.map(notification => notification.notification_id)
+      ]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(rollbackError => console.error('[web-push] Queue rollback failed:', rollbackError.message));
+    console.error('[web-push] Queue processing failed:', error.message);
+    processingPushQueue = false;
+    return;
+  } finally {
+    client?.release();
+  }
+
+  if (!webPushConfigured || !queued.length) {
+    processingPushQueue = false;
+    return;
+  }
+
+  try {
+    for (const notification of queued) {
+      try {
+        if (!notification.is_visible) {
+          await query('DELETE FROM push_delivery_queue WHERE notification_id=$1', [notification.notification_id]);
+          continue;
+        }
+        const deliveryFailed = await sendWebPushToUser(notification.user_id, pushCategoryForNotification(notification.type), {
+          id: notification.notification_id,
+          title: notification.title,
+          body: notification.body,
+          link: notification.link
+        });
+        if (!deliveryFailed) {
+          await query('DELETE FROM push_delivery_queue WHERE notification_id=$1', [notification.notification_id]);
+        } else {
+          const attempts = Number(notification.attempts) + 1;
+          if (attempts >= 8) {
+            await query('DELETE FROM push_delivery_queue WHERE notification_id=$1', [notification.notification_id]);
+          } else {
+            await query(
+              `UPDATE push_delivery_queue
+               SET attempts=$2,next_attempt_at=NOW() + ($3 * INTERVAL '1 second')
+               WHERE notification_id=$1`,
+              [notification.notification_id, attempts, Math.min(3600, 30 * (2 ** attempts))]
+            );
+          }
+        }
+      } catch (error) {
+        const attempts = Number(notification.attempts) + 1;
+        if (attempts >= 8) {
+          console.error(`[web-push] Giving up on notification ${notification.notification_id}:`, error.message);
+          await query('DELETE FROM push_delivery_queue WHERE notification_id=$1', [notification.notification_id]);
+        } else {
+          await query(
+            `UPDATE push_delivery_queue
+             SET attempts=$2,next_attempt_at=NOW() + ($3 * INTERVAL '1 second')
+             WHERE notification_id=$1`,
+            [notification.notification_id, attempts, Math.min(3600, 30 * (2 ** attempts))]
+          );
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[web-push] Delivery queue failed:', error.message);
+  } finally {
+    processingPushQueue = false;
+  }
+}
+
 function closeFriendsVisibilitySql(contentAlias, viewerIdParam) {
   return `(COALESCE(${contentAlias}.close_friends_only,0)=0
     OR ${contentAlias}.user_id=${viewerIdParam}
@@ -819,17 +1009,31 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
       ELSE (COALESCE(mute_forever_user2,0)=1 OR (muted_until_user2 IS NOT NULL AND muted_until_user2>NOW()))
       END AS muted
       FROM dm_conversations WHERE id=$1`, [conversationId, recipient.id])
-      .then(({ rows }) => io.to(`user:${recipient.id}`).emit('dm:incoming', {
-        conversationId,
-        messageId: message.id,
-        senderId: sender.id,
-        username: sender.username,
-        name: sender.nickname || sender.username,
-        avatar: sender.avatar || '',
-        avatarRemoved: sender.avatar_removed,
-        muted: rows[0]?.muted === true,
-        preview: message.content || (message.image_url || message.image_urls?.length ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
-      }))
+      .then(({ rows }) => {
+        const muted = rows[0]?.muted === true;
+        const preview = message.content || (message.image_url || message.image_urls?.length
+          ? 'Fotoğraf'
+          : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj');
+        io.to(`user:${recipient.id}`).emit('dm:incoming', {
+          conversationId,
+          messageId: message.id,
+          senderId: sender.id,
+          username: sender.username,
+          name: sender.nickname || sender.username,
+          avatar: sender.avatar || '',
+          avatarRemoved: sender.avatar_removed,
+          muted,
+          preview
+        });
+        if (muted) return;
+        return sendWebPushToUser(recipient.id, 'messages', {
+          messageId: message.id,
+          thread: conversationId,
+          title: sender.nickname || sender.username,
+          body: preview,
+          url: `/mesajlar/${encodeURIComponent(sender.username)}`
+        });
+      })
       .catch(error => console.warn('DM notification mute state could not be loaded:', error.message || error));
   }
 }
@@ -2765,6 +2969,81 @@ app.get('/api/notifications', authMiddleware, async (req, res) => {
     [req.user.id, req.user.username]
   );
   res.json(rows);
+});
+
+app.get('/api/push/config', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ enabled: webPushConfigured, publicKey: webPushConfigured ? webPushPublicKey : '' });
+});
+
+app.get('/api/push/settings', authMiddleware, async (req, res) => {
+  await query(
+    'INSERT INTO push_preferences(user_id) VALUES($1) ON CONFLICT(user_id) DO NOTHING',
+    [req.user.id]
+  );
+  const [preferences, subscriptions] = await Promise.all([
+    query('SELECT messages,message_previews,social,communities,system FROM push_preferences WHERE user_id=$1', [req.user.id]),
+    query('SELECT COUNT(*)::int AS count FROM push_subscriptions WHERE user_id=$1', [req.user.id])
+  ]);
+  res.json({
+    preferences: preferences.rows[0],
+    subscription_count: subscriptions.rows[0].count
+  });
+});
+
+app.put('/api/push/settings', authMiddleware, async (req, res) => {
+  const preferenceKeys = ['messages', 'message_previews', 'social', 'communities', 'system'];
+  const preferences = req.body?.preferences;
+  if (!preferences || preferenceKeys.some(key => typeof preferences[key] !== 'boolean')) {
+    return res.status(400).json({ error: 'Bildirim tercihleri geçersiz.' });
+  }
+  await query(
+    `INSERT INTO push_preferences(user_id,messages,message_previews,social,communities,system,updated_at)
+     VALUES($1,$2,$3,$4,$5,$6,NOW())
+     ON CONFLICT(user_id) DO UPDATE SET
+       messages=EXCLUDED.messages,message_previews=EXCLUDED.message_previews,
+       social=EXCLUDED.social,communities=EXCLUDED.communities,system=EXCLUDED.system,updated_at=NOW()`,
+    [req.user.id, preferences.messages, preferences.message_previews, preferences.social, preferences.communities, preferences.system]
+  );
+  res.json({ ok: true, preferences });
+});
+
+app.post('/api/push/subscriptions', authMiddleware, async (req, res) => {
+  if (!webPushConfigured) return res.status(503).json({ error: 'Anlık bildirim hizmeti henüz yapılandırılmadı.' });
+  const subscription = req.body?.subscription;
+  const endpoint = String(subscription?.endpoint || '').trim();
+  const p256dh = String(subscription?.keys?.p256dh || '').trim();
+  const auth = String(subscription?.keys?.auth || '').trim();
+  let endpointUrl;
+  try { endpointUrl = new URL(endpoint); } catch {}
+  const allowedPushHost = endpointUrl && (
+    endpointUrl.hostname === 'fcm.googleapis.com'
+    || endpointUrl.hostname.endsWith('.push.apple.com')
+    || endpointUrl.hostname.endsWith('.notify.windows.com')
+    || endpointUrl.hostname.endsWith('.push.services.mozilla.com')
+  );
+  if (!endpointUrl || endpointUrl.protocol !== 'https:' || endpointUrl.username || endpointUrl.password
+    || endpointUrl.port && endpointUrl.port !== '443' || !allowedPushHost
+    || endpoint.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(p256dh) || !/^[A-Za-z0-9_-]+$/.test(auth)
+    || p256dh.length > 200 || auth.length > 100) {
+    return res.status(400).json({ error: 'Bildirim aboneliği geçersiz.' });
+  }
+  await query(
+    `INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth,user_agent,last_used_at)
+     VALUES($1,$2,$3,$4,$5,NOW())
+     ON CONFLICT(endpoint) DO UPDATE SET
+       user_id=EXCLUDED.user_id,p256dh=EXCLUDED.p256dh,auth=EXCLUDED.auth,
+       user_agent=EXCLUDED.user_agent,last_used_at=NOW()`,
+    [req.user.id, endpoint, p256dh, auth, String(req.get('user-agent') || '').slice(0, 512)]
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/push/subscriptions', authMiddleware, async (req, res) => {
+  const endpoint = String(req.body?.endpoint || '').trim();
+  if (!endpoint) return res.status(400).json({ error: 'Cihaz aboneliği belirtilmedi.' });
+  await query('DELETE FROM push_subscriptions WHERE user_id=$1 AND endpoint=$2', [req.user.id, endpoint]);
+  res.json({ ok: true });
 });
 
 app.get('/api/notifications/unread-count', authMiddleware, async (req, res) => {
@@ -4873,6 +5152,17 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     senderId: req.user.id,
     message: msg[0]
   });
+  const groupPreview = content.trim() || (imageUrls.length ? 'Fotoğraf' : shared_gif_url ? 'GIF' : shared_song_id ? 'Müzik' : 'Yeni mesaj');
+  void Promise.all(memberRows
+    .filter(member => String(member.user_id) !== String(req.user.id))
+    .map(member => sendWebPushToUser(member.user_id, 'communities', {
+      messageId: msg[0].id,
+      thread: `group-${group.id}`,
+      title: `${group.name} · ${req.user.nickname || req.user.username}`,
+      body: groupPreview,
+      url: `/grup/${encodeURIComponent(group.slug)}`
+    })))
+    .catch(error => console.error('[web-push] Group message delivery failed:', error.message));
   res.json(msg[0]);
 });
 
@@ -10884,6 +11174,13 @@ app.post('/api/voice-calls', authMiddleware, async (req, res) => {
   if (active.length) return res.status(409).json({ error: 'Zaten aktif bir aramanız var' });
   const id = randomUUID();
   await query('INSERT INTO voice_calls (id,caller_id,callee_id) VALUES ($1,$2,$3)', [id, req.user.id, target[0].id]);
+  void sendWebPushToUser(target[0].id, 'messages', {
+    messageId: id,
+    thread: `call-${id}`,
+    title: 'Gelen CigCig sesli araması',
+    body: `${req.user.nickname || req.user.username} seni arıyor.`,
+    url: `/mesajlar/${encodeURIComponent(req.user.username)}`
+  }).catch(error => console.error('[web-push] Incoming call delivery failed:', error.message));
   res.json({ id, status: 'ringing', other: target[0] });
 });
 
@@ -13482,6 +13779,8 @@ app.get('*', (req, res) => {
 });
 
 initDb().then(() => {
+  const pushDeliveryTimer = setInterval(processPushDeliveryQueue, 2000);
+  pushDeliveryTimer.unref();
   sendAccountEmailReminders();
   setInterval(sendAccountEmailReminders, 15 * 60 * 1000);
   return query(`CREATE TABLE IF NOT EXISTS photo_likes (
@@ -13757,6 +14056,17 @@ initDb().then(() => {
           messageId: message.id,
           message
         });
+        const channelPreview = content.trim() || (image_url ? 'Fotoğraf' : 'Yeni mesaj');
+        void Promise.all([...recipientIds]
+          .filter(userId => userId !== String(req.user.id))
+          .map(userId => sendWebPushToUser(userId, 'communities', {
+            messageId: message.id,
+            thread: `channel-${message.channel_id}`,
+            title: `${req.user.nickname || req.user.username} · CigCig grup kanalı`,
+            body: channelPreview,
+            url: `/grup/${encodeURIComponent(slug)}`
+          })))
+          .catch(error => console.error('[web-push] Group channel delivery failed:', error.message));
         res.json(message);
       } catch (e) {
         console.error('Mesaj gönderme hatası:', e.message);

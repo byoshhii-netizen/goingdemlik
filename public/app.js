@@ -1726,6 +1726,7 @@ function updateAppIcon(user) {
 }
 
 const PWA_INSTALL_KEY = 'cigcig_pwa_installed';
+const PWA_INSTALL_PROMPT_KEY = 'cigcig_pwa_install_prompt_accepted';
 let deferredPwaInstallPrompt = null;
 let pwaInstallDialogShown = false;
 
@@ -1748,10 +1749,6 @@ function isPwaAlreadyInstalled() {
   }
 }
 
-function syncPwaInstallMenu() {
-  $('#pwa-install-menu-item')?.classList.toggle('hidden', isPwaAlreadyInstalled());
-}
-
 function showPwaInstallHelp() {
   const isApple = /iphone|ipad|ipod/i.test(navigator.userAgent)
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -1763,8 +1760,12 @@ function showPwaInstallHelp() {
   help.classList.remove('hidden');
 }
 
-function showPwaInstallDialog({ force = false } = {}) {
-  if ((!force && pwaInstallDialogShown) || isPwaAlreadyInstalled() || !isPwaInstallSupportedDevice()) return;
+function showPwaInstallDialog({ force = false, automatic = false } = {}) {
+  let promptAccepted = false;
+  try { promptAccepted = localStorage.getItem(PWA_INSTALL_PROMPT_KEY) === '1'; } catch (error) {
+    console.warn('PWA teklif durumu okunamadı:', error.message);
+  }
+  if ((!force && pwaInstallDialogShown) || (automatic && promptAccepted) || isPwaAlreadyInstalled() || !isPwaInstallSupportedDevice()) return;
   pwaInstallDialogShown = true;
   showModal('CigCig’i indirmek ister misiniz?', `
     <div class="pwa-install-content">
@@ -1779,6 +1780,9 @@ function showPwaInstallDialog({ force = false } = {}) {
   `, 'pwa-install-modal');
   $('#pwa-install-now')?.addEventListener('click', async () => {
     if (!deferredPwaInstallPrompt) {
+      try { localStorage.setItem(PWA_INSTALL_PROMPT_KEY, '1'); } catch (error) {
+        console.warn('PWA teklif tercihi kaydedilemedi:', error.message);
+      }
       showPwaInstallHelp();
       return;
     }
@@ -1788,11 +1792,16 @@ function showPwaInstallDialog({ force = false } = {}) {
     if (button) button.disabled = true;
     try {
       await installPrompt.prompt();
-      await installPrompt.userChoice;
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') {
+        try { localStorage.setItem(PWA_INSTALL_PROMPT_KEY, '1'); } catch (error) {
+          console.warn('PWA teklif tercihi kaydedilemedi:', error.message);
+        }
+      }
       hideModal();
     } catch (error) {
       console.error('CigCig yükleme penceresi açılamadı:', error);
-      toast('Yükleme penceresi açılamadı. Menüden “Uygulamayı indir” seçeneğini deneyin.', 'error');
+      toast('Yükleme penceresi açılamadı. Ayarlar > Uygulama bölümünden tekrar deneyin.', 'error');
       if (button) button.disabled = false;
     }
   });
@@ -1810,7 +1819,9 @@ window.addEventListener('appinstalled', () => {
   } catch (error) {
     console.warn('PWA kurulum durumu kaydedilemedi:', error.message);
   }
-  syncPwaInstallMenu();
+  try { localStorage.setItem(PWA_INSTALL_PROMPT_KEY, '1'); } catch (error) {
+    console.warn('PWA teklif tercihi kaydedilemedi:', error.message);
+  }
   if ($('#modal')?.classList.contains('pwa-install-modal')) hideModal();
 });
 
@@ -1821,9 +1832,8 @@ if (isPwaRunningStandalone()) {
     console.warn('PWA kurulum durumu kaydedilemedi:', error.message);
   }
 }
-syncPwaInstallMenu();
 if (isPwaInstallSupportedDevice() && !isPwaAlreadyInstalled()) {
-  window.setTimeout(showPwaInstallDialog, 1200);
+  window.setTimeout(() => showPwaInstallDialog({ automatic: true }), 1200);
 }
 
 // ===== IÇERIK RENDER (hashtag + mention) =====
@@ -3722,6 +3732,7 @@ function showLogoutConfirmation() {
       console.warn('Çevrimiçi oturum kapatılamadı:', error.message);
     }
   }
+  await removePushSubscriptionForLogout();
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
   stopMusicPlaybackForAccountChange();
   currentToken = null; currentUser = null;
@@ -3743,11 +3754,6 @@ $('#mobile-toggle').addEventListener('click', () => {
   $('#mobile-toggle').setAttribute('aria-label', isOpening ? 'Menüyü kapat' : 'Menüyü aç');
   $('#mobile-toggle i').classList.toggle('fa-bars', !isOpening);
   $('#mobile-toggle i').classList.toggle('fa-xmark', isOpening);
-});
-
-$('#pwa-install-menu-item')?.addEventListener('click', () => {
-  closeMobileMenu();
-  showPwaInstallDialog({ force: true });
 });
 
 $('#mobile-new-toggle')?.addEventListener('click', async e => {
@@ -10813,6 +10819,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="profile-visibility"><i class="fas fa-sliders"></i> Profil Seçenekleri</div>
         <div class="settings-nav-item" data-section="dm-lock"><i class="fas fa-lock"></i> Sohbet Kilidi</div>
         <div class="settings-nav-item" data-section="notifications"><i class="fas fa-bell"></i> Bildirimler</div>
+        <div class="settings-nav-item" data-section="app"><i class="fas fa-mobile-screen-button"></i> Uygulama</div>
         <div class="settings-nav-item" data-section="account" style="color:var(--accent-red2)"><i class="fas fa-exclamation-triangle"></i> Hesap</div>
       </div>
       <div id="settings-content"></div>
@@ -10841,6 +10848,150 @@ async function renderSettings(app) {
       renderSettingsSection(item.dataset.section);
     });
   });
+}
+
+function vapidKeyToBytes(base64Key) {
+  const padding = '='.repeat((4 - base64Key.length % 4) % 4);
+  const base64 = (base64Key + padding).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+}
+
+async function removePushSubscriptionForLogout() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    await api('/push/subscriptions', {
+      method: 'DELETE',
+      body: JSON.stringify({ endpoint: subscription.endpoint })
+    });
+    await subscription.unsubscribe();
+  } catch (error) {
+    console.warn('Çıkışta bu cihazın bildirim aboneliği kaldırılamadı:', error.message);
+  }
+}
+
+async function renderPushSettingsControls() {
+  const status = $('#push-device-status');
+  const toggle = $('#push-device-toggle');
+  const prefsForm = $('#push-preferences-form');
+  const saveButton = $('#push-preferences-save');
+  if (!status || !toggle || !prefsForm || !saveButton) return;
+  try {
+    const [configuration, data] = await Promise.all([
+      api('/push/config'),
+      api('/push/settings')
+    ]);
+    const supported = 'Notification' in window
+      && 'serviceWorker' in navigator
+      && 'PushManager' in window;
+    const appleMobile = /iphone|ipad|ipod/i.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const appleNeedsHomeScreen = appleMobile && !isPwaRunningStandalone();
+    let registration = null;
+    let subscription = null;
+    if (supported) {
+      registration = await navigator.serviceWorker.ready;
+      subscription = await registration.pushManager.getSubscription();
+    }
+
+    status.classList.remove('is-error', 'is-success');
+    if (!supported) {
+      status.textContent = 'Bu tarayıcı Web Push bildirimlerini desteklemiyor.';
+      toggle.disabled = true;
+    } else if (appleNeedsHomeScreen) {
+      status.textContent = 'iPhone ve iPad’de anlık bildirimleri açmak için önce Ayarlar > Uygulama bölümünden CigCig’i ana ekrana ekle ve uygulama simgesinden aç.';
+      toggle.disabled = true;
+    } else if (!configuration.enabled) {
+      status.textContent = 'Anlık bildirim hizmeti sunucu tarafında henüz yapılandırılmadı.';
+      toggle.disabled = true;
+    } else if (Notification.permission === 'denied') {
+      status.textContent = 'Bildirim izni tarayıcı ayarlarında kapalı. CigCig için bildirim iznini cihaz ayarlarından açmalısın.';
+      status.classList.add('is-error');
+      toggle.disabled = true;
+    } else {
+      status.textContent = subscription
+        ? `Bu cihazda bildirimler açık${data.subscription_count > 1 ? ` · ${data.subscription_count} cihaz bağlı` : ''}.`
+        : 'Bu cihazda anlık bildirimler kapalı.';
+      if (subscription) status.classList.add('is-success');
+      toggle.disabled = false;
+    }
+    toggle.dataset.active = String(Boolean(subscription));
+    toggle.innerHTML = subscription
+      ? '<i class="fas fa-bell-slash" aria-hidden="true"></i> Bu cihazda kapat'
+      : '<i class="fas fa-bell" aria-hidden="true"></i> Bu cihazda aç';
+    toggle.dataset.publicKey = configuration.publicKey || '';
+    toggle.dataset.supported = String(supported);
+    toggle.dataset.configured = String(Boolean(configuration.enabled));
+
+    Object.entries(data.preferences || {}).forEach(([key, value]) => {
+      const input = prefsForm.querySelector(`[name="${key}"]`);
+      if (input) input.checked = value === true;
+    });
+    prefsForm.querySelectorAll('input').forEach(input => { input.disabled = !configuration.enabled; });
+    saveButton.disabled = !configuration.enabled;
+  } catch (error) {
+    status.textContent = `Bildirim ayarları yüklenemedi: ${error.message}`;
+    status.classList.add('is-error');
+    toggle.disabled = true;
+    saveButton.disabled = true;
+  }
+}
+
+async function togglePushNotifications(button) {
+  const status = $('#push-device-status');
+  const wasActive = button.dataset.active === 'true';
+  button.disabled = true;
+  try {
+    if (wasActive) {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        await renderPushSettingsControls();
+        return;
+      }
+      await api('/push/subscriptions', {
+        method: 'DELETE',
+        body: JSON.stringify({ endpoint: subscription.endpoint })
+      });
+      await subscription.unsubscribe();
+    } else {
+      if (Notification.permission !== 'granted') {
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+          throw new Error(permission === 'denied'
+            ? 'Bildirim izni tarayıcı ayarlarından kapalı.'
+            : 'Bildirim izni verilmedi.');
+        }
+      }
+      const publicKey = button.dataset.publicKey;
+      if (!button.dataset.configured || !publicKey) throw new Error('Anlık bildirim hizmeti henüz yapılandırılmadı.');
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      const activeSubscription = subscription || await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: vapidKeyToBytes(publicKey)
+      });
+      try {
+        await api('/push/subscriptions', {
+          method: 'POST',
+          body: JSON.stringify({ subscription: activeSubscription.toJSON() })
+        });
+      } catch (error) {
+        if (!subscription) await activeSubscription.unsubscribe();
+        throw error;
+      }
+    }
+    await renderPushSettingsControls();
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || 'Bildirim ayarı değiştirilemedi.';
+      status.classList.add('is-error');
+    }
+    toast(error.message || 'Bildirim ayarı değiştirilemedi.', 'error');
+    button.disabled = false;
+  }
 }
 
 async function renderSettingsSection(section) {
@@ -11795,8 +11946,62 @@ async function renderSettingsSection(section) {
         }
       };
     });
+  } else if (section === 'app') {
+    const installed = isPwaAlreadyInstalled();
+    const supportsInstall = isPwaInstallSupportedDevice();
+    el.innerHTML = `
+      <div class="card settings-app-card">
+        <div class="card-header"><span><i class="fas fa-mobile-screen-button" style="color:var(--accent-red2);margin-right:6px"></i>CigCig uygulaması</span></div>
+        <div class="card-body">
+          <div class="settings-app-install">
+            <img src="/icons/cigcig-192.png" alt="CigCig uygulama simgesi" />
+            <div class="settings-app-install-copy">
+              <strong>${installed ? 'CigCig bu cihaza eklenmiş' : 'CigCig’i ana ekrana ekle'}</strong>
+              <p>${installed
+                ? 'CigCig’i ana ekrandaki uygulama simgesinden açabilirsin.'
+                : supportsInstall
+                  ? 'Daha hızlı aç, tam ekran kullan ve uygulama bildirimlerini bu cihazda al.'
+                  : 'Telefon veya tablet tarayıcından CigCig’i ana ekrana ekleyebilirsin.'}</p>
+            </div>
+          </div>
+          ${installed
+            ? '<div class="settings-app-installed"><i class="fas fa-circle-check"></i> Ana ekrana eklendi</div>'
+            : `<button type="button" class="btn btn-primary settings-app-install-button" id="settings-pwa-install" ${supportsInstall ? '' : 'disabled'}><i class="fas fa-download"></i> Ana ekrana ekle</button>
+              ${supportsInstall ? '' : '<p class="form-hint">Kurulum seçeneği telefondaki veya tabletteki tarayıcıdan kullanılabilir.</p>'}`}
+        </div>
+      </div>
+      <div class="card settings-app-card">
+        <div class="card-header"><span><i class="fas fa-bell" style="color:var(--accent-red2);margin-right:6px"></i>Uygulama bildirimleri</span></div>
+        <div class="card-body">
+          <p class="settings-app-push-copy">CigCig kapalıyken gelen mesaj ve bildirimleri cihazında alabilmek için Bildirimler ayarlarından bu cihazı etkinleştir.</p>
+          <button type="button" class="btn btn-outline" id="settings-open-notifications"><i class="fas fa-sliders"></i> Bildirim tercihlerini aç</button>
+        </div>
+      </div>`;
+    $('#settings-pwa-install')?.addEventListener('click', () => showPwaInstallDialog({ force: true }));
+    $('#settings-open-notifications')?.addEventListener('click', () => {
+      const notificationsNav = document.querySelector('.settings-nav-item[data-section="notifications"]');
+      notificationsNav?.click();
+    });
   } else if (section === 'notifications') {
     el.innerHTML = `
+      <div class="card push-settings-card">
+        <div class="card-header"><span><i class="fas fa-mobile-screen-button" style="color:var(--accent-red2);margin-right:6px"></i>Telefon ve uygulama bildirimleri</span></div>
+        <div class="card-body">
+          <p class="push-settings-intro">CigCig kapalıyken de yeni mesajları ve bildirimleri bu cihazda al. Bildirim izni yalnızca aşağıdaki düğmeye dokunduğunda istenir.</p>
+          <div class="push-device-status" id="push-device-status" role="status" aria-live="polite">Bildirim desteği kontrol ediliyor…</div>
+          <button type="button" class="btn btn-primary push-device-toggle" id="push-device-toggle" disabled><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Kontrol ediliyor</button>
+          <fieldset class="push-preferences" id="push-preferences-form">
+            <legend>Hangi bildirimleri alacaksın?</legend>
+            <label class="push-preference-option"><span><strong>Mesajlar ve aramalar</strong><small>Yeni özel mesajlar ve gelen sesli aramalar</small></span><input type="checkbox" name="messages" /></label>
+            <label class="push-preference-option push-preference-nested"><span><strong>Mesaj içeriğini göster</strong><small>Kapalıysa kilit ekranında yalnızca yeni mesaj bilgisi görünür</small></span><input type="checkbox" name="message_previews" /></label>
+            <label class="push-preference-option"><span><strong>Sosyal etkileşimler</strong><small>Takip, beğeni, yorum ve etiket bildirimleri</small></span><input type="checkbox" name="social" /></label>
+            <label class="push-preference-option"><span><strong>Topluluklar</strong><small>Grup ve forum etkinlikleri</small></span><input type="checkbox" name="communities" /></label>
+            <label class="push-preference-option"><span><strong>CigCig duyuruları ve hesap bildirimleri</strong><small>Duyurular, güvenlik ve hesapla ilgili önemli bilgiler</small></span><input type="checkbox" name="system" /></label>
+          </fieldset>
+          <button type="button" class="btn btn-outline push-preferences-save" id="push-preferences-save" disabled><i class="fas fa-save"></i> Tercihleri kaydet</button>
+          <p class="push-settings-platform-note">iPhone ve iPad’de uygulamayı önce Ayarlar &gt; Uygulama bölümünden ana ekrana ekle. Web Push için iOS/iPadOS 16.4 veya üzeri gerekir. Bildirimler, cihaz ve tarayıcı izin verdiğinde çalışır.</p>
+        </div>
+      </div>
       <div class="card">
         <div class="card-header"><span><i class="fas fa-bell" style="color:var(--accent-red2);margin-right:6px"></i>Bildirim Ayarları</span></div>
         <div class="card-body">
@@ -11812,6 +12017,29 @@ async function renderSettingsSection(section) {
           <div id="notif-settings-msg" class="form-error mt-4"></div>
         </div>
       </div>`;
+    $('#push-device-toggle')?.addEventListener('click', event => togglePushNotifications(event.currentTarget));
+    $('#push-preferences-save')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const status = $('#push-device-status');
+      button.disabled = true;
+      const preferences = Object.fromEntries([...$('#push-preferences-form').querySelectorAll('input[name]')]
+        .map(input => [input.name, input.checked]));
+      try {
+        await api('/push/settings', { method: 'PUT', body: JSON.stringify({ preferences }) });
+        status.textContent = 'Bildirim tercihlerin kaydedildi.';
+        status.classList.remove('is-error');
+        status.classList.add('is-success');
+        toast('Bildirim tercihleri kaydedildi');
+      } catch (error) {
+        status.textContent = `Bildirim tercihleri kaydedilemedi: ${error.message}`;
+        status.classList.remove('is-success');
+        status.classList.add('is-error');
+        toast(error.message || 'Bildirim tercihleri kaydedilemedi.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+    void renderPushSettingsControls();
     document.querySelectorAll('.tag-permission-option').forEach(option => option.addEventListener('click', async event => {
       const selectedOption = event.currentTarget;
       const previousValue = currentUser.tag_permission || 'everyone';

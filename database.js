@@ -1437,6 +1437,52 @@ async function initDb() {
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_agent TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+    CREATE TABLE IF NOT EXISTS push_preferences (
+      user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      messages BOOLEAN NOT NULL DEFAULT TRUE,
+      message_previews BOOLEAN NOT NULL DEFAULT TRUE,
+      social BOOLEAN NOT NULL DEFAULT TRUE,
+      communities BOOLEAN NOT NULL DEFAULT TRUE,
+      system BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS push_delivery_queue (
+      notification_id BIGINT PRIMARY KEY REFERENCES notifications(id) ON DELETE CASCADE,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_push_delivery_queue_next_attempt ON push_delivery_queue(next_attempt_at);
+    CREATE OR REPLACE FUNCTION enqueue_notification_push() RETURNS TRIGGER AS $$
+    BEGIN
+      IF NEW.type IN ('restriction','content_suspended')
+        OR NOT EXISTS (
+          SELECT 1 FROM users u
+          WHERE u.id=NEW.user_id
+            AND LOWER(u.username)=LOWER(LTRIM(BTRIM(COALESCE(NEW.actor_username,'')),'@'))
+        ) THEN
+        INSERT INTO push_delivery_queue(notification_id)
+        VALUES(NEW.id)
+        ON CONFLICT(notification_id) DO NOTHING;
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS notifications_push_delivery_trigger ON notifications;
+    CREATE TRIGGER notifications_push_delivery_trigger
+      AFTER INSERT ON notifications
+      FOR EACH ROW EXECUTE FUNCTION enqueue_notification_push();
     CREATE TABLE IF NOT EXISTS store_products (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,
