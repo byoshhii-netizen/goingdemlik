@@ -1908,6 +1908,98 @@ function navigate(path, push = true) {
   renderRoute(path);
 }
 
+function initPullToRefresh() {
+  const indicator = $('#pull-to-refresh');
+  if (!indicator || !('ontouchstart' in window)) return;
+
+  const activationDistance = 132;
+  const state = { startX: 0, startY: 0, distance: 0, active: false, refreshing: false };
+  const isMobileTouch = () => window.matchMedia('(max-width: 768px) and (pointer: coarse)').matches;
+  const reset = () => {
+    state.active = false;
+    state.distance = 0;
+    indicator.classList.remove('is-pulling');
+    indicator.setAttribute('aria-hidden', 'true');
+    indicator.style.removeProperty('--pull-offset');
+  };
+  const hasScrollableParent = target => {
+    for (let element = target; element instanceof Element && element.id !== 'app'; element = element.parentElement) {
+      const overflowY = getComputedStyle(element).overflowY;
+      if (['auto', 'scroll', 'overlay'].includes(overflowY)
+        && element.scrollHeight > element.clientHeight + 2
+        && element.scrollTop > 2) return true;
+    }
+    return false;
+  };
+
+  document.addEventListener('touchstart', event => {
+    if (!isMobileTouch() || state.refreshing || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const target = event.target instanceof Element ? event.target : null;
+    const app = $('#app');
+    if (!target || !app?.contains(target) || touch.clientY > Math.min(220, window.innerHeight * 0.28)) return;
+    if (window.scrollY > 2 || target.closest('input, textarea, select, [contenteditable="true"], .modal-overlay:not(.hidden)')) return;
+    if (hasScrollableParent(target)) return;
+    state.startX = touch.clientX;
+    state.startY = touch.clientY;
+    state.distance = 0;
+    state.active = true;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', event => {
+    if (!state.active || state.refreshing) return;
+    if (event.touches.length !== 1) {
+      reset();
+      indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
+      return;
+    }
+    const touch = event.touches[0];
+    const deltaY = touch.clientY - state.startY;
+    const deltaX = touch.clientX - state.startX;
+    if (deltaY < 0 || Math.abs(deltaX) > Math.max(24, deltaY * 0.6)) {
+      reset();
+      indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
+      return;
+    }
+    if (deltaY < 12) return;
+
+    event.preventDefault();
+    state.distance = deltaY;
+    indicator.classList.add('is-pulling');
+    indicator.setAttribute('aria-hidden', 'false');
+    indicator.style.setProperty('--pull-offset', `${Math.min(96, deltaY * 0.72)}px`);
+    indicator.querySelector('.pull-to-refresh-label').textContent = deltaY >= activationDistance
+      ? 'Yenilemek için bırak'
+      : 'Yenilemek için biraz daha çek';
+  }, { passive: false });
+
+  document.addEventListener('touchend', () => {
+    if (!state.active) return;
+    const shouldRefresh = state.distance >= activationDistance;
+    state.active = false;
+    if (!shouldRefresh) {
+      reset();
+      indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
+      return;
+    }
+
+    state.refreshing = true;
+    indicator.classList.add('is-pulling', 'is-refreshing');
+    indicator.setAttribute('aria-hidden', 'false');
+    indicator.style.setProperty('--pull-offset', '96px');
+    indicator.querySelector('.pull-to-refresh-label').textContent = 'Sayfa yenileniyor…';
+    window.setTimeout(() => window.location.reload(), 250);
+  }, { passive: true });
+
+  document.addEventListener('touchcancel', () => {
+    if (!state.active) return;
+    reset();
+    indicator.querySelector('.pull-to-refresh-label').textContent = 'Yenilemek için aşağı çek';
+  }, { passive: true });
+}
+
+initPullToRefresh();
+
 function createForgotPasswordRoute() {
   const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   const values = new Uint32Array(24);
