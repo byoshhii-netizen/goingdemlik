@@ -3157,8 +3157,8 @@ async function renderAdminMessages(main) {
   main.appendChild(searchResults);
   const showAudit = async (conversationId, title) => {
     const audit = await adminApi('/conversations/' + conversationId + '/messages');
-    const events = [...audit.messages.map(message => ({ ...message, event_type: 'message', event_time: message.created_at })), ...audit.calls.map(call => ({ ...call, event_type: 'call', event_time: call.created_at }))].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
-    showModal(title, `<div class="admin-audit-list">${events.length ? events.map(event => event.event_type === 'call' ? `<div class="admin-call-event"><i class="fas fa-phone"></i><span><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong> ${event.status === 'connected' ? 'arama başlattı, cevaplandı ve sonlandı' : event.status === 'ended' ? 'arama sonlandı' : 'arama başlattı, cevap bekliyor'}</span></div>` : `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div class="admin-plaintext-message">${event.image_url ? '<i class="fas fa-image"></i> Medya eki · ' : ''}${escHtml(event.content || '[Boş mesaj]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj veya arama kaydı yok.</div>'}</div>`);
+    const messages = audit.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    showModal(title, `<div class="admin-audit-list">${messages.length ? messages.map(event => `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div class="admin-plaintext-message">${event.image_url ? '<i class="fas fa-image"></i> Medya eki · ' : ''}${escHtml(event.content || '[Boş mesaj]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj kaydı yok.</div>'}</div>`);
   };
   const conversationsBody = $('#admin-conversations-body');
   if (conversationsBody) {
@@ -3928,15 +3928,6 @@ async function renderSettings(main) {
         </div>
       </div>
       <div class="card">
-        <div class="card-header"><span><i class="fas fa-phone-volume" style="color:var(--red2);margin-right:8px"></i>Sesli Arama Sesi</span></div>
-        <div class="card-body">
-          <div class="form-group"><label>Zil sesi URL'si</label><input id="s-call-ringtone-url" type="url" value="${escHtml(settings['call_ringtone_url']||'')}" placeholder="https://site.com/ring.mp3" /></div>
-          <div class="form-group"><label>MP3 dosyası</label><input id="s-call-ringtone-file" type="file" accept="audio/mpeg,audio/ogg,audio/wav,audio/*" /></div>
-          <button class="btn btn-primary" id="s-call-ringtone-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Zil sesini kaydet</button>
-          <div id="s-call-ringtone-msg" class="form-error mt-4"></div>
-        </div>
-      </div>
-      <div class="card">
         <div class="card-header"><span><i class="fas fa-comment-dots" style="color:var(--red2);margin-right:8px"></i>Mesaj Bildirimi Sesi</span></div>
         <div class="card-body">
           <div class="form-group"><label>Mesaj sesi URL'si</label><input id="s-message-sound-url" type="url" value="${escHtml(settings['message_notification_sound_url']||'')}" placeholder="https://site.com/message.mp3" /></div>
@@ -4415,20 +4406,6 @@ async function renderSettings(main) {
     }
     msg.style.color = 'var(--green)'; msg.textContent = '✓ Beta sürümü ayarı kaydedildi.';
   });
-  document.getElementById('s-call-ringtone-save')?.addEventListener('click', async () => {
-    const msg = document.getElementById('s-call-ringtone-msg');
-    try {
-      const file = document.getElementById('s-call-ringtone-file').files[0];
-      let url = document.getElementById('s-call-ringtone-url').value.trim();
-      if (file) {
-        const form = new FormData(); form.append('ringtone', file);
-        const response = await fetch('/api/admin/upload-call-ringtone', { method:'POST', headers:{'X-Admin-Token':adminToken}, body:form });
-        const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Dosya yüklenemedi'); url = result.url;
-      }
-      await saveSetting('call_ringtone_url', url, msg); msg.style.color = 'var(--green)'; msg.textContent = 'Arama zil sesi kaydedildi';
-    } catch (error) { msg.textContent = error.message; }
-  });
-
   const saveNotificationSound = async (key, fileInputId, urlInputId, endpoint, msgId, label) => {
     const msg = document.getElementById(msgId);
     try {

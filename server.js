@@ -340,7 +340,7 @@ app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=()');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
@@ -2952,7 +2952,18 @@ async function notifyCloseFriendsOfContent(actorUser, type, title, body, link) {
 }
 
 // ===== BİLDİRİM ENDPOİNTLERİ =====
+async function ensureAdminBroadcastNotifications(userId) {
+  await query(`
+    INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link,expires_at,broadcast_id)
+    SELECT $1,'announcement','CigCig','/cigcig.png',b.title,b.body,b.link,b.expires_at,b.id
+    FROM admin_notification_broadcasts b
+    WHERE b.expires_at IS NULL OR b.expires_at>NOW()
+    ON CONFLICT (user_id,broadcast_id) WHERE broadcast_id IS NOT NULL DO NOTHING
+  `, [userId]);
+}
+
 app.get('/api/notifications', authMiddleware, async (req, res) => {
+  await ensureAdminBroadcastNotifications(req.user.id);
   await ensureStoryVisibilitySchema();
   const { rows } = await query(
     `SELECT n.*,
@@ -3047,6 +3058,7 @@ app.delete('/api/push/subscriptions', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/notifications/unread-count', authMiddleware, async (req, res) => {
+  await ensureAdminBroadcastNotifications(req.user.id);
   await ensureStoryVisibilitySchema();
   const { rows } = await query(
     `SELECT COUNT(*) as c FROM notifications WHERE user_id=$1 AND is_read=0
@@ -8560,12 +8572,6 @@ app.post('/api/admin/upload-default-avatar', adminMiddleware, upload.single('ima
   }
 });
 
-app.post('/api/admin/upload-call-ringtone', adminMiddleware, upload.single('ringtone'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Ses dosyası gerekli' });
-  try { res.json({ url: await handleUpload(req.file) }); }
-  catch (error) { res.status(400).json({ error: error.message || 'Ses dosyası yüklenemedi' }); }
-});
-
 app.post('/api/admin/upload-message-sound', adminMiddleware, upload.single('sound'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Mesaj bildirimi sesi gerekli' });
   try { res.json({ url: await handleUpload(req.file) }); }
@@ -9565,7 +9571,10 @@ app.get('/api/admin/announcements', adminMiddleware, async (req, res) => {
 
 app.get('/api/admin/notifications', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin && !hasAdminPermission(req.adminUser.permissions, 'can_manage_announcements')) return res.status(403).json({ error: 'Bildirim yönetme yetkiniz yok' });
-  const { rows } = await query('SELECT * FROM admin_notification_broadcasts ORDER BY created_at DESC LIMIT 200');
+  const { rows } = await query(
+    `SELECT b.*,(SELECT COUNT(*)::int FROM notifications n WHERE n.broadcast_id=b.id) AS recipient_count
+     FROM admin_notification_broadcasts b ORDER BY b.created_at DESC LIMIT 200`
+  );
   res.json(rows);
 });
 
@@ -9704,7 +9713,7 @@ app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
     'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
-    'first_visit_auth','mobile_home_auth_required','call_ringtone_url','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
+    'first_visit_auth','mobile_home_auth_required','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url'
   ];
@@ -11141,105 +11150,6 @@ app.post('/api/listening-rooms/:publicId/moderation', authMiddleware, async (req
 });
 
 // ===== MESAJLAR (DM) =====
-async function getCallForUser(callId, userId) {
-  const { rows } = await query(`
-    SELECT c.*, CASE
-        WHEN c.status='ringing' AND c.created_at <= NOW() - INTERVAL '2 minutes' THEN 'ended'
-        WHEN c.status IN ('accepted','connected') AND c.updated_at <= NOW() - INTERVAL '3 minutes' THEN 'ended'
-        ELSE c.status
-      END AS resolved_status,
-      cu.username AS caller_username, cu.nickname AS caller_nickname, cu.avatar AS caller_avatar,
-      cu.avatar_removed AS caller_avatar_removed, cu.name_color AS caller_name_color,
-      tu.username AS callee_username, tu.nickname AS callee_nickname, tu.avatar AS callee_avatar,
-      tu.avatar_removed AS callee_avatar_removed, tu.name_color AS callee_name_color
-    FROM voice_calls c
-    JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
-    WHERE c.id=$1 AND (c.caller_id=$2 OR c.callee_id=$2)
-  `, [callId, userId]);
-  return rows[0] ? { ...rows[0], status: rows[0].resolved_status } : undefined;
-}
-
-async function expireStaleVoiceCallsForUser(userId) {
-  await query(`
-    UPDATE voice_calls
-    SET status='ended', ended_at=COALESCE(ended_at,NOW()), updated_at=NOW()
-    WHERE (caller_id=$1 OR callee_id=$1)
-      AND (
-        (status='ringing' AND created_at <= NOW() - INTERVAL '2 minutes')
-        OR (status IN ('accepted','connected') AND updated_at <= NOW() - INTERVAL '3 minutes')
-      )
-  `, [userId]);
-}
-
-app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
-  const { rows } = await query(`
-    SELECT c.id, c.status, c.created_at, u.username, u.nickname, u.avatar, u.avatar_removed, u.name_color
-    FROM voice_calls c JOIN users u ON u.id=c.caller_id
-    WHERE c.callee_id=$1 AND c.status='ringing' AND c.created_at > NOW() - INTERVAL '2 minutes'
-    ORDER BY c.created_at DESC LIMIT 1
-  `, [req.user.id]);
-  res.json(rows[0] || null);
-});
-
-app.post('/api/voice-calls', authMiddleware, async (req, res) => {
-  await expireStaleVoiceCallsForUser(req.user.id);
-  const username = String(req.body?.username || '').trim();
-  const { rows: target } = await query('SELECT id,username,nickname,avatar,avatar_removed,name_color FROM users WHERE username=$1', [username]);
-  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
-  if (target[0].id === req.user.id) return res.status(400).json({ error: 'Kendinizi arayamazsınız' });
-  const { rows: mutual } = await query(`
-    SELECT 1 FROM follows a JOIN follows b ON b.follower_id=a.following_id AND b.following_id=a.follower_id
-    WHERE a.follower_id=$1 AND a.following_id=$2 AND a.status='accepted' AND b.status='accepted'
-    UNION ALL
-    SELECT 1 FROM friendships WHERE ((requester_id=$1 AND addressee_id=$2) OR (requester_id=$2 AND addressee_id=$1)) AND status='accepted'
-  `, [req.user.id, target[0].id]);
-  if (!mutual.length) return res.status(403).json({ error: 'Arama için birbirinizi takip etmelisiniz' });
-  const { rows: active } = await query("SELECT id FROM voice_calls WHERE status IN ('ringing','accepted','connected') AND (caller_id=$1 OR callee_id=$1) LIMIT 1", [req.user.id]);
-  if (active.length) return res.status(409).json({ error: 'Zaten aktif bir aramanız var' });
-  const id = randomUUID();
-  await query('INSERT INTO voice_calls (id,caller_id,callee_id) VALUES ($1,$2,$3)', [id, req.user.id, target[0].id]);
-  void sendWebPushToUser(target[0].id, 'messages', {
-    messageId: id,
-    thread: `call-${id}`,
-    title: 'Gelen CigCig sesli araması',
-    body: `${req.user.nickname || req.user.username} seni arıyor.`,
-    url: `/mesajlar/${encodeURIComponent(req.user.username)}`
-  }).catch(error => console.error('[web-push] Incoming call delivery failed:', error.message));
-  res.json({ id, status: 'ringing', other: target[0] });
-});
-
-app.get('/api/voice-calls/:id', authMiddleware, async (req, res) => {
-  const call = await getCallForUser(req.params.id, req.user.id);
-  if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
-  res.json(call);
-});
-
-app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
-  const call = await getCallForUser(req.params.id, req.user.id);
-  if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
-  const action = String(req.body?.action || '');
-  const isCaller = call.caller_id === req.user.id;
-  if (['reject', 'end'].includes(action)) {
-    await query("UPDATE voice_calls SET status='ended', ended_at=NOW(), updated_at=NOW() WHERE id=$1", [call.id]);
-  } else if (action === 'accept' && !isCaller && call.status === 'ringing') {
-    await query("UPDATE voice_calls SET status='accepted', updated_at=NOW() WHERE id=$1", [call.id]);
-  } else if (action === 'connect') {
-    await query("UPDATE voice_calls SET status='connected', updated_at=NOW() WHERE id=$1", [call.id]);
-  } else if (action === 'heartbeat' && ['accepted', 'connected'].includes(call.status)) {
-    await query("UPDATE voice_calls SET updated_at=NOW() WHERE id=$1 AND status IN ('accepted','connected')", [call.id]);
-  } else if (action === 'offer' || action === 'answer') {
-    const value = req.body?.value;
-    if (!value || typeof value !== 'object') return res.status(400).json({ error: 'Geçersiz sinyal' });
-    await query(`UPDATE voice_calls SET ${action}=$1, updated_at=NOW() WHERE id=$2`, [JSON.stringify(value), call.id]);
-  } else if (action === 'ice') {
-    const value = req.body?.value;
-    if (!value || typeof value !== 'object') return res.status(400).json({ error: 'Geçersiz ICE paketi' });
-    const column = isCaller ? 'caller_ice' : 'callee_ice';
-    await query(`UPDATE voice_calls SET ${column}=COALESCE(${column},'[]'::jsonb) || $1::jsonb, updated_at=NOW() WHERE id=$2`, [JSON.stringify([value]), call.id]);
-  } else return res.status(400).json({ error: 'Geçersiz arama işlemi' });
-  res.json({ ok: true });
-});
-
 let dmNotesSchemaPromise;
 function ensureDmNotesSchema() {
   if (!dmNotesSchemaPromise) {
@@ -12516,14 +12426,6 @@ app.get('/api/founder/conversations/:id/messages', founderMiddleware, async (req
     FROM dm_messages m JOIN users u ON u.id=m.sender_id
     WHERE m.conversation_id=$1 ORDER BY m.created_at ASC,m.id ASC
   `, [conversationId]);
-  const { rows: calls } = await query(`
-    SELECT c.id,c.caller_id,c.callee_id,c.status,c.created_at,c.updated_at,c.ended_at,
-      cu.username AS caller_username,tu.username AS callee_username
-    FROM voice_calls c
-    JOIN dm_conversations d ON d.user1_id=LEAST(c.caller_id,c.callee_id) AND d.user2_id=GREATEST(c.caller_id,c.callee_id)
-    JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
-    WHERE d.id=$1 ORDER BY c.created_at ASC
-  `, [conversationId]);
   await logAction(req.user.username, 'founder_view_conversation_messages', String(conversationId), `${rows.length} mesaj`);
   const messages = rows.map(message => ({
     ...message,
@@ -12535,7 +12437,7 @@ app.get('/api/founder/conversations/:id/messages', founderMiddleware, async (req
       ...(message.deleted_by_receiver ? [{ kind: 'user', label: 'Alıcı kendisinden sildi', deleted_at: message.deleted_by_receiver_at }] : []),
     ],
   }));
-  res.json({ conversation: conversations[0], messages, calls });
+  res.json({ conversation: conversations[0], messages });
 });
 
 app.get('/api/founder/messages/search', founderMiddleware, async (req, res) => {
@@ -12608,14 +12510,7 @@ app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, re
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     WHERE m.conversation_id=$1 ORDER BY m.created_at ASC
   `, [req.params.id]);
-  const { rows: calls } = await query(`
-    SELECT c.id, c.caller_id, c.callee_id, c.status, c.created_at, c.updated_at, c.ended_at,
-      cu.username AS caller_username, tu.username AS callee_username
-    FROM voice_calls c JOIN dm_conversations d ON d.user1_id=LEAST(c.caller_id,c.callee_id) AND d.user2_id=GREATEST(c.caller_id,c.callee_id)
-      JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
-    WHERE d.id=$1 ORDER BY c.created_at ASC
-  `, [req.params.id]);
-  res.json({ messages, calls });
+  res.json({ messages });
 });
 
 app.use((err, req, res, next) => {

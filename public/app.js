@@ -14,9 +14,6 @@ const seenDmIncomingNotifications = new Map();
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
-let incomingVoiceCallPollTimer = null;
-let incomingVoiceCallPollInFlight = false;
-let incomingVoiceCallPollHasError = false;
 let viewportHeightFrame = null;
 function syncViewportHeight() {
   if (viewportHeightFrame !== null) return;
@@ -100,8 +97,6 @@ window.fetch = (input, options = {}) => {
   });
 };
 let activeStoryAudio = null;
-let activeVoiceCall = null;
-let voiceCallPoll = null;
 let storyRouteStoriesCache = [];
 let storyRouteStoriesCacheAt = 0;
 let activeRealsAudio = null;
@@ -142,7 +137,7 @@ function applyDefaultAvatar(url) {
 
 document.addEventListener('click', event => {
   if (!(event.target instanceof Element) || !defaultAvatarUrl) return;
-  const placeholder = event.target.closest('.avatar-placeholder, .profile-avatar-placeholder, .call-avatar-placeholder');
+  const placeholder = event.target.closest('.avatar-placeholder, .profile-avatar-placeholder');
   if (!placeholder) return;
   event.preventDefault();
   event.stopImmediatePropagation();
@@ -499,7 +494,7 @@ function showModal(title, bodyHTML, modalClass = '', { pauseMedia = true } = {})
   if (pauseMedia) managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'dm-call-confirm-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal');
+  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -997,356 +992,6 @@ function prefetchRouteData(href) {
   routePrefetchPaths(href).forEach(path => { api(path).catch(() => {}); });
 }
 
-function callAvatar(user, size = 'call-avatar') {
-  return hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" class="${size}" alt="" />` : `<div class="${size} call-avatar-placeholder"><i class="fas fa-user"></i></div>`;
-}
-
-function stopVoiceCallAudio() {
-  const ringtone = activeVoiceCall?.ringtone;
-  if (!ringtone) return;
-  ringtone.pause();
-  ringtone.currentTime = 0;
-  ringtone.removeAttribute('src');
-  ringtone.load();
-}
-function releaseVoiceCall(call) {
-  call?.ringtone?.pause();
-  if (call?.ringtone) {
-    call.ringtone.currentTime = 0;
-    call.ringtone.removeAttribute('src');
-    call.ringtone.load();
-  }
-  call?.stream?.getTracks().forEach(track => track.stop());
-  call?.peer?.close();
-  if (call?.remoteAudio) {
-    call.remoteAudio.pause();
-    call.remoteAudio.srcObject = null;
-    call.remoteAudio.remove();
-  }
-}
-function isVoiceCallMuted() { return Number(localStorage.getItem('cigcig_call_mute_until') || 0) > Date.now(); }
-function setVoiceCallMute(hours) { localStorage.setItem('cigcig_call_mute_until', hours ? String(Date.now() + hours * 3600000) : '0'); }
-
-function closeVoiceCallPanel() {
-  stopVoiceCallAudio();
-  document.getElementById('voice-call-layer')?.remove();
-}
-
-function renderVoiceCallPanel(call, mode, other) {
-  closeVoiceCallPanel();
-  const layer = document.createElement('div');
-  layer.id = 'voice-call-layer';
-  layer.innerHTML = `<section class="voice-call-card ${mode === 'mini' ? 'voice-call-mini' : ''}">
-    <button class="voice-call-close" id="voice-call-close" title="Küçült"><i class="fas fa-times"></i></button>
-    <div class="voice-call-kicker"><span class="voice-call-live-dot"></span> CIGCIG SESLİ ARAMA</div>
-    <div class="voice-call-avatars">${callAvatar(mode === 'incoming' ? other : currentUser)}<span class="voice-call-wave"><i></i><i></i><i></i><i></i></span>${callAvatar(mode === 'incoming' ? currentUser : other)}</div>
-    <div class="voice-call-names"><strong>${escHtml(mode === 'incoming' ? (other.nickname || other.username) : (currentUser.nickname || currentUser.username))}<small>@${escHtml(mode === 'incoming' ? other.username : currentUser.username)}</small></strong><span>${mode === 'incoming' ? 'seni arıyor' : 'aranıyor'}</span><strong>${escHtml(mode === 'incoming' ? (currentUser.nickname || currentUser.username) : (other.nickname || other.username))}<small>@${escHtml(mode === 'incoming' ? currentUser.username : other.username)}</small></strong></div>
-    <div class="voice-call-dots"><i></i><i></i><i></i></div>
-    <div class="voice-call-status" id="voice-call-status">${mode === 'incoming' ? 'Gelen arama' : 'Bağlantı kuruluyor'}</div>
-    <div class="voice-call-quality" id="voice-call-quality"><span></span><span></span><span></span><em>Bekleniyor</em></div>
-    ${mode === 'incoming' ? '<div class="voice-call-actions"><button class="call-action call-decline" id="voice-call-decline"><i class="fas fa-phone-slash"></i></button><button class="call-action call-accept" id="voice-call-accept"><i class="fas fa-phone"></i></button></div>' : '<button class="call-action call-decline" id="voice-call-end"><i class="fas fa-phone-slash"></i></button>'}
-    ${mode === 'connected' ? '<button class="call-mic" id="voice-call-mic"><i class="fas fa-microphone"></i> Mikrofon açık</button>' : ''}
-  </section>`;
-  document.body.appendChild(layer);
-  layer.querySelector('#voice-call-close').onclick = event => { event.stopPropagation(); layer.querySelector('.voice-call-card').classList.add('voice-call-mini'); stopVoiceCallAudio(); };
-  layer.querySelector('.voice-call-card').addEventListener('click', event => {
-    if (!event.target.closest('#voice-call-close') && layer.querySelector('.voice-call-card').classList.contains('voice-call-mini')) {
-      layer.querySelector('.voice-call-card').classList.remove('voice-call-mini');
-      if (activeVoiceCall?.status === 'ringing') activeVoiceCall.ringtone?.play().catch(() => {});
-    }
-  });
-  layer.querySelector('#voice-call-end, #voice-call-decline')?.addEventListener('click', () => endVoiceCall());
-  layer.querySelector('#voice-call-accept')?.addEventListener('click', () => acceptVoiceCall(call, other));
-  layer.querySelector('#voice-call-mic')?.addEventListener('click', () => {
-    const track = activeVoiceCall?.stream?.getAudioTracks()[0]; if (!track) return;
-    track.enabled = !track.enabled; layer.querySelector('#voice-call-mic').innerHTML = `<i class="fas fa-microphone${track.enabled ? '' : '-slash'}"></i> Mikrofon ${track.enabled ? 'açık' : 'kapalı'}`;
-  });
-  layer.querySelector('#voice-call-permission-retry')?.addEventListener('click', () => acceptVoiceCall(call, other));
-}
-
-function showVoicePermissionRetry(call, other, error) {
-  const status = document.querySelector('#voice-call-status');
-  if (status) status.textContent = microphonePermissionMessage(error);
-  document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
-  const card = document.querySelector('.voice-call-card');
-  if (card && !document.querySelector('#voice-call-permission-retry')) {
-    const button = document.createElement('button');
-    button.id = 'voice-call-permission-retry'; button.className = 'call-mic';
-    button.innerHTML = '<i class="fas fa-microphone"></i> Mikrofon iznini yeniden dene';
-    button.addEventListener('click', () => activeVoiceCall?.role === 'callee'
-      ? acceptVoiceCall(call, other)
-      : endVoiceCall(true).then(() => requestMicrophoneThenCall(other.username, other)));
-    card.appendChild(button);
-  }
-}
-
-function microphonePermissionMessage(error) {
-  if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
-    const android = /android/i.test(navigator.userAgent);
-    return android
-      ? 'Mikrofon izni reddedildi. Chrome’da site ayarlarından veya Android Ayarlar > Uygulamalar > Chrome > İzinler bölümünden CigCig mikrofon iznini açıp tekrar dene.'
-      : 'Mikrofon izni reddedildi. Tarayıcı site ayarlarından CigCig için mikrofon iznini açıp tekrar dene.';
-  }
-  if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') return 'Kullanılabilir bir mikrofon bulunamadı.';
-  if (error?.name === 'NotReadableError' || error?.name === 'TrackStartError') return 'Mikrofon başka bir uygulama tarafından kullanılıyor. Diğer uygulamayı kapatıp tekrar dene.';
-  return `Mikrofon açılamadı${error?.name ? ` (${error.name})` : ''}. Cihazın mikrofon ayarlarını kontrol edip tekrar dene.`;
-}
-
-async function requestMicrophoneThenCall(username, other) {
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-    showModal('Mikrofon erişimi kullanılamıyor', `<div class="call-permission-guide"><div class="call-permission-guide-icon"><i class="fas fa-lock"></i></div><p>Mikrofon izni yalnızca güvenli bağlantıda çalışır.</p><ol><li>CigCig’i <strong>HTTPS</strong> veya <strong>localhost</strong> üzerinden açın.</li><li>Adres çubuğundaki kilitten Mikrofon için <strong>İzin ver</strong> seçin.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol></div>`);
-    return;
-  }
-  const startAfterPermission = async () => {
-    let permissionState = 'unknown';
-    try { permissionState = (await navigator.permissions.query({ name: 'microphone' })).state; } catch {}
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      await startVoiceCall(username, other, stream);
-    } catch (error) {
-      const reason = permissionState === 'denied' && error.name !== 'NotAllowedError'
-        ? microphonePermissionMessage({ name: 'NotAllowedError' })
-        : microphonePermissionMessage(error);
-      if (error.name === 'NotAllowedError' || permissionState === 'denied') showMicrophonePermissionGuide(username, other, reason);
-      toast(reason, 'error');
-    }
-  };
-  if (localStorage.getItem('cigcig_microphone_consent') !== '1') {
-    showModal('Mikrofon izni', `<div class="call-permission-guide"><div class="call-permission-guide-icon"><i class="fas fa-microphone"></i></div><p>Sesli arama için mikrofon izni verilsin mi?</p><div style="display:flex;gap:8px"><button class="btn btn-outline" id="microphone-consent-no" style="flex:1">Hayır</button><button class="btn btn-primary" id="microphone-consent-yes" style="flex:1"><i class="fas fa-check"></i> Evet, izin ver</button></div></div>`);
-    document.getElementById('microphone-consent-no')?.addEventListener('click', hideModal);
-    document.getElementById('microphone-consent-yes')?.addEventListener('click', async event => {
-      event.currentTarget.disabled = true;
-      localStorage.setItem('cigcig_microphone_consent', '1');
-      hideModal();
-      await startAfterPermission();
-    });
-    return;
-  }
-  await startAfterPermission();
-}
-
-function showMicrophonePermissionGuide(username, other, message = 'Arama yapabilmek için mikrofon izni gerekiyor.') {
-  const instructions = /android/i.test(navigator.userAgent)
-    ? '<ol><li>Chrome’da <strong>⋮ &gt; Ayarlar &gt; Site ayarları &gt; Mikrofon</strong> bölümüne gir.</li><li>CigCig için mikrofonu <strong>İzin ver</strong> yap. Uygulamayı ana ekrana yüklediysen Android uygulama bilgilerindeki <strong>İzinler &gt; Mikrofon</strong> ayarını da kontrol et.</li><li>CigCig’e dönüp <strong>İzni tekrar dene</strong> düğmesine bas.</li></ol>'
-    : '<ol><li>Adres çubuğunun solundaki kilit simgesine bas.</li><li><strong>Mikrofon</strong> ayarını <strong>İzin ver</strong> yap.</li><li>Sayfaya dönüp izni tekrar dene.</li></ol>';
-  showModal('Mikrofon izni gerekli', `<div class="call-permission-guide">
-    <div class="call-permission-guide-icon"><i class="fas fa-microphone-slash"></i></div>
-    <p>${escHtml(message)}</p>
-    ${instructions}
-    <button class="btn btn-primary" id="call-permission-retry" style="width:100%"><i class="fas fa-microphone"></i> İzni tekrar dene</button>
-  </div>`);
-  document.getElementById('call-permission-retry')?.addEventListener('click', async () => {
-    const button = document.getElementById('call-permission-retry');
-    if (button) { button.disabled = true; button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Kontrol ediliyor'; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      hideModal(); await startVoiceCall(username, other, stream);
-    } catch (error) {
-      if (button) { button.disabled = false; button.innerHTML = '<i class="fas fa-microphone"></i> İzni tekrar dene'; }
-      toast('Tarayıcı ayarlarından mikrofon iznini İzin ver yapın', 'error');
-    }
-  });
-}
-
-const VOICE_RTC_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ],
-  iceCandidatePoolSize: 10
-};
-
-async function startVoiceCall(username, other, microphoneStream = null) {
-  let callWasCancelled = false;
-  try {
-    const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
-    const callState = { id: call.id, role: 'caller', other, seenIce: 0, status: 'ringing', stream: microphoneStream };
-    activeVoiceCall = callState;
-    renderVoiceCallPanel(call, 'outgoing', other);
-    callState.ringtone = new Audio();
-    await loadCallRingtone(callState.ringtone);
-    if (activeVoiceCall !== callState) return;
-    callState.ringtone.loop = true;
-    callState.ringtone.play().catch(error => console.warn('Arama sesi başlatılamadı:', error.message));
-    try {
-      const stream = microphoneStream || await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (activeVoiceCall !== callState) {
-        callWasCancelled = true;
-        stream.getTracks().forEach(track => track.stop());
-        return;
-      }
-      callState.stream = stream;
-    } catch (error) {
-      if (activeVoiceCall !== callState) {
-        callWasCancelled = true;
-        return;
-      }
-      await endVoiceCall(true);
-      throw error;
-    }
-    if (activeVoiceCall !== callState) return;
-    callState.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
-    callState.stream.getTracks().forEach(track => callState.peer.addTrack(track, callState.stream));
-    callState.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
-    callState.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); callState.remoteAudio = audio; };
-    callState.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(callState.peer.connectionState)) { callState.status = 'connected'; stopVoiceCallAudio(); document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; } };
-    const offer = await callState.peer.createOffer(); await callState.peer.setLocalDescription(offer);
-    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'offer', value: offer }) });
-    if (activeVoiceCall === callState) voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1800);
-  } catch (error) {
-    if (callWasCancelled) return;
-    microphoneStream?.getTracks().forEach(track => track.stop());
-    if (activeVoiceCall) await endVoiceCall(true);
-    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
-      showMicrophonePermissionGuide(username, other, microphonePermissionMessage(error));
-    }
-    toast(error.message || microphonePermissionMessage(error), 'error');
-  }
-}
-
-async function pollVoiceCall(id) {
-  const callState = activeVoiceCall;
-  if (!callState || callState.id !== id || callState.pollInFlight) return;
-  callState.pollInFlight = true;
-  try {
-    const call = await api('/voice-calls/' + id);
-    if (activeVoiceCall !== callState) return;
-    callState.lastPollError = false;
-    if (call.status === 'ended') return endVoiceCall(true);
-    if (['accepted', 'connected'].includes(call.status) && Date.now() - (callState.lastHeartbeatAt || 0) >= 20000) {
-      callState.lastHeartbeatAt = Date.now();
-      await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'heartbeat' }) });
-    }
-    if (activeVoiceCall !== callState || !callState.peer) return;
-    if (callState.role === 'caller' && call.answer && callState.peer.signalingState === 'have-local-offer') await callState.peer.setRemoteDescription(call.answer);
-    const ice = callState.role === 'caller' ? (call.callee_ice || []) : (call.caller_ice || []);
-    while (callState.seenIce < ice.length) await callState.peer.addIceCandidate(ice[callState.seenIce++]);
-    if (call.status === 'connected') {
-      callState.status = 'connected';
-      stopVoiceCallAudio();
-      document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu';
-      document.querySelector('#voice-call-quality em').textContent = 'İyi';
-      document.querySelector('#voice-call-quality').classList.add('good');
-    }
-    if (callState.role === 'caller' && call.status === 'accepted') await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'connect' }) });
-  } catch (error) {
-    if (activeVoiceCall === callState && !callState.lastPollError) {
-      console.warn('Sesli arama durumu alınamadı:', error.message);
-      callState.lastPollError = true;
-    }
-  } finally {
-    callState.pollInFlight = false;
-  }
-}
-
-async function acceptVoiceCall(call, other) {
-  stopVoiceCallAudio();
-  const callState = { id: call.id, role: 'callee', other, seenIce: 0, status: 'ringing' };
-  let callWasCancelled = false;
-  try {
-    activeVoiceCall = callState;
-    renderVoiceCallPanel(call, 'connected', other);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (activeVoiceCall !== callState) {
-        callWasCancelled = true;
-        stream.getTracks().forEach(track => track.stop());
-        return;
-      }
-      callState.stream = stream;
-    } catch (error) {
-      if (activeVoiceCall !== callState) {
-        callWasCancelled = true;
-        return;
-      }
-      showVoicePermissionRetry(call, other, error);
-      toast(microphonePermissionMessage(error), 'error');
-      return;
-    }
-    if (activeVoiceCall !== callState) return;
-    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
-    if (activeVoiceCall !== callState) return;
-    callState.status = 'accepted';
-    callState.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
-    callState.stream.getTracks().forEach(track => callState.peer.addTrack(track, callState.stream));
-    callState.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
-    callState.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); callState.remoteAudio = audio; };
-    callState.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(callState.peer.connectionState)) { callState.status = 'connected'; document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; } };
-    const fresh = await api('/voice-calls/' + call.id);
-    if (activeVoiceCall !== callState) return;
-    await callState.peer.setRemoteDescription(fresh.offer);
-    const answer = await callState.peer.createAnswer(); await callState.peer.setLocalDescription(answer);
-    await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'answer', value: answer }) });
-    if (activeVoiceCall === callState) voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1800);
-  } catch (error) {
-    if (callWasCancelled) return;
-    if (activeVoiceCall === callState) await endVoiceCall(true);
-    toast(error.message || 'Arama açılamadı', 'error');
-  }
-}
-
-async function endVoiceCall(silent = false) {
-  if (voiceCallPoll) { clearInterval(voiceCallPoll); voiceCallPoll = null; }
-  const call = activeVoiceCall;
-  activeVoiceCall = null;
-  releaseVoiceCall(call);
-  closeVoiceCallPanel();
-  if (!silent) toast('Arama sonlandırıldı');
-  if (call) {
-    api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'end' }) })
-      .catch(error => {
-        console.warn('Arama karşı tarafa sonlandırılamadı:', error.message);
-        if (!silent) toast('Arama bu cihazda kapandı ancak karşı tarafa sonlandırılamadı.', 'error');
-      });
-  }
-}
-
-async function loadCallRingtone(audio) { try { const s = await fetch('/api/settings/public').then(r => r.json()); if (s.call_ringtone_url) audio.src = s.call_ringtone_url; } catch {} }
-
-async function pollIncomingVoiceCall() {
-  if (!currentUser || document.visibilityState !== 'visible' || incomingVoiceCallPollInFlight) return;
-  if (activeVoiceCall) {
-    if (activeVoiceCall.role === 'callee' && activeVoiceCall.status === 'ringing') {
-      await pollVoiceCall(activeVoiceCall.id);
-    }
-    return;
-  }
-  if (isVoiceCallMuted()) return;
-  incomingVoiceCallPollInFlight = true;
-  try {
-    const call = await api('/voice-calls/incoming');
-    incomingVoiceCallPollHasError = false;
-    if (!call || activeVoiceCall || document.getElementById('voice-call-layer')) return;
-    const other = { username: call.username, nickname: call.nickname, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color };
-    const callState = { id: call.id, role: 'callee', other, status: 'ringing', ringtone: new Audio() };
-    activeVoiceCall = callState;
-    callState.ringtone.loop = true;
-    renderVoiceCallPanel(call, 'incoming', other);
-    await loadCallRingtone(callState.ringtone);
-    if (activeVoiceCall === callState && callState.status === 'ringing') {
-      callState.ringtone.play().catch(error => console.warn('Gelen arama sesi başlatılamadı:', error.message));
-    }
-  } catch (error) {
-    if (!incomingVoiceCallPollHasError) console.warn('Gelen aramalar kontrol edilemedi:', error.message);
-    incomingVoiceCallPollHasError = true;
-  } finally {
-    incomingVoiceCallPollInFlight = false;
-  }
-}
-
-function startIncomingVoiceCallPolling() {
-  if (!currentUser) {
-    if (incomingVoiceCallPollTimer) clearInterval(incomingVoiceCallPollTimer);
-    incomingVoiceCallPollTimer = null;
-    document.removeEventListener('visibilitychange', pollIncomingVoiceCall);
-    return;
-  }
-  if (incomingVoiceCallPollTimer) return;
-  pollIncomingVoiceCall();
-  incomingVoiceCallPollTimer = setInterval(pollIncomingVoiceCall, 3000);
-  document.addEventListener('visibilitychange', pollIncomingVoiceCall);
-}
-
 async function apiForm(path, formData, method = 'POST') {
   const headers = {};
   if (currentToken) headers['Authorization'] = 'Bearer ' + currentToken;
@@ -1724,14 +1369,8 @@ window.showFounderInfo = function () {
 
 async function showFounderConversationAudit(conversationId, title) {
   const audit = await api(`/founder/conversations/${encodeURIComponent(conversationId)}/messages`);
-  const events = [
-    ...audit.messages.map(message => ({ ...message, event_type: 'message', event_time: message.created_at })),
-    ...audit.calls.map(call => ({ ...call, event_type: 'call', event_time: call.created_at })),
-  ].sort((a, b) => new Date(a.event_time) - new Date(b.event_time));
-  showModal(`Sohbet arşivi · ${title}`, `<p class="founder-audit-notice"><i class="fas fa-shield-halved"></i> Arşiv görüntüleme işlemi kaydedildi.</p><div class="founder-audit-list">${events.length ? events.map(event => {
-    if (event.event_type === 'call') {
-      return `<div class="founder-audit-call"><small>${formatDate(event.event_time)}</small><strong>${escHtml(event.caller_username)}</strong><span>${event.status === 'connected' ? 'sesli arama yaptı' : 'sesli arama kaydı'}</span></div>`;
-    }
+  const messages = audit.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  showModal(`Sohbet arşivi · ${title}`, `<p class="founder-audit-notice"><i class="fas fa-shield-halved"></i> Arşiv görüntüleme işlemi kaydedildi.</p><div class="founder-audit-list">${messages.length ? messages.map(event => {
     const stateClass = event.audit_status === 'deleted_for_all' ? 'is-deleted-all' : event.audit_status === 'deleted_for_user' ? 'is-deleted-user' : '';
     const deletionNotes = (event.deletion_events || []).map(deletion => `<span class="founder-deletion-note ${deletion.kind === 'all' ? 'is-all' : 'is-user'}">${escHtml(deletion.label)} · ${deletion.deleted_at ? formatDate(deletion.deleted_at) : 'Tarih bilgisi yok (eski kayıt)'}</span>`).join('');
     return `<article class="founder-audit-message ${stateClass}"><div class="founder-audit-meta"><strong>${escHtml(event.sender_username)}</strong><time>${formatDate(event.created_at)}</time></div><div class="founder-audit-content">${event.image_url || (Array.isArray(event.image_urls) && event.image_urls.length) ? '<i class="fas fa-paperclip"></i> Medya eki · ' : ''}${escHtml(event.content || '[Boş mesaj]')}</div>${deletionNotes}</article>`;
@@ -3642,7 +3281,6 @@ window.addEventListener('pagehide', () => {
 function updateNavUI() {
   syncRealtimeSocket();
   syncPresenceHeartbeat();
-  startIncomingVoiceCallPolling();
   updateAppIcon(currentUser);
   const authEl = $('#nav-auth');
   const userEl = $('#nav-user');
@@ -3965,7 +3603,7 @@ async function openNotifDropdown() {
         <span><i class="fas fa-bell" style="color:var(--accent-red2);margin-right:6px"></i>Bildirimler</span>
       </div>
       ${notifs.map(n => `
-        <div class="notif-item${n.is_read ? '' : ' notif-unread'}" data-link="${escHtml(n.link||'')}" data-id="${n.id}"${n.link ? ' role="group" tabindex="0"' : ''} style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
+        <div class="notif-item${n.is_read ? '' : ' notif-unread'}" data-notification-type="${escHtml(n.type)}" data-link="${escHtml(n.link||'')}" data-id="${n.id}"${n.link ? ' role="group" tabindex="0"' : ''} style="padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background=''">
           <div style="display:flex;gap:10px;align-items:flex-start">
             ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" />` : `<div style="width:32px;height:32px;border-radius:50%;background:var(--bg-card2);display:flex;align-items:center;justify-content:center;flex-shrink:0"><i class="fas fa-bell" style="font-size:12px;color:var(--accent-red2)"></i></div>`}
             <div style="flex:1;min-width:0">
@@ -12285,7 +11923,7 @@ async function renderSettingsSection(section) {
           <button type="button" class="btn btn-primary push-device-toggle" id="push-device-toggle" disabled><i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Kontrol ediliyor</button>
           <fieldset class="push-preferences" id="push-preferences-form">
             <legend>Hangi bildirimleri alacaksın?</legend>
-            <label class="push-preference-option"><span><strong>Mesajlar ve aramalar</strong><small>Yeni özel mesajlar ve gelen sesli aramalar</small></span><input type="checkbox" name="messages" /></label>
+            <label class="push-preference-option"><span><strong>Mesajlar</strong><small>Yeni özel mesajlar</small></span><input type="checkbox" name="messages" /></label>
             <label class="push-preference-option push-preference-nested"><span><strong>Mesaj içeriğini göster</strong><small>Kapalıysa kilit ekranında yalnızca yeni mesaj bilgisi görünür</small></span><input type="checkbox" name="message_previews" /></label>
             <label class="push-preference-option"><span><strong>Sosyal etkileşimler</strong><small>Takip, beğeni, yorum ve etiket bildirimleri</small></span><input type="checkbox" name="social" /></label>
             <label class="push-preference-option"><span><strong>Topluluklar</strong><small>Grup ve forum etkinlikleri</small></span><input type="checkbox" name="communities" /></label>
@@ -14756,7 +14394,6 @@ async function renderDMChat(username) {
         </div>
       </div>
       <div class="dm-chat-header-right">
-        ${isSelfConversation ? '' : '<button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" type="button" title="Sesli ara" aria-label="Sesli ara"><i class="fas fa-phone"></i></button>'}
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -14911,33 +14548,6 @@ async function renderDMChat(username) {
   }
   enhanceLinkPreviews(msgsEl);
   installMessageSelectionGestures(msgsEl, '.dm-msg-wrap', enterDmSelection);
-
-  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
-    showModal('Sesli arama', `
-      <div class="dm-call-confirm">
-        <div class="dm-call-confirm-icon"><i class="fas fa-phone-volume" aria-hidden="true"></i></div>
-        <div class="dm-call-confirm-person">
-          ${callAvatar(other)}
-          <strong>${escHtml(other.nickname || other.username)}</strong>
-          <span>@${escHtml(other.username)}</span>
-        </div>
-        <p>Bu kişiyi CigCig üzerinden sesli aramak üzeresin. Arama zil sesi çalar; karşı taraf yanıtladığında görüşme başlar.</p>
-        <div class="dm-call-confirm-actions">
-          <button class="btn btn-ghost" id="dm-call-cancel" type="button">Vazgeç</button>
-          <button class="btn btn-primary" id="dm-call-confirm" type="button"><i class="fas fa-phone" aria-hidden="true"></i> Ara</button>
-        </div>
-      </div>
-    `, 'dm-call-confirm-modal');
-    document.getElementById('dm-call-cancel')?.addEventListener('click', hideModal);
-    document.getElementById('dm-call-confirm')?.addEventListener('click', async event => {
-      const button = event.currentTarget;
-      if (button.disabled) return;
-      button.disabled = true;
-      button.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> Aranıyor...';
-      hideModal();
-      await requestMicrophoneThenCall(other.username, other);
-    });
-  });
 
   // Reply management
   const setReply = (id) => { replyToId = id; };
@@ -16617,7 +16227,7 @@ function showMuteDurationPicker(title, onSelect) {
   showModal(title, `
     <div class="dm-options-content">
       <p class="settings-help">Bildirimlerin ne kadar süre sessiz kalacağını seç.</p>
-      <div class="call-mute-grid mute-duration-grid">
+      <div class="mute-duration-grid">
         <button class="btn btn-outline mute-duration-option" data-hours="2">2 saat</button>
         <button class="btn btn-outline mute-duration-option" data-hours="5">5 saat</button>
         <button class="btn btn-outline mute-duration-option" data-hours="10">10 saat</button>
@@ -16866,7 +16476,7 @@ async function renderNotifications(app) {
       return;
     }
     list.innerHTML = `<div class="notif-page-list">${notifs.map(n => `
-      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}${n.link ? ' notif-page-clickable' : ''}"${n.link ? ` data-notification-link="${escHtml(n.link)}" role="group" aria-label="Bildirim: ${escHtml(n.body)}" tabindex="0"` : ''}>
+      <div class="notif-page-item card card-body${n.is_read ? '' : ' notif-page-unread'}${n.link ? ' notif-page-clickable' : ''}" data-notification-type="${escHtml(n.type)}"${n.link ? ` data-notification-link="${escHtml(n.link)}" role="group" aria-label="Bildirim: ${escHtml(n.body)}" tabindex="0"` : ''}>
         ${n.actor_avatar ? `<img src="${escHtml(n.actor_avatar)}" class="notification-avatar" alt="" />` : `<div class="notification-avatar notification-avatar-placeholder"><i class="fas fa-bell"></i></div>`}
         <div class="notif-page-copy">
           ${['announcement', 'account_email_reminder', 'listening_room_manager'].includes(n.type) && n.title ? `<strong class="notif-page-title">${escHtml(n.title)}</strong>` : ''}

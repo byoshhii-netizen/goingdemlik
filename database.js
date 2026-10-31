@@ -1207,21 +1207,6 @@ async function initDb() {
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS muted_until_user2 TIMESTAMP;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user1 INTEGER DEFAULT 0;
     ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS mute_forever_user2 INTEGER DEFAULT 0;
-    CREATE TABLE IF NOT EXISTS voice_calls (
-      id UUID PRIMARY KEY,
-      caller_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      callee_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      status TEXT NOT NULL DEFAULT 'ringing',
-      offer JSONB,
-      answer JSONB,
-      caller_ice JSONB NOT NULL DEFAULT '[]'::jsonb,
-      callee_ice JSONB NOT NULL DEFAULT '[]'::jsonb,
-      created_at TIMESTAMP DEFAULT NOW(),
-      updated_at TIMESTAMP DEFAULT NOW(),
-      ended_at TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS idx_voice_calls_callee ON voice_calls(callee_id, status, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_voice_calls_caller ON voice_calls(caller_id, status, created_at DESC);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin INTEGER DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS admin_since TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS vip_since TIMESTAMP;
@@ -1437,6 +1422,8 @@ async function initDb() {
       created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_broadcast_recipient
+      ON notifications(user_id,broadcast_id) WHERE broadcast_id IS NOT NULL;
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
