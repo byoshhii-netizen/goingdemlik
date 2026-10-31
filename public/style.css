@@ -7488,6 +7488,7 @@ body[data-story-transition="back"] .story-route-asset { animation: story-enter-b
 .media-explore-search { display:flex;align-items:center;gap:11px;min-width:0;min-height:48px;padding:0 15px;border:1px solid var(--border);border-radius:15px;color:var(--text-muted);background:color-mix(in srgb,var(--bg-card2) 85%,transparent);transition:border-color .2s,box-shadow .2s,transform .2s; }
 .media-explore-search:focus-within { transform:translateY(-1px);border-color:rgba(var(--accent-rgb),.6);box-shadow:0 0 0 4px rgba(var(--accent-rgb),.09),0 10px 24px rgba(0,0,0,.12); }
 .media-explore-search input { width:100%;min-width:0;padding:12px 0;border:0;outline:0;background:transparent;color:var(--text-primary);box-shadow:none; }
+.media-explore-result { display:contents; }
 .media-explore-result[hidden] { display:none !important; }
 .reals-media-card .photo-card-head { gap:10px; }
 .reals-media-card .reals-media-open { z-index:2; }
