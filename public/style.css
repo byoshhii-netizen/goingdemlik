@@ -10218,3 +10218,55 @@ body { min-height:var(--cigcig-viewport-height,100dvh); }
     text-shadow:0 2px 8px rgba(0,0,0,.8);
   }
 }
+
+.profile-header > .profile-avatar-wrap {
+  position:relative;
+  z-index:1;
+  pointer-events:auto;
+}
+.reals-media-sound-toggle {
+  top:12px !important;
+  right:12px !important;
+  bottom:auto !important;
+  z-index:4 !important;
+}
+.reals-media-retry {
+  position:absolute;
+  z-index:5;
+  top:50%;
+  left:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  max-width:calc(100% - 32px);
+  min-height:42px;
+  padding:9px 13px;
+  border:1px solid rgba(255,255,255,.28);
+  border-radius:14px;
+  color:#fff;
+  background:rgba(12,13,16,.82);
+  box-shadow:0 6px 20px rgba(0,0,0,.24);
+  transform:translate(-50%,-50%);
+  cursor:pointer;
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+}
+.reals-media-retry[hidden] { display:none !important; }
+@media (max-width:768px) {
+  body.reals-page .reals-right-actions {
+    right:6px !important;
+    width:72px !important;
+    max-width:72px !important;
+    padding:0 3px !important;
+    gap:8px !important;
+  }
+  body.reals-page .reals-right-actions .reals-action-btn {
+    width:64px !important;
+    min-width:64px !important;
+    min-height:54px !important;
+    flex-basis:54px !important;
+    font-size:22px !important;
+  }
+  body.reals-page .reals-meta { padding-right:88px !important; }
+}

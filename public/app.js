@@ -98,6 +98,8 @@ window.fetch = (input, options = {}) => {
   });
 };
 let activeStoryAudio = null;
+let activeVoiceCall = null;
+let voiceCallPoll = null;
 let storyRouteStoriesCache = [];
 let storyRouteStoriesCacheAt = 0;
 let activeRealsAudio = null;
@@ -118,6 +120,7 @@ let dmSearchUnlockedConvs = [];
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
 const MEDIA_VOLUME_KEY = 'cigcig_volume';
+const PHOTO_SOUND_ENABLED_KEY = 'cigcig_photo_sound_enabled';
 const MEDIA_CLIP_SECONDS = 30;
 let photoSongClipSeconds = MEDIA_CLIP_SECONDS;
 const managedMediaAudio = new Set();
@@ -2424,6 +2427,19 @@ function renderRealsMaintenanceScreen(app, message) {
       </div>`;
 }
 
+function getCompatibleRealsVideoUrl(src) {
+  try {
+    const url = new URL(src, location.href);
+    if (url.hostname.toLowerCase() !== 'res.cloudinary.com' || !url.pathname.includes('/video/upload/')
+      || /\/s--[^/]+--\//.test(url.pathname)) return null;
+    url.pathname = url.pathname.replace('/video/upload/', '/video/upload/vc_h264,f_mp4/');
+    return url.href;
+  } catch (error) {
+    console.warn('Reals video adresi çözümlenemedi:', error.message);
+    return null;
+  }
+}
+
 async function renderRealsFeed(app, initialId = null) {
   document.title = 'Reals – ' + siteName;
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
@@ -2726,18 +2742,6 @@ async function renderRealsFeed(app, initialId = null) {
     if (videoEl.src === new URL(src, location.href).href) return;
     videoEl.src = src;
     videoEl.load();
-  }
-  function getCompatibleRealsVideoUrl(src) {
-    try {
-      const url = new URL(src, location.href);
-      if (url.hostname !== 'res.cloudinary.com' || !url.pathname.includes('/video/upload/')
-        || /\/s--[^/]+--\//.test(url.pathname)) return null;
-      url.pathname = url.pathname.replace('/video/upload/', '/video/upload/vc_h264,f_mp4/');
-      return url.href;
-    } catch (error) {
-      console.warn('Reals video adresi çözümlenemedi:', error.message);
-      return null;
-    }
   }
   function fitRealsVideoFrame(videoEl) {
     const videoWidth = videoEl.videoWidth;
@@ -8950,6 +8954,7 @@ function realsMediaCardHTML(v) {
   const displayName = userDisplayName(v);
   const dateKey = mediaDateKey(v.created_at);
   const liked = v.liked === true || v.liked === 1;
+  const soundEnabled = localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1';
   return `<article class="photo-card reals-media-card" data-reals-id="${escHtml(v.id)}" data-reals-slug="${escHtml(v.slug || v.id)}" data-owner-id="${escHtml(v.user_id)}" data-reals-route="${route}" style="padding:0;overflow:hidden">
     <div class="photo-card-head" style="padding:12px">
       ${avatarImg(v)}
@@ -8957,8 +8962,10 @@ function realsMediaCardHTML(v) {
     </div>
     <div class="photo-media-wrap">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
-        <video class="photo-native reals-media-preview" src="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop autoplay preload="metadata" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
+        <video class="photo-native reals-media-preview" src="${escHtml(v.video_url || '')}" data-video-url="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop autoplay preload="metadata" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
       </a>
+      <button type="button" class="photo-audio-toggle reals-media-sound-toggle" aria-pressed="${soundEnabled}" aria-label="${soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç'}" title="${soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç'}"><i class="fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}"></i></button>
+      <button type="button" class="reals-media-retry" hidden><i class="fas fa-rotate-right"></i><span>Video yüklenemedi · Tekrar dene</span></button>
     </div>
     <div class="photo-card-content">
       <h3>${escHtml(v.title || 'Reals')}</h3>
@@ -13689,6 +13696,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   };
 
   let touchStart = null;
+  let touchFallbackStart = null;
   let suppressClickUntil = 0;
   trigger.addEventListener('pointerdown', event => {
     if (event.pointerType === 'touch' && event.isPrimary) {
@@ -13706,6 +13714,22 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     openViewer(0);
   }, true);
   trigger.addEventListener('pointercancel', () => { touchStart = null; }, true);
+  trigger.addEventListener('touchstart', event => {
+    const touch = event.changedTouches[0];
+    if (touch) touchFallbackStart = { x: touch.clientX, y: touch.clientY };
+  }, { capture: true, passive: true });
+  trigger.addEventListener('touchend', event => {
+    const touch = event.changedTouches[0];
+    const start = touchFallbackStart;
+    touchFallbackStart = null;
+    if (!touch || !start || Date.now() < suppressClickUntil) return;
+    if (Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 12) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClickUntil = Date.now() + 700;
+    openViewer(0);
+  }, { capture: true, passive: false });
+  trigger.addEventListener('touchcancel', () => { touchFallbackStart = null; }, true);
   trigger.addEventListener('click', event => {
     if (Date.now() < suppressClickUntil) {
       event.preventDefault();
@@ -20752,6 +20776,58 @@ function bindPhotoFeed(feed) {
     if (!video) return;
     video.muted = true;
     video.playsInline = true;
+    const retryButton = card.querySelector('.reals-media-retry');
+    video.addEventListener('loadeddata', () => { if (retryButton) retryButton.hidden = true; });
+    video.addEventListener('playing', () => { if (retryButton) retryButton.hidden = true; });
+    video.addEventListener('error', () => {
+      if (!video.isConnected) return;
+      const errorCode = video.error?.code;
+      if (errorCode === MediaError.MEDIA_ERR_NETWORK && video.dataset.mediaNetworkRetry !== '1') {
+        video.dataset.mediaNetworkRetry = '1';
+        window.setTimeout(() => {
+          if (!video.isConnected) return;
+          video.src = video.dataset.videoUrl;
+          video.load();
+          if (video.classList.contains('is-visible')) video.play().catch(() => {});
+        }, 350);
+        return;
+      }
+      if ([MediaError.MEDIA_ERR_DECODE, MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED].includes(errorCode)
+        && video.dataset.mediaCompatibilityRetry !== '1') {
+        const compatibleUrl = getCompatibleRealsVideoUrl(video.dataset.videoUrl || video.currentSrc);
+        if (compatibleUrl && compatibleUrl !== video.currentSrc) {
+          video.dataset.mediaCompatibilityRetry = '1';
+          video.src = compatibleUrl;
+          video.load();
+          if (video.classList.contains('is-visible')) video.play().catch(() => {});
+          return;
+        }
+      }
+      if (retryButton) retryButton.hidden = false;
+    });
+    retryButton?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      delete video.dataset.mediaNetworkRetry;
+      delete video.dataset.mediaCompatibilityRetry;
+      retryButton.hidden = true;
+      video.src = video.dataset.videoUrl;
+      video.load();
+      video.play().catch(error => {
+        if (error.name !== 'AbortError') retryButton.hidden = false;
+      });
+    });
+  });
+  feed.querySelectorAll('.reals-media-sound-toggle').forEach(button => {
+    button.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPhotoSoundEnabled(localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) !== '1');
+      const video = button.closest('.reals-media-card')?.querySelector('.reals-media-preview');
+      if (video && !video.muted) video.play().catch(error => {
+        if (error.name !== 'AbortError') console.warn('Reals sesi başlatılamadı:', error.message);
+      });
+    });
   });
   if (realsCards.length && 'IntersectionObserver' in window) {
     realsMediaObserver = new IntersectionObserver(entries => {
@@ -20763,11 +20839,19 @@ function bindPhotoFeed(feed) {
             activeRealsCard.querySelector('.reals-media-preview')?.pause();
           }
           activeRealsCard = entry.target;
-          video.play().catch(error => {
+          video.classList.add('is-visible');
+          video.muted = true;
+          video.play().then(() => {
+            if (activeRealsCard === entry.target && localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1') {
+              video.muted = false;
+            }
+          }).catch(error => {
             if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
           });
         } else {
+          video.classList.remove('is-visible');
           video.pause();
+          video.muted = true;
           if (activeRealsCard === entry.target) activeRealsCard = null;
         }
       });
@@ -20776,9 +20860,14 @@ function bindPhotoFeed(feed) {
       realsMediaObserver.observe(card);
     });
   } else {
-    realsCards.slice(0, 1).forEach(card => card.querySelector('.reals-media-preview')?.play().catch(error => {
-      if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
-    }));
+    realsCards.slice(0, 1).forEach(card => {
+      const video = card.querySelector('.reals-media-preview');
+      video?.play().then(() => {
+        if (localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1') video.muted = false;
+      }).catch(error => {
+        if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
+      });
+    });
   }
 
   const openRealsMediaComments = async card => {
@@ -21254,11 +21343,12 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
-  let soundEnabled = localStorage.getItem('cigcig_photo_sound_enabled') === '1';
+  let soundEnabled = localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1';
   let visibleCard = null;
 
   const syncButtons = () => {
-    feed.querySelectorAll('.photo-audio-toggle').forEach(button => {
+    soundEnabled = localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1';
+    feed.querySelectorAll('.photo-audio-toggle:not(.reals-media-sound-toggle)').forEach(button => {
       button.classList.toggle('is-playing', activePhotoAudio?._photoId === button.closest('[data-photo-id]')?.dataset.photoId);
       button.title = soundEnabled ? 'Fotoğrafların sesini kapat' : 'Fotoğrafların sesini aç';
       button.setAttribute('aria-label', button.title);
@@ -21277,7 +21367,7 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
     if (!songButton?.dataset.audio) { stop(); return; }
     if (toggle) {
       soundEnabled = !soundEnabled;
-      localStorage.setItem('cigcig_photo_sound_enabled', soundEnabled ? '1' : '0');
+      setPhotoSoundEnabled(soundEnabled);
     }
     if (activePhotoAudio?._photoId===card.dataset.photoId) {
       activePhotoAudio.muted = !soundEnabled;
@@ -21321,7 +21411,7 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
     }, { threshold: [0, 0.35, 0.6, 0.85] });
     feed.querySelectorAll('[data-photo-id]').forEach(card => photoAudioObserver.observe(card));
   }
-  feed.querySelectorAll('.photo-audio-toggle').forEach(button=>button.addEventListener('click',event=>{
+  feed.querySelectorAll('.photo-audio-toggle:not(.reals-media-sound-toggle)').forEach(button=>button.addEventListener('click',event=>{
     event.preventDefault();
     event.stopPropagation();
     const card=button.closest('[data-photo-id]');
@@ -21339,6 +21429,29 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
     slider.addEventListener('pointerdown', event => event.stopPropagation());
   });
   syncButtons();
+}
+
+function setPhotoSoundEnabled(enabled) {
+  const soundEnabled = Boolean(enabled);
+  localStorage.setItem(PHOTO_SOUND_ENABLED_KEY, soundEnabled ? '1' : '0');
+  if (activePhotoAudio) activePhotoAudio.muted = !soundEnabled;
+  document.querySelectorAll('.reals-media-preview').forEach(video => { video.muted = !soundEnabled; });
+  document.querySelectorAll('.photo-audio-toggle:not(.reals-media-sound-toggle)').forEach(button => {
+    const label = soundEnabled ? 'Fotoğrafların sesini kapat' : 'Fotoğrafların sesini aç';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', String(soundEnabled));
+    const icon = button.querySelector('i');
+    if (icon) icon.className = `fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}`;
+  });
+  document.querySelectorAll('.reals-media-sound-toggle').forEach(button => {
+    const label = soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç';
+    button.title = label;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('aria-pressed', String(soundEnabled));
+    const icon = button.querySelector('i');
+    if (icon) icon.className = `fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}`;
+  });
 }
 
 document.addEventListener('click', e => {
