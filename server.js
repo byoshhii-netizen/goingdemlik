@@ -7124,6 +7124,9 @@ app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
   [req.params.id, req.user.id]);
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = stories[0];
+  if (String(story.user_id) === String(req.user.id)) {
+    return res.status(403).json({ error: 'Kendi hikayeni beğenemezsin.' });
+  }
   const { rows: existing } = await query('SELECT id FROM story_likes WHERE story_id=$1 AND user_id=$2', [story.id, req.user.id]);
   const liked = !existing.length;
   if (liked) {
@@ -7157,6 +7160,9 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
   );
   if (!stories.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   const story = stories[0];
+  if (String(story.user_id) === String(req.user.id)) {
+    return res.status(403).json({ error: 'Kendi hikayene yanıt gönderemezsin.' });
+  }
   const { rows } = await query('INSERT INTO story_replies (story_id,user_id,content) VALUES ($1,$2,$3) RETURNING id,story_id,content,created_at', [story.id, req.user.id, content]);
   if (Number(story.user_id) !== Number(req.user.id)) {
     const user1 = Math.min(Number(req.user.id), Number(story.user_id));
