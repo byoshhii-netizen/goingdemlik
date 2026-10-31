@@ -11143,7 +11143,12 @@ app.post('/api/listening-rooms/:publicId/moderation', authMiddleware, async (req
 // ===== MESAJLAR (DM) =====
 async function getCallForUser(callId, userId) {
   const { rows } = await query(`
-    SELECT c.*, cu.username AS caller_username, cu.nickname AS caller_nickname, cu.avatar AS caller_avatar,
+    SELECT c.*, CASE
+        WHEN c.status='ringing' AND c.created_at <= NOW() - INTERVAL '2 minutes' THEN 'ended'
+        WHEN c.status IN ('accepted','connected') AND c.updated_at <= NOW() - INTERVAL '3 minutes' THEN 'ended'
+        ELSE c.status
+      END AS resolved_status,
+      cu.username AS caller_username, cu.nickname AS caller_nickname, cu.avatar AS caller_avatar,
       cu.avatar_removed AS caller_avatar_removed, cu.name_color AS caller_name_color,
       tu.username AS callee_username, tu.nickname AS callee_nickname, tu.avatar AS callee_avatar,
       tu.avatar_removed AS callee_avatar_removed, tu.name_color AS callee_name_color
@@ -11151,7 +11156,7 @@ async function getCallForUser(callId, userId) {
     JOIN users cu ON cu.id=c.caller_id JOIN users tu ON tu.id=c.callee_id
     WHERE c.id=$1 AND (c.caller_id=$2 OR c.callee_id=$2)
   `, [callId, userId]);
-  return rows[0];
+  return rows[0] ? { ...rows[0], status: rows[0].resolved_status } : undefined;
 }
 
 async function expireStaleVoiceCallsForUser(userId) {
@@ -11167,7 +11172,6 @@ async function expireStaleVoiceCallsForUser(userId) {
 }
 
 app.get('/api/voice-calls/incoming', authMiddleware, async (req, res) => {
-  await expireStaleVoiceCallsForUser(req.user.id);
   const { rows } = await query(`
     SELECT c.id, c.status, c.created_at, u.username, u.nickname, u.avatar, u.avatar_removed, u.name_color
     FROM voice_calls c JOIN users u ON u.id=c.caller_id
@@ -11205,14 +11209,12 @@ app.post('/api/voice-calls', authMiddleware, async (req, res) => {
 });
 
 app.get('/api/voice-calls/:id', authMiddleware, async (req, res) => {
-  await expireStaleVoiceCallsForUser(req.user.id);
   const call = await getCallForUser(req.params.id, req.user.id);
   if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
   res.json(call);
 });
 
 app.post('/api/voice-calls/:id/action', authMiddleware, async (req, res) => {
-  await expireStaleVoiceCallsForUser(req.user.id);
   const call = await getCallForUser(req.params.id, req.user.id);
   if (!call) return res.status(404).json({ error: 'Arama bulunamadı' });
   const action = String(req.body?.action || '');

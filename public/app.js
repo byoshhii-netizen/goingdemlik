@@ -12,6 +12,9 @@ const seenDmIncomingNotifications = new Map();
 let mobileSwipeStart = null;
 let lastMobileSwipeAt = 0;
 let activeGroupMessageRefresh = null;
+let incomingVoiceCallPollTimer = null;
+let incomingVoiceCallPollInFlight = false;
+let incomingVoiceCallPollHasError = false;
 let viewportHeightFrame = null;
 function syncViewportHeight() {
   if (viewportHeightFrame !== null) return;
@@ -994,7 +997,27 @@ function callAvatar(user, size = 'call-avatar') {
 }
 
 function stopVoiceCallAudio() {
-  if (activeVoiceCall?.ringtone) { activeVoiceCall.ringtone.pause(); activeVoiceCall.ringtone.currentTime = 0; }
+  const ringtone = activeVoiceCall?.ringtone;
+  if (!ringtone) return;
+  ringtone.pause();
+  ringtone.currentTime = 0;
+  ringtone.removeAttribute('src');
+  ringtone.load();
+}
+function releaseVoiceCall(call) {
+  call?.ringtone?.pause();
+  if (call?.ringtone) {
+    call.ringtone.currentTime = 0;
+    call.ringtone.removeAttribute('src');
+    call.ringtone.load();
+  }
+  call?.stream?.getTracks().forEach(track => track.stop());
+  call?.peer?.close();
+  if (call?.remoteAudio) {
+    call.remoteAudio.pause();
+    call.remoteAudio.srcObject = null;
+    call.remoteAudio.remove();
+  }
 }
 function isVoiceCallMuted() { return Number(localStorage.getItem('cigcig_call_mute_until') || 0) > Date.now(); }
 function setVoiceCallMute(hours) { localStorage.setItem('cigcig_call_mute_until', hours ? String(Date.now() + hours * 3600000) : '0'); }
@@ -1024,7 +1047,7 @@ function renderVoiceCallPanel(call, mode, other) {
   layer.querySelector('.voice-call-card').addEventListener('click', event => {
     if (!event.target.closest('#voice-call-close') && layer.querySelector('.voice-call-card').classList.contains('voice-call-mini')) {
       layer.querySelector('.voice-call-card').classList.remove('voice-call-mini');
-      activeVoiceCall?.ringtone?.play().catch(() => {});
+      if (activeVoiceCall?.status === 'ringing') activeVoiceCall.ringtone?.play().catch(() => {});
     }
   });
   layer.querySelector('#voice-call-end, #voice-call-decline')?.addEventListener('click', () => endVoiceCall());
@@ -1036,9 +1059,9 @@ function renderVoiceCallPanel(call, mode, other) {
   layer.querySelector('#voice-call-permission-retry')?.addEventListener('click', () => acceptVoiceCall(call, other));
 }
 
-function showVoicePermissionRetry(call, other) {
+function showVoicePermissionRetry(call, other, error) {
   const status = document.querySelector('#voice-call-status');
-  if (status) status.textContent = 'Mikrofon izni verilmedi. Tarayıcı ayarlarından izin verin.';
+  if (status) status.textContent = microphonePermissionMessage(error);
   document.querySelector('#voice-call-quality')?.classList.add('call-permission-error');
   const card = document.querySelector('.voice-call-card');
   if (card && !document.querySelector('#voice-call-permission-retry')) {
@@ -1050,6 +1073,18 @@ function showVoicePermissionRetry(call, other) {
       : endVoiceCall(true).then(() => requestMicrophoneThenCall(other.username, other)));
     card.appendChild(button);
   }
+}
+
+function microphonePermissionMessage(error) {
+  if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
+    const android = /android/i.test(navigator.userAgent);
+    return android
+      ? 'Mikrofon izni reddedildi. Chrome’da site ayarlarından veya Android Ayarlar > Uygulamalar > Chrome > İzinler bölümünden CigCig mikrofon iznini açıp tekrar dene.'
+      : 'Mikrofon izni reddedildi. Tarayıcı site ayarlarından CigCig için mikrofon iznini açıp tekrar dene.';
+  }
+  if (error?.name === 'NotFoundError' || error?.name === 'DevicesNotFoundError') return 'Kullanılabilir bir mikrofon bulunamadı.';
+  if (error?.name === 'NotReadableError' || error?.name === 'TrackStartError') return 'Mikrofon başka bir uygulama tarafından kullanılıyor. Diğer uygulamayı kapatıp tekrar dene.';
+  return `Mikrofon açılamadı${error?.name ? ` (${error.name})` : ''}. Cihazın mikrofon ayarlarını kontrol edip tekrar dene.`;
 }
 
 async function requestMicrophoneThenCall(username, other) {
@@ -1064,11 +1099,9 @@ async function requestMicrophoneThenCall(username, other) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       await startVoiceCall(username, other, stream);
     } catch (error) {
-      const reason = error.name === 'NotAllowedError' || permissionState === 'denied'
-        ? 'Tarayıcı mikrofon iznini engelliyor. Kilit simgesinden Mikrofon ayarını İzin ver yapın.'
-        : error.name === 'NotReadableError'
-          ? 'Mikrofon başka bir uygulama tarafından kullanılıyor. Diğer uygulamayı kapatıp tekrar deneyin.'
-          : `Mikrofon başlatılamadı (${error.name || 'bilinmeyen hata'}).`;
+      const reason = permissionState === 'denied' && error.name !== 'NotAllowedError'
+        ? microphonePermissionMessage({ name: 'NotAllowedError' })
+        : microphonePermissionMessage(error);
       if (error.name === 'NotAllowedError' || permissionState === 'denied') showMicrophonePermissionGuide(username, other, reason);
       toast(reason, 'error');
     }
@@ -1088,10 +1121,13 @@ async function requestMicrophoneThenCall(username, other) {
 }
 
 function showMicrophonePermissionGuide(username, other, message = 'Arama yapabilmek için mikrofon izni gerekiyor.') {
+  const instructions = /android/i.test(navigator.userAgent)
+    ? '<ol><li>Chrome’da <strong>⋮ &gt; Ayarlar &gt; Site ayarları &gt; Mikrofon</strong> bölümüne gir.</li><li>CigCig için mikrofonu <strong>İzin ver</strong> yap. Uygulamayı ana ekrana yüklediysen Android uygulama bilgilerindeki <strong>İzinler &gt; Mikrofon</strong> ayarını da kontrol et.</li><li>CigCig’e dönüp <strong>İzni tekrar dene</strong> düğmesine bas.</li></ol>'
+    : '<ol><li>Adres çubuğunun solundaki kilit simgesine bas.</li><li><strong>Mikrofon</strong> ayarını <strong>İzin ver</strong> yap.</li><li>Sayfaya dönüp izni tekrar dene.</li></ol>';
   showModal('Mikrofon izni gerekli', `<div class="call-permission-guide">
     <div class="call-permission-guide-icon"><i class="fas fa-microphone-slash"></i></div>
     <p>${escHtml(message)}</p>
-    <ol><li>Adres çubuğunun solundaki kilit simgesine basın.</li><li><strong>Mikrofon</strong> ayarını <strong>İzin ver</strong> yapın.</li><li>Sayfayı yenileyip tekrar deneyin.</li></ol>
+    ${instructions}
     <button class="btn btn-primary" id="call-permission-retry" style="width:100%"><i class="fas fa-microphone"></i> İzni tekrar dene</button>
   </div>`);
   document.getElementById('call-permission-retry')?.addEventListener('click', async () => {
@@ -1116,83 +1152,194 @@ const VOICE_RTC_CONFIG = {
 };
 
 async function startVoiceCall(username, other, microphoneStream = null) {
+  let callWasCancelled = false;
   try {
     const call = await api('/voice-calls', { method: 'POST', body: JSON.stringify({ username }) });
-    activeVoiceCall = { id: call.id, role: 'caller', other, seenIce: 0 };
+    const callState = { id: call.id, role: 'caller', other, seenIce: 0, status: 'ringing', stream: microphoneStream };
+    activeVoiceCall = callState;
     renderVoiceCallPanel(call, 'outgoing', other);
-    activeVoiceCall.ringtone = new Audio();
-    await loadCallRingtone(activeVoiceCall.ringtone);
-    activeVoiceCall.ringtone.loop = true; activeVoiceCall.ringtone.play().catch(() => {});
+    callState.ringtone = new Audio();
+    await loadCallRingtone(callState.ringtone);
+    if (activeVoiceCall !== callState) return;
+    callState.ringtone.loop = true;
+    callState.ringtone.play().catch(error => console.warn('Arama sesi başlatılamadı:', error.message));
     try {
-      activeVoiceCall.stream = microphoneStream || await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = microphoneStream || await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (activeVoiceCall !== callState) {
+        callWasCancelled = true;
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      callState.stream = stream;
     } catch (error) {
-      showVoicePermissionRetry(call, other);
-      toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
-      return;
+      if (activeVoiceCall !== callState) {
+        callWasCancelled = true;
+        return;
+      }
+      await endVoiceCall(true);
+      throw error;
     }
-    activeVoiceCall.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
-    activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
-    activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
-    activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
-    activeVoiceCall.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(activeVoiceCall.peer.connectionState)) { document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; } };
-    const offer = await activeVoiceCall.peer.createOffer(); await activeVoiceCall.peer.setLocalDescription(offer);
+    if (activeVoiceCall !== callState) return;
+    callState.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
+    callState.stream.getTracks().forEach(track => callState.peer.addTrack(track, callState.stream));
+    callState.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
+    callState.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); callState.remoteAudio = audio; };
+    callState.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(callState.peer.connectionState)) { callState.status = 'connected'; stopVoiceCallAudio(); document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; } };
+    const offer = await callState.peer.createOffer(); await callState.peer.setLocalDescription(offer);
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'offer', value: offer }) });
-    voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1200);
-  } catch (error) { microphoneStream?.getTracks().forEach(track => track.stop()); toast(error.message || 'Arama başlatılamadı', 'error'); endVoiceCall(true); }
+    if (activeVoiceCall === callState) voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1800);
+  } catch (error) {
+    if (callWasCancelled) return;
+    microphoneStream?.getTracks().forEach(track => track.stop());
+    if (activeVoiceCall) await endVoiceCall(true);
+    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+      showMicrophonePermissionGuide(username, other, microphonePermissionMessage(error));
+    }
+    toast(error.message || microphonePermissionMessage(error), 'error');
+  }
 }
 
 async function pollVoiceCall(id) {
-  if (!activeVoiceCall) return;
+  const callState = activeVoiceCall;
+  if (!callState || callState.id !== id || callState.pollInFlight) return;
+  callState.pollInFlight = true;
   try {
     const call = await api('/voice-calls/' + id);
+    if (activeVoiceCall !== callState) return;
+    callState.lastPollError = false;
     if (call.status === 'ended') return endVoiceCall(true);
-    if (['accepted', 'connected'].includes(call.status) && Date.now() - (activeVoiceCall.lastHeartbeatAt || 0) >= 20000) {
-      activeVoiceCall.lastHeartbeatAt = Date.now();
+    if (['accepted', 'connected'].includes(call.status) && Date.now() - (callState.lastHeartbeatAt || 0) >= 20000) {
+      callState.lastHeartbeatAt = Date.now();
       await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'heartbeat' }) });
     }
-    if (activeVoiceCall.role === 'caller' && call.answer && activeVoiceCall.peer.signalingState === 'have-local-offer') await activeVoiceCall.peer.setRemoteDescription(call.answer);
-    const ice = activeVoiceCall.role === 'caller' ? (call.callee_ice || []) : (call.caller_ice || []);
-    while (activeVoiceCall.seenIce < ice.length) await activeVoiceCall.peer.addIceCandidate(ice[activeVoiceCall.seenIce++]);
-    if (call.status === 'connected') { stopVoiceCallAudio(); document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; document.querySelector('#voice-call-quality em').textContent = 'İyi'; document.querySelector('#voice-call-quality').classList.add('good'); }
-    if (activeVoiceCall.role === 'caller' && call.status === 'accepted') await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'connect' }) });
-  } catch {}
+    if (activeVoiceCall !== callState || !callState.peer) return;
+    if (callState.role === 'caller' && call.answer && callState.peer.signalingState === 'have-local-offer') await callState.peer.setRemoteDescription(call.answer);
+    const ice = callState.role === 'caller' ? (call.callee_ice || []) : (call.caller_ice || []);
+    while (callState.seenIce < ice.length) await callState.peer.addIceCandidate(ice[callState.seenIce++]);
+    if (call.status === 'connected') {
+      callState.status = 'connected';
+      stopVoiceCallAudio();
+      document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu';
+      document.querySelector('#voice-call-quality em').textContent = 'İyi';
+      document.querySelector('#voice-call-quality').classList.add('good');
+    }
+    if (callState.role === 'caller' && call.status === 'accepted') await api(`/voice-calls/${id}/action`, { method: 'POST', body: JSON.stringify({ action: 'connect' }) });
+  } catch (error) {
+    if (activeVoiceCall === callState && !callState.lastPollError) {
+      console.warn('Sesli arama durumu alınamadı:', error.message);
+      callState.lastPollError = true;
+    }
+  } finally {
+    callState.pollInFlight = false;
+  }
 }
 
 async function acceptVoiceCall(call, other) {
   stopVoiceCallAudio();
+  const callState = { id: call.id, role: 'callee', other, seenIce: 0, status: 'ringing' };
+  let callWasCancelled = false;
   try {
-    activeVoiceCall = { id: call.id, role: 'callee', other, seenIce: 0 };
+    activeVoiceCall = callState;
     renderVoiceCallPanel(call, 'connected', other);
     try {
-      activeVoiceCall.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (activeVoiceCall !== callState) {
+        callWasCancelled = true;
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      callState.stream = stream;
     } catch (error) {
-      showVoicePermissionRetry(call, other);
-      toast('Mikrofon izni olmadan sesli arama başlatılamaz', 'error');
+      if (activeVoiceCall !== callState) {
+        callWasCancelled = true;
+        return;
+      }
+      showVoicePermissionRetry(call, other, error);
+      toast(microphonePermissionMessage(error), 'error');
       return;
     }
+    if (activeVoiceCall !== callState) return;
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'accept' }) });
-    activeVoiceCall.peer = new RTCPeerConnection(VOICE_RTC_CONFIG); activeVoiceCall.stream.getTracks().forEach(track => activeVoiceCall.peer.addTrack(track, activeVoiceCall.stream));
-    activeVoiceCall.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
-    activeVoiceCall.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); activeVoiceCall.remoteAudio = audio; };
-    activeVoiceCall.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(activeVoiceCall.peer.connectionState)) document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; };
-    const fresh = await api('/voice-calls/' + call.id); await activeVoiceCall.peer.setRemoteDescription(fresh.offer);
-    const answer = await activeVoiceCall.peer.createAnswer(); await activeVoiceCall.peer.setLocalDescription(answer);
+    if (activeVoiceCall !== callState) return;
+    callState.status = 'accepted';
+    callState.peer = new RTCPeerConnection(VOICE_RTC_CONFIG);
+    callState.stream.getTracks().forEach(track => callState.peer.addTrack(track, callState.stream));
+    callState.peer.onicecandidate = e => e.candidate && api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'ice', value: e.candidate }) });
+    callState.peer.ontrack = e => { const audio = document.createElement('audio'); audio.autoplay = true; audio.srcObject = e.streams[0]; document.body.appendChild(audio); callState.remoteAudio = audio; };
+    callState.peer.onconnectionstatechange = () => { if (['connected', 'completed'].includes(callState.peer.connectionState)) { callState.status = 'connected'; document.querySelector('#voice-call-status').textContent = 'Bağlantı kuruldu'; } };
+    const fresh = await api('/voice-calls/' + call.id);
+    if (activeVoiceCall !== callState) return;
+    await callState.peer.setRemoteDescription(fresh.offer);
+    const answer = await callState.peer.createAnswer(); await callState.peer.setLocalDescription(answer);
     await api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'answer', value: answer }) });
-    voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1200);
-  } catch (error) { toast(error.message || 'Arama açılamadı', 'error'); endVoiceCall(); }
+    if (activeVoiceCall === callState) voiceCallPoll = setInterval(() => pollVoiceCall(call.id), 1800);
+  } catch (error) {
+    if (callWasCancelled) return;
+    if (activeVoiceCall === callState) await endVoiceCall(true);
+    toast(error.message || 'Arama açılamadı', 'error');
+  }
 }
 
 async function endVoiceCall(silent = false) {
   if (voiceCallPoll) { clearInterval(voiceCallPoll); voiceCallPoll = null; }
-  if (activeVoiceCall) { try { await api(`/voice-calls/${activeVoiceCall.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'end' }) }); } catch {} activeVoiceCall.stream?.getTracks().forEach(track => track.stop()); activeVoiceCall.peer?.close(); activeVoiceCall.remoteAudio?.remove(); }
-  activeVoiceCall = null; closeVoiceCallPanel(); if (!silent) toast('Arama sonlandırıldı');
+  const call = activeVoiceCall;
+  activeVoiceCall = null;
+  releaseVoiceCall(call);
+  closeVoiceCallPanel();
+  if (!silent) toast('Arama sonlandırıldı');
+  if (call) {
+    api(`/voice-calls/${call.id}/action`, { method: 'POST', body: JSON.stringify({ action: 'end' }) })
+      .catch(error => {
+        console.warn('Arama karşı tarafa sonlandırılamadı:', error.message);
+        if (!silent) toast('Arama bu cihazda kapandı ancak karşı tarafa sonlandırılamadı.', 'error');
+      });
+  }
 }
 
 async function loadCallRingtone(audio) { try { const s = await fetch('/api/settings/public').then(r => r.json()); if (s.call_ringtone_url) audio.src = s.call_ringtone_url; } catch {} }
 
 async function pollIncomingVoiceCall() {
-  if (!currentUser || isVoiceCallMuted() || activeVoiceCall || document.getElementById('voice-call-layer')) return;
-  try { const call = await api('/voice-calls/incoming'); if (!call) return; const other = { username: call.username, nickname: call.nickname, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color }; renderVoiceCallPanel(call, 'incoming', other); const ringtone = new Audio(); await loadCallRingtone(ringtone); ringtone.loop = true; ringtone.play().catch(() => {}); activeVoiceCall = { id: call.id, role: 'callee', other, ringtone }; } catch {}
+  if (!currentUser || document.visibilityState !== 'visible' || incomingVoiceCallPollInFlight) return;
+  if (activeVoiceCall) {
+    if (activeVoiceCall.role === 'callee' && activeVoiceCall.status === 'ringing') {
+      await pollVoiceCall(activeVoiceCall.id);
+    }
+    return;
+  }
+  if (isVoiceCallMuted()) return;
+  incomingVoiceCallPollInFlight = true;
+  try {
+    const call = await api('/voice-calls/incoming');
+    incomingVoiceCallPollHasError = false;
+    if (!call || activeVoiceCall || document.getElementById('voice-call-layer')) return;
+    const other = { username: call.username, nickname: call.nickname, avatar: call.avatar, avatar_removed: call.avatar_removed, name_color: call.name_color };
+    const callState = { id: call.id, role: 'callee', other, status: 'ringing', ringtone: new Audio() };
+    activeVoiceCall = callState;
+    callState.ringtone.loop = true;
+    renderVoiceCallPanel(call, 'incoming', other);
+    await loadCallRingtone(callState.ringtone);
+    if (activeVoiceCall === callState && callState.status === 'ringing') {
+      callState.ringtone.play().catch(error => console.warn('Gelen arama sesi başlatılamadı:', error.message));
+    }
+  } catch (error) {
+    if (!incomingVoiceCallPollHasError) console.warn('Gelen aramalar kontrol edilemedi:', error.message);
+    incomingVoiceCallPollHasError = true;
+  } finally {
+    incomingVoiceCallPollInFlight = false;
+  }
+}
+
+function startIncomingVoiceCallPolling() {
+  if (!currentUser) {
+    if (incomingVoiceCallPollTimer) clearInterval(incomingVoiceCallPollTimer);
+    incomingVoiceCallPollTimer = null;
+    document.removeEventListener('visibilitychange', pollIncomingVoiceCall);
+    return;
+  }
+  if (incomingVoiceCallPollTimer) return;
+  pollIncomingVoiceCall();
+  incomingVoiceCallPollTimer = setInterval(pollIncomingVoiceCall, 3000);
+  document.addEventListener('visibilitychange', pollIncomingVoiceCall);
 }
 
 async function apiForm(path, formData, method = 'POST') {
@@ -3474,6 +3621,7 @@ window.addEventListener('pagehide', () => {
 function updateNavUI() {
   syncRealtimeSocket();
   syncPresenceHeartbeat();
+  startIncomingVoiceCallPolling();
   updateAppIcon(currentUser);
   const authEl = $('#nav-auth');
   const userEl = $('#nav-user');

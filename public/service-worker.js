@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cigcig-app-shell-v11';
+const CACHE_NAME = 'cigcig-app-shell-v12';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
@@ -111,32 +111,17 @@ self.addEventListener('fetch', event => {
   if (!['script', 'style', 'image', 'font'].includes(request.destination)) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    if (['script', 'style'].includes(request.destination)) {
-      try {
-        const response = await fetch(request);
-        if (response.ok) await cache.put(url.pathname, response.clone());
-        return response;
-      } catch (error) {
-        const cached = await cache.match(request, { ignoreSearch: true });
-        if (cached) return cached;
-        throw error;
-      }
-    }
+    const cached = await cache.match(request);
+    if (cached) return cached;
 
-    const cached = await caches.match(request, { ignoreSearch: true });
-    if (cached) {
-      event.waitUntil(fetch(request).then(async response => {
-        if (response.ok) {
-          await cache.put(url.pathname, response);
-        }
-      }).catch(() => {}));
-      return cached;
+    try {
+      const response = await fetch(request);
+      if (response.ok) await cache.put(request, response.clone());
+      return response;
+    } catch (error) {
+      const fallback = await cache.match(url.pathname);
+      if (fallback) return fallback;
+      throw error;
     }
-
-    const response = await fetch(request);
-    if (response.ok) {
-      await cache.put(url.pathname, response.clone());
-    }
-    return response;
   })());
 });
