@@ -2752,8 +2752,10 @@ async function renderRealsFeed(app, initialId = null) {
 
     const isMobile = window.matchMedia('(max-width: 768px)').matches;
     if (isMobile) {
-      frame.style.setProperty('width', `${item.clientWidth}px`, 'important');
-      frame.style.setProperty('height', `${item.clientHeight}px`, 'important');
+      // CSS keeps the vertical 9:16 frame within the visual viewport on phones.
+      // Clear desktop measurements left behind after an orientation/viewport change.
+      frame.style.removeProperty('width');
+      frame.style.removeProperty('height');
       return;
     }
     const maxWidth = Math.max(1, Math.min(400, item.clientWidth - 28));
@@ -8962,7 +8964,7 @@ function realsMediaCardHTML(v) {
     </div>
     <div class="photo-media-wrap">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
-        <video class="photo-native reals-media-preview" src="${escHtml(v.video_url || '')}" data-video-url="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop autoplay preload="metadata" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
+        <video class="photo-native reals-media-preview" data-video-url="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop preload="none" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
       </a>
       <button type="button" class="photo-audio-toggle reals-media-sound-toggle" aria-pressed="${soundEnabled}" aria-label="${soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç'}" title="${soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç'}"><i class="fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}"></i></button>
       <button type="button" class="reals-media-retry" hidden><i class="fas fa-rotate-right"></i><span>Video yüklenemedi · Tekrar dene</span></button>
@@ -14653,6 +14655,10 @@ async function renderDMChat(username) {
   }
 
   const { conv, other, messages, isHidden, hasPassword, lockType, theme } = data;
+  // The API selects the latest page in descending order; the chat UI needs
+  // chronological order so the newest message is at the bottom on first paint.
+  const orderedMessages = [...(Array.isArray(messages) ? messages : [])]
+    .sort((left, right) => Number(left.id) - Number(right.id));
 
   // Kilitli konuşma
   if (isHidden) {
@@ -14744,7 +14750,7 @@ async function renderDMChat(username) {
 
     <!-- Messages -->
     <div class="dm-messages" id="dm-messages">
-      ${dmMessagesHTML(messages, currentUser.id)}
+      ${dmMessagesHTML(orderedMessages, currentUser.id)}
       <div class="dm-peer-typing-row" hidden aria-live="polite">
         <a href="${profileRoute(other.username)}" data-link class="dm-peer-typing-avatar" aria-label="${escHtml(other.nickname || other.username)} profilini aç">
           ${hasUsableAvatar(other)
@@ -15097,7 +15103,7 @@ async function renderDMChat(username) {
   });
 
   // Msg menu button clicks
-  let lastPollMsgId = messages.length > 0 ? Number(messages[messages.length - 1].id) : 0;
+  let lastPollMsgId = orderedMessages.length > 0 ? Number(orderedMessages[orderedMessages.length - 1].id) : 0;
   const lastPollDeletionAt = new Date(Date.now() - 60_000).toISOString();
   const sendDmAttachment = async payload => {
     const message = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
@@ -20814,7 +20820,10 @@ function bindPhotoFeed(feed) {
       video.src = video.dataset.videoUrl;
       video.load();
       video.play().catch(error => {
-        if (error.name !== 'AbortError') retryButton.hidden = false;
+        if (error.name !== 'AbortError') {
+          retryButton.querySelector('span').textContent = 'Videoyu başlatmak için dokun';
+          retryButton.hidden = false;
+        }
       });
     });
   });
@@ -20841,12 +20850,23 @@ function bindPhotoFeed(feed) {
           activeRealsCard = entry.target;
           video.classList.add('is-visible');
           video.muted = true;
+          if (!video.hasAttribute('src') && video.dataset.videoUrl) {
+            video.src = video.dataset.videoUrl;
+            video.load();
+          }
           video.play().then(() => {
             if (activeRealsCard === entry.target && localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1') {
               video.muted = false;
             }
           }).catch(error => {
-            if (error.name !== 'AbortError') console.warn('Reals önizlemesi başlatılamadı:', error);
+            if (error.name !== 'AbortError') {
+              const retryButton = entry.target.querySelector('.reals-media-retry');
+              if (retryButton) {
+                retryButton.querySelector('span').textContent = 'Videoyu başlatmak için dokun';
+                retryButton.hidden = false;
+              }
+              console.warn('Reals önizlemesi başlatılamadı:', error);
+            }
           });
         } else {
           video.classList.remove('is-visible');
@@ -20862,6 +20882,10 @@ function bindPhotoFeed(feed) {
   } else {
     realsCards.slice(0, 1).forEach(card => {
       const video = card.querySelector('.reals-media-preview');
+      if (video && !video.hasAttribute('src') && video.dataset.videoUrl) {
+        video.src = video.dataset.videoUrl;
+        video.load();
+      }
       video?.play().then(() => {
         if (localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1') video.muted = false;
       }).catch(error => {
