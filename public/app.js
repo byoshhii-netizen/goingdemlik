@@ -1802,6 +1802,7 @@ function isPublicGuestRoute(path) {
     || normalizedPath === '/kitaplar'
     || normalizedPath === '/forum'
     || normalizedPath === '/konular'
+    || /^\/profil\/[^/]+$/.test(normalizedPath)
     || /^\/reals(?:\/[^/]+)?$/.test(normalizedPath)
     || /^\/(?:muzik|forum)\/[^/]+(?:\/.*)?$/.test(normalizedPath)
     || /^\/kitap\/[^/]+(?:\/sayfa\/[^/]+)?$/.test(normalizedPath)

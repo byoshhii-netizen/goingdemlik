@@ -1851,6 +1851,7 @@ app.use(async (req, res, next) => {
       || normalizedPath === '/kitaplar'
       || normalizedPath === '/forum'
       || normalizedPath === '/konular'
+      || /^\/profil\/[^/]+$/.test(normalizedPath)
       || /^\/(?:muzik|forum)\/[^/]+(?:\/.*)?$/.test(normalizedPath)
       || /^\/kitap\/[^/]+(?:\/sayfa\/[^/]+)?$/.test(normalizedPath)
       || /^\/[a-zA-Z0-9]{24}$/.test(normalizedPath);

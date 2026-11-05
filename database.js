@@ -82,7 +82,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verif/ed INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMP;
@@ -232,7 +232,7 @@ async function initDb() {
       PRIMARY KEY (target_user_id, signal_type, signal_hash)
     );
     CREATE INDEX IF NOT EXISTS idx_ultra_ban_signals_active_hash
-      ON ultra_ban_signals(signal_type, signal_hash) WHERE tive=1;
+      ON ultra_ban_signals(signal_type, signal_hash) WHERE is_active=1;
     CREATE TABLE IF NOT EXISTS auth_challenges (
       id BIGSERIAL PRIMARY KEY,
       challenge_hash TEXT UNIQUE NOT NULL,
@@ -268,7 +268,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_invite_registrations_code_time
       ON invite_registrations(invite_code_id, registered_at DESC);
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;
-    UPDATE sessions SET expires_at=created_at AL '30 days' WHERE expires_at IS NULL;
+    UPDATE sessions SET expires_at=created_at + INTERVAL '30 days' WHERE expires_at IS NULL;
     ALTER TABLE sessions ALTER COLUMN expires_at SET DEFAULT (NOW() + INTERVAL '30 days');
     CREATE TABLE IF NOT EXISTS admin_sessions (
       token TEXT PRIMARY KEY,
