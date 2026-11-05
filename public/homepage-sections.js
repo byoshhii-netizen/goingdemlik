@@ -21,11 +21,19 @@
     return sections.length ? sections : ['konular'];
   }
 
+  function getHomepageSections(settings, isDesktop) {
+    const mobileSections = normalizeHomepageSections(settings?.homepage_sections);
+    const desktopSections = settings?.homepage_sections_desktop;
+    if (!isDesktop || desktopSections == null || desktopSections === '') return mobileSections;
+    return normalizeHomepageSections(desktopSections);
+  }
+
   if (typeof window !== 'undefined') {
     window.normalizeHomepageSections = normalizeHomepageSections;
+    window.getHomepageSections = getHomepageSections;
   }
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { normalizeHomepageSections };
+    module.exports = { normalizeHomepageSections, getHomepageSections };
   }
 })();

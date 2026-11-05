@@ -9742,7 +9742,7 @@ app.get('/api/admin/my-perms', authMiddleware, async (req, res) => {
 app.get('/api/settings/public', async (req, res) => {
   const keys = [
     'site_name','site_description','primary_color','background_color','dark_theme_style','light_primary_color','light_background_color',
-    'device_theme_enabled','theme_picker_enabled','homepage_sections','profile_tabs','footer_copyright_text',
+    'device_theme_enabled','theme_picker_enabled','homepage_sections','homepage_sections_desktop','profile_tabs','footer_copyright_text',
     'first_visit_auth','mobile_home_auth_required','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url'

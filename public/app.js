@@ -3792,18 +3792,14 @@ async function renderHome(app) {
   $('#home-sections').innerHTML = settingsError
     ? '<div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>Ana sayfa ayarları yüklenemedi; varsayılan bölümler gösteriliyor.</p></div>'
     : '';
-  const raw = settings.homepage_sections;
-  let sections = window.normalizeHomepageSections ? window.normalizeHomepageSections(raw) : (() => {
-    let parsed = raw;
-    if (typeof parsed === 'string') {
-      try { parsed = JSON.parse(parsed); } catch { parsed = [parsed]; }
-    }
-    if (!Array.isArray(parsed)) parsed = [parsed];
-    parsed = parsed.map(s => typeof s === 'string' ? s.trim().toLowerCase() : '').filter(Boolean);
-    if (!parsed.length || (parsed.length === 1 && parsed[0] === 'fotograflar')) return ['konular'];
-    return parsed.filter(s => !(s === 'fotograflar' && parsed.length === 1));
-  })();
-  configuredMobileCreateAction = mobileCreateActionFromSections(sections);
+  const mobileSections = window.normalizeHomepageSections
+    ? window.normalizeHomepageSections(settings.homepage_sections)
+    : ['konular'];
+  const isDesktop = window.matchMedia('(min-width: 769px)').matches;
+  const sections = window.getHomepageSections
+    ? window.getHomepageSections(settings, isDesktop)
+    : mobileSections;
+  configuredMobileCreateAction = mobileCreateActionFromSections(mobileSections);
 
   async function renderForumsSection() {
     const html = `

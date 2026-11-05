@@ -707,6 +707,11 @@ async function renderHomepageSections(main) {
     return parsed.length ? parsed : ['konular'];
   })();
   const currentArr = Array.isArray(current) ? current : [current];
+  const isDesktopSynced = settings.homepage_sections_desktop == null || settings.homepage_sections_desktop === '';
+  const desktopCurrent = window.normalizeHomepageSections
+    ? window.normalizeHomepageSections(settings.homepage_sections_desktop ?? currentArr)
+    : currentArr;
+  const desktopCurrentArr = Array.isArray(desktopCurrent) ? desktopCurrent : [desktopCurrent];
   const available = [
     { id: 'konular', label: 'Konular' },
     { id: 'kitaplar', label: 'Kitaplar' },
@@ -719,35 +724,40 @@ async function renderHomepageSections(main) {
     { id: 'fotograflar', label: 'Medya' }
   ];
 
-  main.innerHTML = `
-    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümü</div><div><button class="btn btn-primary" id="hp-save">Kaydet</button></div></div>
+  const renderSectionList = (listId, selectedSections) => `
     <div class="card" style="padding:12px">
-      <div id="hp-sections-list" style="display:grid;gap:10px">
+      <div id="${listId}" style="display:grid;gap:10px">
         ${available.map(a => `
           <div class="hp-section-row" data-id="${a.id}" style="display:flex;align-items:center;gap:8px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-card2)">
             <button type="button" class="btn btn-ghost btn-xs hp-move-up" title="Yukarı taşı"><i class="fas fa-chevron-up"></i></button>
             <button type="button" class="btn btn-ghost btn-xs hp-move-down" title="Aşağı taşı"><i class="fas fa-chevron-down"></i></button>
             <label class="checkbox-label" style="flex:1;display:flex;align-items:center;gap:10px;cursor:pointer;margin:0">
-              <input type="checkbox" class="hp-section-checkbox" value="${a.id}" ${currentArr.includes(a.id) ? 'checked' : ''} /> ${escHtml(a.label)}
+              <input type="checkbox" class="hp-section-checkbox" value="${a.id}" ${selectedSections.includes(a.id) ? 'checked' : ''} /> ${escHtml(a.label)}
             </label>
           </div>`).join('')}
       </div>
+    </div>`;
+
+  main.innerHTML = `
+    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümleri</div></div>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Her ekran türü için bölümleri ayrı seçip yukarı/aşağı taşıma butonlarıyla sıralayın.</div>
+    <div class="adm-section-header"><div class="adm-section-title">Telefon</div><button class="btn btn-primary" id="hp-save-mobile">Telefon ayarını kaydet</button></div>
+    ${renderSectionList('hp-mobile-sections-list', currentArr)}
+    <div class="adm-section-header" style="margin-top:24px">
+      <div class="adm-section-title">Bilgisayar</div>
+      <button class="btn btn-primary" id="hp-save-desktop">${isDesktopSynced ? 'Senkronizasyonu kaydet' : 'Bilgisayar ayarını kaydet'}</button>
     </div>
-    <div style="font-size:13px;color:var(--text-muted);margin-top:10px">Sekmeleri seçin ve yukarı/aşağı taşıma butonlarıyla ana sayfa sıralamasını belirleyin.</div>
+    <label class="checkbox-label" style="display:flex;align-items:center;gap:10px;margin:0 0 10px;cursor:pointer">
+      <input type="checkbox" id="hp-desktop-sync" ${isDesktopSynced ? 'checked' : ''} />
+      Telefon ana sayfasıyla senkronize et
+    </label>
+    <div id="hp-desktop-section-controls" style="${isDesktopSynced ? 'opacity:.55' : ''}">
+      ${renderSectionList('hp-desktop-sections-list', desktopCurrentArr)}
+    </div>
   `;
 
-  const list = document.getElementById('hp-sections-list');
-  list?.addEventListener('click', e => {
-    const up = e.target.closest('.hp-move-up');
-    const down = e.target.closest('.hp-move-down');
-    if (!up && !down) return;
-    const row = (up || down).closest('.hp-section-row');
-    if (!row) return;
-    if (up && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
-    if (down && row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row.nextElementSibling.nextElementSibling);
-  });
-
-  $('#hp-save')?.addEventListener('click', async () => {
+  const saveSectionList = async (listId, settingKey) => {
+    const list = document.getElementById(listId);
     if (!list) return;
     const selected = Array.from(list.querySelectorAll('.hp-section-row')).map(row => {
       const input = row.querySelector('input.hp-section-checkbox');
@@ -755,8 +765,43 @@ async function renderHomepageSections(main) {
     }).filter(Boolean);
     if (!selected.length) { toast('Bir bölüm seçin', 'error'); return; }
     try {
-      await adminApi('/settings', { method:'POST', body:JSON.stringify({ key:'homepage_sections', value: JSON.stringify(selected) }) });
+      await adminApi('/settings', { method:'POST', body:JSON.stringify({ key:settingKey, value: JSON.stringify(selected) }) });
       toast('Kaydedildi');
+    } catch (e) { toast(e.message,'error'); }
+  };
+
+  ['hp-mobile-sections-list', 'hp-desktop-sections-list'].forEach(listId => {
+    document.getElementById(listId)?.addEventListener('click', e => {
+      const up = e.target.closest('.hp-move-up');
+      const down = e.target.closest('.hp-move-down');
+      if (!up && !down) return;
+      const row = (up || down).closest('.hp-section-row');
+      if (!row) return;
+      if (up && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
+      if (down && row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row.nextElementSibling.nextElementSibling);
+    });
+  });
+  $('#hp-save-mobile')?.addEventListener('click', () => saveSectionList('hp-mobile-sections-list', 'homepage_sections'));
+  const desktopSync = document.getElementById('hp-desktop-sync');
+  const desktopControls = document.getElementById('hp-desktop-section-controls');
+  const updateDesktopControls = () => {
+    desktopControls?.querySelectorAll('button, input').forEach(control => {
+      control.disabled = desktopSync?.checked === true;
+    });
+    if (desktopControls) desktopControls.style.opacity = desktopSync?.checked ? '.55' : '';
+    const saveButton = $('#hp-save-desktop');
+    if (saveButton) saveButton.textContent = desktopSync?.checked ? 'Senkronizasyonu kaydet' : 'Bilgisayar ayarını kaydet';
+  };
+  desktopSync?.addEventListener('change', updateDesktopControls);
+  updateDesktopControls();
+  $('#hp-save-desktop')?.addEventListener('click', async () => {
+    if (!desktopSync?.checked) {
+      await saveSectionList('hp-desktop-sections-list', 'homepage_sections_desktop');
+      return;
+    }
+    try {
+      await adminApi('/settings', { method:'POST', body:JSON.stringify({ key:'homepage_sections_desktop', value:'' }) });
+      toast('Bilgisayar ana sayfası telefon ayarıyla senkronize edildi');
     } catch (e) { toast(e.message,'error'); }
   });
 }
