@@ -3617,7 +3617,7 @@ async function renderAdminNotifications(main) {
   list.innerHTML = campaigns.length ? campaigns.map(campaign => {
     const expired = campaign.expires_at && new Date(campaign.expires_at) <= new Date();
     return `<article class="card admin-notification-campaign${expired ? ' is-expired' : ''}">
-      <div class="admin-notification-campaign-logo"><img src="/cigcig.png" alt="CigCig" /></div>
+      <div class="admin-notification-campaign-logo"><img src="/cigcig2.png" alt="CigCig" /></div>
       <div class="admin-notification-campaign-copy"><strong>${escHtml(campaign.title)}</strong><p>${escHtml(campaign.body)}</p>${campaign.link ? `<small><i class="fas fa-link"></i> ${escHtml(campaign.link)}</small>` : ''}<small>${formatDate(campaign.created_at)} · ${Number(campaign.recipient_count) || 0} alıcı · ${expired ? 'Süresi doldu' : campaign.expires_at ? `Bitiş: ${formatDate(campaign.expires_at)}` : 'Süresiz'}</small></div>
       <button class="btn btn-danger btn-sm admin-notification-delete" type="button" data-id="${escHtml(campaign.id)}" aria-label="Bildirimi ve kullanıcılardaki kopyalarını sil"><i class="fas fa-trash"></i></button>
     </article>`;

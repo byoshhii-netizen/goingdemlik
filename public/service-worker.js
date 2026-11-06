@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cigcig-app-shell-v15';
+const CACHE_NAME = 'cigcig-app-shell-v16';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
@@ -8,11 +8,7 @@ const APP_SHELL_URLS = [
   '/homepage-sections.js',
   '/app.js',
   '/dialogs.js',
-  '/cigcig.png',
-  '/icons/cigcig-192.png',
-  '/icons/cigcig-512.png',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png'
+  '/cigcig2.png'
 ];
 
 self.addEventListener('install', event => {
@@ -56,8 +52,8 @@ self.addEventListener('push', event => {
       : new URL('/bildirimler', self.location.origin).href;
     await self.registration.showNotification(title, {
       body: String(payload.body || 'Yeni bir bildirimin var.').slice(0, 240),
-      icon: '/icons/cigcig-192.png',
-      badge: '/icons/cigcig-192.png',
+      icon: '/cigcig2.png',
+      badge: '/cigcig2.png',
       tag: String(payload.tag || 'cigcig-notification'),
       renotify: false,
       data: { url: targetUrl },

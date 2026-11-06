@@ -2976,7 +2976,7 @@ async function notifyCloseFriendsOfContent(actorUser, type, title, body, link) {
 async function ensureAdminBroadcastNotifications(userId) {
   await query(`
     INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link,expires_at,broadcast_id)
-    SELECT $1,'announcement','CigCig','/cigcig.png',b.title,b.body,b.link,b.expires_at,b.id
+    SELECT $1,'announcement','CigCig','/cigcig2.png',b.title,b.body,b.link,b.expires_at,b.id
     FROM admin_notification_broadcasts b
     WHERE b.expires_at IS NULL OR b.expires_at>NOW()
     ON CONFLICT (user_id,broadcast_id) WHERE broadcast_id IS NOT NULL DO NOTHING
@@ -3109,7 +3109,7 @@ async function sendAccountEmailReminders() {
   try {
     await query(
       `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link)
-       SELECT u.id,'account_email_reminder','', '/cigcig.png',
+       SELECT u.id,'account_email_reminder','', '/cigcig2.png',
          'Hesabını güvende tut',
          'Hesabının güvende olması ve şifreni unuttuğunda hesabını kaybetmemen için bir e-posta adresi eklemelisin.',
          '/ayarlar?section=two-factor&action=add-email'
@@ -5115,8 +5115,14 @@ app.get('/api/group/:slug/messages', optionalAuth, async (req, res) => {
   const { rows } = await query(sql, params);
   const messageIds = rows.map(message => message.id);
   const { rows: reactionRows } = messageIds.length
-    ? await query(`SELECT message_id, json_agg(json_build_object('emoji',emoji,'user_id',user_id) ORDER BY created_at) AS reactions
-      FROM group_message_reactions WHERE message_id=ANY($1::bigint[]) GROUP BY message_id`, [messageIds])
+    ? await query(`SELECT reaction.message_id,
+        json_agg(json_build_object(
+          'emoji',reaction.emoji,'user_id',reaction.user_id,'username',u.username,
+          'nickname',u.nickname,'avatar',u.avatar,'avatar_removed',u.avatar_removed
+        ) ORDER BY reaction.created_at) AS reactions
+      FROM group_message_reactions reaction
+      LEFT JOIN users u ON u.id=reaction.user_id
+      WHERE reaction.message_id=ANY($1::bigint[]) GROUP BY reaction.message_id`, [messageIds])
     : { rows: [] };
   const reactionsByMessage = new Map(reactionRows.map(row => [String(row.message_id), row.reactions || []]));
   res.json(rows.reverse().map(message => ({ ...message, reactions: reactionsByMessage.get(String(message.id)) || [] }))); // en eskiden yeniye
@@ -5267,8 +5273,13 @@ app.post('/api/group/:slug/messages/:id/reactions', authMiddleware, async (req, 
     );
   }
   const { rows: reactionRows } = await query(
-    `SELECT COALESCE(json_agg(json_build_object('emoji',emoji,'user_id',user_id) ORDER BY created_at),'[]'::json) AS reactions
-     FROM group_message_reactions WHERE message_id=$1`,
+    `SELECT COALESCE(json_agg(json_build_object(
+       'emoji',reaction.emoji,'user_id',reaction.user_id,'username',u.username,
+       'nickname',u.nickname,'avatar',u.avatar,'avatar_removed',u.avatar_removed
+     ) ORDER BY reaction.created_at),'[]'::json) AS reactions
+     FROM group_message_reactions reaction
+     LEFT JOIN users u ON u.id=reaction.user_id
+     WHERE reaction.message_id=$1`,
     [messageId]
   );
   const reactions = reactionRows[0]?.reactions || [];
@@ -8985,7 +8996,7 @@ app.post('/api/admin/upload-mention-sound', adminMiddleware, upload.single('soun
 
 // Logo dosya yükleme (cihazdan)
 app.post('/api/admin/upload-logo', adminMiddleware, upload.single('logo'), async (req, res) => {
-  res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig.png dosyasından alınır.' });
+  res.status(410).json({ error: 'Logo değiştirilemez; site logosu /cigcig2.png dosyasından alınır.' });
 });
 
 app.get('/api/kvkk', async (req, res) => {
@@ -10014,7 +10025,7 @@ app.post('/api/admin/notifications', adminMiddleware, async (req, res) => {
     const broadcast = campaign.rows[0];
     const recipients = await client.query(
       `INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link,expires_at,broadcast_id)
-       SELECT id,'announcement','CigCig','/cigcig.png',$1,$2,$3,$4,$5
+       SELECT id,'announcement','CigCig','/cigcig2.png',$1,$2,$3,$4,$5
        FROM users WHERE COALESCE(is_deleted,0)=0`,
       [title, body, rawLink, expiresAt, broadcast.id]
     );
@@ -10030,7 +10041,7 @@ app.post('/api/admin/notifications', adminMiddleware, async (req, res) => {
     const liveNotification = {
       type: 'announcement',
       actor_username: 'CigCig',
-      actor_avatar: '/cigcig.png',
+      actor_avatar: '/cigcig2.png',
       title,
       body,
       link: rawLink
@@ -10331,7 +10342,7 @@ function safeJsonLd(value) {
 
 function injectMeta(title, desc, url, imageUrl, extraMeta, bodyHtml) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const img = imageUrl || `${SITE_URL}/cigcig.png`;
+  const img = imageUrl || `${SITE_URL}/cigcig2.png`;
   const extra = extraMeta || '';
   const meta = `<title>${escapeHtml(title)}</title>
     <meta name="description" content="${escapeHtml(desc)}" />
@@ -10416,7 +10427,7 @@ app.get('/reals/:id', async (req, res) => {
   </article>`);
   const schema = safeJsonLd({
     '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description, thumbnailUrl: real.thumbnail_url ? [real.thumbnail_url] : undefined,
-    contentUrl: real.video_url, uploadDate: real.created_at, url, publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig.png` } }
+    contentUrl: real.video_url, uploadDate: real.created_at, url, publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig2.png` } }
   });
   res.send(injectMeta(`${title} – CigCig Reals`, description, url, real.thumbnail_url, `<script type="application/ld+json">${schema}</script>`, body));
 });
@@ -10443,7 +10454,7 @@ app.get('/video/:slug', async (req, res) => {
     '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description,
     thumbnailUrl: video.thumbnail_url ? [video.thumbnail_url] : undefined,
     contentUrl: video.video_url, uploadDate: video.created_at, url,
-    publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig.png` } }
+    publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig2.png` } }
   });
   res.send(injectMeta(`${title} – CigCig Video`, description, url, video.thumbnail_url, `<script type="application/ld+json">${schema}</script>`, body));
 });
@@ -10647,7 +10658,7 @@ app.get('/forum/:slug', async (req, res) => {
     'dateModified': forum.updated_at || forum.created_at,
     'description': (forum.content||'').substring(0,200),
     'author':{'@type':'Person','name':forum.username||'Anonim'},
-    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL,'logo':{'@type':'ImageObject','url':`${SITE_URL}/cigcig.png`}}
+    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL,'logo':{'@type':'ImageObject','url':`${SITE_URL}/cigcig2.png`}}
   });
   const meta = `<title>${escapeHtml(forum.title)} – CigCig</title>
     <meta name="description" content="${desc}" />
@@ -12165,8 +12176,13 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       r.deleted_for_all as reply_deleted_for_all,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username,
       CASE WHEN m.deleted_for_all=1 THEN '[]'::json ELSE COALESCE((
-        SELECT json_agg(json_build_object('emoji',reaction.emoji,'user_id',reaction.user_id) ORDER BY reaction.created_at)
-        FROM dm_message_reactions reaction WHERE reaction.message_id=m.id
+        SELECT json_agg(json_build_object(
+          'emoji',reaction.emoji,'user_id',reaction.user_id,'username',reaction_user.username,
+          'nickname',reaction_user.nickname,'avatar',reaction_user.avatar,'avatar_removed',reaction_user.avatar_removed
+        ) ORDER BY reaction.created_at)
+        FROM dm_message_reactions reaction
+        LEFT JOIN users reaction_user ON reaction_user.id=reaction.user_id
+        WHERE reaction.message_id=m.id
       ), '[]'::json) END AS reactions
     FROM dm_messages m
     JOIN users u ON m.sender_id=u.id
@@ -12493,8 +12509,13 @@ app.post('/api/messages/:id/reactions', authMiddleware, async (req, res) => {
   }
 
   const { rows: reactionRows } = await query(
-    `SELECT COALESCE(json_agg(json_build_object('emoji',emoji,'user_id',user_id) ORDER BY created_at),'[]'::json) AS reactions
-     FROM dm_message_reactions WHERE message_id=$1`,
+    `SELECT COALESCE(json_agg(json_build_object(
+       'emoji',reaction.emoji,'user_id',reaction.user_id,'username',u.username,
+       'nickname',u.nickname,'avatar',u.avatar,'avatar_removed',u.avatar_removed
+     ) ORDER BY reaction.created_at),'[]'::json) AS reactions
+     FROM dm_message_reactions reaction
+     LEFT JOIN users u ON u.id=reaction.user_id
+     WHERE reaction.message_id=$1`,
     [message.id]
   );
   const reactions = reactionRows[0]?.reactions || [];

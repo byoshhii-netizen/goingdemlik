@@ -22,7 +22,7 @@
   <meta property="og:description" content="Forum konuları, videolar, Reals kısa videoları, şiirler, kitaplar, müzik ve topluluklar CigCig'de." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://cigcig.xyz" />
-  <meta property="og:image" content="https://cigcig.xyz/cigcig.png" />
+  <meta property="og:image" content="https://cigcig.xyz/cigcig2.png" />
   <meta property="og:image:width" content="1044" />
   <meta property="og:image:height" content="910" />
   <meta property="og:locale" content="tr_TR" />
@@ -31,7 +31,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="CigCig | Topluluk Platformu" />
   <meta name="twitter:description" content="CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu." />
-  <meta name="twitter:image" content="https://cigcig.xyz/cigcig.png" />
+  <meta name="twitter:image" content="https://cigcig.xyz/cigcig2.png" />
 
   <!-- SEO_END -->
   <!-- Schema.org JSON-LD -->
@@ -68,7 +68,7 @@
     "@type": "Organization",
     "name": "CigCig",
     "url": "https://cigcig.xyz",
-    "logo": "https://cigcig.xyz/cigcig.png",
+    "logo": "https://cigcig.xyz/cigcig2.png",
     "description": "Forum konuları, videolar, Reals kısa videoları, şiirler, kitaplar, müzik ve toplulukları bir araya getiren Türkçe sosyal platform.",
     "sameAs": [],
     "contactPoint": {
@@ -79,8 +79,8 @@
   }
   </script>
 
-  <link rel="icon" href="/icons/cigcig-192.png" type="image/png" sizes="192x192" />
-  <link rel="apple-touch-icon" href="/icons/cigcig-512.png" />
+  <link rel="icon" href="/cigcig2.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/cigcig2.png" />
   <link rel="manifest" href="/manifest.json" />
   <script>
     if ('serviceWorker' in navigator) {
@@ -104,7 +104,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="/theme.js?v=20261024-dark-only"></script>
   <script src="/homepage-sections.js?v=20261014-homepage-sections"></script>
-  <link rel="stylesheet" href="/style.css?v=profile-background-size-1" />
+  <link rel="stylesheet" href="/style.css?v=ui-layout-repair-2" />
   <link rel="stylesheet" href="/dialogs.css?v=20261017-native-dialogs" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
@@ -122,7 +122,7 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="/" data-link class="nav-brand">
-        <img src="/cigcig.png?v=20260829" class="site-logo" alt="CigCig" draggable="false" />
+        <img src="/cigcig2.png?v=20261106" class="site-logo" alt="CigCig" draggable="false" />
         <span class="site-wordmark">CigCig</span>
       </a>
       <div class="nav-links">
@@ -195,7 +195,7 @@
             <a href="/rozetler" data-link id="dropdown-badges" class="dropdown-item"><i class="fas fa-award"></i> Rozetler</a>
             <a href="/admin" id="dropdown-admin" class="dropdown-item" hidden><i class="fas fa-screwdriver-wrench"></i> Yönetim Paneli</a>
             <a href="/video" data-link class="dropdown-item" id="dropdown-videos"><i class="fas fa-video"></i> Videolar</a>
-          <a href="/medyakesfet" data-link class="dropdown-item" id="dropdown-media-explore"><i class="fas fa-compass"></i> Keşfet</a>
+          <a href="/medyakesfet" data-link class="dropdown-item" id="dropdown-media-explore"><i class="fas fa-magnifying-glass"></i> Keşfet</a>
           <div class="dropdown-divider"></div>
             <button class="dropdown-item text-danger" id="logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış Yap</button>
           </div>
@@ -286,7 +286,7 @@
       if(d.primary_color) applyThemeColor(d.primary_color);
       applyBackgroundColor(d.background_color || '#121212');
       const favicon = document.querySelector('link[rel="icon"]');
-      if(favicon) favicon.href = '/icons/cigcig-192.png?v=20261020-seo';
+      if(favicon) favicon.href = '/cigcig2.png?v=20261106';
       // Site adı güncelle
       if(d.site_name && d.site_name.toLowerCase() !== 'demlik') {
         const navSpan = document.querySelector('.nav-brand .site-wordmark');
@@ -299,7 +299,7 @@
 </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-  <script src="/app.js?v=profile-background-size-1"></script>
+  <script src="/app.js?v=ui-layout-repair-2"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---

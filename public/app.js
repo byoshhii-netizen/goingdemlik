@@ -456,14 +456,14 @@ function updatePageMeta(title, description, imageUrl) {
   if (!desc) { desc = document.createElement('meta'); desc.setAttribute('name','description'); document.head.appendChild(desc); }
   desc.setAttribute('content', description);
 
-  const ogFields = { 'og:title': title, 'og:description': description, 'og:image': imageUrl || (SITE_URL + '/cigcig.png'), 'og:url': location.href };
+  const ogFields = { 'og:title': title, 'og:description': description, 'og:image': imageUrl || (SITE_URL + '/cigcig2.png'), 'og:url': location.href };
   Object.entries(ogFields).forEach(([prop, content]) => {
     let el = document.querySelector(`meta[property="${prop}"]`);
     if (!el) { el = document.createElement('meta'); el.setAttribute('property', prop); document.head.appendChild(el); }
     el.setAttribute('content', content);
   });
 
-  const twFields = { 'twitter:title': title, 'twitter:description': description, 'twitter:image': imageUrl || (SITE_URL + '/cigcig.png') };
+  const twFields = { 'twitter:title': title, 'twitter:description': description, 'twitter:image': imageUrl || (SITE_URL + '/cigcig2.png') };
   Object.entries(twFields).forEach(([name, content]) => {
     let el = document.querySelector(`meta[name="${name}"]`);
     if (!el) { el = document.createElement('meta'); el.setAttribute('name', name); document.head.appendChild(el); }
@@ -508,7 +508,7 @@ function showModal(title, bodyHTML, modalClass = '', { pauseMedia = true } = {})
   if (pauseMedia) managedMediaAudio.forEach(audio => audio.pause());
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal');
+  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal', 'dm-reaction-users-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -534,7 +534,7 @@ function hideModal({ resumeReals = true } = {}) {
   }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'dm-image-viewer-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'dm-image-viewer-modal', 'dm-reaction-users-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -1549,9 +1549,9 @@ function spotifyNowPlayingMarkup(data, compact = false) {
 
 function updateAppIcon(user) {
   const favicon = document.querySelector('link[rel="icon"]');
-  if (favicon) favicon.href = '/icons/cigcig-192.png';
+  if (favicon) favicon.href = '/cigcig2.png';
   const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
-  if (appleIcon) appleIcon.href = '/icons/cigcig-512.png';
+  if (appleIcon) appleIcon.href = '/cigcig2.png';
 }
 
 const PWA_INSTALL_KEY = 'cigcig_pwa_installed';
@@ -1598,7 +1598,7 @@ function showPwaInstallDialog({ force = false, automatic = false } = {}) {
   pwaInstallDialogShown = true;
   showModal('CigCig’i indirmek ister misiniz?', `
     <div class="pwa-install-content">
-      <img class="pwa-install-logo" src="/icons/cigcig-192.png" alt="CigCig logosu" />
+      <img class="pwa-install-logo" src="/cigcig2.png" alt="CigCig logosu" />
       <p>CigCig’i ana ekranına ekle; uygulama gibi hızlıca açıp kullan.</p>
       <div class="pwa-install-actions">
         <button type="button" class="btn btn-primary" id="pwa-install-now"><i class="fas fa-download"></i> Ana ekrana ekle</button>
@@ -3482,8 +3482,8 @@ function updateNavUI() {
     const nav = currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="nav-avatar" />` : `<div class="nav-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:12px"></i></div>`;
     const btn = $('#nav-user-btn');
     btn.title = `${currentUser.nickname || currentUser.username} (@${currentUser.username})`;
-    btn.setAttribute('aria-label', 'Hesap menüsünü aç');
-    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link">${nav}</a><i class="fas fa-chevron-down" style="font-size:10px;color:var(--text-muted);padding:0 4px"></i>`;
+    btn.setAttribute('aria-label', 'Profilini aç');
+    btn.innerHTML = `<a href="${profileRoute(currentUser.username)}" data-link class="nav-avatar-link">${nav}</a>`;
     $('#dropdown-profile').setAttribute('href', profileRoute(currentUser.username));
     const navBrand = document.querySelector('.nav-brand');
     if (navBrand) {
@@ -3634,7 +3634,7 @@ document.addEventListener('touchcancel', () => { mobileSwipeStart = null; }, { p
 
 $('#nav-user-btn').addEventListener('click', event => {
   if (event.target.closest('a[data-link]')) return;
-  $('#dropdown-menu').classList.toggle('hidden');
+  if (currentUser?.username) navigate(profileRoute(currentUser.username));
 });
 $('#mbb-auth')?.addEventListener('click', event => {
   if (!currentUser) return;
@@ -5813,7 +5813,7 @@ function renderForumListItems(forums) {
   el.innerHTML = `<div class="forum-list">${forums.map(f => forumCardHTML(f)).join('')}</div>`;
 }
 
-function forumCardHTML(f) {
+function forumCardHTML(f, showOpen = true) {
   const preview = f.content.substring(0, 140).replace(/</g,'&lt;');
   const authorClick = f.username
     ? `onclick="event.stopPropagation();navigate('${profileRoute(f.username)}')" style="cursor:pointer"`
@@ -5840,7 +5840,7 @@ function forumCardHTML(f) {
     <div class="forum-card-body">
       <div class="forum-card-heading">
         <div class="forum-card-title">${escHtml(f.title)}</div>
-        <span class="forum-card-open"><i class="fas fa-arrow-up-right-from-square"></i> Aç</span>
+        ${showOpen ? '<span class="forum-card-open"><i class="fas fa-arrow-up-right-from-square"></i> Aç</span>' : ''}
       </div>
       <div class="forum-card-preview">${preview}${f.content.length > 140 ? '...' : ''}</div>
       ${tagsHTML ? `<div class="forum-tags-row">${tagsHTML}</div>` : ''}
@@ -5857,7 +5857,7 @@ function forumCardHTML(f) {
 }
 
 function poemCardHTML(poem) {
-  const preview = String(poem.content || '').replace(/\s+/g, ' ').trim();
+  const preview = String(poem.content || '').replace(/\r\n?/g, '\n').trim();
   const authorClick = poem.username
     ? `onclick="event.stopPropagation();navigate('${profileRoute(poem.username)}')" style="cursor:pointer"`
     : `style="cursor:default;opacity:0.6"`;
@@ -5870,7 +5870,7 @@ function poemCardHTML(poem) {
       ${poem.is_hidden ? `<span class="poem-badge poem-badge-hidden"><i class="fas fa-lock"></i> Gizli</span>` : ''}
     </div>
     <div class="poem-card-title">${escHtml(poem.title)}</div>
-    <div class="poem-card-preview">${escHtml(preview.length > 220 ? preview.substring(0, 220) + '...' : preview)}</div>
+    <div class="poem-card-preview">${poemTextHTML(preview.length > 420 ? preview.substring(0, 420).trimEnd() + '…' : preview)}</div>
     <div class="poem-card-meta">
       <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${poem.username ? escHtml(poem.nickname || poem.username) : 'Silinmiş Kullanıcı'}</span>
       <span class="forum-meta-item"><i class="fas fa-heart"></i>${formatCount(poem.like_count)}</span>
@@ -7967,6 +7967,14 @@ async function renderGroupDetail(app, slug) {
     updateSelectionToolbar();
   };
   installMessageSelectionGestures(chatEl, '.chat-msg', selectGroupMessage, '.group-message-image-open');
+  chatEl.addEventListener('contextmenu', event => {
+    if (!(event.target instanceof Element)) return;
+    const row = event.target.closest('.chat-msg');
+    const menuButton = row?.querySelector('.msg-menu-trigger');
+    if (!row || !menuButton) return;
+    event.preventDefault();
+    menuButton.click();
+  });
   installMessageReplySwipeGesture(chatEl, row => {
     const message = messages.find(item => String(item.id) === String(row.dataset.messageId));
     startGroupReply(message);
@@ -8346,7 +8354,33 @@ async function renderGroupDetail(app, slug) {
     });
   }
 
-  $('#chat-messages')?.addEventListener('click', async e => {
+  const groupMessagesEl = document.getElementById('chat-messages');
+  let groupReactionPressTimer = null;
+  let groupReactionPressStart = null;
+  let suppressGroupReactionClickUntil = 0;
+  groupMessagesEl?.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch') return;
+    const pill = event.target.closest('.dm-reaction-pill');
+    const row = pill?.closest('.chat-msg');
+    if (!pill || !row) return;
+    groupReactionPressStart = { x: event.clientX, y: event.clientY };
+    groupReactionPressTimer = window.setTimeout(() => {
+      groupReactionPressTimer = null;
+      suppressGroupReactionClickUntil = Date.now() + 900;
+      showDmReactionUsers(row.dataset.reactions, pill.dataset.emoji);
+    }, 520);
+  }, { passive: true });
+  const cancelGroupReactionPress = () => {
+    if (groupReactionPressTimer) window.clearTimeout(groupReactionPressTimer);
+    groupReactionPressTimer = null;
+    groupReactionPressStart = null;
+  };
+  groupMessagesEl?.addEventListener('pointermove', event => {
+    if (!groupReactionPressStart || Math.hypot(event.clientX - groupReactionPressStart.x, event.clientY - groupReactionPressStart.y) > 12) cancelGroupReactionPress();
+  }, { passive: true });
+  groupMessagesEl?.addEventListener('pointerup', cancelGroupReactionPress, { passive: true });
+  groupMessagesEl?.addEventListener('pointercancel', cancelGroupReactionPress, { passive: true });
+  groupMessagesEl?.addEventListener('click', async e => {
     const imageButton = e.target.closest('.group-message-image-open');
     if (imageButton) {
       const messageRow = imageButton.closest('.chat-msg');
@@ -8358,6 +8392,10 @@ async function renderGroupDetail(app, slug) {
     }
     const reactionPill = e.target.closest('.dm-reaction-pill');
     if (reactionPill) {
+      if (Date.now() < suppressGroupReactionClickUntil) {
+        suppressGroupReactionClickUntil = 0;
+        return;
+      }
       const row = reactionPill.closest('.chat-msg');
       if (!row || reactionPill.disabled) return;
       reactionPill.disabled = true;
@@ -8722,7 +8760,7 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
   imageUrls = Array.isArray(imageUrls) ? imageUrls.filter(url => typeof url === 'string' && url.trim()) : [];
   if (!imageUrls.length && m.image_url) imageUrls = [m.image_url];
   const selectBox = `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" aria-label="Mesajı seç" style="display:${groupChatSelectionMode ? 'block' : 'none'}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />`;
-  return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}">
+  return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     ${selectBox}
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
@@ -10126,7 +10164,7 @@ async function renderProfile(app, username) {
   const profileVideos = Array.isArray(videos) ? videos : [];
   const profileReals = Array.isArray(reals) ? reals : [];
   const renderProfileArchive = async panel => {
-    let state = 'active';
+    let state = 'archived';
     panel.innerHTML = `
       <section class="profile-archive">
         <header class="profile-archive-header">
@@ -10134,8 +10172,7 @@ async function renderProfile(app, username) {
           <div><h2>Arşivim</h2><p>Arşivlediğin içerikleri, silinenleri ve süresi dolan hikâyelerini burada bul.</p></div>
         </header>
         <nav class="profile-archive-tabs" aria-label="Arşiv bölümleri">
-          <button type="button" data-archive-state="active" class="is-active">İçeriklerim</button>
-          <button type="button" data-archive-state="archived">Arşivlenenler</button>
+          <button type="button" data-archive-state="archived" class="is-active">Arşivlenenler</button>
           <button type="button" data-archive-state="trash">Silinenler</button>
           <button type="button" data-archive-state="expired_stories">Süresi dolan hikâyeler</button>
         </nav>
@@ -10449,7 +10486,7 @@ async function renderProfile(app, username) {
     <div class="tabs profile-tabs" aria-label="Profil bölümleri">${profileTabOrder.filter(tab => (isOwn || (tab !== 'saved' && tab !== 'archive')) && profileTabMeta[tab]).map(tab => `<button class="tab profile-tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}" aria-label="${profileTabMeta[tab][0]}" title="${profileTabMeta[tab][0]}"><i class="fas ${profileTabMeta[tab][1]}" aria-hidden="true"></i><span>${profileTabMeta[tab][0]}</span></button>`).join('')}</div>
 
     <div id="tab-forums">
-      ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => profileArchiveCard('forum', f.id, forumCardHTML(f))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
+      ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => profileArchiveCard('forum', f.id, forumCardHTML(f, false))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
     </div>
     <div id="tab-books" class="hidden">
       ${books.length ? `<div class="grid-3">${books.map(b => profileArchiveCard('book', b.id, bookCardHTML(b), String(b.user_id) === String(user.id))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
@@ -10961,6 +10998,9 @@ async function renderSettings(app) {
   </div>`;
 
   const requestedSection = new URLSearchParams(location.search).get('section');
+  if (window.matchMedia('(min-width: 1000px)').matches) {
+    app.querySelector('.settings-nav-item[data-section="app"]')?.remove();
+  }
   const settingsSections = Array.from($$('.settings-nav-item'));
   const initialSection = settingsSections.some(item => item.dataset.section === requestedSection) ? requestedSection : 'profile';
   $$('.settings-nav-item').forEach(item => item.classList.toggle('active', item.dataset.section === initialSection));
@@ -12200,7 +12240,7 @@ async function renderSettingsSection(section) {
         <div class="card-header"><span><i class="fas fa-mobile-screen-button" style="color:var(--accent-red2);margin-right:6px"></i>CigCig uygulaması</span></div>
         <div class="card-body">
           <div class="settings-app-install">
-            <img src="/icons/cigcig-192.png" alt="CigCig uygulama simgesi" />
+            <img src="/cigcig2.png" alt="CigCig uygulama simgesi" />
             <div class="settings-app-install-copy">
               <strong>${installed ? 'CigCig bu cihaza eklenmiş' : 'CigCig’i ana ekrana ekle'}</strong>
               <p>${installed
@@ -12471,7 +12511,7 @@ function renderLogin(app) {
   document.title = 'Giriş Yap - ' + siteName;
   app.innerHTML = `<div class="auth-page auth-page--login">
     <div class="auth-card auth-card--enhanced card card-body">
-      <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
+      <img class="auth-site-logo" src="/cigcig2.png" alt="CigCig">
       <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
       <div class="auth-title">Tekrar hoş geldin</div>
       <p class="auth-subtitle">Hesabına giriş yap ve kaldığın yerden devam et.</p>
@@ -12601,7 +12641,7 @@ function renderRegister(app) {
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
-      <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
+      <img class="auth-site-logo" src="/cigcig2.png" alt="CigCig">
       <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
@@ -12805,7 +12845,7 @@ function renderForgotPassword(app) {
   const renderEmailStep = () => {
     app.innerHTML = `<div class="auth-page">
       <div class="auth-card auth-card--enhanced card card-body">
-        <img class="auth-site-logo" src="/cigcig.png" alt="CigCig">
+        <img class="auth-site-logo" src="/cigcig2.png" alt="CigCig">
         <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
         <div class="auth-title">Şifremi Unuttum</div>
         <p class="auth-subtitle">Hesabındaki e-posta adresini yaz, sana doğrulama kodunu gönderelim.</p>
@@ -15185,6 +15225,8 @@ async function renderDMChat(username) {
     if (!event.target.closest('.dm-attach-slot')) closeAttachMenu();
   });
   const dmMessageList = document.getElementById('dm-messages');
+  let dmReactionLongPressFired = false;
+  let suppressDmReactionClickUntil = 0;
   dmMessageList?.addEventListener('click', async e => {
     const selectionRow = e.target.closest('.dm-msg-wrap');
     if (dmSelectionMode && selectionRow && !e.target.closest('.dm-msg-cb')) {
@@ -15204,6 +15246,10 @@ async function renderDMChat(username) {
     if (reactionPill) {
       e.preventDefault();
       e.stopPropagation();
+      if (Date.now() < suppressDmReactionClickUntil) {
+        suppressDmReactionClickUntil = 0;
+        return;
+      }
       const row = reactionPill.closest('.dm-msg-wrap');
       if (!row || reactionPill.disabled) return;
       reactionPill.disabled = true;
@@ -15302,6 +15348,17 @@ async function renderDMChat(username) {
     const button = row?.querySelector('.dm-msg-menu-btn');
     if (!row || !button || row.classList.contains('dm-deleted-for-all')) return;
     dmLongPressStart = { x: event.clientX, y: event.clientY };
+    const reactionPill = event.target.closest('.dm-reaction-pill');
+    if (reactionPill) {
+      dmReactionLongPressFired = false;
+      dmLongPressTimer = window.setTimeout(() => {
+        dmLongPressTimer = null;
+        dmReactionLongPressFired = true;
+        suppressDmReactionClickUntil = Date.now() + 900;
+        showDmReactionUsers(row.dataset.reactions, reactionPill.dataset.emoji);
+      }, 520);
+      return;
+    }
     dmLongPressTimer = window.setTimeout(() => {
       dmLongPressTimer = null;
       button.style.opacity = '1';
@@ -15312,6 +15369,8 @@ async function renderDMChat(username) {
   const cancelDmLongPress = () => {
     if (dmLongPressTimer) window.clearTimeout(dmLongPressTimer);
     dmLongPressTimer = null;
+    if (dmReactionLongPressFired) suppressDmReactionClickUntil = Date.now() + 900;
+    dmReactionLongPressFired = false;
     dmLongPressStart = null;
   };
   dmMessageListForMenus?.addEventListener('pointermove', event => {
@@ -15497,13 +15556,6 @@ function installMessageSelectionGestures(container, selector, onSelect, allowInt
     if (activePointerId === event.pointerId) clearHold();
   });
   container.addEventListener('pointercancel', clearHold);
-  container.addEventListener('contextmenu', event => {
-    const row = getMessageRow(event);
-    if (!row) return;
-    event.preventDefault();
-    clearHold();
-    onSelect(row.dataset.messageId || row.dataset.id);
-  });
   container.addEventListener('click', event => {
     if (Date.now() > suppressClickUntil || !getMessageRow(event)) return;
     suppressClickUntil = 0;
@@ -16262,7 +16314,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     && Number.isFinite(previousTime)
     && Math.abs(messageTime - previousTime) <= 60_000;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -16365,7 +16417,50 @@ function dmMessageReactionsHTML(reactions, myId) {
     </button>`).join('')}</div>`;
 }
 
+function showDmReactionUsers(reactionsValue, activeEmoji = '') {
+  let reactions;
+  try {
+    reactions = Array.isArray(reactionsValue) ? reactionsValue : JSON.parse(reactionsValue || '[]');
+  } catch (error) {
+    toast('Tepki listesi yüklenemedi.', 'error');
+    return;
+  }
+  const grouped = new Map();
+  reactions.forEach(reaction => {
+    if (!reaction?.emoji) return;
+    const users = grouped.get(reaction.emoji) || [];
+    users.push(reaction);
+    grouped.set(reaction.emoji, users);
+  });
+  if (!grouped.size) return;
+
+  const emojis = [...grouped.keys()];
+  let selectedEmoji = emojis.includes(activeEmoji) ? activeEmoji : emojis[0];
+  const renderUsers = () => {
+    const users = grouped.get(selectedEmoji) || [];
+    const usersHTML = users.map(user => {
+      const name = user.nickname || user.username || 'Kullanıcı';
+      const avatar = hasUsableAvatar({ avatar: user.avatar, avatar_removed: user.avatar_removed });
+      return `<div class="dm-reaction-user">
+        ${avatar ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<span class="dm-reaction-user-placeholder"><i class="fas fa-user" aria-hidden="true"></i></span>'}
+        <span><strong>${escHtml(name)}</strong>${user.username ? `<small>@${escHtml(user.username)}</small>` : ''}</span>
+      </div>`;
+    }).join('');
+    return `${emojis.length > 1 ? `<nav class="dm-reaction-user-tabs" aria-label="Emoji tepkileri">${emojis.map(emoji => `<button type="button" class="${emoji === selectedEmoji ? 'is-active' : ''}" data-reaction-emoji="${escHtml(emoji)}" aria-pressed="${emoji === selectedEmoji}"><span>${escHtml(emoji)}</span><small>${grouped.get(emoji).length}</small></button>`).join('')}</nav>` : ''}
+      <div class="dm-reaction-user-list">${usersHTML || '<p class="dm-reaction-user-empty">Bu tepki için henüz kimse görünmüyor.</p>'}</div>`;
+  };
+  showModal('Emoji tepkileri', `<div class="dm-reaction-users">${renderUsers()}</div>`, 'dm-reaction-users-modal');
+  $('#modal-body').addEventListener('click', event => {
+    const tab = event.target.closest('[data-reaction-emoji]');
+    if (!tab) return;
+    selectedEmoji = tab.dataset.reactionEmoji;
+    const panel = $('#modal-body .dm-reaction-users');
+    if (panel) panel.innerHTML = renderUsers();
+  });
+}
+
 function updateDmMessageReactions(row, reactions) {
+  row.dataset.reactions = JSON.stringify(Array.isArray(reactions) ? reactions : []);
   const html = dmMessageReactionsHTML(reactions, currentUser?.id);
   const bubble = row.querySelector('.dm-msg-bubble, .chat-msg-body');
   const existing = bubble?.querySelector('.dm-msg-reactions');
@@ -16558,6 +16653,12 @@ function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
     });
     menu.appendChild(el);
   });
+  if (Number.isFinite(createdAt)) {
+    const sentAt = document.createElement('div');
+    sentAt.className = 'dm-msg-menu-time';
+    sentAt.textContent = `Gönderildi · ${new Date(createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+    menu.appendChild(sentAt);
+  }
   document.body.appendChild(menu);
   menu.style.left = `${Math.max(8, Math.min(rect.left - menu.offsetWidth + rect.width, window.innerWidth - menu.offsetWidth - 8))}px`;
   menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
@@ -19929,7 +20030,7 @@ function showStoryUploadModal() {
     </section>
     <section class="social-compose-fields story-compose">
       <div class="form-group"><label>Açıklama</label><input id="story-caption" maxlength="180" placeholder="Hikayene bir şey ekle..." /></div>
-      <label class="checkbox-label story-close-friends-option"><input id="story-close-friends" type="checkbox"/> <i class="fas fa-star" aria-hidden="true"></i> Yalnızca yakın arkadaşlar görsün</label>
+      <label class="close-friends-toggle"><input id="story-close-friends" type="checkbox"/><span class="close-friends-switch" aria-hidden="true"></span><span class="close-friends-copy"><strong>Yakın arkadaşlar</strong><small>Hikayeni yalnızca listen görebilir</small></span><i class="fas fa-star close-friends-icon" aria-hidden="true"></i></label>
       <div class="form-group story-duration-field"><label>Yayında kalma süresi</label>
         <input type="hidden" id="story-duration" value="${escHtml(savedDraft?.duration || '24')}" />
         <div class="story-duration-choices" id="story-duration-choices" role="group" aria-label="Hikayenin yayında kalma süresi">
@@ -20646,7 +20747,7 @@ async function renderMediaExplore(app) {
   document.title = 'Medya Keşfet – ' + siteName;
   app.innerHTML = `<div class="container page photos-page media-explore-page">
     <header class="media-explore-hero">
-      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Keşfet</h1></div></div>
+      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-magnifying-glass"></i></span><div><h1>Keşfet</h1></div></div>
       <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Fotoğraf, Reals, kullanıcı, tarih veya #etiket ara..." autocomplete="off" aria-label="Fotoğraf, video, tarih ve hashtag ara" /></label>
     </header>
     <div id="media-explore-feed" class="photos-feed" aria-live="polite"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -21802,7 +21903,7 @@ function showPhotoUploadModal() {
           <label class="checkbox-label"><input id="photo-likes" type="checkbox" checked/> Beğeni açık</label>
           <label class="checkbox-label"><input id="photo-comments" type="checkbox" checked/> Yorum açık</label>
           <label class="checkbox-label"><input id="photo-shares" type="checkbox" checked/> Paylaşım ve iletme açık</label>
-          <label class="checkbox-label"><input id="photo-close-friends" type="checkbox"/> <i class="fas fa-star" aria-hidden="true"></i> Yalnızca yakın arkadaşlar</label>
+          <label class="close-friends-toggle"><input id="photo-close-friends" type="checkbox"/><span class="close-friends-switch" aria-hidden="true"></span><span class="close-friends-copy"><strong>Yakın arkadaşlar</strong><small>Bu fotoğrafları yalnızca listen görür</small></span><i class="fas fa-star close-friends-icon" aria-hidden="true"></i></label>
         </div>
         <div id="photo-error" class="form-error"></div>
         <button class="btn btn-primary social-compose-submit" id="photo-save"><i class="fas fa-paper-plane"></i> Paylaş</button>
@@ -22872,57 +22973,46 @@ async function renderMyOrders(app) {
   const activeSubs = subs.filter(s => s.is_active && new Date(s.expires_at) > new Date());
 
   const subsHTML = activeSubs.length ? `
-    <div class="card card-body" style="margin-bottom:24px">
-      <div style="font-size:15px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px">
-        <i class="fas fa-crown" style="color:#fbbf24"></i> Aktif Üyeliklerim
-      </div>
-      ${activeSubs.map(s => {
+    <section class="orders-subscriptions">
+      <header class="orders-section-heading"><span><i class="fas fa-crown"></i></span><div><h2>Aktif üyeliklerim</h2><p>Üyelik durumunu ve yenilenme tarihini takip et.</p></div></header>
+      <div class="orders-subscription-list">${activeSubs.map(s => {
         const cfg = typeConfig[s.type] || typeConfig.vip;
         const dl = daysLeft(s.expires_at);
-        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid var(--border);border-left:3px solid ${cfg.color};border-radius:12px;margin-bottom:10px;background:var(--bg-secondary)">
-          <div style="display:flex;align-items:center;gap:10px">
-            <div style="width:36px;height:36px;border-radius:10px;background:${cfg.color}22;color:${cfg.color};display:flex;align-items:center;justify-content:center;font-size:17px"><i class="${cfg.icon}"></i></div>
-            <div>
-              <div style="font-weight:700;font-size:14px">${escHtml(s.product_name || cfg.label)}</div>
-              <div style="font-size:12px;color:var(--text-muted)">Bitiş: ${new Date(s.expires_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})}</div>
-            </div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:14px;font-weight:700;color:${dl <= 5 ? '#ef4444' : cfg.color}"><i class="fas fa-clock"></i> ${dl} gün</div>
-            <div style="font-size:11px;color:var(--text-muted)">kaldı</div>
-          </div>
-        </div>`;
-      }).join('')}
-    </div>
+        return `<article class="orders-subscription-card" style="--order-accent:${cfg.color}">
+          <span class="orders-product-mark"><i class="${cfg.icon}"></i></span>
+          <div class="orders-subscription-copy"><strong>${escHtml(s.product_name || cfg.label)}</strong><small>Bitiş · ${new Date(s.expires_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})}</small></div>
+          <div class="orders-days-left${dl <= 5 ? ' is-ending' : ''}"><strong>${dl}</strong><span>gün kaldı</span></div>
+        </article>`;
+      }).join('')}</div>
+      <a href="/magaza" data-link class="orders-manage-link"><i class="fas fa-store"></i> Üyelikleri yönet</a>
+    </section>
   ` : '';
 
   const ordersHTML = orders.length ? orders.map(o => {
     const st = statusLabel[o.status] || statusLabel.pending;
     const cfg = typeConfig[o.product_type] || typeConfig.vip;
-    return `<div class="card card-body" style="margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-        <div style="width:40px;height:40px;border-radius:10px;background:${cfg.color}22;color:${cfg.color};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0"><i class="${cfg.icon}"></i></div>
-        <div style="min-width:0">
-          <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(o.product_name || o.product_type)}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${new Date(o.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">İşlem No: ${escHtml(o.platform_order_id || String(o.id))}</div>
-        </div>
+    return `<article class="orders-history-card" style="--order-accent:${cfg.color}">
+      <span class="orders-product-mark"><i class="${cfg.icon}"></i></span>
+      <div class="orders-history-copy">
+        <strong>${escHtml(o.product_name || o.product_type)}</strong>
+        <time>${new Date(o.created_at).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})}</time>
+        <small>İşlem no · ${escHtml(o.platform_order_id || String(o.id))}</small>
       </div>
-      <div style="display:flex;align-items:center;gap:16px;flex-shrink:0">
-        <div style="font-size:15px;font-weight:700">${parseFloat(o.amount||0).toFixed(2)} ₺</div>
-        <div style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:600;background:${st.color}18;color:${st.color};border:1px solid ${st.color}30">
-          <i class="${st.icon}"></i> ${st.text}
-        </div>
+      <div class="orders-history-result">
+        <strong>${parseFloat(o.amount||0).toFixed(2)} ₺</strong>
+        <span class="orders-status" style="--status-color:${st.color}"><i class="${st.icon}"></i>${st.text}</span>
       </div>
-    </div>`;
+    </article>`;
   }).join('') : `<div class="orders-empty-state"><i class="fas fa-credit-card"></i><h2>Henüz ödemen yok</h2><p>Mağazayı keşfet, sana uygun üyelik ve ürün seçeneklerine göz at.</p><a href="/magaza" data-link class="btn btn-primary"><i class="fas fa-store"></i> Mağazayı keşfet</a></div>`;
 
   app.innerHTML = `
     <div class="container page orders-page">
-      <div class="orders-page-header"><div><h1><i class="fas fa-credit-card" style="color:var(--accent-red2);margin-right:8px"></i>Ödemelerim</h1><p>Ödeme geçmişini ve aktif üyeliklerini buradan takip et.</p></div><a href="/magaza" data-link class="btn btn-outline btn-sm" aria-label="Mağazaya git" title="Mağaza"><i class="fas fa-store"></i><span>Mağaza</span></a></div>
+      <header class="orders-page-header"><div><span class="orders-page-kicker">HESAP ÖZETİ</span><h1>Ödemelerim</h1><p>Üyeliklerini ve ödeme geçmişini tek yerde takip et.</p></div><a href="/magaza" data-link class="btn btn-outline btn-sm" aria-label="Mağazaya git" title="Mağaza"><i class="fas fa-store"></i><span>Mağazaya git</span></a></header>
       ${subsHTML}
-      <div class="orders-history-heading"><i class="fas fa-clock-rotate-left"></i> Ödeme Geçmişi</div>
-      ${ordersHTML}
+      <section class="orders-history">
+        <header class="orders-section-heading"><span><i class="fas fa-clock-rotate-left"></i></span><div><h2>Ödeme geçmişi</h2><p>Yaptığın işlemler ve durumları.</p></div></header>
+        <div class="orders-history-list">${ordersHTML}</div>
+      </section>
     </div>
   `;
 

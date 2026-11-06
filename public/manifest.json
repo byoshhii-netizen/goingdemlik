@@ -9,16 +9,10 @@
   "theme_color": "#121212",
   "icons": [
     {
-      "src": "/icons/cigcig-192.png",
-      "sizes": "192x192",
+      "src": "/cigcig2.png",
       "type": "image/png",
+      "sizes": "1044x910",
       "purpose": "any"
-    },
-    {
-      "src": "/icons/cigcig-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
     }
   ]
 }
