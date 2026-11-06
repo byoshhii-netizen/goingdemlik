@@ -135,6 +135,20 @@ function applyDefaultAvatar(url) {
   else root.style.removeProperty('--default-avatar-image');
 }
 
+function applyDefaultAvatarSize(value) {
+  const parsed = Number(value);
+  const size = Number.isFinite(parsed) ? Math.min(200, Math.max(50, Math.round(parsed))) : 100;
+  document.documentElement.style.setProperty('--default-avatar-size', `${size}%`);
+}
+
+function applyProfilePageBackground(root, imageUrl) {
+  const page = root.querySelector('.profile-page');
+  if (!page || !imageUrl) return;
+  const escapedUrl = String(imageUrl).replace(/[\\"\n\r]/g, character => `\\${character}`);
+  page.classList.add('has-profile-background');
+  page.style.setProperty('--profile-background-image', `url("${escapedUrl}")`);
+}
+
 document.addEventListener('click', event => {
   if (!(event.target instanceof Element) || !defaultAvatarUrl) return;
   const placeholder = event.target.closest('.avatar-placeholder, .profile-avatar-placeholder');
@@ -1183,6 +1197,7 @@ function redVerificationIconHTML(enabled, verifiedAt) {
   const dateAttributes = verifiedAt
     ? ` data-red-verified-at="${escHtml(verifiedAt)}" role="button" tabindex="0" aria-label="Doğrulanmış hesap veriliş tarihi"`
     : '';
+  $('#home-sections')?.removeAttribute('aria-busy');
   return `<span class="red-verification-tick"${dateAttributes} title="Doğrulanmış hesap"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></span>`;
 }
 
@@ -1242,7 +1257,13 @@ document.addEventListener('click', event => {
   event.stopPropagation();
   const date = new Date(badge.dataset.redVerifiedAt);
   const formatted = Number.isNaN(date.getTime()) ? badge.dataset.redVerifiedAt : date.toLocaleString('tr-TR');
-  showModal('Kırmızı Tik', `<p>Bu kişi ${escHtml(formatted)} tarihinde kırmızı tik sahibi oldu.</p>`, 'red-verification-modal');
+  showModal('Hesap doğrulandı', `<div class="red-verification-dialog">
+    <span class="red-verification-dialog-badge"><img src="/gobolog.png" alt="" /></span>
+    <span class="red-verification-dialog-status"><i class="fas fa-circle-check" aria-hidden="true"></i> DOĞRULANMIŞ HESAP</span>
+    <h4>Kırmızı Tik</h4>
+    <p>Bu hesabın CigCig tarafından doğrulandığını gösterir.</p>
+    <div class="red-verification-dialog-date"><i class="far fa-calendar-check" aria-hidden="true"></i><span><small>Doğrulama tarihi</small><strong>${escHtml(formatted)}</strong></span></div>
+  </div>`, 'red-verification-modal');
 });
 document.addEventListener('keydown', event => {
   const badge = event.target.closest?.('[data-red-verified-at]');
@@ -3944,7 +3965,7 @@ document.addEventListener('click', e => {
 async function renderHome(app) {
   document.title = siteName + ' – Topluluk Platformu';
   updatePageMeta(siteName + ' – Topluluk Platformu', 'CigCig, her şeyden, her platformdan özelliği barındıran bir topluluk platformu.', '');
-  app.innerHTML = '<div class="container page"><div id="home-sections"><div class="loading-center" role="status"><div class="spinner"></div><span>Ana sayfa yükleniyor...</span></div></div></div>';
+  app.innerHTML = '<div class="container page"><div id="home-sections" class="home-sections-loading" aria-busy="true"><div class="home-loading-skeleton"><span></span><span></span><span></span></div></div></div>';
 
   let settings = {};
   let settingsError = null;
@@ -10296,7 +10317,7 @@ async function renderProfile(app, username) {
     });
   };
   if (data.private_profile && !isOwn) {
-    app.innerHTML = `<div class="container page"><div class="profile-header">
+    app.innerHTML = `<div class="container page profile-page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
       <div class="profile-header-actions is-other">${profileBadgesButtonHTML(data.badges || [])}</div>
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
@@ -10304,6 +10325,7 @@ async function renderProfile(app, username) {
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${!blockedRelationship && currentUser ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}" style="margin-top:12px">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'İstek gönderildi' : 'Takip et')}</button>` : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
+    applyProfilePageBackground(app, user.profile_background_url);
     bindProfileAvatarViewer(app, user);
     bindFollowButton();
     return;
@@ -10377,7 +10399,7 @@ async function renderProfile(app, username) {
     archive: ['Arşivim', 'fa-box-archive']
   };
 
-  app.innerHTML = `<div class="container page">
+  app.innerHTML = `<div class="container page profile-page">
     <div class="profile-header">
       <div class="profile-avatar-wrap">
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
@@ -10465,6 +10487,7 @@ async function renderProfile(app, username) {
   const firstTab = profileTabOrder.find(tab => app.querySelector('#tab-' + tab));
   profileTabOrder.forEach(tab => app.querySelector('#tab-' + tab)?.classList.toggle('hidden', tab !== firstTab));
 
+  applyProfilePageBackground(app, user.profile_background_url);
   bindProfileAvatarViewer(app, user, data.avatar_photos || [], isOwn);
   app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(badges, isOwn));
   app.querySelectorAll('[data-profile-links]').forEach(button => button.addEventListener('click', () => showProfileLinks(links)));
@@ -11678,6 +11701,17 @@ async function renderSettingsSection(section) {
             <label class="name-color-custom-label" for="s-name-color">Özel renk kodu</label>
             <div class="name-color-custom-input"><input type="color" id="s-name-color-picker" value="${selectedNameColor}" aria-label="Özel isim rengi seç" /><span>#</span><input type="text" id="s-name-color" value="${selectedNameColor.slice(1)}" maxlength="6" inputmode="text" autocomplete="off" aria-describedby="s-name-color-hint" /><small id="s-name-color-hint">HEX</small></div>
           </section>` : ''}
+          ${(currentUser.is_vip || currentUser.is_plus) ? `<section class="profile-background-setting">
+            <div class="profile-background-setting-heading"><span><i class="fas fa-image"></i></span><div><strong>Profil arka planı</strong><small>Görselin profilinde görünür; metin ve düğmelerin okunması için koyu bir katmanla dengelenir.</small></div></div>
+            <div class="profile-background-preview${currentUser.profile_background_url ? ' has-image' : ''}" id="profile-background-preview">
+              <span><i class="fas fa-eye"></i> Profil önizlemesi</span>
+            </div>
+            <div class="profile-background-actions">
+              <label class="btn btn-outline profile-background-picker" for="profile-background-file"><i class="fas fa-images"></i> Cihazdan görsel seç<input type="file" id="profile-background-file" accept="image/jpeg,image/png,image/webp,image/avif,image/gif" /></label>
+              <button type="button" class="btn btn-ghost" id="profile-background-remove" ${currentUser.profile_background_url ? '' : 'disabled'}><i class="fas fa-trash"></i> Kaldır</button>
+            </div>
+            <div class="settings-autosave-status" id="profile-background-status" aria-live="polite">Yatay ve dikey ekrana uyumlu şekilde kırpılır. En fazla 5 MB.</div>
+          </section>` : ''}
           <div id="appearance-save-status" class="settings-autosave-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
         </div>
       </div>`;
@@ -11770,6 +11804,69 @@ async function renderSettingsSection(section) {
     };
     bindAppearanceToggle('#s-show-color', 'show_level_color', 'İsim rengi görünürlüğü kaydedildi.');
     bindAppearanceToggle('#s-show-progress', 'show_level_progress', 'Seviye ilerleme tercihi kaydedildi.');
+    const backgroundInput = $('#profile-background-file');
+    const backgroundPreview = $('#profile-background-preview');
+    const backgroundStatus = $('#profile-background-status');
+    const backgroundRemove = $('#profile-background-remove');
+    if (currentUser.profile_background_url) {
+      const escapedUrl = currentUser.profile_background_url.replace(/[\\"\n\r]/g, character => `\\${character}`);
+      backgroundPreview.style.setProperty('--profile-background-preview', `url("${escapedUrl}")`);
+    }
+    let backgroundSaving = false;
+    backgroundInput?.addEventListener('change', async () => {
+      const file = backgroundInput.files?.[0];
+      if (!file) return;
+      if (!/^image\/(?:jpeg|png|webp|avif|gif)$/.test(file.type) || file.size > 5 * 1024 * 1024) {
+        backgroundStatus.textContent = 'JPEG, PNG, WEBP, AVIF veya GIF biçiminde, en fazla 5 MB bir görsel seçin.';
+        backgroundInput.value = '';
+        return;
+      }
+      const previousBackground = currentUser.profile_background_url || '';
+      backgroundSaving = true;
+      backgroundInput.disabled = true;
+      backgroundRemove.disabled = true;
+      backgroundStatus.textContent = 'Görsel yükleniyor…';
+      const formData = new FormData();
+      formData.append('background', file);
+      try {
+        const result = await apiForm('/profile/background', formData, 'POST');
+        currentUser.profile_background_url = result.profile_background_url;
+        backgroundPreview.style.setProperty('--profile-background-preview', `url("${result.profile_background_url.replace(/[\\"\n\r]/g, character => `\\${character}`)}")`);
+        backgroundPreview.classList.add('has-image');
+        backgroundRemove.disabled = false;
+        backgroundStatus.textContent = 'Profil arka planı kaydedildi.';
+      } catch (error) {
+        currentUser.profile_background_url = previousBackground;
+        backgroundStatus.textContent = error.message || 'Profil arka planı yüklenemedi.';
+        toast(backgroundStatus.textContent, 'error');
+      } finally {
+        backgroundInput.value = '';
+        backgroundInput.disabled = false;
+        backgroundRemove.disabled = !currentUser.profile_background_url;
+        backgroundSaving = false;
+      }
+    });
+    backgroundRemove?.addEventListener('click', async () => {
+      if (backgroundSaving || !currentUser.profile_background_url) return;
+      backgroundSaving = true;
+      backgroundInput.disabled = true;
+      backgroundRemove.disabled = true;
+      backgroundStatus.textContent = 'Arka plan kaldırılıyor…';
+      try {
+        await api('/profile/background', { method: 'DELETE' });
+        currentUser.profile_background_url = '';
+        backgroundPreview.style.removeProperty('--profile-background-preview');
+        backgroundPreview.classList.remove('has-image');
+        backgroundStatus.textContent = 'Profil arka planı kaldırıldı.';
+      } catch (error) {
+        backgroundStatus.textContent = error.message || 'Profil arka planı kaldırılamadı.';
+        toast(backgroundStatus.textContent, 'error');
+        backgroundRemove.disabled = false;
+      } finally {
+        backgroundInput.disabled = false;
+        backgroundSaving = false;
+      }
+    });
   } else if (section === 'account-status') {
     const isPrivate = !!currentUser.is_private;
     el.innerHTML = `
@@ -13009,7 +13106,6 @@ async function init() {
   if (canRenderBeforeSettings) {
     renderRoute(currentPath);
     if (currentUser) showPendingWarning();
-    window.hideMobileSplash?.();
   }
   try {
     const response = await settingsPromise;
@@ -13018,6 +13114,7 @@ async function init() {
     if (redirectForAppUpdate(ps.asset_version)) return;
     window.CigCigTheme?.configure({ ...ps, device_theme_enabled: '0' });
     applyDefaultAvatar(ps.default_avatar_url);
+    applyDefaultAvatarSize(ps.default_avatar_size);
     document.body.classList.toggle('beta-mode-enabled', ps.beta_mode_enabled !== '0');
     siteName = ps.site_name && ps.site_name.toLowerCase() !== 'demlik' ? ps.site_name : 'CigCig';
     loginRequiredEnabled = ps.first_visit_auth === '1';
@@ -13061,7 +13158,6 @@ async function init() {
   startAppVersionPolling();
   if (!canRenderBeforeSettings) {
     renderRoute(location.pathname + location.search);
-    window.hideMobileSplash?.();
   }
   try {
     const journalists = await api('/journalists');

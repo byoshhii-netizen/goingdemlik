@@ -5567,6 +5567,25 @@ app.get('/api/profile/avatar-archive', authMiddleware, async (req, res) => {
   res.json({ photos: rows, current_avatar: users[0]?.avatar || '', avatar_removed: Number(users[0]?.avatar_removed) === 1 });
 });
 
+app.post('/api/profile/background', authMiddleware, avatarUpload.single('background'), async (req, res) => {
+  if (!req.user.is_vip && !req.user.is_plus) return res.status(403).json({ error: 'Profil arka planı yalnızca VIP ve Plus üyeler için kullanılabilir.' });
+  if (!req.file) return res.status(400).json({ error: 'Arka plan için bir görsel seçin.' });
+  try {
+    const imageUrl = await handleUpload(req.file);
+    await query('UPDATE users SET profile_background_url=$1 WHERE id=$2', [imageUrl, req.user.id]);
+    res.json({ profile_background_url: imageUrl });
+  } catch (error) {
+    console.error('[profile-background] Image could not be saved:', error.message);
+    res.status(500).json({ error: 'Profil arka planı kaydedilemedi.' });
+  }
+});
+
+app.delete('/api/profile/background', authMiddleware, async (req, res) => {
+  if (!req.user.is_vip && !req.user.is_plus) return res.status(403).json({ error: 'Profil arka planı yalnızca VIP ve Plus üyeler için kullanılabilir.' });
+  await query("UPDATE users SET profile_background_url='' WHERE id=$1", [req.user.id]);
+  res.json({ profile_background_url: '' });
+});
+
 app.post('/api/profile/avatar-archive', authMiddleware, avatarUpload.single('avatar'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Bir profil fotoğrafı seçin.' });
   await ensureProfileAvatarArchiveSchema();
@@ -8913,6 +8932,13 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     }
     if (value.startsWith('//')) return res.status(400).json({ error: 'Profil görseli adresi geçersiz.' });
   }
+  if (key === 'default_avatar_size') {
+    const size = Number(value);
+    if (!Number.isInteger(size) || size < 50 || size > 200) {
+      return res.status(400).json({ error: 'Profilsiz görsel yakınlaştırması %50-%200 arasında olmalı.' });
+    }
+    value = String(size);
+  }
   const storedValue = key === 'admin_password' ? hashPassword(String(value || '')) : value;
   await query('INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, storedValue]);
   if (key === 'other_songs_enabled' && storedValue === '0') {
@@ -8969,7 +8995,7 @@ app.get('/api/kvkk', async (req, res) => {
 
 app.get('/api/public-settings', async (req, res) => {
   setNoStoreHeaders(res);
-  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'mobile_home_auth_required', 'photo_song_clip_seconds', 'beta_mode_enabled', 'founder_color', 'default_avatar_url'];
+  const keys = ['site_name', 'footer_copyright_text', 'primary_color', 'background_color', 'dark_theme_style', 'light_primary_color', 'light_background_color', 'device_theme_enabled', 'theme_picker_enabled', 'book_bg_color', 'book_reader_font', 'first_visit_auth', 'mobile_home_auth_required', 'photo_song_clip_seconds', 'beta_mode_enabled', 'founder_color', 'default_avatar_url', 'default_avatar_size'];
   const result = {};
   for (const k of keys) {
     const { rows } = await query('SELECT value FROM settings WHERE key=$1', [k]);
@@ -10114,7 +10140,7 @@ app.get('/api/settings/public', async (req, res) => {
     'device_theme_enabled','theme_picker_enabled','homepage_sections','homepage_sections_desktop','profile_tabs','footer_copyright_text',
     'first_visit_auth','mobile_home_auth_required','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
-    'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url'
+    'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url','default_avatar_size'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};

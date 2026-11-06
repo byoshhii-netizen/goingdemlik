@@ -96,6 +96,7 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS homepage_sections TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_visibility TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_removed INTEGER DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_background_url TEXT NOT NULL DEFAULT '';
     UPDATE users SET tag_permission='everyone' WHERE tag_permission IS NULL OR tag_permission='';
 
     CREATE TABLE IF NOT EXISTS red_verification_events (
