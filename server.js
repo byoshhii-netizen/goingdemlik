@@ -48,6 +48,18 @@ function profileRouteKey(username) {
 }
 
 const profileRouteSql = "regexp_replace(translate(lower(username), 'çğıöşü', 'cgiosu'), '[^a-z0-9]', '', 'g')";
+const defaultChildSafetyPolicy = {
+  title: 'Çocuk Güvenliği Standartlarımız',
+  effective_date: '6 Kasım 2026',
+  intro: 'CigCig çocukların cinsel istismarı ve sömürüsüne (CSAE) ve çocuk cinsel istismarı materyaline (CSAM) karşı sıfır tolerans uygular. Bu tür içerik ve davranışlar platformda yasaktır; güvenli bildirimler öncelikli olarak incelenir.',
+  contact: 'Çocuk güvenliğiyle ilgili bir durumu /bildir sayfasından Güvenlik ve istismar başlığıyla iletebilirsiniz.',
+  sections: [
+    { title: 'Yasak davranışlar', body: 'Çocukların cinsel istismarı veya sömürüsünü içeren görsel, video, metin ve bağlantıların paylaşılması; çocukları cinselleştiren içerikler; çocuklara yönelik taciz, kandırma veya istismar girişimleri yasaktır.', link_label: '', link_url: '' },
+    { title: 'Tespit ve inceleme', body: 'Güvenlik bildirimleri öncelikli olarak incelenir. Şüpheli içerikler yayından kaldırılabilir ve inceleme süresince hesap erişimi sınırlandırılabilir.', link_label: '', link_url: '' },
+    { title: 'Bildirim ve yaptırım', body: 'Kullanıcılar şüpheli içerikleri platform içindeki bildirim formundan iletebilir. Kural ihlalleri içeriğin kaldırılması, hesabın askıya alınması veya kalıcı olarak kapatılmasıyla sonuçlanabilir.', link_label: 'Güvenli bildirim oluştur', link_url: '/bildir' },
+    { title: 'Yasal yükümlülükler', body: 'CigCig, yürürlükteki mevzuat kapsamındaki yükümlülüklerine uyar ve gerektiğinde yetkili kurumlarla iş birliği yapar.', link_label: '', link_url: '' }
+  ]
+};
 
 const app = express();
 const server = http.createServer(app);
@@ -423,6 +435,14 @@ const uploadLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Kısa sürede çok fazla içerik yükledin. Biraz bekleyip tekrar dene.' },
+});
+const userReportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  keyGenerator: req => String(req.user.id),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Saatlik bildirim sınırına ulaştın. Lütfen daha sonra tekrar dene.' },
 });
 
 const adminAuthLimiter = rateLimit({
@@ -8452,6 +8472,354 @@ app.get('/api/admin/authority-logs', adminMiddleware, async (req, res) => {
   res.json(rows);
 });
 
+app.get('/api/child-safety', async (req, res) => {
+  try {
+    const { rows } = await query("SELECT value FROM settings WHERE key='child_safety_policy'");
+    const policy = rows.length ? JSON.parse(rows[0].value) : defaultChildSafetyPolicy;
+    res.json(policy);
+  } catch (error) {
+    console.error('[child-safety] Policy could not be loaded:', error.message);
+    res.status(500).json({ error: 'Çocuk güvenliği metni yüklenemedi.' });
+  }
+});
+
+app.get('/api/admin/child-safety', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Çocuk güvenliği metni yalnızca ana admine açıktır.' });
+  try {
+    const { rows } = await query("SELECT value FROM settings WHERE key='child_safety_policy'");
+    res.json(rows.length ? JSON.parse(rows[0].value) : defaultChildSafetyPolicy);
+  } catch (error) {
+    console.error('[child-safety] Admin policy read failed:', error.message);
+    res.status(500).json({ error: 'Çocuk güvenliği metni alınamadı.' });
+  }
+});
+
+app.put('/api/admin/child-safety', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Çocuk güvenliği metni yalnızca ana admine açıktır.' });
+  const body = req.body || {};
+  const title = String(body.title || '').trim();
+  const effectiveDate = String(body.effective_date || '').trim();
+  const intro = String(body.intro || '').trim();
+  const contact = String(body.contact || '').trim();
+  if (!title || title.length > 140 || effectiveDate.length > 60 || intro.length > 3000 || contact.length > 1200) {
+    return res.status(400).json({ error: 'Başlık, tarih veya metin uzunluğu geçersiz.' });
+  }
+  if (!Array.isArray(body.sections) || body.sections.length < 1 || body.sections.length > 16) {
+    return res.status(400).json({ error: 'En az bir, en fazla 16 bölüm ekleyin.' });
+  }
+  const sections = [];
+  for (const section of body.sections) {
+    const item = {
+      title: String(section?.title || '').trim(),
+      body: String(section?.body || '').trim(),
+      link_label: String(section?.link_label || '').trim(),
+      link_url: String(section?.link_url || '').trim()
+    };
+    if (!item.title || item.title.length > 140 || item.body.length > 5000
+      || item.link_label.length > 120 || item.link_url.length > 2048) {
+      return res.status(400).json({ error: 'Bölüm başlığı, açıklaması veya bağlantısı geçersiz.' });
+    }
+    if (item.link_url && !item.link_url.startsWith('/') && !/^https?:\/\//i.test(item.link_url)) {
+      return res.status(400).json({ error: 'Bağlantılar site içi yol veya http/https adresi olmalıdır.' });
+    }
+    sections.push(item);
+  }
+  const policy = { title, effective_date: effectiveDate, intro, contact, sections };
+  try {
+    await query(
+      `INSERT INTO settings (key,value,updated_at) VALUES ('child_safety_policy',$1,NOW())
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,
+      [JSON.stringify(policy)]
+    );
+    res.json({ ok: true, policy });
+  } catch (error) {
+    console.error('[child-safety] Admin policy save failed:', error.message);
+    res.status(500).json({ error: 'Çocuk güvenliği metni kaydedilemedi.' });
+  }
+});
+
+app.post('/api/reports', authMiddleware, userReportLimiter, async (req, res) => {
+  const categories = new Set(['safety', 'harassment', 'hate', 'inappropriate', 'spam', 'impersonation', 'privacy', 'other']);
+  const category = String(req.body?.category || '');
+  const details = String(req.body?.details || '').trim();
+  const targetUsername = String(req.body?.target_username || '').trim().replace(/^@/, '');
+  if (!categories.has(category)) return res.status(400).json({ error: 'Geçerli bir bildirim konusu seçin.' });
+  if (details.length > 2000) return res.status(400).json({ error: 'Açıklama en fazla 2000 karakter olabilir.' });
+  try {
+    let targetId = null;
+    if (targetUsername) {
+      const { rows: target } = await query('SELECT id FROM users WHERE LOWER(username)=LOWER($1) AND COALESCE(banned,0)=0', [targetUsername]);
+      if (!target.length) return res.status(404).json({ error: 'Bildirilecek kullanıcı bulunamadı.' });
+      targetId = target[0].id;
+      if (String(targetId) === String(req.user.id)) return res.status(400).json({ error: 'Kendi hesabını bildiremezsin.' });
+    }
+    const { rows } = await query(
+      'INSERT INTO user_reports (reporter_id,target_user_id,category,details) VALUES ($1,$2,$3,$4) RETURNING id,created_at',
+      [req.user.id, targetId, category, details]
+    );
+    if (!rows.length) return res.status(503).json({ error: 'Bildirim hizmeti şu anda kullanılamıyor.' });
+    res.status(201).json({ ok: true, id: rows[0].id, created_at: rows[0].created_at });
+  } catch (error) {
+    console.error('[reports] User report creation failed:', error.message);
+    res.status(500).json({ error: 'Bildirim kaydedilemedi. Lütfen tekrar dene.' });
+  }
+});
+
+app.get('/api/admin/user-reports', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions?.can_view_users) return res.status(403).json({ error: 'Bildirimleri görüntüleme izniniz yok.' });
+  const status = String(req.query.status || 'open');
+  if (!['all', 'open', 'resolved', 'dismissed'].includes(status)) return res.status(400).json({ error: 'Geçersiz bildirim durumu.' });
+  try {
+    const { rows } = await query(
+      `SELECT r.id,r.category,r.details,r.status,r.created_at,r.updated_at,
+        reporter.username AS reporter_username,target.username AS target_username,
+        reviewer.username AS reviewer_username
+       FROM user_reports r
+       JOIN users reporter ON reporter.id=r.reporter_id
+       LEFT JOIN users target ON target.id=r.target_user_id
+       LEFT JOIN users reviewer ON reviewer.id=r.reviewed_by
+       WHERE ($1='all' OR r.status=$1)
+       ORDER BY CASE WHEN r.category='safety' THEN 0 ELSE 1 END,r.created_at DESC
+       LIMIT 500`,
+      [status]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error('[reports] Admin report list failed:', error.message);
+    res.status(500).json({ error: 'Bildirimler alınamadı.' });
+  }
+});
+
+app.patch('/api/admin/user-reports/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin && !req.adminUser.permissions?.can_view_users) return res.status(403).json({ error: 'Bildirimleri yönetme izniniz yok.' });
+  const reportId = Number.parseInt(req.params.id, 10);
+  const status = String(req.body?.status || '');
+  if (!Number.isSafeInteger(reportId) || reportId < 1 || !['resolved', 'dismissed', 'open'].includes(status)) {
+    return res.status(400).json({ error: 'Bildirim durumu veya numarası geçersiz.' });
+  }
+  try {
+    const { rows } = await query(
+      `UPDATE user_reports SET status=$1,reviewed_by=$2,updated_at=NOW()
+       WHERE id=$3 RETURNING id,status,updated_at`,
+      [status, req.adminUser.id || null, reportId]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Bildirim bulunamadı.' });
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('[reports] Admin report update failed:', error.message);
+    res.status(500).json({ error: 'Bildirim durumu güncellenemedi.' });
+  }
+});
+
+const warningAudienceClause = `(w.audience_type='everyone'
+  OR (w.audience_type='users' AND w.audience_ids ? $2::text)
+  OR (w.audience_type='badges' AND EXISTS (
+    SELECT 1 FROM user_badges ub WHERE ub.user_id=$2::bigint AND w.audience_ids ? ub.badge_id::text
+  )))`;
+
+app.get('/api/warnings/pending', authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT w.id,w.title,w.body,w.category,w.followup_warning_id,w.max_displays,
+        COALESCE(v.view_count,0) AS view_count
+       FROM admin_warnings w
+       JOIN users u ON u.id=$1
+       LEFT JOIN user_warning_views v ON v.warning_id=w.id AND v.user_id=$1
+       WHERE w.is_active=1 AND w.is_deleted=0
+         AND (w.new_users_only=0 OR u.created_at>=w.created_at)
+         AND (w.max_displays=0 OR COALESCE(v.view_count,0)<w.max_displays)
+         AND ${warningAudienceClause}
+         AND NOT EXISTS (
+           SELECT 1 FROM admin_warnings parent
+           WHERE parent.followup_warning_id=w.id AND parent.is_active=1 AND parent.is_deleted=0
+         )
+       ORDER BY w.created_at,w.id LIMIT 1`,
+      [req.user.id, String(req.user.id)]
+    );
+    res.json(rows[0] || null);
+  } catch (error) {
+    console.error('[warnings] Pending warning could not be loaded:', error.message);
+    res.status(500).json({ error: 'Uyarılar yüklenemedi.' });
+  }
+});
+
+app.post('/api/warnings/:id/acknowledge', authMiddleware, async (req, res) => {
+  const warningId = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(warningId) || warningId < 1) return res.status(400).json({ error: 'Geçersiz ihtar.' });
+  try {
+    const { rows: acknowledged } = await query(
+      `INSERT INTO user_warning_views (warning_id,user_id,view_count,last_seen_at)
+       SELECT w.id,$2,1,NOW()
+       FROM admin_warnings w JOIN users u ON u.id=$2
+       WHERE w.id=$1 AND w.is_active=1 AND w.is_deleted=0
+         AND (w.new_users_only=0 OR u.created_at>=w.created_at)
+         AND (w.max_displays=0 OR NOT EXISTS (
+           SELECT 1 FROM user_warning_views existing
+           WHERE existing.warning_id=w.id AND existing.user_id=$2 AND existing.view_count>=w.max_displays
+         ))
+         AND ${warningAudienceClause}
+       ON CONFLICT (warning_id,user_id) DO UPDATE
+         SET view_count=user_warning_views.view_count+1,last_seen_at=NOW()
+         WHERE user_warning_views.view_count < COALESCE((
+           SELECT max_displays FROM admin_warnings WHERE id=$1
+         ),0)
+       RETURNING warning_id`,
+      [warningId, req.user.id]
+    );
+    if (!acknowledged.length) return res.status(409).json({ error: 'Bu ihtar artık görüntülenemiyor.' });
+    const continueChain = req.body?.continue === true;
+    let next = null;
+    if (continueChain) {
+      const { rows } = await query(
+        `SELECT w.id,w.title,w.body,w.category,w.followup_warning_id,w.max_displays,
+          COALESCE(v.view_count,0) AS view_count
+         FROM admin_warnings current
+         JOIN admin_warnings w ON w.id=current.followup_warning_id
+         JOIN users u ON u.id=$2
+         LEFT JOIN user_warning_views v ON v.warning_id=w.id AND v.user_id=$2
+         WHERE current.id=$1 AND w.is_active=1 AND w.is_deleted=0
+           AND (w.new_users_only=0 OR u.created_at>=w.created_at)
+           AND (w.max_displays=0 OR COALESCE(v.view_count,0)<w.max_displays)
+           AND ${warningAudienceClause}
+         LIMIT 1`,
+        [warningId, String(req.user.id)]
+      );
+      next = rows[0] || null;
+    }
+    res.json({ ok: true, next });
+  } catch (error) {
+    console.error('[warnings] Acknowledgement failed:', error.message);
+    res.status(500).json({ error: 'İhtar tercihi kaydedilemedi.' });
+  }
+});
+
+app.get('/api/admin/warnings', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'İhtar yönetimi yalnızca ana admine açıktır.' });
+  try {
+    const [{ rows: warnings }, { rows: badges }] = await Promise.all([
+      query(`SELECT w.*,COALESCE(views.total_views,0) AS total_views,
+          COALESCE(audience.usernames,'[]'::jsonb) AS audience_usernames
+        FROM admin_warnings w LEFT JOIN (
+          SELECT warning_id,SUM(view_count)::bigint AS total_views
+          FROM user_warning_views GROUP BY warning_id
+        ) views ON views.warning_id=w.id
+        LEFT JOIN LATERAL (
+          SELECT jsonb_agg(u.username ORDER BY u.username) AS usernames
+          FROM users u WHERE w.audience_type='users' AND w.audience_ids ? u.id::text
+        ) audience ON TRUE
+        ORDER BY w.is_deleted,w.created_at DESC`),
+      query('SELECT id,name,color FROM badges WHERE COALESCE(is_hidden,0)=0 ORDER BY name')
+    ]);
+    res.json({ warnings, badges });
+  } catch (error) {
+    console.error('[warnings] Admin warnings could not be loaded:', error.message);
+    res.status(500).json({ error: 'İhtarlar alınamadı.' });
+  }
+});
+
+async function saveAdminWarning(req, res, warningId = null) {
+  const body = req.body || {};
+  const title = String(body.title || '').trim();
+  const message = String(body.body || '').trim();
+  const category = String(body.category || '').trim();
+  const audienceType = String(body.audience_type || 'everyone');
+  const maxDisplays = Number(body.max_displays);
+  const newUsersOnly = body.new_users_only === true || body.new_users_only === 1;
+  const followupId = body.followup_warning_id ? Number.parseInt(body.followup_warning_id, 10) : null;
+  if (!title || title.length > 160 || !message || message.length > 10000
+    || !category || category.length > 80 || !/^[\p{L}\p{N} _-]+$/u.test(category)) {
+    return res.status(400).json({ error: 'İhtar başlığı, metni veya kategorisi geçersiz.' });
+  }
+  if (!['everyone', 'users', 'badges'].includes(audienceType)
+    || !Number.isInteger(maxDisplays) || maxDisplays < 1 || maxDisplays > 25) {
+    return res.status(400).json({ error: 'Hedef kitle veya gösterim sayısı geçersiz.' });
+  }
+  if (followupId && (!Number.isSafeInteger(followupId) || followupId < 1 || followupId === warningId)) {
+    return res.status(400).json({ error: 'Devam ihtarı seçimi geçersiz.' });
+  }
+  try {
+    let audienceIds = [];
+    if (audienceType === 'users') {
+      const names = [...new Set((Array.isArray(body.target_usernames) ? body.target_usernames : [])
+        .map(name => String(name || '').trim().replace(/^@/, '').slice(0, 40))
+        .filter(Boolean))].slice(0, 100);
+      if (!names.length) return res.status(400).json({ error: 'Seçili kişilere göndermek için en az bir kullanıcı adı ekleyin.' });
+      const { rows } = await query('SELECT id,username FROM users WHERE LOWER(username)=ANY($1::text[])', [names.map(name => name.toLocaleLowerCase('tr-TR'))]);
+      const found = new Set(rows.map(user => user.username.toLocaleLowerCase('tr-TR')));
+      const missing = names.filter(name => !found.has(name.toLocaleLowerCase('tr-TR')));
+      if (missing.length) return res.status(400).json({ error: `Kullanıcı bulunamadı: ${missing.join(', ')}` });
+      audienceIds = rows.map(user => String(user.id));
+    } else if (audienceType === 'badges') {
+      audienceIds = [...new Set((Array.isArray(body.badge_ids) ? body.badge_ids : [])
+        .map(id => String(Number.parseInt(id, 10))).filter(id => id !== 'NaN'))].slice(0, 100);
+      if (!audienceIds.length) return res.status(400).json({ error: 'Seçili rozetlere göndermek için en az bir rozet seçin.' });
+      const { rows } = await query('SELECT id FROM badges WHERE id=ANY($1::bigint[])', [audienceIds]);
+      if (rows.length !== audienceIds.length) return res.status(400).json({ error: 'Rozet seçimlerinden biri bulunamadı.' });
+    }
+    if (followupId) {
+      const { rows } = await query(
+        `WITH RECURSIVE chain(id) AS (
+          SELECT $1::bigint
+          UNION
+          SELECT w.followup_warning_id FROM admin_warnings w JOIN chain c ON w.id=c.id
+          WHERE w.followup_warning_id IS NOT NULL
+        ) SELECT 1 FROM chain WHERE id=$2 LIMIT 1`,
+        [followupId, warningId || -1]
+      );
+      if (rows.length) return res.status(400).json({ error: 'İhtar zinciri kendi üzerine döngü oluşturamaz.' });
+    }
+    const jsonIds = JSON.stringify(audienceIds);
+    const values = [title, message, category, audienceType, jsonIds, maxDisplays, newUsersOnly ? 1 : 0, followupId];
+    let result;
+    if (warningId) {
+      values.push(warningId);
+      result = await query(
+        `UPDATE admin_warnings SET title=$1,body=$2,category=$3,audience_type=$4,audience_ids=$5::jsonb,
+         max_displays=$6,new_users_only=$7,followup_warning_id=$8,updated_at=NOW()
+         WHERE id=$9 AND is_deleted=0 RETURNING *`,
+        values
+      );
+    } else {
+      result = await query(
+        `INSERT INTO admin_warnings (title,body,category,audience_type,audience_ids,max_displays,new_users_only,followup_warning_id)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) RETURNING *`,
+        values
+      );
+    }
+    if (!result.rows.length) return res.status(404).json({ error: 'İhtar bulunamadı veya silinmiş.' });
+    return res.json(result.rows[0]);
+  } catch (error) {
+    console.error('[warnings] Admin warning save failed:', error.message);
+    return res.status(500).json({ error: 'İhtar kaydedilemedi.' });
+  }
+}
+
+app.post('/api/admin/warnings', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'İhtar yönetimi yalnızca ana admine açıktır.' });
+  return saveAdminWarning(req, res);
+});
+app.put('/api/admin/warnings/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'İhtar yönetimi yalnızca ana admine açıktır.' });
+  const warningId = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(warningId) || warningId < 1) return res.status(400).json({ error: 'Geçersiz ihtar.' });
+  return saveAdminWarning(req, res, warningId);
+});
+app.patch('/api/admin/warnings/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'İhtar yönetimi yalnızca ana admine açıktır.' });
+  const warningId = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(warningId) || warningId < 1) return res.status(400).json({ error: 'Geçersiz ihtar.' });
+  const action = String(req.body?.action || '');
+  if (!['activate', 'deactivate', 'delete'].includes(action)) return res.status(400).json({ error: 'Geçersiz ihtar işlemi.' });
+  const { rows } = await query(
+    `UPDATE admin_warnings SET is_active=CASE WHEN $1='activate' THEN 1 WHEN $1='deactivate' THEN 0 ELSE is_active END,
+      is_deleted=CASE WHEN $1='delete' THEN 1 ELSE is_deleted END,updated_at=NOW()
+     WHERE id=$2 RETURNING id,is_active,is_deleted`,
+    [action, warningId]
+  );
+  if (!rows.length) return res.status(404).json({ error: 'İhtar bulunamadı.' });
+  res.json(rows[0]);
+});
+
 app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Site ayarları yalnızca ana admine açıktır' });
   const { rows } = await query('SELECT * FROM settings');
@@ -11793,7 +12161,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       AND (m.deleted_for_all=0 OR $6=0 OR m.deleted_for_all_at>$7::timestamptz)
       AND ($2=1 OR COALESCE(m.deleted_by_sender,0)=0 OR m.sender_id!=$3)
       AND ($2=1 OR COALESCE(m.deleted_by_receiver,0)=0 OR m.sender_id=$3)
-    ORDER BY CASE WHEN m.id>$6 THEN 0 ELSE 1 END ASC,
+    ORDER BY CASE WHEN $6=0 THEN m.id END DESC,
+      CASE WHEN m.id>$6 THEN 0 ELSE 1 END ASC,
       CASE WHEN m.id>$6 THEN m.id END ASC,
       m.deleted_for_all_at DESC NULLS LAST, m.id DESC
     LIMIT $4 OFFSET $5
@@ -11802,7 +12171,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   if (afterId) return res.json(msgs);
 
   if (msgs.length && String(other.id) !== String(uid)) {
-    const lastId = msgs[msgs.length - 1].id;
+    const lastId = Math.max(...msgs.map(message => Number(message.id)));
     if (isUser1) {
       await query('UPDATE dm_conversations SET read_until_user1=$1 WHERE id=$2 AND read_until_user1 < $1', [lastId, conv.id]);
     } else {

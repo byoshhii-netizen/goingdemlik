@@ -280,6 +280,43 @@ async function initDb() {
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '24 hours')
     );
+    CREATE TABLE IF NOT EXISTS user_reports (
+      id BIGSERIAL PRIMARY KEY,
+      reporter_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      category TEXT NOT NULL,
+      details TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'open',
+      reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_reports_status_created
+      ON user_reports(status, created_at DESC);
+    CREATE TABLE IF NOT EXISTS admin_warnings (
+      id BIGSERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'general',
+      audience_type TEXT NOT NULL DEFAULT 'everyone',
+      audience_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+      max_displays INTEGER NOT NULL DEFAULT 1,
+      new_users_only INTEGER NOT NULL DEFAULT 0,
+      followup_warning_id BIGINT REFERENCES admin_warnings(id) ON DELETE SET NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS user_warning_views (
+      warning_id BIGINT NOT NULL REFERENCES admin_warnings(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      view_count INTEGER NOT NULL DEFAULT 0,
+      last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (warning_id,user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_warnings_active_created
+      ON admin_warnings(is_active,is_deleted,created_at);
     CREATE TABLE IF NOT EXISTS vmb_admin_sessions (
       token TEXT PRIMARY KEY,
       username TEXT NOT NULL DEFAULT 'Cambaz',

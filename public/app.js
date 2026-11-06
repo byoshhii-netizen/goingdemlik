@@ -1799,6 +1799,7 @@ function isPublicGuestRoute(path) {
     || normalizedPath === '/kayit'
     || normalizedPath === '/muzikler'
     || normalizedPath === '/medyakesfet'
+    || normalizedPath === '/csam'
     || normalizedPath === '/kitaplar'
     || normalizedPath === '/forum'
     || normalizedPath === '/konular'
@@ -1958,6 +1959,8 @@ function renderRoute(fullPath) {
   if (path === '/gruplar') return renderGroupList(app);
   if (path === '/fotograflar') return renderPhotos(app);
   if (path === '/medyakesfet') return renderMediaExplore(app);
+  if (path === '/bildir') return renderReportPage(app, queryStr || '');
+  if (path === '/csam') return renderChildSafetyPage(app);
   if (path.startsWith('/hikaye/')) {
     if (!currentUser) return navigate('/giris', false);
     return renderStoryRoute(app, segs[1]);
@@ -2004,6 +2007,164 @@ function updateNavActive(path) {
     l.classList.toggle('active', l.getAttribute('href') === path || (l.getAttribute('href') !== '/' && path.startsWith(l.getAttribute('href'))));
   });
   updateMobileBottomBar(path);
+}
+
+async function renderReportPage(app, queryString = '') {
+  const params = new URLSearchParams(queryString);
+  const username = String(params.get('username') || '').trim().replace(/^@/, '').slice(0, 40);
+  if (!currentUser) return navigate(`/giris?returnTo=${encodeURIComponent(`/bildir${queryString ? `?${queryString}` : ''}`)}`, false);
+
+  const categories = [
+    ['safety', 'Güvenlik ve istismar', 'fa-shield-halved', 'Çocuk güvenliği dâhil acil güvenlik riskleri.'],
+    ['harassment', 'Taciz veya zorbalık', 'fa-hand', 'Israrlı rahatsız etme, tehdit veya hedef gösterme.'],
+    ['hate', 'Nefret söylemi', 'fa-heart-crack', 'Kimlik temelli aşağılayıcı veya şiddeti teşvik eden içerik.'],
+    ['inappropriate', 'Uygunsuz içerik', 'fa-triangle-exclamation', 'Kurallara veya yasalara aykırı içerik.'],
+    ['spam', 'Spam veya dolandırıcılık', 'fa-link-slash', 'Yanıltıcı bağlantı, istenmeyen tanıtım veya dolandırıcılık.'],
+    ['impersonation', 'Taklit veya sahte hesap', 'fa-user-secret', 'Bir kişiyi ya da kurumu yanıltıcı biçimde temsil etme.'],
+    ['privacy', 'Gizlilik ihlali', 'fa-lock', 'İzinsiz kişisel bilgi veya görüntü paylaşımı.'],
+    ['other', 'Diğer bir sorun', 'fa-ellipsis', 'Yukarıdakilere uymayan bir durumu bildir.']
+  ];
+
+  app.innerHTML = `<div class="container page report-page">
+    <header class="report-hero">
+      <span class="report-hero-icon"><i class="fas fa-flag"></i></span>
+      <div><span class="report-eyebrow">CİGCİG GÜVENLİK MERKEZİ</span><h1>Bir bildirimi bize ilet</h1>
+      <p>Bildirimini gizli biçimde inceleriz. Yalnızca inceleme için gerekli bilgileri paylaş.</p></div>
+    </header>
+    <form class="report-card" id="report-form">
+      <div class="report-target"><span class="report-target-icon"><i class="fas ${username ? 'fa-user' : 'fa-circle-info'}"></i></span>
+        <span><strong>${username ? `@${escHtml(username)} hakkında bildirim` : 'Bir içerik veya hesap bildir'}</strong><small>${username ? 'Profil menüsünden geldin. Bu hesap bildirimine eklenecek.' : 'İstersen bir kullanıcı adı ekleyerek bildirimin kapsamını netleştirebilirsin.'}</small></span>
+      </div>
+      <input type="hidden" name="username" value="${escHtml(username)}" />
+      ${username ? '' : `<label class="report-field"><span>İlgili kullanıcı <small>(isteğe bağlı)</small></span><div class="report-input-wrap"><i class="fas fa-at"></i><input name="username_optional" maxlength="40" autocomplete="off" placeholder="kullaniciadi" /></div></label>`}
+      <fieldset class="report-category-field"><legend>Bildirim konusu <span>Birini seç</span></legend>
+        <div class="report-category-grid">${categories.map(([value, label, icon, help], index) => `<label class="report-category">
+          <input type="radio" name="category" value="${value}" ${index === 0 ? 'required' : ''} />
+          <span class="report-category-icon"><i class="fas ${icon}"></i></span>
+          <span class="report-category-copy"><strong>${label}</strong><small>${help}</small></span>
+          <span class="report-category-check"><i class="fas fa-check"></i></span>
+        </label>`).join('')}</div>
+      </fieldset>
+      <label class="report-field"><span>İncelememize yardımcı olacak ayrıntı <small>(isteğe bağlı)</small></span>
+        <textarea name="details" maxlength="2000" rows="4" placeholder="Ne olduğunu ve mümkünse ilgili içeriği kısaca anlat..."></textarea>
+        <small class="report-field-hint">Parola, doğrulama kodu veya gereksiz kişisel bilgi ekleme.</small>
+      </label>
+      <button class="btn btn-primary report-submit" type="submit"><i class="fas fa-paper-plane"></i> Güvenli biçimde gönder</button>
+      <p class="report-privacy"><i class="fas fa-lock"></i> Bildirim yalnızca yetkili inceleme ekibine görünür.</p>
+    </form>
+    <a class="report-safety-link" href="/csam" data-link><span class="report-safety-icon"><i class="fas fa-child-reaching"></i></span>
+      <span><strong>Çocuk Güvenliği Standartlarımız</strong><small>Çocuk güvenliğiyle ilgili yaklaşımımızı ve bildirim yollarını incele.</small></span><i class="fas fa-arrow-up-right-from-square"></i>
+    </a>
+  </div>`;
+
+  app.querySelector('#report-form')?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    const formData = new FormData(form);
+    const targetUsername = username || String(formData.get('username_optional') || '').trim().replace(/^@/, '');
+    submit.disabled = true;
+    try {
+      await api('/reports', { method: 'POST', body: JSON.stringify({
+        target_username: targetUsername,
+        category: formData.get('category'),
+        details: String(formData.get('details') || '').trim()
+      }) });
+      app.querySelector('.report-card').innerHTML = `<div class="report-success">
+        <span><i class="fas fa-check"></i></span><h2>Bildirimin alındı</h2>
+        <p>Ekibimiz bildirimini gizlilik içinde değerlendirecek. Teşekkür ederiz.</p>
+        <button type="button" class="btn btn-outline" id="report-back"><i class="fas fa-arrow-left"></i> Önceki sayfaya dön</button>
+      </div>`;
+      app.querySelector('#report-back')?.addEventListener('click', () => history.length > 1 ? history.back() : navigate('/'));
+    } catch (error) {
+      submit.disabled = false;
+      toast(error.message || 'Bildirim gönderilemedi.', 'error');
+    }
+  });
+}
+
+async function renderChildSafetyPage(app) {
+  app.innerHTML = '<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>';
+  try {
+    const policy = await api('/child-safety');
+    const sections = Array.isArray(policy.sections) ? policy.sections : [];
+    const content = value => escHtml(String(value || '')).replace(/\n/g, '<br>');
+    app.innerHTML = `<div class="container page child-safety-page">
+      <header class="child-safety-header"><span class="child-safety-mark"><i class="fas fa-shield-heart"></i></span>
+        <div><span class="report-eyebrow">CİGCİG GÜVENLİK MERKEZİ</span><h1>${escHtml(policy.title || 'Çocuk Güvenliği Standartlarımız')}</h1>
+        <p>${policy.effective_date ? `Yürürlük tarihi: ${escHtml(policy.effective_date)}` : 'Çocukların güvenliğini korumak için ortak sorumluluk alıyoruz.'}</p></div>
+      </header>
+      ${policy.intro ? `<div class="child-safety-intro">${content(policy.intro)}</div>` : ''}
+      <div class="child-safety-sections">${sections.map((section, index) => `<section class="child-safety-section">
+        <span class="child-safety-index">${String(index + 1).padStart(2, '0')}</span><div><h2>${escHtml(section.title || '')}</h2><p>${content(section.body || '')}</p>
+          ${section.link_url ? `<a href="${escHtml(section.link_url)}" ${section.link_url.startsWith('http://') || section.link_url.startsWith('https://') ? 'target="_blank" rel="noopener noreferrer"' : ''}>${escHtml(section.link_label || 'Daha fazla bilgi')} <i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
+        </div></section>`).join('')}</div>
+      ${policy.contact ? `<aside class="child-safety-contact"><span><i class="fas fa-envelope"></i></span><div><strong>Güvenli bildirim kanalı</strong><p>${content(policy.contact)}</p></div><a href="/bildir" data-link class="btn btn-primary btn-sm">Bildirim oluştur</a></aside>` : ''}
+      <a class="child-safety-back" href="/bildir" data-link><i class="fas fa-arrow-left"></i> Bildirim sayfasına dön</a>
+    </div>`;
+  } catch (error) {
+    app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-shield-halved"></i><p>Çocuk güvenliği standartları şu anda yüklenemedi.</p><button class="btn btn-outline" id="child-safety-retry">Yeniden dene</button></div></div>`;
+    app.querySelector('#child-safety-retry')?.addEventListener('click', () => renderChildSafetyPage(app));
+    console.error('Çocuk güvenliği metni yüklenemedi:', error.message);
+  }
+}
+
+let warningPromptUserId = null;
+async function showPendingWarning() {
+  const userId = currentUser?.id;
+  if (!userId || String(warningPromptUserId) === String(userId)) return;
+  warningPromptUserId = userId;
+  try {
+    const warning = await api('/warnings/pending');
+    if (warning) renderWarningNotice(warning);
+  } catch (error) {
+    warningPromptUserId = null;
+    console.error('İhtarlar alınamadı:', error.message);
+  }
+}
+
+function renderWarningNotice(warning) {
+  document.getElementById('warning-notice-overlay')?.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'warning-notice-overlay';
+  overlay.className = 'warning-notice-overlay';
+  const categories = {
+    safety: ['Güvenlik', 'fa-shield-heart'],
+    rules: ['Topluluk kuralları', 'fa-book-open'],
+    update: ['Bilgilendirme', 'fa-sparkles'],
+    general: ['CigCig bilgilendirmesi', 'fa-bullhorn']
+  };
+  const [categoryLabel, categoryIcon] = categories[warning.category] || [warning.category || 'Bilgilendirme', 'fa-bullhorn'];
+  overlay.innerHTML = `<section class="warning-notice" role="dialog" aria-modal="true" aria-labelledby="warning-notice-title">
+    <div class="warning-notice-top"><span class="warning-notice-icon"><i class="fas ${categoryIcon}"></i></span>
+      <button type="button" class="warning-notice-close" aria-label="İhtarı kapat"><i class="fas fa-xmark"></i></button></div>
+    <span class="warning-notice-category">${escHtml(categoryLabel)}</span>
+    <h2 id="warning-notice-title">${escHtml(warning.title)}</h2>
+    <div class="warning-notice-body">${escHtml(warning.body).replace(/\n/g, '<br>')}</div>
+    <div class="warning-notice-footer"><span><i class="fas fa-lock"></i> CigCig yönetiminden gelen bilgilendirme</span>
+      <div><button type="button" class="warning-notice-dismiss">Kapat</button>
+      <button type="button" class="warning-notice-continue">${warning.followup_warning_id ? 'Devam et' : 'Okudum'} <i class="fas fa-arrow-right"></i></button></div>
+    </div>
+  </section>`;
+  document.body.appendChild(overlay);
+  const closeWarning = async continueChain => {
+    const buttons = overlay.querySelectorAll('button');
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+      const result = await api(`/warnings/${encodeURIComponent(warning.id)}/acknowledge`, {
+        method: 'POST',
+        body: JSON.stringify({ continue: continueChain })
+      });
+      overlay.remove();
+      if (continueChain && result.next) renderWarningNotice(result.next);
+    } catch (error) {
+      buttons.forEach(button => { button.disabled = false; });
+      toast(error.message || 'İhtar tercihi kaydedilemedi.', 'error');
+    }
+  };
+  overlay.querySelector('.warning-notice-close').addEventListener('click', () => closeWarning(false));
+  overlay.querySelector('.warning-notice-dismiss').addEventListener('click', () => closeWarning(false));
+  overlay.querySelector('.warning-notice-continue').addEventListener('click', () => closeWarning(true));
 }
 
 // Reals feed basic viewer
@@ -3288,7 +3449,13 @@ function updateNavUI() {
   const mobAuth = $('#mobile-menu-auth');
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
+  const desktopAccountGroup = $('#nav-desktop-account-group');
+  const adminMenuLink = $('#dropdown-admin');
   if (currentUser) {
+    desktopAccountGroup?.classList.add('is-visible');
+    if (adminMenuLink) {
+      adminMenuLink.hidden = !(currentUser.is_admin === true || Number(currentUser.is_admin) === 1);
+    }
     authEl.classList.add('hidden');
     userEl.classList.remove('hidden');
     const nav = currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="nav-avatar" />` : `<div class="nav-avatar avatar-placeholder"><i class="fas fa-user" style="font-size:12px"></i></div>`;
@@ -3330,6 +3497,8 @@ function updateNavUI() {
       }
     }
   } else {
+    desktopAccountGroup?.classList.remove('is-visible');
+    if (adminMenuLink) adminMenuLink.hidden = true;
     dmSearchUnlockCode = '';
     dmIconUnlockCode = '';
     dmSearchUnlockedConvs = [];
@@ -3367,6 +3536,7 @@ function updateMobileBottomBar(path) {
   if (desktopMessages) {
     desktopMessages.classList.toggle('active', path === '/mesajlar' || path.startsWith('/mesajlar/'));
   }
+  $('#nav-desktop-settings')?.classList.toggle('active', path === '/ayarlar');
 }
 
 function mobileSwipeSection(path) {
@@ -10196,6 +10366,16 @@ async function renderProfile(app, username) {
   }
 
   const links = (() => { try { return JSON.parse(user.links || '[]'); } catch { return []; } })();
+  const profileTabMeta = {
+    forums: ['Konular', 'fa-comments'],
+    books: ['Kitaplar', 'fa-book-open'],
+    photos: ['Medya', 'fa-images'],
+    videos: ['Videolar', 'fa-film'],
+    reals: ['Reals', 'fa-circle-play'],
+    saved: ['Kaydedilenler', 'fa-bookmark'],
+    songs: ['Müzikler', 'fa-music'],
+    archive: ['Arşivim', 'fa-box-archive']
+  };
 
   app.innerHTML = `<div class="container page">
     <div class="profile-header">
@@ -10211,11 +10391,11 @@ async function renderProfile(app, username) {
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
           <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span>
         </div>
-        ${user.title ? `<div class="profile-title"><i class="fas fa-briefcase" style="font-size:11px;margin-right:4px"></i>${escHtml(user.title)}</div>` : ''}
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
         <div id="profile-spotify-now-playing" data-username="${escHtml(user.username)}"></div>
         ${progressHTML}
         ${user.bio ? descriptionPreviewHTML(user.bio, 'profile-bio', 160) : ''}
+        ${user.title ? `<div class="profile-title profile-title-after-bio"><i class="fas fa-briefcase" aria-hidden="true"></i><span>${escHtml(user.title)}</span></div>` : ''}
         ${links.length ? `<div class="profile-links">${links.length > 3
           ? `<button type="button" class="profile-link profile-links-more" data-profile-links aria-haspopup="dialog" aria-label="Profildeki tüm bağlantıları gör" title="Profil bağlantılarını gör"><i class="fas fa-link" aria-hidden="true"></i><span>...</span></button>`
           : links.map(link => {
@@ -10244,7 +10424,7 @@ async function renderProfile(app, username) {
       </div>
     </div>
 
-    <div class="tabs">${profileTabOrder.filter(tab => isOwn || (tab !== 'saved' && tab !== 'archive')).map(tab => ({ forums:'Konular', books:'Kitaplar', photos:'Medya', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab] ? `<button class="tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}">${({ forums:'Konular', books:'Kitaplar', photos:'Medya', videos:'Videolar', reals:'Reals', saved:'Kaydedilenler', songs:'Müzikler', archive:'Arşivim' })[tab]}</button>` : '').join('')}</div>
+    <div class="tabs profile-tabs" aria-label="Profil bölümleri">${profileTabOrder.filter(tab => (isOwn || (tab !== 'saved' && tab !== 'archive')) && profileTabMeta[tab]).map(tab => `<button class="tab profile-tab ${tab === profileTabOrder.find(item => isOwn || (item !== 'saved' && item !== 'archive')) ? 'active' : ''}" data-tab="${tab}" aria-label="${profileTabMeta[tab][0]}" title="${profileTabMeta[tab][0]}"><i class="fas ${profileTabMeta[tab][1]}" aria-hidden="true"></i><span>${profileTabMeta[tab][0]}</span></button>`).join('')}</div>
 
     <div id="tab-forums">
       ${forums.length ? `<div style="display:flex;flex-direction:column;gap:12px">${forums.map(f => profileArchiveCard('forum', f.id, forumCardHTML(f))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-comments"></i><p>Forum yok.</p></div>'}
@@ -10559,7 +10739,8 @@ async function renderProfile(app, username) {
       });
       function buildMenuItems(fs) {
         const items = [
-          { icon: 'fa-share-nodes', label: 'Profili Paylaş', action: 'share-profile' }
+          { icon: 'fa-share-nodes', label: 'Profili Paylaş', action: 'share-profile' },
+          { icon: 'fa-flag', label: 'Profili bildir', action: 'report-profile', danger: true }
         ];
         if (data.is_mutual_friend && !fs?.blocked_by_me) {
           items.push({
@@ -10617,6 +10798,8 @@ async function renderProfile(app, username) {
                 } else {
                   throw new Error('Bu tarayıcıda paylaşım kullanılamıyor');
                 }
+              } else if (action === 'report-profile') {
+                navigate(`/bildir?username=${encodeURIComponent(username)}`);
               } else if (action === 'toggle-story-visibility') {
                 const hide = !storyHidden;
                 if (!await showStoryVisibilityConfirmation(hide)) return;
@@ -12825,6 +13008,7 @@ async function init() {
   const canRenderBeforeSettings = Boolean(currentUser) || isPublicGuestRoute(location.pathname);
   if (canRenderBeforeSettings) {
     renderRoute(currentPath);
+    if (currentUser) showPendingWarning();
     window.hideMobileSplash?.();
   }
   try {
@@ -13149,12 +13333,49 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
   let photos = profileAvatarPhotoList(user, archivePhotos);
   const canViewOwnAvatar = isOwner || (currentUser && String(currentUser.id) === String(user.id));
   if (!photos.length && !canViewOwnAvatar) return;
+  let profileIndex = Math.max(0, photos.findIndex(photo => photo.is_primary));
+  let rotationTimer = null;
+  const stopRotation = () => {
+    if (rotationTimer) clearInterval(rotationTimer);
+    rotationTimer = null;
+  };
+  const showProfileAvatar = transition => {
+    const photo = photos[profileIndex];
+    if (!photo) return;
+    let image = trigger.querySelector('.profile-avatar');
+    if (!image) {
+      trigger.innerHTML = `<img src="${escHtml(photo.image_url)}" class="profile-avatar" alt="" />`;
+      return;
+    }
+    if (transition) image.style.opacity = '0.55';
+    const applyImage = () => {
+      if (!image.isConnected) return;
+      image.src = photo.image_url;
+      image.style.opacity = '';
+    };
+    if (transition) setTimeout(applyImage, 110);
+    else applyImage();
+  };
+  const rotateProfileAvatar = () => {
+    stopRotation();
+    if (photos.length < 2) return;
+    rotationTimer = setInterval(() => {
+      if (!trigger.isConnected) {
+        stopRotation();
+        return;
+      }
+      profileIndex = (profileIndex + 1) % photos.length;
+      showProfileAvatar(true);
+    }, 3600);
+  };
+  if (photos.length) showProfileAvatar(false);
   trigger.dataset.viewerBound = 'true';
   trigger.setAttribute('role', 'button');
   trigger.setAttribute('tabindex', '0');
   trigger.setAttribute('aria-label', 'Profil fotoğraflarını görüntüle');
 
   const openViewer = startIndex => {
+    stopRotation();
     let activeIndex = photos.length ? Math.min(Math.max(startIndex, 0), photos.length - 1) : 0;
     const overlay = document.createElement('div');
     overlay.className = 'profile-avatar-gallery-overlay';
@@ -13224,6 +13445,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
       overlay.remove();
       document.removeEventListener('keydown', onKeydown);
       trigger.focus({ preventScroll: true });
+      rotateProfileAvatar();
     };
     const onKeydown = event => {
       if (event.key === 'Escape') close();
@@ -13249,6 +13471,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
         close();
         return;
       }
+      profileIndex = Math.max(0, photos.findIndex(entry => entry.is_primary));
       const profileAvatarWrap = root.querySelector('.profile-header .profile-avatar-wrap');
       const profileImage = profileAvatarWrap?.querySelector('.profile-avatar');
       if (profileAvatarWrap && user.avatar && !user.avatar_removed) {
@@ -13257,6 +13480,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
       } else if (profileAvatarWrap) {
         profileAvatarWrap.innerHTML = '<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>';
       }
+      showProfileAvatar(false);
       activeIndex = Math.max(0, photos.findIndex(entry => entry.image_url === selectedUrl));
       renderSelection();
     };
@@ -13278,6 +13502,8 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
             : '<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>';
         }
         photos = profileAvatarPhotoList(user, Array.isArray(archive.photos) ? archive.photos : []);
+        profileIndex = Math.max(0, photos.findIndex(entry => entry.is_primary));
+        showProfileAvatar(false);
         renderSelection();
       } catch (error) {
         toast(error.message || 'Profil fotoğrafları yüklenemedi.', 'error');
@@ -13401,7 +13627,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     event.preventDefault();
     event.stopPropagation();
     suppressClickUntil = Date.now() + 700;
-    openViewer(0);
+    openViewer(profileIndex);
   }, true);
   trigger.addEventListener('pointercancel', () => { touchStart = null; }, true);
   trigger.addEventListener('touchstart', event => {
@@ -13417,7 +13643,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     event.preventDefault();
     event.stopPropagation();
     suppressClickUntil = Date.now() + 700;
-    openViewer(0);
+    openViewer(profileIndex);
   }, { capture: true, passive: false });
   trigger.addEventListener('touchcancel', () => { touchFallbackStart = null; }, true);
   trigger.addEventListener('click', event => {
@@ -13428,14 +13654,15 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     }
     event.preventDefault();
     event.stopPropagation();
-    openViewer(0);
+    openViewer(profileIndex);
   }, true);
   trigger.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      openViewer(0);
+      openViewer(profileIndex);
     }
   });
+  rotateProfileAvatar();
 }
 
 async function renderMessages(app, targetUsername, rotateSuggestions = false) {
@@ -14959,9 +15186,44 @@ async function renderDMChat(username) {
       return;
     }
   });
-  document.getElementById('dm-messages')?.addEventListener('contextmenu', event => {
-    if (event.target.closest('.dm-message-image, .dm-ephemeral-open')) event.preventDefault();
+  const dmMessageListForMenus = document.getElementById('dm-messages');
+  dmMessageListForMenus?.addEventListener('contextmenu', event => {
+    if (event.target.closest('.dm-message-image, .dm-ephemeral-open')) {
+      event.preventDefault();
+      return;
+    }
+    const row = event.target.closest('.dm-msg-wrap');
+    const button = row?.querySelector('.dm-msg-menu-btn');
+    if (!row || !button || row.classList.contains('dm-deleted-for-all')) return;
+    event.preventDefault();
+    showDmMsgMenu(button, row.dataset.id, row.classList.contains('dm-own'), username, startDmReply);
   });
+  let dmLongPressTimer = null;
+  let dmLongPressStart = null;
+  dmMessageListForMenus?.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch') return;
+    const row = event.target.closest('.dm-msg-wrap');
+    const button = row?.querySelector('.dm-msg-menu-btn');
+    if (!row || !button || row.classList.contains('dm-deleted-for-all')) return;
+    dmLongPressStart = { x: event.clientX, y: event.clientY };
+    dmLongPressTimer = window.setTimeout(() => {
+      dmLongPressTimer = null;
+      button.style.opacity = '1';
+      showDmMsgMenu(button, row.dataset.id, row.classList.contains('dm-own'), username, startDmReply);
+      showDmReactionPicker(button, row.dataset.id);
+    }, 520);
+  }, { passive: true });
+  const cancelDmLongPress = () => {
+    if (dmLongPressTimer) window.clearTimeout(dmLongPressTimer);
+    dmLongPressTimer = null;
+    dmLongPressStart = null;
+  };
+  dmMessageListForMenus?.addEventListener('pointermove', event => {
+    if (event.pointerType !== 'touch' || !dmLongPressStart) return;
+    if (Math.hypot(event.clientX - dmLongPressStart.x, event.clientY - dmLongPressStart.y) > 12) cancelDmLongPress();
+  }, { passive: true });
+  dmMessageListForMenus?.addEventListener('pointerup', cancelDmLongPress, { passive: true });
+  dmMessageListForMenus?.addEventListener('pointercancel', cancelDmLongPress, { passive: true });
   document.getElementById('dm-messages')?.addEventListener('dragstart', event => {
     if (event.target.closest('.dm-message-image')) event.preventDefault();
   });

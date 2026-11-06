@@ -90,6 +90,55 @@
     .admin-report-message { margin-top:12px; padding:12px; border-radius:8px; background:var(--bg4); color:var(--text); line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
     .admin-report-reason { margin-top:9px; color:var(--text2); font-size:12px; }
     .admin-report-actions { margin-top:12px; }
+    .admin-report-card.is-safety-report { border-left-color:var(--orange); background:linear-gradient(110deg,rgba(249,115,22,.06),var(--bg3) 52%); }
+    .user-report-category { padding:4px 8px; border:1px solid var(--border-red); border-radius:999px; color:var(--red2); background:rgba(225,29,72,.07); }
+    .child-safety-editor { display:grid; gap:18px; }
+    .child-safety-editor-intro { margin:0; color:var(--text2); font-size:12px; line-height:1.6; }
+    .child-safety-editor-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .child-safety-editor-fields label,.child-safety-editor-section label { display:grid; gap:6px; min-width:0; color:var(--text2); font-size:11px; font-weight:700; }
+    .child-safety-editor-wide { grid-column:1/-1; }
+    .child-safety-editor-section { display:grid; gap:12px; margin-top:13px; padding:15px; border:1px solid var(--border); border-radius:12px; background:var(--bg2); }
+    .child-safety-editor-heading { display:flex; align-items:center; justify-content:space-between; color:var(--text); font-size:12px; }
+    .child-safety-editor-link { display:grid; grid-template-columns:1fr 1.4fr; gap:12px; }
+    .child-safety-editor textarea { line-height:1.55; }
+    .warning-editor-card { margin-bottom:16px; }
+    .warning-editor-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+    .warning-editor-form > label { display:grid; align-content:start; gap:6px; min-width:0; margin:0; color:var(--text2); font-size:11px; }
+    .warning-editor-form > label small { color:var(--text3); font-size:10px; font-weight:500; line-height:1.4; text-transform:none; letter-spacing:0; }
+    .warning-editor-wide { grid-column:1/-1; }
+    .warning-editor-check { display:flex !important; grid-column:1/-1; align-items:center; gap:9px !important; padding:11px 12px; border:1px solid var(--border); border-radius:9px; background:var(--bg2); }
+    .warning-editor-check input { flex:0 0 17px; width:17px; height:17px; accent-color:var(--red); }
+    .warning-editor-actions { display:flex; grid-column:1/-1; align-items:center; gap:12px; }
+    .warning-editor-actions span { color:var(--text2); font-size:11px; }
+    .warning-list-toolbar { display:flex; justify-content:flex-end; gap:10px; margin:16px 0 10px; }
+    .warning-list-toolbar label { display:flex; align-items:center; gap:8px; margin:0; color:var(--text2); font-size:11px; }
+    .warning-list-toolbar select { width:auto; min-width:130px; }
+    .warning-admin-list { display:grid; gap:11px; }
+    .warning-admin-card { padding:15px; border:1px solid var(--border); border-left:3px solid var(--red); border-radius:12px; background:var(--bg3); }
+    .warning-admin-card.is-deleted { border-left-color:var(--text3); opacity:.72; }
+    .warning-admin-card-top,.warning-admin-card-meta,.warning-admin-card-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+    .warning-admin-card-top small { margin-left:auto; color:var(--text3); font-size:10px; }
+    .warning-admin-card h3 { margin-top:10px; color:var(--text); font-size:15px; }
+    .warning-admin-card > p { max-height:72px; margin:6px 0 12px; overflow:hidden; color:var(--text2); font-size:11px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .warning-status-chip,.warning-category-chip { padding:4px 8px; border:1px solid var(--border); border-radius:999px; color:var(--text2); background:var(--bg2); font-size:10px; font-weight:700; }
+    .warning-status-chip.is-active { border-color:rgba(34,197,94,.3); color:#86efac; background:rgba(34,197,94,.08); }
+    .warning-status-chip.is-deleted { color:var(--text3); }
+    .warning-category-chip { border-color:var(--border-red); color:var(--red2); background:rgba(225,29,72,.06); }
+    .warning-admin-card-meta { padding:9px 0; border-top:1px solid var(--border); color:var(--text3); font-size:10px; }
+    .warning-admin-card-meta span { display:inline-flex; align-items:center; gap:5px; }
+    .warning-admin-card-meta i { color:var(--red2); }
+    .warning-admin-card-actions { justify-content:flex-end; margin-top:5px; }
+    @media(max-width:620px) {
+      .child-safety-editor-fields,.child-safety-editor-link { grid-template-columns:minmax(0,1fr); }
+      .child-safety-editor-wide { grid-column:auto; }
+      .warning-editor-form { grid-template-columns:minmax(0,1fr); }
+      .warning-editor-wide,.warning-editor-check,.warning-editor-actions { grid-column:auto; }
+      .warning-list-toolbar { justify-content:stretch; }
+      .warning-list-toolbar label { flex:1; align-items:flex-start; flex-direction:column; }
+      .warning-list-toolbar select { width:100%; min-width:0; }
+      .warning-admin-card { padding:12px; }
+      .warning-admin-card-actions { justify-content:flex-start; }
+    }
     .admin-plaintext-message { margin-top:5px; padding:9px 11px; border-radius:7px; background:var(--bg4); color:var(--text); line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
     .login-hex {
       text-align: center; margin-bottom: 32px;
@@ -893,6 +942,9 @@
       <div class="adm-nav-item" data-section="homepage-sections"><div class="adm-nav-icon"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümleri</div>
       <div class="adm-nav-item" data-section="messages"><div class="adm-nav-icon"><i class="fas fa-envelope"></i></div> Mesajlar</div>
       <div class="adm-nav-item" data-section="message-reports"><div class="adm-nav-icon"><i class="fas fa-flag"></i></div> Bildirilenler</div>
+      <div class="adm-nav-item" data-section="user-reports"><div class="adm-nav-icon"><i class="fas fa-shield-heart"></i></div> Kullanıcı Bildirimleri</div>
+      <div class="adm-nav-item" data-section="child-safety"><div class="adm-nav-icon"><i class="fas fa-child-reaching"></i></div> Çocuk Güvenliği</div>
+      <div class="adm-nav-item" data-section="warnings"><div class="adm-nav-icon"><i class="fas fa-bullhorn"></i></div> İhtarlar</div>
       <div class="adm-nav-item" data-section="shop"><div class="adm-nav-icon"><i class="fas fa-store"></i></div> Mağaza Ürünleri</div>
       <div class="adm-nav-item" data-section="shop-orders"><div class="adm-nav-icon"><i class="fas fa-receipt"></i></div> Siparişler</div>
       <div class="adm-nav-item" data-section="shop-settings"><div class="adm-nav-icon"><i class="fas fa-credit-card"></i></div> Ödeme Sistemi</div>
@@ -949,6 +1001,6 @@ function applyThemeColor(hex) {
 })();
 </script>
 <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-<script src="admin.js?v=feature-cleanup-notifications-1"></script>
+<script src="admin.js?v=feature-warning-management-1"></script>
 </body>
 </html>

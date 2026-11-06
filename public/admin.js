@@ -540,7 +540,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_review_artists')) visible.add('artists');
   if (hasPermission('can_review_artists')) visible.add('artist-apps');
   if (hasPermission('can_assign_badges')) visible.add('badges');
-  if (hasPermission('can_view_users')) { visible.add('messages'); visible.add('message-reports'); }
+  if (hasPermission('can_view_users')) { visible.add('messages'); visible.add('message-reports'); visible.add('user-reports'); }
   $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
 }
 
@@ -588,6 +588,7 @@ function loadSection(section) {
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
     levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages, 'message-reports': renderMessageReports,
+    'user-reports': renderUserReports, 'child-safety': renderChildSafetySettings, warnings: renderWarnings,
     notifications: renderAdminNotifications,
     announcements: renderAnnouncements,
     songs: renderAdminSongs, 'artist-apps': renderArtistApps,
@@ -3282,6 +3283,279 @@ async function renderMessageReports(main) {
       showModal(button.dataset.title, `<div class="admin-audit-list">${audit.messages.map(message => `<div class="admin-audit-message"><span class="admin-audit-sender"><small>${formatDate(message.created_at)}</small>${escHtml(message.sender_username)}</span><div class="admin-plaintext-message">${escHtml(message.content || '[Boş mesaj]')}</div></div>`).join('')}</div>`);
     } catch (error) { toast(error.message, 'error'); }
   }));
+}
+
+async function renderUserReports(main) {
+  let status = 'open';
+  const loadReports = async () => {
+    main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
+    try {
+      const reports = await adminApi(`/user-reports?status=${encodeURIComponent(status)}`);
+      const categoryLabels = {
+        safety: 'Güvenlik ve istismar',
+        harassment: 'Taciz veya zorbalık',
+        hate: 'Nefret söylemi',
+        inappropriate: 'Uygunsuz içerik',
+        spam: 'Spam veya dolandırıcılık',
+        impersonation: 'Taklit veya sahte hesap',
+        privacy: 'Gizlilik ihlali',
+        other: 'Diğer'
+      };
+      main.innerHTML = `<div class="adm-section-header">
+        <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-shield-heart"></i></div> Kullanıcı Bildirimleri <span style="font-size:13px;font-weight:400;color:var(--text2)">(${reports.length})</span></div>
+        <label style="display:flex;align-items:center;gap:8px;margin:0;color:var(--text2);font-size:12px">Durum
+          <select id="user-report-filter" style="width:auto"><option value="open">Açık</option><option value="resolved">İncelendi</option><option value="dismissed">Kapatıldı</option><option value="all">Tümü</option></select>
+        </label>
+      </div>
+      <div class="card"><div class="admin-reports-list">${reports.length ? reports.map(report => `<article class="admin-report-card${report.category === 'safety' ? ' is-safety-report' : ''}">
+        <div class="admin-report-head"><span><i class="fas fa-user"></i> <strong>${escHtml(report.reporter_username)}</strong> bildirdi</span><time>${formatDate(report.created_at)}</time></div>
+        <div class="admin-report-context"><span>Hesap: <strong>${report.target_username ? `@${escHtml(report.target_username)}` : 'Belirtilmedi'}</strong></span>
+          <span class="user-report-category">${escHtml(categoryLabels[report.category] || report.category)}</span><span>Durum: ${escHtml(report.status)}</span></div>
+        ${report.details ? `<div class="admin-report-message">${escHtml(report.details)}</div>` : '<div class="admin-report-reason">Ek açıklama yok.</div>'}
+        <div class="admin-report-actions">
+          ${report.status !== 'resolved' ? `<button class="btn btn-outline btn-xs user-report-action" data-id="${report.id}" data-status="resolved"><i class="fas fa-check"></i> İncelendi</button>` : ''}
+          ${report.status !== 'dismissed' ? `<button class="btn btn-ghost btn-xs user-report-action" data-id="${report.id}" data-status="dismissed"><i class="fas fa-xmark"></i> Kapat</button>` : ''}
+          ${report.status !== 'open' ? `<button class="btn btn-ghost btn-xs user-report-action" data-id="${report.id}" data-status="open"><i class="fas fa-rotate-left"></i> Yeniden aç</button>` : ''}
+        </div></article>`).join('') : '<div class="admin-audit-empty">Bu filtrede bildirim bulunmuyor.</div>'}</div></div>`;
+      $('#user-report-filter').value = status;
+      $('#user-report-filter').addEventListener('change', event => { status = event.target.value; loadReports(); });
+      main.querySelectorAll('.user-report-action').forEach(button => button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          await adminApi(`/user-reports/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ status: button.dataset.status }) });
+          toast('Bildirim durumu güncellendi.');
+          await loadReports();
+        } catch (error) { button.disabled = false; toast(error.message, 'error'); }
+      }));
+    } catch (error) {
+      main.innerHTML = `<div class="card card-body" style="color:var(--red2)">${escHtml(error.message)}</div>`;
+    }
+  };
+  await loadReports();
+}
+
+async function renderChildSafetySettings(main) {
+  let policy;
+  try { policy = await adminApi('/child-safety'); }
+  catch (error) { main.innerHTML = `<div class="card card-body" style="color:var(--red2)">${escHtml(error.message)}</div>`; return; }
+  policy.sections = Array.isArray(policy.sections) ? policy.sections : [];
+  const renderSections = () => {
+    const host = $('#child-safety-editor-sections');
+    if (!host) return;
+    host.innerHTML = policy.sections.map((section, index) => `<section class="child-safety-editor-section" data-index="${index}">
+      <div class="child-safety-editor-heading"><strong>Bölüm ${index + 1}</strong><button type="button" class="btn btn-ghost btn-xs child-safety-remove" data-index="${index}" aria-label="Bölümü sil"><i class="fas fa-trash"></i></button></div>
+      <label>Başlık<input data-field="title" maxlength="140" value="${escHtml(section.title || '')}" /></label>
+      <label>Metin<textarea data-field="body" maxlength="5000" rows="4">${escHtml(section.body || '')}</textarea></label>
+      <div class="child-safety-editor-link"><label>Bağlantı metni<input data-field="link_label" maxlength="120" value="${escHtml(section.link_label || '')}" /></label>
+      <label>Bağlantı adresi<input data-field="link_url" maxlength="2048" placeholder="/bildir veya https://..." value="${escHtml(section.link_url || '')}" /></label></div>
+    </section>`).join('');
+    host.querySelectorAll('[data-field]').forEach(field => field.addEventListener('input', () => {
+      const section = policy.sections[Number(field.closest('[data-index]').dataset.index)];
+      section[field.dataset.field] = field.value;
+    }));
+    host.querySelectorAll('.child-safety-remove').forEach(button => button.addEventListener('click', () => {
+      if (policy.sections.length <= 1) { toast('En az bir bölüm bulunmalı.', 'error'); return; }
+      policy.sections.splice(Number(button.dataset.index), 1);
+      renderSections();
+    }));
+  };
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-child-reaching"></i></div> Çocuk Güvenliği Standartları</div>
+      <button class="btn btn-primary btn-sm" id="child-safety-save"><i class="fas fa-floppy-disk"></i> Değişiklikleri kaydet</button></div>
+    <div class="card"><div class="card-body child-safety-editor">
+      <p class="child-safety-editor-intro">Bu içerik <code>/csam</code> sayfasında herkese gösterilir. Başlık, yürürlük tarihi, açıklamalar, iletişim bilgisi ve her bölümün bağlantısı düzenlenebilir.</p>
+      <div class="child-safety-editor-fields">
+        <label>Sayfa başlığı<input id="child-safety-title" maxlength="140" value="${escHtml(policy.title || '')}" /></label>
+        <label>Yürürlük tarihi<input id="child-safety-date" maxlength="60" value="${escHtml(policy.effective_date || '')}" /></label>
+        <label class="child-safety-editor-wide">Giriş metni<textarea id="child-safety-intro" maxlength="3000" rows="4">${escHtml(policy.intro || '')}</textarea></label>
+        <label class="child-safety-editor-wide">İletişim / bildirim bilgisi<textarea id="child-safety-contact" maxlength="1200" rows="3">${escHtml(policy.contact || '')}</textarea></label>
+      </div>
+      <div id="child-safety-editor-sections"></div>
+      <button class="btn btn-outline btn-sm" id="child-safety-add"><i class="fas fa-plus"></i> Bölüm ekle</button>
+      <div id="child-safety-save-status" class="settings-help" aria-live="polite"></div>
+    </div></div>`;
+  renderSections();
+  $('#child-safety-add').addEventListener('click', () => {
+    if (policy.sections.length >= 16) { toast('En fazla 16 bölüm eklenebilir.', 'error'); return; }
+    policy.sections.push({ title: '', body: '', link_label: '', link_url: '' });
+    renderSections();
+  });
+  $('#child-safety-save').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    $('#child-safety-save-status').textContent = 'Kaydediliyor...';
+    const payload = {
+      title: $('#child-safety-title').value,
+      effective_date: $('#child-safety-date').value,
+      intro: $('#child-safety-intro').value,
+      contact: $('#child-safety-contact').value,
+      sections: policy.sections
+    };
+    try {
+      const result = await adminApi('/child-safety', { method: 'PUT', body: JSON.stringify(payload) });
+      policy = result.policy;
+      $('#child-safety-save-status').textContent = 'Kaydedildi. /csam sayfası yeni içeriği gösterecek.';
+      toast('Çocuk güvenliği metni güncellendi.');
+    } catch (error) {
+      $('#child-safety-save-status').textContent = error.message;
+      toast(error.message, 'error');
+    } finally { button.disabled = false; }
+  });
+}
+
+async function renderWarnings(main) {
+  let data;
+  try { data = await adminApi('/warnings'); }
+  catch (error) { main.innerHTML = `<div class="card card-body" style="color:var(--red2)">${escHtml(error.message)}</div>`; return; }
+  const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+  const badges = Array.isArray(data.badges) ? data.badges : [];
+  let statusFilter = 'all';
+  let categoryFilter = 'all';
+  let editingId = null;
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-bullhorn"></i></div> İhtarlar</div>
+    <button class="btn btn-primary btn-sm" id="warning-new"><i class="fas fa-plus"></i> Yeni ihtar</button></div>
+    <section class="card warning-editor-card" id="warning-editor" hidden>
+      <div class="card-header"><span id="warning-editor-heading"><i class="fas fa-pen"></i> İhtar oluştur</span><button class="btn btn-ghost btn-xs" id="warning-editor-close" aria-label="Formu kapat"><i class="fas fa-xmark"></i></button></div>
+      <div class="card-body">
+        <form id="warning-form" class="warning-editor-form">
+          <label>Başlık<input id="warning-title" maxlength="160" required placeholder="Örn. Topluluk kurallarımız" /></label>
+          <label>Kategori<input id="warning-category" maxlength="80" required placeholder="Güvenlik, Güncelleme..." /></label>
+          <label class="warning-editor-wide">İhtar metni<textarea id="warning-body" maxlength="10000" rows="6" required placeholder="Kullanıcıya gösterilecek açık ve anlaşılır bilgi..."></textarea></label>
+          <label>Kimlere gösterilsin?
+            <select id="warning-audience"><option value="everyone">Herkese</option><option value="users">Seçili kişilere</option><option value="badges">Seçili rozetlere sahip kişilere</option></select>
+          </label>
+          <label>En fazla kaç kez gösterilsin?
+            <input id="warning-max-displays" type="number" min="1" max="25" value="1" required />
+            <small>1 seçilirse kullanıcıya bir kez gösterilir ve tekrar açılmaz.</small>
+          </label>
+          <label class="warning-editor-wide" id="warning-users-field" hidden>Kullanıcı adları <small>Virgül veya satırla ayır. Örn: kullanici1, kullanici2</small>
+            <textarea id="warning-users" rows="2" placeholder="@kullanici1, kullanici2"></textarea>
+          </label>
+          <label class="warning-editor-wide" id="warning-badges-field" hidden>Rozetler <small>Seçilen rozetlerden en az birine sahip kullanıcılar hedeflenir.</small>
+            <select id="warning-badges" multiple size="5">${badges.map(badge => `<option value="${badge.id}">${escHtml(badge.name)}</option>`).join('')}</select>
+          </label>
+          <label class="warning-editor-check"><input id="warning-new-users" type="checkbox" /> Yalnızca ihtar oluşturulduktan sonra kayıt olanlara göster</label>
+          <label class="warning-editor-wide">“Devam” seçeneğinde açılacak sonraki ihtar
+            <select id="warning-followup"><option value="">Bağlı ihtar yok</option>${warnings.filter(item => !item.is_deleted).map(item => `<option value="${item.id}">${escHtml(item.title)}</option>`).join('')}</select>
+          </label>
+          <div class="warning-editor-actions"><button type="submit" class="btn btn-primary" id="warning-save"><i class="fas fa-floppy-disk"></i> İhtarı kaydet</button><span id="warning-save-status" aria-live="polite"></span></div>
+        </form>
+      </div>
+    </section>
+    <div class="warning-list-toolbar">
+      <label>Durum<select id="warning-status-filter"><option value="all">Tümü</option><option value="active">Aktif</option><option value="inactive">Pasif</option><option value="deleted">Silinmiş</option></select></label>
+      <label>Kategori<select id="warning-category-filter"><option value="all">Tüm kategoriler</option>${[...new Set(warnings.map(item => item.category).filter(Boolean))].map(category => `<option value="${escHtml(category)}">${escHtml(category)}</option>`).join('')}</select></label>
+    </div>
+    <div class="warning-admin-list" id="warning-admin-list"></div>`;
+  const editor = $('#warning-editor');
+  const statusFilterNode = $('#warning-status-filter');
+  const categoryFilterNode = $('#warning-category-filter');
+  const drawList = () => {
+    const filtered = warnings.filter(item => {
+      const state = item.is_deleted ? 'deleted' : Number(item.is_active) ? 'active' : 'inactive';
+      return (statusFilter === 'all' || statusFilter === state) && (categoryFilter === 'all' || item.category === categoryFilter);
+    });
+    $('#warning-admin-list').innerHTML = filtered.length ? filtered.map(item => {
+      const state = item.is_deleted ? 'Silinmiş' : Number(item.is_active) ? 'Aktif' : 'Pasif';
+      const audience = item.audience_type === 'users' ? 'Seçili kişiler'
+        : item.audience_type === 'badges' ? 'Rozet hedeflemesi' : 'Herkes';
+      return `<article class="warning-admin-card${item.is_deleted ? ' is-deleted' : ''}">
+        <div class="warning-admin-card-top"><span class="warning-status-chip ${item.is_deleted ? 'is-deleted' : Number(item.is_active) ? 'is-active' : ''}">${state}</span>
+          <span class="warning-category-chip">${escHtml(item.category)}</span><small>${formatDate(item.created_at)}</small></div>
+        <h3>${escHtml(item.title)}</h3><p>${escHtml(item.body)}</p>
+        <div class="warning-admin-card-meta"><span><i class="fas fa-users"></i> ${audience}</span><span><i class="fas fa-repeat"></i> En çok ${Number(item.max_displays)} kez</span><span><i class="fas fa-eye"></i> ${Number(item.total_views || 0)} görüntüleme</span>
+          ${item.new_users_only ? '<span><i class="fas fa-user-plus"></i> Yeni kayıtlar</span>' : ''}${item.followup_warning_id ? `<span><i class="fas fa-arrow-right"></i> Sonraki ihtar #${Number(item.followup_warning_id)}</span>` : ''}</div>
+        <div class="warning-admin-card-actions">
+          ${!item.is_deleted ? `<button class="btn btn-outline btn-xs warning-edit" data-id="${item.id}"><i class="fas fa-pen"></i> Düzenle</button>
+            <button class="btn btn-ghost btn-xs warning-toggle" data-id="${item.id}" data-action="${Number(item.is_active) ? 'deactivate' : 'activate'}"><i class="fas fa-${Number(item.is_active) ? 'pause' : 'play'}"></i> ${Number(item.is_active) ? 'Pasife al' : 'Etkinleştir'}</button>
+            <button class="btn btn-ghost btn-xs warning-delete" data-id="${item.id}"><i class="fas fa-trash"></i> Sil</button>` : ''}
+        </div></article>`;
+    }).join('') : '<div class="card card-body" style="color:var(--text2);text-align:center">Bu filtrede ihtar yok.</div>';
+    $('#warning-admin-list').querySelectorAll('.warning-edit').forEach(button => button.addEventListener('click', () => {
+      const item = warnings.find(warning => String(warning.id) === button.dataset.id);
+      if (!item) return;
+      editingId = item.id;
+      $('#warning-editor-heading').innerHTML = '<i class="fas fa-pen"></i> İhtarı düzenle';
+      $('#warning-title').value = item.title;
+      $('#warning-category').value = item.category;
+      $('#warning-body').value = item.body;
+      $('#warning-audience').value = item.audience_type;
+      $('#warning-max-displays').value = item.max_displays;
+      $('#warning-new-users').checked = Number(item.new_users_only) === 1;
+      $('#warning-users').value = item.audience_type === 'users'
+        ? (Array.isArray(item.audience_usernames) ? item.audience_usernames : []).join(', ')
+        : '';
+      const selectedBadges = new Set((Array.isArray(item.audience_ids) ? item.audience_ids : []).map(String));
+      [...$('#warning-badges').options].forEach(option => { option.selected = selectedBadges.has(option.value); });
+      $('#warning-followup').value = item.followup_warning_id || '';
+      $('#warning-users-field').hidden = item.audience_type !== 'users';
+      $('#warning-badges-field').hidden = item.audience_type !== 'badges';
+      $('#warning-followup').innerHTML = `<option value="">Bağlı ihtar yok</option>${warnings.filter(warning => !warning.is_deleted && String(warning.id) !== String(item.id)).map(warning => `<option value="${warning.id}">${escHtml(warning.title)}</option>`).join('')}`;
+      $('#warning-followup').value = item.followup_warning_id || '';
+      $('#warning-save').innerHTML = '<i class="fas fa-floppy-disk"></i> Değişiklikleri kaydet';
+      editor.hidden = false;
+      editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+    $('#warning-admin-list').querySelectorAll('.warning-toggle,.warning-delete').forEach(button => button.addEventListener('click', async () => {
+      const action = button.dataset.action || 'delete';
+      if (action === 'delete' && !await CigCigDialogs.confirm('Bu ihtar silinmiş olarak arşivlensin mi?')) return;
+      button.disabled = true;
+      try {
+        await adminApi(`/warnings/${button.dataset.id}`, { method: 'PATCH', body: JSON.stringify({ action }) });
+        const item = warnings.find(warning => String(warning.id) === button.dataset.id);
+        if (item) {
+          if (action === 'delete') item.is_deleted = 1;
+          else item.is_active = action === 'activate' ? 1 : 0;
+        }
+        toast(action === 'delete' ? 'İhtar silinmişler bölümüne taşındı.' : 'İhtar durumu güncellendi.');
+        drawList();
+      } catch (error) { button.disabled = false; toast(error.message, 'error'); }
+    }));
+  };
+  const resetForm = () => {
+    editingId = null;
+    $('#warning-form').reset();
+    $('#warning-max-displays').value = '1';
+    $('#warning-editor-heading').innerHTML = '<i class="fas fa-pen"></i> İhtar oluştur';
+    $('#warning-save').innerHTML = '<i class="fas fa-floppy-disk"></i> İhtarı kaydet';
+    $('#warning-users-field').hidden = true;
+    $('#warning-badges-field').hidden = true;
+  };
+  $('#warning-new').addEventListener('click', () => { resetForm(); editor.hidden = false; editor.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  $('#warning-editor-close').addEventListener('click', () => { editor.hidden = true; });
+  $('#warning-audience').addEventListener('change', event => {
+    $('#warning-users-field').hidden = event.target.value !== 'users';
+    $('#warning-badges-field').hidden = event.target.value !== 'badges';
+  });
+  $('#warning-status-filter').addEventListener('change', event => { statusFilter = event.target.value; drawList(); });
+  $('#warning-category-filter').addEventListener('change', event => { categoryFilter = event.target.value; drawList(); });
+  $('#warning-form').addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = $('#warning-save');
+    const audienceType = $('#warning-audience').value;
+    const payload = {
+      title: $('#warning-title').value.trim(),
+      category: $('#warning-category').value.trim(),
+      body: $('#warning-body').value.trim(),
+      audience_type: audienceType,
+      max_displays: Number($('#warning-max-displays').value),
+      new_users_only: $('#warning-new-users').checked,
+      target_usernames: $('#warning-users').value.split(/[,\n;]/).map(name => name.trim()).filter(Boolean),
+      badge_ids: [...$('#warning-badges').selectedOptions].map(option => option.value),
+      followup_warning_id: $('#warning-followup').value || null
+    };
+    button.disabled = true;
+    try {
+      await adminApi(editingId ? `/warnings/${editingId}` : '/warnings', {
+        method: editingId ? 'PUT' : 'POST',
+        body: JSON.stringify(payload)
+      });
+      toast(editingId ? 'İhtar güncellendi.' : 'İhtar oluşturuldu.');
+      await loadSection('warnings');
+    } catch (error) { toast(error.message, 'error'); button.disabled = false; }
+  });
+  statusFilterNode.value = statusFilter;
+  categoryFilterNode.value = categoryFilter;
+  drawList();
 }
 
 async function renderAdminNotifications(main) {
