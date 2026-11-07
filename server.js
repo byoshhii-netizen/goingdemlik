@@ -8761,7 +8761,7 @@ app.get('/api/warnings/pending', authMiddleware, async (req, res) => {
            SELECT 1 FROM admin_warnings parent
            WHERE parent.followup_warning_id=w.id AND parent.is_active=1 AND parent.is_deleted=0
          )
-       ORDER BY w.created_at,w.id LIMIT 1`,
+       ORDER BY w.priority_order,w.created_at,w.id LIMIT 1`,
       [req.user.id, String(req.user.id)]
     );
     res.json(rows[0] || null);
@@ -8852,6 +8852,7 @@ async function saveAdminWarning(req, res, warningId = null) {
   const category = String(body.category || '').trim();
   const audienceType = String(body.audience_type || 'everyone');
   const maxDisplays = Number(body.max_displays);
+  const priorityOrder = Number(body.priority_order);
   const newUsersOnly = body.new_users_only === true || body.new_users_only === 1;
   const followupId = body.followup_warning_id ? Number.parseInt(body.followup_warning_id, 10) : null;
   if (!title || title.length > 160 || !message || message.length > 10000
@@ -8859,7 +8860,8 @@ async function saveAdminWarning(req, res, warningId = null) {
     return res.status(400).json({ error: 'İhtar başlığı, metni veya kategorisi geçersiz.' });
   }
   if (!['everyone', 'users', 'badges'].includes(audienceType)
-    || !Number.isInteger(maxDisplays) || maxDisplays < 1 || maxDisplays > 25) {
+    || !Number.isInteger(maxDisplays) || maxDisplays < 1 || maxDisplays > 25
+    || !Number.isInteger(priorityOrder) || priorityOrder < 1 || priorityOrder > 1000000) {
     return res.status(400).json({ error: 'Hedef kitle veya gösterim sayısı geçersiz.' });
   }
   if (followupId && (!Number.isSafeInteger(followupId) || followupId < 1 || followupId === warningId)) {
@@ -8885,6 +8887,11 @@ async function saveAdminWarning(req, res, warningId = null) {
       if (rows.length !== audienceIds.length) return res.status(400).json({ error: 'Rozet seçimlerinden biri bulunamadı.' });
     }
     if (followupId) {
+      const { rows: existingParents } = await query(
+        'SELECT id FROM admin_warnings WHERE followup_warning_id=$1 AND id<>$2 LIMIT 1',
+        [followupId, warningId || -1]
+      );
+      if (existingParents.length) return res.status(400).json({ error: 'Bir ihtar yalnızca tek bir ihtar zincirine bağlanabilir.' });
       const { rows } = await query(
         `WITH RECURSIVE chain(id) AS (
           SELECT $1::bigint
@@ -8897,20 +8904,20 @@ async function saveAdminWarning(req, res, warningId = null) {
       if (rows.length) return res.status(400).json({ error: 'İhtar zinciri kendi üzerine döngü oluşturamaz.' });
     }
     const jsonIds = JSON.stringify(audienceIds);
-    const values = [title, message, category, audienceType, jsonIds, maxDisplays, newUsersOnly ? 1 : 0, followupId];
+    const values = [title, message, category, audienceType, jsonIds, maxDisplays, newUsersOnly ? 1 : 0, followupId, priorityOrder];
     let result;
     if (warningId) {
       values.push(warningId);
       result = await query(
         `UPDATE admin_warnings SET title=$1,body=$2,category=$3,audience_type=$4,audience_ids=$5::jsonb,
-         max_displays=$6,new_users_only=$7,followup_warning_id=$8,updated_at=NOW()
-         WHERE id=$9 AND is_deleted=0 RETURNING *`,
+         max_displays=$6,new_users_only=$7,followup_warning_id=$8,priority_order=$9,updated_at=NOW()
+         WHERE id=$10 AND is_deleted=0 RETURNING *`,
         values
       );
     } else {
       result = await query(
-        `INSERT INTO admin_warnings (title,body,category,audience_type,audience_ids,max_displays,new_users_only,followup_warning_id)
-         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) RETURNING *`,
+        `INSERT INTO admin_warnings (title,body,category,audience_type,audience_ids,max_displays,new_users_only,followup_warning_id,priority_order)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING *`,
         values
       );
     }

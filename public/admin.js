@@ -3410,6 +3410,7 @@ async function renderWarnings(main) {
   catch (error) { main.innerHTML = `<div class="card card-body" style="color:var(--red2)">${escHtml(error.message)}</div>`; return; }
   const warnings = Array.isArray(data.warnings) ? data.warnings : [];
   const badges = Array.isArray(data.badges) ? data.badges : [];
+  const nextWarningPriority = warnings.reduce((priority, item) => Math.max(priority, Number(item.priority_order) || 0), 0) + 1;
   let statusFilter = 'all';
   let categoryFilter = 'all';
   let editingId = null;
@@ -3428,6 +3429,10 @@ async function renderWarnings(main) {
           <label>En fazla kaç kez gösterilsin?
             <input id="warning-max-displays" type="number" min="1" max="25" value="1" required />
             <small>1 seçilirse kullanıcıya bir kez gösterilir ve tekrar açılmaz.</small>
+          </label>
+          <label class="warning-editor-priority">Gösterim önceliği
+            <input id="warning-priority-order" type="number" min="1" max="1000000" value="${nextWarningPriority}" required />
+            <small>Düşük sıra numaralı bağımsız ihtarlar ve zincirler önce gösterilir. Bağlı ihtarların sırasını zincir belirler.</small>
           </label>
           <label class="warning-editor-wide" id="warning-users-field" hidden>Kullanıcı adları <small>Virgül veya satırla ayır. Örn: kullanici1, kullanici2</small>
             <textarea id="warning-users" rows="2" placeholder="@kullanici1, kullanici2"></textarea>
@@ -3456,21 +3461,54 @@ async function renderWarnings(main) {
       const state = item.is_deleted ? 'deleted' : Number(item.is_active) ? 'active' : 'inactive';
       return (statusFilter === 'all' || statusFilter === state) && (categoryFilter === 'all' || item.category === categoryFilter);
     });
-    $('#warning-admin-list').innerHTML = filtered.length ? filtered.map(item => {
+    const warningById = new Map(warnings.map(item => [String(item.id), item]));
+    const childIds = new Set(warnings.map(item => item.followup_warning_id).filter(Boolean).map(String));
+    const roots = warnings.filter(item => !childIds.has(String(item.id))).sort((a, b) =>
+      (Number(a.priority_order) || 1000) - (Number(b.priority_order) || 1000)
+      || new Date(a.created_at) - new Date(b.created_at)
+      || Number(a.id) - Number(b.id));
+    const groups = [];
+    const renderedIds = new Set();
+    const addChain = root => {
+      const chain = [];
+      const visited = new Set();
+      let item = root;
+      while (item && !visited.has(String(item.id))) {
+        visited.add(String(item.id));
+        renderedIds.add(String(item.id));
+        chain.push(item);
+        item = item.followup_warning_id ? warningById.get(String(item.followup_warning_id)) : null;
+      }
+      const visibleChain = chain.map((entry, index) => ({ item: entry, sequence: index + 1 }))
+        .filter(entry => filtered.includes(entry.item));
+      if (visibleChain.length) groups.push({ root, chain: visibleChain, totalLength: chain.length });
+    };
+    roots.forEach(addChain);
+    warnings.filter(item => !renderedIds.has(String(item.id))).forEach(addChain);
+    const renderWarningCard = (item, sequence, root) => {
       const state = item.is_deleted ? 'Silinmiş' : Number(item.is_active) ? 'Aktif' : 'Pasif';
       const audience = item.audience_type === 'users' ? 'Seçili kişiler'
         : item.audience_type === 'badges' ? 'Rozet hedeflemesi' : 'Herkes';
       return `<article class="warning-admin-card${item.is_deleted ? ' is-deleted' : ''}">
         <div class="warning-admin-card-top"><span class="warning-status-chip ${item.is_deleted ? 'is-deleted' : Number(item.is_active) ? 'is-active' : ''}">${state}</span>
-          <span class="warning-category-chip">${escHtml(item.category)}</span><small>${formatDate(item.created_at)}</small></div>
+          <span class="warning-category-chip">${escHtml(item.category)}</span><span class="warning-sequence-chip">Sıra ${sequence}</span><small>${formatDate(item.created_at)}</small></div>
         <h3>${escHtml(item.title)}</h3><p>${escHtml(item.body)}</p>
         <div class="warning-admin-card-meta"><span><i class="fas fa-users"></i> ${audience}</span><span><i class="fas fa-repeat"></i> En çok ${Number(item.max_displays)} kez</span><span><i class="fas fa-eye"></i> ${Number(item.total_views || 0)} görüntüleme</span>
-          ${item.new_users_only ? '<span><i class="fas fa-user-plus"></i> Yeni kayıtlar</span>' : ''}${item.followup_warning_id ? `<span><i class="fas fa-arrow-right"></i> Sonraki ihtar #${Number(item.followup_warning_id)}</span>` : ''}</div>
+          ${sequence === 1 ? `<span><i class="fas fa-arrow-down-wide-short"></i> Öncelik #${Number(root.priority_order) || 1000}</span>` : ''}${item.new_users_only ? '<span><i class="fas fa-user-plus"></i> Yeni kayıtlar</span>' : ''}${item.followup_warning_id ? `<span><i class="fas fa-arrow-right"></i> Sonraki ihtar #${Number(item.followup_warning_id)}</span>` : ''}</div>
         <div class="warning-admin-card-actions">
           ${!item.is_deleted ? `<button class="btn btn-outline btn-xs warning-edit" data-id="${item.id}"><i class="fas fa-pen"></i> Düzenle</button>
             <button class="btn btn-ghost btn-xs warning-toggle" data-id="${item.id}" data-action="${Number(item.is_active) ? 'deactivate' : 'activate'}"><i class="fas fa-${Number(item.is_active) ? 'pause' : 'play'}"></i> ${Number(item.is_active) ? 'Pasife al' : 'Etkinleştir'}</button>
             <button class="btn btn-ghost btn-xs warning-delete" data-id="${item.id}"><i class="fas fa-trash"></i> Sil</button>` : ''}
         </div></article>`;
+    };
+    $('#warning-admin-list').innerHTML = groups.length ? groups.map(({ root, chain, totalLength }) => {
+      const isChain = totalLength > 1 || Boolean(root.followup_warning_id);
+      return `<section class="warning-chain-group">
+        <div class="warning-chain-group-heading"><div><strong>${isChain ? 'Bağlı ihtar zinciri' : 'Bağımsız ihtar'}</strong>
+          <small>${isChain ? `${totalLength} ihtar · öncelik #${Number(root.priority_order) || 1000} · zincirde adım sırasıyla gösterilir` : `Öncelik sırası #${Number(root.priority_order) || 1000}`}</small></div>
+          ${isChain ? `<span><i class="fas fa-link"></i> Zincir</span>` : ''}</div>
+        <div class="warning-chain-group-items">${chain.map(({ item, sequence }) => renderWarningCard(item, sequence, root)).join('')}</div>
+      </section>`;
     }).join('') : '<div class="card card-body" style="color:var(--text2);text-align:center">Bu filtrede ihtar yok.</div>';
     $('#warning-admin-list').querySelectorAll('.warning-edit').forEach(button => button.addEventListener('click', () => {
       const item = warnings.find(warning => String(warning.id) === button.dataset.id);
@@ -3482,6 +3520,7 @@ async function renderWarnings(main) {
       $('#warning-body').value = item.body;
       $('#warning-audience').value = item.audience_type;
       $('#warning-max-displays').value = item.max_displays;
+      $('#warning-priority-order').value = item.priority_order || 1000;
       $('#warning-new-users').checked = Number(item.new_users_only) === 1;
       $('#warning-users').value = item.audience_type === 'users'
         ? (Array.isArray(item.audience_usernames) ? item.audience_usernames : []).join(', ')
@@ -3517,6 +3556,7 @@ async function renderWarnings(main) {
     editingId = null;
     $('#warning-form').reset();
     $('#warning-max-displays').value = '1';
+    $('#warning-priority-order').value = String(nextWarningPriority);
     $('#warning-editor-heading').innerHTML = '<i class="fas fa-pen"></i> İhtar oluştur';
     $('#warning-save').innerHTML = '<i class="fas fa-floppy-disk"></i> İhtarı kaydet';
     $('#warning-users-field').hidden = true;
@@ -3540,6 +3580,7 @@ async function renderWarnings(main) {
       body: $('#warning-body').value.trim(),
       audience_type: audienceType,
       max_displays: Number($('#warning-max-displays').value),
+      priority_order: Number($('#warning-priority-order').value),
       new_users_only: $('#warning-new-users').checked,
       target_usernames: $('#warning-users').value.split(/[,\n;]/).map(name => name.trim()).filter(Boolean),
       badge_ids: [...$('#warning-badges').selectedOptions].map(option => option.value),

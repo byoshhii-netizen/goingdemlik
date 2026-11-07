@@ -304,11 +304,13 @@ async function initDb() {
       max_displays INTEGER NOT NULL DEFAULT 1,
       new_users_only INTEGER NOT NULL DEFAULT 0,
       followup_warning_id BIGINT REFERENCES admin_warnings(id) ON DELETE SET NULL,
+      priority_order INTEGER NOT NULL DEFAULT 1000,
       is_active INTEGER NOT NULL DEFAULT 1,
       is_deleted INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE admin_warnings ADD COLUMN IF NOT EXISTS priority_order INTEGER NOT NULL DEFAULT 1000;
     CREATE TABLE IF NOT EXISTS user_warning_views (
       warning_id BIGINT NOT NULL REFERENCES admin_warnings(id) ON DELETE CASCADE,
       user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -318,6 +320,8 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_admin_warnings_active_created
       ON admin_warnings(is_active,is_deleted,created_at);
+    CREATE INDEX IF NOT EXISTS idx_admin_warnings_priority
+      ON admin_warnings(is_active,is_deleted,priority_order,created_at);
     CREATE TABLE IF NOT EXISTS vmb_admin_sessions (
       token TEXT PRIMARY KEY,
       username TEXT NOT NULL DEFAULT 'Cambaz',
