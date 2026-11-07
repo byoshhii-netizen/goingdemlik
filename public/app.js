@@ -1128,6 +1128,15 @@ function formatDate(dt) {
   return new Date(dt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
 }
 
+function formatDateTime(dt) {
+  const date = new Date(dt);
+  if (!Number.isFinite(date.getTime())) return '';
+  return date.toLocaleString('tr-TR', {
+    day: '2-digit', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+}
+
 function mediaDateKey(dt) {
   const date = new Date(dt);
   if (!Number.isFinite(date.getTime())) return '';
@@ -1138,7 +1147,7 @@ function mediaDateSearchTerms(dt) {
   const key = mediaDateKey(dt);
   if (!key) return [];
   const [year, month, day] = key.split('-');
-  return [key, formatDate(dt), `${day}.${month}.${year}`, `${day}/${month}/${year}`];
+  return [key, formatDate(dt), formatDateTime(dt), `${day}.${month}.${year}`, `${day}/${month}/${year}`];
 }
 
 function escHtml(s) {
@@ -5820,7 +5829,7 @@ function forumCardHTML(f, showOpen = true) {
     : `style="cursor:default;opacity:0.6"`;
   const d = new Date(f.created_at);
   const dateStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
-  const timeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const timeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
   // Etiketler
   const systemTags = Array.isArray(f.system_tags) ? f.system_tags : (typeof f.system_tags === 'string' ? (() => { try { return JSON.parse(f.system_tags); } catch { return []; } })() : []);
@@ -5863,7 +5872,7 @@ function poemCardHTML(poem) {
     : `style="cursor:default;opacity:0.6"`;
   const d = new Date(poem.created_at);
   const dateStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
-  const timeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const timeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   return `<div class="poem-card" onclick="navigate('/siir/${escHtml(poem.slug)}')">
     <div class="poem-card-topline">
       <span class="poem-badge"><i class="fas fa-pen-fancy"></i> Şiir</span>
@@ -5875,7 +5884,7 @@ function poemCardHTML(poem) {
       <span class="forum-meta-item" ${authorClick}><i class="fas fa-user"></i>${poem.username ? escHtml(poem.nickname || poem.username) : 'Silinmiş Kullanıcı'}</span>
       <span class="forum-meta-item"><i class="fas fa-heart"></i>${formatCount(poem.like_count)}</span>
       <span class="forum-meta-item"><i class="fas fa-comment"></i>${poem.comment_count || 0}</span>
-      <span class="forum-meta-item" title="${dateStr} ${timeStr}"><i class="fas fa-clock"></i>${dateStr}</span>
+      <span class="forum-meta-item" title="${dateStr} ${timeStr}"><i class="fas fa-clock"></i>${dateStr} ${timeStr}</span>
     </div>
   </div>`;
 }
@@ -6009,7 +6018,7 @@ async function renderPoemDetail(app, slug) {
             <a href="${profileRoute(poem.username)}" data-link style="color:inherit">${escHtml(poem.nickname || poem.username)}</a>
             ${poem.user_location ? `<span style="font-size:11px;color:var(--text-muted)"><i class="fas fa-map-marker-alt" style="font-size:10px"></i> ${escHtml(poem.user_location)}</span>` : ''}
           </span>
-          <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDate(poem.created_at)}</span>
+          <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDateTime(poem.created_at)}</span>
           <span><i class="fas fa-eye" style="color:var(--accent-red)"></i> ${poem.views || 0} görüntülenme</span>
         </div>
         <div class="poem-detail-title">${escHtml(poem.title)}</div>
@@ -6454,7 +6463,7 @@ async function renderForumDetail(app, slug) {
             <a href="${profileRoute(forum.username)}" data-link style="color:inherit">${userDisplayName(forum)}</a>
             ${forum.user_location ? `<span style="font-size:11px;color:var(--text-muted)"><i class="fas fa-map-marker-alt" style="font-size:10px"></i> ${escHtml(forum.user_location)}</span>` : ''}
           </span>
-          <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDate(forum.created_at)}</span>
+          <span><i class="fas fa-calendar" style="color:var(--accent-red)"></i> ${formatDateTime(forum.created_at)}</span>
           <span><i class="fas fa-eye" style="color:var(--accent-red)"></i> ${forum.views || 0} görüntülenme</span>
           ${forum.share_count ? `<span><i class="fas fa-share-alt" style="color:var(--accent-red)"></i> ${forum.share_count} iletildi</span>` : ''}
         </div>
@@ -6728,6 +6737,7 @@ function bookCardHTML(b) {
       <div class="book-title">${escHtml(b.title)}</div>
       ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${escHtml(authorDisplay)}</div>` : ''}
       <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
+      ${b.created_at ? `<div class="book-pages book-created-at"><i class="fas fa-clock" style="color:var(--text-muted);font-size:11px"></i> ${escHtml(formatDateTime(b.created_at))}</div>` : ''}
       ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}
     </div>
   </div>`;
@@ -7006,8 +7016,8 @@ async function renderBookDetail(app, slug) {
         <div class="book-detail-meta">
           <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
           <span><i class="fas fa-file-alt"></i> ${book.page_count || 0} sayfa</span>
-          ${book.created_at ? `<span><i class="fas fa-calendar"></i> ${formatDate(book.created_at)}</span>` : ''}
-          ${book.updated_at ? `<span><i class="fas fa-edit"></i> Güncellendi ${formatDate(book.updated_at)}</span>` : ''}
+          ${book.created_at ? `<span><i class="fas fa-calendar"></i> ${formatDateTime(book.created_at)}</span>` : ''}
+          ${book.updated_at ? `<span><i class="fas fa-edit"></i> Güncellendi ${formatDateTime(book.updated_at)}</span>` : ''}
         </div>
         ${book.preface ? `<div class="book-preface"><strong>Tanıtım / Önsöz</strong><p>${escHtml(book.preface)}</p></div>` : ''}
         ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
@@ -8813,6 +8823,7 @@ function videoCardHTML(v) {
         <span>•</span>
         <span>${v.views || 0} izlenme</span>
       </div>
+      ${v.created_at ? `<div class="video-card-date"><i class="fas fa-clock"></i> ${escHtml(formatDateTime(v.created_at))}</div>` : ''}
       ${hashtagDescriptionPreviewHTML(v.description, 'video-card-desc', 100)}
     </div>
   </div>`;
@@ -8839,7 +8850,7 @@ function realsMediaCardHTML(v) {
   return `<article class="photo-card reals-media-card" data-reals-id="${escHtml(v.id)}" data-reals-slug="${escHtml(v.slug || v.id)}" data-owner-id="${escHtml(v.user_id)}" data-reals-route="${route}" style="padding:0;overflow:hidden">
     <div class="photo-card-head" style="padding:12px">
       ${avatarImg(v)}
-      <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}">${escHtml(formatDate(v.created_at))}</time></a>` : ''}</div>
+      <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}">${escHtml(formatDateTime(v.created_at))}</time></a>` : ''}</div>
     </div>
     <div class="photo-media-wrap">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
@@ -10435,8 +10446,11 @@ async function renderProfile(app, username) {
     songs: ['Müzikler', 'fa-music'],
     archive: ['Arşivim', 'fa-box-archive']
   };
+  const profileNameColor = (user.is_vip || user.is_plus) && user.show_level_color && user.name_color
+    ? `--profile-name-color:${escHtml(user.name_color)};`
+    : '';
 
-  app.innerHTML = `<div class="container page profile-page">
+  app.innerHTML = `<div class="container page profile-page" style="${profileNameColor}">
     <div class="profile-header">
       <div class="profile-avatar-wrap">
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
@@ -14108,16 +14122,18 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       const label = own ? 'Notun' : (note.nickname || note.username || 'Kullanıcı');
       const recentLikers = own && Array.isArray(note.recent_likers) ? note.recent_likers.slice(0, 3) : [];
       return `<button type="button" class="dm-note-card${own ? ' is-own' : ''}" data-note-user="${escHtml(note.username || '')}" aria-label="${escHtml(label)} notu" style="--dm-note-color:${escHtml(/^#[0-9a-f]{6}$/i.test(note.background_color || '') ? note.background_color : '#242731')}">
+        ${note.song_title ? `<span class="dm-note-song-title"><i class="fas fa-music" aria-hidden="true"></i><span>${escHtml(note.song_title)}</span></span>` : ''}
+        ${note.content ? `<span class="dm-note-preview">${escHtml(note.content)}</span>` : ''}
         <span class="dm-note-avatar">${avatar}${note.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
         <span class="dm-note-label">${escHtml(own ? 'Notun' : (note.nickname || note.username || 'Not'))}</span>
-        <span class="dm-note-preview">${escHtml(note.content || note.song_title || '♪')}</span>
         ${noteLikersHTML(recentLikers)}
       </button>`;
     };
     strip.innerHTML = `<button type="button" class="dm-note-card dm-note-create${ownNote ? ' has-note' : ''}" id="dm-note-create" style="--dm-note-color:${escHtml(/^#[0-9a-f]{6}$/i.test(ownNote?.background_color || '') ? ownNote.background_color : '#242731')}" aria-label="${ownNote ? 'Notunu düzenle' : 'Not ekle'}">
+      ${ownNote?.song_title ? `<span class="dm-note-song-title"><i class="fas fa-music" aria-hidden="true"></i><span>${escHtml(ownNote.song_title)}</span></span>` : ''}
+      ${ownNote?.content ? `<span class="dm-note-preview">${escHtml(ownNote.content)}</span>` : ''}
       <span class="dm-note-avatar">${ownNote && hasUsableAvatar(currentUser) ? `<img src="${escHtml(currentUser.avatar)}" alt="" />` : '<i class="fas fa-plus"></i>'}${ownNote?.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
       <span class="dm-note-label">${ownNote ? 'Notun' : 'Not ekle'}</span>
-      ${ownNote ? `<span class="dm-note-preview">${escHtml(ownNote.content || ownNote.song_title || '♪')}</span>` : ''}
       ${noteLikersHTML(ownRecentLikers)}
     </button>${otherNotes.map(note => noteButton(note)).join('')}`;
     strip.querySelector('#dm-note-create')?.addEventListener('click', () => {
@@ -16295,13 +16311,8 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
   const isOwn = m.sender_id == myId;
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe) return '';
-  if (m.deleted_for_all) {
-    const timeLabel = m.created_at ? new Date(m.created_at).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
-    return `<div class="dm-msg-wrap dm-deleted-for-all${isOwn ? ' dm-own' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="" data-deleted-for-all="true">
-      <div class="dm-msg-content"><div class="dm-deleted-for-all-note"><i class="fas fa-ban" aria-hidden="true"></i><span>Bu mesaj herkesten silindi</span>${timeLabel ? `<time>${timeLabel}</time>` : ''}</div></div>
-    </div>`;
-  }
-  const messageText = String(m.content || '');
+  const deletedForAll = Boolean(m.deleted_for_all);
+  const messageText = deletedForAll ? 'Bu mesaj herkesten silindi' : String(m.content || '');
   const senderName = m.sender_nickname || m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
   const messageTime = Date.parse(m.created_at);
@@ -16313,8 +16324,62 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     && Number.isFinite(messageTime)
     && Number.isFinite(previousTime)
     && Math.abs(messageTime - previousTime) <= 60_000;
+  const messageBubbleContent = deletedForAll
+    ? '<span class="dm-deleted-for-all-label"><i class="fas fa-ban" aria-hidden="true"></i>Bu mesaj herkesten silindi</span>'
+    : `${Number(m.image_view_limit) > 0 && !isOwn
+      ? Number(m.image_view_count) >= Number(m.image_view_limit)
+        ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
+        : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}" aria-label="Sınırlı görüntülemeli fotoğrafı aç"><i class="fas fa-eye"></i><span>Fotoğraf</span><small>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} görüntüleme</small></button>`
+      : imageUrls.length === 1
+        ? `<img src="${escHtml(imageUrls[0])}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(imageUrls[0])}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
+        : imageUrls.length > 1
+          ? `<div class="dm-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<img src="${escHtml(url)}" class="dm-message-image" alt="Mesaj fotoğrafı ${index + 1}" data-dm-image-url="${escHtml(url)}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`).join('')}</div>`
+          : ''}
+    ${m.shared_gif_url ? `<img class="dm-shared-gif" src="${escHtml(m.shared_gif_url)}" alt="GIF" loading="lazy" decoding="async" />` : ''}
+    ${m.shared_song_id ? `<div class="dm-shared-song">
+      <span class="dm-shared-song-art">${m.song_cover_url ? `<img src="${escHtml(m.song_cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music" aria-hidden="true"></i>'}</span>
+      <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
+      ${m.song_audio_url ? `<button type="button" class="dm-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" data-song-slug="${escHtml(m.song_slug || '')}" data-start-seconds="${Number(m.song_start_seconds) || 0}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
+    </div>` : ''}
+    ${m.shared_song_id && m.song_slug ? `<a class="dm-shared-song-continue" href="/muzik/${encodeURIComponent(m.song_slug)}?start=${Number(m.song_start_seconds) || 0}&autoplay=1" data-link hidden><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i><span>Devamını müziklerde dinle</span></a>` : ''}
+    ${m.shared_forum_id
+      ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
+           ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
+           <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title || '')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
+         </div>`
+      : ''}
+    ${m.shared_book_id
+      ? `<div class="dm-shared-forum" onclick="navigate('/kitap/${escHtml(m.book_slug)}')">
+           ${m.book_cover ? `<img src="${escHtml(m.book_cover)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
+           <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.book_title || 'Kitap')}</div><div style="font-size:11px;color:var(--accent-red2)">Kitap →</div></div>
+         </div>`
+      : ''}
+    ${m.shared_photo_id
+      ? `<div class="dm-shared-forum" onclick="navigate('/foto/${encodeURIComponent(m.shared_photo_id)}')"><img src="${escHtml(m.photo_url||'')}" style="width:100%;height:120px;object-fit:cover" /><div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.photo_title||m.photo_caption||'Fotoğraf')}</div><div style="font-size:11px;color:var(--accent-red2)">Fotoğraf →</div></div></div>`
+      : ''}
+    ${m.shared_video_id
+      ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
+           ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
+           <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title || 'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
+         </div>`
+      : ''}
+    ${m.shared_story_id
+      ? `<div class="dm-shared-story" onclick="navigate('/hikaye/${escHtml(m.shared_story_id)}')">
+           ${m.story_media_url ? `<img src="${escHtml(m.story_media_url)}" alt="" />` : ''}
+           <div><b>${escHtml(m.story_username || 'Hikaye')}</b><small>Hikaye yanıtı</small></div>
+         </div>`
+      : ''}
+    ${m.shared_newspaper_id
+      ? `<a class="dm-shared-newspaper" href="/gazete/${encodeURIComponent(m.shared_newspaper_id)}" data-link>
+           ${m.newspaper_image ? `<img src="${escHtml(m.newspaper_image)}" alt="" />` : '<span class="dm-shared-newspaper-icon"><i class="fas fa-newspaper"></i></span>'}
+           <span><strong>${escHtml(m.newspaper_name || 'Gazete')}</strong><small>${m.newspaper_date ? escHtml(formatNewspaperDate(m.newspaper_date)) : 'Gazeteler →'}</small></span>
+         </a>`
+      : ''}
+    ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
+    ${dmMessageReactionsHTML(m.reactions, myId)}
+    ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}`;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${deletedForAll ? ' dm-deleted-for-all' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${deletedForAll ? '' : escHtml(messageText)}"${deletedForAll ? ' data-deleted-for-all="true"' : ''} data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -16333,60 +16398,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
              <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content || '').substring(0, 60))}</div>
            </div>`
         : ''}
-      <div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">
-             ${Number(m.image_view_limit) > 0 && !isOwn
-               ? Number(m.image_view_count) >= Number(m.image_view_limit)
-                 ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
-                 : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}" aria-label="Sınırlı görüntülemeli fotoğrafı aç"><i class="fas fa-eye"></i><span>Fotoğraf</span><small>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} görüntüleme</small></button>`
-               : imageUrls.length === 1
-                 ? `<img src="${escHtml(imageUrls[0])}" class="dm-message-image" alt="Mesaj fotoğrafı" data-dm-image-url="${escHtml(imageUrls[0])}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`
-                 : imageUrls.length > 1
-                   ? `<div class="dm-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<img src="${escHtml(url)}" class="dm-message-image" alt="Mesaj fotoğrafı ${index + 1}" data-dm-image-url="${escHtml(url)}" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />`).join('')}</div>`
-                   : ''}
-             ${m.shared_gif_url ? `<img class="dm-shared-gif" src="${escHtml(m.shared_gif_url)}" alt="GIF" loading="lazy" decoding="async" />` : ''}
-             ${m.shared_song_id ? `<div class="dm-shared-song">
-               <span class="dm-shared-song-art">${m.song_cover_url ? `<img src="${escHtml(m.song_cover_url)}" alt="" loading="lazy" />` : '<i class="fas fa-music" aria-hidden="true"></i>'}</span>
-               <span class="dm-shared-song-info"><strong>${escHtml(m.song_title || 'Paylaşılan müzik')}</strong><small>${escHtml(m.song_artist || 'CigCig Müzik')}</small></span>
-               ${m.song_audio_url ? `<button type="button" class="dm-shared-song-play" data-audio-url="${escHtml(m.song_audio_url)}" data-song-slug="${escHtml(m.song_slug || '')}" data-start-seconds="${Number(m.song_start_seconds) || 0}" aria-label="Müziği oynat" title="Oynat"><i class="fas fa-play" aria-hidden="true"></i></button>` : '<i class="fas fa-music dm-shared-song-note" aria-hidden="true"></i>'}
-             </div>` : ''}
-             ${m.shared_song_id && m.song_slug ? `<a class="dm-shared-song-continue" href="/muzik/${encodeURIComponent(m.song_slug)}?start=${Number(m.song_start_seconds) || 0}&autoplay=1" data-link hidden><i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i><span>Devamını müziklerde dinle</span></a>` : ''}
-             ${m.shared_forum_id
-               ? `<div class="dm-shared-forum" onclick="navigate('/forum/${escHtml(m.forum_slug)}')">
-                    ${m.forum_banner ? `<img src="${escHtml(m.forum_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
-                    <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.forum_title || '')}</div><div style="font-size:11px;color:var(--accent-red2)">Forum →</div></div>
-                  </div>`
-               : ''}
-             ${m.shared_book_id
-               ? `<div class="dm-shared-forum" onclick="navigate('/kitap/${escHtml(m.book_slug)}')">
-                    ${m.book_cover ? `<img src="${escHtml(m.book_cover)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
-                    <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.book_title || 'Kitap')}</div><div style="font-size:11px;color:var(--accent-red2)">Kitap →</div></div>
-                  </div>`
-               : ''}
-             ${m.shared_photo_id
-               ? `<div class="dm-shared-forum" onclick="navigate('/foto/${encodeURIComponent(m.shared_photo_id)}')"><img src="${escHtml(m.photo_url||'')}" style="width:100%;height:120px;object-fit:cover" /><div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.photo_title||m.photo_caption||'Fotoğraf')}</div><div style="font-size:11px;color:var(--accent-red2)">Fotoğraf →</div></div></div>`
-               : ''}
-             ${m.shared_video_id
-               ? `<div class="dm-shared-forum" onclick="navigate('/video/${escHtml(m.video_slug)}')">
-                    ${m.video_banner ? `<img src="${escHtml(m.video_banner)}" style="width:100%;height:70px;object-fit:cover" />` : ''}
-                    <div style="padding:7px 10px"><div style="font-size:12px;font-weight:600;color:var(--text-primary)">${escHtml(m.video_title || 'Video')}</div><div style="font-size:11px;color:var(--accent-red2)">Video →</div></div>
-                  </div>`
-               : ''}
-             ${m.shared_story_id
-               ? `<div class="dm-shared-story" onclick="navigate('/hikaye/${escHtml(m.shared_story_id)}')">
-                    ${m.story_media_url ? `<img src="${escHtml(m.story_media_url)}" alt="" />` : ''}
-                    <div><b>${escHtml(m.story_username || 'Hikaye')}</b><small>Hikaye yanıtı</small></div>
-                  </div>`
-               : ''}
-             ${m.shared_newspaper_id
-               ? `<a class="dm-shared-newspaper" href="/gazete/${encodeURIComponent(m.shared_newspaper_id)}" data-link>
-                    ${m.newspaper_image ? `<img src="${escHtml(m.newspaper_image)}" alt="" />` : '<span class="dm-shared-newspaper-icon"><i class="fas fa-newspaper"></i></span>'}
-                    <span><strong>${escHtml(m.newspaper_name || 'Gazete')}</strong><small>${m.newspaper_date ? escHtml(formatNewspaperDate(m.newspaper_date)) : 'Gazeteler →'}</small></span>
-                  </a>`
-               : ''}
-             ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
-             ${dmMessageReactionsHTML(m.reactions, myId)}
-             ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}
-           </div>
+      <div class="dm-msg-bubble${m.edited_at && !deletedForAll ? ' is-edited' : ''}">${messageBubbleContent}</div>
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
         ${isOwn
@@ -20747,8 +20759,8 @@ async function renderMediaExplore(app) {
   document.title = 'Medya Keşfet – ' + siteName;
   app.innerHTML = `<div class="container page photos-page media-explore-page">
     <header class="media-explore-hero">
-      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-magnifying-glass"></i></span><div><h1>Keşfet</h1></div></div>
-      <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Fotoğraf, Reals, kullanıcı, tarih veya #etiket ara..." autocomplete="off" aria-label="Fotoğraf, video, tarih ve hashtag ara" /></label>
+      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Medya Keşfet</h1></div></div>
+      <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Başlık, açıklama, kullanıcı, tarih veya #etiket ara..." autocomplete="off" aria-label="Medya başlığı, açıklaması, kullanıcı, tarih veya hashtag ara" /></label>
     </header>
     <div id="media-explore-feed" class="photos-feed" aria-live="polite"><div class="loading-center"><div class="spinner"></div></div></div>
   </div>`;
@@ -20765,11 +20777,12 @@ async function renderMediaExplore(app) {
     }
     let photos = [];
     let reals = [];
-    let photosLoaded = false;
+    let videos = [];
+    let mediaLoaded = false;
     let resultsRendered = false;
-    let shuffledMedia = [];
-    const loadAllPhotos = async () => {
-      if (photosLoaded) return;
+    let mediaItems = [];
+    const loadAllMedia = async () => {
+      if (mediaLoaded) return;
       const loadedPhotos = [];
       let offset = 0;
       let batch;
@@ -20778,29 +20791,52 @@ async function renderMediaExplore(app) {
         loadedPhotos.push(...batch);
         offset += batch.length;
       } while (batch.length === 100);
-      const loadedReals = await api('/reals?source=media').catch(error => {
+      const loadedReals = [];
+      let realsOffset = 0;
+      let realsBatch;
+      try {
+        do {
+          realsBatch = await api(`/reals?source=media&limit=100&offset=${realsOffset}`);
+          loadedReals.push(...realsBatch);
+          realsOffset += realsBatch.length;
+        } while (realsBatch.length === 100);
+      } catch (error) {
         console.warn('Medya keşfette Reals içerikleri yüklenemedi:', error.message || error);
-        return [];
-      });
+      }
+      const loadedVideos = [];
+      let videosOffset = 0;
+      let videosBatch;
+      try {
+        do {
+          videosBatch = await api(`/videos?sort=latest&limit=100&offset=${videosOffset}`);
+          loadedVideos.push(...videosBatch);
+          videosOffset += videosBatch.length;
+        } while (videosBatch.length === 100);
+      } catch (error) {
+        console.warn('Medya keşfette video içerikleri yüklenemedi:', error.message || error);
+      }
       photos = loadedPhotos;
-      reals = Array.isArray(loadedReals) ? loadedReals : [];
-      shuffledMedia = shuffleArray([
+      reals = loadedReals;
+      videos = loadedVideos;
+      mediaItems = [
         ...photos.map(photo => ({ type: 'photo', content: photo })),
-        ...reals.map(real => ({ type: 'reals', content: real }))
-      ]);
-      photosLoaded = true;
+        ...reals.map(real => ({ type: 'reals', content: real })),
+        ...videos.map(video => ({ type: 'video', content: video }))
+      ].sort((a, b) => new Date(b.content.created_at || 0) - new Date(a.content.created_at || 0));
+      mediaLoaded = true;
     };
-    if (!hasInitialTag) await loadAllPhotos();
+    if (!hasInitialTag) await loadAllMedia();
     const renderPhotoResults = values => {
       feed.innerHTML = values.length
         ? values.map(item => {
           const content = item.content;
-          const searchIndex = [content.title, item.type === 'reals' ? content.description : content.caption, content.username, content.nickname, ...mediaDateSearchTerms(content.created_at)]
+          const description = item.type === 'photo' ? content.caption : content.description;
+          const searchIndex = [content.title, description, content.username, content.nickname, ...mediaDateSearchTerms(content.created_at)]
             .filter(Boolean).join(' ').toLocaleLowerCase('tr-TR');
-          const html = item.type === 'reals' ? realsMediaCardHTML(content) : photoCardHTML(content);
+          const html = item.type === 'reals' ? realsMediaCardHTML(content) : item.type === 'video' ? videoCardHTML(content) : photoCardHTML(content);
           return `<div class="media-explore-result" data-search-index="${escHtml(searchIndex)}">${html}</div>`;
         }).join('')
-        : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık fotoğraf veya Reals yok.</p></div>';
+        : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık medya paylaşımı yok.</p></div>';
       bindPhotoFeed(feed);
       setupPhotoAudio(feed);
       resultsRendered = true;
@@ -20811,7 +20847,7 @@ async function renderMediaExplore(app) {
       const [tagMatches, matchingPhotos, matchingVideos, matchingRealsResult] = await Promise.all([
         api('/hashtags?q=' + encodeURIComponent(tag)),
         api('/photos?hashtag=' + encodeURIComponent(tag)),
-        api('/videos?hashtag=' + encodeURIComponent(tag)),
+        api('/videos?sort=latest&hashtag=' + encodeURIComponent(tag)),
         api('/reals?source=media&hashtag=' + encodeURIComponent(tag)).then(value => ({ value }), error => ({ error }))
       ]);
       if (requestId !== hashtagSearchRequestId || !feed.isConnected) return;
@@ -20820,7 +20856,7 @@ async function renderMediaExplore(app) {
       const exactTag = tagMatches.find(item => item.tag.toLocaleLowerCase('tr-TR') === tag.toLocaleLowerCase('tr-TR'));
       const content = [
         ...matchingPhotos.map(photo => ({ createdAt: photo.created_at, search: [photo.title, photo.caption, photo.username, photo.nickname], html: photoCardHTML(photo) })),
-        ...matchingVideos.map(video => ({ createdAt: video.created_at, search: [video.title, video.description, video.username], html: videoCardHTML(video) })),
+        ...matchingVideos.map(video => ({ createdAt: video.created_at, search: [video.title, video.description, video.username, video.nickname, ...mediaDateSearchTerms(video.created_at)], html: videoCardHTML(video) })),
         ...matchingReals.map(real => ({ createdAt: real.created_at, search: [real.title, real.description, real.username], html: realsMediaCardHTML(real) }))
       ].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
       const summary = `<section class="hashtag-search-summary"><strong>#${escHtml(tag)}</strong><span>${formatCount(exactTag?.usage_count)} kullanım · ${formatCount(exactTag?.post_count)} gönderi</span></section>`;
@@ -20834,7 +20870,7 @@ async function renderMediaExplore(app) {
     if (hasInitialTag) {
       await loadHashtagResults(initialTag);
     } else {
-      renderPhotoResults(shuffledMedia);
+      renderPhotoResults(mediaItems);
       if (initialDate) applyMediaExploreSearch(initialDate);
     }
     search.addEventListener('input', async () => {
@@ -20852,16 +20888,16 @@ async function renderMediaExplore(app) {
       }
       clearTimeout(hashtagSearchTimeout);
       const requestId = ++hashtagSearchRequestId;
-      if (!photosLoaded) {
+      if (!mediaLoaded) {
         feed.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
-        try { await loadAllPhotos(); }
+        try { await loadAllMedia(); }
         catch (error) {
           if (requestId === hashtagSearchRequestId) feed.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(error.message || 'Fotoğraflar yüklenemedi.')}</p></div>`;
           return;
         }
         if (requestId !== hashtagSearchRequestId) return;
       }
-      if (!resultsRendered) renderPhotoResults(shuffledMedia);
+      if (!resultsRendered) renderPhotoResults(mediaItems);
       applyMediaExploreSearch(query);
     });
     function applyMediaExploreSearch(query) {
@@ -20872,7 +20908,7 @@ async function renderMediaExplore(app) {
         if (!result.hidden) visibleCount++;
       });
       feed.querySelector('.media-explore-empty')?.remove();
-      if (normalizedQuery && visibleCount === 0 && shuffledMedia.length) {
+      if (normalizedQuery && visibleCount === 0 && mediaItems.length) {
         feed.insertAdjacentHTML('beforeend', '<div class="empty-state media-explore-empty"><i class="fas fa-magnifying-glass"></i><p>Bu aramayla eşleşen medya bulunamadı.</p></div>');
       }
     }
@@ -20884,7 +20920,7 @@ function photoCardHTML(p) {
   const imageUrls = photoImageUrls(p);
   const dateKey = mediaDateKey(p.created_at);
   const galleryControls = imageUrls.length > 1 ? `<div class="photo-gallery-controls" aria-label="Fotoğraf galerisi"><button type="button" class="photo-gallery-arrow photo-gallery-prev" data-gallery-step="-1" aria-label="Önceki fotoğraf"><i class="fas fa-chevron-left"></i></button><div class="photo-gallery-dots">${imageUrls.map((_, index) => `<button type="button" class="photo-gallery-dot${index === 0 ? ' active' : ''}" data-gallery-go="${index}" aria-label="${index + 1}. fotoğraf" aria-current="${index === 0 ? 'true' : 'false'}"></button>`).join('')}</div><button type="button" class="photo-gallery-arrow photo-gallery-next" data-gallery-step="1" aria-label="Sonraki fotoğraf"><i class="fas fa-chevron-right"></i></button></div>` : '';
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<div class="photo-card-identity"><a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(p.created_at || '')}">${escHtml(formatDate(p.created_at))}</time></a>` : ''}</div>${currentUser&&currentUser.id===p.user_id?'<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${galleryControls}${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div class="photo-card-content">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}  ${p.caption?hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180):''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<div class="photo-card-identity"><a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(p.created_at || '')}">${escHtml(formatDateTime(p.created_at))}</time></a>` : ''}</div>${currentUser&&currentUser.id===p.user_id?'<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${galleryControls}${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div class="photo-card-content">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}  ${p.caption?hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180):''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
 }
 function photoImageUrls(photo) {
   let urls = photo?.image_urls;

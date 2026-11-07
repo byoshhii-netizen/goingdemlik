@@ -13707,14 +13707,16 @@ app.get('/api/videos', optionalAuth, async (req, res) => {
   const searchClause = conditions.length ? ` AND ${conditions.join(' AND ')}` : '';
   const requestedLimit = Number.parseInt(req.query.limit, 10);
   const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
-  params.push(limit);
-  const order = search
+  const requestedOffset = Number.parseInt(req.query.offset, 10);
+  const offset = Number.isInteger(requestedOffset) ? Math.min(Math.max(requestedOffset, 0), 1000000) : 0;
+  params.push(limit, offset);
+  const order = search || req.query.sort === 'latest'
     ? 'ORDER BY v.created_at DESC'
     : `ORDER BY ((COALESCE(v.views,0) * 0.45) +
         ((SELECT COUNT(*) FROM video_likes vl3 WHERE vl3.video_id=v.id) * 8) +
         ((SELECT COUNT(*) FROM video_comments vc3 WHERE vc3.video_id=v.id) * 3) +
         (EXTRACT(EPOCH FROM (NOW() - v.created_at)) / -86400.0)) DESC`;
-  const { rows } = await query(`${videoSelect}${searchClause} AND v.is_reals=0 ${order} LIMIT $${params.length}`, params);
+  const { rows } = await query(`${videoSelect}${searchClause} AND v.is_reals=0 ${order} LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
   res.json(rows);
 });
 
@@ -13828,7 +13830,12 @@ app.get('/api/reals', optionalAuth, async (req, res) => {
     return res.status(400).json({ error: 'Hashtag geçersiz.' });
   }
   const hashtagFilter = requestedHashtag ? (params.push(`#${requestedHashtag}([^[:alnum:]_]|$)`), ` AND v.description ~* $${params.length}`) : '';
-  const { rows } = await query(`${videoSelect} AND v.is_reals=1 AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted'))${hashtagFilter} ORDER BY v.created_at DESC LIMIT 100`, params);
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
+  const requestedOffset = Number.parseInt(req.query.offset, 10);
+  const offset = Number.isInteger(requestedOffset) ? Math.min(Math.max(requestedOffset, 0), 1000000) : 0;
+  params.push(limit, offset);
+  const { rows } = await query(`${videoSelect} AND v.is_reals=1 AND (COALESCE(u.is_private,0)=0 OR v.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=v.user_id AND f.status='accepted'))${hashtagFilter} ORDER BY v.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
   res.json(rows);
 });
 

@@ -404,7 +404,7 @@ function timeAgo(dt) {
 
 function formatDate(dt) {
   if (!dt) return '-';
-  return new Date(dt).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return new Date(dt).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 async function adminApi(path, options = {}) {
@@ -679,7 +679,7 @@ async function renderAdminStories(main) {
 // ===== HOMEPAGE SECTIONS =====
 async function renderAdminPhotos(main) {
   const photos = await adminApi('/photos');
-  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Medya</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
+  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title">Medya</div></div><div class="card"><table class="adm-table"><thead><tr><th>Fotoğraf</th><th>Sahip</th><th>Açıklama</th><th>Paylaşım zamanı</th><th>İşlem</th></tr></thead><tbody>${photos.map(p=>`<tr><td><img src="${escHtml(p.url)}" style="width:54px;height:54px;object-fit:cover;border-radius:6px"></td><td>${escHtml(p.username||'')}</td><td>${escHtml(p.caption||'')}</td><td>${formatDate(p.created_at)}</td><td><button class="btn btn-danger btn-xs photo-admin-delete" data-id="${p.id}">Sil</button></td></tr>`).join('')}</tbody></table></div>`;
   main.querySelectorAll('.photo-admin-delete').forEach(b=>b.onclick=async()=>{if(await CigCigDialogs.confirm('Fotoğraf silinsin mi?')){await adminApi('/photos/'+b.dataset.id,{method:'DELETE'});renderAdminPhotos(main);}});
 }
 async function renderAdSubmissions(main) {
@@ -1673,7 +1673,7 @@ async function renderForums(main) {
       <td><span style="color:var(--blue2)">${escHtml(f.username||'—')}</span></td>
       <td style="font-size:12px;color:var(--text2)">${f.views||0} <i class="fas fa-eye" style="font-size:10px"></i></td>
       <td style="font-size:12px;color:var(--text2)">${f.like_count||0} <i class="fas fa-heart" style="font-size:10px;color:#ef4444"></i></td>
-      <td style="color:var(--text3);font-size:12px">${timeAgo(f.created_at)}</td>
+      <td style="color:var(--text3);font-size:12px">${formatDate(f.created_at)}</td>
       <td>
         <div style="display:flex;gap:4px">
           <button class="btn btn-outline btn-xs edit-forum-btn" data-id="${f.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
@@ -1744,7 +1744,7 @@ async function renderPoems(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Başlık</th><th>Yazar</th><th>Durum</th><th>Gör.</th><th>Beğeni</th><th>Yorum</th><th>Tarih</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Yazar</th><th>Durum</th><th>Gör.</th><th>Beğeni</th><th>Yorum</th><th>Paylaşım zamanı</th><th>İşlem</th></tr></thead>
           <tbody id="poems-tbody"></tbody>
         </table>
       </div>
@@ -1809,7 +1809,7 @@ async function renderPoems(main) {
         <td style="font-size:12px;color:var(--text2)">${p.views || 0}</td>
         <td style="font-size:12px;color:var(--text2)">${p.like_count || 0}</td>
         <td style="font-size:12px;color:var(--text2)">${p.comment_count || 0}</td>
-        <td style="color:var(--text3);font-size:12px">${timeAgo(p.created_at)}</td>
+        <td style="color:var(--text3);font-size:12px">${formatDate(p.created_at)}</td>
         <td>
           <div style="display:flex;gap:4px;flex-wrap:wrap">
             <button class="btn btn-outline btn-xs edit-poem-btn" data-id="${p.id}" title="Düzenle"><i class="fas fa-edit"></i></button>
@@ -1912,14 +1912,14 @@ async function renderBooks(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Banner</th><th>Başlık</th><th>Hesap</th><th>Sayfa</th><th>Durum</th><th>PDF</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Banner</th><th>Başlık</th><th>Hesap</th><th>Sayfa</th><th>Durum</th><th>PDF</th><th>Paylaşım zamanı</th><th>İşlem</th></tr></thead>
           <tbody id="books-tbody"></tbody>
         </table>
       </div>
     </div>`;
   const renderTable = (list) => {
     const tbody = $('#books-tbody'); if (!tbody) return;
-    if (!list.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:32px">Kitap bulunamadı</td></tr>'; return; }
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:32px">Kitap bulunamadı</td></tr>'; return; }
     tbody.innerHTML = list.map(b => `<tr>
       <td style="color:var(--text3);font-size:12px">#${b.id}</td>
       <td>
@@ -1932,6 +1932,7 @@ async function renderBooks(main) {
       <td style="color:var(--text3);font-size:12px">${b.page_count||0}</td>
       <td>${b.is_hidden ? '<span class="badge badge-red"><i class="fas fa-eye-slash"></i> Gizli</span>' : '<span class="badge badge-green"><i class="fas fa-eye"></i> Açık</span>'}</td>
       <td>${(b.allow_download !== 0 && b.allow_pdf !== 0) ? '<span class="badge badge-green"><i class="fas fa-file-pdf"></i> Açık</span>' : '<span class="badge badge-gray"><i class="fas fa-ban"></i> Kapalı</span>'}</td>
+      <td style="color:var(--text3);font-size:12px">${formatDate(b.created_at)}</td>
       <td style="display:flex;gap:6px">
         <button class="btn btn-blue btn-xs edit-book-btn"
           data-id="${b.id}"
@@ -2133,7 +2134,7 @@ async function renderVideos(main) {
     <div class="card">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>ID</th><th>Başlık</th><th>Kullanıcı</th><th>Yorum</th><th>Beğeni</th><th>Durum</th><th>İşlem</th></tr></thead>
+          <thead><tr><th>ID</th><th>Başlık</th><th>Kullanıcı</th><th>Yorum</th><th>Beğeni</th><th>Durum</th><th>Paylaşım zamanı</th><th>İşlem</th></tr></thead>
           <tbody id="videos-tbody"></tbody>
         </table>
       </div>
@@ -2141,7 +2142,7 @@ async function renderVideos(main) {
 
   const renderTable = list => {
     const tbody = $('#videos-tbody'); if (!tbody) return;
-    if (!list.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:32px">Video bulunamadı</td></tr>'; return; }
+    if (!list.length) { tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:32px">Video bulunamadı</td></tr>'; return; }
     tbody.innerHTML = list.map(v => `<tr>
       <td style="color:var(--text3);font-size:12px">#${v.id}</td>
       <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(v.title)}">${escHtml(v.title)}</td>
@@ -2149,6 +2150,7 @@ async function renderVideos(main) {
       <td style="color:var(--text3);font-size:12px">${v.allow_comments?'<span class="badge badge-green">Açık</span>':'<span class="badge badge-red">Kapalı</span>'}</td>
       <td style="color:var(--text3);font-size:12px">${v.like_count||0}</td>
       <td style="color:var(--text3);font-size:12px">${v.active?'<span class="badge badge-green">Aktif</span>':'<span class="badge badge-red">Pasif</span>'}</td>
+      <td style="color:var(--text3);font-size:12px">${formatDate(v.created_at)}</td>
       <td>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-outline btn-xs edit-video-btn" data-id="${v.id}">Düzenle</button>
