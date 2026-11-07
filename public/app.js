@@ -2069,7 +2069,7 @@ async function renderReportPage(app, queryString = '') {
   app.innerHTML = `<div class="container page report-page">
     <header class="report-hero">
       <span class="report-hero-icon"><i class="fas fa-flag"></i></span>
-      <div><span class="report-eyebrow">CİGCİG GÜVENLİK MERKEZİ</span><h1>Bir bildirimi bize ilet</h1>
+      <div><span class="report-eyebrow">BİLDİRİM FORMU</span><h1>Bir bildirimi bize ilet</h1>
       <p>Bildirimini gizli biçimde inceleriz. Yalnızca inceleme için gerekli bilgileri paylaş.</p></div>
     </header>
     <form class="report-card" id="report-form">
@@ -2132,7 +2132,7 @@ async function renderChildSafetyPage(app) {
     const content = value => escHtml(String(value || '')).replace(/\n/g, '<br>');
     app.innerHTML = `<div class="container page child-safety-page">
       <header class="child-safety-header"><span class="child-safety-mark"><i class="fas fa-shield-heart"></i></span>
-        <div><span class="report-eyebrow">CİGCİG GÜVENLİK MERKEZİ</span><h1>${escHtml(policy.title || 'Çocuk Güvenliği Standartlarımız')}</h1>
+        <div><span class="report-eyebrow">ÇOCUK GÜVENLİĞİ STANDARTLARI</span><h1>${escHtml(policy.title || 'Çocuk Güvenliği Standartlarımız')}</h1>
         <p>${policy.effective_date ? `Yürürlük tarihi: ${escHtml(policy.effective_date)}` : 'Çocukların güvenliğini korumak için ortak sorumluluk alıyoruz.'}</p></div>
       </header>
       ${policy.intro ? `<div class="child-safety-intro">${content(policy.intro)}</div>` : ''}
@@ -10391,6 +10391,7 @@ async function renderProfile(app, username) {
   };
 
   const isOwn = !!currentUser && String(currentUser.id) === String(user.id);
+  const isCloseFriendOfViewer = !isOwn && data.is_close_friend === true;
   const [settings, loadedFollowState] = await Promise.all([
     api('/settings/public').catch(() => null),
     !isOwn && currentUser
@@ -10447,7 +10448,7 @@ async function renderProfile(app, username) {
     app.innerHTML = `<div class="container page profile-page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
       <div class="profile-header-actions is-other">${profileBadgesButtonHTML(data.badges || [])}</div>
-       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}${profileAdminBadgeHTML(data.badges, user.username)}</strong><small>@${escHtml(user.username)}</small></span></div>
+       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}${profileAdminBadgeHTML(data.badges, user.username)}${isCloseFriendOfViewer ? ' <span class="profile-close-friend-mark" title="Yakın arkadaşın" aria-label="Yakın arkadaşın"><i class="fas fa-star" aria-hidden="true"></i></span>' : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
       <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${Number(data.content_count || 0).toLocaleString('tr-TR')}</div><div class="profile-stat-label">İçerik</div></div><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${!blockedRelationship && currentUser ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}" style="margin-top:12px">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'İstek gönderildi' : 'Takip et')}</button>` : ''}</div></div></div>`;
@@ -10561,7 +10562,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}${profileAdminBadgeHTML(badges, user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}${profileAdminBadgeHTML(badges, user.username)}${isCloseFriendOfViewer ? ' <span class="profile-close-friend-mark" title="Yakın arkadaşın" aria-label="Yakın arkadaşın"><i class="fas fa-star" aria-hidden="true"></i></span>' : ''}</strong><small>@${escHtml(user.username)}</small></span>
         </div>
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
         <div id="profile-spotify-now-playing" data-username="${escHtml(user.username)}"></div>
@@ -11114,7 +11115,8 @@ async function renderProfile(app, username) {
         moreMenu.style.position = 'fixed';
         moreMenu.style.width = 'min(240px, calc(100vw - 24px))';
         moreMenu.style.maxWidth = 'calc(100vw - 24px)';
-        moreMenu.style.maxHeight = `${Math.max(80, window.innerHeight - 24)}px`;
+        const viewportHeight = window.visualViewport?.height || window.innerHeight;
+        moreMenu.style.maxHeight = `${Math.max(120, Math.min(viewportHeight - 24, viewportHeight * 0.72))}px`;
         moreMenu.style.overflowY = 'auto';
         const menuRect = moreMenu.getBoundingClientRect();
         const left = Math.max(12, Math.min(rect.right - menuRect.width, window.innerWidth - menuRect.width - 12));

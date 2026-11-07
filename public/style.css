@@ -6867,9 +6867,15 @@ body.dm-chat-route .mobile-bottom-bar { display: none !important; }
   display:none;position:fixed;z-index:9500;box-sizing:border-box;
   width:min(240px,calc(100vw - 24px));max-width:calc(100vw - 24px);
   border:1px solid var(--border);border-radius:14px;background:var(--bg-secondary);
-  box-shadow:0 12px 34px rgba(0,0,0,.42);overscroll-behavior:contain;
+  max-height:min(72dvh,calc(100dvh - 24px));overflow-x:hidden;overflow-y:auto;
+  overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--border-hover) transparent;
+  box-shadow:0 12px 34px rgba(0,0,0,.42);-webkit-overflow-scrolling:touch;
 }
 .profile-more-menu .profile-menu-item { min-height:46px; }
+.profile-close-friend-mark { display:inline-grid;place-items:center;width:1em;height:1em;margin-left:4px;color:#65d98a;font-size:.78em;vertical-align:.02em;filter:drop-shadow(0 0 3px rgba(89,235,135,.62));animation:profileCloseFriendGlow 2s ease-in-out infinite; }
+.profile-close-friend-mark i { text-shadow:0 0 7px rgba(89,235,135,.82); }
+@keyframes profileCloseFriendGlow { 50% { filter:drop-shadow(0 0 7px rgba(89,235,135,.9));transform:scale(1.13); } }
+@media (prefers-reduced-motion:reduce) { .profile-close-friend-mark { animation:none; } }
 .profile-admin-panel-btn { border:0; color:#fff; background:linear-gradient(135deg,#1a1aff,#5865F2); }
 .profile-archiveable-card { position:relative; min-width:0; }
 .profile-photo-owner-actions { position:absolute; z-index:5; inset:0; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px; padding:12px; opacity:0; visibility:hidden; pointer-events:none; transition:opacity .16s,visibility .16s; }
