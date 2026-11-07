@@ -10786,7 +10786,7 @@ async function renderProfile(app, username) {
               <a href="${profileRoute(item.username)}" data-link class="profile-follow-copy">
                 <strong>${escHtml(displayName)}</strong><small>@${escHtml(item.username)}</small>
               </a>
-              ${isOwn ? `<button type="button" class="profile-follow-remove" data-username="${escHtml(item.username)}" data-action="${button.dataset.followList === 'followers' ? 'remove-follower' : 'unfollow'}" aria-label="Çıkar"><i class="fas fa-user-minus" aria-hidden="true"></i><span>Çıkar</span></button>` : ''}
+              ${isOwn ? `<button type="button" class="profile-follow-remove" data-username="${escHtml(item.username)}" data-action="${button.dataset.followList === 'followers' ? 'remove-follower' : 'unfollow'}" aria-label="${button.dataset.followList === 'followers' ? 'Çıkar' : 'Takipten çık'}"><i class="fas fa-user-minus" aria-hidden="true"></i><span>${button.dataset.followList === 'followers' ? 'Çıkar' : 'Takipten çık'}</span></button>` : ''}
             </div>`;
           }).join('')}
           <div class="profile-follow-no-results" hidden>Bu aramayla eşleşen kişi bulunamadı.</div>
@@ -10837,7 +10837,8 @@ async function renderProfile(app, username) {
         row.classList.remove('is-follow-removal-pending');
         button.disabled = false;
         button.classList.remove('is-cancel-removal');
-        button.innerHTML = '<i class="fas fa-user-minus" aria-hidden="true"></i><span>Çıkar</span>';
+        const label = button.dataset.action === 'remove-follower' ? 'Çıkar' : 'Takipten çık';
+        button.innerHTML = `<i class="fas fa-user-minus" aria-hidden="true"></i><span>${label}</span>`;
       };
       document.querySelectorAll('.profile-follow-remove').forEach(removeButton => removeButton.addEventListener('click', async () => {
         const row = removeButton.closest('.profile-follow-row');
@@ -10848,8 +10849,8 @@ async function renderProfile(app, username) {
         }
         row.classList.add('is-follow-removal-pending');
         removeButton.classList.add('is-cancel-removal');
-        removeButton.innerHTML = '<i class="fas fa-rotate-left" aria-hidden="true"></i><span class="profile-follow-remove-count"><small>Takipten çıkarılıyor</small><strong>İptal et · 2</strong></span>';
-        let seconds = 2;
+        removeButton.innerHTML = '<i class="fas fa-rotate-left" aria-hidden="true"></i><span class="profile-follow-remove-count"><small>Takipten çıkarılıyor</small><strong>İptal et · 1</strong></span>';
+        let seconds = 1;
         const interval = setInterval(() => {
           seconds -= 1;
           if (removeButton.isConnected && removalTimers.has(removeButton)) {
@@ -10886,7 +10887,7 @@ async function renderProfile(app, username) {
             restoreRemovalButton(row, removeButton);
             toast(error.message, 'error');
           }
-        }, 2000);
+        }, 1000);
         removalTimers.set(removeButton, { interval, timeout });
       }));
     } catch (e) { toast(e.message, 'error'); }
