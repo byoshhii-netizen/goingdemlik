@@ -1217,6 +1217,12 @@ function profileRedVerificationIconHTML(badges) {
   return badge ? redVerificationIconHTML(1, badge.assigned_at) : '';
 }
 
+function profileAdminBadgeHTML(badges, username = '') {
+  const badge = Array.isArray(badges) ? badges.find(item => item.type === 'admin' && item.is_active !== false) : null;
+  if (!badge) return '';
+  return ` <button type="button" class="user-admin admin-verification-tick" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(badge.assigned_at || '')}" data-admin-username="${escHtml(username)}"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></button>`;
+}
+
 function profileBadgeHTML(badge, compact = false) {
   if (!badge) return '';
   if (badge.type === 'red_verified') return redVerificationIconHTML(badge.is_active === false ? 0 : 1, badge.assigned_at);
@@ -1391,11 +1397,11 @@ function userDisplayName(u) {
   const redVerified = Number(u.is_red_verified) === 1
     || (currentUser?.username === u.username && Number(currentUser.is_red_verified) === 1);
   const redVerification = redVerificationIconHTML(redVerified ? 1 : 0, u.red_verified_at);
-  const adminBadge = u.is_admin ? ` <button type="button" class="user-admin" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}"><i class="fas fa-shield"></i></button>` : '';
+  const adminBadge = u.is_admin ? ` <button type="button" class="user-admin admin-verification-tick" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" data-admin-username="${escHtml(u.username || '')}"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></button>` : '';
   const founderMark = isFounder ? ` <button type="button" class="founder-name-mark" aria-label="Kurucu bilgisi" title="Kurucu" style="color:${escHtml(founderColor)}" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : '';
   const vipBadge = u.is_vip ? ` <button type="button" class="user-membership user-vip" data-membership="vip" data-membership-since="${escHtml(u.vip_since || '')}" aria-label="VIP üyelik bilgisi" title="VIP"><i class="fas fa-gem"></i></button>` : '';
   const plusBadge = u.is_plus ? ` <button type="button" class="user-membership user-plus" data-membership="plus" data-membership-since="${escHtml(u.plus_since || '')}" aria-label="Plus üyelik bilgisi" title="Plus"><i class="fas fa-plus"></i></button>` : '';
-  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}${redVerification}${founderMark}</strong><small>@${escHtml(u.username)}</small></span>${vipBadge}${plusBadge}${adminBadge}</span>`;
+  return `<span class="user-badge" ${color}><span class="user-display-identity"><strong>${escHtml(u.nickname || u.username)}${redVerification}${founderMark}${adminBadge}</strong><small>@${escHtml(u.username)}</small></span>${vipBadge}${plusBadge}</span>`;
 }
 
 window.showFounderInfo = function () {
@@ -10441,7 +10447,7 @@ async function renderProfile(app, username) {
     app.innerHTML = `<div class="container page profile-page"><div class="profile-header">
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
       <div class="profile-header-actions is-other">${profileBadgesButtonHTML(data.badges || [])}</div>
-       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
+       <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}${profileAdminBadgeHTML(data.badges, user.username)}</strong><small>@${escHtml(user.username)}</small></span></div>
       <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${Number(data.content_count || 0).toLocaleString('tr-TR')}</div><div class="profile-stat-label">İçerik</div></div><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${!blockedRelationship && currentUser ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}" style="margin-top:12px">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'İstek gönderildi' : 'Takip et')}</button>` : ''}</div></div></div>`;
@@ -10555,7 +10561,7 @@ async function renderProfile(app, username) {
       </div>
       <div class="profile-info">
         <div class="profile-username" style="${(user.is_vip || user.is_plus) && user.show_level_color && user.name_color ? 'color:' + escHtml(user.name_color) : ''}">
-          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span>
+          <span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}${profileAdminBadgeHTML(badges, user.username)}</strong><small>@${escHtml(user.username)}</small></span>
         </div>
         ${user.location ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px"><i class="fas fa-map-marker-alt" style="font-size:11px;margin-right:4px"></i>${escHtml(user.location)}</div>` : ''}
         <div id="profile-spotify-now-playing" data-username="${escHtml(user.username)}"></div>
@@ -17949,8 +17955,12 @@ document.addEventListener('click', e => {
   e.preventDefault();
   e.stopPropagation();
   const since = shield.dataset.adminSince;
-  const sinceText = since ? new Date(since).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' }) : 'bilinmiyor';
-  showModal('CigCig Yetkilisi', `<div class="role-info-modal role-info-admin"><span class="role-info-icon"><i class="fas fa-shield-halved"></i></span><strong>CigCig Yetkilisi</strong><p>Bu kullanıcı ${sinceText} tarihinden beri CigCig yetkilisi.</p></div>`, 'role-info-modal-wrap');
+  const sinceDate = since && !Number.isNaN(new Date(since).getTime())
+    ? new Date(since).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
+  const username = shield.dataset.adminUsername;
+  const sinceText = sinceDate ? `${sinceDate} tarihinde` : 'bilinmeyen bir tarihte';
+  showModal('CigCig Yetkilisi', `<div class="role-info-modal role-info-admin"><span class="role-info-icon"><i class="fas fa-shield-halved"></i></span><strong>CigCig Yetkilisi</strong><p>${username ? `@${escHtml(username)} kullanıcısı ` : 'Bu kullanıcı '}${sinceText} CigCig yetkilisi oldu.</p></div>`, 'role-info-modal-wrap');
 });
 
 document.addEventListener('click', event => {

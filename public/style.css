@@ -3079,7 +3079,9 @@ body.forgot-password-route .auth-page { box-sizing:border-box; min-height:0; pad
 .user-membership:hover,.user-membership:focus-visible { background:rgba(255,255,255,.08);transform:translateY(-1px);outline:0; }
 .user-vip { font-size:12px; color: #fbbf24; }
 .user-plus { font-size:12px; color: #b59aff; }
-.user-admin { width:20px;height:20px;color:#8aa3ff;font-size:13px; }
+.user-admin { width:20px;height:20px;color:#ef3340;font-size:13px; }
+.user-admin.admin-verification-tick { display:inline-flex;width:1em;height:1em;margin-left:4px;padding:0;border:0;background:transparent;vertical-align:-.12em; }
+.user-admin.admin-verification-tick .red-verification-tick-image { width:1em;height:1em;margin:0; }
 
 /* ===== SEARCH ===== */
 .search-bar { position: relative; margin-bottom: 24px; }
@@ -11244,9 +11246,8 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
 .reals-media-sound-toggle { width:40px !important;height:40px !important;min-width:40px !important;max-width:40px !important;min-height:40px !important;max-height:40px !important;border-radius:13px !important;border-color:rgba(255,255,255,.3) !important;background:rgba(12,13,16,.82) !important;box-shadow:0 5px 16px rgba(0,0,0,.3); }
 .media-explore-page .photo-card-head { display:none !important; }
 @media (max-width:768px) {
-  .profile-tabs { display:flex;flex-wrap:nowrap;gap:4px;overflow-x:auto;overscroll-behavior-inline:contain;scrollbar-width:none; }
-  .profile-tabs::-webkit-scrollbar { display:none; }
-  .profile-tabs .profile-tab { flex:0 0 44px;min-width:44px;scroll-snap-align:start; }
+  .profile-tabs { display:grid;grid-template-columns:repeat(auto-fit,minmax(32px,1fr));width:100%;gap:4px;overflow:visible;overscroll-behavior-inline:auto; }
+  .profile-tabs .profile-tab { width:100%;min-width:0;min-height:44px;padding-inline:2px; }
   .photo-detail-shell .photo-media-wrap,
   .photo-detail-shell .photo-media-wrap .photo-native-link,
   .photo-detail-shell .photo-media-wrap .photo-native { max-height:68svh; }
