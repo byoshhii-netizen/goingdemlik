@@ -7006,6 +7006,18 @@ app.put('/api/users/:username/story-visibility', authMiddleware, async (req, res
   res.json({ hidden: req.body.hidden });
 });
 
+app.get('/api/story-visibility', authMiddleware, async (req, res) => {
+  await ensureStoryVisibilitySchema();
+  const { rows } = await query(`
+    SELECT u.username, u.nickname, u.avatar, u.avatar_removed, usv.created_at
+    FROM user_story_visibility usv
+    JOIN users u ON u.id=usv.hidden_user_id
+    WHERE usv.user_id=$1 AND COALESCE(u.is_deleted,0)=0
+    ORDER BY usv.created_at DESC
+  `, [req.user.id]);
+  res.json(rows);
+});
+
 app.get('/api/stories', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
@@ -7296,6 +7308,51 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
     ]);
   }
   res.json(rows[0]);
+});
+
+app.get('/api/photos/:id/likes', authMiddleware, async (req, res) => {
+  const photoId = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(photoId) || photoId < 1) return res.status(400).json({ error: 'Geçersiz fotoğraf.' });
+  const searchTerm = String(req.query.q || '').trim().slice(0, 100);
+  const requestedLimit = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requestedLimit) ? Math.min(Math.max(requestedLimit, 1), 100) : 100;
+  const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 100000);
+  try {
+    await ensurePhotoInteractionSchema();
+    const userId = Number(req.user.id);
+    const { rows: visible } = await query(`
+      SELECT p.id, COALESCE(p.show_likes,1) AS show_likes
+      FROM photos p
+      JOIN users owner ON owner.id=p.user_id
+      WHERE p.id=$1
+        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
+        AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW())
+        AND ${closeFriendsVisibilitySql('p', '$2')}
+        AND (COALESCE(owner.is_private,0)=0 OR p.user_id=$2
+          OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted')
+          OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id)
+            OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))
+    `, [photoId, userId]);
+    if (!visible.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı.' });
+    if (Number(visible[0].show_likes) !== 1) return res.status(403).json({ error: 'Bu fotoğrafta beğeni listesi kapalı.' });
+    const { rows } = await query(`
+      SELECT u.id, u.username, u.nickname, u.avatar, u.avatar_removed, u.name_color,
+        u.is_red_verified, u.red_verified_at, pl.created_at,
+        EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=u.id AND f.status='accepted') AS is_followed
+      FROM photo_likes pl
+      JOIN users u ON u.id=pl.user_id
+      WHERE pl.photo_id=$1 AND COALESCE(u.is_deleted,0)=0
+        AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE (bl.blocker_id=$2 AND bl.blocked_id=u.id) OR (bl.blocker_id=u.id AND bl.blocked_id=$2))
+        AND ($3='' OR u.username ILIKE $4 OR COALESCE(u.nickname,'') ILIKE $4)
+      ORDER BY is_followed DESC, pl.created_at DESC
+      LIMIT $5 OFFSET $6
+    `, [photoId, userId, searchTerm, `%${searchTerm}%`, limit, offset]);
+    res.json({ users: rows, has_more: rows.length === limit });
+  } catch (error) {
+    console.error('Photo likes list failed:', error);
+    res.status(500).json({ error: 'Beğenenler listesi yüklenemedi.' });
+  }
 });
 
 // Like toggle
@@ -9397,12 +9454,20 @@ app.get('/api/songs', async (req, res) => {
   if (artist && !q) { params.push(`%${artist}%`); where += ` AND s.artist_name ILIKE $${params.length}`; }
   if (distributor && !q) { params.push(`%${distributor}%`); where += ` AND s.distributor ILIKE $${params.length}`; }
   params.push(limit);
-  const order = sort === 'popular' ? 's.play_count DESC, s.published_at DESC' : 's.published_at DESC';
+  const order = sort === 'weekly'
+    ? 'weekly.weekly_play_count DESC, s.published_at DESC'
+    : sort === 'popular' ? 's.play_count DESC, s.published_at DESC' : 's.published_at DESC';
   const { rows } = await query(
     `SELECT s.id, s.title, s.artist_name, s.distributor, s.genre, s.cover_url, s.audio_url,
-            s.remastered_audio_url, s.play_count, s.slug, s.song_type, s.published_at, s.share_reason,
+            s.remastered_audio_url, s.play_count, weekly.weekly_play_count, s.slug, s.song_type, s.published_at, s.share_reason,
             u.username as uploader, u.avatar as uploader_avatar
     FROM songs s JOIN users u ON s.uploader_id=u.id AND COALESCE(u.is_deleted,0)=0
+    LEFT JOIN LATERAL (
+      SELECT COUNT(*)::int AS weekly_play_count
+      FROM content_view_events cve
+      WHERE cve.content_type='song' AND cve.content_id=s.id
+        AND cve.created_at >= NOW() - INTERVAL '7 days'
+    ) weekly ON TRUE
      ${where} ORDER BY ${order} LIMIT $${params.length}`,
     params
   );
@@ -12108,6 +12173,53 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
   res.json({ count: parseInt(rows[0].c) });
 });
 
+app.get('/api/messages/search', authMiddleware, async (req, res) => {
+  const searchTerm = String(req.query.q || '').trim().slice(0, 100);
+  if (searchTerm.length < 2) return res.json([]);
+  const pattern = `%${searchTerm.replace(/[\\%_]/g, '\\$&')}%`;
+  try {
+    const { rows } = await query(`
+      SELECT m.id, m.conversation_id, m.sender_id, m.content, m.created_at,
+        CASE WHEN COALESCE(viewer_receipt_settings.read_receipts_enabled,1)=1
+          AND COALESCE(sender_receipt_settings.read_receipts_enabled,1)=1 THEN m.read_at ELSE NULL END AS read_at,
+        peer.username AS other_username, peer.nickname AS other_nickname, peer.avatar AS other_avatar,
+        sender.username AS sender_username, sender.nickname AS sender_nickname,
+        song.title AS song_title, song.artist_name AS song_artist,
+        (m.sender_id=$1) AS is_mine
+      FROM dm_messages m
+      JOIN dm_conversations c ON c.id=m.conversation_id
+      JOIN users peer ON peer.id=CASE WHEN c.user1_id=$1 THEN c.user2_id ELSE c.user1_id END
+      JOIN users sender ON sender.id=m.sender_id
+      LEFT JOIN songs song ON song.id=m.shared_song_id
+      LEFT JOIN dm_user_settings viewer_receipt_settings ON viewer_receipt_settings.user_id=$1
+      LEFT JOIN dm_user_settings sender_receipt_settings ON sender_receipt_settings.user_id=m.sender_id
+      WHERE (c.user1_id=$1 OR c.user2_id=$1)
+        AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE
+          (bl.blocker_id=$1 AND bl.blocked_id=peer.id) OR (bl.blocker_id=peer.id AND bl.blocked_id=$1))
+        AND (peer.id=$1 OR COALESCE(peer.dm_message_permission,'everyone')='everyone'
+          OR (peer.dm_message_permission='followers' AND EXISTS (
+            SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=peer.id AND f.status='accepted'))
+          OR (peer.dm_message_permission='friends' AND EXISTS (
+            SELECT 1 FROM follows f1 JOIN follows f2 ON f1.following_id=f2.follower_id
+            WHERE f1.follower_id=$1 AND f1.following_id=peer.id
+              AND f2.follower_id=peer.id AND f2.following_id=$1
+              AND f1.status='accepted' AND f2.status='accepted')))
+        AND COALESCE(m.deleted_for_all,0)=0
+        AND ((m.sender_id=$1 AND COALESCE(m.deleted_by_sender,0)=0)
+          OR (m.sender_id<>$1 AND COALESCE(m.deleted_by_receiver,0)=0))
+        AND NOT (c.user1_id=$1 AND COALESCE(c.hidden_by_user1,0)=1)
+        AND NOT (c.user2_id=$1 AND COALESCE(c.hidden_by_user2,0)=1)
+        AND (m.content ILIKE $2 OR song.title ILIKE $2 OR song.artist_name ILIKE $2)
+      ORDER BY m.id DESC
+      LIMIT 50
+    `, [req.user.id, pattern]);
+    res.json(rows);
+  } catch (error) {
+    console.error('DM message search failed:', error);
+    res.status(500).json({ error: 'Mesajlarda arama yapılamadı.' });
+  }
+});
+
 app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const { rows: target } = await query(`
     SELECT u.id,u.username,u.nickname,u.avatar,u.avatar_removed,u.name_color,u.is_private,
@@ -12162,6 +12274,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const requestedLimit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 100);
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
+  const aroundId = Math.max(Number.parseInt(req.query.around_id, 10) || 0, 0);
   const requestedDeletionCheckpoint = req.query.after_deleted_at
     ? new Date(String(req.query.after_deleted_at))
     : new Date(0);
@@ -12243,12 +12356,13 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       AND (($6=0 AND COALESCE(m.deleted_for_all,0)=0) OR ($6>0 AND ((m.id>$6 AND COALESCE(m.deleted_for_all,0)=0) OR (COALESCE(m.deleted_for_all,0)=1 AND m.deleted_for_all_at>$7::timestamptz))))
       AND ($2=1 OR COALESCE(m.deleted_by_sender,0)=0 OR m.sender_id!=$3)
       AND ($2=1 OR COALESCE(m.deleted_by_receiver,0)=0 OR m.sender_id=$3)
+      AND ($8=0 OR ABS(m.id-$8) <= 50)
     ORDER BY CASE WHEN $6=0 THEN m.id END DESC,
       CASE WHEN m.id>$6 THEN 0 ELSE 1 END ASC,
       CASE WHEN m.id>$6 THEN m.id END ASC,
       m.deleted_for_all_at DESC NULLS LAST, m.id DESC
     LIMIT $4 OFFSET $5
-  `, [conv.id, 0, uid, requestedLimit, offset, afterId, afterDeletedAt]);
+  `, [conv.id, 0, uid, requestedLimit, offset, afterId, afterDeletedAt, aroundId]);
 
   if (afterId) return res.json(msgs);
 
