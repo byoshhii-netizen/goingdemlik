@@ -145,7 +145,18 @@ function applyDefaultAvatarSize(value) {
 function applyProfilePageBackground(root, imageUrl) {
   const page = root.querySelector('.profile-page');
   if (!page || !imageUrl) return;
-  const escapedUrl = String(imageUrl).replace(/[\\"\n\r]/g, character => `\\${character}`);
+  let backgroundUrl = String(imageUrl);
+  try {
+    const url = new URL(backgroundUrl, location.origin);
+    if (url.hostname === 'res.cloudinary.com' && /\/image\/upload\//.test(url.pathname)
+      && !/\/image\/upload\/[^/]*(?:f_auto|q_auto|w_1600)/.test(url.pathname)) {
+      url.pathname = url.pathname.replace('/image/upload/', '/image/upload/f_auto,q_auto,w_1600,c_limit/');
+      backgroundUrl = url.href;
+    }
+  } catch (error) {
+    console.warn('Profil arka planı adresi geçersiz:', error.message);
+  }
+  const escapedUrl = backgroundUrl.replace(/[\\"\n\r]/g, character => `\\${character}`);
   page.classList.add('has-profile-background');
   page.style.setProperty('--profile-background-image', `url("${escapedUrl}")`);
 }
@@ -1221,7 +1232,7 @@ function profileRedVerificationIconHTML(badges) {
 function profileAdminBadgeHTML(badges, username = '') {
   const badge = Array.isArray(badges) ? badges.find(item => item.type === 'admin' && item.is_active !== false) : null;
   if (!badge) return '';
-  return ` <button type="button" class="user-admin admin-verification-tick" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(badge.assigned_at || '')}" data-admin-username="${escHtml(username)}"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></button>`;
+  return ` <button type="button" class="user-admin admin-verification-tick" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(badge.assigned_at || '')}" data-admin-username="${escHtml(username)}"><i class="fas fa-shield-halved" aria-hidden="true"></i></button>`;
 }
 
 function profileBadgeHTML(badge, compact = false) {
@@ -1398,7 +1409,7 @@ function userDisplayName(u) {
   const redVerified = Number(u.is_red_verified) === 1
     || (currentUser?.username === u.username && Number(currentUser.is_red_verified) === 1);
   const redVerification = redVerificationIconHTML(redVerified ? 1 : 0, u.red_verified_at);
-  const adminBadge = u.is_admin ? ` <button type="button" class="user-admin admin-verification-tick" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" data-admin-username="${escHtml(u.username || '')}"><img class="red-verification-tick-image" src="/gobolog.png" alt="" aria-hidden="true" /></button>` : '';
+  const adminBadge = u.is_admin ? ` <button type="button" class="user-admin admin-verification-tick" aria-label="CigCig yetkilisi bilgisi" title="CigCig Yetkilisi" data-admin-since="${escHtml(u.admin_since || '')}" data-admin-username="${escHtml(u.username || '')}"><i class="fas fa-shield-halved" aria-hidden="true"></i></button>` : '';
   const founderMark = isFounder ? ` <button type="button" class="founder-name-mark" aria-label="Kurucu bilgisi" title="Kurucu" style="color:${escHtml(founderColor)}" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : '';
   const vipBadge = u.is_vip ? ` <button type="button" class="user-membership user-vip" data-membership="vip" data-membership-since="${escHtml(u.vip_since || '')}" aria-label="VIP üyelik bilgisi" title="VIP"><i class="fas fa-gem"></i></button>` : '';
   const plusBadge = u.is_plus ? ` <button type="button" class="user-membership user-plus" data-membership="plus" data-membership-since="${escHtml(u.plus_since || '')}" aria-label="Plus üyelik bilgisi" title="Plus"><i class="fas fa-plus"></i></button>` : '';
@@ -10594,6 +10605,7 @@ async function renderProfile(app, username) {
           ${!blockedRelationship ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'Takip isteği gönderildi' : 'Takip et')}</button>` : ''}
           ${blockedRelationship || user.is_private ? '' : `<button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>`}
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px;position:relative" aria-label="Profil seçenekleri" aria-expanded="false"><i class="fas fa-ellipsis-h"></i></button>
+          <button type="button" id="profile-more-backdrop" class="profile-more-backdrop" aria-label="Menüyü kapat" tabindex="-1"></button>
           <div id="profile-more-menu" class="profile-more-menu" role="menu"></div>
         </div>` : ''}
       </div>
@@ -10608,7 +10620,7 @@ async function renderProfile(app, username) {
       ${books.length ? `<div class="grid-3">${books.map(b => profileArchiveCard('book', b.id, bookCardHTML(b), String(b.user_id) === String(user.id))).join('')}</div>` : '<div class="empty-state"><i class="fas fa-book"></i><p>Kitap yok.</p></div>'}
     </div>
     <div id="tab-photos" class="hidden">
-      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" /></a>`, true, `data-profile-edit-photo="${escHtml(photo.id)}"`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
+      ${photos.length ? `<div class="profile-photo-grid">${photos.map(photo => profileArchiveCard('photo', photo.id, `<a href="/foto/${photo.id}" data-link class="profile-photo-item"><img src="${escHtml(photo.url)}" alt="Fotoğraf" loading="lazy" decoding="async" /></a>`, true, `data-profile-edit-photo="${escHtml(photo.id)}"`)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-images"></i><p>Fotoğraf yok.</p></div>'}
     </div>
     <div id="tab-groups" class="hidden">
       ${groups.length ? `<div class="grid-3">${groups.map(g => groupCardHTML(g)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-users"></i><p>Grup yok.</p></div>'}
@@ -11022,24 +11034,34 @@ async function renderProfile(app, username) {
         return items;
       }
 
+      const moreBackdrop = document.getElementById('profile-more-backdrop');
+      const isMobileProfileMenu = () => window.matchMedia('(max-width: 768px)').matches;
+      const closeProfileMenuUI = () => {
+        moreMenu.style.display = isMobileProfileMenu() ? '' : 'none';
+        moreMenu.classList.remove('is-open');
+        moreBackdrop?.classList.remove('is-open');
+        document.body.classList.remove('profile-menu-open');
+        moreBtn.setAttribute('aria-expanded', 'false');
+      };
+
       function renderMenu(fs) {
         const items = buildMenuItems(fs);
-        moreMenu.innerHTML = items.map(item =>
+        moreMenu.innerHTML = `<div class="profile-menu-sheet-header"><span class="profile-menu-sheet-grabber" aria-hidden="true"></span><strong>Profil seçenekleri</strong><button type="button" class="profile-menu-sheet-close" aria-label="Menüyü kapat"><i class="fas fa-times"></i></button></div>${items.map(item =>
           `<div class="profile-menu-item${item.danger ? ' danger' : ''}" role="menuitem" tabindex="0" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
             <i class="fas ${item.icon}" style="width:18px;text-align:center;flex-shrink:0"></i> <span>${item.label}</span>
           </div>`
-        ).join('');
+        ).join('')}`;
+        moreMenu.querySelector('.profile-menu-sheet-close')?.addEventListener('click', closeProfileMenuUI);
         // Son item'ın border'ını kaldır
         const lastItem = moreMenu.querySelector('.profile-menu-item:last-child');
         if (lastItem) lastItem.style.borderBottom = 'none';
-        if (moreMenu.style.display === 'block') positionProfileMenu(moreBtn);
+        if (moreMenu.style.display === 'block' || moreMenu.classList.contains('is-open')) positionProfileMenu(moreBtn);
         
         moreMenu.querySelectorAll('.profile-menu-item').forEach(el => {
           el.addEventListener('mouseover', () => el.style.background = 'var(--bg-hover)');
           el.addEventListener('mouseout', () => el.style.background = '');
           el.addEventListener('click', async () => {
-            moreMenu.style.display = 'none';
-            moreBtn.setAttribute('aria-expanded', 'false');
+            closeProfileMenuUI();
             const action = el.dataset.action;
             const fid = el.dataset.id;
             try {
@@ -11103,6 +11125,7 @@ async function renderProfile(app, username) {
         });
       }
 
+      renderMenu({});
       Promise.all([
         getBlockStatus(),
         api('/users/' + encodeURIComponent(username) + '/story-visibility').then(result => {
@@ -11112,11 +11135,31 @@ async function renderProfile(app, username) {
       ]).then(([blockStatus]) => renderMenu(blockStatus)).catch(() => renderMenu({}));
 
       const positionProfileMenu = anchor => {
+        if (isMobileProfileMenu()) {
+          moreMenu.style.display = 'block';
+          moreMenu.style.position = 'fixed';
+          moreMenu.style.left = '0';
+          moreMenu.style.right = '0';
+          moreMenu.style.top = 'auto';
+          moreMenu.style.bottom = '0';
+          moreMenu.style.width = '100%';
+          moreMenu.style.maxWidth = 'none';
+          moreMenu.style.maxHeight = 'min(72dvh, calc(var(--cigcig-viewport-height, 100dvh) - 12px))';
+          moreMenu.style.overflowY = 'auto';
+          moreMenu.classList.add('is-open');
+          moreBackdrop?.classList.add('is-open');
+          document.body.classList.add('profile-menu-open');
+          return;
+        }
         const rect = anchor.getBoundingClientRect();
         moreMenu.style.display = 'block';
+        moreMenu.classList.remove('is-open');
+        moreBackdrop?.classList.remove('is-open');
+        document.body.classList.remove('profile-menu-open');
         moreMenu.style.position = 'fixed';
         moreMenu.style.width = 'min(240px, calc(100vw - 24px))';
         moreMenu.style.maxWidth = 'calc(100vw - 24px)';
+        moreMenu.style.bottom = 'auto';
         const viewportHeight = window.visualViewport?.height || window.innerHeight;
         moreMenu.style.maxHeight = `${Math.max(120, Math.min(viewportHeight - 24, viewportHeight * 0.72))}px`;
         moreMenu.style.overflowY = 'auto';
@@ -11132,26 +11175,34 @@ async function renderProfile(app, username) {
       };
       const toggleProfileMenu = (event) => {
         if (event) event.stopPropagation();
-        const isOpen = moreMenu.style.display === 'block';
-        if (isOpen) moreMenu.style.display = 'none';
+        const isOpen = isMobileProfileMenu()
+          ? moreMenu.classList.contains('is-open')
+          : moreMenu.style.display === 'block';
+        if (isOpen) closeProfileMenuUI();
         else positionProfileMenu(event?.currentTarget || moreBtn);
         moreBtn.setAttribute('aria-expanded', String(!isOpen));
       };
 
       document.getElementById('profile-friend-btn')?.addEventListener('click', toggleProfileMenu);
       moreBtn.addEventListener('click', toggleProfileMenu);
+      moreBackdrop?.addEventListener('click', closeProfileMenuUI);
       const closeProfileMenu = event => {
-        if (!event.target.closest('#profile-more-btn') && !event.target.closest('#profile-more-menu')) {
-          if (moreMenu) moreMenu.style.display = 'none';
-          moreBtn.setAttribute('aria-expanded', 'false');
-        }
+        if (!event.target.closest('#profile-more-btn') && !event.target.closest('#profile-more-menu')) closeProfileMenuUI();
+      };
+      const onProfileMenuKeydown = event => {
+        if (event.key === 'Escape' && moreMenu.classList.contains('is-open')) closeProfileMenuUI();
       };
       document.addEventListener('click', closeProfileMenu);
-      window.__profileMenuCleanup = () => document.removeEventListener('click', closeProfileMenu);
+      document.addEventListener('keydown', onProfileMenuKeydown);
+      window.__profileMenuCleanup = () => {
+        document.removeEventListener('click', closeProfileMenu);
+        document.removeEventListener('keydown', onProfileMenuKeydown);
+        moreBackdrop?.removeEventListener('click', closeProfileMenuUI);
+        closeProfileMenuUI();
+      };
       moreMenu.addEventListener('keydown', event => {
         if (event.key === 'Escape') {
-          moreMenu.style.display = 'none';
-          moreBtn.setAttribute('aria-expanded', 'false');
+          closeProfileMenuUI();
           moreBtn.focus();
         } else if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
