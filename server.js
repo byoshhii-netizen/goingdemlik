@@ -12947,6 +12947,9 @@ app.delete('/api/messages/:id', authMiddleware, async (req, res) => {
   const conv = convRows[0];
   const isOwn = msg.sender_id == req.user.id;
   if (mode === 'all' && !isOwn) return res.status(403).json({ error: 'Sadece kendi mesajınızı herkesten silebilirsiniz' });
+  if (mode === 'all' && String(conv.user1_id) === String(conv.user2_id)) {
+    return res.status(400).json({ error: 'Kendinle olan konuşmadaki mesajlar yalnızca senden silinebilir.' });
+  }
   if (mode === 'all') {
     await query('UPDATE dm_messages SET deleted_for_all=1,deleted_for_all_at=COALESCE(deleted_for_all_at,NOW()) WHERE id=$1', [msg.id]);
   } else {
@@ -12964,8 +12967,14 @@ app.post('/api/messages/delete-bulk', authMiddleware, async (req, res) => {
   if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ID listesi gerekli' });
   if (mode === 'all') {
     for (const id of ids) {
-      const { rows } = await query('SELECT sender_id FROM dm_messages WHERE id=$1', [id]);
+      const { rows } = await query('SELECT sender_id,conversation_id FROM dm_messages WHERE id=$1', [id]);
       if (rows.length && rows[0].sender_id != req.user.id) return res.status(403).json({ error: 'Sadece kendi mesajınızı herkesten silebilirsiniz' });
+      if (rows.length) {
+        const { rows: conversations } = await query('SELECT user1_id,user2_id FROM dm_conversations WHERE id=$1', [rows[0].conversation_id]);
+        if (conversations.length && String(conversations[0].user1_id) === String(conversations[0].user2_id)) {
+          return res.status(400).json({ error: 'Kendinle olan konuşmadaki mesajlar yalnızca senden silinebilir.' });
+        }
+      }
     }
   }
   for (const id of ids) {
@@ -13126,15 +13135,24 @@ app.get('/api/admin/messages/search', adminMiddleware, async (req, res) => {
 });
 
 app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, res) => {
+  const conversationId = Number(req.params.id);
+  if (!Number.isSafeInteger(conversationId) || conversationId < 1) return res.status(400).json({ error: 'Geçersiz konuşma.' });
+  const { rows: conversations } = await query(`
+    SELECT c.id,u1.username AS user1,u2.username AS user2
+    FROM dm_conversations c
+    JOIN users u1 ON u1.id=c.user1_id JOIN users u2 ON u2.id=c.user2_id
+    WHERE c.id=$1
+  `, [conversationId]);
+  if (!conversations.length) return res.status(404).json({ error: 'Konuşma bulunamadı.' });
   const { rows: messages } = await query(`
     SELECT m.*, u.username AS sender_username,
       CASE WHEN m.deleted_for_all=1 THEN 'deleted_for_all'
         WHEN m.deleted_by_sender=1 OR m.deleted_by_receiver=1 THEN 'deleted_for_user'
         ELSE 'visible' END AS audit_status
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
-    WHERE m.conversation_id=$1 ORDER BY m.created_at ASC
-  `, [req.params.id]);
-  res.json({ messages });
+    WHERE m.conversation_id=$1 ORDER BY m.created_at ASC,m.id ASC
+  `, [conversationId]);
+  res.json({ conversation: conversations[0], messages });
 });
 
 app.use((err, req, res, next) => {

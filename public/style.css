@@ -11236,3 +11236,11 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
   .photo-detail-shell .photo-media-wrap .photo-native-link,
   .photo-detail-shell .photo-media-wrap .photo-native { max-height:68svh; }
 }
+
+@media (max-width:768px) {
+  .profile-page.has-profile-background::before {
+    inset:0;
+    background-position:center center,center center;
+    background-size:auto,cover;
+  }
+}

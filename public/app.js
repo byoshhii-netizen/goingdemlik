@@ -15023,14 +15023,14 @@ async function renderDMChat(username) {
         </div>
       </div>
       <div class="dm-chat-header-right">
-        ${!isSelfConversation ? '<button class="btn btn-ghost btn-sm" id="dm-chat-search-messages-btn" title="Bu sohbette ara" aria-label="Bu sohbette ara"><i class="fas fa-magnifying-glass-plus"></i></button>' : ''}
+        <button class="btn btn-ghost btn-sm" id="dm-chat-search-messages-btn" title="Bu sohbette ara" aria-label="Bu sohbette ara"><i class="fas fa-magnifying-glass-plus"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
     <div class="dm-sel-actions-bar" id="dm-sel-actions-bar" role="toolbar" aria-label="Seçilen mesaj işlemleri">
       <span class="dm-selection-label" aria-live="polite">0 mesaj seçildi</span>
       <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
-      <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
+      <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"${isSelfConversation ? ' hidden' : ''}><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
       <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i> İptal</button>
     </div>
 
@@ -15656,6 +15656,7 @@ async function renderDMChat(username) {
     } catch (e) { toast(e.message, 'error'); }
   });
   document.getElementById('dm-sel-delete-all')?.addEventListener('click', async () => {
+    if (isSelfConversation) return;
     if (!dmSelectedIds.size || ![...dmSelectedIds].every(id => {
       const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(id)}"]`);
       return !!row && String(row.dataset.senderId) === String(currentUser?.id);
@@ -15752,7 +15753,8 @@ function updateDmSelActions() {
   const selectionLabel = bar?.querySelector('.dm-selection-label');
   if (selectionLabel) selectionLabel.textContent = dmSelectedIds.size ? `${dmSelectedIds.size} mesaj seçildi` : 'Mesaj seçimi';
   if (deleteMeButton) deleteMeButton.disabled = dmSelectedIds.size === 0;
-  if (deleteAllButton) deleteAllButton.hidden = !dmSelectedIds.size || !onlyOwnMessages;
+  const isSelfConversation = document.querySelector('.dm-chat')?.dataset.selfConversation === 'true';
+  if (deleteAllButton) deleteAllButton.hidden = isSelfConversation || !dmSelectedIds.size || !onlyOwnMessages;
 }
 
 function installMessageSelectionGestures(container, selector, onSelect, allowInteractiveSelector = '') {
@@ -16825,7 +16827,8 @@ function openDmMessageEditor(messageRow, username) {
 function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
   document.getElementById('dm-msg-ctx')?.remove();
   const messageRow = [...document.querySelectorAll('.dm-msg-wrap')].find(row => row.dataset.id === String(msgId));
-  const canDeleteForAll = isOwn
+  const isSelfConversation = document.querySelector('.dm-chat')?.dataset.selfConversation === 'true';
+  const canDeleteForAll = !isSelfConversation && isOwn
     && String(messageRow?.dataset.senderId) === String(currentUser?.id)
     && messageRow?.dataset.deletedForAll !== 'true';
   const canEdit = isDmMessageEditable(messageRow);

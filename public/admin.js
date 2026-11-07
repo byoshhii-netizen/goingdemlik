@@ -3276,10 +3276,52 @@ async function renderAdminMessages(main) {
   searchResults.className = 'card admin-message-search-results';
   searchResults.style.display = 'none';
   main.appendChild(searchResults);
-  const showAudit = async (conversationId, title) => {
+  const showAudit = async (conversationId, title, focusMessageId = '') => {
     const audit = await adminApi('/conversations/' + conversationId + '/messages');
     const messages = audit.messages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    showModal(title, `<div class="admin-audit-list">${messages.length ? messages.map(event => `<div class="admin-audit-message ${event.audit_status !== 'visible' ? 'is-deleted' : ''}"><span class="admin-audit-sender"><small>${formatDate(event.created_at)}</small>${escHtml(event.sender_username)}</span><div class="admin-plaintext-message">${event.image_url ? '<i class="fas fa-image"></i> Medya eki · ' : ''}${escHtml(event.content || '[Boş mesaj]')}</div>${event.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : event.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</div>`).join('') : '<div class="admin-audit-empty">Mesaj kaydı yok.</div>'}</div>`);
+    const renderAuditMessages = (query = '') => messages.map(message => {
+      const deletedForAll = Number(message.deleted_for_all) === 1;
+      const deletedBySender = Number(message.deleted_by_sender) === 1;
+      const deletedByReceiver = Number(message.deleted_by_receiver) === 1;
+      const deleted = deletedForAll || deletedBySender || deletedByReceiver;
+      const mediaCount = Array.isArray(message.image_urls) ? message.image_urls.length : 0;
+      const mediaLabel = message.image_url || mediaCount
+        ? `<span class="admin-chat-attachment"><i class="fas fa-image"></i> Medya eki${mediaCount > 1 ? ` · ${mediaCount} fotoğraf` : ''}</span>`
+        : '';
+      const songLabel = message.shared_song_id ? '<span class="admin-chat-attachment"><i class="fas fa-music"></i> Paylaşılan müzik</span>' : '';
+      const searchText = `${message.content || ''} ${message.sender_username || ''} ${message.shared_song_id ? 'müzik' : ''}`.toLocaleLowerCase('tr-TR');
+      if (query && !searchText.includes(query.toLocaleLowerCase('tr-TR'))) return '';
+      const side = message.sender_username === audit.conversation?.user1 ? 'is-left' : 'is-right';
+      const deletionNotes = [
+        deletedForAll ? `<em>Herkesten silindi${message.deleted_for_all_at ? ` · ${formatDate(message.deleted_for_all_at)}` : ''}</em>` : '',
+        deletedBySender ? `<em>Gönderen tarafından silindi${message.deleted_by_sender_at ? ` · ${formatDate(message.deleted_by_sender_at)}` : ''}</em>` : '',
+        deletedByReceiver ? `<em>Alıcı tarafından silindi${message.deleted_by_receiver_at ? ` · ${formatDate(message.deleted_by_receiver_at)}` : ''}</em>` : ''
+      ].join('');
+      return `<article class="admin-chat-message ${side}${deleted ? ' is-deleted' : ''}" data-message-id="${escHtml(String(message.id))}">
+        <div class="admin-chat-message-meta"><strong>${escHtml(message.sender_username || 'Silinmiş kullanıcı')}</strong><time>${formatDate(message.created_at)}</time></div>
+        <div class="admin-chat-message-content">${escHtml(message.content || (mediaLabel || songLabel ? '' : '[Boş mesaj]'))}</div>
+        ${mediaLabel}${songLabel}${deletionNotes}
+      </article>`;
+    }).join('') || '<div class="admin-audit-empty">Bu aramayla eşleşen mesaj yok.</div>';
+    showModal(title, `<div class="admin-chat-audit">
+      <div class="admin-chat-audit-search"><button type="button" class="btn btn-outline" id="admin-chat-audit-search-toggle" aria-label="Sohbette ara" aria-expanded="true"><i class="fas fa-magnifying-glass"></i></button><input id="admin-chat-audit-search" type="search" placeholder="Bu sohbette mesaj ara..." aria-label="Bu sohbette mesaj ara" value="${escHtml(focusMessageId ? (messages.find(message => String(message.id) === String(focusMessageId))?.content || '') : '')}" /></div>
+      <div class="admin-chat-audit-notice"><i class="fas fa-shield-halved"></i> Sohbet kaydı; kullanıcıların sildiği mesajlar ve silinme bilgileri dahil.</div>
+      <div class="admin-chat-audit-messages" id="admin-chat-audit-messages">${renderAuditMessages(focusMessageId ? (messages.find(message => String(message.id) === String(focusMessageId))?.content || '') : '')}</div>
+    </div>`);
+    const searchInput = $('#admin-chat-audit-search');
+    const messagesContainer = $('#admin-chat-audit-messages');
+    const renderSearchResults = () => {
+      messagesContainer.innerHTML = renderAuditMessages(searchInput.value.trim());
+      const focus = messagesContainer.querySelector(`[data-message-id="${CSS.escape(String(focusMessageId))}"]`);
+      focus?.scrollIntoView({ block: 'center' });
+      focus?.classList.add('is-focused');
+    };
+    searchInput?.addEventListener('input', renderSearchResults);
+    $('#admin-chat-audit-search-toggle')?.addEventListener('click', () => {
+      searchInput?.focus();
+      searchInput?.select();
+    });
+    if (focusMessageId) renderSearchResults();
   };
   const conversationsBody = $('#admin-conversations-body');
   if (conversationsBody) {
@@ -3316,8 +3358,8 @@ async function renderAdminMessages(main) {
       try {
         const results = await adminApi('/messages/search?q=' + encodeURIComponent(q));
         searchResults.style.display = '';
-        searchResults.innerHTML = `<div class="card-header"><span><i class="fas fa-message" style="color:var(--red2);margin-right:8px"></i>Mesaj sonuçları (${results.length})</span></div><div class="admin-message-search-list">${results.length ? results.map(result => `<button class="admin-message-search-result" data-conversation-id="${result.conversation_id}" data-title="${escHtml(result.user1)} ↔ ${escHtml(result.user2)}"><span class="admin-search-result-meta"><strong>${escHtml(result.sender_username)}</strong> · ${formatDate(result.created_at)}</span><span class="admin-search-result-users">${escHtml(result.user1)} ↔ ${escHtml(result.user2)}</span><span class="admin-search-result-content ${result.audit_status !== 'visible' ? 'is-deleted' : ''}">${escHtml(result.content || '[Medya]')}</span>${result.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : result.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</button>`).join('') : '<div class="admin-audit-empty">Bu metni içeren mesaj bulunamadı.</div>'}</div>`;
-        searchResults.querySelectorAll('.admin-message-search-result').forEach(result => result.addEventListener('click', () => showAudit(result.dataset.conversationId, result.dataset.title)));
+        searchResults.innerHTML = `<div class="card-header"><span><i class="fas fa-message" style="color:var(--red2);margin-right:8px"></i>Mesaj sonuçları (${results.length})</span></div><div class="admin-message-search-list">${results.length ? results.map(result => `<button class="admin-message-search-result" data-message-id="${result.id}" data-conversation-id="${result.conversation_id}" data-title="${escHtml(result.user1)} ↔ ${escHtml(result.user2)}"><span class="admin-search-result-meta"><strong>${escHtml(result.sender_username)}</strong> · ${formatDate(result.created_at)}</span><span class="admin-search-result-users">${escHtml(result.user1)} ↔ ${escHtml(result.user2)}</span><span class="admin-search-result-content ${result.audit_status !== 'visible' ? 'is-deleted' : ''}">${escHtml(result.content || '[Medya]')}</span>${result.audit_status === 'deleted_for_all' ? '<em>Herkesten silindi</em>' : result.audit_status === 'deleted_for_user' ? '<em>Kendisinden silindi</em>' : ''}</button>`).join('') : '<div class="admin-audit-empty">Bu metni içeren mesaj bulunamadı.</div>'}</div>`;
+        searchResults.querySelectorAll('.admin-message-search-result').forEach(result => result.addEventListener('click', () => showAudit(result.dataset.conversationId, result.dataset.title, result.dataset.messageId)));
       } catch (error) { searchResults.style.display = ''; searchResults.innerHTML = `<div class="admin-audit-empty">${escHtml(error.message)}</div>`; }
     }, 250);
   });
