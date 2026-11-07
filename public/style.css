@@ -10790,13 +10790,22 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
 .close-friends-toggle:has(input:checked) .close-friends-icon { color:#54dfa0;transform:scale(1.08); }
 .close-friends-toggle:focus-within { outline:2px solid color-mix(in srgb,var(--accent-red2) 65%,transparent);outline-offset:2px; }
 
-.profile-page.has-profile-background { background-color:var(--bg-primary);background-image:linear-gradient(180deg,rgba(8,9,12,.08),rgba(8,9,12,.2)),var(--profile-background-image);background-position:center top;background-repeat:no-repeat;background-size:cover; }
+.profile-page.has-profile-background { position:relative;isolation:isolate;border:0;border-radius:0;background:transparent;box-shadow:none; }
+.profile-page.has-profile-background::before { position:fixed;z-index:-1;inset:60px 0 0;content:"";pointer-events:none;background-color:var(--bg-primary);background-image:linear-gradient(180deg,rgba(8,9,12,.1),rgba(8,9,12,.3)),var(--profile-background-image);background-position:center;background-repeat:no-repeat;background-size:cover; }
 .profile-page.has-profile-background .profile-header { background:rgba(11,12,16,.22);backdrop-filter:none;-webkit-backdrop-filter:none; }
 .profile-page.has-profile-background .profile-tabs { background:rgba(11,12,16,.3);backdrop-filter:none;-webkit-backdrop-filter:none; }
 .profile-page.has-profile-background .profile-archiveable-card,
 .profile-page.has-profile-background .profile-page > .card { background:rgba(12,13,16,.32);backdrop-filter:none;-webkit-backdrop-filter:none; }
 .profile-page.has-profile-background .profile-archiveable-card .photo-card-content,
 .profile-page.has-profile-background .profile-archiveable-card .photo-card-head { background:rgba(12,13,16,.4); }
+
+@media (max-width:768px) {
+  .profile-page.has-profile-background::before { top:calc(58px + env(safe-area-inset-top,0px)); }
+}
+
+@media (min-width:1000px) {
+  .profile-page.has-profile-background::before { top:68px;left:238px; }
+}
 
 @media (min-width:769px) {
   .profile-photo-grid { grid-template-columns:repeat(3,minmax(0,1fr));justify-content:stretch;gap:12px; }
@@ -10817,20 +10826,42 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
     margin:0;
     padding:0 20px;
   }
-  .nav-user,
+  .nav-brand {
+    position:absolute;
+    top:0;
+    left:0;
+    box-sizing:border-box;
+    display:flex;
+    width:238px;
+    height:68px;
+    justify-content:flex-start;
+    gap:8px;
+    padding:0 24px;
+  }
+  .nav-brand .site-logo { width:36px !important;height:36px !important;min-width:36px;max-width:36px;flex-basis:36px; }
+  .nav-brand .site-wordmark { font-size:28px; }
+  .nav-user {
+    position:absolute;
+    top:50%;
+    left:calc(238px + (100% - 238px)/2);
+    gap:12px;
+    margin:0;
+    transform:translate(-50%,-50%);
+  }
   #nav-auth { margin-left:auto; }
-  .nav-user { gap:8px; }
+  .nav-link-heading { padding:8px 11px 5px;font-size:11px;letter-spacing:.06em;text-transform:none; }
   .nav-create-toggle,
   .nav-messages-btn,
   .nav-user #nav-notif-btn {
     box-sizing:border-box;
-    width:38px;
-    height:38px;
-    border:1px solid transparent;
-    border-radius:12px;
-    color:var(--text-secondary);
-    background:transparent;
-    box-shadow:none;
+    width:42px;
+    height:42px;
+    border:1px solid var(--border);
+    border-radius:13px;
+    color:var(--text-primary);
+    background:color-mix(in srgb,var(--bg-card) 84%,transparent);
+    box-shadow:0 3px 12px rgba(0,0,0,.12);
+    font-size:16px;
   }
   .nav-create-toggle:hover,
   .nav-create-toggle[aria-expanded="true"],
@@ -10844,13 +10875,13 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
   }
   .nav-user #nav-notif-btn { display:grid;place-items:center;padding:0 !important; }
   .nav-user-btn {
-    width:38px;
-    height:38px;
-    border-color:transparent;
-    background:transparent;
+    width:42px;
+    height:42px;
+    border-color:var(--border);
+    background:color-mix(in srgb,var(--bg-card) 84%,transparent);
   }
   .nav-user-btn > span,
   .nav-user-btn > .fa-chevron-down { display:none; }
-  .nav-user-btn .nav-avatar { width:34px;height:34px;min-width:34px;flex-basis:34px; }
-  .nav-user-btn:hover { border-color:transparent;background:var(--bg-hover); }
+  .nav-user-btn .nav-avatar { width:36px;height:36px;min-width:36px;flex-basis:36px; }
+  .nav-user-btn:hover { border-color:var(--border-hover);background:var(--bg-hover); }
 }
