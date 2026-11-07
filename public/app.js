@@ -10848,8 +10848,8 @@ async function renderProfile(app, username) {
         }
         row.classList.add('is-follow-removal-pending');
         removeButton.classList.add('is-cancel-removal');
-        removeButton.innerHTML = '<i class="fas fa-rotate-left" aria-hidden="true"></i><span class="profile-follow-remove-count"><small>Takipten çıkarılıyor</small><strong>İptal et · 3</strong></span>';
-        let seconds = 3;
+        removeButton.innerHTML = '<i class="fas fa-rotate-left" aria-hidden="true"></i><span class="profile-follow-remove-count"><small>Takipten çıkarılıyor</small><strong>İptal et · 2</strong></span>';
+        let seconds = 2;
         const interval = setInterval(() => {
           seconds -= 1;
           if (removeButton.isConnected && removalTimers.has(removeButton)) {
@@ -10886,7 +10886,7 @@ async function renderProfile(app, username) {
             restoreRemovalButton(row, removeButton);
             toast(error.message, 'error');
           }
-        }, 3000);
+        }, 2000);
         removalTimers.set(removeButton, { interval, timeout });
       }));
     } catch (e) { toast(e.message, 'error'); }
