@@ -10786,7 +10786,7 @@ async function renderProfile(app, username) {
               <a href="${profileRoute(item.username)}" data-link class="profile-follow-copy">
                 <strong>${escHtml(displayName)}</strong><small>@${escHtml(item.username)}</small>
               </a>
-              ${isOwn ? `<button type="button" class="profile-follow-remove" data-username="${escHtml(item.username)}" data-action="${button.dataset.followList === 'followers' ? 'remove-follower' : 'unfollow'}" aria-label="${button.dataset.followList === 'followers' ? 'Takipçilerimden çıkar' : 'Takipten çık'}"><i class="fas fa-user-minus" aria-hidden="true"></i><span>${button.dataset.followList === 'followers' ? 'Takipçilerimden çıkar' : 'Takipten çık'}</span></button>` : ''}
+              ${isOwn ? `<button type="button" class="profile-follow-remove" data-username="${escHtml(item.username)}" data-action="${button.dataset.followList === 'followers' ? 'remove-follower' : 'unfollow'}" aria-label="Çıkar"><i class="fas fa-user-minus" aria-hidden="true"></i><span>Çıkar</span></button>` : ''}
             </div>`;
           }).join('')}
           <div class="profile-follow-no-results" hidden>Bu aramayla eşleşen kişi bulunamadı.</div>
@@ -10837,8 +10837,7 @@ async function renderProfile(app, username) {
         row.classList.remove('is-follow-removal-pending');
         button.disabled = false;
         button.classList.remove('is-cancel-removal');
-        const label = button.dataset.action === 'remove-follower' ? 'Takipçilerimden çıkar' : 'Takipten çık';
-        button.innerHTML = `<i class="fas fa-user-minus" aria-hidden="true"></i><span>${label}</span>`;
+        button.innerHTML = '<i class="fas fa-user-minus" aria-hidden="true"></i><span>Çıkar</span>';
       };
       document.querySelectorAll('.profile-follow-remove').forEach(removeButton => removeButton.addEventListener('click', async () => {
         const row = removeButton.closest('.profile-follow-row');
