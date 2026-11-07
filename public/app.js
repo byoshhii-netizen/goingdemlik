@@ -104,6 +104,7 @@ let activeVideoPreviewObjectUrl = null;
 let storyComposerAudio = null;
 let activePhotoAudio = null;
 let photoAudioObserver = null;
+let photoSongAvailabilityTimer = null;
 let realsMediaObserver = null;
 let siteName = 'CigCig';
 let defaultAvatarUrl = '';
@@ -1888,6 +1889,7 @@ function renderRoute(fullPath) {
   // Sayfa değişiminde fotoğraf ses kontrolünü kaldır
   document.getElementById('photo-audio-control')?.remove();
   photoAudioObserver?.disconnect();
+  clearInterval(photoSongAvailabilityTimer);
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio = null;
@@ -19182,7 +19184,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
         }
       }
       const next = getNextQueueIndex(1);
-      if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
+      if (next !== null) playQueueTrack(next);
       else {
         const pb = document.getElementById('gp-play');
         if (pb) {
@@ -19272,7 +19274,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
       return;
     }
     const prev = getNextQueueIndex(-1);
-    if (prev !== null) { const s = currentQueue[prev]; currentQueueIndex = prev; openMiniPlayer(s.audio_url, s.slug, s); }
+    if (prev !== null) playQueueTrack(prev);
   });
   document.getElementById('gp-next').addEventListener('click', () => {
     if (listeningRoom) {
@@ -19280,7 +19282,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
       return;
     }
     const next = getNextQueueIndex(1);
-    if (next !== null) { const s = currentQueue[next]; currentQueueIndex = next; openMiniPlayer(s.audio_url, s.slug, s); }
+    if (next !== null) playQueueTrack(next);
   });
 
   // Karıştır: çalma kuyruğunu bir kez yeniden sırala.
@@ -19367,6 +19369,12 @@ function getNextQueueIndex(dir) { // dir: +1 ileri, -1 geri
   const newIdx = currentQueueIndex + dir;
   if (newIdx < 0 || newIdx >= currentQueue.length) return null;
   return newIdx;
+}
+
+function playQueueTrack(index) {
+  const song = currentQueue[index];
+  if (!song?.audio_url || !song.slug) return;
+  openMiniPlayer(song.audio_url, song.slug, song, currentQueue, index);
 }
 
 async function renderMusicDetail(app, slug) {
@@ -21330,7 +21338,7 @@ function photoCardHTML(p, showSave = false) {
       </div>
       ${currentUser && currentUser.id === p.user_id ? '<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>' : ''}
     </div>
-    ${p.song_title && p.song_audio_url ? `<div class="photo-song-row"><button class="photo-song photo-song-card" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds) || 0}" type="button"><i class="fas fa-music" aria-hidden="true"></i><span><strong>${escHtml(p.song_title)}</strong>${p.song_artist ? ` · ${escHtml(p.song_artist)}` : ''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div></div>` : ''}
+    ${p.song_title && p.song_id ? `<div class="photo-song-row"><button class="photo-song photo-song-card${p.song_status === 'active' ? '' : ' is-unavailable'}" data-audio="${escHtml(p.song_audio_url || '')}" data-song-slug="${escHtml(p.song_slug || '')}" data-song-status="${escHtml(p.song_status || 'unavailable')}" data-start="${Number(p.song_start_seconds) || 0}" type="button"><i class="fas fa-music" aria-hidden="true"></i><span><strong>${escHtml(p.song_title)}</strong>${p.song_artist ? `<small class="photo-song-artist">${escHtml(p.song_artist)}</small>` : ''}<small class="photo-song-unavailable"${p.song_status === 'active' ? ' hidden' : ''}>Müzik kullanımda değil</small></span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div></div>` : ''}
     <div class="photo-media-wrap">
       <div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div>
       <div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title || p.caption || '')}" draggable="false"/></div>
@@ -22003,10 +22011,12 @@ function bindPhotoFeed(feed) {
   feed.querySelectorAll('.photo-song').forEach(button => button.addEventListener('click', async event => {
     event.preventDefault(); event.stopPropagation();
     try {
-      const photo = await api('/photos/' + encodeURIComponent(button.closest('[data-photo-id]').dataset.photoId));
-      if (photo.song_slug) navigate('/muzik/' + encodeURIComponent(photo.song_slug));
-      else toast('Bu müziğin sayfası bulunamadı', 'error');
-    } catch (error) { toast(error.message || 'Müzik sayfası açılamadı', 'error'); }
+      if (!(await refreshPhotoSongAvailability(button, true))) {
+        toast('Müzik kullanımda değil.');
+        return;
+      }
+      navigate('/muzik/' + encodeURIComponent(button.dataset.songSlug));
+    } catch (error) { toast(error.message || 'Müzik durumu kontrol edilemedi.', 'error'); }
   }));
 
 }
@@ -22028,6 +22038,7 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
   // Fotoğraflar sessiz başlar. Ses yalnızca kullanıcının düğmeye
   // tıklamasıyla açılır; seçilen yerden itibaren yönetici sınırına kadar çalar.
   photoAudioObserver?.disconnect();
+  clearInterval(photoSongAvailabilityTimer);
   activePhotoAudio?.pause();
   untrackMediaAudio(activePhotoAudio);
   activePhotoAudio=null;
@@ -22050,13 +22061,24 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
     activePhotoAudio=null;
     syncButtons();
   };
-  const play=(card, toggle = false)=>{
+  const play=async (card, toggle = false)=>{
     const songButton=card.querySelector('.photo-song');
-    if (!songButton?.dataset.audio) { stop(); return; }
+    if (!songButton) { stop(); return; }
     if (toggle) {
       soundEnabled = !soundEnabled;
       setPhotoSoundEnabled(soundEnabled);
     }
+    try {
+      if (!(await refreshPhotoSongAvailability(songButton))) {
+        if (activePhotoAudio?._photoId === card.dataset.photoId) stop();
+        return;
+      }
+    } catch (error) {
+      if (toggle) toast(error.message || 'Müzik durumu kontrol edilemedi.', 'error');
+      else console.warn('Fotoğraf müziği durumu kontrol edilemedi:', error.message);
+      return;
+    }
+    if (visibleCard !== card) return;
     if (activePhotoAudio?._photoId===card.dataset.photoId) {
       activePhotoAudio.muted = !soundEnabled;
       if (soundEnabled) activePhotoAudio.play().catch(() => {});
@@ -22098,6 +22120,23 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
       else stop();
     }, { threshold: [0, 0.35, 0.6, 0.85] });
     feed.querySelectorAll('[data-photo-id]').forEach(card => photoAudioObserver.observe(card));
+    photoSongAvailabilityTimer = setInterval(async () => {
+      if (!visibleCard || document.hidden) return;
+      const modal = $('#modal-overlay');
+      if (modal && !modal.classList.contains('hidden')) {
+        stop();
+        return;
+      }
+      const songButton = visibleCard.querySelector('.photo-song');
+      if (!songButton) return;
+      try {
+        const available = await refreshPhotoSongAvailability(songButton, true);
+        if (!available) stop();
+        else if (activePhotoAudio?._photoId !== visibleCard.dataset.photoId) play(visibleCard);
+      } catch (error) {
+        console.warn('Fotoğraf müziği durumu yenilenemedi:', error.message);
+      }
+    }, 15000);
   }
   feed.querySelectorAll('.photo-audio-toggle:not(.reals-media-sound-toggle)').forEach(button=>button.addEventListener('click',event=>{
     event.preventDefault();
@@ -22117,6 +22156,42 @@ function setupPhotoAudio(feed, { disableAutoplay = false } = {}) {
     slider.addEventListener('pointerdown', event => event.stopPropagation());
   });
   syncButtons();
+}
+
+async function refreshPhotoSongAvailability(button, force = false) {
+  const checkedAt = Number(button.dataset.statusCheckedAt) || 0;
+  if (!force && Date.now() - checkedAt < 10000) {
+    return button.dataset.songStatus === 'active' && !!button.dataset.audio;
+  }
+  if (!button.dataset.songSlug) {
+    button.dataset.songStatus = 'unavailable';
+    button.dataset.audio = '';
+    return false;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const song = await api('/songs/' + encodeURIComponent(button.dataset.songSlug), { signal: controller.signal });
+    button.dataset.songStatus = 'active';
+    button.dataset.audio = song.audio_url || '';
+    button.dataset.statusCheckedAt = String(Date.now());
+  } catch (error) {
+    button.dataset.statusCheckedAt = String(Date.now());
+    if (error.data?.error === 'Müzik bulunamadı') {
+      button.dataset.songStatus = 'unavailable';
+      button.dataset.audio = '';
+    } else {
+      throw error;
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+  const unavailable = button.dataset.songStatus !== 'active' || !button.dataset.audio;
+  const status = button.closest('.photo-song-row')?.querySelector('.photo-song-unavailable');
+  if (status) status.hidden = !unavailable;
+  button.classList.toggle('is-unavailable', unavailable);
+  return !unavailable;
 }
 
 function setPhotoSoundEnabled(enabled) {

@@ -6666,7 +6666,7 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
   if (requestedHashtag && !/^[\p{L}\p{N}_]{1,80}$/u.test(requestedHashtag)) {
     return res.status(400).json({ error: 'Hashtag geçersiz.' });
   }
-  const base = `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, p.close_friends_only, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
+  const base = `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, p.close_friends_only, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.status AS song_status, CASE WHEN s.status='active' THEN s.audio_url END AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
     (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked,
@@ -6694,7 +6694,7 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
   const userId = req.user ? req.user.id : 0;
   const { rows } = await query(
     `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, p.close_friends_only,
-    s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
+    s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.status AS song_status, CASE WHEN s.status='active' THEN s.audio_url END AS song_audio_url, s.cover_url AS song_cover_url,
       p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
@@ -6778,7 +6778,7 @@ app.put('/api/photos/:id', authMiddleware, upload.single('image'), async (req, r
   await query('UPDATE photos SET url=$1,image_urls=$2::jsonb,title=COALESCE($3,title),caption=$4,location=COALESCE($5,location),song_id=$6,song_start_seconds=$7,show_likes=COALESCE($8,show_likes),allow_comments=COALESCE($9,allow_comments),allow_shares=COALESCE($10,allow_shares) WHERE id=$11',
     [nextUrl, JSON.stringify(imageUrls), title !== undefined ? String(title).trim() : null, caption||'', location !== undefined ? String(location).trim() : null, song_id || null, songStart, show_likes !== undefined ? (parseFormBoolean(show_likes) ? 1 : 0) : null, allow_comments !== undefined ? (parseFormBoolean(allow_comments) ? 1 : 0) : null, allow_shares !== undefined ? (parseFormBoolean(allow_shares) ? 1 : 0) : null, req.params.id]);
   const { rows: updated } = await query(
-    'SELECT p.id,p.url,p.image_urls,p.title,p.caption,p.location,p.song_id,p.song_start_seconds,s.title AS song_title,s.artist_name AS song_artist,s.audio_url AS song_audio_url,s.cover_url AS song_cover_url,p.created_at,p.show_likes,p.allow_comments,p.allow_shares,u.username,u.avatar FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE p.id=$1',
+    "SELECT p.id,p.url,p.image_urls,p.title,p.caption,p.location,p.song_id,p.song_start_seconds,s.title AS song_title,s.artist_name AS song_artist,s.status AS song_status,CASE WHEN s.status='active' THEN s.audio_url END AS song_audio_url,s.cover_url AS song_cover_url,p.created_at,p.show_likes,p.allow_comments,p.allow_shares,u.username,u.avatar FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id WHERE p.id=$1",
     [req.params.id]
   );
   res.json(updated[0]);
@@ -7441,10 +7441,7 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
     if (typeof content !== 'string' || !content.trim()) return res.status(400).json({ error: 'Yorum boş olamaz' });
     if (content.length > 2000) return res.status(400).json({ error: 'Yorum en fazla 2000 karakter olabilir.' });
     const { rows: photoExists } = await query('SELECT id, allow_comments FROM photos WHERE id=$1', [photoId]);
-    if (!photoExists.length) {
-      await query('DELETE FROM photo_comments WHERE photo_id=$1', [photoId]);
-      return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
-    }
+    if (!photoExists.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     const { rows } = await query(`SELECT p.allow_comments FROM photos p LEFT JOIN users u ON u.id=p.user_id WHERE p.id=$1 AND ${closeFriendsVisibilitySql('p', '$2')} AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`, [photoId, req.user.id]);
     if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     if (Number(rows[0].allow_comments ?? photoExists[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });

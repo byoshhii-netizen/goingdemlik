@@ -1925,8 +1925,11 @@ body.home-page #home-photos .photo-card-head .user-display-identity small { font
 .photo-song-row { display:flex; align-items:center; gap:8px; min-width:0; padding:0 12px 10px; }
 .photo-song-card { display:flex; align-items:center; gap:8px; min-width:0; flex:1; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:var(--bg-card2); color:var(--text-primary); text-align:left; cursor:pointer; }
 .photo-song-card > i { flex:0 0 auto; color:var(--accent-red2); }
-.photo-song-card span { min-width:0; overflow:hidden; color:var(--text-secondary); text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.photo-song-card span { display:flex; flex-direction:column; min-width:0; overflow:hidden; color:var(--text-secondary); font-size:12px; }
 .photo-song-card strong { color:var(--text-primary); font-size:12px; }
+.photo-song-card .photo-song-artist { overflow:hidden; color:var(--text-secondary); text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
+.photo-song-card .photo-song-unavailable { color:var(--accent-red2); font-size:10px; }
+.photo-song-card.is-unavailable > i { color:var(--text-muted); }
 .photo-song-card:hover { border-color:var(--border-hover); background:var(--bg-hover); }
 .photo-audio-toggle { appearance:none; -webkit-appearance:none; position:absolute; right:10px; bottom:10px; z-index:3; width:34px; height:34px; min-width:34px; min-height:34px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.28); border-radius:50%; background:rgba(0,0,0,.78) !important; color:#fff !important; cursor:pointer; backdrop-filter:blur(6px); padding:0; line-height:1; }
 .photo-audio-toggle:not(.muted) { background:rgba(0,0,0,.78) !important; }
