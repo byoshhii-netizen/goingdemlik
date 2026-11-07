@@ -2148,6 +2148,7 @@ async function showPendingWarning() {
   warningPromptUserId = userId;
   try {
     const warning = await api('/warnings/pending');
+    if (String(currentUser?.id) !== String(userId)) return;
     if (warning) renderWarningNotice(warning);
   } catch (error) {
     warningPromptUserId = null;
@@ -3965,6 +3966,22 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.body.classList.contains('mobile-create-menu-open')) {
     closeMobileCreateMenu();
   }
+});
+
+document.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return;
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest('input, textarea, select, [contenteditable="true"], button, a, [role="button"], [data-link]')) return;
+  const active = document.activeElement;
+  if (active instanceof Element && active.closest('input, textarea, select, [contenteditable="true"], button, a, [role="button"]')) return;
+  const composer = document.querySelector('#dm-input:not([disabled]), #chat-input:not([disabled])');
+  if (!(composer instanceof HTMLTextAreaElement) || composer.readOnly) return;
+  composer.focus({ preventScroll: true });
+  const start = composer.selectionStart ?? composer.value.length;
+  const end = composer.selectionEnd ?? start;
+  composer.setRangeText(event.key, start, end, 'end');
+  composer.dispatchEvent(new Event('input', { bubbles: true }));
+  event.preventDefault();
 });
 
 document.addEventListener('click', e => {
@@ -12668,7 +12685,7 @@ function renderLogin(app) {
             const verified = await api('/auth/2fa/verify', { method: 'POST', body: JSON.stringify({ challenge: data.challenge, value }) });
             currentToken = verified.token; currentUser = verified.user;
             localStorage.setItem('token', currentToken);
-            updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate(returnTo);
+            updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!'); navigate(returnTo); showPendingWarning();
           } catch (e) { $('#login-2fa-error').textContent = e.message; }
         };
         $('#login-2fa-btn').addEventListener('click', verify);
@@ -12712,7 +12729,7 @@ function renderLogin(app) {
             currentToken = loginData.token; currentUser = loginData.user;
             localStorage.setItem('token', currentToken);
             updateNavUI(); toast('Hesabın geri alındı, hoş geldin ' + currentUser.username + '!');
-            navigate(returnTo);
+            navigate(returnTo); showPendingWarning();
           } catch(e) { toast(e.message, 'error'); }
         });
         $('#keep-delete-btn').addEventListener('click', () => {
@@ -12724,7 +12741,7 @@ function renderLogin(app) {
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
-      navigate(returnTo);
+      navigate(returnTo); showPendingWarning();
     } catch (e) { $('#login-error').textContent = e.message; }
   };
 
@@ -12932,7 +12949,7 @@ function renderRegister(app) {
       currentToken = data.token; currentUser = data.user;
       localStorage.setItem('token', currentToken);
       updateNavUI(); toast('Hoş geldiniz, ' + currentUser.username + '!');
-      navigate(returnTo);
+      navigate(returnTo); showPendingWarning();
     } catch (e) { $('#reg-error').textContent = e.message; }
   };
 
@@ -23033,7 +23050,7 @@ async function renderStore(app) {
 
   const typeConfig = {
     vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
-    plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
+    plus:  { icon: 'fas fa-plus', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
     admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
     red_tick: { icon: 'fas fa-check', color: '#ef3340', label: 'Kırmızı Tik', gradient: 'linear-gradient(135deg,#ef3340,#b91c1c)' },
     ad_boost: { icon: 'fas fa-music', color: '#dc2626', label: 'Müzik Reklamı Boost', gradient: 'linear-gradient(135deg,#dc2626,#991b1b)' },
@@ -23048,9 +23065,22 @@ async function renderStore(app) {
     return mySubscriptions.find(s => s.type === type && s.is_active);
   }
 
+  function renderStoreFeatures(rawFeatures, color, size = '') {
+    let features;
+    try { features = Array.isArray(rawFeatures) ? rawFeatures : JSON.parse(rawFeatures || '[]'); }
+    catch { features = []; }
+    if (!Array.isArray(features)) return '';
+    const entries = features.map(feature => typeof feature === 'string'
+      ? { text: feature, icon: 'fas fa-check-circle' }
+      : { text: feature?.text || '', icon: feature?.icon || 'fas fa-check-circle' })
+      .filter(feature => feature.text);
+    return entries.length
+      ? `<ul class="store-features${size ? ` ${size}` : ''}">${entries.map(feature => `<li><i class="${escHtml(feature.icon)}" style="color:${escHtml(color)}"></i><span>${escHtml(feature.text)}</span></li>`).join('')}</ul>`
+      : '';
+  }
+
   function productCardHTML(p) {
     const cfg = typeConfig[p.type] || typeConfig.vip;
-    const features = (() => { try { return JSON.parse(p.features || '[]'); } catch { return []; } })();
     const hasSale = p.original_price && parseFloat(p.original_price) > parseFloat(p.price);
     const discountPct = hasSale ? Math.round((1 - parseFloat(p.price)/parseFloat(p.original_price)) * 100) : 0;
     const activeSub = myActiveSub(p.type);
@@ -23058,7 +23088,7 @@ async function renderStore(app) {
     return `<div class="store-card" data-product-id="${p.id}" data-product-type="${p.type}">
       <div class="store-card-header" style="background:${cfg.gradient}">
         ${hasSale ? `<div class="store-badge-sale">%${discountPct} İNDİRİM</div>` : ''}
-        <div class="store-card-icon"><i class="${escHtml(p.type === 'red_tick' ? 'fas fa-check' : p.type === 'ad_boost' ? 'fas fa-music' : p.badge_icon || cfg.icon)}"></i></div>
+        <div class="store-card-icon">${p.type === 'red_tick' ? '<span class="store-red-tick" aria-label="Kırmızı Tik"><i class="fas fa-check"></i></span>' : `<i class="${escHtml(p.type === 'vip' ? 'fas fa-gem' : p.type === 'plus' ? 'fas fa-plus' : p.type === 'ad_boost' ? 'fas fa-music' : p.badge_icon || cfg.icon)}"></i>`}</div>
         <div class="store-card-type">${escHtml(p.name)}</div>
         <div class="store-card-price-row">
           ${hasSale ? `<span class="store-price-old">${parseFloat(p.original_price).toFixed(2)} ₺</span>` : ''}
@@ -23068,7 +23098,7 @@ async function renderStore(app) {
       </div>
       <div class="store-card-body">
         ${descriptionPreviewHTML(p.description, 'store-card-desc', 120)}
-        ${features.length ? `<ul class="store-features">${features.map(f=>`<li><i class="fas fa-check-circle" style="color:${cfg.color}"></i> ${escHtml(f)}</li>`).join('')}</ul>` : ''}
+        ${renderStoreFeatures(p.features, cfg.color)}
         ${activeSub ? `
           <div class="store-active-badge"><i class="fas fa-check-circle"></i> Aktif Üyeliğin Var</div>
           <div class="store-active-info"><i class="fas fa-calendar-alt"></i> ${daysLeft(activeSub.expires_at)} gün kaldı · ${new Date(activeSub.expires_at).toLocaleDateString('tr-TR')} bitiyor</div>
@@ -23102,7 +23132,6 @@ async function renderStore(app) {
       <div class="store-my-subs">
         ${mySubscriptions.map(s => {
           const cfg = typeConfig[s.type] || typeConfig.vip;
-          const feats = (() => { try { return JSON.parse(s.features || '[]'); } catch { return []; } })();
           const dl = daysLeft(s.expires_at);
           const pct = Math.min(100, Math.round((dl / 30) * 100));
           return `<div class="store-sub-card" style="border-left:3px solid ${cfg.color}">
@@ -23122,7 +23151,7 @@ async function renderStore(app) {
               <div class="store-sub-progress-fill" style="width:${pct}%;background:${cfg.gradient || cfg.color}"></div>
             </div>
             <div class="store-sub-meta">Bitiş: ${new Date(s.expires_at).toLocaleDateString('tr-TR', {day:'2-digit',month:'long',year:'numeric'})}</div>
-            ${feats.length ? `<ul class="store-features small">${feats.map(f=>`<li><i class="fas fa-check" style="color:${cfg.color}"></i> ${escHtml(f)}</li>`).join('')}</ul>` : ''}
+            ${renderStoreFeatures(s.features, cfg.color, 'small')}
           </div>`;
         }).join('')}
       </div>
@@ -23142,6 +23171,7 @@ async function renderStore(app) {
       .store-card-header { padding:28px 24px 20px; position:relative; text-align:center; }
       .store-badge-sale { position:absolute; top:12px; right:12px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:.5px; }
       .store-card-icon { font-size:36px; color:#fff; margin-bottom:10px; filter:drop-shadow(0 2px 8px rgba(0,0,0,0.3)); }
+      .store-red-tick { display:inline-grid;width:42px;height:42px;place-items:center;border:3px solid rgba(255,255,255,.92);border-radius:50%;color:#ef3340;background:#fff;font-size:23px;box-shadow:0 3px 12px rgba(0,0,0,.24); }
       .store-card-type { font-size:22px; font-weight:800; color:#fff; margin-bottom:8px; text-shadow:0 1px 3px rgba(0,0,0,0.3); }
       .store-card-price-row { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:6px; }
       .store-price-old { font-size:14px; color:rgba(255,255,255,0.65); text-decoration:line-through; }
@@ -23150,7 +23180,9 @@ async function renderStore(app) {
       .store-card-body { padding:20px 24px; }
       .store-card-desc { font-size:13px; color:var(--text-muted); margin-bottom:14px; line-height:1.5; }
       .store-features { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; }
-      .store-features li { font-size:13px; display:flex; align-items:center; gap:8px; color:var(--text); }
+      .store-features li { font-size:13px; display:flex; align-items:flex-start; gap:8px; color:var(--text); }
+      .store-features li > i { flex:0 0 auto;margin-top:2px; }
+      .store-features li > span { min-width:0; }
       .store-features.small li { font-size:12px; color:var(--text-muted); }
       .store-active-badge { background:#22c55e15; color:#22c55e; border:1px solid #22c55e33; border-radius:8px; padding:7px 12px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; margin-top:14px; }
       .store-active-info { font-size:12px; color:var(--text-muted); margin-top:6px; display:flex; align-items:center; gap:6px; }
@@ -23171,19 +23203,20 @@ async function renderStore(app) {
       .store-empty i { font-size:48px; display:block; margin-bottom:16px; opacity:0.3; }
       .store-buy-btn { transition:opacity .15s,transform .1s; }
       .store-buy-btn:active { transform:scale(0.97); }
+      @media (max-width:620px) { .store-grid { grid-template-columns:minmax(0,1fr);gap:14px; } .store-hero { padding:30px 0 22px; } .store-card-body { padding:17px; } }
     </style>
 
     ${alertHTML}
 
     <div class="store-hero">
       <div class="store-hero-title"><i class="fas fa-store" style="color:var(--accent-red)"></i> Mağaza</div>
-      <div class="store-hero-sub">VIP, Plus ve Admin üyeliklerini satın alarak platformun tüm özelliklerine erişin.</div>
+      <div class="store-hero-sub">CigCig deneyimini ihtiyaçlarına göre kişiselleştir, sana uygun ayrıcalıkları keşfet.</div>
     </div>
 
     ${mySubsHTML}
 
     <div class="store-section">
-      <h2 class="store-section-title"><i class="fas fa-box-open"></i> Üyelik Paketleri</h2>
+      <h2 class="store-section-title"><i class="fas fa-box-open"></i> Alabilecekleriniz</h2>
       ${products.length ? `<div class="store-grid">${products.map(productCardHTML).join('')}</div>` :
         `<div class="store-empty"><i class="fas fa-store-alt-slash"></i><p>Henüz ürün yok.</p></div>`}
     </div>
@@ -23233,7 +23266,7 @@ async function renderProfileSubscriptions(container, username) {
 
   const typeConfig = {
     vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
-    plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
+    plus:  { icon: 'fas fa-plus', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
     admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
   };
 
@@ -23306,7 +23339,7 @@ async function renderMyOrders(app) {
 
   const typeConfig = {
     vip:   { icon: 'fas fa-gem',        color: '#fbbf24', label: 'VIP',   gradient: 'linear-gradient(135deg,#f59e0b,#d97706)' },
-    plus:  { icon: 'fas fa-plus-circle', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
+    plus:  { icon: 'fas fa-plus', color: '#818cf8', label: 'Plus',  gradient: 'linear-gradient(135deg,#6366f1,#4f46e5)' },
     admin: { icon: 'fas fa-shield-alt',  color: '#22c55e', label: 'Admin', gradient: 'linear-gradient(135deg,#16a34a,#15803d)' },
   };
 

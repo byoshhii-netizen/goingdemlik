@@ -5834,7 +5834,7 @@ app.get('/api/user/:username/saved-photos', authMiddleware, async (req, res) => 
       AND ${closeFriendsVisibilitySql('p', '$1')}
       AND (COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted')
         OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))
-    ORDER BY s.created_at DESC`, [req.user.id]);
+    ORDER BY p.created_at DESC`, [req.user.id]);
   res.json(rows);
 });
 
@@ -9466,7 +9466,7 @@ app.get('/api/songs', async (req, res) => {
       SELECT COUNT(*)::int AS weekly_play_count
       FROM content_view_events cve
       WHERE cve.content_type='song' AND cve.content_id=s.id
-        AND cve.created_at >= NOW() - INTERVAL '7 days'
+        AND cve.viewed_at >= NOW() - INTERVAL '7 days'
     ) weekly ON TRUE
      ${where} ORDER BY ${order} LIMIT $${params.length}`,
     params

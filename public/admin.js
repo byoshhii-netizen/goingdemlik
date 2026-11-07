@@ -5152,13 +5152,21 @@ async function renderShop(main) {
   }
 
   function showProductModal(existing, onSave) {
-    const features = existing ? (() => { try { return JSON.parse(existing.features || '[]'); } catch { return []; } })() : [];
+    const features = existing ? (() => {
+      try {
+        const parsed = Array.isArray(existing.features) ? existing.features : JSON.parse(existing.features || '[]');
+        return Array.isArray(parsed) ? parsed.map(feature => typeof feature === 'string'
+          ? { text: feature, icon: 'fas fa-check-circle' }
+          : { text: feature?.text || '', icon: feature?.icon || 'fas fa-check-circle' }) : [];
+      } catch { return []; }
+    })() : [];
     showModal(existing ? 'Ürün Düzenle' : 'Yeni Ürün Ekle', `
       <style>
         .shop-form-group { margin-bottom:14px; }
         .shop-form-group label { display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px }
-        .shop-feat-row { display:flex;gap:6px;margin-bottom:6px }
-        .shop-feat-row input { flex:1 }
+        .shop-feat-row { display:grid;grid-template-columns:minmax(0,1fr) minmax(110px,150px) auto;gap:6px;margin-bottom:6px }
+        .shop-feat-row input { min-width:0 }
+        @media (max-width:560px) { .shop-feat-row { grid-template-columns:minmax(0,1fr) auto } .shop-feat-icon { grid-column:1 } }
       </style>
       <div class="shop-form-group">
         <label>Ürün Adı *</label>
@@ -5209,9 +5217,9 @@ async function renderShop(main) {
       <div class="shop-form-group">
         <label>Özellikler</label>
         <div id="sp-feats-list">
-          ${features.map((f,i)=>`<div class="shop-feat-row"><input class="sp-feat-input" type="text" value="${escHtml(f)}"><button type="button" class="btn-remove-feat btn btn-sm" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:0 10px"><i class="fas fa-times"></i></button></div>`).join('')}
+          ${features.map(feature=>`<div class="shop-feat-row"><input class="sp-feat-input" type="text" value="${escHtml(feature.text)}" placeholder="Özellik açıklaması"><input class="sp-feat-icon" type="text" value="${escHtml(feature.icon)}" placeholder="fas fa-check-circle" aria-label="Özellik simgesi"><button type="button" class="btn-remove-feat btn btn-sm" aria-label="Özelliği kaldır" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:0 10px"><i class="fas fa-times"></i></button></div>`).join('')}
         </div>
-        <button type="button" id="sp-add-feat" class="btn btn-outline btn-sm" style="margin-top:6px"><i class="fas fa-plus"></i> Özellik Ekle</button>
+        <button type="button" id="sp-add-feat" class="btn btn-outline btn-sm" style="margin-top:6px"><i class="fas fa-plus"></i> Özellik ve simge ekle</button>
       </div>
       <div class="shop-form-group">
         <label>Görünürlük</label>
@@ -5230,7 +5238,7 @@ async function renderShop(main) {
       const list = document.getElementById('sp-feats-list');
       const row = document.createElement('div');
       row.className = 'shop-feat-row';
-      row.innerHTML = `<input class="sp-feat-input" type="text" placeholder="özellik..."><button type="button" class="btn-remove-feat btn btn-sm" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:0 10px"><i class="fas fa-times"></i></button>`;
+      row.innerHTML = `<input class="sp-feat-input" type="text" placeholder="Özellik açıklaması"><input class="sp-feat-icon" type="text" value="fas fa-check-circle" placeholder="fas fa-check-circle" aria-label="Özellik simgesi"><button type="button" class="btn-remove-feat btn btn-sm" aria-label="Özelliği kaldır" style="background:#ef444420;color:#ef4444;border:1px solid #ef444430;padding:0 10px"><i class="fas fa-times"></i></button>`;
       list.appendChild(row);
       row.querySelector('.btn-remove-feat').addEventListener('click', () => row.remove());
     });
@@ -5245,7 +5253,10 @@ async function renderShop(main) {
       const price = parseFloat(document.getElementById('sp-price')?.value);
       if (!name || !type || isNaN(price)) { toast('Ad, tür ve fiyat zorunlu', 'error'); return; }
       const origVal = document.getElementById('sp-orig')?.value;
-      const feats = Array.from(document.querySelectorAll('.sp-feat-input')).map(i=>i.value.trim()).filter(Boolean);
+      const feats = Array.from(document.querySelectorAll('#sp-feats-list .shop-feat-row')).map(row => ({
+        text: row.querySelector('.sp-feat-input')?.value.trim() || '',
+        icon: row.querySelector('.sp-feat-icon')?.value.trim() || 'fas fa-check-circle'
+      })).filter(feature => feature.text);
       onSave({
         name, description: document.getElementById('sp-desc')?.value||'',
         features: feats, type, price,
