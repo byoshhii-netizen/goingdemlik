@@ -10442,7 +10442,7 @@ async function renderProfile(app, username) {
       <div class="profile-avatar-wrap">${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}</div>
       <div class="profile-header-actions is-other">${profileBadgesButtonHTML(data.badges || [])}</div>
        <div class="profile-info"><div class="profile-username"><span class="profile-name-identity"><strong>${user.is_private ? '<i class="fas fa-lock profile-private-lock" title="Gizli hesap"></i> ' : ''}${escHtml(user.nickname || user.username)}${profileRedVerificationIconHTML(data.badges)}${user.is_founder ? ` <button type="button" class="founder-name-mark" style="color:${escHtml(user.founder_color || '#e11d48')}" aria-label="Kurucu bilgisi" onclick="event.preventDefault();event.stopPropagation();showFounderInfo()">*</button>` : ''}</strong><small>@${escHtml(user.username)}</small></span></div>
-      <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
+      <div class="profile-stats" style="margin-top:12px"><div class="profile-stat"><div class="profile-stat-num">${Number(data.content_count || 0).toLocaleString('tr-TR')}</div><div class="profile-stat-label">İçerik</div></div><div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div><div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div></div>
       <p style="color:var(--text-secondary);margin-top:16px"><i class="fas fa-lock"></i> Bu hesap gizli.</p>
       ${!blockedRelationship && currentUser ? `<button id="profile-follow-btn" class="${followState.following ? 'profile-follow-status profile-follow-status-button' : `btn ${followState.pending ? 'btn-outline' : 'btn-primary'} btn-sm`}" style="margin-top:12px">${followState.following ? '<i class="fas fa-check" aria-hidden="true"></i> Takip edildi' : (followState.pending ? 'İstek gönderildi' : 'Takip et')}</button>` : ''}</div></div></div>`;
     app.querySelector('[data-profile-badges]')?.addEventListener('click', () => showProfileBadges(data.badges || []));
@@ -10781,10 +10781,13 @@ async function renderProfile(app, username) {
           <div class="profile-followers-list">${list.map(item => {
             const displayName = item.nickname || item.username;
             const searchText = `${displayName} ${item.username} ${item.title || ''}`.toLocaleLowerCase('tr-TR');
-            return `<a href="${profileRoute(item.username)}" data-link class="profile-follow-row" data-search="${escHtml(searchText)}">
+            return `<div class="profile-follow-row" data-search="${escHtml(searchText)}">
               <span class="profile-follow-avatar">${avatarImg(item)}</span>
-              <span class="profile-follow-copy"><strong>${escHtml(displayName)}</strong><small>@${escHtml(item.username)}</small></span>
-            </a>`;
+              <a href="${profileRoute(item.username)}" data-link class="profile-follow-copy">
+                <strong>${escHtml(displayName)}</strong><small>@${escHtml(item.username)}</small>
+              </a>
+              ${isOwn ? `<button type="button" class="profile-follow-remove" data-username="${escHtml(item.username)}" data-action="${button.dataset.followList === 'followers' ? 'remove-follower' : 'unfollow'}" aria-label="${button.dataset.followList === 'followers' ? 'Takipçilerimden çıkar' : 'Takipten çık'}"><i class="fas fa-user-minus" aria-hidden="true"></i><span>${button.dataset.followList === 'followers' ? 'Takipçilerimden çıkar' : 'Takipten çık'}</span></button>` : ''}
+            </div>`;
           }).join('')}
           <div class="profile-follow-no-results" hidden>Bu aramayla eşleşen kişi bulunamadı.</div>
           </div>
@@ -10810,7 +10813,83 @@ async function renderProfile(app, username) {
         searchInput.dispatchEvent(new Event('input'));
         searchInput.focus();
       });
-      rows.forEach(row => row.addEventListener('click', () => hideModal(), { once: true }));
+      rows.forEach(row => row.querySelector('.profile-follow-copy')?.addEventListener('click', () => hideModal(), { once: true }));
+      const removalTimers = new Map();
+      const modalOverlay = document.getElementById('modal-overlay');
+      const modalObserver = new MutationObserver(() => {
+        if (!modalOverlay?.classList.contains('hidden')) return;
+        removalTimers.forEach((timer, pendingButton) => {
+          clearInterval(timer.interval);
+          clearTimeout(timer.timeout);
+          const pendingRow = pendingButton.closest('.profile-follow-row');
+          if (pendingRow) restoreRemovalButton(pendingRow, pendingButton);
+        });
+        modalObserver.disconnect();
+      });
+      if (modalOverlay) modalObserver.observe(modalOverlay, { attributes: true, attributeFilter: ['class'] });
+      const restoreRemovalButton = (row, button) => {
+        const timer = removalTimers.get(button);
+        if (timer) {
+          clearInterval(timer.interval);
+          clearTimeout(timer.timeout);
+          removalTimers.delete(button);
+        }
+        row.classList.remove('is-follow-removal-pending');
+        button.disabled = false;
+        button.classList.remove('is-cancel-removal');
+        const label = button.dataset.action === 'remove-follower' ? 'Takipçilerimden çıkar' : 'Takipten çık';
+        button.innerHTML = `<i class="fas fa-user-minus" aria-hidden="true"></i><span>${label}</span>`;
+      };
+      document.querySelectorAll('.profile-follow-remove').forEach(removeButton => removeButton.addEventListener('click', async () => {
+        const row = removeButton.closest('.profile-follow-row');
+        if (!row) return;
+        if (removalTimers.has(removeButton)) {
+          restoreRemovalButton(row, removeButton);
+          return;
+        }
+        row.classList.add('is-follow-removal-pending');
+        removeButton.classList.add('is-cancel-removal');
+        removeButton.innerHTML = '<i class="fas fa-rotate-left" aria-hidden="true"></i><span class="profile-follow-remove-count"><small>Takipten çıkarılıyor</small><strong>İptal et · 3</strong></span>';
+        let seconds = 3;
+        const interval = setInterval(() => {
+          seconds -= 1;
+          if (removeButton.isConnected && removalTimers.has(removeButton)) {
+            const countdown = removeButton.querySelector('.profile-follow-remove-count strong');
+            if (countdown) countdown.textContent = `İptal et · ${seconds}`;
+          }
+        }, 1000);
+        const timeout = setTimeout(async () => {
+          removalTimers.delete(removeButton);
+          clearInterval(interval);
+          if (!row.isConnected) return;
+          removeButton.disabled = true;
+          removeButton.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>İşleniyor…</span>';
+          try {
+            const route = removeButton.dataset.action === 'remove-follower'
+              ? `/users/${encodeURIComponent(removeButton.dataset.username)}/follower`
+              : `/users/${encodeURIComponent(removeButton.dataset.username)}/follow`;
+            await api(route, { method: 'DELETE' });
+            const statLabel = removeButton.dataset.action === 'remove-follower' ? 'Takipçi' : 'Takip';
+            const stat = [...app.querySelectorAll('.profile-stats .profile-stat')]
+              .find(item => item.querySelector('.profile-stat-label')?.textContent.trim() === statLabel);
+            const statNumber = stat?.querySelector('.profile-stat-num');
+            if (statNumber) {
+              const count = Number(String(statNumber.textContent).replace(/[^\d]/g, ''));
+              statNumber.textContent = Math.max(0, count - 1).toLocaleString('tr-TR');
+            }
+            row.remove();
+            if (!document.querySelector('.profile-follow-row')) {
+              const listNode = document.querySelector('.profile-followers-list');
+              if (listNode) listNode.innerHTML = '<div class="empty-state"><p>Henüz kimse yok.</p></div>';
+            }
+            toast(removeButton.dataset.action === 'remove-follower' ? 'Takipçi kaldırıldı.' : 'Takipten çıkıldı.');
+          } catch (error) {
+            restoreRemovalButton(row, removeButton);
+            toast(error.message, 'error');
+          }
+        }, 3000);
+        removalTimers.set(removeButton, { interval, timeout });
+      }));
     } catch (e) { toast(e.message, 'error'); }
   }));
 
@@ -17005,11 +17084,11 @@ function showGroupInboxOptionsMenu(slug, name, isMuted, onMuteChange) {
 
 const DM_THEME_LABELS = {
   default: 'Varsayılan',
-  sunset: 'Gün Batımı',
-  ocean: 'Okyanus',
-  rose: 'Gül',
-  forest: 'Orman',
-  lavender: 'Lavanta'
+  sunset: 'Bakır',
+  ocean: 'Gece Mavisi',
+  rose: 'Bordo',
+  forest: 'Adaçayı',
+  lavender: 'Erik'
 };
 
 function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConversationOverride = false) {
@@ -17054,9 +17133,9 @@ function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConve
 function dmThemeOptionsHTML(selectedTheme = 'default', buttons = false) {
   const options = Object.entries(DM_THEME_LABELS);
   if (buttons) return options.map(([key, label]) => `<button type="button" class="dm-theme-option" data-theme-key="${key}" aria-pressed="${key === selectedTheme}"><span class="dm-theme-swatch" style="--dm-theme-swatch:${({
-    default: 'linear-gradient(135deg,#292929,#4a4a4a)', sunset: 'linear-gradient(135deg,#f97316,#be123c)',
-    ocean: 'linear-gradient(135deg,#0284c7,#1d4ed8)', rose: 'linear-gradient(135deg,#e11d48,#be185d)',
-    forest: 'linear-gradient(135deg,#15803d,#065f46)', lavender: 'linear-gradient(135deg,#7c3aed,#6d28d9)'
+    default: 'linear-gradient(135deg,#292929,#4a4a4a)', sunset: 'linear-gradient(135deg,#785744,#b17b56)',
+    ocean: 'linear-gradient(135deg,#344d67,#52758b)', rose: 'linear-gradient(135deg,#70444d,#a76570)',
+    forest: 'linear-gradient(135deg,#435d50,#718975)', lavender: 'linear-gradient(135deg,#574d68,#81758f)'
   })[key]}"></span>${label}</button>`).join('');
   return options.map(([key, label]) => `<option value="${key}" ${key === selectedTheme ? 'selected' : ''}>${label}</option>`).join('');
 }

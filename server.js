@@ -5503,6 +5503,14 @@ app.delete('/api/users/:username/follow', authMiddleware, async (req, res) => {
   res.json({ following: false, pending: false });
 });
 
+app.delete('/api/users/:username/follower', authMiddleware, async (req, res) => {
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  if (String(target[0].id) === String(req.user.id)) return res.status(400).json({ error: 'Kendinizi takipçilerinizden çıkaramazsınız.' });
+  await query('DELETE FROM follows WHERE follower_id=$1 AND following_id=$2', [target[0].id, req.user.id]);
+  res.json({ following: false });
+});
+
 async function canViewFollowList(username, viewer, listType) {
   const { rows: target } = await query('SELECT id,is_private,profile_visibility FROM users WHERE username=$1', [username]);
   if (!target.length) return null;
@@ -5749,7 +5757,18 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     (SELECT COUNT(*) FROM follows WHERE following_id=$1 AND status='accepted') AS followers_count,
     (SELECT COUNT(*) FROM follows WHERE follower_id=$1 AND status='accepted') AS following_count`, [user.id]);
   if (user.is_private && !isOwner && !isFollower && !graceViewer) {
-    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, blocked_relationship: blockedRelationship, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false, ...relationshipState });
+    const { rows: contentCounts } = await query(`SELECT
+        (SELECT COUNT(*) FROM photos p WHERE p.user_id=$1
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='photo' AND a.content_id=p.id::text)) AS photo_count,
+        (SELECT COUNT(*) FROM videos v WHERE v.user_id=$1
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1
+            AND a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND a.content_id=v.id::text)) AS video_count,
+        (SELECT COUNT(*) FROM songs s WHERE s.uploader_id=$1 AND s.status='active'
+          AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.owner_id=$1 AND a.content_type='song' AND a.content_id=s.id::text)) AS song_count`,
+      [user.id]);
+    const contentCount = Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0)
+      + Number(contentCounts[0]?.photo_count || 0) + Number(contentCounts[0]?.video_count || 0) + Number(contentCounts[0]?.song_count || 0);
+    return res.json({ user: sanitizeUserForFeatures(user, features), badges, forums: [], books: [], groups: [], videos: [], songs: [], level: null, levels: [], book_page_count: 0, features, private_profile: true, content_count: contentCount, blocked_relationship: blockedRelationship, followers_count: Number(followCounts[0].followers_count), following_count: Number(followCounts[0].following_count), following: false, ...relationshipState });
   }
   await ensureProfileAvatarArchiveSchema();
   const [forums, books, groups, level, levels, bpCount, photos, videos, reals, songs, contentCounts, avatarPhotos] = await Promise.all([
