@@ -6818,7 +6818,7 @@ app.get('/api/archive', authMiddleware, async (req, res) => {
          FROM stories s
          LEFT JOIN user_content_archive a
            ON a.owner_id=$1 AND a.content_type='story' AND a.content_id=s.id::text
-         WHERE s.user_id=$1 AND s.expires_at<=NOW()
+         WHERE s.user_id=$1 AND s.expires_at<=NOW() AND COALESCE(s.is_permanent,0)=0
          ORDER BY s.expires_at DESC`,
         [req.user.id]
       );
@@ -6844,7 +6844,7 @@ app.get('/api/archive', authMiddleware, async (req, res) => {
     const items = [];
     for (const [type, config] of Object.entries(USER_ARCHIVE_TYPES)) {
       const realsFilter = config.reals === undefined ? '' : ` AND c.is_reals=${config.reals ? 1 : 0}`;
-      const storyExpiryFilter = type === 'story' ? ' AND c.expires_at>NOW()' : '';
+      const storyExpiryFilter = type === 'story' ? ' AND (c.expires_at>NOW() OR COALESCE(c.is_permanent,0)=1)' : '';
       const { rows } = await query(
         `SELECT $2::text AS content_type, c.${config.id}::text AS content_id, to_jsonb(c) AS content_data
          FROM ${config.table} c
@@ -7021,7 +7021,7 @@ app.get('/api/story-visibility', authMiddleware, async (req, res) => {
 app.get('/api/stories', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.close_friends_only,s.created_at,s.expires_at,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.is_permanent,s.close_friends_only,s.created_at,s.expires_at,
       u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.viewer_id=$1) AS viewed,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$1) AS liked,
@@ -7030,7 +7030,7 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
       (SELECT COUNT(*) FROM content_view_events cve WHERE cve.content_type='story' AND cve.content_id=s.id) AS total_views,
       CASE WHEN s.user_id=$1 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
-    WHERE s.expires_at > NOW() AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
+    WHERE (s.expires_at > NOW() OR COALESCE(s.is_permanent,0)=1) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
       AND (s.is_suspended=0 OR s.user_id=$1)
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=s.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())
       AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$1 AND usv.hidden_user_id=s.user_id)
@@ -7045,14 +7045,14 @@ app.get('/api/stories', optionalAuth, async (req, res) => {
 app.get('/api/stories/:id', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.close_friends_only,s.created_at,s.expires_at,
+  const { rows } = await query(`SELECT s.id,s.public_id,s.user_id,s.media_url,s.media_type,s.caption,s.song_id,s.song_start_seconds,s.media_filter,s.duration_hours,s.is_suspended,s.is_permanent,s.close_friends_only,s.created_at,s.expires_at,
   u.username,u.avatar,u.avatar_removed,u.is_private,u.is_red_verified,u.red_verified_at,song.title AS song_title,song.artist_name AS song_artist,song.audio_url AS song_audio_url,song.cover_url AS song_cover_url,
       EXISTS(SELECT 1 FROM story_likes sl WHERE sl.story_id=s.id AND sl.user_id=$2) AS liked,
       (SELECT COUNT(*) FROM story_likes slc WHERE slc.story_id=s.id) AS like_count,
       (SELECT COALESCE(SUM(sv.view_count),0) FROM story_views sv WHERE sv.story_id=s.id) AS total_views,
       CASE WHEN s.user_id=$2 THEN 1 ELSE 0 END AS is_owner
     FROM stories s JOIN users u ON u.id=s.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs song ON song.id=s.song_id
-    WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW()
+    WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1)
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=s.id::text)
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=s.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW())
       AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
@@ -7132,7 +7132,7 @@ app.post('/api/stories/from-url', authMiddleware, uploadLimiter, async (req, res
 app.post('/api/stories/:id/view', optionalAuth, async (req, res) => {
   await ensureStoryVisibilitySchema();
   const viewerId = req.user?.id || 0;
-  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND ${closeFriendsVisibilitySql('s', '$2')} AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
+  const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1) AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND ${closeFriendsVisibilitySql('s', '$2')} AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   await recordContentView('story', story[0].id, req);
   if (req.user?.id) {
@@ -7217,7 +7217,8 @@ app.put('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
   const requestedDuration = Number(req.body.duration_hours);
   const durationHours = Number.isInteger(requestedDuration) && requestedDuration >= 1 && requestedDuration <= 720 ? requestedDuration : old.duration_hours;
   const suspended = req.body.is_suspended === undefined ? old.is_suspended : (req.body.is_suspended ? 1 : 0);
-  const { rows: updated } = await query('UPDATE stories SET caption=$1,duration_hours=$2,is_suspended=$3,expires_at=created_at + ($2 * INTERVAL \'1 hour\') WHERE id=$4 RETURNING *', [caption, durationHours, suspended, old.id]);
+  const permanent = req.body.is_permanent === undefined ? Number(old.is_permanent) || 0 : (parseFormBoolean(req.body.is_permanent) ? 1 : 0);
+  const { rows: updated } = await query('UPDATE stories SET caption=$1,duration_hours=$2,is_suspended=$3,is_permanent=$4,expires_at=created_at + ($2 * INTERVAL \'1 hour\') WHERE id=$5 RETURNING *', [caption, durationHours, suspended, permanent, old.id]);
   res.json(updated[0]);
 });
 
@@ -7237,7 +7238,7 @@ app.delete('/api/admin/stories/:id', adminMiddleware, async (req, res) => {
 app.post('/api/stories/:id/like', authMiddleware, async (req, res) => {
   const { rows: stories } = await query(`SELECT s.id,s.user_id,u.username AS owner_username,u.avatar AS owner_avatar
     FROM stories s JOIN users u ON u.id=s.user_id
-    WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0
+    WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1) AND s.is_suspended=0
       AND ${closeFriendsVisibilitySql('s', '$2')}
       AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
       AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`,
@@ -7272,7 +7273,7 @@ app.post('/api/stories/:id/replies', authMiddleware, async (req, res) => {
     `SELECT s.id, s.user_id, u.username AS owner_username
      FROM stories s
      JOIN users u ON u.id=s.user_id
-     WHERE (s.public_id=$1 OR s.id::text=$1) AND s.expires_at>NOW() AND s.is_suspended=0
+     WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1) AND s.is_suspended=0
        AND ${closeFriendsVisibilitySql('s', '$2')}
        AND NOT EXISTS (SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id)
        AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`,
@@ -11086,7 +11087,7 @@ app.get('/api/search', optionalAuth, async (req, res) => {
       // Süresi geçmemiş hikâyeler
       query(`SELECT st.id, st.public_id, st.caption, st.created_at, u.username AS author
         FROM stories st JOIN users u ON u.id=st.user_id
-        WHERE st.caption ILIKE $1 AND st.expires_at > NOW() AND st.is_suspended=0
+        WHERE st.caption ILIKE $1 AND (st.expires_at > NOW() OR COALESCE(st.is_permanent,0)=1) AND st.is_suspended=0
           AND COALESCE(u.is_deleted,0)=0 AND COALESCE(u.is_private,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='story' AND cs.content_id=st.id)
           AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='story' AND a.content_id=st.id::text)
@@ -12191,6 +12192,10 @@ app.get('/api/conversations/unread-count', authMiddleware, async (req, res) => {
 
 app.get('/api/messages/search', authMiddleware, async (req, res) => {
   const searchTerm = String(req.query.q || '').trim().slice(0, 100);
+  const conversationId = Number(req.query.conversation_id);
+  if (!Number.isSafeInteger(conversationId) || conversationId < 1) {
+    return res.status(400).json({ error: 'Mesaj aramak için bir sohbet seçin.' });
+  }
   if (searchTerm.length < 2) return res.json([]);
   const pattern = `%${searchTerm.replace(/[\\%_]/g, '\\$&')}%`;
   try {
@@ -12210,6 +12215,7 @@ app.get('/api/messages/search', authMiddleware, async (req, res) => {
       LEFT JOIN dm_user_settings viewer_receipt_settings ON viewer_receipt_settings.user_id=$1
       LEFT JOIN dm_user_settings sender_receipt_settings ON sender_receipt_settings.user_id=m.sender_id
       WHERE (c.user1_id=$1 OR c.user2_id=$1)
+        AND c.id=$3
         AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE
           (bl.blocker_id=$1 AND bl.blocked_id=peer.id) OR (bl.blocker_id=peer.id AND bl.blocked_id=$1))
         AND (peer.id=$1 OR COALESCE(peer.dm_message_permission,'everyone')='everyone'
@@ -12228,7 +12234,7 @@ app.get('/api/messages/search', authMiddleware, async (req, res) => {
         AND (m.content ILIKE $2 OR song.title ILIKE $2 OR song.artist_name ILIKE $2)
       ORDER BY m.id DESC
       LIMIT 50
-    `, [req.user.id, pattern]);
+    `, [req.user.id, pattern, conversationId]);
     res.json(rows);
   } catch (error) {
     console.error('DM message search failed:', error);

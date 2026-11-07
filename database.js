@@ -159,6 +159,7 @@ async function initDb() {
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS duration_hours INTEGER NOT NULL DEFAULT 24;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS public_id TEXT;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_suspended INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_permanent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS close_friends_only INTEGER NOT NULL DEFAULT 0;
     UPDATE stories SET public_id='h' || substr(md5(random()::text || id::text), 1, 10) WHERE public_id IS NULL;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_stories_public_id ON stories(public_id);

@@ -14534,7 +14534,6 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
         </div>
         <div class="dm-sidebar-actions">
           <button class="btn dm-header-action-btn dm-search-toggle" id="dm-search-toggle" type="button" title="Konuşma ara" aria-label="Konuşma ara" aria-expanded="false"><i class="fas fa-search"></i></button>
-          <button class="btn dm-header-action-btn" id="dm-search-messages-btn" type="button" title="Mesajlarda ara" aria-label="Mesajlarda ara"><i class="fas fa-magnifying-glass-plus"></i></button>
           <button class="btn dm-header-action-btn dm-new-message-btn" id="new-dm-btn" title="Yeni mesaj" aria-label="Yeni mesaj"><i class="fas fa-plus"></i></button>
           ${dmLockSettings.icon_unlock_enabled ? '<button class="btn dm-header-action-btn dm-hidden-toggle-btn" id="dm-hidden-toggle-btn" title="Kilitli mesajlar" aria-label="Kilitli mesajlar" type="button"><i class="fas fa-lock"></i></button>' : ''}
         </div>
@@ -14653,7 +14652,6 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
     if (icon) icon.className = `fas fa-${isOpen ? 'search' : 'times'}`;
     if (!isOpen) app.querySelector('#dm-search')?.focus();
   });
-  app.querySelector('#dm-search-messages-btn')?.addEventListener('click', openDmMessageSearch);
   if (window.__dmSearchOutsideHandler) document.removeEventListener('click', window.__dmSearchOutsideHandler);
   window.__dmSearchOutsideHandler = event => {
     if (!searchWrap?.isConnected || searchWrap.classList.contains('hidden')) return;
@@ -14809,8 +14807,9 @@ let dmSelectionMode = false;
 let dmSelectedIds = new Set();
 let dmPollTimer = null;
 let dmPresencePollTimer = null;
-async function openDmMessageSearch() {
-  showModal('Mesajlarda ara', `
+async function openDmMessageSearch(conversationId) {
+  if (!Number.isSafeInteger(Number(conversationId)) || Number(conversationId) < 1) return;
+  showModal('Bu sohbette ara', `
     <div class="dm-message-search">
       <label class="dm-message-search-input"><i class="fas fa-search" aria-hidden="true"></i><input id="dm-message-search-query" type="search" placeholder="Mesaj veya paylaşılan müzik ara..." autocomplete="off" /></label>
       <div class="dm-message-search-hint">Mesaj metinlerinde ve paylaşılan müzik adlarında ara.</div>
@@ -14829,7 +14828,7 @@ async function openDmMessageSearch() {
     }
     results.innerHTML = '<div class="dm-message-search-empty"><span class="spinner"></span> Mesajlar aranıyor…</div>';
     try {
-      const matches = await api(`/messages/search?q=${encodeURIComponent(query)}`);
+      const matches = await api(`/messages/search?q=${encodeURIComponent(query)}&conversation_id=${encodeURIComponent(conversationId)}`);
       if (!results.isConnected || activeRequestId !== requestId) return;
       results.innerHTML = matches.length ? matches.map(message => {
         const preview = message.content || (message.song_title
@@ -15024,7 +15023,7 @@ async function renderDMChat(username) {
         </div>
       </div>
       <div class="dm-chat-header-right">
-        <button class="btn btn-ghost btn-sm" id="dm-chat-search-messages-btn" title="Mesajlarda ara" aria-label="Mesajlarda ara"><i class="fas fa-magnifying-glass-plus"></i></button>
+        ${!isSelfConversation ? '<button class="btn btn-ghost btn-sm" id="dm-chat-search-messages-btn" title="Bu sohbette ara" aria-label="Bu sohbette ara"><i class="fas fa-magnifying-glass-plus"></i></button>' : ''}
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
@@ -15126,7 +15125,7 @@ async function renderDMChat(username) {
 
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
-  document.getElementById('dm-chat-search-messages-btn')?.addEventListener('click', openDmMessageSearch);
+  document.getElementById('dm-chat-search-messages-btn')?.addEventListener('click', () => openDmMessageSearch(Number(conv.id)));
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
 

@@ -669,11 +669,84 @@ async function renderAccountDeletions(main) {
 async function renderAdminStories(main) {
   let stories = [];
   try { stories = await adminApi('/stories'); } catch (error) { main.innerHTML = `<div class="form-error">${escHtml(error.message)}</div>`; return; }
-  main.innerHTML = `<div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-circle-play"></i></div> Hikayeler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${stories.length})</span></div></div><div class="card"><div style="overflow:auto"><table class="adm-table"><thead><tr><th>Medya</th><th>Sahip</th><th>Durum</th><th>Süre</th><th>Görüntülenme</th><th>Beğeni</th><th>Tarih</th><th>İşlemler</th></tr></thead><tbody>${stories.map(story => `<tr><td><a href="/hikaye/${escHtml(story.public_id || story.id)}" target="_blank"><img src="${escHtml(story.media_url)}" style="width:64px;height:82px;object-fit:contain;background:#000;border-radius:6px" /></a></td><td>${story.avatar ? `<img src="${escHtml(story.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:5px" />` : ''}${escHtml(story.username)}</td><td>${story.is_suspended ? '<span class="badge badge-red">Askıda</span>' : (new Date(story.expires_at) < new Date() ? '<span class="badge">Süresi doldu</span>' : '<span class="badge badge-green">Aktif</span>')}</td><td>${story.duration_hours} saat</td><td>${story.total_views || 0} toplam / ${story.unique_viewers || 0} kişi</td><td>${story.like_count || 0}</td><td>${formatDate(story.created_at)}</td><td><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn btn-outline btn-xs story-admin-viewers" data-id="${escHtml(story.public_id || story.id)}">Görenler</button><button class="btn btn-outline btn-xs story-admin-edit" data-id="${escHtml(story.public_id || story.id)}">Düzenle</button><button class="btn ${story.is_suspended ? 'btn-primary' : 'btn-outline'} btn-xs story-admin-suspend" data-id="${escHtml(story.public_id || story.id)}" data-suspended="${story.is_suspended ? '1' : '0'}">${story.is_suspended ? 'Aktifleştir' : 'Askıya al'}</button><button class="btn btn-danger btn-xs story-admin-delete" data-id="${escHtml(story.public_id || story.id)}">Sil</button></div></td></tr>`).join('')}</tbody></table></div></div>`;
-  main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => { try { const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers'); showModal('Hikaye görüntüleyenleri', viewers.length ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${viewer.username ? escHtml(viewer.username) : '<i class="fas fa-user-secret"></i> Misafir'}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)} · IP: ${escHtml(viewer.ip || 'Bilinmiyor')}</small></span></div>`).join('')}</div>` : '<div class="empty-state">Henüz görüntüleyen yok.</div>'); } catch (error) { toast(error.message, 'error'); } });
-  main.querySelectorAll('.story-admin-edit').forEach(button => button.onclick = async () => { const story = stories.find(item => String(item.public_id || item.id) === button.dataset.id); if (!story) return; showModal('Hikayeyi düzenle', `<div class="form-group"><label>Açıklama</label><textarea id="adm-story-caption">${escHtml(story.caption || '')}</textarea></div><div class="form-group"><label>Süre (saat)</label><input id="adm-story-duration" type="number" min="1" max="720" step="1" value="${Number(story.duration_hours) || 24}" /><small style="display:block;margin-top:5px;color:var(--text-muted)">1-720 saat arasında istediğin süreyi yazabilirsin.</small></div><button class="btn btn-primary" id="adm-story-save">Kaydet</button>`); $('#adm-story-save').onclick = async () => { const duration = Number($('#adm-story-duration').value); if (!Number.isInteger(duration) || duration < 1 || duration > 720) return toast('Süre 1-720 saat arasında tam sayı olmalı.', 'error'); try { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ caption: $('#adm-story-caption').value, duration_hours: duration }) }); hideModal(); toast('Hikaye güncellendi'); renderAdminStories(main); } catch (error) { toast(error.message, 'error'); } }; });
-  main.querySelectorAll('.story-admin-suspend').forEach(button => button.onclick = async () => { await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_suspended: button.dataset.suspended !== '1' }) }); toast(button.dataset.suspended === '1' ? 'Hikaye aktifleştirildi' : 'Hikaye askıya alındı'); renderAdminStories(main); });
-  main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => { if (!await CigCigDialogs.confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return; await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' }); toast('Hikaye silindi'); renderAdminStories(main); });
+  main.innerHTML = `<div class="adm-section-header"><div><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-circle-play"></i></div> Hikayeler <span style="font-size:13px;font-weight:400;color:var(--text2)">(${stories.length})</span></div><small style="display:block;margin-top:5px;color:var(--text2)">Süresiz hikâyeler süresi geçse de yayında kalır; kapatınca süresi dolmuşsa pasif olur.</small></div></div><div class="card"><div style="overflow:auto"><table class="adm-table"><thead><tr><th>Medya</th><th>Sahip</th><th>Durum</th><th>Süre</th><th>Görüntülenme</th><th>Beğeni</th><th>Tarih</th><th>İşlemler</th></tr></thead><tbody>${stories.map(story => {
+    const id = story.public_id || story.id;
+    const permanent = Number(story.is_permanent) === 1;
+    const expired = new Date(story.expires_at) < new Date();
+    const status = story.is_suspended
+      ? '<span class="badge badge-red">Askıda</span>'
+      : permanent
+        ? '<span class="badge badge-green">Süresiz · Aktif</span>'
+        : expired
+          ? '<span class="badge">Süresi doldu</span>'
+          : '<span class="badge badge-green">Aktif</span>';
+    return `<tr>
+      <td><a href="/hikaye/${escHtml(id)}" target="_blank"><img src="${escHtml(story.media_url)}" style="width:64px;height:82px;object-fit:contain;background:#000;border-radius:6px" /></a></td>
+      <td>${story.avatar ? `<img src="${escHtml(story.avatar)}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:5px" />` : ''}${escHtml(story.username)}</td>
+      <td>${status}</td>
+      <td>${permanent ? 'Süresiz' : `${story.duration_hours} saat`}</td>
+      <td>${story.total_views || 0} toplam / ${story.unique_viewers || 0} kişi</td>
+      <td>${story.like_count || 0}</td>
+      <td>${formatDate(story.created_at)}</td>
+      <td><div style="display:flex;gap:5px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-xs story-admin-viewers" data-id="${escHtml(id)}">Görenler</button>
+        <button class="btn btn-outline btn-xs story-admin-edit" data-id="${escHtml(id)}">Düzenle</button>
+        <button class="btn ${permanent ? 'btn-primary' : 'btn-outline'} btn-xs story-admin-permanent" data-id="${escHtml(id)}" data-permanent="${permanent ? '1' : '0'}">${permanent ? 'Süreli yap' : 'Süresiz yap'}</button>
+        <button class="btn ${story.is_suspended ? 'btn-primary' : 'btn-outline'} btn-xs story-admin-suspend" data-id="${escHtml(id)}" data-suspended="${story.is_suspended ? '1' : '0'}">${story.is_suspended ? 'Aktifleştir' : 'Askıya al'}</button>
+        <button class="btn btn-danger btn-xs story-admin-delete" data-id="${escHtml(id)}">Sil</button>
+      </div></td>
+    </tr>`;
+  }).join('')}</tbody></table></div></div>`;
+  main.querySelectorAll('.story-admin-viewers').forEach(button => button.onclick = async () => {
+    try {
+      const viewers = await adminApi('/stories/' + button.dataset.id + '/viewers');
+      showModal('Hikaye görüntüleyenleri', viewers.length
+        ? `<div class="story-viewer-list">${viewers.map(viewer => `<div class="story-viewer-row">${viewer.avatar ? `<img src="${escHtml(viewer.avatar)}" class="avatar-sm" />` : '<div class="avatar-sm avatar-placeholder"><i class="fas fa-user"></i></div>'}<span><b>${viewer.username ? escHtml(viewer.username) : '<i class="fas fa-user-secret"></i> Misafir'}</b><small>${viewer.view_count} kez · ${formatDate(viewer.viewed_at)} · IP: ${escHtml(viewer.ip || 'Bilinmiyor')}</small></span></div>`).join('')}</div>`
+        : '<div class="empty-state">Henüz görüntüleyen yok.</div>');
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  main.querySelectorAll('.story-admin-edit').forEach(button => button.onclick = async () => {
+    const story = stories.find(item => String(item.public_id || item.id) === button.dataset.id);
+    if (!story) return;
+    showModal('Hikayeyi düzenle', `<div class="form-group"><label>Açıklama</label><textarea id="adm-story-caption">${escHtml(story.caption || '')}</textarea></div><div class="form-group"><label>Süre (saat)</label><input id="adm-story-duration" type="number" min="1" max="720" step="1" value="${Number(story.duration_hours) || 24}" /><small style="display:block;margin-top:5px;color:var(--text-muted)">1-720 saat arasında istediğin süreyi yazabilirsin.</small></div><button class="btn btn-primary" id="adm-story-save">Kaydet</button>`);
+    $('#adm-story-save').onclick = async () => {
+      const duration = Number($('#adm-story-duration').value);
+      if (!Number.isInteger(duration) || duration < 1 || duration > 720) return toast('Süre 1-720 saat arasında tam sayı olmalı.', 'error');
+      try {
+        await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ caption: $('#adm-story-caption').value, duration_hours: duration }) });
+        hideModal();
+        toast('Hikaye güncellendi');
+        renderAdminStories(main);
+      } catch (error) { toast(error.message, 'error'); }
+    };
+  });
+  main.querySelectorAll('.story-admin-permanent').forEach(button => button.onclick = async () => {
+    button.disabled = true;
+    try {
+      const permanent = button.dataset.permanent !== '1';
+      await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_permanent: permanent }) });
+      toast(permanent ? 'Hikaye süresiz olarak etkinleştirildi' : 'Hikaye süresi dolmuşsa pasif hale geldi');
+      renderAdminStories(main);
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message, 'error');
+    }
+  });
+  main.querySelectorAll('.story-admin-suspend').forEach(button => button.onclick = async () => {
+    try {
+      await adminApi('/stories/' + button.dataset.id, { method: 'PUT', body: JSON.stringify({ is_suspended: button.dataset.suspended !== '1' }) });
+      toast(button.dataset.suspended === '1' ? 'Hikaye aktifleştirildi' : 'Hikaye askıya alındı');
+      renderAdminStories(main);
+    } catch (error) { toast(error.message, 'error'); }
+  });
+  main.querySelectorAll('.story-admin-delete').forEach(button => button.onclick = async () => {
+    if (!await CigCigDialogs.confirm('Hikaye ve ilişkili görüntülemeler silinsin mi?')) return;
+    try {
+      await adminApi('/stories/' + button.dataset.id, { method: 'DELETE' });
+      toast('Hikaye silindi');
+      renderAdminStories(main);
+    } catch (error) { toast(error.message, 'error'); }
+  });
 }
 
 // ===== HOMEPAGE SECTIONS =====
