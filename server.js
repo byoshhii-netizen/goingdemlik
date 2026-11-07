@@ -5823,6 +5823,21 @@ app.get('/api/user/:username/saved-videos', authMiddleware, async (req, res) => 
   res.json(rows);
 });
 
+app.get('/api/user/:username/saved-photos', authMiddleware, async (req, res) => {
+  if (req.user.username.toLowerCase() !== String(req.params.username).toLowerCase()) return res.status(403).json({ error: 'Kaydedilenler yalnızca size görünür.' });
+  await ensurePhotoInteractionSchema();
+  const { rows } = await query(`SELECT p.id,p.url,p.image_urls,p.title,p.caption,p.created_at,u.username,u.nickname,u.avatar,u.avatar_removed
+    FROM photo_saves s JOIN photos p ON p.id=s.photo_id JOIN users u ON u.id=p.user_id
+    WHERE s.user_id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
+      AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())
+      AND ${closeFriendsVisibilitySql('p', '$1')}
+      AND (COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted')
+        OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted'))
+    ORDER BY s.created_at DESC`, [req.user.id]);
+  res.json(rows);
+});
+
 const DM_THEME_KEYS = new Set(['default', 'sunset', 'ocean', 'rose', 'forest', 'lavender']);
 
 async function getDmThemeForUser(conversation, userId) {
@@ -6534,6 +6549,13 @@ function ensurePhotoInteractionSchema() {
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(photo_id, user_id)
       );
+      CREATE TABLE IF NOT EXISTS photo_saves (
+        id BIGSERIAL PRIMARY KEY,
+        photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE(photo_id, user_id)
+      );
       DO $$
       BEGIN
         LOCK TABLE photo_likes IN ACCESS EXCLUSIVE MODE;
@@ -6628,7 +6650,8 @@ app.get('/api/photos', optionalAuth, async (req, res) => {
   const base = `SELECT p.id, p.url, p.image_urls, p.title, p.caption, p.location, p.song_id, p.song_start_seconds, p.close_friends_only, s.slug AS song_slug, s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url, p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
     (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
     (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
-    (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked
+    (CASE WHEN $1::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$1) END) > 0 AS liked,
+    CASE WHEN $1::bigint=0 THEN false ELSE EXISTS(SELECT 1 FROM photo_saves ps WHERE ps.photo_id=p.id AND ps.user_id=$1) END AS saved
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)`;
   const visibility = `(COALESCE(u.is_private,0)=0 OR p.user_id=$1 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$1 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$1 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$1)) AND fr.status='accepted')) AND ${closeFriendsVisibilitySql('p', '$1')} AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$1 AND bl.hide_until<=NOW())`;
   const params = [userId];
@@ -6656,7 +6679,8 @@ app.get('/api/photos/:id', optionalAuth, async (req, res) => {
       p.created_at, p.user_id, u.username, u.nickname, u.avatar, u.is_red_verified, u.red_verified_at, COALESCE(p.show_likes,1) AS show_likes, COALESCE(p.allow_comments,1) AS allow_comments, COALESCE(p.allow_shares,1) AS allow_shares,
       (SELECT COUNT(*) FROM photo_likes pl WHERE pl.photo_id = p.id) AS like_count,
       (SELECT COUNT(*) FROM photo_comments pc WHERE pc.photo_id = p.id) AS comment_count,
-      (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked
+      (CASE WHEN $2::bigint = 0 THEN 0 ELSE (SELECT COUNT(*) FROM photo_likes pl2 WHERE pl2.photo_id=p.id AND pl2.user_id=$2) END) > 0 AS liked,
+      CASE WHEN $2::bigint=0 THEN false ELSE EXISTS(SELECT 1 FROM photo_saves ps WHERE ps.photo_id=p.id AND ps.user_id=$2) END AS saved
     FROM photos p JOIN users u ON u.id=p.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=p.song_id
     WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text) AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW()) AND ${closeFriendsVisibilitySql('p', '$2')} AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted') OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
     [req.params.id, userId]
@@ -6673,6 +6697,23 @@ app.post('/api/photos/:id/view', optionalAuth, async (req, res) => {
   if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
   await recordContentView('photo', rows[0].id, req);
   res.json({ ok: true });
+});
+
+app.post('/api/photos/:id/save', authMiddleware, async (req, res) => {
+  await ensurePhotoInteractionSchema();
+  const { rows: photo } = await query(`SELECT p.id FROM photos p JOIN users u ON u.id=p.user_id
+    WHERE p.id=$1 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
+      AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
+      AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE bl.blocker_id=p.user_id AND bl.blocked_id=$2 AND bl.hide_until<=NOW())
+      AND ${closeFriendsVisibilitySql('p', '$2')}
+      AND (COALESCE(u.is_private,0)=0 OR p.user_id=$2 OR EXISTS (SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=p.user_id AND f.status='accepted')
+        OR EXISTS (SELECT 1 FROM friendships fr WHERE ((fr.requester_id=$2 AND fr.addressee_id=p.user_id) OR (fr.requester_id=p.user_id AND fr.addressee_id=$2)) AND fr.status='accepted'))`,
+  [req.params.id, req.user.id]);
+  if (!photo.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı veya görüntüleme izniniz yok.' });
+  const { rows: existing } = await query('SELECT id FROM photo_saves WHERE photo_id=$1 AND user_id=$2', [photo[0].id, req.user.id]);
+  if (existing.length) await query('DELETE FROM photo_saves WHERE id=$1', [existing[0].id]);
+  else await query('INSERT INTO photo_saves (photo_id,user_id) VALUES ($1,$2)', [photo[0].id, req.user.id]);
+  res.json({ saved: !existing.length });
 });
 
 app.post('/api/photos', authMiddleware, uploadLimiter, upload.fields([{ name: 'image', maxCount: 1 }, { name: 'images', maxCount: 10 }]), async (req, res) => {
@@ -11859,8 +11900,8 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
-        FROM dm_messages m WHERE m.conversation_id=c.id
+      (SELECT m.content
+        FROM dm_messages m WHERE m.conversation_id=c.id AND COALESCE(m.deleted_for_all,0)=0
           AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message,
       (SELECT COUNT(*) FROM dm_messages WHERE conversation_id=c.id AND sender_id!=$1 AND 
@@ -11918,8 +11959,8 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
-        FROM dm_messages m WHERE m.conversation_id=c.id
+      (SELECT m.content
+        FROM dm_messages m WHERE m.conversation_id=c.id AND COALESCE(m.deleted_for_all,0)=0
           AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c
@@ -11965,9 +12006,9 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT CASE WHEN m.deleted_for_all=1 THEN 'Bu mesaj herkesten silindi' ELSE m.content END
+      (SELECT m.content
         FROM dm_messages m
-        WHERE m.conversation_id=c.id
+        WHERE m.conversation_id=c.id AND COALESCE(m.deleted_for_all,0)=0
           AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message
     FROM dm_conversations c JOIN users u1 ON c.user1_id=u1.id JOIN users u2 ON c.user2_id=u2.id
@@ -12199,8 +12240,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
     LEFT JOIN dm_user_settings viewer_receipt_settings ON viewer_receipt_settings.user_id=$3
     LEFT JOIN dm_user_settings sender_receipt_settings ON sender_receipt_settings.user_id=m.sender_id
     WHERE m.conversation_id=$1
-      AND ($6=0 OR m.id>$6 OR (m.deleted_for_all=1 AND m.deleted_for_all_at>$7::timestamptz))
-      AND (m.deleted_for_all=0 OR $6=0 OR m.deleted_for_all_at>$7::timestamptz)
+      AND (($6=0 AND COALESCE(m.deleted_for_all,0)=0) OR ($6>0 AND ((m.id>$6 AND COALESCE(m.deleted_for_all,0)=0) OR (COALESCE(m.deleted_for_all,0)=1 AND m.deleted_for_all_at>$7::timestamptz))))
       AND ($2=1 OR COALESCE(m.deleted_by_sender,0)=0 OR m.sender_id!=$3)
       AND ($2=1 OR COALESCE(m.deleted_by_receiver,0)=0 OR m.sender_id=$3)
     ORDER BY CASE WHEN $6=0 THEN m.id END DESC,
@@ -13681,7 +13721,8 @@ const videoSelect = `SELECT v.*, v.thumbnail_url AS banner_image, u.username, u.
   s.title AS song_title, s.artist_name AS song_artist, s.audio_url AS song_audio_url, s.cover_url AS song_cover_url,
   (SELECT COUNT(*) FROM video_likes vl WHERE vl.video_id=v.id) AS like_count,
   (SELECT COUNT(*) FROM video_comments vc WHERE vc.video_id=v.id) AS comment_count,
-  (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked
+  (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_likes vl2 WHERE vl2.video_id=v.id AND vl2.user_id=$1) END) AS liked,
+  (CASE WHEN $1::bigint = 0 THEN false ELSE EXISTS(SELECT 1 FROM video_saves vs WHERE vs.video_id=v.id AND vs.user_id=$1) END) AS saved
   FROM videos v JOIN users u ON u.id=v.user_id AND COALESCE(u.is_deleted,0)=0 LEFT JOIN songs s ON s.id=v.song_id
   WHERE NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND cs.content_id=v.id)
     AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type=CASE WHEN v.is_reals=1 THEN 'reals' ELSE 'video' END AND a.content_id=v.id::text)

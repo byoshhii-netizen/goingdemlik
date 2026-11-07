@@ -104,7 +104,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <script src="/theme.js?v=20261024-dark-only"></script>
   <script src="/homepage-sections.js?v=20261014-homepage-sections"></script>
-  <link rel="stylesheet" href="/style.css?v=media-explore-time-notes-1" />
+  <link rel="stylesheet" href="/style.css?v=media-explore-grid-compose-fix-20261107" />
   <link rel="stylesheet" href="/dialogs.css?v=20261017-native-dialogs" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
@@ -128,24 +128,32 @@
       <div class="nav-links">
         <div class="nav-link-group nav-desktop-account-group" id="nav-desktop-account-group">
           <a href="/ayarlar" data-link class="nav-link" id="nav-desktop-settings"><i class="fas fa-gear"></i><span>Ayarlar</span></a>
+          <a href="/arkadaslar" data-link class="nav-link"><i class="fas fa-user-friends"></i><span>Arkadaşlar</span></a>
+          <a href="/rozetler" data-link class="nav-link"><i class="fas fa-award"></i><span>Rozetler</span></a>
+          <a href="/mesajlar" data-link class="nav-link"><i class="fas fa-paper-plane"></i><span>Mesajlar</span></a>
         </div>
         <div class="nav-link-group">
           <span class="nav-link-heading">CigCig</span>
           <a href="/" data-link class="nav-link"><i class="fas fa-house"></i><span>Ana Sayfa</span></a>
           <a href="/konular" data-link class="nav-link"><i class="fas fa-comments"></i><span>Konular</span></a>
           <a href="/siirler" data-link class="nav-link"><i class="fas fa-feather-pointed"></i><span>Şiirler</span></a>
+          <a href="/gazeteler" data-link class="nav-link"><i class="fas fa-newspaper"></i><span>Gazeteler</span></a>
         </div>
         <div class="nav-link-group">
           <span class="nav-link-heading"><i class="fas fa-compass" aria-hidden="true"></i><span>Keşfet</span></span>
           <a href="/kitaplar" data-link class="nav-link"><i class="fas fa-book-open"></i><span>Kitaplar</span></a>
           <a href="/muzikler" data-link class="nav-link"><i class="fas fa-music"></i><span>Müzikler</span></a>
-          <a href="/video" data-link class="nav-link"><i class="fas fa-film"></i><span>Videolar</span></a>
+          <a href="/video" data-link class="nav-link"><i class="fas fa-video"></i><span>Videolar</span></a>
           <a href="/reals" data-link class="nav-link"><i class="fas fa-circle-play"></i><span>Reals</span></a>
-          <a href="/medyakesfet" data-link class="nav-link"><i class="fas fa-images"></i><span>Medya Keşfet</span></a>
+          <a href="/medyakesfet" data-link class="nav-link"><i class="fas fa-images"></i><span>Keşfet</span></a>
         </div>
         <div class="nav-link-group">
-          <span class="nav-link-heading">Topluluk</span>
+          <span class="nav-link-heading">Diğer</span>
           <a href="/magaza" data-link class="nav-link"><i class="fas fa-store"></i><span>Mağaza</span></a>
+          <a href="/siparislerim" data-link class="nav-link"><i class="fas fa-credit-card"></i><span>Ödemelerim</span></a>
+        </div>
+        <div class="nav-link-group nav-desktop-logout-group" id="nav-desktop-logout-group" hidden>
+          <button type="button" class="nav-link nav-logout-link" id="nav-desktop-logout"><i class="fas fa-sign-out-alt"></i><span>Çıkış Yap</span></button>
         </div>
       </div>
       <div class="nav-auth" id="nav-auth">
@@ -299,7 +307,7 @@
 </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-  <script src="/app.js?v=media-explore-time-notes-1"></script>
+  <script src="/app.js?v=media-explore-grid-compose-fix-20261107"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---

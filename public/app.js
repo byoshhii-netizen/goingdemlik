@@ -3480,9 +3480,11 @@ function updateNavUI() {
   const mobNewToggle = $('#mobile-new-toggle');
   const mobUserLinks = $('#mobile-menu-user-links');
   const desktopAccountGroup = $('#nav-desktop-account-group');
+  const desktopLogoutGroup = $('#nav-desktop-logout-group');
   const adminMenuLink = $('#dropdown-admin');
   if (currentUser) {
     desktopAccountGroup?.classList.add('is-visible');
+    if (desktopLogoutGroup) desktopLogoutGroup.hidden = false;
     if (adminMenuLink) {
       adminMenuLink.hidden = !(currentUser.is_admin === true || Number(currentUser.is_admin) === 1);
     }
@@ -3528,6 +3530,7 @@ function updateNavUI() {
     }
   } else {
     desktopAccountGroup?.classList.remove('is-visible');
+    if (desktopLogoutGroup) desktopLogoutGroup.hidden = true;
     if (adminMenuLink) adminMenuLink.hidden = true;
     dmSearchUnlockCode = '';
     dmIconUnlockCode = '';
@@ -3869,6 +3872,7 @@ function showLogoutConfirmation() {
   });
 }
 $('#logout-btn')?.addEventListener('click', showLogoutConfirmation);
+$('#nav-desktop-logout')?.addEventListener('click', showLogoutConfirmation);
 
 $('#mobile-toggle').addEventListener('click', () => {
   const menu = $('#mobile-menu');
@@ -8840,7 +8844,7 @@ function realsProfileCardHTML(v) {
   </a>`;
 }
 
-function realsMediaCardHTML(v) {
+function realsMediaCardHTML(v, showSave = false) {
   const cover = v.banner_image || v.thumbnail_url || v.cover_url || v.poster || '';
   const route = `/reals/${encodeURIComponent(v.id)}`;
   const displayName = userDisplayName(v);
@@ -8869,7 +8873,29 @@ function realsMediaCardHTML(v) {
         <button type="button" class="btn btn-ghost btn-sm reals-media-share" aria-label="Reals bağlantısını paylaş"><i class="fas fa-share-alt"></i> Paylaş</button>
         <button type="button" class="btn btn-ghost btn-sm reals-media-forward" aria-label="Reals videosunu ilet"><i class="fas fa-paper-plane"></i> İlet</button>
       </div>
+      ${showSave ? mediaExploreSaveButtonHTML(v) : ''}
     </div>
+  </article>`;
+}
+
+function mediaExploreSaveButtonHTML(content, type = 'video') {
+  const saved = content.saved === true || content.saved === 1;
+  const contentId = type === 'photo' ? content.id : (content.slug || content.id);
+  return `<div class="media-explore-save-row"><button type="button" class="media-explore-save${saved ? ' is-saved' : ''}" data-save-type="${type}" data-save-id="${escHtml(contentId)}" aria-label="${saved ? 'Kaydedilenlerden kaldır' : 'Kaydet'}" aria-pressed="${saved}" title="${saved ? 'Kaydedilenlerden kaldır' : 'Kaydet'}"><i class="${saved ? 'fas' : 'far'} fa-bookmark" aria-hidden="true"></i></button></div>`;
+}
+
+function mediaExploreVideoCardHTML(video) {
+  const dateKey = mediaDateKey(video.created_at);
+  const cover = video.banner_image || video.thumbnail_url || '';
+  return `<article class="video-card media-explore-video-card">
+    <div class="photo-card-head">
+      ${avatarImg(video)}
+      <div class="photo-card-identity"><a href="${profileRoute(video.username)}" data-link>${userDisplayName(video)}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(video.created_at || '')}">${escHtml(formatDateTime(video.created_at))}</time></a>` : ''}</div>
+    </div>
+    <a class="video-thumb media-explore-video-open" href="/video/${encodeURIComponent(video.slug || video.id)}" data-link aria-label="${escHtml(video.title || 'Videoyu izle')}">
+      ${cover ? `<img src="${escHtml(cover)}" alt="" loading="lazy" />` : '<div class="video-thumb-placeholder"><i class="fas fa-video"></i></div>'}
+    </a>
+    ${mediaExploreSaveButtonHTML(video)}
   </article>`;
 }
 
@@ -10380,11 +10406,31 @@ async function renderProfile(app, username) {
   }
   const profileSpotifyPromise = getSpotifyNowPlaying(user.username);
   let savedVideos = [];
+  let savedPhotos = [];
   if (isOwn) {
-    try { savedVideos = await api('/user/' + encodeURIComponent(username) + '/saved-videos'); } catch {}
+    [savedVideos, savedPhotos] = await Promise.all([
+      api('/user/' + encodeURIComponent(username) + '/saved-videos').catch(error => {
+        console.warn('Kaydedilen videolar yüklenemedi:', error.message || error);
+        return [];
+      }),
+      api('/user/' + encodeURIComponent(username) + '/saved-photos').catch(error => {
+        console.warn('Kaydedilen fotoğraflar yüklenemedi:', error.message || error);
+        return [];
+      })
+    ]);
   }
   const profileSavedVideos = Array.isArray(savedVideos) ? savedVideos : [];
-  const savedContentHTML = profileSavedVideos.length ? `<div class="profile-saved-content-grid">${profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)).join('')}</div>` : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Kaydedilen video yok.</p></div>';
+  const profileSavedPhotos = Array.isArray(savedPhotos) ? savedPhotos : [];
+  const savedPhotoCards = profileSavedPhotos.map(photo => {
+    const image = photoImageUrls(photo)[0];
+    return `<a class="profile-saved-photo-card" href="/foto/${encodeURIComponent(photo.id)}" data-link>
+      <img src="${escHtml(image || '')}" alt="${escHtml(photo.title || 'Kaydedilen fotoğraf')}" loading="lazy" />
+      <span><strong>${escHtml(userDisplayName(photo))}</strong><small>${escHtml(formatDateTime(photo.created_at))}</small></span>
+    </a>`;
+  });
+  const savedContentHTML = profileSavedVideos.length || savedPhotoCards.length
+    ? `<div class="profile-saved-content-grid">${[...profileSavedVideos.map(v => v.is_reals ? realsProfileCardHTML(v) : videoCardHTML(v)), ...savedPhotoCards].join('')}</div>`
+    : '<div class="empty-state"><i class="fas fa-bookmark"></i><p>Henüz kaydedilmiş medya yok.</p></div>';
   const profileArchiveCard = (type, id, content, canArchive = true, editAction = '') => `<div class="profile-archiveable-card${isOwn && canArchive && editAction ? ' has-profile-owner-actions' : ''}">${content}${isOwn && canArchive && editAction ? `<div class="profile-photo-owner-actions" aria-label="İçerik işlemleri">
       <button type="button" class="profile-content-edit-btn" ${editAction} aria-label="Düzenle" title="Düzenle"><i class="fas fa-pen"></i><span>Düzenle</span></button>
       <button type="button" class="profile-content-archive-btn" data-profile-content-action="archive" data-profile-archive-type="${escHtml(type)}" data-profile-archive-id="${escHtml(id)}" aria-label="Arşivle"><i class="fas fa-box-archive"></i><span>Arşivle</span></button>
@@ -14729,6 +14775,7 @@ async function renderDMChat(username) {
   // The API selects the latest page in descending order; the chat UI needs
   // chronological order so the newest message is at the bottom on first paint.
   const orderedMessages = [...(Array.isArray(messages) ? messages : [])]
+    .filter(message => !message.deleted_for_all)
     .sort((left, right) => Number(left.id) - Number(right.id));
 
   // Kilitli konuşma
@@ -15192,7 +15239,7 @@ async function renderDMChat(username) {
 
   // Msg menu button clicks
   let lastPollMsgId = orderedMessages.length > 0 ? Number(orderedMessages[orderedMessages.length - 1].id) : 0;
-  const lastPollDeletionAt = new Date(Date.now() - 60_000).toISOString();
+  let lastPollDeletionAt = new Date(Date.now() - 60_000).toISOString();
   const sendDmAttachment = async payload => {
     const message = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
       method: 'POST',
@@ -15450,14 +15497,15 @@ async function renderDMChat(username) {
     try {
       const deletionCheckpoint = lastPollDeletionAt;
       const conversationUpdate = await api(`/conversation/${encodeURIComponent(username)}?limit=100&after_id=${lastPollMsgId}&after_deleted_at=${encodeURIComponent(deletionCheckpoint)}`, { headers: searchUnlockHeaders });
+      lastPollDeletionAt = new Date(Date.now() - 60_000).toISOString();
       const refreshedMsgs = Array.isArray(conversationUpdate) ? conversationUpdate : conversationUpdate?.messages || [];
       const el = document.getElementById('dm-messages');
       if (!el) return;
       const wasBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
       refreshedMsgs.forEach(message => {
         const existing = el.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`);
-        if (existing && message.deleted_for_all && existing.dataset.deletedForAll !== 'true') {
-          existing.outerHTML = dmMessageHTML(message, currentUser.id, dmSelectionMode);
+        if (message.deleted_for_all) {
+          existing?.remove();
           dmSelectedIds.delete(String(message.id));
           updateDmSelActions();
         } else if (!existing && Number(message.id) > lastPollMsgId) {
@@ -15465,10 +15513,11 @@ async function renderDMChat(username) {
         }
       });
       if (refreshedMsgs.length) {
+        const hasNewMessages = refreshedMsgs.some(message => !message.deleted_for_all && Number(message.id) > lastPollMsgId);
         lastPollMsgId = Math.max(lastPollMsgId, ...refreshedMsgs.map(message => Number(message.id)));
         enhanceLinkPreviews(el);
-        if (wasBottom) el.scrollTop = el.scrollHeight;
-        if (document.visibilityState === 'visible' && document.hasFocus()) {
+        if (hasNewMessages && wasBottom) el.scrollTop = el.scrollHeight;
+        if (hasNewMessages && document.visibilityState === 'visible' && document.hasFocus()) {
           if (!isSelfConversation) await api(`/conversation/${encodeURIComponent(username)}/mark-read`, { method: 'POST' });
         }
       }
@@ -16308,25 +16357,22 @@ function playSharedMessageSong(button) {
 }
 
 function dmMessageHTML(m, myId, selMode, previousMessage = null) {
+  if (m.deleted_for_all) return '';
   const isOwn = m.sender_id == myId;
   const hiddenForMe = isOwn ? m.deleted_by_sender : m.deleted_by_receiver;
   if (hiddenForMe) return '';
-  const deletedForAll = Boolean(m.deleted_for_all);
-  const messageText = deletedForAll ? 'Bu mesaj herkesten silindi' : String(m.content || '');
+  const messageText = String(m.content || '');
   const senderName = m.sender_nickname || m.sender_username || 'Silinmiş kullanıcı';
   const senderProfile = m.sender_username ? profileRoute(m.sender_username) : '#';
   const messageTime = Date.parse(m.created_at);
   const previousTime = Date.parse(previousMessage?.created_at);
   const imageUrls = dmMessageImageUrls(m);
   const isContinued = previousMessage
-    && !previousMessage.deleted_for_all
     && String(previousMessage.sender_id) === String(m.sender_id)
     && Number.isFinite(messageTime)
     && Number.isFinite(previousTime)
     && Math.abs(messageTime - previousTime) <= 60_000;
-  const messageBubbleContent = deletedForAll
-    ? '<span class="dm-deleted-for-all-label"><i class="fas fa-ban" aria-hidden="true"></i>Bu mesaj herkesten silindi</span>'
-    : `${Number(m.image_view_limit) > 0 && !isOwn
+  const messageBubbleContent = `${Number(m.image_view_limit) > 0 && !isOwn
       ? Number(m.image_view_count) >= Number(m.image_view_limit)
         ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
         : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}" aria-label="Sınırlı görüntülemeli fotoğrafı aç"><i class="fas fa-eye"></i><span>Fotoğraf</span><small>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} görüntüleme</small></button>`
@@ -16379,7 +16425,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     ${dmMessageReactionsHTML(m.reactions, myId)}
     ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}`;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${deletedForAll ? ' dm-deleted-for-all' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${deletedForAll ? '' : escHtml(messageText)}"${deletedForAll ? ' data-deleted-for-all="true"' : ''} data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
+  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -16398,7 +16444,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
              <div style="font-size:12px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml((m.reply_content || '').substring(0, 60))}</div>
            </div>`
         : ''}
-      <div class="dm-msg-bubble${m.edited_at && !deletedForAll ? ' is-edited' : ''}">${messageBubbleContent}</div>
+      <div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">${messageBubbleContent}</div>
       <div class="dm-msg-meta">
         <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
         ${isOwn
@@ -20756,10 +20802,10 @@ async function renderPhotos(app) {
   }
 }
 async function renderMediaExplore(app) {
-  document.title = 'Medya Keşfet – ' + siteName;
+  document.title = 'Keşfet – ' + siteName;
   app.innerHTML = `<div class="container page photos-page media-explore-page">
     <header class="media-explore-hero">
-      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Medya Keşfet</h1></div></div>
+      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Keşfet</h1></div></div>
       <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Başlık, açıklama, kullanıcı, tarih veya #etiket ara..." autocomplete="off" aria-label="Medya başlığı, açıklaması, kullanıcı, tarih veya hashtag ara" /></label>
     </header>
     <div id="media-explore-feed" class="photos-feed" aria-live="polite"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -20833,7 +20879,7 @@ async function renderMediaExplore(app) {
           const description = item.type === 'photo' ? content.caption : content.description;
           const searchIndex = [content.title, description, content.username, content.nickname, ...mediaDateSearchTerms(content.created_at)]
             .filter(Boolean).join(' ').toLocaleLowerCase('tr-TR');
-          const html = item.type === 'reals' ? realsMediaCardHTML(content) : item.type === 'video' ? videoCardHTML(content) : photoCardHTML(content);
+          const html = item.type === 'reals' ? realsMediaCardHTML(content, true) : item.type === 'video' ? mediaExploreVideoCardHTML(content) : photoCardHTML(content, true);
           return `<div class="media-explore-result" data-search-index="${escHtml(searchIndex)}">${html}</div>`;
         }).join('')
         : '<div class="empty-state"><i class="fas fa-images"></i><p>Henüz herkese açık medya paylaşımı yok.</p></div>';
@@ -20855,9 +20901,9 @@ async function renderMediaExplore(app) {
       if (matchingRealsResult.error) console.warn('Hashtag Reals sonuçları yüklenemedi:', matchingRealsResult.error.message || matchingRealsResult.error);
       const exactTag = tagMatches.find(item => item.tag.toLocaleLowerCase('tr-TR') === tag.toLocaleLowerCase('tr-TR'));
       const content = [
-        ...matchingPhotos.map(photo => ({ createdAt: photo.created_at, search: [photo.title, photo.caption, photo.username, photo.nickname], html: photoCardHTML(photo) })),
-        ...matchingVideos.map(video => ({ createdAt: video.created_at, search: [video.title, video.description, video.username, video.nickname, ...mediaDateSearchTerms(video.created_at)], html: videoCardHTML(video) })),
-        ...matchingReals.map(real => ({ createdAt: real.created_at, search: [real.title, real.description, real.username], html: realsMediaCardHTML(real) }))
+        ...matchingPhotos.map(photo => ({ createdAt: photo.created_at, search: [photo.title, photo.caption, photo.username, photo.nickname], html: photoCardHTML(photo, true) })),
+        ...matchingVideos.map(video => ({ createdAt: video.created_at, search: [video.title, video.description, video.username, video.nickname, ...mediaDateSearchTerms(video.created_at)], html: mediaExploreVideoCardHTML(video) })),
+        ...matchingReals.map(real => ({ createdAt: real.created_at, search: [real.title, real.description, real.username], html: realsMediaCardHTML(real, true) }))
       ].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
       const summary = `<section class="hashtag-search-summary"><strong>#${escHtml(tag)}</strong><span>${formatCount(exactTag?.usage_count)} kullanım · ${formatCount(exactTag?.post_count)} gönderi</span></section>`;
       const results = content.map(item => `<div class="media-explore-result" data-search-index="${escHtml(item.search.filter(Boolean).join(' ').toLocaleLowerCase('tr-TR'))}">${item.html}</div>`).join('');
@@ -20916,11 +20962,37 @@ async function renderMediaExplore(app) {
     feed.innerHTML = `<div class="empty-state"><i class="fas fa-triangle-exclamation"></i><p>${escHtml(error.message || 'Fotoğraflar yüklenemedi.')}</p></div>`;
   }
 }
-function photoCardHTML(p) {
+function photoCardHTML(p, showSave = false) {
   const imageUrls = photoImageUrls(p);
   const dateKey = mediaDateKey(p.created_at);
   const galleryControls = imageUrls.length > 1 ? `<div class="photo-gallery-controls" aria-label="Fotoğraf galerisi"><button type="button" class="photo-gallery-arrow photo-gallery-prev" data-gallery-step="-1" aria-label="Önceki fotoğraf"><i class="fas fa-chevron-left"></i></button><div class="photo-gallery-dots">${imageUrls.map((_, index) => `<button type="button" class="photo-gallery-dot${index === 0 ? ' active' : ''}" data-gallery-go="${index}" aria-label="${index + 1}. fotoğraf" aria-current="${index === 0 ? 'true' : 'false'}"></button>`).join('')}</div><button type="button" class="photo-gallery-arrow photo-gallery-next" data-gallery-step="1" aria-label="Sonraki fotoğraf"><i class="fas fa-chevron-right"></i></button></div>` : '';
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0" style="padding:0;overflow:hidden"><div class="photo-card-head" style="padding:12px">${avatarImg(p)}<div class="photo-card-identity"><a href="/profil/${escHtml(p.username)}" data-link>${userDisplayName(p)}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(p.created_at || '')}">${escHtml(formatDateTime(p.created_at))}</time></a>` : ''}</div>${currentUser&&currentUser.id===p.user_id?'<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>':''}</div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div><div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title||p.caption||'')}" draggable="false"/></div>${galleryControls}${p.song_title&&p.song_audio_url?`<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds)||0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist?` · ${escHtml(p.song_artist)}`:''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>`:''}</div><div class="photo-card-content">${p.title?`<h3>${escHtml(p.title)}</h3>`:''}  ${p.caption?hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180):''}${p.location?`<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>`:''}<div class="photo-actions">${p.show_likes?`<button class="btn btn-ghost btn-sm photo-like ${p.liked?'liked':''}" data-liked="${p.liked?'true':'false'}" data-like-count="${Number(p.like_count)||0}"><i class="${p.liked?'fas':'far'} fa-heart"></i> <span>${p.like_count}</span></button>`:''}${p.allow_comments?`<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count)||0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>`:''}${p.allow_shares?'<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>':''}</div></div></article>`;
+  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0" style="padding:0;overflow:hidden">
+    <div class="photo-card-head" style="padding:12px">
+      ${avatarImg(p)}
+      <div class="photo-card-identity">
+        <a href="${profileRoute(p.username)}" data-link>${userDisplayName(p)}</a>
+        ${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(p.created_at || '')}">${escHtml(formatDateTime(p.created_at))}</time></a>` : ''}
+      </div>
+      ${currentUser && currentUser.id === p.user_id ? '<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>' : ''}
+    </div>
+    <div class="photo-media-wrap">
+      <div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div>
+      <div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title || p.caption || '')}" draggable="false"/></div>
+      ${galleryControls}
+      ${p.song_title && p.song_audio_url ? `<button class="photo-song photo-song-overlay" data-audio="${escHtml(p.song_audio_url)}" data-start="${Number(p.song_start_seconds) || 0}" type="button"><i class="fas fa-music"></i><span>${escHtml(p.song_title)}${p.song_artist ? ` · ${escHtml(p.song_artist)}` : ''}</span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>` : ''}
+    </div>
+    ${showSave ? mediaExploreSaveButtonHTML(p, 'photo') : ''}
+    <div class="photo-card-content">
+      ${p.title ? `<h3>${escHtml(p.title)}</h3>` : ''}
+      ${p.caption ? hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180) : ''}
+      ${p.location ? `<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>` : ''}
+      <div class="photo-actions">
+        ${p.show_likes ? `<button class="btn btn-ghost btn-sm photo-like ${p.liked ? 'liked' : ''}" data-liked="${p.liked ? 'true' : 'false'}" data-like-count="${Number(p.like_count) || 0}"><i class="${p.liked ? 'fas' : 'far'} fa-heart"></i> <span>${p.like_count}</span></button>` : ''}
+        ${p.allow_comments ? `<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count) || 0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>` : ''}
+        ${p.allow_shares ? '<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>' : ''}
+      </div>
+    </div>
+  </article>`;
 }
 function photoImageUrls(photo) {
   let urls = photo?.image_urls;
@@ -20946,6 +21018,32 @@ function setPhotoGalleryIndex(card, index) {
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
+  feed.querySelectorAll('.media-explore-save').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!currentUser) {
+        toast('İçeriği kaydetmek için giriş yapmalısın.', 'error');
+        return;
+      }
+      button.disabled = true;
+      try {
+        const contentType = button.dataset.saveType === 'photo' ? 'photos' : 'video';
+        const contentId = encodeURIComponent(button.dataset.saveId || '');
+        const result = await api(`/${contentType}/${contentId}/save`, { method: 'POST' });
+        button.classList.toggle('is-saved', result.saved);
+        button.setAttribute('aria-pressed', String(result.saved));
+        button.setAttribute('aria-label', result.saved ? 'Kaydedilenlerden kaldır' : 'Kaydet');
+        button.title = result.saved ? 'Kaydedilenlerden kaldır' : 'Kaydet';
+        const icon = button.querySelector('i');
+        if (icon) icon.className = `${result.saved ? 'fas' : 'far'} fa-bookmark`;
+      } catch (error) {
+        toast(error.message || 'İçerik kaydedilemedi.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
   feed.querySelectorAll('.reals-media-card').forEach(card => {
     card.addEventListener('click', event => {
       if (event.target.closest('a, button')) return;
