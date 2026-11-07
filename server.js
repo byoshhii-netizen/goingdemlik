@@ -2399,7 +2399,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     if (!Number.isFinite(age) || age < 15 || birth > today) return res.status(400).json({ error: '15 yaş altı kabul edilmez (¬‿¬) hııhıı' });
     const validTagPermission = 'everyone';
     const isPrivate = is_private === true || is_private === 1 || ['true', '1', 'on'].includes(String(is_private ?? '').trim().toLowerCase());
-    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true, followers_list: true, following_list: true };
+    let defaultVisibility = { forums: false, books: false, comments: false, photos: false, music: false, followers: true, following: true };
     const { rows: homepageSettings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
     let defaultHomepageSections = [];
     try {
@@ -5511,13 +5511,10 @@ app.delete('/api/users/:username/follower', authMiddleware, async (req, res) => 
   res.json({ following: false });
 });
 
-async function canViewFollowList(username, viewer, listType) {
-  const { rows: target } = await query('SELECT id,is_private,profile_visibility FROM users WHERE username=$1', [username]);
+async function canViewFollowList(username, viewer) {
+  const { rows: target } = await query('SELECT id,is_private FROM users WHERE username=$1', [username]);
   if (!target.length) return null;
   if (viewer && await blockHidesContent(viewer.id, target[0].id)) return false;
-  let visibility = { followers: true, following: true };
-  try { visibility = { ...visibility, ...(target[0].profile_visibility ? JSON.parse(target[0].profile_visibility) : {}) }; } catch {}
-  if (visibility[listType] === false) return false;
   if (!target[0].is_private || (viewer && viewer.id === target[0].id)) return target[0].id;
   if (!viewer) return false;
   const { rows } = await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [viewer.id, target[0].id]);
@@ -5525,7 +5522,7 @@ async function canViewFollowList(username, viewer, listType) {
 }
 
 app.get('/api/users/:username/followers', optionalAuth, async (req, res) => {
-  const userId = await canViewFollowList(req.params.username, req.user, 'followers');
+  const userId = await canViewFollowList(req.params.username, req.user);
   if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
   const { rows } = await query("SELECT u.id,u.username,u.nickname,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.follower_id WHERE f.following_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
@@ -5533,7 +5530,7 @@ app.get('/api/users/:username/followers', optionalAuth, async (req, res) => {
 });
 
 app.get('/api/users/:username/following', optionalAuth, async (req, res) => {
-  const userId = await canViewFollowList(req.params.username, req.user, 'following');
+  const userId = await canViewFollowList(req.params.username, req.user);
   if (userId === null) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   if (userId === false) return res.status(403).json({ error: 'Bu hesap gizli' });
   const { rows } = await query("SELECT u.id,u.username,u.nickname,u.avatar,u.title FROM follows f JOIN users u ON u.id=f.following_id WHERE f.follower_id=$1 AND f.status='accepted' ORDER BY f.created_at DESC", [userId]);
@@ -6074,6 +6071,8 @@ app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
   const { rows } = await query('SELECT profile_visibility FROM users WHERE id=$1', [req.user.id]);
   let visibility = {};
   try { visibility = rows[0]?.profile_visibility ? JSON.parse(rows[0].profile_visibility) : {}; } catch {}
+  delete visibility.followers_list;
+  delete visibility.following_list;
   if (!Object.keys(visibility).length) {
     const { rows: settings } = await query("SELECT value FROM settings WHERE key='homepage_sections'");
     let sections = [];
@@ -6086,7 +6085,7 @@ app.get('/api/me/profile-visibility', authMiddleware, async (req, res) => {
 });
 
 app.put('/api/me/profile-visibility', authMiddleware, async (req, res) => {
-  const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following', 'followers_list', 'following_list'];
+  const allowed = ['forums', 'books', 'comments', 'photos', 'music', 'followers', 'following'];
   const { rows: combinedSetting } = await query("SELECT value FROM settings WHERE key='content_count_combined'");
   const combined = combinedSetting[0]?.value === '1';
   let existingVisibility = {};
@@ -6568,6 +6567,7 @@ function ensurePhotoInteractionSchema() {
         created_at TIMESTAMP DEFAULT NOW(),
         UNIQUE(photo_id, user_id)
       );
+      ALTER TABLE photo_likes ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
       CREATE TABLE IF NOT EXISTS photo_saves (
         id BIGSERIAL PRIMARY KEY,
         photo_id BIGINT NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
@@ -7365,7 +7365,9 @@ app.get('/api/photos/:id/likes', authMiddleware, async (req, res) => {
       WHERE pl.photo_id=$1 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE (bl.blocker_id=$2 AND bl.blocked_id=u.id) OR (bl.blocker_id=u.id AND bl.blocked_id=$2))
         AND ($3='' OR u.username ILIKE $4 OR COALESCE(u.nickname,'') ILIKE $4)
-      ORDER BY is_followed DESC, pl.created_at DESC
+      ORDER BY CASE WHEN EXISTS (
+        SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=u.id AND f.status='accepted'
+      ) THEN 0 ELSE 1 END, pl.created_at DESC
       LIMIT $5 OFFSET $6
     `, [photoId, userId, searchTerm, `%${searchTerm}%`, limit, offset]);
     res.json({ users: rows, has_more: rows.length === limit });

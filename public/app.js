@@ -10410,7 +10410,7 @@ async function renderProfile(app, username) {
       }
     } catch {}
   }
-  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true, followers_list: true, following_list: true };
+  let profileVisibility = { forums: true, books: true, comments: true, photos: true, music: true };
   try { profileVisibility = { ...profileVisibility, ...(user.profile_visibility ? JSON.parse(user.profile_visibility) : {}) }; } catch {}
   let followState = { following: !!data.following, pending: false };
   if (loadedFollowState) followState = loadedFollowState;
@@ -10580,8 +10580,8 @@ async function renderProfile(app, username) {
           ${combinedContentCount
             ? `<button type="button" class="profile-stat profile-content-count" aria-label="İçerik sayılarını görüntüle"><div class="profile-stat-num">${Number(data.content_count ?? (Number(user.forum_count || 0) + Number(user.book_count || 0) + Number(user.comment_count || 0) + photos.length + profileSongs.length))}</div><div class="profile-stat-label">İçerik</div></button>`
             : ''}
-          ${profileVisibility.followers_list !== false ? `<button type="button" class="profile-stat profile-follow-list" data-follow-list="followers" aria-label="Takipçi listesini gör"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></div>`}
-          ${profileVisibility.following_list !== false ? `<button type="button" class="profile-stat profile-follow-list" data-follow-list="following" aria-label="Takip ettiklerini gör"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>` : `<div class="profile-stat"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></div>`}
+          <button type="button" class="profile-stat profile-follow-list" data-follow-list="followers" aria-label="Takipçi listesini gör"><div class="profile-stat-num">${data.followers_count || 0}</div><div class="profile-stat-label">Takipçi</div></button>
+          <button type="button" class="profile-stat profile-follow-list" data-follow-list="following" aria-label="Takip ettiklerini gör"><div class="profile-stat-num">${data.following_count || 0}</div><div class="profile-stat-label">Takip</div></button>
           ${!combinedContentCount ? `${profileVisibility.forums ? `<div class="profile-stat"><div class="profile-stat-num">${user.forum_count}</div><div class="profile-stat-label">Forum</div></div>` : ''}
               ${profileVisibility.books ? `<div class="profile-stat"><div class="profile-stat-num">${user.book_count}</div><div class="profile-stat-label">Kitap</div></div>` : ''}
               ${profileVisibility.music && profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
@@ -12266,7 +12266,7 @@ async function renderSettingsSection(section) {
       try { toast('Bu eski ayar artık kullanılmıyor'); } catch (error) { $('#homepage-msg').textContent = error.message; }
     });
   } else if (section === 'profile-visibility') {
-    let visibility = { forums: true, books: true, comments: true, photos: true, music: true, followers_list: true, following_list: true };
+    let visibility = { forums: true, books: true, comments: true, photos: true, music: true };
     try {
       visibility = { ...visibility, ...(await api('/me/profile-visibility')).visibility };
     } catch (error) {
@@ -12294,10 +12294,6 @@ async function renderSettingsSection(section) {
       ['photos', 'Medya', 'Profilinde fotoğraf ve video sayısını göster', 'fas fa-images'],
       ['music', 'Müzikler', 'Profilinde müzik sayısını göster', 'fas fa-music']
     ];
-    const followItems = [
-      ['followers_list', 'Takipçi listesi', 'Takipçilerini profilinden açılabilir yap', 'fas fa-users'],
-      ['following_list', 'Takip edilenler listesi', 'Takip ettiklerini profilinden açılabilir yap', 'fas fa-user-check']
-    ];
     el.innerHTML = `<div class="card profile-visibility-card">
       <div class="card-header"><span><i class="fas fa-sliders" style="color:var(--accent-red2);margin-right:8px"></i>Profil seçenekleri</span></div>
       <div class="card-body">
@@ -12306,10 +12302,6 @@ async function renderSettingsSection(section) {
           <div class="profile-preference-heading"><strong>Profilde gösterilenler</strong><small>İçerik sayılarını profilinde göster veya gizle.</small></div>
           <div class="profile-visibility-list">${contentItems.map(renderOption).join('')}</div>
         </section>` : ''}
-        <section class="profile-preference-group">
-          <div class="profile-preference-heading"><strong>Takipçi listeleri</strong><small>Takipçi ve takip edilen listelerinin açılabilirliğini yönet.</small></div>
-          <div class="profile-visibility-list">${followItems.map(renderOption).join('')}</div>
-        </section>
         <div class="settings-autosave-status" id="profile-visibility-status" aria-live="polite">Değişiklikler otomatik kaydedilir.</div>
       </div>
     </div>`;
@@ -21350,7 +21342,7 @@ function photoCardHTML(p, showSave = false) {
       ${p.caption ? hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180) : ''}
       ${p.location ? `<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>` : ''}
       <div class="photo-actions">
-        ${p.show_likes ? `<button class="btn btn-ghost btn-sm photo-like ${p.liked ? 'liked' : ''}" data-liked="${p.liked ? 'true' : 'false'}" data-like-count="${Number(p.like_count) || 0}" title="${p.liked ? 'Beğeniyi kaldır' : 'Beğen'}" aria-label="${p.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${p.liked ? 'fas' : 'far'} fa-heart"></i></button><button class="btn btn-ghost btn-sm photo-like-count" type="button" data-photo-likes-count="${p.id}" aria-label="${Number(p.like_count) || 0} beğenen kişiyi göster"><span>${p.like_count}</span></button>` : ''}
+        ${p.show_likes ? `<span class="photo-like-group"><button class="btn btn-ghost btn-sm photo-like ${p.liked ? 'liked' : ''}" data-liked="${p.liked ? 'true' : 'false'}" data-like-count="${Number(p.like_count) || 0}" title="${p.liked ? 'Beğeniyi kaldır' : 'Beğen'}" aria-label="${p.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${p.liked ? 'fas' : 'far'} fa-heart"></i></button><button class="btn btn-ghost btn-sm photo-like-count" type="button" data-photo-likes-count="${p.id}" aria-label="${Number(p.like_count) || 0} beğenen kişiyi göster"><span>${p.like_count}</span></button></span>` : ''}
         ${p.allow_comments ? `<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count) || 0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>` : ''}
         ${p.allow_shares ? '<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>' : ''}
       </div>
