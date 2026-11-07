@@ -11893,6 +11893,15 @@ app.put('/api/dm-notes', authMiddleware, async (req, res) => {
   const backgroundColor = typeof req.body?.background_color === 'string' && /^#[0-9a-f]{6}$/i.test(req.body.background_color)
     ? req.body.background_color.toLowerCase()
     : '#242731';
+  const noteColorChannels = /^#([0-9a-f]{6})$/i.exec(backgroundColor)?.[1];
+  if (noteColorChannels) {
+    const luminance = [0, 2, 4].reduce((sum, index, channelIndex) => {
+      const value = parseInt(noteColorChannels.slice(index, index + 2), 16) / 255;
+      const linear = value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      return sum + linear * [0.2126, 0.7152, 0.0722][channelIndex];
+    }, 0);
+    if (luminance > 0.18) return res.status(400).json({ error: 'Not rengi çok açık. Daha koyu bir renk seçin.' });
+  }
   const songId = req.body?.song_id == null || req.body.song_id === '' ? null : Number(req.body.song_id);
   const songStart = Number(req.body?.song_start_seconds || 0);
   if (content.length > 180) return res.status(400).json({ error: 'Not en fazla 180 karakter olabilir.' });

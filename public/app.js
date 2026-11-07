@@ -1309,6 +1309,7 @@ function mobileCreateActionFromSections(sections) {
   const actionBySection = {
     fotograflar: 'media', photos: 'media', medya: 'media', reals: 'media',
     konular: 'forum', forum: 'forum', forums: 'forum',
+    gazeteler: 'newspaper', newspapers: 'newspaper',
     kitaplar: 'book', books: 'book',
     siirler: 'poem', poems: 'poem',
     muzikler: 'music', music: 'music',
@@ -1321,6 +1322,7 @@ function mobileCreateActionFromSections(sections) {
 
 async function getMobileCreateAction(path = location.pathname) {
   if (/^\/(?:fotograflar|medyakesfet|foto\/|hikaye\/|reals(?:\/|$))/.test(path)) return 'media';
+  if (/^\/(?:gazeteler(?:\/|$)|gazete\/)/.test(path)) return 'newspaper';
   if (/^\/(?:video|videolar)(?:\/|$)/.test(path)) return 'video';
   if (/^\/(?:muzikler|muzik\/)(?:\/|$)/.test(path)) return 'music';
   if (/^\/(?:forum|konular)(?:\/|$)/.test(path)) return 'forum';
@@ -1356,6 +1358,7 @@ async function handleMobileCreateAction() {
   }
   closeMobileCreateMenu();
   if (!currentUser) return navigate('/giris');
+  if (action === 'newspaper') return showNewspaperUploadModal();
   if (action === 'video') return showNewVideoModal();
   if (action === 'music') return navigate('/sarki-yukle');
   if (action === 'forum') return showNewForumModal();
@@ -4709,10 +4712,37 @@ async function shareNewspaper(newspaper) {
   }
 }
 
-function showNewspaperUploadModal() {
+function showJournalistRequiredModal() {
+  showModal('Gazeteci yetkisi gerekli', `
+    <section class="journalist-required">
+      <span class="journalist-required-icon"><i class="fas fa-newspaper"></i></span>
+      <span class="journalist-required-eyebrow">CigCig Gazeteleri</span>
+      <h2>Gazeteler gazeteciler tarafından yayımlanır</h2>
+      <p>Gazete hazırlayıp arşive ekleyebilmek için hesabında gazeteci yetkisi bulunmalı. Yetkin varsa durumunu yeniden kontrol edebilirsin.</p>
+      <button type="button" class="btn btn-outline" id="journalist-required-retry"><i class="fas fa-rotate"></i> Yeniden kontrol et</button>
+    </section>`);
+  $('#journalist-required-retry')?.addEventListener('click', showNewspaperUploadModal);
+}
+
+async function refreshJournalistDirectory() {
+  const journalists = await api('/journalists');
+  journalistDirectory.clear();
+  journalists.forEach(journalist => {
+    journalistDirectory.set(String(journalist.username || '').toLocaleLowerCase('tr-TR'), journalist);
+  });
+}
+
+async function showNewspaperUploadModal() {
   if (!currentUser) return navigate('/giris');
+  try {
+    await refreshJournalistDirectory();
+  } catch (error) {
+    showModal('Gazeteci durumu kontrol edilemedi', `<div class="form-error">${escHtml(error.message || 'Gazeteci bilgileri yüklenemedi.')}</div><button type="button" class="btn btn-outline" id="journalist-required-retry"><i class="fas fa-rotate"></i> Yeniden dene</button>`);
+    $('#journalist-required-retry')?.addEventListener('click', showNewspaperUploadModal);
+    return;
+  }
   if (!journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'))) {
-    return toast('Gazete yayımlamak için gazeteci olmanız gerekir.', 'error');
+    return showJournalistRequiredModal();
   }
   showModal('Gazeteni yayımla', `
     <div class="newspaper-publish-choices">
@@ -4738,7 +4768,6 @@ function showNewspaperPhotoUploadModal() {
   const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   showModal('Yeni gazete yayımla', `
     <form class="newspaper-upload-form" id="newspaper-upload-form">
-      <div class="newspaper-upload-banner"><span><i class="fas fa-feather-pointed"></i></span><div><strong>Yeni bir sayı arşive giriyor</strong><small>Gazete görselini, sayı adını ve basım tarihini ekleyin.</small></div></div>
       <label class="newspaper-upload-field"><span>Gazete adı</span><input id="newspaper-name-input" name="newspaper_name" maxlength="100" required value="CigCig Gazetesi" autocomplete="off" /></label>
       <label class="newspaper-upload-field"><span>Gazete tarihi</span><input id="newspaper-date-input" name="newspaper_date" type="date" value="${today}" required /></label>
       <label class="newspaper-upload-file" for="newspaper-image-input"><span class="newspaper-upload-file-icon"><i class="fas fa-cloud-arrow-up"></i></span><strong>Gazete görselini seç</strong><small>Dikey sayfa önerilir · JPG, PNG veya WebP · En fazla 25 MB</small><input id="newspaper-image-input" name="image" type="file" accept="image/*" required /></label>
@@ -6196,7 +6225,6 @@ async function renderPoemDetail(app, slug) {
 function showNewForumModal(existing = null) {
   showModal(existing ? 'Konuyu Düzenle' : 'Yeni Konu Aç', `
     <div class="forum-compose">
-      ${existing ? '' : `<div class="forum-compose-intro"><span class="forum-compose-icon"><i class="fas fa-lightbulb"></i></span><div><strong>Topluluğa bir soru bırak</strong><small>Başlığını net tut, detayları içerikte anlat. Böylece daha hızlı ve iyi cevaplar alırsın.</small></div></div>`}
       <div class="form-group forum-compose-field"><label for="fm-title">Başlık</label><input id="fm-title" maxlength="140" type="text" placeholder="Örn. Bu konuda sizin deneyiminiz ne?" value="${existing ? escHtml(existing.title) : ''}" /><small class="field-hint">Konunun ne hakkında olduğunu tek cümlede anlat.</small></div>
       <div class="form-group forum-compose-field"><div class="field-label-row"><label for="fm-content">İçerik</label><span id="fm-content-count">0 / 20.000</span></div><textarea id="fm-content" maxlength="20000" rows="9" placeholder="Düşünceni, sorunu veya bağlamı buraya yaz...">${existing ? escHtml(existing.content) : ''}</textarea><small class="field-hint">Satır atlayabilir, bağlantı veya etiket ekleyebilirsin.</small></div>
       <div class="form-group forum-compose-field">
@@ -9163,7 +9191,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
   showModal(existing ? 'Videoyu Düzenle' : (forceReals ? 'Reals oluştur' : 'Video oluştur'), `
     <div class="social-compose social-compose-video${simplifiedRealsComposer ? ' social-compose-reals' : ' social-compose-video-standard'}">
       <section class="social-compose-preview-pane">
-        <div class="social-compose-preview-frame social-compose-video-frame${existing?.video_url ? ' has-media' : ''}">
+        <div class="social-compose-preview-frame social-compose-video-frame${!simplifiedRealsComposer ? ' is-landscape' : ''}${existing?.video_url ? ' has-media' : ''}">
           <video id="video-upload-preview" controls muted playsinline preload="metadata"></video>
           ${existing?.video_url ? `<video class="social-compose-existing-preview" src="${escHtml(getVideoPlaybackUrl(existing.video_url))}" controls muted playsinline preload="metadata"></video>` : ''}
           <div class="social-compose-preview-empty${existing?.video_url ? ' hidden' : ''}" id="video-preview-empty"><i class="fas fa-circle-play"></i><strong>Videonu seç</strong><span>Önizlemen burada görünecek</span></div>
@@ -14411,8 +14439,29 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       count.textContent = String(content.value.length);
       document.getElementById('dm-note-preview-content').textContent = content.value.trim() || chosenSong?.title || 'Notun burada görünecek';
     };
+    const sanitizeDmNoteColor = value => {
+      const channels = /^#([0-9a-f]{6})$/i.exec(value)?.[1];
+      if (!channels) return '#242731';
+      const rgb = [0, 2, 4].map(index => parseInt(channels.slice(index, index + 2), 16));
+      const luminance = factor => rgb.reduce((sum, channel, index) => {
+        const normalized = channel * factor / 255;
+        return sum + (normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4) * [0.2126, 0.7152, 0.0722][index];
+      }, 0);
+      if (luminance(1) <= 0.18) return `#${channels.toLowerCase()}`;
+      let low = 0;
+      let high = 1;
+      for (let iteration = 0; iteration < 16; iteration++) {
+        const middle = (low + high) / 2;
+        if (luminance(middle) <= 0.17) low = middle;
+        else high = middle;
+      }
+      return `#${rgb.map(channel => Math.round(channel * low).toString(16).padStart(2, '0')).join('')}`;
+    };
     content.addEventListener('input', updateNotePreview);
-    colorInput?.addEventListener('input', () => colorPreview?.style.setProperty('--dm-note-color', colorInput.value));
+    colorInput?.addEventListener('input', () => {
+      colorInput.value = sanitizeDmNoteColor(colorInput.value);
+      colorPreview?.style.setProperty('--dm-note-color', colorInput.value);
+    });
     document.getElementById('dm-note-clear-song')?.addEventListener('click', () => {
       chosenSong = null;
       updateNotePreview();
