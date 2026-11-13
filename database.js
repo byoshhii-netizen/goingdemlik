@@ -745,6 +745,15 @@ async function initDb() {
     ALTER TABLE book_pages ADD COLUMN IF NOT EXISTS is_published INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE book_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 
+    CREATE TABLE IF NOT EXISTS book_page_drafts (
+      page_id BIGINT PRIMARY KEY REFERENCES book_pages(id) ON DELETE CASCADE,
+      chapter_id BIGINT REFERENCES book_chapters(id) ON DELETE SET NULL,
+      title TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      image_url TEXT DEFAULT '',
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS groups (
       id BIGSERIAL PRIMARY KEY,
       name TEXT NOT NULL,

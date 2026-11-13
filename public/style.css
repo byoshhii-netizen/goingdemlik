@@ -3178,6 +3178,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   word-break: break-word;
   overflow-wrap: anywhere;
   max-width: 100%;
+  font-family: var(--book-reader-font, Georgia, serif);
+  line-height: 1.85;
 }
 @media (max-width: 600px) {
   .ebook-page-content { padding: 24px 20px; font-size: 16px; line-height: 1.85; min-height: 62svh; }
@@ -11391,19 +11393,19 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
 .book-writing-intro { display:flex;align-items:center;gap:14px;margin-bottom:14px;padding:13px 15px;border:1px solid rgba(var(--accent-rgb),.2);border-radius:13px;background:rgba(var(--accent-rgb),.055); }
 .book-writing-intro > span { display:flex;flex:0 0 auto;align-items:center;gap:6px;color:var(--accent-red2);font-size:10px;font-weight:800;letter-spacing:.04em; }
 .book-writing-intro p { margin:0;color:var(--text-secondary);font-size:11px;line-height:1.5; }
-.book-writing-paper { min-height:70vh;padding:clamp(22px,6vw,58px);border:1px solid rgba(0,0,0,.14);border-radius:5px;background:#f4ecd8;box-shadow:0 10px 38px rgba(0,0,0,.24); }
-.book-writing-title { display:block;width:100%;margin:0 0 18px;padding:0 0 12px;border:0;border-bottom:1px solid rgba(50,43,32,.2);outline:0;color:#28231d;background:transparent;font:700 clamp(25px,4vw,36px)/1.25 Georgia,serif; }
-.book-writing-title::placeholder { color:rgba(40,35,29,.45); }
-.book-writing-chapter-label { display:block;margin:10px 0 5px;color:#62584a;font-size:11px;font-weight:700; }
-.book-writing-chapter { max-width:280px;margin-bottom:15px;padding:8px 10px;border:1px solid rgba(50,43,32,.22);border-radius:8px;color:#332c23;background:rgba(255,255,255,.55); }
-.book-writing-image-control { display:inline-flex;align-items:center;gap:7px;margin:0 0 12px;color:#715d44;font-size:11px;font-weight:700;cursor:pointer; }
-.book-writing-image-control input { max-width:220px;color:#5d5448;font-size:10px; }
+.book-writing-paper { min-height:70vh;padding:clamp(22px,6vw,58px);border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 18%,transparent);border-radius:5px;color:var(--book-text,#2c1a0e);background:var(--book-bg,#f6ecd7);box-shadow:0 10px 38px rgba(0,0,0,.24); }
+.book-writing-title { display:block;width:100%;margin:0 0 18px;padding:0 0 12px;border:0;border-bottom:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 22%,transparent);outline:0;color:var(--book-text,#2c1a0e);background:transparent;font:700 clamp(25px,4vw,36px)/1.25 var(--book-reader-font,Georgia,serif); }
+.book-writing-title::placeholder { color:color-mix(in srgb,var(--book-text,#2c1a0e) 48%,transparent); }
+.book-writing-chapter-label { display:block;margin:10px 0 5px;color:color-mix(in srgb,var(--book-text,#2c1a0e) 78%,transparent);font-size:11px;font-weight:700; }
+.book-writing-chapter { max-width:280px;margin-bottom:15px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 24%,transparent);border-radius:8px;color:var(--book-text,#2c1a0e);background:color-mix(in srgb,var(--book-bg,#f6ecd7) 84%,var(--book-text,#2c1a0e)); }
+.book-writing-image-control { display:inline-flex;align-items:center;gap:7px;margin:0 0 12px;color:color-mix(in srgb,var(--book-text,#2c1a0e) 82%,transparent);font-size:11px;font-weight:700;cursor:pointer; }
+.book-writing-image-control input { max-width:220px;color:var(--book-text,#2c1a0e);font-size:10px; }
 .book-writing-image-preview { position:relative;width:max-content;max-width:100%;margin:0 0 14px; }
 .book-writing-image-preview[hidden] { display:none; }
 .book-writing-image-preview img { display:block;max-width:100%;max-height:300px;border-radius:8px;object-fit:contain; }
 .book-writing-image-preview button { position:absolute;top:7px;right:7px;display:grid;width:30px;height:30px;place-items:center;border:0;border-radius:50%;color:#fff;background:rgba(0,0,0,.7);cursor:pointer; }
-.book-writing-content { display:block;box-sizing:border-box;width:100%;min-height:52vh;padding:0;border:0;outline:0;resize:vertical;color:#28231d;background:transparent;font:18px/1.9 Georgia,'Times New Roman',serif;white-space:pre-wrap; }
-.book-writing-content::placeholder { color:rgba(40,35,29,.42); }
+.book-writing-content { display:block;box-sizing:border-box;width:100%;min-height:52vh;padding:0;border:0;outline:0;resize:vertical;color:var(--book-text,#2c1a0e);background:transparent;font:18px/1.85 var(--book-reader-font,Georgia,serif);white-space:pre-wrap; }
+.book-writing-content::placeholder { color:color-mix(in srgb,var(--book-text,#2c1a0e) 48%,transparent); }
 .book-writing-error { max-width:840px;margin:10px auto 0; }
 .book-writing-actions button:disabled { opacity:.65;cursor:wait; }
 @media (max-width:650px) {
@@ -11415,5 +11417,5 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
   .book-writing-intro { align-items:flex-start;flex-direction:column;gap:5px;padding:11px; }
   .book-writing-paper { min-height:68vh;padding:23px 17px;border-radius:4px; }
   .book-writing-title { font-size:26px; }
-  .book-writing-content { min-height:56vh;font-size:16px; }
+  .book-writing-content { min-height:56vh;font-size:17px; }
 }

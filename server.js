@@ -4731,7 +4731,12 @@ app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   if (!page.is_published && !isOwner) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const { rows: prev } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2 AND is_published=1', [book.id, page.page_num-1]);
   const { rows: next } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2 AND is_published=1', [book.id, page.page_num+1]);
-  res.json({ page, book: sanitizeBook(book), prev: prev[0]||null, next: next[0]||null });
+  let draft = null;
+  if (isOwner && page.is_published) {
+    const { rows: draftRows } = await query('SELECT * FROM book_page_drafts WHERE page_id=$1', [page.id]);
+    draft = draftRows[0] || null;
+  }
+  res.json({ page, draft, book: sanitizeBook(book), prev: prev[0]||null, next: next[0]||null });
 });
 
 app.put('/api/book/:slug/page/:pageSlug/draft', authMiddleware, async (req, res) => {
@@ -4740,13 +4745,21 @@ app.put('/api/book/:slug/page/:pageSlug/draft', authMiddleware, async (req, res)
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { rows: pageRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
-  if (!pageRows.length || pageRows[0].is_published) return res.status(404).json({ error: 'Taslak sayfa bulunamadı' });
+  if (!pageRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
 
   const page = pageRows[0];
   const title = String(req.body?.title || '').trim();
   const content = String(req.body?.content || '');
   const chapterId = req.body?.chapter_id || null;
   const imageUrl = req.body?.image_url ?? page.image_url;
+  if (page.is_published) {
+    const { rows } = await query(`INSERT INTO book_page_drafts (page_id,chapter_id,title,content,image_url,updated_at)
+      VALUES ($1,$2,$3,$4,$5,NOW())
+      ON CONFLICT (page_id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id,title=EXCLUDED.title,
+        content=EXCLUDED.content,image_url=EXCLUDED.image_url,updated_at=NOW()
+      RETURNING *`, [page.id, chapterId, title, content, imageUrl]);
+    return res.json(rows[0]);
+  }
   const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,updated_at=NOW()
     WHERE id=$5 RETURNING *`, [title, content, chapterId, imageUrl, page.id]);
   res.json(rows[0]);
@@ -4758,12 +4771,23 @@ app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, r
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { rows: pageRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
-  if (!pageRows.length || pageRows[0].is_published) return res.status(404).json({ error: 'Taslak sayfa bulunamadı' });
+  if (!pageRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
 
   const page = pageRows[0];
   const title = String(req.body?.title || '').trim();
   const content = String(req.body?.content || '').trim();
   if (!title || !content) return res.status(400).json({ error: 'Yayınlamak için başlık ve içerik zorunlu' });
+  if (page.is_published) {
+    const { rows: draftRows } = await query('SELECT * FROM book_page_drafts WHERE page_id=$1', [page.id]);
+    if (!draftRows.length) return res.status(404).json({ error: 'Yayınlanacak taslak düzenleme bulunamadı' });
+    const draft = draftRows[0];
+    const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,updated_at=NOW()
+      WHERE id=$5 RETURNING *`,
+    [title, content, req.body?.chapter_id !== undefined ? req.body.chapter_id : draft.chapter_id, req.body?.image_url ?? draft.image_url, page.id]);
+    await query('DELETE FROM book_page_drafts WHERE page_id=$1', [page.id]);
+    await query('UPDATE books SET updated_at=NOW() WHERE id=$1', [book.id]);
+    return res.json(rows[0]);
+  }
   const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1 AND is_published=1', [book.id]);
   const pageNum = countRows[0].c + 1;
   const realSlug = makeSlug(title, page.id);

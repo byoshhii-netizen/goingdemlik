@@ -1783,7 +1783,10 @@ async function confirmBookPageEditorExit() {
   if (!editor) return true;
   if (editor.exitPending) return false;
   editor.exitPending = true;
-  const confirmed = await CigCigDialogs.confirm('Bu sayfayı özel taslak olarak kaydedip çıkmak istiyor musunuz? Taslak yalnızca size görünür.');
+  const prompt = editor.isEditingPublished
+    ? 'Değişiklikleri özel taslak olarak kaydedip çıkmak istiyor musunuz? Yayındaki sayfa mevcut haliyle kalır.'
+    : 'Bu sayfayı özel taslak olarak kaydedip çıkmak istiyor musunuz? Taslak yalnızca size görünür.';
+  const confirmed = await CigCigDialogs.confirm(prompt);
   if (!confirmed) {
     editor.exitPending = false;
     return false;
@@ -7443,10 +7446,6 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       return;
     }
     if (pageSlug && !pageData) pageData = await api(`/book/${encodeURIComponent(bookSlug)}/page/${encodeURIComponent(pageSlug)}`);
-    if (pageData?.page && Number(pageData.page.is_published) !== 0) {
-      navigate(`/kitap/${encodeURIComponent(bookSlug)}/sayfa/${encodeURIComponent(pageData.page.slug)}`);
-      return;
-    }
     if (!pageSlug) {
       pageData = { page: await api(`/book/${encodeURIComponent(bookSlug)}/pages/draft`, {
         method: 'POST',
@@ -7462,15 +7461,20 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
 
   const { book, chapters } = bookData;
   const page = pageData.page;
+  const isEditingPublished = Number(page.is_published) !== 0;
+  const workingCopy = isEditingPublished ? (pageData.draft || page) : page;
   const route = `/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(page.slug)}`;
+  const returnPath = isEditingPublished
+    ? `/kitap/${encodeURIComponent(bookSlug)}/sayfa/${encodeURIComponent(page.slug)}`
+    : `/kitap/${encodeURIComponent(bookSlug)}`;
   const cacheKey = `cigcig_book_page_draft:${currentUser.id}:${bookSlug}:${page.slug}`;
-  let title = String(page.title || '');
-  let content = String(page.content || '');
-  let chapterId = page.chapter_id ? String(page.chapter_id) : '';
-  let imageUrl = String(page.image_url || '');
+  let title = String(workingCopy.title || '');
+  let content = String(workingCopy.content || '');
+  let chapterId = workingCopy.chapter_id ? String(workingCopy.chapter_id) : '';
+  let imageUrl = String(workingCopy.image_url || '');
   try {
     const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
-    if (cached && Number(cached.savedAt) > (Date.parse(page.updated_at || page.created_at || '') || 0)) {
+    if (cached && Number(cached.savedAt) > (Date.parse(workingCopy.updated_at || page.updated_at || page.created_at || '') || 0)) {
       title = String(cached.title || '');
       content = String(cached.content || '');
       chapterId = String(cached.chapterId || '');
@@ -7483,15 +7487,15 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   document.title = `Sayfa yaz - ${book.title}`;
   app.innerHTML = `<div class="book-writing-page">
     <header class="book-writing-header">
-      <a class="book-writing-back" href="/kitap/${escHtml(bookSlug)}" data-link><i class="fas fa-arrow-left"></i><span>${escHtml(book.title)}</span></a>
-      <div class="book-writing-status" id="book-writer-status" role="status" aria-live="polite">Özel taslak hazır</div>
+      <a class="book-writing-back" href="${escHtml(returnPath)}" data-link><i class="fas fa-arrow-left"></i><span>${escHtml(book.title)}</span></a>
+      <div class="book-writing-status" id="book-writer-status" role="status" aria-live="polite">${isEditingPublished ? 'Özel düzenleme taslağı hazır' : 'Özel taslak hazır'}</div>
       <div class="book-writing-actions">
         <button type="button" class="btn btn-outline" id="book-writer-close" aria-label="Kaydedip çık"><i class="fas fa-xmark"></i><span>Çık</span></button>
-        <button type="button" class="btn btn-primary" id="book-writer-publish"><i class="fas fa-globe"></i><span>Yayınla</span></button>
+        <button type="button" class="btn btn-primary" id="book-writer-publish"><i class="fas fa-globe"></i><span>${isEditingPublished ? 'Değişiklikleri yayınla' : 'Yayınla'}</span></button>
       </div>
     </header>
     <main class="book-writing-main">
-      <div class="book-writing-intro"><span><i class="fas fa-lock"></i> ÖZEL TASLAK</span><p>Yazdıkların otomatik kaydedilir ve yalnızca sana görünür. Yayınladığında bu sayfa herkese açılır.</p></div>
+      <div class="book-writing-intro"><span><i class="fas fa-lock"></i> ${isEditingPublished ? 'ÖZEL DÜZENLEME TASLAĞI' : 'ÖZEL TASLAK'}</span><p>${isEditingPublished ? 'Değişikliklerin özel olarak kaydedilir; yayındaki sayfa herkese mevcut haliyle görünmeye devam eder. Değişiklikleri yayınlayınca yeni sürüm herkese açılır.' : 'Yazdıkların otomatik kaydedilir ve yalnızca sana görünür. Yayınladığında bu sayfa herkese açılır.'}</p></div>
       <article class="book-writing-paper">
         <input id="book-writer-title" class="book-writing-title" type="text" maxlength="180" placeholder="Sayfa başlığı" value="${escHtml(title)}" aria-label="Sayfa başlığı" />
         ${chapters.length ? `<label class="book-writing-chapter-label" for="book-writer-chapter">Bölüm (isteğe bağlı)</label><select id="book-writer-chapter" class="book-writing-chapter"><option value="">Bölüm seç</option>${chapters.map(chapter => `<option value="${escHtml(chapter.id)}"${String(chapter.id) === chapterId ? ' selected' : ''}>${escHtml(chapter.title)}</option>`).join('')}</select>` : ''}
@@ -7586,7 +7590,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       saveDraftNow().catch(error => console.error('Kitap sayfası kaydedilemedi.', error));
     }
   };
-  const editorState = { route, save: saveDraftNow, beforeUnload, keydown, exitPending: false };
+  const editorState = { route, save: saveDraftNow, beforeUnload, keydown, exitPending: false, isEditingPublished };
   activeBookPageEditor = editorState;
   window.addEventListener('beforeunload', beforeUnload);
   document.addEventListener('keydown', keydown);
@@ -7613,7 +7617,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       imageUploadPending = false;
     }
   });
-  $('#book-writer-close').addEventListener('click', () => navigate(`/kitap/${encodeURIComponent(bookSlug)}`));
+  $('#book-writer-close').addEventListener('click', () => navigate(returnPath));
   $('#book-writer-publish').addEventListener('click', async event => {
     const button = event.currentTarget;
     const finalTitle = titleInput.value.trim();
@@ -7640,8 +7644,8 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       activeBookPageEditor = null;
       window.removeEventListener('beforeunload', beforeUnload);
       document.removeEventListener('keydown', keydown);
-      toast('Sayfa yayınlandı; artık herkes görebilir.', 'success');
-      navigate(`/kitap/${encodeURIComponent(bookSlug)}`);
+      toast(isEditingPublished ? 'Sayfa değişiklikleri yayınlandı.' : 'Sayfa yayınlandı; artık herkes görebilir.', 'success');
+      navigate(returnPath);
     } catch (error) {
       errorBox.textContent = error.message || 'Sayfa yayınlanamadı.';
       status.textContent = 'Yayınlama başarısız';
@@ -7712,7 +7716,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
     </div>
 
     ${isOwner ? `<div style="display:flex;gap:8px;margin-bottom:16px">
-      <button class="btn btn-outline btn-sm" id="edit-page-btn"><i class="fas fa-edit"></i> Düzenle</button>
+      <button class="btn btn-outline btn-sm" id="edit-page-btn"><i class="fas fa-edit"></i> ${data.draft ? 'Taslağa devam et' : 'Düzenle'}</button>
       <button class="btn btn-danger btn-sm" id="del-page-btn"><i class="fas fa-trash"></i> Sil</button>
     </div>` : ''}
 
@@ -7793,23 +7797,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
   $('#toc-toggle').addEventListener('click', () => { tocOpen = !tocOpen; updateToc(); });
 
   if (isOwner) {
-    $('#edit-page-btn').addEventListener('click', () => {
-      showModal('Sayfayı Düzenle', `
-        <div class="form-group"><label>Başlık</label><input id="ep-title" type="text" value="${escHtml(page.title)}" /></div>
-        <div class="form-group"><label>İçerik</label><textarea id="ep-content" rows="14">${escHtml(page.content)}</textarea></div>
-        <button class="btn btn-primary" id="ep-submit" style="width:100%">Kaydet</button>
-        <div id="ep-error" class="form-error mt-4"></div>
-      `);
-      $('#ep-submit').addEventListener('click', async () => {
-        const title = $('#ep-title').value.trim();
-        const content = $('#ep-content').value.trim();
-        if (!title || !content) { $('#ep-error').textContent = 'Zorunlu alan'; return; }
-        try {
-          await api(`/book/${bookSlug}/page/${pageSlug}`, { method: 'PUT', body: JSON.stringify({ title, content }) });
-          toast('Sayfa güncellendi'); hideModal(); renderRoute(location.pathname);
-        } catch (e) { $('#ep-error').textContent = e.message; }
-      });
-    });
+    $('#edit-page-btn').addEventListener('click', () => navigate(`/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(pageSlug)}`));
     $('#del-page-btn').addEventListener('click', async () => {
       if (!await CigCigDialogs.confirm('Sayfa silinsin mi?')) return;
       try { await api(`/book/${bookSlug}/page/${pageSlug}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate('/kitap/' + bookSlug); } catch (e) { toast(e.message, 'error'); }
