@@ -15839,13 +15839,16 @@ async function renderDMChat(username) {
       }
       const row = reactionPill.closest('.dm-msg-wrap');
       if (!row || reactionPill.disabled) return;
+      const emoji = reactionPill.dataset.emoji;
+      const hadReaction = hasDmUserReaction(row.dataset.reactions, emoji);
       reactionPill.disabled = true;
       try {
         const result = await api(`/messages/${encodeURIComponent(row.dataset.id)}/reactions`, {
           method: 'POST',
-          body: JSON.stringify({ emoji: reactionPill.dataset.emoji })
+          body: JSON.stringify({ emoji })
         });
         updateDmMessageReactions(row, result.reactions);
+        if (!hadReaction && hasDmUserReaction(result.reactions, emoji)) recordDmReactionUsage(username, emoji);
       } catch (error) {
         reactionPill.disabled = false;
         toast(error.message || 'Emoji tepkisi güncellenemedi.', 'error');
@@ -15915,6 +15918,45 @@ async function renderDMChat(username) {
       return;
     }
   });
+  const getQuickReactionTarget = event => {
+    if (!(event.target instanceof Element) || dmSelectionMode) return null;
+    const row = event.target.closest('.dm-msg-wrap');
+    const bubble = event.target.closest('.dm-msg-bubble');
+    if (!row || !bubble || !bubble.contains(event.target) || row.classList.contains('dm-own') || row.classList.contains('dm-deleted-for-all')) return null;
+    if (event.target.closest('a,button,input,textarea,select,img,video,audio,.dm-msg-image,.dm-message-image,.dm-msg-reactions,.dm-deleted,.dm-ephemeral-open')) return null;
+    return { row, bubble };
+  };
+  const quickReactToDmMessage = (row, bubble) => {
+    const preferredEmoji = getDmPreferredReaction(username);
+    if (!preferredEmoji) {
+      showDmReactionPicker(bubble, row.dataset.id, {
+        prompt: 'İlk tepkin için bir emoji seç.',
+        ensureReaction: true,
+        onReaction: emoji => recordDmReactionUsage(username, emoji)
+      });
+      return;
+    }
+
+    if (hasDmUserReaction(row.dataset.reactions, preferredEmoji) || row.dataset.quickReactPending === 'true') return;
+    row.dataset.quickReactPending = 'true';
+    api(`/messages/${encodeURIComponent(row.dataset.id)}/reactions`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji: preferredEmoji })
+    }).then(result => {
+      updateDmMessageReactions(row, result.reactions);
+      if (hasDmUserReaction(result.reactions, preferredEmoji)) recordDmReactionUsage(username, preferredEmoji);
+    }).catch(error => {
+      toast(error.message || 'Emoji tepkisi eklenemedi.', 'error');
+    }).finally(() => {
+      delete row.dataset.quickReactPending;
+    });
+  };
+  dmMessageList?.addEventListener('dblclick', event => {
+    const target = getQuickReactionTarget(event);
+    if (!target) return;
+    event.preventDefault();
+    quickReactToDmMessage(target.row, target.bubble);
+  });
   const dmMessageListForMenus = document.getElementById('dm-messages');
   dmMessageListForMenus?.addEventListener('contextmenu', event => {
     if (event.target.closest('.dm-message-image, .dm-ephemeral-open')) {
@@ -15929,17 +15971,21 @@ async function renderDMChat(username) {
   });
   let dmLongPressTimer = null;
   let dmLongPressStart = null;
+  let dmLongPressTriggered = false;
+  let lastDmTouchTap = null;
   dmMessageListForMenus?.addEventListener('pointerdown', event => {
     if (event.pointerType !== 'touch') return;
     const row = event.target.closest('.dm-msg-wrap');
     const button = row?.querySelector('.dm-msg-menu-btn');
     if (!row || !button || row.classList.contains('dm-deleted-for-all')) return;
     dmLongPressStart = { x: event.clientX, y: event.clientY };
+    dmLongPressTriggered = false;
     const reactionPill = event.target.closest('.dm-reaction-pill');
     if (reactionPill) {
       dmReactionLongPressFired = false;
       dmLongPressTimer = window.setTimeout(() => {
         dmLongPressTimer = null;
+        dmLongPressTriggered = true;
         dmReactionLongPressFired = true;
         suppressDmReactionClickUntil = Date.now() + 900;
         showDmReactionUsers(row.dataset.reactions, reactionPill.dataset.emoji);
@@ -15948,16 +15994,37 @@ async function renderDMChat(username) {
     }
     dmLongPressTimer = window.setTimeout(() => {
       dmLongPressTimer = null;
+      dmLongPressTriggered = true;
       button.style.opacity = '1';
       showDmMsgMenu(button, row.dataset.id, row.classList.contains('dm-own'), username, startDmReply);
-      showDmReactionPicker(button, row.dataset.id);
+      showDmReactionPicker(button, row.dataset.id, {
+        onReaction: emoji => recordDmReactionUsage(username, emoji)
+      });
     }, 520);
   }, { passive: true });
-  const cancelDmLongPress = () => {
+  const cancelDmLongPress = event => {
+    const wasPressed = Boolean(dmLongPressStart);
+    if (event?.type === 'pointerup' && event.pointerType === 'touch' && wasPressed && !dmLongPressTriggered) {
+      const target = getQuickReactionTarget(event);
+      if (target) {
+        const now = Date.now();
+        if (lastDmTouchTap?.messageId === target.row.dataset.id && now - lastDmTouchTap.time <= 400) {
+          quickReactToDmMessage(target.row, target.bubble);
+          lastDmTouchTap = null;
+        } else {
+          lastDmTouchTap = { messageId: target.row.dataset.id, time: now };
+        }
+      } else {
+        lastDmTouchTap = null;
+      }
+    } else if (!event || event.type === 'pointercancel' || dmLongPressTriggered) {
+      lastDmTouchTap = null;
+    }
     if (dmLongPressTimer) window.clearTimeout(dmLongPressTimer);
     dmLongPressTimer = null;
     if (dmReactionLongPressFired) suppressDmReactionClickUntil = Date.now() + 900;
     dmReactionLongPressFired = false;
+    dmLongPressTriggered = false;
     dmLongPressStart = null;
   };
   dmMessageListForMenus?.addEventListener('pointermove', event => {
@@ -17059,6 +17126,56 @@ function updateDmMessageReactions(row, reactions) {
   bubble?.insertAdjacentHTML('beforeend', html);
 }
 
+const DM_MESSAGE_REACTION_EMOJIS = ['❤️','😂','😍','😮','😢','👍','👎','🔥','👏','🎉','🙏','🥰','🤔','💯','😎','✨','🤗','😡'];
+
+function hasDmUserReaction(reactionsValue, emoji) {
+  let reactions = reactionsValue;
+  if (typeof reactions === 'string') {
+    try { reactions = JSON.parse(reactions); }
+    catch { return false; }
+  }
+  return Array.isArray(reactions) && reactions.some(reaction =>
+    reaction?.emoji === emoji && String(reaction.user_id) === String(currentUser?.id)
+  );
+}
+
+function getDmReactionUsageKey(username) {
+  const userId = currentUser?.id;
+  const peer = String(username || '').trim().toLocaleLowerCase('tr-TR');
+  return `cigcig_dm_reaction_usage:${encodeURIComponent(String(userId || ''))}:${encodeURIComponent(peer)}`;
+}
+
+function getDmReactionUsage(username) {
+  try {
+    const usage = JSON.parse(localStorage.getItem(getDmReactionUsageKey(username)) || '{}');
+    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return {};
+    return Object.fromEntries(Object.entries(usage).filter(([emoji, count]) =>
+      DM_MESSAGE_REACTION_EMOJIS.includes(emoji) && Number.isSafeInteger(count) && count > 0
+    ));
+  } catch (error) {
+    toast('Emoji tercihleri okunamadı.', 'error');
+    return {};
+  }
+}
+
+function recordDmReactionUsage(username, emoji) {
+  if (!DM_MESSAGE_REACTION_EMOJIS.includes(emoji)) return;
+  try {
+    const key = getDmReactionUsageKey(username);
+    const usage = getDmReactionUsage(username);
+    usage[emoji] = (usage[emoji] || 0) + 1;
+    localStorage.setItem(key, JSON.stringify(usage));
+  } catch (error) {
+    toast('Emoji tercihi kaydedilemedi.', 'error');
+  }
+}
+
+function getDmPreferredReaction(username) {
+  const entries = Object.entries(getDmReactionUsage(username));
+  entries.sort((a, b) => b[1] - a[1]);
+  return entries[0]?.[0] || '';
+}
+
 // Hover: show/hide menu btn on desktop
 document.addEventListener('mouseover', e => {
   const wrap = e.target.closest('.dm-msg-wrap');
@@ -17207,7 +17324,9 @@ function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
     el.addEventListener('click', async () => {
       menu.remove();
       if (item.action === 'react') {
-        showDmReactionPicker(btn, msgId);
+        showDmReactionPicker(btn, msgId, {
+          onReaction: emoji => recordDmReactionUsage(username, emoji)
+        });
       } else if (item.action === 'reply') {
         startDmReply?.(messageRow);
       } else if (item.action === 'select') {
@@ -17250,9 +17369,15 @@ function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
 }
 
-function showDmReactionPicker(anchor, messageId, { endpoint = `/messages/${encodeURIComponent(messageId)}/reactions`, rowSelector = `.dm-msg-wrap[data-id="${CSS.escape(String(messageId))}"]` } = {}) {
+function showDmReactionPicker(anchor, messageId, {
+  endpoint = `/messages/${encodeURIComponent(messageId)}/reactions`,
+  rowSelector = `.dm-msg-wrap[data-id="${CSS.escape(String(messageId))}"]`,
+  onReaction = null,
+  prompt = '',
+  ensureReaction = false
+} = {}) {
   document.getElementById('dm-reaction-picker')?.remove();
-  const commonEmojis = ['❤️','😂','😍','😮','😢','👍','👎','🔥','👏','🎉','🙏','🥰','🤔','💯','😎','✨','🤗','😡'];
+  const commonEmojis = DM_MESSAGE_REACTION_EMOJIS;
   let recent = [];
   try {
     const saved = JSON.parse(localStorage.getItem('cigcig_dm_recent_reactions') || '[]');
@@ -17263,7 +17388,7 @@ function showDmReactionPicker(anchor, messageId, { endpoint = `/messages/${encod
   panel.className = 'dm-reaction-picker';
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'Emoji tepkisi seç');
-  panel.innerHTML = `${recent.length ? `<div class="dm-reaction-recent"><span>Son kullanılan</span><div>${recent.map(emoji => `<button type="button" class="dm-reaction-choice" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join('')}</div></div>` : ''}
+  panel.innerHTML = `${prompt ? `<div class="dm-reaction-recent"><span>${escHtml(prompt)}</span></div>` : ''}${recent.length ? `<div class="dm-reaction-recent"><span>Son kullanılan</span><div>${recent.map(emoji => `<button type="button" class="dm-reaction-choice" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join('')}</div></div>` : ''}
     <div class="dm-reaction-grid">${commonEmojis.map(emoji => `<button type="button" class="dm-reaction-choice" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join('')}</div>`;
   panel.addEventListener('click', async event => {
     const choice = event.target.closest('.dm-reaction-choice');
@@ -17271,12 +17396,19 @@ function showDmReactionPicker(anchor, messageId, { endpoint = `/messages/${encod
     const emoji = choice.dataset.emoji;
     choice.disabled = true;
     try {
+      const rowBefore = document.querySelector(rowSelector);
+      const hadReaction = hasDmUserReaction(rowBefore?.dataset.reactions, emoji);
+      if (ensureReaction && hadReaction) {
+        panel.remove();
+        return;
+      }
       const result = await api(endpoint, {
         method: 'POST',
         body: JSON.stringify({ emoji })
       });
       const row = document.querySelector(rowSelector);
       if (row) updateDmMessageReactions(row, result.reactions);
+      if (!hadReaction && hasDmUserReaction(result.reactions, emoji)) onReaction?.(emoji);
       const updatedRecent = [emoji, ...recent.filter(item => item !== emoji)].slice(0, 8);
       localStorage.setItem('cigcig_dm_recent_reactions', JSON.stringify(updatedRecent));
       panel.remove();
