@@ -3181,6 +3181,8 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   font-family: var(--book-reader-font, Georgia, serif);
   line-height: 1.85;
 }
+.ebook-inline-image { display:block;max-width:100%;margin:1em 0;break-inside:avoid; }
+.ebook-inline-image img { display:inline-block;height:auto;max-height:70vh;filter:grayscale(1);object-fit:contain;vertical-align:middle; }
 @media (max-width: 600px) {
   .ebook-page-content { padding: 24px 20px; font-size: 16px; line-height: 1.85; min-height: 62svh; }
   .ebook-reader { border-radius: 8px; }
@@ -3188,12 +3190,15 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
 }
 .ebook-page-image {
   width: 100%;
+  max-width: 100%;
   max-height: 400px;
   object-fit: cover;
   display: block;
   margin-bottom: 24px;
   border-radius: 8px;
+  filter: grayscale(1);
 }
+.seo-page-article .seo-hero-image { filter:grayscale(1); }
 .ebook-nav {
   display: flex;
   align-items: center;
@@ -11398,14 +11403,21 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
 .book-writing-title::placeholder { color:color-mix(in srgb,var(--book-text,#2c1a0e) 48%,transparent); }
 .book-writing-chapter-label { display:block;margin:10px 0 5px;color:color-mix(in srgb,var(--book-text,#2c1a0e) 78%,transparent);font-size:11px;font-weight:700; }
 .book-writing-chapter { max-width:280px;margin-bottom:15px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 24%,transparent);border-radius:8px;color:var(--book-text,#2c1a0e);background:color-mix(in srgb,var(--book-bg,#f6ecd7) 84%,var(--book-text,#2c1a0e)); }
-.book-writing-image-control { display:inline-flex;align-items:center;gap:7px;margin:0 0 12px;color:color-mix(in srgb,var(--book-text,#2c1a0e) 82%,transparent);font-size:11px;font-weight:700;cursor:pointer; }
-.book-writing-image-control input { max-width:220px;color:var(--book-text,#2c1a0e);font-size:10px; }
-.book-writing-image-preview { position:relative;width:max-content;max-width:100%;margin:0 0 14px; }
-.book-writing-image-preview[hidden] { display:none; }
-.book-writing-image-preview img { display:block;max-width:100%;max-height:300px;border-radius:8px;object-fit:contain; }
-.book-writing-image-preview button { position:absolute;top:7px;right:7px;display:grid;width:30px;height:30px;place-items:center;border:0;border-radius:50%;color:#fff;background:rgba(0,0,0,.7);cursor:pointer; }
-.book-writing-content { display:block;box-sizing:border-box;width:100%;min-height:52vh;padding:0;border:0;outline:0;resize:vertical;color:var(--book-text,#2c1a0e);background:transparent;font:18px/1.85 var(--book-reader-font,Georgia,serif);white-space:pre-wrap; }
-.book-writing-content::placeholder { color:color-mix(in srgb,var(--book-text,#2c1a0e) 48%,transparent); }
+.book-writing-toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:0 0 15px; }
+.book-writing-toolbar > .btn { flex:0 0 auto; }
+.book-writing-image-hint { color:color-mix(in srgb,var(--book-text,#2c1a0e) 65%,transparent);font-size:10px; }
+.book-writing-image-tools { display:flex;align-items:center;flex-wrap:wrap;gap:10px;width:100%;padding:9px 10px;border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 16%,transparent);border-radius:8px;background:color-mix(in srgb,var(--book-bg,#f6ecd7) 88%,var(--book-text,#2c1a0e)); }
+.book-writing-image-tools[hidden] { display:none; }
+.book-writing-image-tools label { display:flex;align-items:center;gap:6px;color:var(--book-text,#2c1a0e);font-size:10px;font-weight:700; }
+.book-writing-image-tools select { padding:5px 7px;border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 22%,transparent);border-radius:6px;color:var(--book-text,#2c1a0e);background:var(--book-bg,#f6ecd7); }
+.book-writing-image-tools input[type="range"] { width:100px;accent-color:var(--accent-red); }
+.book-writing-image-tools label span { min-width:32px;color:var(--book-text,#2c1a0e);font-size:10px; }
+.book-writing-image-block { box-sizing:border-box;max-width:100%;margin:14px 0;padding:4px;border:1px solid transparent;cursor:grab; }
+.book-writing-image-block:active { cursor:grabbing; }
+.book-writing-image-block.is-selected { border-color:var(--accent-red);border-style:dashed; }
+.book-writing-image-block img { display:block;width:100%;max-width:100%;max-height:60vh;margin:0 auto;border-radius:4px;filter:grayscale(1);object-fit:contain; }
+.book-writing-content { display:block;box-sizing:border-box;width:100%;min-height:52vh;padding:0;border:0;outline:0;color:var(--book-text,#2c1a0e);background:transparent;font:18px/1.85 var(--book-reader-font,Georgia,serif);white-space:pre-wrap;overflow-wrap:anywhere; }
+.book-writing-content:empty::before { color:color-mix(in srgb,var(--book-text,#2c1a0e) 48%,transparent);content:attr(data-placeholder);pointer-events:none; }
 .book-writing-error { max-width:840px;margin:10px auto 0; }
 .book-writing-actions button:disabled { opacity:.65;cursor:wait; }
 @media (max-width:650px) {
@@ -11418,4 +11430,6 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
   .book-writing-paper { min-height:68vh;padding:23px 17px;border-radius:4px; }
   .book-writing-title { font-size:26px; }
   .book-writing-content { min-height:56vh;font-size:17px; }
+  .book-writing-image-tools { align-items:flex-start; }
+  .book-writing-image-hint { flex:1 1 100%; }
 }

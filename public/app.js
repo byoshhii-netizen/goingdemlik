@@ -1796,6 +1796,7 @@ async function confirmBookPageEditorExit() {
     if (activeBookPageEditor === editor) activeBookPageEditor = null;
     window.removeEventListener('beforeunload', editor.beforeUnload);
     document.removeEventListener('keydown', editor.keydown);
+    document.removeEventListener('selectionchange', editor.selectionChange);
     return true;
   } catch (error) {
     editor.exitPending = false;
@@ -7407,7 +7408,7 @@ async function renderBookDetail(app, slug) {
           doc.setFontSize(11);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(40, 40, 40);
-          const contentLines = doc.splitTextToSize(pg.content || '', contentW);
+          const contentLines = doc.splitTextToSize(bookPageContentText(pg.content || ''), contentW);
           const lineH = 5.2;
           contentLines.forEach(line => {
             if (y + lineH > pageH - margin) { doc.addPage(); y = margin; }
@@ -7433,6 +7434,127 @@ function pageItemHTML(p, bookSlug) {
   return `<div class="page-item">
     <a href="/kitap/${escHtml(bookSlug)}/sayfa/${escHtml(p.slug)}" data-link class="page-title">${escHtml(p.title)}</a>
   </div>`;
+}
+
+// Marks drafts that now store legacy page images inside the content markers.
+const BOOK_INLINE_IMAGE_LAYOUT_HANDLED = '__cigcig_inline_image_layout__';
+
+function safeBookImageUrl(value) {
+  const source = String(value || '').trim();
+  if (/^\/(?!\/)/.test(source)) return source;
+  try {
+    const url = new URL(source, location.origin);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : '';
+  } catch {
+    return '';
+  }
+}
+
+function encodeBookInlineImage(image) {
+  return `[[cigcig-image:${encodeURIComponent(JSON.stringify(image))}]]`;
+}
+
+function decodeBookInlineImage(value) {
+  try {
+    const image = JSON.parse(decodeURIComponent(value));
+    const src = safeBookImageUrl(image?.src);
+    if (!src) return null;
+    const width = Math.min(100, Math.max(25, Number.parseInt(image.width, 10) || 100));
+    const align = ['left', 'center', 'right'].includes(image.align) ? image.align : 'center';
+    return { src, width, align, alt: String(image.alt || '').slice(0, 180) };
+  } catch {
+    return null;
+  }
+}
+
+function createBookEditorImage(image) {
+  const figure = document.createElement('figure');
+  figure.className = 'book-writing-image-block';
+  figure.dataset.bookImage = 'true';
+  figure.dataset.src = image.src;
+  figure.dataset.width = String(image.width);
+  figure.dataset.align = image.align;
+  figure.dataset.alt = image.alt || '';
+  figure.contentEditable = 'false';
+  figure.draggable = true;
+  figure.style.width = `${image.width}%`;
+  figure.style.textAlign = image.align;
+  figure.style.marginLeft = image.align === 'left' ? '0' : 'auto';
+  figure.style.marginRight = image.align === 'right' ? '0' : 'auto';
+  const img = document.createElement('img');
+  img.src = image.src;
+  img.alt = image.alt || '';
+  figure.appendChild(img);
+  return figure;
+}
+
+function appendBookEditorText(root, text) {
+  const lines = String(text).split('\n');
+  lines.forEach((line, index) => {
+    if (line) root.appendChild(document.createTextNode(line));
+    if (index < lines.length - 1) root.appendChild(document.createElement('br'));
+  });
+}
+
+function populateBookPageEditor(root, content) {
+  root.replaceChildren();
+  const tokenPattern = /\[\[cigcig-image:([^\]]+)\]\]/g;
+  const text = String(content || '');
+  let cursor = 0;
+  let match;
+  while ((match = tokenPattern.exec(text))) {
+    appendBookEditorText(root, text.slice(cursor, match.index));
+    const image = decodeBookInlineImage(match[1]);
+    if (image) root.appendChild(createBookEditorImage(image));
+    else appendBookEditorText(root, match[0]);
+    root.appendChild(document.createElement('br'));
+    cursor = match.index + match[0].length;
+  }
+  appendBookEditorText(root, text.slice(cursor));
+}
+
+function serializeBookPageEditor(root) {
+  const serialize = node => {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    if (node.matches('[data-book-image="true"]')) {
+      const image = decodeBookInlineImage(encodeURIComponent(JSON.stringify({
+        src: node.dataset.src,
+        width: node.dataset.width,
+        align: node.dataset.align,
+        alt: node.dataset.alt
+      })));
+      return image ? `\n${encodeBookInlineImage(image)}\n` : '';
+    }
+    if (node.tagName === 'BR') return '\n';
+    const content = Array.from(node.childNodes, serialize).join('');
+    return ['DIV', 'P'].includes(node.tagName) ? `${content}\n` : content;
+  };
+  return Array.from(root.childNodes, serialize).join('').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
+}
+
+function bookPageContentHTML(content) {
+  const tokenPattern = /\[\[cigcig-image:([^\]]+)\]\]/g;
+  const text = String(content || '');
+  let cursor = 0;
+  let html = '';
+  let match;
+  while ((match = tokenPattern.exec(text))) {
+    html += escHtml(text.slice(cursor, match.index)).replace(/\n/g, '<br>');
+    const image = decodeBookInlineImage(match[1]);
+    if (image) {
+      html += `<figure class="ebook-inline-image" style="text-align:${image.align}"><img src="${escHtml(image.src)}" alt="${escHtml(image.alt)}" style="width:${image.width}%;max-width:100%" loading="lazy" /></figure>`;
+    } else {
+      html += escHtml(match[0]);
+    }
+    cursor = match.index + match[0].length;
+  }
+  html += escHtml(text.slice(cursor)).replace(/\n/g, '<br>');
+  return html;
+}
+
+function bookPageContentText(content) {
+  return String(content || '').replace(/\[\[cigcig-image:[^\]]+\]\]/g, ' ').replace(/\n{3,}/g, '\n\n');
 }
 
 async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageData = null) {
@@ -7472,6 +7594,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   let content = String(workingCopy.content || '');
   let chapterId = workingCopy.chapter_id ? String(workingCopy.chapter_id) : '';
   let imageUrl = String(workingCopy.image_url || '');
+  let hasNewerCache = false;
   try {
     const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
     if (cached && Number(cached.savedAt) > (Date.parse(workingCopy.updated_at || page.updated_at || page.created_at || '') || 0)) {
@@ -7479,10 +7602,20 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       content = String(cached.content || '');
       chapterId = String(cached.chapterId || '');
       imageUrl = String(cached.imageUrl || '');
+      hasNewerCache = true;
     }
   } catch (error) {
     console.warn('Kitap sayfası taslak yedeği okunamadı.', error);
   }
+  const legacyImageUrl = imageUrl && imageUrl !== BOOK_INLINE_IMAGE_LAYOUT_HANDLED
+    ? imageUrl
+    : imageUrl !== BOOK_INLINE_IMAGE_LAYOUT_HANDLED && (!hasNewerCache || !imageUrl) && pageData.draft?.image_url !== BOOK_INLINE_IMAGE_LAYOUT_HANDLED
+      ? String(page.image_url || '')
+      : '';
+  if (legacyImageUrl && !content.includes('[[cigcig-image:')) {
+    content = `${encodeBookInlineImage({ src: legacyImageUrl, alt: title || page.title, width: 100, align: 'center' })}\n${content}`;
+  }
+  imageUrl = BOOK_INLINE_IMAGE_LAYOUT_HANDLED;
 
   document.title = `Sayfa yaz - ${book.title}`;
   app.innerHTML = `<div class="book-writing-page">
@@ -7499,9 +7632,24 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       <article class="book-writing-paper">
         <input id="book-writer-title" class="book-writing-title" type="text" maxlength="180" placeholder="Sayfa başlığı" value="${escHtml(title)}" aria-label="Sayfa başlığı" />
         ${chapters.length ? `<label class="book-writing-chapter-label" for="book-writer-chapter">Bölüm (isteğe bağlı)</label><select id="book-writer-chapter" class="book-writing-chapter"><option value="">Bölüm seç</option>${chapters.map(chapter => `<option value="${escHtml(chapter.id)}"${String(chapter.id) === chapterId ? ' selected' : ''}>${escHtml(chapter.title)}</option>`).join('')}</select>` : ''}
-        <label class="book-writing-image-control"><i class="fas fa-image"></i><span>Sayfaya görsel ekle (isteğe bağlı)</span><input id="book-writer-image" type="file" accept="image/*" /></label>
-        <div id="book-writer-image-preview" class="book-writing-image-preview"${imageUrl ? '' : ' hidden'}>${imageUrl ? `<img src="${escHtml(imageUrl)}" alt="" /><button type="button" id="book-writer-image-remove" aria-label="Görseli kaldır"><i class="fas fa-xmark"></i></button>` : ''}</div>
-        <textarea id="book-writer-content" class="book-writing-content" placeholder="Sayfanı burada yazmaya başla...">${escHtml(content)}</textarea>
+        <div class="book-writing-toolbar" role="toolbar" aria-label="Sayfa düzenleme araçları">
+          <button type="button" class="btn btn-outline btn-sm" id="book-writer-add-image"><i class="fas fa-image"></i> Görsel ekle</button>
+          <input id="book-writer-image" type="file" accept="image/*" hidden />
+          <span class="book-writing-image-hint">Görseli metin arasına ekle veya sürükleyerek taşı.</span>
+          <div class="book-writing-image-tools" id="book-writer-image-tools" hidden>
+            <label>Hizalama
+              <select id="book-writer-image-align" aria-label="Görsel hizalaması">
+                <option value="left">Sol</option><option value="center">Orta</option><option value="right">Sağ</option>
+              </select>
+            </label>
+            <label>Boyut
+              <input id="book-writer-image-width" type="range" min="25" max="100" step="5" value="80" aria-label="Görsel boyutu" />
+              <span id="book-writer-image-width-label">80%</span>
+            </label>
+            <button type="button" class="btn btn-ghost btn-sm" id="book-writer-image-remove"><i class="fas fa-trash"></i> Görseli kaldır</button>
+          </div>
+        </div>
+        <div id="book-writer-content" class="book-writing-content" contenteditable="true" role="textbox" aria-label="Sayfa içeriği" aria-multiline="true" data-placeholder="Sayfanı burada yazmaya başla..."></div>
       </article>
       <div id="book-writer-error" class="form-error book-writing-error" role="alert"></div>
     </main>
@@ -7512,27 +7660,105 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   const chapterInput = $('#book-writer-chapter');
   const status = $('#book-writer-status');
   const errorBox = $('#book-writer-error');
-  const imagePreview = $('#book-writer-image-preview');
+  const imagePicker = $('#book-writer-image');
+  const imageTools = $('#book-writer-image-tools');
+  const imageAlignInput = $('#book-writer-image-align');
+  const imageWidthInput = $('#book-writer-image-width');
+  const imageWidthLabel = $('#book-writer-image-width-label');
   let saveTimer = null;
   let saveQueue = Promise.resolve();
   let saveVersion = 0;
   let imageUploadPending = false;
+  let selectedImage = null;
+  let draggedImage = null;
+  let savedRange = null;
 
-  const updateImagePreview = () => {
-    imagePreview.hidden = !imageUrl;
-    imagePreview.innerHTML = imageUrl
-      ? `<img src="${escHtml(imageUrl)}" alt="" /><button type="button" id="book-writer-image-remove" aria-label="Görseli kaldır"><i class="fas fa-xmark"></i></button>`
-      : '';
-    $('#book-writer-image-remove')?.addEventListener('click', () => {
-      imageUrl = '';
-      updateImagePreview();
+  populateBookPageEditor(contentInput, content);
+  const updateSelectedImage = image => {
+    selectedImage?.classList.remove('is-selected');
+    selectedImage = image;
+    selectedImage?.classList.add('is-selected');
+    imageTools.hidden = !selectedImage;
+    if (selectedImage) {
+      imageAlignInput.value = selectedImage.dataset.align || 'center';
+      imageWidthInput.value = selectedImage.dataset.width || '80';
+      imageWidthLabel.textContent = `${imageWidthInput.value}%`;
+    }
+  };
+  const rememberSelection = () => {
+    const selection = window.getSelection();
+    if (selection?.rangeCount && (selection.anchorNode === contentInput || contentInput.contains(selection.anchorNode))) {
+      savedRange = selection.getRangeAt(0).cloneRange();
+    }
+  };
+  const rangeAtPoint = (x, y) => {
+    if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+    if (document.caretPositionFromPoint) {
+      const position = document.caretPositionFromPoint(x, y);
+      if (position) {
+        const range = document.createRange();
+        range.setStart(position.offsetNode, position.offset);
+        range.collapse(true);
+        return range;
+      }
+    }
+    return null;
+  };
+  const insertImageAtRange = (image, range) => {
+    const targetRange = range && (range.startContainer === contentInput || contentInput.contains(range.startContainer))
+      ? range
+      : savedRange && (savedRange.startContainer === contentInput || contentInput.contains(savedRange.startContainer))
+        ? savedRange
+        : (() => {
+          const endRange = document.createRange();
+          endRange.selectNodeContents(contentInput);
+          endRange.collapse(false);
+          return endRange;
+        })();
+    targetRange.deleteContents();
+    const figure = createBookEditorImage(image);
+    targetRange.insertNode(figure);
+    const lineBreak = document.createElement('br');
+    figure.after(lineBreak);
+    const caret = document.createRange();
+    caret.setStartAfter(lineBreak);
+    caret.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(caret);
+    savedRange = caret.cloneRange();
+    contentInput.focus();
+    updateSelectedImage(figure);
+    queueDraftSave();
+  };
+  const uploadBookImage = async (file, range = savedRange) => {
+    if (imageUploadPending) return;
+    if (!file || !file.type.startsWith('image/')) {
+      errorBox.textContent = 'Lütfen bir görsel dosyası seçin.';
+      return;
+    }
+    imageUploadPending = true;
+    status.textContent = 'Görsel yükleniyor...';
+    errorBox.textContent = '';
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await apiForm('/upload', formData);
+      const src = safeBookImageUrl(result.url);
+      if (!src) throw new Error('Yüklenen görselin adresi geçersiz.');
+      insertImageAtRange({ src, alt: file.name || '', width: 80, align: 'center' }, range);
+    } catch (error) {
+      errorBox.textContent = error.message || 'Görsel yüklenemedi.';
+      status.textContent = 'Görsel eklenemedi';
+    } finally {
+      imageUploadPending = false;
       queueDraftSave();
-    });
+    }
   };
   const saveLocalBackup = () => {
     const snapshot = {
       title: titleInput.value,
-      content: contentInput.value,
+      content: serializeBookPageEditor(contentInput),
       chapterId: chapterInput?.value || '',
       imageUrl,
       savedAt: Date.now()
@@ -7558,7 +7784,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
         title: snapshot.title.trim(),
         content: snapshot.content,
         chapter_id: snapshot.chapterId || null,
-        image_url: snapshot.imageUrl
+        image_url: BOOK_INLINE_IMAGE_LAYOUT_HANDLED
       })
     }));
     saveQueue = request.then(() => {
@@ -7590,38 +7816,81 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       saveDraftNow().catch(error => console.error('Kitap sayfası kaydedilemedi.', error));
     }
   };
-  const editorState = { route, save: saveDraftNow, beforeUnload, keydown, exitPending: false, isEditingPublished };
+  const selectionChange = () => rememberSelection();
+  const editorState = { route, save: saveDraftNow, beforeUnload, keydown, selectionChange, exitPending: false, isEditingPublished };
   activeBookPageEditor = editorState;
   window.addEventListener('beforeunload', beforeUnload);
   document.addEventListener('keydown', keydown);
-  updateImagePreview();
+  document.addEventListener('selectionchange', selectionChange);
   titleInput.addEventListener('input', queueDraftSave);
   contentInput.addEventListener('input', queueDraftSave);
   chapterInput?.addEventListener('change', queueDraftSave);
-  $('#book-writer-image').addEventListener('change', async event => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    imageUploadPending = true;
-    status.textContent = 'Görsel yükleniyor...';
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const result = await apiForm('/upload', formData);
-      imageUrl = result.url;
-      updateImagePreview();
-      queueDraftSave();
-    } catch (error) {
-      errorBox.textContent = error.message || 'Görsel yüklenemedi.';
-      status.textContent = 'Taslak kaydedilmedi';
-    } finally {
-      imageUploadPending = false;
+  $('#book-writer-add-image').addEventListener('mousedown', rememberSelection);
+  $('#book-writer-add-image').addEventListener('click', () => imagePicker.click());
+  imagePicker.addEventListener('change', async event => {
+    await uploadBookImage(event.target.files?.[0]);
+    event.target.value = '';
+  });
+  imageAlignInput.addEventListener('change', () => {
+    if (!selectedImage) return;
+    selectedImage.dataset.align = imageAlignInput.value;
+    selectedImage.style.textAlign = imageAlignInput.value;
+    selectedImage.style.marginLeft = imageAlignInput.value === 'left' ? '0' : 'auto';
+    selectedImage.style.marginRight = imageAlignInput.value === 'right' ? '0' : 'auto';
+    queueDraftSave();
+  });
+  imageWidthInput.addEventListener('input', () => {
+    if (!selectedImage) return;
+    selectedImage.dataset.width = imageWidthInput.value;
+    selectedImage.style.width = `${imageWidthInput.value}%`;
+    imageWidthLabel.textContent = `${imageWidthInput.value}%`;
+    queueDraftSave();
+  });
+  $('#book-writer-image-remove').addEventListener('click', () => {
+    selectedImage?.remove();
+    updateSelectedImage(null);
+    queueDraftSave();
+    contentInput.focus();
+  });
+  contentInput.addEventListener('click', event => {
+    const image = event.target.closest?.('[data-book-image="true"]');
+    if (image && contentInput.contains(image)) updateSelectedImage(image);
+    else if (!event.target.closest?.('[data-book-image="true"]')) updateSelectedImage(null);
+  });
+  contentInput.addEventListener('dragstart', event => {
+    const image = event.target.closest?.('[data-book-image="true"]');
+    if (!image) return;
+    draggedImage = image;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', 'book-image');
+  });
+  contentInput.addEventListener('dragend', () => { draggedImage = null; });
+  contentInput.addEventListener('dragover', event => {
+    if (draggedImage || Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
+  });
+  contentInput.addEventListener('drop', event => {
+    const file = Array.from(event.dataTransfer?.files || []).find(item => item.type.startsWith('image/'));
+    if (file) {
+      event.preventDefault();
+      uploadBookImage(file, rangeAtPoint(event.clientX, event.clientY));
+      return;
     }
+    if (!draggedImage) return;
+    event.preventDefault();
+    const range = rangeAtPoint(event.clientX, event.clientY);
+    if (!range || !(range.startContainer === contentInput || contentInput.contains(range.startContainer)) || draggedImage.contains(range.startContainer)) return;
+    range.insertNode(draggedImage);
+    const lineBreak = document.createElement('br');
+    draggedImage.after(lineBreak);
+    updateSelectedImage(draggedImage);
+    draggedImage = null;
+    queueDraftSave();
   });
   $('#book-writer-close').addEventListener('click', () => navigate(returnPath));
   $('#book-writer-publish').addEventListener('click', async event => {
     const button = event.currentTarget;
     const finalTitle = titleInput.value.trim();
-    const finalContent = contentInput.value.trim();
+    const finalContent = serializeBookPageEditor(contentInput).trim();
     if (!finalTitle || !finalContent) {
       errorBox.textContent = 'Yayınlamak için başlık ve içerik gerekli.';
       (!finalTitle ? titleInput : contentInput).focus();
@@ -7634,9 +7903,9 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
         method: 'POST',
         body: JSON.stringify({
           title: finalTitle,
-          content: contentInput.value,
+          content: serializeBookPageEditor(contentInput),
           chapter_id: chapterInput?.value || null,
-          image_url: imageUrl
+          image_url: ''
         })
       });
       try { localStorage.removeItem(cacheKey); }
@@ -7644,6 +7913,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       activeBookPageEditor = null;
       window.removeEventListener('beforeunload', beforeUnload);
       document.removeEventListener('keydown', keydown);
+      document.removeEventListener('selectionchange', selectionChange);
       toast(isEditingPublished ? 'Sayfa değişiklikleri yayınlandı.' : 'Sayfa yayınlandı; artık herkes görebilir.', 'success');
       navigate(returnPath);
     } catch (error) {
@@ -7750,7 +8020,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
         <div class="ebook-page-content ${isOwner ? 'book-owner-content' : 'book-reader-content'}" id="ebook-content" style="font-size:${fontSize}px">
           ${page.image_url ? `<img src="${escHtml(page.image_url)}" class="ebook-page-image" alt="" />` : ''}
           <div class="book-title-heading">${escHtml(page.title)}</div>
-          <div class="book-text">${escHtml(page.content.trim())}</div>
+          <div class="book-text">${bookPageContentHTML(page.content.trim())}</div>
         </div>
 
         <!-- Alt Navigasyon -->

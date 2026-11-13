@@ -10951,6 +10951,43 @@ app.get('/kitap/:slug', async (req, res) => {
   res.send(injectCrawlableBody(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta), bookBody));
 });
 
+function renderBookPageContent(content) {
+  const tokenPattern = /\[\[cigcig-image:([^\]]+)\]\]/g;
+  const text = String(content || '');
+  let cursor = 0;
+  let html = '';
+  let match;
+  while ((match = tokenPattern.exec(text))) {
+    html += escapeHtml(text.slice(cursor, match.index)).replace(/\n/g, '<br>');
+    let image = null;
+    try {
+      const parsed = JSON.parse(decodeURIComponent(match[1]));
+      const source = String(parsed.src || '').trim();
+      const url = new URL(source, SITE_URL);
+      if (/^\/(?!\/)/.test(source) || url.protocol === 'https:' || url.protocol === 'http:') {
+        image = {
+          src: /^\/(?!\/)/.test(source) ? source : url.href,
+          width: Math.min(100, Math.max(25, Number.parseInt(parsed.width, 10) || 100)),
+          align: ['left', 'center', 'right'].includes(parsed.align) ? parsed.align : 'center',
+          alt: String(parsed.alt || '').slice(0, 180)
+        };
+      }
+    } catch {}
+    if (image) {
+      html += `<figure class="ebook-inline-image" style="text-align:${image.align}"><img src="${escapeHtml(image.src)}" alt="${escapeHtml(image.alt)}" style="width:${image.width}%;max-width:100%" loading="lazy" /></figure>`;
+    } else {
+      html += escapeHtml(match[0]);
+    }
+    cursor = match.index + match[0].length;
+  }
+  html += escapeHtml(text.slice(cursor)).replace(/\n/g, '<br>');
+  return html;
+}
+
+function bookPagePlainText(content) {
+  return String(content || '').replace(/\[\[cigcig-image:[^\]]+\]\]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
   const { rows: pages } = await query(`SELECT bp.*, b.title AS book_title, b.slug AS book_slug, u.username AS author, b.cover_image
     FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
@@ -10964,10 +11001,11 @@ app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
   const body = serverPageBody('CİGCİG KİTAP', `${page.book_title} · ${page.title}`, page.author ? `Yazar: ${page.author}` : '', `<article class="seo-article seo-page-article">
     <p class="seo-breadcrumb"><a href="/kitap/${escapeHtml(page.book_slug)}">${escapeHtml(page.book_title)}</a> / ${escapeHtml(page.title)}</p>
     ${page.image_url ? serverImage(page.image_url, page.title, 'seo-hero-image') : ''}
-    <div class="seo-article-text">${escapeHtml(page.content || '')}</div>
+    <div class="seo-article-text">${renderBookPageContent(page.content || '')}</div>
   </article>`);
-  const html = injectMeta(`${page.title} – ${page.book_title} | CigCig`, String(page.content || '').replace(/\s+/g, ' ').slice(0, 160), pageUrl, page.cover_image || '', `<script type="application/ld+json">${safeJsonLd({
-    '@context': 'https://schema.org', '@type': 'Chapter', name: page.title, isPartOf: { '@type': 'Book', name: page.book_title, url: `${SITE_URL}/kitap/${page.book_slug}` }, url: pageUrl, text: String(page.content || '').slice(0, 500), inLanguage: 'tr'
+  const plainText = bookPagePlainText(page.content);
+  const html = injectMeta(`${page.title} – ${page.book_title} | CigCig`, plainText.slice(0, 160), pageUrl, page.cover_image || '', `<script type="application/ld+json">${safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'Chapter', name: page.title, isPartOf: { '@type': 'Book', name: page.book_title, url: `${SITE_URL}/kitap/${page.book_slug}` }, url: pageUrl, text: plainText.slice(0, 500), inLanguage: 'tr'
   })}</script>`, body);
   res.send(html);
 });
@@ -11216,7 +11254,7 @@ app.get('/api/search', optionalAuth, async (req, res) => {
     videoComments.rows.forEach(r => results.push({ type: r.is_reals ? 'reals_comment' : 'video_comment', title: r.title, excerpt: r.content, route: `/${r.is_reals ? 'reals' : 'video'}/${r.slug}`, author: r.author, created_at: r.created_at }));
     songs.rows.forEach(r => results.push({ type: 'song', title: r.title, excerpt: [r.artist_name, r.genre, r.lyrics].filter(Boolean).join(' · '), route: `/muzik/${r.slug}`, author: r.author, created_at: r.created_at }));
     books.rows.forEach(r => results.push({ type: 'book', title: r.title, excerpt: [r.preface, r.karakterler, r.kadro].filter(Boolean).join(' · '), route: `/kitap/${r.slug}`, author: r.author, created_at: r.created_at }));
-    bookPages.rows.forEach(r => results.push({ type: 'book_page', title: `${r.title} · ${r.page_title}`, excerpt: r.content, route: `/kitap/${r.slug}/sayfa/${r.page_slug}`, author: r.author, created_at: r.created_at }));
+    bookPages.rows.forEach(r => results.push({ type: 'book_page', title: `${r.title} · ${r.page_title}`, excerpt: bookPagePlainText(r.content), route: `/kitap/${r.slug}/sayfa/${r.page_slug}`, author: r.author, created_at: r.created_at }));
     users.rows.forEach(r => results.push({ type: 'profile', title: `@${r.username}`, excerpt: [r.title, r.bio, r.location].filter(Boolean).join(' · '), route: `/profil/${profileRouteKey(r.username)}`, author: r.username, avatar: r.avatar, created_at: r.created_at }));
     groups.rows.forEach(r => results.push({ type: 'group', title: r.name, excerpt: r.description, route: `/grup/${r.slug}`, author: r.author, created_at: r.created_at }));
     groupChannels.rows.forEach(r => results.push({ type: 'group_channel', title: `${r.name} · #${r.channel_name}`, excerpt: r.description, route: `/grup/${r.slug}`, author: r.author, created_at: r.created_at }));
