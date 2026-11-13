@@ -736,10 +736,14 @@ async function initDb() {
       page_num INTEGER DEFAULT 1,
       slug TEXT UNIQUE,
       image_url TEXT DEFAULT '',
+      is_published INTEGER NOT NULL DEFAULT 1,
       created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
       FOREIGN KEY(book_id) REFERENCES books(id) ON DELETE CASCADE,
       FOREIGN KEY(chapter_id) REFERENCES book_chapters(id) ON DELETE SET NULL
     );
+    ALTER TABLE book_pages ADD COLUMN IF NOT EXISTS is_published INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE book_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
 
     CREATE TABLE IF NOT EXISTS groups (
       id BIGSERIAL PRIMARY KEY,

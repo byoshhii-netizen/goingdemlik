@@ -1,4 +1,5 @@
 let currentUser = null;
+let activeBookPageEditor = null;
 let currentToken = localStorage.getItem('token');
 let realtimeSocket = null;
 let realtimeSocketToken = null;
@@ -1764,9 +1765,40 @@ function navigate(path, push = true) {
   closeMobileMenu();
   closeMobileCreateMenu();
   $('#new-dropdown')?.classList.add('hidden');
+  if (activeBookPageEditor && path !== activeBookPageEditor.route) {
+    void confirmBookPageEditorExit().then(confirmed => {
+      if (!confirmed) return;
+      if (push) history.pushState({}, '', path);
+      renderRoute(path);
+    });
+    return;
+  }
   if (push) history.pushState({}, '', path);
   // path içindeki query string'i renderRoute'a geçir
   renderRoute(path);
+}
+
+async function confirmBookPageEditorExit() {
+  const editor = activeBookPageEditor;
+  if (!editor) return true;
+  if (editor.exitPending) return false;
+  editor.exitPending = true;
+  const confirmed = await CigCigDialogs.confirm('Bu sayfayı özel taslak olarak kaydedip çıkmak istiyor musunuz? Taslak yalnızca size görünür.');
+  if (!confirmed) {
+    editor.exitPending = false;
+    return false;
+  }
+  try {
+    await editor.save();
+    if (activeBookPageEditor === editor) activeBookPageEditor = null;
+    window.removeEventListener('beforeunload', editor.beforeUnload);
+    document.removeEventListener('keydown', editor.keydown);
+    return true;
+  } catch (error) {
+    editor.exitPending = false;
+    toast(error.message || 'Taslak kaydedilemedi. Yazma ekranında kalabilirsiniz.', 'error');
+    return false;
+  }
 }
 
 function initPullToRefresh() {
@@ -1864,8 +1896,17 @@ function isPublicGuestRoute(path) {
 }
 
 window.addEventListener('popstate', () => {
+  const path = location.pathname + location.search;
+  if (activeBookPageEditor && path !== activeBookPageEditor.route) {
+    void confirmBookPageEditorExit().then(confirmed => {
+      if (confirmed) renderRoute(path);
+      else history.forward();
+    });
+    return;
+  }
+  if (activeBookPageEditor && path === activeBookPageEditor.route) return;
   closeMobileCreateMenu();
-  renderRoute(location.pathname + location.search);
+  renderRoute(path);
 });
 
 document.addEventListener('click', e => {
@@ -2009,6 +2050,7 @@ function renderRoute(fullPath) {
   }
   if (path === '/kitaplar') return renderBookList(app);
   if (path.startsWith('/kitap/') && segs.length === 2) return renderBookDetail(app, segs[1]);
+  if (path.startsWith('/kitap/') && segs[2] === 'yaz' && (segs.length === 3 || segs.length === 4)) return renderBookPageEditor(app, segs[1], segs[3] || null);
   if (path.startsWith('/kitap/') && segs.length === 4 && segs[2] === 'sayfa') return renderPageReader(app, segs[1], segs[3]);
   if (path === '/gruplar') return renderGroupList(app);
   if (path === '/fotograflar') return renderPhotos(app);
@@ -6993,7 +7035,8 @@ async function renderBookDetail(app, slug) {
   updatePageMeta(book.title + ' – ' + siteName, book.preface ? book.preface.substring(0,155) : book.title + ' – CigCig\'te yayınlanan kitap.', book.cover_image || '');
   const isOwner = currentUser && currentUser.id === book.user_id;
 
-  const sortedPages = [...pages].sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
+  const sortedPages = pages.filter(page => Number(page.is_published) !== 0).sort((a,b) => (a.page_num || 0) - (b.page_num || 0));
+  const draftPages = pages.filter(page => Number(page.is_published) === 0);
   const firstPage = sortedPages[0];
   const unassigned = sortedPages.filter(p => !p.chapter_id);
   const chapPages = {};
@@ -7033,6 +7076,12 @@ async function renderBookDetail(app, slug) {
     </div>`;
 
   const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug)).join('');
+  const draftPagesHTML = draftPages.map(page => `
+    <a class="book-draft-item" href="/kitap/${escHtml(slug)}/yaz/${escHtml(page.slug)}" data-link>
+      <i class="fas fa-file-pen"></i>
+      <span>      <strong>${escHtml(page.title === 'Taslak sayfa' || !page.title ? 'Adsız sayfa taslağı' : page.title)}</strong><small>Yalnızca sen görebilirsin · Yazmaya devam et</small></span>
+      <i class="fas fa-arrow-right"></i>
+    </a>`).join('');
 
   // Kitap yorumları kapatıldı: kitap sayfasında yorum alanı gösterilmeyecek.
 
@@ -7104,7 +7153,8 @@ async function renderBookDetail(app, slug) {
     </div>
     <div class="chapters-list">
       ${resumeHTML}
-      ${!chapters.length && !pages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
+      ${draftPages.length ? `<section class="book-drafts"><h2><i class="fas fa-lock"></i> Özel taslakların</h2><p>Bu sayfaları yalnızca sen görebilirsin. Yayınladığında kitapta herkese açılır.</p>${draftPagesHTML}</section>` : ''}
+      ${!chapters.length && !sortedPages.length && !draftPages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
       ${unassignedHTML}
       ${chapListHTML}
     </div>
@@ -7194,7 +7244,7 @@ async function renderBookDetail(app, slug) {
       if (!await CigCigDialogs.confirm('Kitabı ve tüm sayfalarını silmek istediğinize emin misiniz?')) return;
       try { await api('/book/' + slug, { method: 'DELETE' }); toast('Kitap silindi'); navigate('/kitaplar'); } catch (e) { toast(e.message, 'error'); }
     });
-    $('#add-page-btn').addEventListener('click', () => showAddPageModal(slug, chapters));
+    $('#add-page-btn').addEventListener('click', () => navigate('/kitap/' + encodeURIComponent(slug) + '/yaz'));
     $('#add-chap-btn').addEventListener('click', () => showAddChapterModal(slug));
     document.querySelectorAll('.del-chapter').forEach(btn => {
       btn.addEventListener('click', async e => {
@@ -7382,59 +7432,221 @@ function pageItemHTML(p, bookSlug) {
   </div>`;
 }
 
-async function showAddPageModal(bookSlug, chapters) {
-  // Önce mevcut sayfa sayısını al
-  let pageCount = 0;
+async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageData = null) {
+  app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
+  let bookData;
+  let pageData = initialPageData;
   try {
-    const data = await api('/book/' + bookSlug);
-    pageCount = data.book.page_count || 0;
-  } catch {}
+    bookData = await api('/book/' + encodeURIComponent(bookSlug));
+    if (!currentUser || currentUser.id !== bookData.book.user_id) {
+      app.innerHTML = '<div class="container page"><div class="empty-state"><p>Bu yazma alanı yalnızca kitap sahibine açıktır.</p></div></div>';
+      return;
+    }
+    if (pageSlug && !pageData) pageData = await api(`/book/${encodeURIComponent(bookSlug)}/page/${encodeURIComponent(pageSlug)}`);
+    if (pageData?.page && Number(pageData.page.is_published) !== 0) {
+      navigate(`/kitap/${encodeURIComponent(bookSlug)}/sayfa/${encodeURIComponent(pageData.page.slug)}`);
+      return;
+    }
+    if (!pageSlug) {
+      pageData = { page: await api(`/book/${encodeURIComponent(bookSlug)}/pages/draft`, {
+        method: 'POST',
+        body: JSON.stringify({ title: '', content: '' })
+      }) };
+      pageSlug = pageData.page.slug;
+      history.replaceState({}, '', `/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(pageSlug)}`);
+    }
+  } catch (error) {
+    app.innerHTML = `<div class="container page"><div class="empty-state"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message || 'Yazma alanı açılamadı.')}</p><a class="btn btn-outline" href="/kitap/${escHtml(bookSlug)}" data-link>Kitaba dön</a></div></div>`;
+    return;
+  }
 
-  const chapOptions = chapters.map(c => `<option value="${c.id}">${escHtml(c.title)}</option>`).join('');
-  showModal('Yeni Sayfa', `
-    <div style="background:var(--bg-card2);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--text-secondary)">
-      <i class="fas fa-info-circle" style="color:var(--accent-red)"></i>
-      Bu sayfa <strong style="color:var(--text-primary)">${pageCount + 1}. sayfa</strong> olarak eklenecek
-    </div>
-    <div class="form-group"><label>Sayfa Başlığı</label><input id="pg-title" type="text" placeholder="Sayfa başlığı..." /></div>
-    ${chapters.length ? `<div class="form-group"><label>Bölüm (opsiyonel)</label><select id="pg-chap"><option value="">-- Bölüm seçin --</option>${chapOptions}</select></div>` : ''}
-    <div class="form-group">
-      <label>Kapak/Görsel (opsiyonel)</label>
-      <input type="file" id="pg-image-file" accept="image/*" style="margin-bottom:8px" />
-      <div id="pg-image-preview" style="display:none"></div>
-    </div>
-    <div class="form-group"><label>İçerik</label><textarea id="pg-content" rows="14" placeholder="Sayfanın içeriğini buraya yazın..."></textarea></div>
-    <button class="btn btn-primary" id="pg-submit" style="width:100%">Ekle</button>
-    <div id="pg-error" class="form-error mt-4"></div>
-  `);
+  const { book, chapters } = bookData;
+  const page = pageData.page;
+  const route = `/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(page.slug)}`;
+  const cacheKey = `cigcig_book_page_draft:${currentUser.id}:${bookSlug}:${page.slug}`;
+  let title = String(page.title || '');
+  let content = String(page.content || '');
+  let chapterId = page.chapter_id ? String(page.chapter_id) : '';
+  let imageUrl = String(page.image_url || '');
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    if (cached && Number(cached.savedAt) > (Date.parse(page.updated_at || page.created_at || '') || 0)) {
+      title = String(cached.title || '');
+      content = String(cached.content || '');
+      chapterId = String(cached.chapterId || '');
+      imageUrl = String(cached.imageUrl || '');
+    }
+  } catch (error) {
+    console.warn('Kitap sayfası taslak yedeği okunamadı.', error);
+  }
 
-  $('#pg-image-file').addEventListener('change', e => {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const prev = $('#pg-image-preview');
-      prev.style.display = 'block';
-      prev.innerHTML = `<img src="${ev.target.result}" style="width:100%;max-height:200px;object-fit:cover;border-radius:8px;margin-top:4px" />`;
+  document.title = `Sayfa yaz - ${book.title}`;
+  app.innerHTML = `<div class="book-writing-page">
+    <header class="book-writing-header">
+      <a class="book-writing-back" href="/kitap/${escHtml(bookSlug)}" data-link><i class="fas fa-arrow-left"></i><span>${escHtml(book.title)}</span></a>
+      <div class="book-writing-status" id="book-writer-status" role="status" aria-live="polite">Özel taslak hazır</div>
+      <div class="book-writing-actions">
+        <button type="button" class="btn btn-outline" id="book-writer-close" aria-label="Kaydedip çık"><i class="fas fa-xmark"></i><span>Çık</span></button>
+        <button type="button" class="btn btn-primary" id="book-writer-publish"><i class="fas fa-globe"></i><span>Yayınla</span></button>
+      </div>
+    </header>
+    <main class="book-writing-main">
+      <div class="book-writing-intro"><span><i class="fas fa-lock"></i> ÖZEL TASLAK</span><p>Yazdıkların otomatik kaydedilir ve yalnızca sana görünür. Yayınladığında bu sayfa herkese açılır.</p></div>
+      <article class="book-writing-paper">
+        <input id="book-writer-title" class="book-writing-title" type="text" maxlength="180" placeholder="Sayfa başlığı" value="${escHtml(title)}" aria-label="Sayfa başlığı" />
+        ${chapters.length ? `<label class="book-writing-chapter-label" for="book-writer-chapter">Bölüm (isteğe bağlı)</label><select id="book-writer-chapter" class="book-writing-chapter"><option value="">Bölüm seç</option>${chapters.map(chapter => `<option value="${escHtml(chapter.id)}"${String(chapter.id) === chapterId ? ' selected' : ''}>${escHtml(chapter.title)}</option>`).join('')}</select>` : ''}
+        <label class="book-writing-image-control"><i class="fas fa-image"></i><span>Sayfaya görsel ekle (isteğe bağlı)</span><input id="book-writer-image" type="file" accept="image/*" /></label>
+        <div id="book-writer-image-preview" class="book-writing-image-preview"${imageUrl ? '' : ' hidden'}>${imageUrl ? `<img src="${escHtml(imageUrl)}" alt="" /><button type="button" id="book-writer-image-remove" aria-label="Görseli kaldır"><i class="fas fa-xmark"></i></button>` : ''}</div>
+        <textarea id="book-writer-content" class="book-writing-content" placeholder="Sayfanı burada yazmaya başla...">${escHtml(content)}</textarea>
+      </article>
+      <div id="book-writer-error" class="form-error book-writing-error" role="alert"></div>
+    </main>
+  </div>`;
+
+  const titleInput = $('#book-writer-title');
+  const contentInput = $('#book-writer-content');
+  const chapterInput = $('#book-writer-chapter');
+  const status = $('#book-writer-status');
+  const errorBox = $('#book-writer-error');
+  const imagePreview = $('#book-writer-image-preview');
+  let saveTimer = null;
+  let saveQueue = Promise.resolve();
+  let saveVersion = 0;
+  let imageUploadPending = false;
+
+  const updateImagePreview = () => {
+    imagePreview.hidden = !imageUrl;
+    imagePreview.innerHTML = imageUrl
+      ? `<img src="${escHtml(imageUrl)}" alt="" /><button type="button" id="book-writer-image-remove" aria-label="Görseli kaldır"><i class="fas fa-xmark"></i></button>`
+      : '';
+    $('#book-writer-image-remove')?.addEventListener('click', () => {
+      imageUrl = '';
+      updateImagePreview();
+      queueDraftSave();
+    });
+  };
+  const saveLocalBackup = () => {
+    const snapshot = {
+      title: titleInput.value,
+      content: contentInput.value,
+      chapterId: chapterInput?.value || '',
+      imageUrl,
+      savedAt: Date.now()
     };
-    reader.readAsDataURL(file);
-  });
-
-  $('#pg-submit').addEventListener('click', async () => {
-    const title = $('#pg-title').value.trim();
-    const content = $('#pg-content').value.trim();
-    if (!title || !content) { $('#pg-error').textContent = 'Başlık ve içerik zorunlu'; return; }
-    const chapter_id = $('#pg-chap')?.value || null;
     try {
-      let image_url = '';
-      const imgFile = $('#pg-image-file').files[0];
-      if (imgFile) {
-        const fd = new FormData(); fd.append('file', imgFile);
-        const r = await apiForm('/upload', fd);
-        image_url = r.url;
+      localStorage.setItem(cacheKey, JSON.stringify(snapshot));
+    } catch (error) {
+      console.error('Kitap sayfası taslak yedeği kaydedilemedi.', error);
+      status.textContent = 'Tarayıcı yedeği kaydedilemedi; bağlantını kontrol et.';
+    }
+    return snapshot;
+  };
+  const saveDraftNow = () => {
+    clearTimeout(saveTimer);
+    if (imageUploadPending) return Promise.reject(new Error('Görsel yüklemesi tamamlanana kadar bekleyin.'));
+    const snapshot = saveLocalBackup();
+    const version = ++saveVersion;
+    status.textContent = 'Taslak kaydediliyor...';
+    errorBox.textContent = '';
+    const request = saveQueue.catch(() => {}).then(() => api(`/book/${encodeURIComponent(bookSlug)}/page/${encodeURIComponent(page.slug)}/draft`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        title: snapshot.title.trim(),
+        content: snapshot.content,
+        chapter_id: snapshot.chapterId || null,
+        image_url: snapshot.imageUrl
+      })
+    }));
+    saveQueue = request.then(() => {
+      if (version === saveVersion) status.textContent = 'Özel taslak kaydedildi';
+    }, error => {
+      if (version === saveVersion) {
+        status.textContent = 'Kaydedilemedi';
+        errorBox.textContent = error.message || 'Taslak kaydedilemedi. Bağlantını kontrol et.';
       }
-      await api('/book/' + bookSlug + '/pages', { method: 'POST', body: JSON.stringify({ title, content, chapter_id, image_url }) });
-      toast('Sayfa eklendi'); hideModal(); renderRoute(location.pathname);
-    } catch (e) { $('#pg-error').textContent = e.message; }
+      throw error;
+    });
+    return saveQueue;
+  };
+  const queueDraftSave = () => {
+    saveLocalBackup();
+    status.textContent = 'Değişiklikler kaydediliyor...';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveDraftNow().catch(error => console.error('Kitap sayfası otomatik kaydedilemedi.', error));
+    }, 800);
+  };
+  const beforeUnload = event => {
+    event.preventDefault();
+    event.returnValue = '';
+  };
+  const keydown = event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      saveDraftNow().catch(error => console.error('Kitap sayfası kaydedilemedi.', error));
+    }
+  };
+  const editorState = { route, save: saveDraftNow, beforeUnload, keydown, exitPending: false };
+  activeBookPageEditor = editorState;
+  window.addEventListener('beforeunload', beforeUnload);
+  document.addEventListener('keydown', keydown);
+  updateImagePreview();
+  titleInput.addEventListener('input', queueDraftSave);
+  contentInput.addEventListener('input', queueDraftSave);
+  chapterInput?.addEventListener('change', queueDraftSave);
+  $('#book-writer-image').addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    imageUploadPending = true;
+    status.textContent = 'Görsel yükleniyor...';
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const result = await apiForm('/upload', formData);
+      imageUrl = result.url;
+      updateImagePreview();
+      queueDraftSave();
+    } catch (error) {
+      errorBox.textContent = error.message || 'Görsel yüklenemedi.';
+      status.textContent = 'Taslak kaydedilmedi';
+    } finally {
+      imageUploadPending = false;
+    }
+  });
+  $('#book-writer-close').addEventListener('click', () => navigate(`/kitap/${encodeURIComponent(bookSlug)}`));
+  $('#book-writer-publish').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const finalTitle = titleInput.value.trim();
+    const finalContent = contentInput.value.trim();
+    if (!finalTitle || !finalContent) {
+      errorBox.textContent = 'Yayınlamak için başlık ve içerik gerekli.';
+      (!finalTitle ? titleInput : contentInput).focus();
+      return;
+    }
+    button.disabled = true;
+    try {
+      await saveDraftNow();
+      await api(`/book/${encodeURIComponent(bookSlug)}/page/${encodeURIComponent(page.slug)}/publish`, {
+        method: 'POST',
+        body: JSON.stringify({
+          title: finalTitle,
+          content: contentInput.value,
+          chapter_id: chapterInput?.value || null,
+          image_url: imageUrl
+        })
+      });
+      try { localStorage.removeItem(cacheKey); }
+      catch (error) { console.warn('Yayınlanan sayfanın yerel taslak yedeği silinemedi.', error); }
+      activeBookPageEditor = null;
+      window.removeEventListener('beforeunload', beforeUnload);
+      document.removeEventListener('keydown', keydown);
+      toast('Sayfa yayınlandı; artık herkes görebilir.', 'success');
+      navigate(`/kitap/${encodeURIComponent(bookSlug)}`);
+    } catch (error) {
+      errorBox.textContent = error.message || 'Sayfa yayınlanamadı.';
+      status.textContent = 'Yayınlama başarısız';
+      button.disabled = false;
+    }
   });
 }
 
@@ -7470,8 +7682,9 @@ async function renderPageReader(app, bookSlug, pageSlug) {
   }
 
   const { page, book, prev, next } = data;
-  document.title = page.title + ' - ' + book.title;
   const isOwner = currentUser && currentUser.id === book.user_id;
+  if (!Number(page.is_published) && isOwner) return renderBookPageEditor(app, bookSlug, pageSlug, data);
+  document.title = page.title + ' - ' + book.title;
 
   // Kitabın tüm sayfalarını al (içindekiler için)
   let allPages = [];

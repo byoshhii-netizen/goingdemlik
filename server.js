@@ -1219,7 +1219,7 @@ async function updateUserLevel(userId) {
   if (!users.length) return;
   const user = users[0];
   const { rows: bpRows } = await query(
-    'SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [userId]);
+    'SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1 AND bp.is_published=1', [userId]);
   const bookPageCount = parseInt(bpRows[0].c);
   const { rows: levels } = await query('SELECT * FROM levels ORDER BY order_num ASC');
   let bestLevel = levels[0];
@@ -1277,7 +1277,7 @@ async function checkDailyLimit(userId, user, type) {
     countRes = await query("SELECT COUNT(*) as c FROM books WHERE user_id=$1 AND DATE(created_at)=$2", [userId, today]);
   } else if (type === 'book_pages') {
     countRes = await query(
-      "SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1 AND DATE(bp.created_at)=$2",
+      "SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1 AND bp.is_published=1 AND DATE(bp.created_at)=$2",
       [userId, today]);
   }
   const count = parseInt(countRes?.rows[0]?.c || 0);
@@ -1595,7 +1595,7 @@ app.get('/sitemap.xml', async (req, res) => {
       ORDER BY b.updated_at DESC LIMIT 2000`).then(r => r.rows),
     query(`SELECT bp.slug AS page_slug, b.slug AS book_slug, bp.created_at AS updated_at
       FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
-      WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
+      WHERE bp.is_published=1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
         AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
         AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
         AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
@@ -4464,7 +4464,8 @@ app.get('/api/book/:slug', optionalAuth, async (req, res) => {
   if (book.password_hash && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap şifreli', password_required: true, book: sanitizeBook({ ...book, password_hash: undefined }) });
   if (book.is_hidden && !isOwner && !hasPasswordAccess) return res.status(403).json({ error: 'Bu kitap gizli' });
   const { rows: chapters } = await query('SELECT * FROM book_chapters WHERE book_id=$1 ORDER BY order_num ASC', [book.id]);
-  const { rows: pages } = await query('SELECT id,title,page_num,slug,chapter_id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
+  const { rows: pages } = await query(`SELECT id,title,page_num,slug,chapter_id,is_published FROM book_pages
+    WHERE book_id=$1 AND (is_published=1 OR $2=1) ORDER BY page_num ASC`, [book.id, isOwner ? 1 : 0]);
 
   const { rows: likeCountRows } = await query('SELECT COUNT(*)::int AS c FROM book_likes WHERE book_id=$1', [book.id]);
   const likeCount = parseInt(likeCountRows[0]?.c || 0);
@@ -4686,7 +4687,7 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
   const { title, content, chapter_id, image_url } = req.body;
   if (!title || !content) return res.status(400).json({ error: 'Başlık ve içerik zorunlu' });
-  const { rows: cnt } = await query('SELECT COUNT(*) as c FROM book_pages WHERE book_id=$1', [book.id]);
+  const { rows: cnt } = await query('SELECT COUNT(*) as c FROM book_pages WHERE book_id=$1 AND is_published=1', [book.id]);
   const pageNum = parseInt(cnt[0].c) + 1;
   const tempSlug = slugify(title, { lower: true, strict: false, locale: 'tr' }).substring(0, 40) + '-' + Date.now();
   const { rows } = await query('INSERT INTO book_pages (book_id,chapter_id,title,content,page_num,slug,image_url) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id',
@@ -4697,6 +4698,21 @@ app.post('/api/book/:slug/pages', authMiddleware, async (req, res) => {
   await query('UPDATE books SET page_count=page_count+1, updated_at=NOW() WHERE id=$1', [book.id]);
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE id=$1', [id]);
   res.json(pRows[0]);
+});
+
+app.post('/api/book/:slug/pages/draft', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1', [book.id]);
+  const title = String(req.body?.title || '').trim();
+  const slug = `${slugify(title || 'taslak-sayfa', { lower: true, strict: false, locale: 'tr' }).substring(0, 40)}-${randomUUID().substring(0, 8)}`;
+  const { rows } = await query(`INSERT INTO book_pages (book_id,chapter_id,title,content,page_num,slug,image_url,is_published)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,0) RETURNING *`,
+  [book.id, req.body?.chapter_id || null, title, String(req.body?.content || ''), countRows[0].c + 1, slug, req.body?.image_url || '']);
+  res.json(rows[0]);
 });
 
 app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
@@ -4712,9 +4728,52 @@ app.get('/api/book/:slug/page/:pageSlug', optionalAuth, async (req, res) => {
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
   if (!pRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const page = pRows[0];
-  const { rows: prev } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2', [book.id, page.page_num-1]);
-  const { rows: next } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2', [book.id, page.page_num+1]);
+  if (!page.is_published && !isOwner) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+  const { rows: prev } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2 AND is_published=1', [book.id, page.page_num-1]);
+  const { rows: next } = await query('SELECT slug,title FROM book_pages WHERE book_id=$1 AND page_num=$2 AND is_published=1', [book.id, page.page_num+1]);
   res.json({ page, book: sanitizeBook(book), prev: prev[0]||null, next: next[0]||null });
+});
+
+app.put('/api/book/:slug/page/:pageSlug/draft', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows: pageRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
+  if (!pageRows.length || pageRows[0].is_published) return res.status(404).json({ error: 'Taslak sayfa bulunamadı' });
+
+  const page = pageRows[0];
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '');
+  const chapterId = req.body?.chapter_id || null;
+  const imageUrl = req.body?.image_url ?? page.image_url;
+  const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,updated_at=NOW()
+    WHERE id=$5 RETURNING *`, [title, content, chapterId, imageUrl, page.id]);
+  res.json(rows[0]);
+});
+
+app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, res) => {
+  const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
+  if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = bRows[0];
+  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+  const { rows: pageRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
+  if (!pageRows.length || pageRows[0].is_published) return res.status(404).json({ error: 'Taslak sayfa bulunamadı' });
+
+  const page = pageRows[0];
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '').trim();
+  if (!title || !content) return res.status(400).json({ error: 'Yayınlamak için başlık ve içerik zorunlu' });
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1 AND is_published=1', [book.id]);
+  const pageNum = countRows[0].c + 1;
+  const realSlug = makeSlug(title, page.id);
+  const chapterId = req.body?.chapter_id || null;
+  const imageUrl = req.body?.image_url ?? page.image_url;
+  const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,page_num=$5,
+    slug=$6,is_published=1,updated_at=NOW() WHERE id=$7 RETURNING *`,
+  [title, content, chapterId, imageUrl, pageNum, realSlug, page.id]);
+  await query('UPDATE books SET page_count=$1,updated_at=NOW() WHERE id=$2', [pageNum, book.id]);
+  res.json(rows[0]);
 });
 
 app.put('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {
@@ -4726,7 +4785,7 @@ app.put('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {
   if (!pRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   const page = pRows[0];
   const { title, content, chapter_id } = req.body;
-  await query('UPDATE book_pages SET title=$1,content=$2,chapter_id=$3 WHERE id=$4',
+  await query('UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,updated_at=NOW() WHERE id=$4',
     [title||page.title, content||page.content, chapter_id??page.chapter_id, page.id]);
   const { rows } = await query('SELECT * FROM book_pages WHERE id=$1', [page.id]);
   res.json(rows[0]);
@@ -4740,8 +4799,10 @@ app.delete('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) =>
   const { rows: pRows } = await query('SELECT * FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
   if (!pRows.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
   await query('DELETE FROM book_pages WHERE id=$1', [pRows[0].id]);
-  await query('UPDATE books SET page_count=GREATEST(0,page_count-1) WHERE id=$1', [book.id]);
-  const { rows: remaining } = await query('SELECT id FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC', [book.id]);
+  if (pRows[0].is_published) {
+    await query('UPDATE books SET page_count=GREATEST(0,page_count-1) WHERE id=$1', [book.id]);
+  }
+  const { rows: remaining } = await query('SELECT id FROM book_pages WHERE book_id=$1 AND is_published=1 ORDER BY page_num ASC', [book.id]);
   for (let i = 0; i < remaining.length; i++) {
     await query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [i+1, remaining[i].id]);
   }
@@ -5779,7 +5840,7 @@ app.get('/api/profile/:username', optionalAuth, async (req, res) => {
     query(`SELECT g.* FROM groups g INNER JOIN group_members gm ON g.id=gm.group_id WHERE gm.user_id=$1 LIMIT 20`, [user.id]).then(r => r.rows),
     features.levels ? query('SELECT * FROM levels WHERE id=$1', [user.level_id]).then(r => r.rows[0] || null) : Promise.resolve(null),
     features.levels ? query('SELECT * FROM levels ORDER BY order_num ASC').then(r => r.rows) : Promise.resolve([]),
-    query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1', [user.id]).then(r => parseInt(r.rows[0].c)),
+    query('SELECT COUNT(*) as c FROM book_pages bp INNER JOIN books b ON bp.book_id=b.id WHERE b.user_id=$1 AND bp.is_published=1', [user.id]).then(r => parseInt(r.rows[0].c)),
     query(`SELECT p.id,p.url,p.title,p.caption,p.location,p.created_at,p.song_id,p.close_friends_only,s.title AS song_title,s.artist_name AS song_artist
       FROM photos p LEFT JOIN songs s ON s.id=p.song_id WHERE p.user_id=$1
         AND ${closeFriendsVisibilitySql('p', '$2')}
@@ -10856,7 +10917,7 @@ app.get('/kitap/:slug', async (req, res) => {
     ${imgTag}
     <script type="application/ld+json">${bookLd}</script>`;
   const { rows: bookPages } = await query(`SELECT title, content, page_num, slug
-    FROM book_pages WHERE book_id=$1 ORDER BY page_num ASC LIMIT 200`, [book.id]);
+    FROM book_pages WHERE book_id=$1 AND is_published=1 ORDER BY page_num ASC LIMIT 200`, [book.id]);
   const bookBody = serverPageBody('CİGCİG KİTAP', book.title, book.author ? `Yazar: ${book.author}` : 'CigCig topluluğunda yayınlanan kitap.', `<article class="seo-article">
     ${book.cover_image ? serverImage(book.cover_image, book.title, 'seo-hero-image') : ''}
     ${book.preface ? `<p class="seo-lead">${escapeHtml(book.preface)}</p>` : ''}
@@ -10869,7 +10930,7 @@ app.get('/kitap/:slug', async (req, res) => {
 app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
   const { rows: pages } = await query(`SELECT bp.*, b.title AS book_title, b.slug AS book_slug, u.username AS author, b.cover_image
     FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
-    WHERE bp.slug=$1 AND b.slug=$2 AND b.is_hidden=0 AND COALESCE(b.password_hash,'')=''
+    WHERE bp.slug=$1 AND b.slug=$2 AND bp.is_published=1 AND b.is_hidden=0 AND COALESCE(b.password_hash,'')=''
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
     AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
     AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.pageSlug, req.params.slug]);
@@ -11073,7 +11134,7 @@ app.get('/api/search', optionalAuth, async (req, res) => {
         FROM book_pages bp
         JOIN books b ON b.id=bp.book_id
         JOIN users u ON u.id=b.user_id
-        WHERE b.is_hidden=0 AND (bp.title ILIKE $1 OR bp.content ILIKE $1)
+        WHERE bp.is_published=1 AND b.is_hidden=0 AND (bp.title ILIKE $1 OR bp.content ILIKE $1)
           AND COALESCE(u.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
         ORDER BY bp.created_at DESC LIMIT $2`, [term, limit]),
