@@ -8021,6 +8021,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
           ${page.image_url ? `<img src="${escHtml(page.image_url)}" class="ebook-page-image" alt="" />` : ''}
           <div class="book-title-heading">${escHtml(page.title)}</div>
           <div class="book-text">${bookPageContentHTML(page.content.trim())}</div>
+          <div class="book-page-number" aria-label="Sayfa ${page.page_num}">${page.page_num}</div>
         </div>
 
         <!-- Alt Navigasyon -->

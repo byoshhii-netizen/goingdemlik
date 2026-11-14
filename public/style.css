@@ -3170,6 +3170,9 @@ pre, .page-reader-content { font-family: 'Inter', sans-serif; }
   box-sizing: border-box;
   overflow-x: hidden;
 }
+.ebook-page-content.book-owner-content,
+.ebook-page-content.book-reader-content { display:flex;flex-direction:column; }
+.book-page-number { align-self:flex-end;margin-top:auto;padding-top:24px;color:var(--book-text,#2c1a0e);font-size:13px;font-variant-numeric:tabular-nums;opacity:.72; }
 .ebook-page-content .book-title-heading {
   display: none !important;
 }
