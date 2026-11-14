@@ -1673,6 +1673,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
   background: var(--bg-card);
   padding: 12px 16px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.08);
 }
+.ebook-page-jump { display:flex; align-items:center; gap:7px; margin:0; }
+.ebook-page-jump label { color:var(--text-secondary); font-size:12px; white-space:nowrap; }
+.ebook-page-jump input { width:64px; min-width:0; padding:7px 8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--bg-secondary); color:var(--text-primary); }
+.ebook-page-jump button { width:auto !important; flex:0 0 auto !important; }
 .ebook-page-counter { color: var(--text-secondary); font-size: 13px; }
 .ebook-page-content { background: var(--book-bg, #F4ECD8); border: 1px solid rgba(0,0,0,0.12); border-radius: var(--radius); padding: 40px 48px; min-height: 360px; box-shadow: 0 2px 12px rgba(0,0,0,0.10), inset 0 0 0 1px rgba(0,0,0,0.06); }
 .book-title-heading { font-size: 26px; font-weight: 700; margin-bottom: 18px; font-family: 'Literata', Georgia, serif; color: var(--book-text, #2c1a0e); }

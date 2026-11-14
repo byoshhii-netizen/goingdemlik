@@ -8111,6 +8111,11 @@ async function renderPageReader(app, bookSlug, pageSlug) {
           <button class="btn btn-ghost btn-sm" id="toc-toggle" title="İçindekiler">
             <i class="fas fa-list"></i> <span class="hidden" id="toc-label">İçindekiler</span>
           </button>
+          <form class="ebook-page-jump" id="ebook-page-jump">
+            <label for="ebook-page-jump-input">Sayfaya git</label>
+            <input id="ebook-page-jump-input" type="number" min="1" max="${allPages.length}" step="1" value="${page.page_num}" aria-label="Sayfa numarası" />
+            <button type="submit" class="btn btn-outline btn-sm">Git</button>
+          </form>
           <div class="font-size-controls" style="display:flex;align-items:center;gap:6px">
             <button id="font-dec" title="Küçük">A-</button>
             <span style="font-size:13px;color:var(--text-muted)" id="font-size-label">${fontSize}px</span>
@@ -8169,6 +8174,20 @@ async function renderPageReader(app, bookSlug, pageSlug) {
   }
   updateToc();
   $('#toc-toggle').addEventListener('click', () => { tocOpen = !tocOpen; updateToc(); });
+  $('#ebook-page-jump').addEventListener('submit', event => {
+    event.preventDefault();
+    const requestedPageNum = Number($('#ebook-page-jump-input').value);
+    if (!Number.isInteger(requestedPageNum)) {
+      toast('Geçerli bir sayfa numarası girin.', 'error');
+      return;
+    }
+    const targetPage = allPages.find(item => Number(item.page_num) === requestedPageNum);
+    if (!targetPage) {
+      toast(`1 ile ${allPages.length} arasında yayımlanmış bir sayfa numarası girin.`, 'error');
+      return;
+    }
+    navigate(`/kitap/${encodeURIComponent(bookSlug)}/sayfa/${encodeURIComponent(targetPage.slug)}`);
+  });
 
   if (isOwner) {
     $('#edit-page-btn').addEventListener('click', () => navigate(`/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(pageSlug)}`));
