@@ -7533,6 +7533,12 @@ function serializeBookPageEditor(root) {
   return Array.from(root.childNodes, serialize).join('').replace(/\n{3,}/g, '\n\n').replace(/^\n+|\n+$/g, '');
 }
 
+function bookTextHTML(text) {
+  return escHtml(text)
+    .replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
 function bookPageContentHTML(content) {
   const tokenPattern = /\[\[cigcig-image:([^\]]+)\]\]/g;
   const text = String(content || '');
@@ -7540,7 +7546,7 @@ function bookPageContentHTML(content) {
   let html = '';
   let match;
   while ((match = tokenPattern.exec(text))) {
-    html += escHtml(text.slice(cursor, match.index)).replace(/\n/g, '<br>');
+    html += bookTextHTML(text.slice(cursor, match.index));
     const image = decodeBookInlineImage(match[1]);
     if (image) {
       html += `<figure class="ebook-inline-image" style="text-align:${image.align}"><img src="${escHtml(image.src)}" alt="${escHtml(image.alt)}" style="width:${image.width}%;max-width:100%" loading="lazy" /></figure>`;
@@ -7549,12 +7555,12 @@ function bookPageContentHTML(content) {
     }
     cursor = match.index + match[0].length;
   }
-  html += escHtml(text.slice(cursor)).replace(/\n/g, '<br>');
+  html += bookTextHTML(text.slice(cursor));
   return html;
 }
 
 function bookPageContentText(content) {
-  return String(content || '').replace(/\[\[cigcig-image:[^\]]+\]\]/g, ' ').replace(/\n{3,}/g, '\n\n');
+  return String(content || '').replace(/\[\[cigcig-image:[^\]]+\]\]/g, ' ').replace(/\*\*/g, '').replace(/\n{3,}/g, '\n\n');
 }
 
 async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageData = null) {
@@ -7629,6 +7635,10 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       <div class="book-writing-status" id="book-writer-status" role="status" aria-live="polite">${isEditingPublished ? 'Özel düzenleme taslağı hazır' : 'Özel taslak hazır'}</div>
       <div class="book-writing-actions">
         <button type="button" class="btn btn-outline" id="book-writer-close" aria-label="Kaydedip çık"><i class="fas fa-xmark"></i><span>Çık</span></button>
+        <label class="book-writing-header-page-number" title="Başka bir sayfanın numarasını seçerseniz sayfalar yer değiştirir.">
+          <span>Sayfa</span>
+          <input id="book-writer-page-number" type="number" min="1" max="${maxPageNum}" step="1" value="${pageNum}" aria-label="Sayfa numarası" />
+        </label>
         <button type="button" class="btn btn-primary" id="book-writer-publish"><i class="fas fa-globe"></i><span>${isEditingPublished ? 'Değişiklikleri yayınla' : 'Yayınla'}</span></button>
       </div>
     </header>
@@ -7637,11 +7647,6 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       <article class="book-writing-paper">
         <input id="book-writer-title" class="book-writing-title" type="text" maxlength="180" placeholder="Sayfa başlığı" value="${escHtml(title)}" aria-label="Sayfa başlığı" />
         ${chapters.length ? `<label class="book-writing-chapter-label" for="book-writer-chapter">Bölüm (isteğe bağlı)</label><select id="book-writer-chapter" class="book-writing-chapter"><option value="">Bölüm seç</option>${chapters.map(chapter => `<option value="${escHtml(chapter.id)}"${String(chapter.id) === chapterId ? ' selected' : ''}>${escHtml(chapter.title)}</option>`).join('')}</select>` : ''}
-        <div class="book-writing-page-number-control">
-          <label for="book-writer-page-number">Sayfa numarası</label>
-          <input id="book-writer-page-number" type="number" min="1" max="${maxPageNum}" step="1" value="${pageNum}" />
-          <small id="book-writer-page-number-hint">Başka bir sayfanın numarasını seçerseniz sayfalar yer değiştirir.</small>
-        </div>
         <div class="book-writing-toolbar" role="toolbar" aria-label="Sayfa düzenleme araçları">
           <button type="button" class="btn btn-outline btn-sm" id="book-writer-add-image"><i class="fas fa-image"></i> Görsel ekle</button>
           <input id="book-writer-image" type="file" accept="image/*" hidden />

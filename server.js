@@ -11015,6 +11015,12 @@ app.get('/kitap/:slug', async (req, res) => {
   res.send(injectCrawlableBody(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta), bookBody));
 });
 
+function renderBookTextHtml(text) {
+  return escapeHtml(text)
+    .replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
 function renderBookPageContent(content) {
   const tokenPattern = /\[\[cigcig-image:([^\]]+)\]\]/g;
   const text = String(content || '');
@@ -11022,7 +11028,7 @@ function renderBookPageContent(content) {
   let html = '';
   let match;
   while ((match = tokenPattern.exec(text))) {
-    html += escapeHtml(text.slice(cursor, match.index)).replace(/\n/g, '<br>');
+    html += renderBookTextHtml(text.slice(cursor, match.index));
     let image = null;
     try {
       const parsed = JSON.parse(decodeURIComponent(match[1]));
@@ -11044,12 +11050,12 @@ function renderBookPageContent(content) {
     }
     cursor = match.index + match[0].length;
   }
-  html += escapeHtml(text.slice(cursor)).replace(/\n/g, '<br>');
+  html += renderBookTextHtml(text.slice(cursor));
   return html;
 }
 
 function bookPagePlainText(content) {
-  return String(content || '').replace(/\[\[cigcig-image:[^\]]+\]\]/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(content || '').replace(/\[\[cigcig-image:[^\]]+\]\]/g, ' ').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
 }
 
 app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
