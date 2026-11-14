@@ -6916,8 +6916,11 @@ function bookCardHTML(b, catalogView = false) {
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
-      ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${authorLink}</div>` : ''}
-      ${catalogView ? '' : `<div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
+      ${catalogView ? `<div class="book-catalog-byline">
+        ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${authorLink}</div>` : '<span></span>'}
+        <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
+      </div>` : `${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${authorLink}</div>` : ''}
+      <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
       ${b.created_at ? `<div class="book-pages book-created-at"><i class="fas fa-clock" style="color:var(--text-muted);font-size:11px"></i> ${escHtml(formatDateTime(b.created_at))}</div>` : ''}
       ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}`}
     </div>

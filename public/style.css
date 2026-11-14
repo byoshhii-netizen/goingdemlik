@@ -984,7 +984,10 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .books-catalog-grid .book-cover { aspect-ratio:2/3; }
 .books-catalog-grid .book-info { display:grid; gap:6px; padding:14px 16px; }
 .books-catalog-grid .book-title { font-size:16px; }
-.books-catalog-grid .book-author { margin:0; }
+.books-catalog-grid .book-catalog-byline { display:flex; align-items:center; justify-content:space-between; gap:8px; min-width:0; }
+.books-catalog-grid .book-author { min-width:0; margin:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.books-catalog-grid .book-author a { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.books-catalog-grid .book-catalog-byline .book-pages { flex:0 0 auto; white-space:nowrap; }
 @media (max-width:768px) {
   .books-catalog-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
   .books-catalog-grid .book-info { padding:11px 12px; }
