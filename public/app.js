@@ -7047,6 +7047,7 @@ async function renderBookDetail(app, slug) {
   chapters.forEach(c => { chapPages[c.id] = sortedPages.filter(p => p.chapter_id === c.id); });
   const lastReadSlug = localStorage.getItem('cigcig_book_last_page_' + slug);
   const lastReadPage = sortedPages.find(p => p.slug === lastReadSlug);
+  const readPage = lastReadPage || firstPage;
   const resumeHTML = lastReadPage ? `<div class="resume-card" style="margin-bottom:20px;padding:18px 20px;border:1px solid var(--border);border-radius:16px;background:rgba(59,130,246,0.05);display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;color:var(--accent-red2)">Kaldığın yerden devam et</div>
@@ -7146,7 +7147,7 @@ async function renderBookDetail(app, slug) {
         ${book.karakterler ? `<div class="book-preface"><strong>Karakterler</strong><p>${escHtml(book.karakterler)}</p></div>` : ''}
         ${book.kadro ? `<div class="book-preface"><strong>Kadro</strong><p>${escHtml(book.kadro)}</p></div>` : ''}
         ${bookActionButtons}
-        ${firstPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(firstPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> Oku</a></div>` : ''}
+        ${readPage ? `<div style="margin-top:16px"><a href="/kitap/${escHtml(slug)}/sayfa/${escHtml(readPage.slug)}" data-link class="btn btn-primary btn-sm"><i class="fas fa-book-reader"></i> ${lastReadPage ? 'Kaldığın yerden oku' : 'Oku'}</a></div>` : ''}
         ${isOwner ? `<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
           <button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>
