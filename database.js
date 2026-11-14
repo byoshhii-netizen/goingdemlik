@@ -751,8 +751,10 @@ async function initDb() {
       title TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
       image_url TEXT DEFAULT '',
+      page_num INTEGER,
       updated_at TIMESTAMP DEFAULT NOW()
     );
+    ALTER TABLE book_page_drafts ADD COLUMN IF NOT EXISTS page_num INTEGER;
 
     CREATE TABLE IF NOT EXISTS groups (
       id BIGSERIAL PRIMARY KEY,

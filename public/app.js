@@ -7585,6 +7585,8 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   const page = pageData.page;
   const isEditingPublished = Number(page.is_published) !== 0;
   const workingCopy = isEditingPublished ? (pageData.draft || page) : page;
+  const publishedPageCount = (bookData.pages || []).filter(item => Number(item.is_published) !== 0).length;
+  const maxPageNum = Math.max(1, publishedPageCount + (isEditingPublished ? 0 : 1));
   const route = `/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(page.slug)}`;
   const returnPath = isEditingPublished
     ? `/kitap/${encodeURIComponent(bookSlug)}/sayfa/${encodeURIComponent(page.slug)}`
@@ -7593,6 +7595,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   let title = String(workingCopy.title || '');
   let content = String(workingCopy.content || '');
   let chapterId = workingCopy.chapter_id ? String(workingCopy.chapter_id) : '';
+  let pageNum = Number(workingCopy.page_num) || Number(page.page_num) || 1;
   let imageUrl = String(workingCopy.image_url || '');
   let hasNewerCache = false;
   try {
@@ -7601,12 +7604,14 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       title = String(cached.title || '');
       content = String(cached.content || '');
       chapterId = String(cached.chapterId || '');
+      if (Number.isInteger(Number(cached.pageNum))) pageNum = Number(cached.pageNum);
       imageUrl = String(cached.imageUrl || '');
       hasNewerCache = true;
     }
   } catch (error) {
     console.warn('Kitap sayfası taslak yedeği okunamadı.', error);
   }
+  pageNum = Math.min(maxPageNum, Math.max(1, Math.trunc(pageNum)));
   const legacyImageUrl = imageUrl && imageUrl !== BOOK_INLINE_IMAGE_LAYOUT_HANDLED
     ? imageUrl
     : imageUrl !== BOOK_INLINE_IMAGE_LAYOUT_HANDLED && (!hasNewerCache || !imageUrl) && pageData.draft?.image_url !== BOOK_INLINE_IMAGE_LAYOUT_HANDLED
@@ -7632,6 +7637,11 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       <article class="book-writing-paper">
         <input id="book-writer-title" class="book-writing-title" type="text" maxlength="180" placeholder="Sayfa başlığı" value="${escHtml(title)}" aria-label="Sayfa başlığı" />
         ${chapters.length ? `<label class="book-writing-chapter-label" for="book-writer-chapter">Bölüm (isteğe bağlı)</label><select id="book-writer-chapter" class="book-writing-chapter"><option value="">Bölüm seç</option>${chapters.map(chapter => `<option value="${escHtml(chapter.id)}"${String(chapter.id) === chapterId ? ' selected' : ''}>${escHtml(chapter.title)}</option>`).join('')}</select>` : ''}
+        <div class="book-writing-page-number-control">
+          <label for="book-writer-page-number">Sayfa numarası</label>
+          <input id="book-writer-page-number" type="number" min="1" max="${maxPageNum}" step="1" value="${pageNum}" />
+          <small id="book-writer-page-number-hint">Başka bir sayfanın numarasını seçerseniz sayfalar yer değiştirir.</small>
+        </div>
         <div class="book-writing-toolbar" role="toolbar" aria-label="Sayfa düzenleme araçları">
           <button type="button" class="btn btn-outline btn-sm" id="book-writer-add-image"><i class="fas fa-image"></i> Görsel ekle</button>
           <input id="book-writer-image" type="file" accept="image/*" hidden />
@@ -7658,6 +7668,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   const titleInput = $('#book-writer-title');
   const contentInput = $('#book-writer-content');
   const chapterInput = $('#book-writer-chapter');
+  const pageNumberInput = $('#book-writer-page-number');
   const status = $('#book-writer-status');
   const errorBox = $('#book-writer-error');
   const imagePicker = $('#book-writer-image');
@@ -7760,6 +7771,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
       title: titleInput.value,
       content: serializeBookPageEditor(contentInput),
       chapterId: chapterInput?.value || '',
+      pageNum: Number(pageNumberInput.value),
       imageUrl,
       savedAt: Date.now()
     };
@@ -7774,6 +7786,13 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   const saveDraftNow = () => {
     clearTimeout(saveTimer);
     if (imageUploadPending) return Promise.reject(new Error('Görsel yüklemesi tamamlanana kadar bekleyin.'));
+    const requestedPageNum = Number(pageNumberInput.value);
+    if (!Number.isInteger(requestedPageNum) || requestedPageNum < 1 || requestedPageNum > maxPageNum) {
+      const error = new Error(`Sayfa numarası 1 ile ${maxPageNum} arasında olmalı.`);
+      errorBox.textContent = error.message;
+      status.textContent = 'Sayfa numarası geçersiz';
+      return Promise.reject(error);
+    }
     const snapshot = saveLocalBackup();
     const version = ++saveVersion;
     status.textContent = 'Taslak kaydediliyor...';
@@ -7784,6 +7803,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
         title: snapshot.title.trim(),
         content: snapshot.content,
         chapter_id: snapshot.chapterId || null,
+        page_num: snapshot.pageNum,
         image_url: BOOK_INLINE_IMAGE_LAYOUT_HANDLED
       })
     }));
@@ -7824,6 +7844,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
   document.addEventListener('selectionchange', selectionChange);
   titleInput.addEventListener('input', queueDraftSave);
   contentInput.addEventListener('input', queueDraftSave);
+  pageNumberInput.addEventListener('input', queueDraftSave);
   chapterInput?.addEventListener('change', queueDraftSave);
   $('#book-writer-add-image').addEventListener('mousedown', rememberSelection);
   $('#book-writer-add-image').addEventListener('click', () => imagePicker.click());
@@ -7905,6 +7926,7 @@ async function renderBookPageEditor(app, bookSlug, pageSlug = null, initialPageD
           title: finalTitle,
           content: serializeBookPageEditor(contentInput),
           chapter_id: chapterInput?.value || null,
+          page_num: Number(pageNumberInput.value),
           image_url: ''
         })
       });

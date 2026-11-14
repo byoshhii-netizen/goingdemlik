@@ -4706,7 +4706,7 @@ app.post('/api/book/:slug/pages/draft', authMiddleware, async (req, res) => {
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
 
-  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1', [book.id]);
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1 AND is_published=1', [book.id]);
   const title = String(req.body?.title || '').trim();
   const slug = `${slugify(title || 'taslak-sayfa', { lower: true, strict: false, locale: 'tr' }).substring(0, 40)}-${randomUUID().substring(0, 8)}`;
   const { rows } = await query(`INSERT INTO book_pages (book_id,chapter_id,title,content,page_num,slug,image_url,is_published)
@@ -4752,16 +4752,22 @@ app.put('/api/book/:slug/page/:pageSlug/draft', authMiddleware, async (req, res)
   const content = String(req.body?.content || '');
   const chapterId = req.body?.chapter_id || null;
   const imageUrl = req.body?.image_url ?? page.image_url;
+  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1 AND is_published=1', [book.id]);
+  const maxPageNum = countRows[0].c + (page.is_published ? 0 : 1);
+  const pageNum = Number(req.body?.page_num ?? page.page_num);
+  if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > maxPageNum) {
+    return res.status(400).json({ error: `Sayfa numarası 1 ile ${maxPageNum} arasında olmalı.` });
+  }
   if (page.is_published) {
-    const { rows } = await query(`INSERT INTO book_page_drafts (page_id,chapter_id,title,content,image_url,updated_at)
-      VALUES ($1,$2,$3,$4,$5,NOW())
+    const { rows } = await query(`INSERT INTO book_page_drafts (page_id,chapter_id,title,content,image_url,page_num,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,NOW())
       ON CONFLICT (page_id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id,title=EXCLUDED.title,
-        content=EXCLUDED.content,image_url=EXCLUDED.image_url,updated_at=NOW()
-      RETURNING *`, [page.id, chapterId, title, content, imageUrl]);
+        content=EXCLUDED.content,image_url=EXCLUDED.image_url,page_num=EXCLUDED.page_num,updated_at=NOW()
+      RETURNING *`, [page.id, chapterId, title, content, imageUrl, pageNum]);
     return res.json(rows[0]);
   }
-  const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,updated_at=NOW()
-    WHERE id=$5 RETURNING *`, [title, content, chapterId, imageUrl, page.id]);
+  const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,page_num=$5,updated_at=NOW()
+    WHERE id=$6 RETURNING *`, [title, content, chapterId, imageUrl, pageNum, page.id]);
   res.json(rows[0]);
 });
 
@@ -4778,26 +4784,84 @@ app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, r
   const content = String(req.body?.content || '').trim();
   if (!title || !content) return res.status(400).json({ error: 'Yayınlamak için başlık ve içerik zorunlu' });
   if (page.is_published) {
-    const { rows: draftRows } = await query('SELECT * FROM book_page_drafts WHERE page_id=$1', [page.id]);
-    if (!draftRows.length) return res.status(404).json({ error: 'Yayınlanacak taslak düzenleme bulunamadı' });
-    const draft = draftRows[0];
-    const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,updated_at=NOW()
-      WHERE id=$5 RETURNING *`,
-    [title, content, req.body?.chapter_id !== undefined ? req.body.chapter_id : draft.chapter_id, req.body?.image_url ?? draft.image_url, page.id]);
-    await query('DELETE FROM book_page_drafts WHERE page_id=$1', [page.id]);
-    await query('UPDATE books SET updated_at=NOW() WHERE id=$1', [book.id]);
-    return res.json(rows[0]);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT id FROM books WHERE id=$1 FOR UPDATE', [book.id]);
+      const { rows: lockedPages } = await client.query(`SELECT id,page_num FROM book_pages
+        WHERE book_id=$1 AND is_published=1 ORDER BY page_num,id FOR UPDATE`, [book.id]);
+      const currentPage = lockedPages.find(item => String(item.id) === String(page.id));
+      const { rows: draftRows } = await client.query('SELECT * FROM book_page_drafts WHERE page_id=$1 FOR UPDATE', [page.id]);
+      if (!currentPage || !draftRows.length) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Yayınlanacak taslak düzenleme bulunamadı' });
+      }
+      const draft = draftRows[0];
+      const pageNum = Number(req.body?.page_num ?? draft.page_num ?? currentPage.page_num);
+      const targetPage = lockedPages.find(item => Number(item.page_num) === pageNum);
+      if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > lockedPages.length || !targetPage) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: `Sayfa numarası 1 ile ${lockedPages.length} arasında olmalı.` });
+      }
+      await client.query(`UPDATE book_pages SET page_num=CASE WHEN id=$1 THEN $2 ELSE $3 END
+        WHERE book_id=$4 AND is_published=1 AND id IN ($1,$5)`,
+      [page.id, pageNum, currentPage.page_num, book.id, targetPage.id]);
+      const { rows } = await client.query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,page_num=$5,updated_at=NOW()
+        WHERE id=$6 RETURNING *`,
+      [title, content, req.body?.chapter_id !== undefined ? req.body.chapter_id : draft.chapter_id, req.body?.image_url ?? draft.image_url, pageNum, page.id]);
+      await client.query('DELETE FROM book_page_drafts WHERE page_id=$1', [page.id]);
+      await client.query('UPDATE books SET updated_at=NOW() WHERE id=$1', [book.id]);
+      await client.query('COMMIT');
+      return res.json(rows[0]);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
-  const { rows: countRows } = await query('SELECT COUNT(*)::int AS c FROM book_pages WHERE book_id=$1 AND is_published=1', [book.id]);
-  const pageNum = countRows[0].c + 1;
-  const realSlug = makeSlug(title, page.id);
-  const chapterId = req.body?.chapter_id || null;
-  const imageUrl = req.body?.image_url ?? page.image_url;
-  const { rows } = await query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,page_num=$5,
-    slug=$6,is_published=1,updated_at=NOW() WHERE id=$7 RETURNING *`,
-  [title, content, chapterId, imageUrl, pageNum, realSlug, page.id]);
-  await query('UPDATE books SET page_count=$1,updated_at=NOW() WHERE id=$2', [pageNum, book.id]);
-  res.json(rows[0]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM books WHERE id=$1 FOR UPDATE', [book.id]);
+    const { rows: currentDraftPages } = await client.query('SELECT id FROM book_pages WHERE id=$1 AND is_published=0 FOR UPDATE', [page.id]);
+    if (!currentDraftPages.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Taslak sayfa bulunamadı' });
+    }
+    const { rows: lockedPages } = await client.query(`SELECT id,page_num FROM book_pages
+      WHERE book_id=$1 AND is_published=1 ORDER BY page_num,id FOR UPDATE`, [book.id]);
+    const pageNum = Number(req.body?.page_num ?? lockedPages.length + 1);
+    const maxPageNum = lockedPages.length + 1;
+    if (!Number.isInteger(pageNum) || pageNum < 1 || pageNum > maxPageNum) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Sayfa numarası 1 ile ${maxPageNum} arasında olmalı.` });
+    }
+    const targetPage = pageNum <= lockedPages.length
+      ? lockedPages.find(item => Number(item.page_num) === pageNum)
+      : null;
+    if (pageNum <= lockedPages.length && !targetPage) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Seçilen sayfa numarası kullanılamıyor.' });
+    }
+    if (targetPage) {
+      await client.query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [maxPageNum, targetPage.id]);
+    }
+    const realSlug = makeSlug(title, page.id);
+    const chapterId = req.body?.chapter_id || null;
+    const imageUrl = req.body?.image_url ?? page.image_url;
+    const { rows } = await client.query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,page_num=$5,
+      slug=$6,is_published=1,updated_at=NOW() WHERE id=$7 RETURNING *`,
+    [title, content, chapterId, imageUrl, pageNum, realSlug, page.id]);
+    await client.query('UPDATE books SET page_count=$1,updated_at=NOW() WHERE id=$2', [maxPageNum, book.id]);
+    await client.query('COMMIT');
+    return res.json(rows[0]);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 });
 
 app.put('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {

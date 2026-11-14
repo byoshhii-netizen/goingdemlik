@@ -11406,6 +11406,10 @@ html.has-default-avatar .profile-avatar-placeholder { background-size:var(--defa
 .book-writing-title::placeholder { color:color-mix(in srgb,var(--book-text,#2c1a0e) 48%,transparent); }
 .book-writing-chapter-label { display:block;margin:10px 0 5px;color:color-mix(in srgb,var(--book-text,#2c1a0e) 78%,transparent);font-size:11px;font-weight:700; }
 .book-writing-chapter { max-width:280px;margin-bottom:15px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 24%,transparent);border-radius:8px;color:var(--book-text,#2c1a0e);background:color-mix(in srgb,var(--book-bg,#f6ecd7) 84%,var(--book-text,#2c1a0e)); }
+.book-writing-page-number-control { display:grid;grid-template-columns:auto 88px;align-items:center;gap:4px 10px;width:max-content;max-width:100%;margin:0 0 16px;color:var(--book-text,#2c1a0e); }
+.book-writing-page-number-control label { font-size:11px;font-weight:700; }
+.book-writing-page-number-control input { box-sizing:border-box;width:88px;padding:6px 8px;border:1px solid color-mix(in srgb,var(--book-text,#2c1a0e) 24%,transparent);border-radius:7px;color:var(--book-text,#2c1a0e);background:color-mix(in srgb,var(--book-bg,#f6ecd7) 84%,var(--book-text,#2c1a0e)); }
+.book-writing-page-number-control small { grid-column:1/-1;color:color-mix(in srgb,var(--book-text,#2c1a0e) 65%,transparent);font-size:10px;line-height:1.4; }
 .book-writing-toolbar { display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:0 0 15px; }
 .book-writing-toolbar > .btn { flex:0 0 auto; }
 .book-writing-image-hint { color:color-mix(in srgb,var(--book-text,#2c1a0e) 65%,transparent);font-size:10px; }
