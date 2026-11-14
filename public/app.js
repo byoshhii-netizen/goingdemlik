@@ -4037,7 +4037,7 @@ document.addEventListener('keydown', event => {
 });
 
 document.addEventListener('keydown', event => {
-  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) return;
+  if (event.defaultPrevented || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || typeof event.key !== 'string' || event.key.length !== 1) return;
   const target = event.target instanceof Element ? event.target : null;
   if (target?.closest('input, textarea, select, [contenteditable="true"], button, a, [role="button"], [data-link]')) return;
   const active = document.activeElement;

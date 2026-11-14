@@ -4775,7 +4775,7 @@ app.put('/api/book/:slug/page/:pageSlug/draft', authMiddleware, async (req, res)
   res.json(rows[0]);
 });
 
-app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, res) => {
+async function publishBookPage(req, res) {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
@@ -4807,9 +4807,15 @@ app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, r
         await client.query('ROLLBACK');
         return res.status(400).json({ error: `Sayfa numarası 1 ile ${lockedPages.length} arasında olmalı.` });
       }
-      await client.query(`UPDATE book_pages SET page_num=CASE WHEN id=$1 THEN $2 ELSE $3 END
-        WHERE book_id=$4 AND is_published=1 AND id IN ($1,$5)`,
-      [page.id, pageNum, currentPage.page_num, book.id, targetPage.id]);
+      if (String(targetPage.id) !== String(page.id)) {
+        const { rows: temporaryRows } = await client.query(
+          'SELECT COALESCE(MAX(page_num),0)::int+1 AS page_num FROM book_pages WHERE book_id=$1',
+          [book.id]
+        );
+        await client.query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [temporaryRows[0].page_num, targetPage.id]);
+        await client.query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [pageNum, page.id]);
+        await client.query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [currentPage.page_num, targetPage.id]);
+      }
       const { rows } = await client.query(`UPDATE book_pages SET title=$1,content=$2,chapter_id=$3,image_url=$4,page_num=$5,updated_at=NOW()
         WHERE id=$6 RETURNING *`,
       [title, content, req.body?.chapter_id !== undefined ? req.body.chapter_id : draft.chapter_id, req.body?.image_url ?? draft.image_url, pageNum, page.id]);
@@ -4818,7 +4824,8 @@ app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, r
       await client.query('COMMIT');
       return res.json(rows[0]);
     } catch (error) {
-      await client.query('ROLLBACK');
+      try { await client.query('ROLLBACK'); }
+      catch (rollbackError) { console.error('Book page publish rollback failed:', rollbackError); }
       throw error;
     } finally {
       client.release();
@@ -4849,7 +4856,11 @@ app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, r
       return res.status(400).json({ error: 'Seçilen sayfa numarası kullanılamıyor.' });
     }
     if (targetPage) {
-      await client.query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [maxPageNum, targetPage.id]);
+      const { rows: temporaryRows } = await client.query(
+        'SELECT COALESCE(MAX(page_num),0)::int+1 AS page_num FROM book_pages WHERE book_id=$1',
+        [book.id]
+      );
+      await client.query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [temporaryRows[0].page_num, targetPage.id]);
     }
     const realSlug = makeSlug(title, page.id);
     const chapterId = req.body?.chapter_id || null;
@@ -4861,12 +4872,20 @@ app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, async (req, r
     await client.query('COMMIT');
     return res.json(rows[0]);
   } catch (error) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); }
+    catch (rollbackError) { console.error('Book page publish rollback failed:', rollbackError); }
     throw error;
   } finally {
     client.release();
   }
-});
+}
+
+app.post('/api/book/:slug/page/:pageSlug/publish', authMiddleware, (req, res) =>
+  publishBookPage(req, res).catch(error => {
+    console.error('Book page publish failed:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'Sayfa yayınlanamadı. Lütfen tekrar deneyin.' });
+  })
+);
 
 app.put('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
