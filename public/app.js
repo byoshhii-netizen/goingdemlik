@@ -6831,7 +6831,7 @@ async function renderBookList(app) {
 
   $('#book-search')?.addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
-    renderBookGrid(books.filter(b => b.title.toLowerCase().includes(q) || b.username?.toLowerCase().includes(q)));
+    renderBookGrid(books.filter(b => b.title.toLowerCase().includes(q) || b.author_name?.toLowerCase().includes(q) || b.username?.toLowerCase().includes(q)));
   });
 }
 
@@ -6841,9 +6841,74 @@ function renderBookGrid(books) {
   el.innerHTML = books.map(b => bookCardHTML(b)).join('');
 }
 
+function attachBookUserPicker(prefix) {
+  const search = $(`#${prefix}-user-search`);
+  const results = $(`#${prefix}-user-results`);
+  const selected = $(`#${prefix}-username`);
+  const selectedDisplay = $(`#${prefix}-user-selected`);
+  let debounceTimer;
+  let requestVersion = 0;
+  let users = [];
+
+  search.addEventListener('input', () => {
+    selected.value = '';
+    selectedDisplay.innerHTML = '';
+    const q = search.value.trim();
+    const version = ++requestVersion;
+    clearTimeout(debounceTimer);
+    users = [];
+    if (q.length < 2) {
+      results.innerHTML = q ? '<div class="book-user-picker-message">En az iki harf yazın.</div>' : '';
+      return;
+    }
+    results.innerHTML = '<div class="book-user-picker-message">Kullanıcılar aranıyor…</div>';
+    debounceTimer = setTimeout(async () => {
+      try {
+        const found = await api(`/search/users?q=${encodeURIComponent(q)}`);
+        if (version !== requestVersion) return;
+        users = found;
+        results.innerHTML = users.length ? users.map(user => `<button type="button" class="book-user-option" role="option" data-username="${escHtml(user.username)}">
+          ${user.avatar ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<span class="book-user-option-avatar"><i class="fas fa-user"></i></span>'}
+          <span class="book-user-option-name"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+        </button>`).join('') : '<div class="book-user-picker-message">Kullanıcı bulunamadı.</div>';
+      } catch (error) {
+        if (version === requestVersion) results.innerHTML = `<div class="book-user-picker-message book-user-picker-error">${escHtml(error.message || 'Kullanıcılar aranamadı.')}</div>`;
+      }
+    }, 250);
+  });
+
+  results.addEventListener('click', event => {
+    const option = event.target.closest('.book-user-option');
+    if (!option) return;
+    const user = users.find(item => item.username === option.dataset.username);
+    if (!user) return;
+    selected.value = user.username;
+    selectedDisplay.innerHTML = `<div class="book-user-selected-item">
+      ${user.avatar ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<span class="book-user-option-avatar"><i class="fas fa-user"></i></span>'}
+      <span class="book-user-option-name"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+      <button type="button" class="book-user-clear" aria-label="Seçimi kaldır"><i class="fas fa-times"></i></button>
+    </div>`;
+    search.value = '';
+    results.innerHTML = '';
+    users = [];
+  });
+
+  selectedDisplay.addEventListener('click', event => {
+    if (!event.target.closest('.book-user-clear')) return;
+    selected.value = '';
+    selectedDisplay.innerHTML = '';
+    search.focus();
+  });
+}
+
 function bookCardHTML(b) {
   const previewText = b.preface ? b.preface.substring(0, 80) : '';
-  const authorDisplay = b.author || b.username || '';
+  const authorDisplay = b.author_name || '';
+  const authorLink = authorDisplay
+    ? b.username
+      ? `<a href="${escHtml(profileRoute(b.username))}" data-link onclick="event.stopPropagation()">${escHtml(authorDisplay)}</a>`
+      : escHtml(authorDisplay)
+    : '';
   return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
@@ -6851,7 +6916,7 @@ function bookCardHTML(b) {
     </div>
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
-      ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${escHtml(authorDisplay)}</div>` : ''}
+      ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${authorLink}</div>` : ''}
       <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
       ${b.created_at ? `<div class="book-pages book-created-at"><i class="fas fa-clock" style="color:var(--text-muted);font-size:11px"></i> ${escHtml(formatDateTime(b.created_at))}</div>` : ''}
       ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}
@@ -6878,7 +6943,7 @@ function showNewBookModal(existing = null) {
       <label>Başlık ${!existing ? '<span id="bk-title-required" style="color:var(--accent-red2)">*</span>' : ''}</label>
       <input id="bk-title" type="text" value="${existing ? escHtml(existing.is_unnamed ? '' : existing.title) : ''}" placeholder="${isUnnamedBook ? 'Yeni isim gir...' : 'Kitap başlığı'}" />
     </div>
-    <div class="form-group"><label>Kitap Yazarı <span style="color:var(--accent-red2)">*</span></label><input id="bk-author" type="text" placeholder="Yazar adı (zorunlu)" value="${existing ? escHtml(existing.author || existing.username || '') : (currentUser ? escHtml(currentUser.username) : '')}" /></div>
+    <div class="form-group"><label>Kitap Yazarı <span style="color:var(--accent-red2)">*</span></label><input id="bk-author" type="text" placeholder="Yazar adını yaz" value="${existing ? escHtml(existing.author_name || '') : ''}" /></div>
     <div class="form-group"><label>Tanıtım / Önsöz</label><textarea id="bk-preface" rows="4">${existing ? escHtml(existing.preface || '') : ''}</textarea></div>
     <div class="form-group"><label>Karakterler (opsiyonel)</label><textarea id="bk-karakterler" rows="3" placeholder="Karakter isimleri, kısa notlar...">${existing ? escHtml(existing.karakterler || '') : ''}</textarea></div>
     <div class="form-group"><label>Kadro (opsiyonel)</label><textarea id="bk-kadro" rows="3" placeholder="Oyuncu kadrosu, karakter dağılımı...">${existing ? escHtml(existing.kadro || '') : ''}</textarea></div>
@@ -6967,7 +7032,7 @@ function showNewBookModal(existing = null) {
       }
       const payload = {
         title: noName ? '' : title,
-        author,
+        author_name: author,
         preface: $('#bk-preface').value.trim(),
         karakterler: $('#bk-karakterler').value.trim(),
         kadro: $('#bk-kadro').value.trim(),
@@ -7136,9 +7201,8 @@ async function renderBookDetail(app, slug) {
       </div>
       <div class="book-detail-info">
         <div class="book-detail-title">${book.is_unnamed ? '<span style="color:rgba(255,255,255,0.3);font-style:italic">İsimsiz Kitap</span>' : escHtml(book.title)} ${book.is_hidden ? '<span style="margin-left:8px;display:inline-block;padding:4px 8px;background:#6b6b6b;color:var(--accent-red2);border-radius:6px;font-size:11px;font-weight:700"><i class="fas fa-lock"></i> GİZLİ</span>' : ''}</div>
-        ${(book.author || book.username) ? `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> <span style="font-weight:600">${escHtml(book.author || book.username)}</span></div>` : ''}
+        ${book.author_name ? `<div style="font-size:15px;color:var(--text-secondary);margin-bottom:10px;display:flex;align-items:center;gap:6px"><i class="fas fa-pen" style="color:var(--accent-red);font-size:12px"></i> ${book.username ? `<a href="${escHtml(profileRoute(book.username))}" data-link style="font-weight:600;color:inherit">${escHtml(book.author_name)}</a>` : `<span style="font-weight:600">${escHtml(book.author_name)}</span>`}</div>` : ''}
         <div class="book-detail-meta">
-          <span>${avatarImg(book, 'avatar-sm')} ${userDisplayName(book)}</span>
           <span><i class="fas fa-file-alt"></i> ${book.page_count || 0} sayfa</span>
           ${book.created_at ? `<span><i class="fas fa-calendar"></i> ${formatDateTime(book.created_at)}</span>` : ''}
           ${book.updated_at ? `<span><i class="fas fa-edit"></i> Güncellendi ${formatDateTime(book.updated_at)}</span>` : ''}
@@ -7191,8 +7255,11 @@ async function renderBookDetail(app, slug) {
     if (!currentUser) { navigate('/giris'); return; }
     showModal('Kitabı İlet', `<div class="modal-compact">
       <div class="form-group">
-        <label>Kullanıcı adı</label>
-        <input id="book-send-username" type="text" placeholder="Kullanıcı adı" autocomplete="off" />
+        <label for="book-send-user-search">Kullanıcı ara ve seç</label>
+        <input id="book-send-user-search" type="search" placeholder="İsim veya kullanıcı adı ara..." autocomplete="off" />
+        <div id="book-send-user-results" class="book-user-picker-results" role="listbox"></div>
+        <input id="book-send-username" type="hidden" />
+        <div id="book-send-user-selected" class="book-user-picker-selected" aria-live="polite"></div>
       </div>
       <div class="form-group">
         <label>İletilecek metin</label>
@@ -7203,11 +7270,12 @@ async function renderBookDetail(app, slug) {
         <button class="btn btn-primary" id="book-send-submit"><i class="fas fa-paper-plane"></i> Gönder</button>
       </div>
     </div>`);
+    attachBookUserPicker('book-send');
     $('#book-send-cancel')?.addEventListener('click', hideModal);
     $('#book-send-submit')?.addEventListener('click', async () => {
-      const username = $('#book-send-username').value.trim();
+      const username = $('#book-send-username').value;
       const content = $('#book-send-content').value.trim();
-      if (!username) { toast('Kullanıcı adı gerekli', 'error'); return; }
+      if (!username) { toast('Arama sonuçlarından bir kullanıcı seçin', 'error'); return; }
       try {
         const msg = await api(`/conversation/${encodeURIComponent(username)}/messages`, { method: 'POST', body: JSON.stringify({ content, shared_book_id: book.id }) });
         hideModal(); toast('Kitap iletildi'); navigate('/mesajlar/' + username);
@@ -7219,8 +7287,11 @@ async function renderBookDetail(app, slug) {
     if (!currentUser) { navigate('/giris'); return; }
     showModal('Kitabı Paylaş', `<div class="modal-compact">
       <div class="form-group">
-        <label>Kullanıcı adı</label>
-        <input id="book-share-username" type="text" placeholder="Kullanıcı adı" autocomplete="off" />
+        <label for="book-share-user-search">Kullanıcı ara ve seç</label>
+        <input id="book-share-user-search" type="search" placeholder="İsim veya kullanıcı adı ara..." autocomplete="off" />
+        <div id="book-share-user-results" class="book-user-picker-results" role="listbox"></div>
+        <input id="book-share-username" type="hidden" />
+        <div id="book-share-user-selected" class="book-user-picker-selected" aria-live="polite"></div>
       </div>
       <div class="form-group">
         <label>Not</label>
@@ -7231,11 +7302,12 @@ async function renderBookDetail(app, slug) {
         <button class="btn btn-primary" id="book-share-submit"><i class="fas fa-share-nodes"></i> Paylaş</button>
       </div>
     </div>`);
+    attachBookUserPicker('book-share');
     $('#book-share-cancel')?.addEventListener('click', hideModal);
     $('#book-share-submit')?.addEventListener('click', async () => {
-      const username = $('#book-share-username').value.trim();
+      const username = $('#book-share-username').value;
       const content = $('#book-share-content').value.trim();
-      if (!username) { toast('Kullanıcı adı gerekli', 'error'); return; }
+      if (!username) { toast('Arama sonuçlarından bir kullanıcı seçin', 'error'); return; }
       try {
         await api(`/book/${encodeURIComponent(slug)}/share`, { method: 'POST', body: JSON.stringify({ username, content }) });
         hideModal(); toast('Kitap paylaşıldı'); navigate('/mesajlar/' + username);
@@ -7346,7 +7418,7 @@ async function renderBookDetail(app, slug) {
       doc.setFontSize(14);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(100, 100, 100);
-      doc.text((book.author || book.username || 'Bilinmiyor'), pageW / 2, y, { align: 'center' });
+      doc.text((book.author_name || ''), pageW / 2, y, { align: 'center' });
       y += 8;
 
       // Sayfa sayısı
@@ -7420,7 +7492,7 @@ async function renderBookDetail(app, slug) {
           // Sayfa alt notu
           doc.setFontSize(9);
           doc.setTextColor(180, 180, 180);
-          doc.text(book.title + ' — ' + (book.author || book.username || ''), pageW / 2, pageH - 10, { align: 'center' });
+          doc.text(book.title + ' — ' + (book.author_name || ''), pageW / 2, pageH - 10, { align: 'center' });
         } catch {}
       }
 
@@ -13806,12 +13878,15 @@ function searchExcerpt(text) {
 
 function searchResultHTML(result) {
   const [label, icon] = SEARCH_GROUPS[result.type] || ['İçerikler', 'fa-magnifying-glass'];
+  const authorLabel = ['book', 'book_page'].includes(result.type) && result.author_name
+    ? escHtml(result.author_name)
+    : result.author ? `@${escHtml(result.author)}` : '';
   return `<a class="search-result-card" href="${escHtml(result.route)}" data-link>
     <span class="search-result-icon"><i class="fas ${icon}"></i></span>
     <span class="search-result-copy">
       <strong>${escHtml(result.title || label)}</strong>
       ${result.excerpt ? `<small>${escHtml(searchExcerpt(result.excerpt))}</small>` : ''}
-      <em>${escHtml(label)}${result.author ? ` · @${escHtml(result.author)}` : ''}</em>
+      <em>${escHtml(label)}${authorLabel ? ` · ${authorLabel}` : ''}</em>
     </span>
     ${result.avatar ? `<img src="${escHtml(result.avatar)}" class="search-result-avatar" alt="" />` : '<i class="fas fa-arrow-up-right-from-square search-result-arrow"></i>'}
   </a>`;

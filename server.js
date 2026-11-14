@@ -4629,14 +4629,16 @@ app.post('/api/book/:slug/unlock', authMiddleware, async (req, res) => {
 
 app.post('/api/books', authMiddleware, async (req, res) => {
   try {
-    const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
+    const { title, author_name, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
     const finalTitle = is_unnamed ? ('İsimsiz Kitap #' + Date.now().toString().slice(-6)) : String(title || '').trim();
     if (!is_unnamed && !finalTitle) return res.status(400).json({ error: 'Başlık zorunlu' });
+    const finalAuthorName = String(author_name || '').trim();
+    if (!finalAuthorName) return res.status(400).json({ error: 'Yazar adı zorunlu' });
     const finalHidden = is_unnamed ? 1 : (is_hidden ? 1 : 0);
     const tempSlug = slugify(finalTitle || 'isimsiz-kitap', { lower: true, strict: false, locale: 'tr' }).substring(0, 60) + '-' + randomUUID().substring(0, 8);
     if (book_password && String(book_password).length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
-    const { rows } = await query('INSERT INTO books (user_id,title,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed,password_hash,comment_count,like_count,share_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,0,0) RETURNING id',
-      [req.user.id, finalTitle, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0, book_password ? hashPassword(book_password) : '']);
+    const { rows } = await query('INSERT INTO books (user_id,title,author_name,preface,karakterler,kadro,cover_image,slug,is_hidden,is_unnamed,password_hash,comment_count,like_count,share_count) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,0,0) RETURNING id',
+      [req.user.id, finalTitle, finalAuthorName, preface||'', karakterler||'', kadro||'', cover_image||'', tempSlug, finalHidden, is_unnamed?1:0, book_password ? hashPassword(book_password) : '']);
     const id = rows[0].id;
     const realSlug = makeSlug(finalTitle, id);
     await query('UPDATE books SET slug=$1 WHERE id=$2', [realSlug, id]);
@@ -4653,18 +4655,20 @@ app.put('/api/book/:slug', authMiddleware, async (req, res) => {
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
   const book = bRows[0];
   if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
-  const { title, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
+  const { title, author_name, preface, karakterler, kadro, cover_image, is_hidden, is_unnamed, book_password } = req.body;
+  const authorName = author_name === undefined ? (book.author_name || '') : String(author_name || '').trim();
+  if (author_name !== undefined && !authorName) return res.status(400).json({ error: 'Yazar adı zorunlu' });
   // Başlık güncellendiyse ve is_unnamed sıfırlanmadıysa, is_unnamed'i sıfırla
   const newIsUnnamed = is_unnamed !== undefined ? (is_unnamed ? 1 : 0) : book.is_unnamed;
   const newPassword = typeof book_password === 'string' ? book_password.trim() : '';
   if (newPassword && newPassword.length < 6) return res.status(400).json({ error: 'Kitap şifresi en az 6 karakter olmalı' });
-  const updateValues = [title||book.title, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, book.id];
+  const updateValues = [title||book.title, authorName, preface??book.preface, karakterler??book.karakterler, kadro??book.kadro, cover_image??book.cover_image, is_hidden!==undefined ? (is_hidden?1:0) : book.is_hidden, newIsUnnamed, book.id];
   if (newPassword) {
-    await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,password_hash=$8,updated_at=NOW() WHERE id=$9',
-      [...updateValues.slice(0, 7), hashPassword(newPassword), updateValues[7]]);
+    await query('UPDATE books SET title=$1,author_name=$2,preface=$3,karakterler=$4,kadro=$5,cover_image=$6,is_hidden=$7,is_unnamed=$8,password_hash=$9,updated_at=NOW() WHERE id=$10',
+      [...updateValues.slice(0, 8), hashPassword(newPassword), updateValues[8]]);
     await query('DELETE FROM book_access WHERE book_id=$1 AND user_id<>$2', [book.id, req.user.id]);
   } else {
-    await query('UPDATE books SET title=$1,preface=$2,karakterler=$3,kadro=$4,cover_image=$5,is_hidden=$6,is_unnamed=$7,updated_at=NOW() WHERE id=$8', updateValues);
+    await query('UPDATE books SET title=$1,author_name=$2,preface=$3,karakterler=$4,kadro=$5,cover_image=$6,is_hidden=$7,is_unnamed=$8,updated_at=NOW() WHERE id=$9', updateValues);
   }
   const { rows } = await query('SELECT * FROM books WHERE id=$1', [book.id]);
   res.json(sanitizeBook(rows[0]));
@@ -10969,7 +10973,7 @@ app.get('/forum/:slug', async (req, res) => {
 });
 
 app.get('/kitap/:slug', async (req, res) => {
-  const { rows } = await query(`SELECT b.*, u.username AS author FROM books b
+  const { rows } = await query(`SELECT b.*, u.username FROM books b
     LEFT JOIN users u ON u.id=b.user_id
     WHERE b.slug=$1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
@@ -10982,13 +10986,13 @@ app.get('/kitap/:slug', async (req, res) => {
   const imgTag = book.cover_image
     ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
     : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const bookKw = `${escapeHtml(book.title)}${book.author?', '+escapeHtml(book.author):''}, e-kitap, CigCig kitap, topluluk platformu, ücretsiz kitap oku`;
+  const bookKw = `${escapeHtml(book.title)}${book.author_name?', '+escapeHtml(book.author_name):''}, e-kitap, CigCig kitap, topluluk platformu, ücretsiz kitap oku`;
   const bookLd = safeJsonLd({
     '@context':'https://schema.org','@type':'Book',
     'name': book.title,
     'url': `${SITE_URL}/kitap/${book.slug}`,
     'description': (book.preface||book.title).substring(0,200),
-    'author': book.author?{'@type':'Person','name':book.author}:undefined,
+    'author': book.author_name?{'@type':'Person','name':book.author_name}:undefined,
     'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL},
     'image': book.cover_image||undefined,
     'inLanguage':'tr'
@@ -11006,7 +11010,7 @@ app.get('/kitap/:slug', async (req, res) => {
     <script type="application/ld+json">${bookLd}</script>`;
   const { rows: bookPages } = await query(`SELECT title, content, page_num, slug
     FROM book_pages WHERE book_id=$1 AND is_published=1 ORDER BY page_num ASC LIMIT 200`, [book.id]);
-  const bookBody = serverPageBody('CİGCİG KİTAP', book.title, book.author ? `Yazar: ${book.author}` : 'CigCig topluluğunda yayınlanan kitap.', `<article class="seo-article">
+  const bookBody = serverPageBody('CİGCİG KİTAP', book.title, book.author_name ? `Yazar: ${book.author_name}` : 'CigCig topluluğunda yayınlanan kitap.', `<article class="seo-article">
     ${book.cover_image ? serverImage(book.cover_image, book.title, 'seo-hero-image') : ''}
     ${book.preface ? `<p class="seo-lead">${escapeHtml(book.preface)}</p>` : ''}
     ${bookPages.length ? `<section class="seo-book-pages"><h2>İçindekiler</h2><ol>${bookPages.map(page => `<li><a href="/kitap/${escapeHtml(book.slug)}/sayfa/${escapeHtml(page.slug)}">${escapeHtml(page.title)}</a></li>`).join('')}</ol></section>` : ''}
@@ -11059,7 +11063,7 @@ function bookPagePlainText(content) {
 }
 
 app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
-  const { rows: pages } = await query(`SELECT bp.*, b.title AS book_title, b.slug AS book_slug, u.username AS author, b.cover_image
+  const { rows: pages } = await query(`SELECT bp.*, b.title AS book_title, b.slug AS book_slug, b.author_name AS book_author_name, b.cover_image
     FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
     WHERE bp.slug=$1 AND b.slug=$2 AND bp.is_published=1 AND b.is_hidden=0 AND COALESCE(b.password_hash,'')=''
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
@@ -11068,7 +11072,7 @@ app.get('/kitap/:slug/sayfa/:pageSlug', async (req, res) => {
   if (!pages.length) return sendUncachedAppHtml(res);
   const page = pages[0];
   const pageUrl = `${SITE_URL}/kitap/${page.book_slug}/sayfa/${page.slug}`;
-  const body = serverPageBody('CİGCİG KİTAP', `${page.book_title} · ${page.title}`, page.author ? `Yazar: ${page.author}` : '', `<article class="seo-article seo-page-article">
+  const body = serverPageBody('CİGCİG KİTAP', `${page.book_title} · ${page.title}`, page.book_author_name ? `Yazar: ${page.book_author_name}` : '', `<article class="seo-article seo-page-article">
     <p class="seo-breadcrumb"><a href="/kitap/${escapeHtml(page.book_slug)}">${escapeHtml(page.book_title)}</a> / ${escapeHtml(page.title)}</p>
     ${page.image_url ? serverImage(page.image_url, page.title, 'seo-hero-image') : ''}
     <div class="seo-article-text">${renderBookPageContent(page.content || '')}</div>
@@ -11163,7 +11167,7 @@ app.get('/profil/:username', (req, res) => sendUncachedAppHtml(res));
 app.get('/api/search/users', async (req, res) => {
   const q = String(req.query.q || '').trim().replace(/^@/, '');
   if (!q || q.length < 2) return res.json([]);
-  const { rows } = await query(`SELECT id, username, nickname, avatar, name_color FROM users WHERE (username ILIKE $1 OR nickname ILIKE $1) AND banned=0 LIMIT 20`, [`%${q}%`]);
+  const { rows } = await query(`SELECT id, username, nickname, avatar, name_color FROM users WHERE (username ILIKE $1 OR nickname ILIKE $1) AND banned=0 AND COALESCE(is_deleted,0)=0 LIMIT 20`, [`%${q}%`]);
   res.json(rows);
 });
 
@@ -11250,10 +11254,10 @@ app.get('/api/search', optionalAuth, async (req, res) => {
           AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='song' AND a.content_id=s.id::text)
         ORDER BY s.published_at DESC, s.created_at DESC LIMIT $2`, [term, limit]),
       // Kitap bilgileri
-      query(`SELECT b.id, b.slug, b.title, b.preface, b.karakterler, b.kadro, b.created_at, u.username AS author
+      query(`SELECT b.id, b.slug, b.title, b.preface, b.karakterler, b.kadro, b.author_name, b.created_at, u.username AS author
         FROM books b JOIN users u ON u.id=b.user_id
         WHERE b.is_hidden=0
-          AND (b.title ILIKE $1 OR b.preface ILIKE $1 OR b.karakterler ILIKE $1 OR b.kadro ILIKE $1)
+          AND (b.title ILIKE $1 OR b.preface ILIKE $1 OR b.karakterler ILIKE $1 OR b.kadro ILIKE $1 OR b.author_name ILIKE $1)
           AND COALESCE(u.is_deleted,0)=0
           AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
           AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
@@ -11262,7 +11266,7 @@ app.get('/api/search', optionalAuth, async (req, res) => {
         ORDER BY b.created_at DESC LIMIT $2`, [term, limit]),
       // Kitap sayfaları/bölümleri: doğrudan eşleşen sayfaya götür
       query(`SELECT bp.id, bp.slug AS page_slug, bp.title AS page_title, bp.content, bp.created_at,
-          b.slug, b.title, u.username AS author
+          b.slug, b.title, b.author_name, u.username AS author
         FROM book_pages bp
         JOIN books b ON b.id=bp.book_id
         JOIN users u ON u.id=b.user_id
@@ -11323,8 +11327,8 @@ app.get('/api/search', optionalAuth, async (req, res) => {
     videos.rows.forEach(r => results.push({ type: r.is_reals ? 'reals' : 'video', title: r.title, excerpt: [r.description, r.sound_name].filter(Boolean).join(' · '), route: `/${r.is_reals ? 'reals' : 'video'}/${r.slug}`, author: r.author, created_at: r.created_at }));
     videoComments.rows.forEach(r => results.push({ type: r.is_reals ? 'reals_comment' : 'video_comment', title: r.title, excerpt: r.content, route: `/${r.is_reals ? 'reals' : 'video'}/${r.slug}`, author: r.author, created_at: r.created_at }));
     songs.rows.forEach(r => results.push({ type: 'song', title: r.title, excerpt: [r.artist_name, r.genre, r.lyrics].filter(Boolean).join(' · '), route: `/muzik/${r.slug}`, author: r.author, created_at: r.created_at }));
-    books.rows.forEach(r => results.push({ type: 'book', title: r.title, excerpt: [r.preface, r.karakterler, r.kadro].filter(Boolean).join(' · '), route: `/kitap/${r.slug}`, author: r.author, created_at: r.created_at }));
-    bookPages.rows.forEach(r => results.push({ type: 'book_page', title: `${r.title} · ${r.page_title}`, excerpt: bookPagePlainText(r.content), route: `/kitap/${r.slug}/sayfa/${r.page_slug}`, author: r.author, created_at: r.created_at }));
+    books.rows.forEach(r => results.push({ type: 'book', title: r.title, excerpt: [r.preface, r.karakterler, r.kadro].filter(Boolean).join(' · '), route: `/kitap/${r.slug}`, author: r.author, author_name: r.author_name, created_at: r.created_at }));
+    bookPages.rows.forEach(r => results.push({ type: 'book_page', title: `${r.title} · ${r.page_title}`, excerpt: bookPagePlainText(r.content), route: `/kitap/${r.slug}/sayfa/${r.page_slug}`, author: r.author, author_name: r.author_name, created_at: r.created_at }));
     users.rows.forEach(r => results.push({ type: 'profile', title: `@${r.username}`, excerpt: [r.title, r.bio, r.location].filter(Boolean).join(' · '), route: `/profil/${profileRouteKey(r.username)}`, author: r.username, avatar: r.avatar, created_at: r.created_at }));
     groups.rows.forEach(r => results.push({ type: 'group', title: r.name, excerpt: r.description, route: `/grup/${r.slug}`, author: r.author, created_at: r.created_at }));
     groupChannels.rows.forEach(r => results.push({ type: 'group_channel', title: `${r.name} · #${r.channel_name}`, excerpt: r.description, route: `/grup/${r.slug}`, author: r.author, created_at: r.created_at }));

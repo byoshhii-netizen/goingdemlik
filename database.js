@@ -666,6 +666,7 @@ async function initDb() {
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT,
       title TEXT NOT NULL,
+      author_name TEXT NOT NULL DEFAULT '',
       preface TEXT DEFAULT '',
       karakterler TEXT DEFAULT '',
       kadro TEXT DEFAULT '',
@@ -684,6 +685,7 @@ async function initDb() {
 
     ALTER TABLE books ADD COLUMN IF NOT EXISTS karakterler TEXT DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS kadro TEXT DEFAULT '';
+    ALTER TABLE books ADD COLUMN IF NOT EXISTS author_name TEXT NOT NULL DEFAULT '';
     ALTER TABLE books ADD COLUMN IF NOT EXISTS is_hidden INTEGER DEFAULT 0;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_download INTEGER DEFAULT 1;
     ALTER TABLE books ADD COLUMN IF NOT EXISTS allow_pdf INTEGER DEFAULT 1;

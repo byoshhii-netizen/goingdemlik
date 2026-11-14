@@ -1482,7 +1482,26 @@ label { display: block; font-size: 13px; font-weight: 500; color: var(--text-sec
 .book-info { padding: 16px; display: grid; gap: 8px; }
 .book-title { font-size: 18px; font-weight: 800; color: var(--text-primary); }
 .book-author, .book-pages { font-size: 13px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+.book-author a { color: inherit; text-decoration: none; }
+.book-author a:hover { text-decoration: underline; }
 .book-desc { font-size: 13px; color: var(--text-muted); line-height: 1.5; margin-top: 6px; }
+
+.book-user-picker-results { max-height: 220px; overflow-y: auto; margin-top: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card); }
+.book-user-picker-results:empty { display: none; }
+.book-user-option { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.book-user-option:last-child { border-bottom: 0; }
+.book-user-option:hover, .book-user-option:focus-visible { background: var(--bg-card2); outline: none; }
+.book-user-option img, .book-user-selected-item img, .book-user-option-avatar { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; object-fit: cover; }
+.book-user-option-avatar { display: inline-flex; align-items: center; justify-content: center; background: var(--bg-card2); color: var(--text-muted); }
+.book-user-option-name { min-width: 0; display: grid; gap: 2px; }
+.book-user-option-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.book-user-option-name small { color: var(--text-muted); font-size: 11px; }
+.book-user-picker-message { padding: 10px 12px; color: var(--text-muted); font-size: 12px; }
+.book-user-picker-error { color: var(--accent-red2); }
+.book-user-selected-item { display: flex; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-card2); }
+.book-user-selected-item .book-user-option-name { flex: 1; }
+.book-user-clear { width: 30px; height: 30px; border: 0; border-radius: 50%; background: transparent; color: var(--text-muted); cursor: pointer; }
+.book-user-clear:hover { color: var(--accent-red2); background: rgba(255,255,255,.06); }
 
 .book-detail-header { display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: flex-start; margin-bottom: 32px; }
 .book-detail-cover { width: 100%; min-height: 360px; border-radius: var(--radius); overflow: hidden; background: var(--bg-card2); display: flex; align-items: center; justify-content: center; }
