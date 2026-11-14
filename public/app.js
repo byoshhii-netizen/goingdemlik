@@ -6822,7 +6822,7 @@ async function renderBookList(app) {
         <h1 class="page-title">Kitaplar</h1>
       </div>
       <div class="search-bar"><i class="fas fa-search"></i><input type="text" id="book-search" placeholder="Kitap ara..." /></div>
-      <div id="books-grid" class="grid-3"><div class="loading-center"><div class="spinner"></div></div></div>
+      <div id="books-grid" class="books-catalog-grid"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
 
   let books = [];
@@ -6838,7 +6838,7 @@ async function renderBookList(app) {
 function renderBookGrid(books) {
   const el = $('#books-grid'); if (!el) return;
   if (!books.length) { el.innerHTML = '<div class="empty-state" style="grid-column:1/-1"><i class="fas fa-book-open"></i><p>Kitap bulunamadı.</p></div>'; return; }
-  el.innerHTML = books.map(b => bookCardHTML(b)).join('');
+  el.innerHTML = books.map(b => bookCardHTML(b, true)).join('');
 }
 
 function attachBookUserPicker(prefix) {
@@ -6901,7 +6901,7 @@ function attachBookUserPicker(prefix) {
   });
 }
 
-function bookCardHTML(b) {
+function bookCardHTML(b, catalogView = false) {
   const previewText = b.preface ? b.preface.substring(0, 80) : '';
   const authorDisplay = b.author_name || '';
   const authorLink = authorDisplay
@@ -6909,7 +6909,7 @@ function bookCardHTML(b) {
       ? `<a href="${escHtml(profileRoute(b.username))}" data-link onclick="event.stopPropagation()">${escHtml(authorDisplay)}</a>`
       : escHtml(authorDisplay)
     : '';
-  return `<div class="book-card" onclick="navigate('/kitap/${escHtml(b.slug)}')">
+  return `<div class="book-card${catalogView ? ' book-card-catalog' : ''}" onclick="navigate('/kitap/${escHtml(b.slug)}')">
     <div class="book-cover">
       ${b.cover_image ? `<img src="${escHtml(b.cover_image)}" alt="" />` : `<div class="book-cover-placeholder"><i class="fas fa-book"></i></div>`}
       ${(b.is_hidden || b.has_password) ? `<div style="position:absolute;top:8px;right:8px;background:${b.is_hidden ? '#7c3aed' : 'rgba(168,85,247,.18)'};color:${b.is_hidden ? '#fff' : '#c084fc'};width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;border:1px solid rgba(192,132,252,.45)" title="${b.is_hidden ? 'Gizli kitap' : 'Şifreli kitap'}"><i class="fas fa-${b.has_password ? 'key' : 'lock'}"></i></div>` : ''}
@@ -6917,9 +6917,9 @@ function bookCardHTML(b) {
     <div class="book-info">
       <div class="book-title">${escHtml(b.title)}</div>
       ${authorDisplay ? `<div class="book-author"><i class="fas fa-pen" style="color:var(--accent-red);font-size:11px"></i> ${authorLink}</div>` : ''}
-      <div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
+      ${catalogView ? '' : `<div class="book-pages"><i class="fas fa-file-alt" style="color:var(--text-muted);font-size:11px"></i> ${b.page_count || 0} sayfa</div>
       ${b.created_at ? `<div class="book-pages book-created-at"><i class="fas fa-clock" style="color:var(--text-muted);font-size:11px"></i> ${escHtml(formatDateTime(b.created_at))}</div>` : ''}
-      ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}
+      ${previewText ? `<div class="book-desc">${escHtml(previewText)}...</div>` : ''}`}
     </div>
   </div>`;
 }
