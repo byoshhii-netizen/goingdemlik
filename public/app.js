@@ -8924,6 +8924,7 @@ async function renderGroupDetail(app, slug) {
                 <span class="dm-img-upload-status" id="group-img-upload-status" aria-live="polite"></span>
                 <textarea id="chat-input" placeholder="Mesaj yaz..." rows="1"></textarea>
               </div>
+              <button class="dm-send-btn dm-mic-btn" id="group-mic-btn" type="button" aria-label="Sesli mesaj kaydet (basılı tut)" title="Sesli mesaj"><i class="fas fa-microphone"></i></button>
               <button class="dm-send-btn" id="send-msg-btn" type="button" aria-label="Mesaj gönder"><i class="fas fa-paper-plane"></i></button>
             </div>` : isMuted ? `<div style="padding:14px 12px;text-align:center;color:var(--text-muted);font-size:13px;background:rgba(255,81,81,0.08);border:1px solid rgba(255,81,81,0.18);border-radius:10px"><i class="fas fa-volume-xmark" style="font-size:18px;color:var(--accent-red2);margin-bottom:6px;display:block"></i><strong style="color:var(--accent-red2)">SUSTURULDUN</strong><div style="margin-top:6px">Kalan süre: ${escHtml(mutedRemainingText)}</div></div>` : (currentUser && !isMember ? `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Mesaj göndermek için gruba katılın.</div>` : `<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:13px">Giriş yaparak katılabilirsiniz.</div>`)}
           </div>` : `<div class="card card-body" style="text-align:center;color:var(--text-muted)"><i class="fas fa-comment-slash" style="font-size:32px;margin-bottom:8px;display:block"></i>Sohbet kapatılmış.</div>`}
@@ -9351,6 +9352,71 @@ async function renderGroupDetail(app, slug) {
       }
     };
     $('#send-msg-btn')?.addEventListener('click', sendMsg);
+
+    // Grup sesli mesajı: DM ile aynı kayıt/yükleme modülü
+    const groupInputBar = document.querySelector('.group-message-input-bar');
+    const groupMicButton = $('#group-mic-btn');
+    const groupTextInput = $('#chat-input');
+    const groupVoiceSupported = Boolean(window.CigCigVoice?.isSupported());
+    const syncGroupComposer = () => {
+      const hasContent = Boolean(groupTextInput?.value.trim()) || pendingGroupImages.length > 0;
+      groupInputBar?.classList.toggle('has-content', hasContent || !groupVoiceSupported);
+    };
+    groupTextInput?.addEventListener('input', syncGroupComposer);
+    syncGroupComposer();
+    window.__groupVoiceRecorder?.destroy?.();
+    window.__groupVoiceRecorder = null;
+    if (groupVoiceSupported && groupInputBar && groupMicButton && canSend) {
+      const sendGroupVoiceNote = async recording => {
+        const list = $('#chat-messages');
+        if (!list) return;
+        const holder = document.createElement('div');
+        holder.innerHTML = window.CigCigVoice.pendingBubbleHTML(recording.duration);
+        const pendingRow = holder.firstElementChild;
+        pendingRow.classList.add('chat-msg', 'own');
+        list.appendChild(pendingRow);
+        list.scrollTop = list.scrollHeight;
+        const voiceEl = pendingRow.querySelector('.cg-voice');
+        const status = pendingRow.querySelector('.cg-voice-status');
+        const replyId = groupReplyToId;
+        try {
+          const uploaded = await window.CigCigVoice.uploadVoice(recording, ratio => {
+            voiceEl?.style.setProperty('--cg-upload', String(Math.round(ratio * 100)));
+            if (status) status.textContent = `Yükleniyor %${Math.round(ratio * 100)}`;
+          });
+          if (status) status.textContent = 'Gönderiliyor…';
+          const msg = await api('/group/' + groupSlugPath + '/messages', {
+            method: 'POST',
+            body: JSON.stringify({
+              voice_url: uploaded.voice_url,
+              voice_duration: uploaded.voice_duration,
+              voice_waveform: uploaded.voice_waveform,
+              voice_token: uploaded.voice_token,
+              reply_to_id: replyId
+            })
+          });
+          pendingRow.remove();
+          if (replyId && groupReplyToId === replyId) clearGroupReply();
+          if (!messages.some(item => String(item.id) === String(msg.id))) {
+            $('#chat-messages').insertAdjacentHTML('beforeend', chatMsgHTML(msg, window._chatCanMod, !!canSend));
+            messages.push(msg);
+            lastChatSignature = chatSignature(messages);
+          }
+          lastId = Math.max(lastId, Number(msg.id));
+          chatEl.scrollTop = chatEl.scrollHeight;
+        } catch (error) {
+          pendingRow.classList.add('is-failed');
+          if (status) status.textContent = 'Gönderilemedi · tekrar dene';
+          toast(error.message || 'Sesli mesaj gönderilemedi.', 'error');
+        }
+      };
+      window.__groupVoiceRecorder = new window.CigCigVoice.VoiceRecorder({
+        inputBar: groupInputBar,
+        micButton: groupMicButton,
+        onSend: sendGroupVoiceNote,
+        onStateChange: recording => { if (recording) window.CigCigVoice.stopPlayback(); }
+      });
+    }
     const attachButton = $('#group-attach-btn');
     const attachMenu = $('#group-attach-menu');
     const closeGroupAttachMenu = () => {
@@ -9827,6 +9893,7 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
         ${m.edited_at ? '<span class="chat-msg-edited" title="Bu mesaj düzenlendi"><i class="fas fa-pen"></i></span>' : ''}
         ${currentUser ? `<button class="btn btn-ghost msg-menu-trigger" data-id="${m.id}" title="Mesaj seçenekleri" style="padding:0 4px;font-size:11px;color:var(--text-muted)"><i class="fas fa-ellipsis-v"></i></button>` : ''}
       </div>
+      ${m.voice_url && window.CigCigVoice ? window.CigCigVoice.bubbleHTML(m, isOwn) : ''}
       ${m.reply_to_id && (m.reply_content || m.reply_image_url) ? `<div class="chat-reply-preview"><span>${escHtml(m.reply_username || 'Silinmiş kullanıcı')}</span><div>${escHtml((m.reply_content || 'Fotoğraf').slice(0, 100))}</div></div>` : ''}
       ${m.content ? `<div class="chat-msg-text">${renderContent(m.content)}</div>` : ''}
       ${imageUrls.length ? `<div class="group-message-image-grid" data-image-count="${imageUrls.length}">${imageUrls.map((url, index) => `<button type="button" class="group-message-image-open" data-image-url="${escHtml(url)}" aria-label="Fotoğrafı görüntüle"><img src="${escHtml(url)}" class="chat-msg-img" alt="Mesaj fotoğrafı ${index + 1}" loading="lazy" decoding="async" /></button>`).join('')}</div>` : ''}
@@ -25156,3 +25223,21 @@ async function renderMyOrders(app) {
 }
 
 init();
+
+// Klavye açılınca alt menüyü gizle ve odaklanılan alanı görünür yap (visualViewport)
+(function bindKeyboardAwareLayout() {
+  if (!window.visualViewport) return;
+  const vv = window.visualViewport;
+  const sync = () => {
+    const keyboardHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.body.classList.toggle('keyboard-open', keyboardHeight > 120);
+    document.documentElement.style.setProperty('--kb-inset', `${Math.round(keyboardHeight)}px`);
+  };
+  vv.addEventListener('resize', sync);
+  vv.addEventListener('scroll', sync);
+  document.addEventListener('focusin', event => {
+    const field = event.target;
+    if (!(field instanceof HTMLElement) || !field.matches('input, textarea, [contenteditable="true"]')) return;
+    setTimeout(() => field.scrollIntoView({ block: 'center', behavior: 'smooth' }), 280);
+  });
+})();

@@ -2630,22 +2630,18 @@ async function trackInviteRegistration(code, user, ip) {
 }
 
 const QUICK_REGISTER_ADJECTIVES = [
-  'Uykulu', 'Pofuduk', 'Gezgin', 'Meraklı', 'Neşeli', 'Dalgın', 'Sabırlı', 'Tembel',
-  'Kıpır Kıpır', 'Şaşkın', 'Keyifli', 'Sessiz', 'Gevrek', 'Minik', 'Yaramaz', 'Renkli',
-  'Tostçu', 'Miskin', 'Zıpır', 'Hayalperest', 'Çıtır', 'Şapşik', 'Kahvekolik', 'Pijamalı',
-  'Fırlama', 'Limonlu', 'Bulutlu', 'Çevik', 'Tatlı', 'Gizemli'
+  'Gece', 'Mavi', 'Sisli', 'Kozmik', 'Neon', 'Gölge', 'Altın', 'Yıldız', 'Rüzgar', 'Kıyı',
+  'Sessiz', 'Gezgin', 'Dalgın', 'Pasaklı', 'Çılgın', 'Vahşi', 'Tatlı', 'Gizemli', 'Kuytu', 'Serin',
+  'Sarı', 'Kırmızı', 'Yeşil', 'Lacivert', 'Pırıltılı', 'Bulutsu', 'Sakin', 'Hızlı', 'Çelik', 'Tozlu'
 ];
 const QUICK_REGISTER_NOUNS = [
-  'Kavanoz', 'Mandalina', 'Penguen', 'Patates', 'Kaktüs', 'Simit', 'Tost', 'Martı',
-  'Çorap', 'Bulut', 'Kumanda', 'Turşu', 'Kestane', 'Panda', 'Fincan', 'Limon',
-  'Karpuz', 'Makarna', 'Kirpi', 'Balon', 'Salatalık', 'Tavşan', 'Paspas', 'Lahmacun',
-  'Badem', 'Tencere', 'Mıknatıs', 'Kedi', 'Terlik', 'Kurabiye', 'Fıstık', 'Bavul'
+  'Martı', 'Kedi', 'Panda', 'Kurt', 'Tilki', 'Baykuş', 'Balina', 'Kaplan', 'Çınar', 'Deniz',
+  'Dalga', 'Sahil', 'Fener', 'Pusula', 'Plak', 'Gitar', 'Davul', 'Kaset', 'Radyo', 'Kahve',
+  'Gezgin', 'Şehir', 'Orman', 'Yıldız', 'Ay', 'Kelebek', 'Ejderha', 'Kaktüs', 'Kanat', 'Fırtına'
 ];
-const QUICK_REGISTER_SINGLE_NICKNAMES = [
-  'Mandalina', 'Penguen', 'Patates', 'Kaktüs', 'Simit', 'Martı', 'Çorap', 'Bulut',
-  'Turşu', 'Kestane', 'Panda', 'Fincan', 'Limon', 'Karpuz', 'Makarna', 'Kirpi',
-  'Balon', 'Tavşan', 'Paspas', 'Lahmacun', 'Badem', 'Tencere', 'Mıknatıs', 'Terlik',
-  'Kurabiye', 'Fıstık', 'Bavul', 'Zeytin', 'Pofuduk', 'Fırfır', 'Lokum', 'Mırmır'
+const QUICK_REGISTER_FIRST_NAMES = [
+  'Mira', 'Ege', 'Defne', 'Can', 'Lara', 'Kerem', 'Asya', 'Eren', 'Selin', 'Mert',
+  'Zeynep', 'Arda', 'Nehir', 'Deniz', 'Ada', 'Emir', 'Ece', 'Yiğit', 'Duru', 'Kaan'
 ];
 
 function quickRegisterUsernamePart(value) {
@@ -2666,17 +2662,12 @@ async function createQuickRegistrationSuggestion(req, res) {
     for (let attempt = 0; attempt < 100 && !suggestion; attempt++) {
       const adjective = QUICK_REGISTER_ADJECTIVES[crypto.randomInt(QUICK_REGISTER_ADJECTIVES.length)];
       const noun = QUICK_REGISTER_NOUNS[crypto.randomInt(QUICK_REGISTER_NOUNS.length)];
-      const isSingleNickname = crypto.randomInt(2) === 0;
-      const nickname = isSingleNickname
-        ? QUICK_REGISTER_SINGLE_NICKNAMES[crypto.randomInt(QUICK_REGISTER_SINGLE_NICKNAMES.length)]
-        : `${adjective} ${noun}`;
-      const usernameWords = isSingleNickname
-        ? QUICK_REGISTER_NOUNS.filter(word => quickRegisterUsernamePart(word) !== quickRegisterUsernamePart(nickname))
-        : [noun];
-      const usernameWord = usernameWords[crypto.randomInt(usernameWords.length)];
-      const baseUsername = isSingleNickname
-        ? `${quickRegisterUsernamePart(nickname).slice(0, 8)}.${quickRegisterUsernamePart(usernameWord).slice(0, 8)}`
-        : `${quickRegisterUsernamePart(adjective).slice(0, 8)}.${quickRegisterUsernamePart(usernameWord).slice(0, 8)}`;
+      const firstName = QUICK_REGISTER_FIRST_NAMES[crypto.randomInt(QUICK_REGISTER_FIRST_NAMES.length)];
+      // Görünen ad: "Gece Martı" ya da "Mira · Gece Martı" gibi iki ayrı tarz
+      const nickname = crypto.randomInt(2) === 0 ? `${adjective} ${noun}` : `${firstName} ${adjective}`;
+      // Kullanıcı adı: kısa, okunur ve sayılı (ör. gece.martı47)
+      const suffix = crypto.randomInt(10, 9999);
+      const baseUsername = `${quickRegisterUsernamePart(adjective).slice(0, 8)}.${quickRegisterUsernamePart(noun).slice(0, 8)}${suffix}`;
       const username = baseUsername;
       const { rows } = await query(
         `SELECT 1 FROM users WHERE LOWER(username)=LOWER($1) OR LOWER(nickname)=LOWER($2)
@@ -5749,6 +5740,19 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     }
   }
   let shared_song_id = null;
+  // Grup sesli mesajı (DM ile aynı imzalı yükleme akışı)
+  let groupVoiceUrl = null, groupVoiceDuration = null, groupVoiceWaveform = null;
+  if (req.body?.voice_url) {
+    const voiceUrl = String(req.body.voice_url).trim();
+    const voiceDuration = Number(req.body.voice_duration);
+    if (!voiceUrl || voiceUrl.length > 2048 || !Number.isSafeInteger(voiceDuration)
+      || !verifyDmVoiceToken(req.user.id, voiceUrl, voiceDuration, req.body.voice_token)) {
+      return res.status(400).json({ error: 'Sesli mesaj doğrulanamadı. Lütfen tekrar kaydet.' });
+    }
+    groupVoiceUrl = voiceUrl;
+    groupVoiceDuration = voiceDuration;
+    groupVoiceWaveform = JSON.stringify(sanitizeVoiceWaveform(req.body.voice_waveform));
+  }
   const songStartSeconds = Number(req.body?.song_start_seconds ?? 0);
   if (!Number.isInteger(songStartSeconds) || songStartSeconds < 0 || songStartSeconds > 3600) return res.status(400).json({ error: 'Müzik başlangıç zamanı geçersiz.' });
   if (req.body?.shared_song_id !== undefined && req.body.shared_song_id !== null && req.body.shared_song_id !== '') {
@@ -5757,7 +5761,7 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     const { rows: songs } = await query("SELECT id FROM songs WHERE id=$1 AND status='active'", [shared_song_id]);
     if (!songs.length) return res.status(404).json({ error: 'Bu müzik bulunamadı veya kullanılamıyor.' });
   }
-  if (!content.trim() && !imageUrls.length && !shared_gif_url && !shared_song_id) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content.trim() && !imageUrls.length && !shared_gif_url && !shared_song_id && !groupVoiceUrl) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { reply_to_id } = req.body || {};
   let replyId = null;
   if (reply_to_id !== undefined && reply_to_id !== null && String(reply_to_id).trim() !== '') {
@@ -5766,8 +5770,8 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
     const { rows: replyRows } = await query('SELECT id FROM group_messages WHERE id=$1 AND group_id=$2', [replyId, group.id]);
     if (!replyRows.length) return res.status(400).json({ error: 'Yanıtlanacak mesaj bulunamadı' });
   }
-  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url,image_urls,shared_gif_url,shared_song_id,song_start_seconds,reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9) RETURNING id',
-    [group.id, req.user.id, content, image_url, JSON.stringify(imageUrls), shared_gif_url, shared_song_id, shared_song_id ? songStartSeconds : 0, replyId]);
+  const { rows } = await query('INSERT INTO group_messages (group_id,user_id,content,image_url,image_urls,shared_gif_url,shared_song_id,song_start_seconds,reply_to_id,voice_url,voice_duration,voice_waveform) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12::jsonb) RETURNING id',
+    [group.id, req.user.id, content, image_url, JSON.stringify(imageUrls), shared_gif_url, shared_song_id, shared_song_id ? songStartSeconds : 0, replyId, groupVoiceUrl, groupVoiceDuration, groupVoiceWaveform]);
   await notifyGroupMentions(group, req.user, content || '').catch(() => {});
   const { rows: msg } = await query(`SELECT gm.*, u.username, u.avatar, u.avatar_removed, u.name_color, u.is_vip, u.badge_name, u.badge_icon, u.badge_color, r.content AS reply_content, r.image_url AS reply_image_url, ru.username AS reply_username, song.title AS song_title, song.artist_name AS song_artist, song.cover_url AS song_cover_url, song.audio_url AS song_audio_url, song.slug AS song_slug FROM group_messages gm LEFT JOIN users u ON gm.user_id=u.id LEFT JOIN group_messages r ON gm.reply_to_id=r.id LEFT JOIN users ru ON r.user_id=ru.id LEFT JOIN songs song ON song.id=gm.shared_song_id WHERE gm.id=$1`, [rows[0].id]);
   const { rows: memberRows } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [group.id]);

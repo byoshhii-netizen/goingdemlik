@@ -1425,38 +1425,6 @@ body.cg-scroll-locked { overflow: hidden !important; }
 .cg-avatar-zoom-manage { height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.1); color: #fff; font: 600 14px/1 inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 
 /* -------------------------------------------------------------------------
-   Profil kapak görseli ("arka profil") — üstte kapak, avatar kapağın kenarına biner
-   ------------------------------------------------------------------------- */
-.profile-page.has-profile-background {
-  --cg-cover-h: clamp(150px, 34vw, 300px);
-  position: relative; isolation: isolate;
-  padding: 0 !important; border: 0 !important; border-radius: 0 !important;
-  background: none !important; box-shadow: none !important;
-  padding-top: calc(var(--cg-cover-h) - 64px) !important;
-}
-.profile-page.has-profile-background::before {
-  content: ""; position: absolute; z-index: -1; left: 50%; top: 0;
-  width: min(100vw, 1100px); margin-left: calc(min(100vw, 1100px) / -2); height: var(--cg-cover-h);
-  background: var(--profile-background-image) center / cover no-repeat;
-  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
-}
-@media (min-width: 769px) { .profile-page.has-profile-background::before { border-radius: 0 0 22px 22px; } }
-.profile-page.has-profile-background .profile-header {
-  border: 0 !important; background: transparent !important; box-shadow: none !important;
-  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
-}
-.profile-page.has-profile-background .profile-avatar-wrap .profile-avatar,
-.profile-page.has-profile-background .profile-avatar-wrap .profile-avatar-placeholder {
-  box-shadow: 0 0 0 4px var(--bg-primary, #0b0b0b), 0 10px 30px rgba(0,0,0,.45);
-}
-.profile-page.has-profile-background .profile-tabs { background: transparent !important; border: 0 !important; border-top: 1px solid rgba(255,255,255,.08) !important; border-radius: 0 !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-.profile-page.has-profile-background .profile-tabs .tab { color: var(--text-secondary, #aaa) !important; }
-.profile-page.has-profile-background .profile-tabs .tab.active { color: var(--text-primary, #fff) !important; background: transparent !important; }
-.profile-page.has-profile-background .profile-archiveable-card,
-.profile-page.has-profile-background .profile-page > .card { background: var(--bg-card, #0b0b0b) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-
-/* -------------------------------------------------------------------------
    SESLİ ARAMA
    ------------------------------------------------------------------------- */
 .dm-chat-header .dm-call-btn i { font-size: 17px; }
@@ -1702,3 +1670,114 @@ video.igs-media { object-fit: cover; }
 .ig-post-media-video .reals-media-sound-toggle { position: absolute !important; right: 10px !important; bottom: 10px !important; top: auto !important; left: auto !important; width: 30px !important; height: 30px !important; min-width: 0 !important; padding: 0 !important; border-radius: 50% !important; border: 0 !important; background: rgba(0,0,0,.6) !important; color: #fff !important; font-size: 12px !important; box-shadow: none !important; }
 .ig-post .ig-post-location { font-size: 12.5px !important; font-weight: 400 !important; color: var(--text-secondary, #bbb) !important; }
 html body .photo-card.ig-post .ig-post-media-video button.reals-media-sound-toggle { width: 30px !important; height: 30px !important; min-width: 30px !important; min-height: 30px !important; right: 10px !important; bottom: 10px !important; font-size: 12px !important; }
+
+/* =========================================================================
+   YÜKLEME EKRANLARI (hikaye / gönderi / reels) — Instagram düzeni
+   ========================================================================= */
+.social-compose-modal .modal-body { background: var(--bg-primary, #0b0b0b); }
+.social-compose-preview-pane { background: #111 !important; border-right: 1px solid rgba(255,255,255,.06); }
+.social-compose-preview-frame { border-radius: 6px !important; border: 0 !important; background: #050505 !important; }
+.social-compose-upload-hint { justify-content: center; text-align: center; }
+.social-compose-fields { background: var(--bg-primary, #0b0b0b); }
+.social-compose-fields .form-group input,
+.social-compose-fields .form-group textarea { background: #1a1a1a !important; border: 1px solid #262626 !important; border-radius: 10px !important; }
+.social-compose-submit { border-radius: 10px !important; font-weight: 700 !important; height: 44px; }
+.social-compose-fields .checkbox-label, .social-compose-options .checkbox-label { font-size: 14px; }
+.social-compose-options { border-top: 1px solid #1f1f1f; padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.social-compose-advanced summary { cursor: pointer; font-size: 14px; font-weight: 600; padding: 10px 0; list-style: none; }
+.social-compose-advanced summary::-webkit-details-marker { display: none; }
+
+@media (max-width: 760px) {
+  .social-compose-modal { width: 100vw !important; max-width: 100vw !important; height: 100dvh; max-height: 100dvh !important; border-radius: 0 !important; }
+  .social-compose { display: flex !important; flex-direction: column; min-height: 0 !important; }
+  .social-compose-preview-pane { padding: 14px !important; flex: 0 0 auto; }
+  .social-compose-preview-frame,
+  .social-compose-photo .social-compose-photo-frame,
+  .social-compose-story-frame,
+  .social-compose-video-frame { width: 100% !important; max-width: 100%; height: auto !important; max-height: 52dvh; aspect-ratio: 4 / 5 !important; min-height: 0 !important; }
+  .social-compose-story-frame { aspect-ratio: 9 / 16 !important; max-height: 58dvh; width: min(100%, calc(58dvh * 9 / 16)) !important; }
+  .social-compose-upload-hint { display: none; }
+  .social-compose-fields { max-height: none !important; flex: 1 1 auto; overflow-y: auto; padding: 14px 16px 110px !important; }
+  .social-compose-submit { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 5; width: auto; }
+  .social-compose-modal .modal-header { padding: 12px 14px !important; }
+}
+
+/* =========================================================================
+   GRUP / SOHBET MESAJLARI — WhatsApp düzeni (grup sohbetleri)
+   ========================================================================= */
+.chat-container .chat-messages { padding: 8px 10px 14px !important; gap: 2px !important; display: flex; flex-direction: column; }
+.chat-container .chat-msg { display: flex; align-items: flex-end; gap: 6px; max-width: 86%; margin: 1px 0; padding: 0; background: none; border: 0; }
+.chat-container .chat-msg:not(.own) { align-self: flex-start; }
+.chat-container .chat-msg.own { align-self: flex-end; flex-direction: row-reverse; }
+.chat-container .chat-msg-profile { flex: 0 0 auto; width: 28px; height: 28px; align-self: flex-end; margin-bottom: 2px; }
+.chat-container .chat-msg.own .chat-msg-profile { display: none; }
+.chat-container .chat-msg-avatar { width: 28px !important; height: 28px !important; border-radius: 50% !important; object-fit: cover; }
+.chat-container .chat-msg-body { position: relative; min-width: 0; max-width: 100%; display: flex; flex-direction: column; padding: 6px 9px 4px !important; border-radius: 12px; background: #1f2128; color: var(--text-primary, #eee); box-shadow: 0 1px 1px rgba(0,0,0,.25); }
+.chat-container .chat-msg:not(.own) .chat-msg-body { border-top-left-radius: 3px; }
+.chat-container .chat-msg.own .chat-msg-body { background: #1f4d3c; border-top-right-radius: 3px; }
+.chat-container .chat-msg:not(.own) + .chat-msg:not(.own) .chat-msg-body { border-top-left-radius: 12px; }
+.chat-container .chat-msg.own + .chat-msg.own .chat-msg-body { border-top-right-radius: 12px; }
+.chat-container .chat-msg-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 1.2; }
+.chat-container .chat-msg-name { font-weight: 700; font-size: 12.5px; color: #e9a86b; text-decoration: none; }
+.chat-container .chat-msg-time { color: rgba(255,255,255,.5); font-size: 11px; margin-left: auto; white-space: nowrap; }
+.chat-container .chat-msg-edited { color: rgba(255,255,255,.5); font-size: 10px; }
+.chat-container .msg-menu-trigger { opacity: .0; transition: opacity .15s; }
+@media (hover: hover) { .chat-container .chat-msg:hover .msg-menu-trigger { opacity: 1; } }
+.chat-container .chat-msg-text { font-size: 14.5px; line-height: 1.38; word-break: break-word; white-space: pre-wrap; }
+.chat-container .chat-msg-time-inline { display: inline-block; margin-left: 8px; float: right; position: relative; top: 5px; color: rgba(255,255,255,.5); font-size: 11px; }
+.chat-container .chat-reply-preview { border-left: 3px solid #5fd4a3; background: rgba(0,0,0,.22); border-radius: 6px; padding: 5px 8px; margin-bottom: 4px; font-size: 12.5px; }
+.chat-container .chat-reply-preview span { color: #5fd4a3; font-weight: 700; display: block; }
+.chat-container .chat-msg.selected .chat-msg-body { outline: 2px solid #5fd4a3; }
+.chat-container .chat-msg-select { align-self: center; accent-color: #5fd4a3; width: 18px; height: 18px; }
+.chat-container .chat-msg.deleted-for-me .chat-msg-body { background: transparent; box-shadow: none; border: 1px dashed rgba(255,255,255,.15); color: rgba(255,255,255,.5); font-style: italic; }
+@media (max-width: 760px) { .chat-container .chat-msg { max-width: 88%; } }
+.group-message-input-bar .dm-mic-btn { display: none; }
+.group-message-input-bar:not(.has-content) .dm-mic-btn { display: inline-flex; }
+.group-message-input-bar:not(.has-content) #send-msg-btn { display: none; }
+.chat-container .chat-msg-body .cg-voice { max-width: 260px; }
+/* Ana sayfa akışı: Instagram gibi — medya kenardan kenara, metinler 12px içeride */
+@media (max-width: 520px) {
+  .photo-card.ig-post .ig-post-head,
+  .photo-card.ig-post .ig-post-body { padding-left: 12px !important; padding-right: 12px !important; }
+  .photo-card.ig-post .ig-post-media { margin: 0 !important; width: 100% !important; max-width: 100% !important; border-radius: 0 !important; }
+  .photo-card.ig-post .ig-post-avatar { margin-left: 0; }
+}
+
+/* -------------------------------------------------------------------------
+   KLAVYE: iOS odak büyütmesi yok, klavye açılınca alt bar ve giriş alanı yerinde kalır
+   ------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  textarea, select { font-size: 16px !important; }
+}
+html, body { overscroll-behavior-y: none; }
+body.keyboard-open .mobile-bottom-nav,
+body.keyboard-open .mobile-bottom-bar { display: none !important; }
+body.keyboard-open .dm-chat .dm-input-bar,
+body.keyboard-open .group-message-input-bar { position: sticky; bottom: 0; }
+
+/* =========================================================================
+   GİRİŞ / KAYIT — sosyal medya düzeni (mobilde tam ekran, masaüstünde ortada kart)
+   ========================================================================= */
+.auth-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: radial-gradient(120% 70% at 50% -10%, rgba(201,169,110,.18), transparent 60%), #050505 !important; }
+.auth-page .auth-card { width: min(420px, 100%); background: #111 !important; border: 1px solid #242424 !important; border-radius: 22px !important; box-shadow: 0 30px 80px rgba(0,0,0,.6); padding: 34px 28px 26px !important; animation: cgAuthIn .5s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes cgAuthIn { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
+.auth-page .auth-site-logo { display: block; width: 74px; height: 74px; margin: 0 auto 6px; object-fit: contain; }
+.auth-page .auth-site-wordmark { font-family: 'Playfair Display', Georgia, serif; font-size: 34px; letter-spacing: .5px; text-align: center; color: #f4ead6; margin-bottom: 4px; }
+.auth-page .auth-title { text-align: center; font-size: 17px; font-weight: 600; color: #e9e9e9; margin-top: 6px; }
+.auth-page .auth-subtitle { text-align: center; font-size: 13.5px; color: #8e8e8e; line-height: 1.5; margin: 6px 0 20px; }
+.auth-page .form-group { margin-bottom: 12px; }
+.auth-page .form-group label { font-size: 12px; color: #9a9a9a; font-weight: 600; margin-bottom: 6px; display: block; }
+.auth-page input[type="text"], .auth-page input[type="password"], .auth-page input[type="email"] {
+  height: 48px; border-radius: 12px !important; background: #1b1b1b !important; border: 1px solid #2c2c2c !important; color: #f2f2f2; padding: 0 14px; width: 100%; box-sizing: border-box; transition: border-color .2s, background .2s; }
+.auth-page input:focus { outline: none; border-color: #c9a96e !important; background: #1f1f1f !important; box-shadow: 0 0 0 3px rgba(201,169,110,.15); }
+.auth-page .btn-primary, .auth-page #login-btn, .auth-page #register-btn { height: 48px; border-radius: 12px !important; font-weight: 700; font-size: 15px; letter-spacing: .2px; background: linear-gradient(135deg, #e7c98d, #b98c4d) !important; color: #111 !important; border: 0 !important; box-shadow: 0 10px 26px rgba(201,169,110,.25); }
+.auth-page .btn-primary:active { transform: scale(.985); }
+.auth-page .auth-link { color: #c9a96e !important; font-weight: 600; }
+.auth-page .auth-footer { margin-top: 22px; padding-top: 18px; border-top: 1px solid #222; text-align: center; color: #8e8e8e; font-size: 14px; }
+.auth-page .form-error { color: #ff6b6b; font-size: 13px; }
+@media (max-width: 520px) {
+  .auth-page { padding: 0; align-items: stretch; background: #000 !important; }
+  .auth-page .auth-card { width: 100%; min-height: 100dvh; border-radius: 0 !important; border: 0 !important; box-shadow: none; display: flex; flex-direction: column; justify-content: center; padding: 40px 22px calc(24px + env(safe-area-inset-bottom)) !important; }
+  .auth-page input[type="text"], .auth-page input[type="password"] { font-size: 16px; }
+}

@@ -875,6 +875,10 @@ async function initDb() {
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT REFERENCES group_messages(id) ON DELETE SET NULL;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_url TEXT;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_waveform JSONB;
+    ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_listened_at TIMESTAMP;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS shared_song_id BIGINT;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS song_start_seconds INTEGER NOT NULL DEFAULT 0;
