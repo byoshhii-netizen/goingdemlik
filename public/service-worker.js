@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cigcig-app-shell-v21';
+const CACHE_NAME = 'cigcig-app-shell-v22';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
@@ -109,18 +109,21 @@ self.addEventListener('fetch', event => {
   }
 
   if (!['script', 'style', 'image', 'font'].includes(request.destination)) return;
+  // Script ve stiller ağ öncelikli: yeni sürüm yayınlandığında eski dosya asla takılı kalmaz.
+  const networkFirst = request.destination === 'script' || request.destination === 'style';
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(request);
-    if (cached) return cached;
-
+    if (!networkFirst) {
+      const cached = await cache.match(request);
+      if (cached) return cached;
+    }
     try {
       const response = await fetch(request);
       if (response.ok) await cache.put(request, response.clone());
       return response;
     } catch (error) {
-      const fallback = await cache.match(url.pathname);
-      if (fallback) return fallback;
+      const cached = await cache.match(request) || await cache.match(url.pathname);
+      if (cached) return cached;
       throw error;
     }
   })());

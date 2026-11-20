@@ -20999,7 +20999,8 @@ async function renderMusicDetail(app, slug) {
     <div class="song-detail-page">
       <a href="/muzikler" data-link class="song-detail-back"><i class="fas fa-arrow-left"></i><span>Müziklere dön</span></a>
       <div class="song-detail-hero">
-        <div class="song-detail-cover-wrap">
+        <div class="song-detail-cover-wrap has-vinyl">
+          <div class="song-vinyl" aria-hidden="true"><span class="song-vinyl-label"${song.cover_url ? ` style="background-image:url('${escHtml(song.cover_url)}')"` : ''}></span></div>
           ${song.cover_url
             ? `<img src="${escHtml(song.cover_url)}" class="song-detail-cover" />`
             : `<div class="song-detail-cover song-detail-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -21067,12 +21068,10 @@ async function renderMusicDetail(app, slug) {
 
       <div id="song-recommendations-section">${renderRecommendationSection(song.recommendations)}</div>
 
-      ${hasLyrics ? `
-        <div class="song-lyrics-section">
-          <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
-          <div class="song-lyrics-text ${timedLyrics.length ? 'song-lyrics-timed' : ''}" id="detail-lyrics">${lyricsLinesHTML(song.lyrics, timedLyrics)}</div>
-        </div>
-      ` : ''}
+      <div class="song-lyrics-section" id="song-lyrics-section"${hasLyrics ? '' : ' hidden'}>
+        <div class="song-lyrics-title"><i class="fas fa-align-left"></i> Şarkı Sözleri</div>
+        <div class="song-lyrics-text ${timedLyrics.length ? 'song-lyrics-timed' : ''}" id="detail-lyrics">${hasLyrics ? lyricsLinesHTML(song.lyrics, timedLyrics) : ''}</div>
+      </div>
     </div>
   `;
 
@@ -21124,6 +21123,32 @@ async function renderMusicDetail(app, slug) {
   bindMusicPlaybackPersistence(audio);
   bindMusicAdTracking(audio, song);
   if (playBtn && !audio.paused) playBtn.innerHTML = '<i class="fas fa-pause"></i>';
+  // Plak dönüşü: çalarken döner, durunca durur
+  const songPage = document.querySelector('.song-detail-page');
+  const syncVinyl = () => songPage?.classList.toggle('is-spinning', !audio.paused);
+  audio.addEventListener('play', syncVinyl);
+  audio.addEventListener('pause', syncVinyl);
+  audio.addEventListener('ended', syncVinyl);
+  syncVinyl();
+  // Söz yoksa otomatik getir (LRCLIB)
+  if (!hasLyrics) {
+    api('/songs/' + encodeURIComponent(song.slug) + '/auto-lyrics').then(auto => {
+      const section = document.getElementById('song-lyrics-section');
+      const box = document.getElementById('detail-lyrics');
+      if (!section || !box || !auto) return;
+      const segments = Array.isArray(auto.lyrics_timed) ? auto.lyrics_timed : [];
+      if (!segments.length && !auto.lyrics) return;
+      box.innerHTML = lyricsLinesHTML(auto.lyrics || '', segments);
+      box.classList.toggle('song-lyrics-timed', segments.length > 0);
+      section.hidden = false;
+      if (segments.length) {
+        audio.addEventListener('timeupdate', () => updateLyricsHighlight(box, audio.currentTime));
+      }
+    }).catch(() => {});
+  } else if (timedLyrics.length) {
+    const box = document.getElementById('detail-lyrics');
+    audio.addEventListener('timeupdate', () => updateLyricsHighlight(box, audio.currentTime));
+  }
   const remasteredToggle = document.getElementById('song-remastered-toggle');
   const updateRemasteredToggle = () => {
     if (!remasteredToggle) return;
