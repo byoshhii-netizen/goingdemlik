@@ -1757,29 +1757,93 @@ body.keyboard-open .dm-chat .dm-input-bar,
 body.keyboard-open .group-message-input-bar { position: sticky; bottom: 0; }
 
 /* =========================================================================
-   GİRİŞ / KAYIT — sosyal medya düzeni (mobilde tam ekran, masaüstünde ortada kart)
+   GİRİŞ / KAYIT — sosyal medya düzeni
    ========================================================================= */
-.auth-page { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; background: radial-gradient(120% 70% at 50% -10%, rgba(201,169,110,.18), transparent 60%), #050505 !important; }
-.auth-page .auth-card { width: min(420px, 100%); background: #111 !important; border: 1px solid #242424 !important; border-radius: 22px !important; box-shadow: 0 30px 80px rgba(0,0,0,.6); padding: 34px 28px 26px !important; animation: cgAuthIn .5s cubic-bezier(.2,.8,.2,1) both; }
-@keyframes cgAuthIn { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
-.auth-page .auth-site-logo { display: block; width: 74px; height: 74px; margin: 0 auto 6px; object-fit: contain; }
-.auth-page .auth-site-wordmark { font-family: 'Playfair Display', Georgia, serif; font-size: 34px; letter-spacing: .5px; text-align: center; color: #f4ead6; margin-bottom: 4px; }
-.auth-page .auth-title { text-align: center; font-size: 17px; font-weight: 600; color: #e9e9e9; margin-top: 6px; }
-.auth-page .auth-subtitle { text-align: center; font-size: 13.5px; color: #8e8e8e; line-height: 1.5; margin: 6px 0 20px; }
-.auth-page .form-group { margin-bottom: 12px; }
-.auth-page .form-group label { font-size: 12px; color: #9a9a9a; font-weight: 600; margin-bottom: 6px; display: block; }
-.auth-page input[type="text"], .auth-page input[type="password"], .auth-page input[type="email"] {
-  height: 48px; border-radius: 12px !important; background: #1b1b1b !important; border: 1px solid #2c2c2c !important; color: #f2f2f2; padding: 0 14px; width: 100%; box-sizing: border-box; transition: border-color .2s, background .2s; }
-.auth-page input:focus { outline: none; border-color: #c9a96e !important; background: #1f1f1f !important; box-shadow: 0 0 0 3px rgba(201,169,110,.15); }
-.auth-page .btn-primary, .auth-page #login-btn, .auth-page #register-btn { height: 48px; border-radius: 12px !important; font-weight: 700; font-size: 15px; letter-spacing: .2px; background: linear-gradient(135deg, #e7c98d, #b98c4d) !important; color: #111 !important; border: 0 !important; box-shadow: 0 10px 26px rgba(201,169,110,.25); }
-.auth-page .btn-primary:active { transform: scale(.985); }
-.auth-page .auth-link { color: #c9a96e !important; font-weight: 600; }
-.auth-page .auth-footer { margin-top: 22px; padding-top: 18px; border-top: 1px solid #222; text-align: center; color: #8e8e8e; font-size: 14px; }
-.auth-page .form-error { color: #ff6b6b; font-size: 13px; }
+body.auth-route, body.auth-route #app { background: #050505 !important; }
+.auth-page {
+  box-sizing: border-box; min-height: 100dvh; width: 100%;
+  display: flex; flex-direction: column; justify-content: center; align-items: center;
+  padding: 28px 18px calc(28px + env(safe-area-inset-bottom)) !important;
+  background:
+    radial-gradient(90% 55% at 50% -8%, rgba(201,169,110,.22), transparent 62%),
+    radial-gradient(70% 45% at 100% 100%, rgba(120,80,200,.14), transparent 60%),
+    #050505 !important;
+}
+.auth-page .auth-card {
+  box-sizing: border-box;
+  width: 100% !important; max-width: 400px !important; margin: 0 auto !important;
+  padding: 30px 24px 24px !important;
+  background: rgba(17,17,19,.92) !important;
+  border: 1px solid #232326 !important; border-radius: 22px !important;
+  box-shadow: 0 28px 70px rgba(0,0,0,.6) !important;
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  animation: cgAuthIn .45s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes cgAuthIn { from { opacity: 0; transform: translateY(12px) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* Marka kilidi: logo + yazı + Beta rozeti yan yana, çakışmaz */
+.auth-page .auth-site-logo { display: block; width: 58px; height: 58px; margin: 0 auto 10px; object-fit: contain; }
+.auth-page .auth-site-logo[data-broken] { display: none; }
+.auth-page .auth-site-wordmark {
+  position: relative !important; display: flex !important; align-items: baseline; justify-content: center; gap: 6px;
+  font-size: 30px !important; line-height: 1.05; margin: 0 0 14px !important; color: #f4ead6 !important;
+}
+.beta-mode-enabled .auth-page .auth-site-wordmark--brand::after {
+  position: static !important; left: auto !important; top: auto !important;
+  content: "Beta" !important; padding: 3px 7px; border-radius: 6px;
+  background: rgba(201,169,110,.18); color: #e7c98d !important;
+  font-family: Inter, system-ui, sans-serif !important; font-size: 10px !important;
+  font-weight: 800 !important; letter-spacing: 1px; text-transform: uppercase; transform: translateY(-6px);
+}
+.auth-page .auth-title { text-align: center; font-size: 19px !important; font-weight: 700; color: #f1f1f1; margin: 0; }
+.auth-page .auth-subtitle { text-align: center; font-size: 13.5px; color: #8b8b8b; line-height: 1.5; margin: 7px 0 20px; }
+
+.auth-page .form-group { margin-bottom: 13px !important; }
+.auth-page .form-group label:not(.checkbox-label) { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 700; letter-spacing: .3px; color: #9c9c9c; }
+.auth-page input[type="text"], .auth-page input[type="password"],
+.auth-page input[type="email"], .auth-page input[type="date"], .auth-page input[type="tel"] {
+  box-sizing: border-box; width: 100%; height: 50px;
+  padding: 0 14px; border-radius: 13px !important;
+  background: #1b1b1e !important; border: 1px solid #2d2d31 !important; color: #f2f2f2 !important;
+  font-size: 16px; transition: border-color .18s, background .18s, box-shadow .18s;
+}
+.auth-page input::placeholder { color: #6b6b6b; }
+.auth-page input:focus { outline: none; border-color: #c9a96e !important; background: #202023 !important; box-shadow: 0 0 0 3px rgba(201,169,110,.16); }
+.auth-page .btn-primary, .auth-page #login-btn, .auth-page #register-btn {
+  width: 100%; height: 50px; margin-top: 6px;
+  border: 0 !important; border-radius: 13px !important;
+  background: linear-gradient(135deg,#e9cd92,#bb8e4e) !important; color: #141414 !important;
+  font-size: 15.5px !important; font-weight: 800 !important; letter-spacing: .2px;
+  box-shadow: 0 12px 26px rgba(201,169,110,.22); cursor: pointer;
+  transition: transform .14s, box-shadow .2s;
+}
+.auth-page .btn-primary:active { transform: scale(.985); box-shadow: 0 6px 16px rgba(201,169,110,.2); }
+.auth-page .auth-link { color: #d8b87c !important; font-weight: 700; text-decoration: none; }
+.auth-page .auth-footer { margin-top: 20px; padding-top: 16px; border-top: 1px solid #202023; text-align: center; color: #8b8b8b; font-size: 14px; }
+.auth-page .form-error { margin-top: 10px; color: #ff6b6b; font-size: 13px; text-align: center; }
+.auth-page .checkbox-label { display: flex; align-items: center; gap: 9px; font-size: 13.5px; color: #c6c6c6; }
+.auth-page .quick-register-button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px;
+  margin-bottom: 14px; padding: 0 14px; cursor: pointer;
+  border: 1px dashed #3a3a3f !important; border-radius: 13px !important;
+  background: rgba(255,255,255,.03) !important; color: #e4e4e4 !important;
+  font-size: 14px; font-weight: 600; text-align: left;
+}
+.auth-page .quick-register-button .quick-register-icon { color: #c9a96e; }
+.auth-page .quick-register-button:active { transform: scale(.99); }
+
 @media (max-width: 520px) {
-  .auth-page { padding: 0; align-items: stretch; background: #000 !important; }
-  .auth-page .auth-card { width: 100%; min-height: 100dvh; border-radius: 0 !important; border: 0 !important; box-shadow: none; display: flex; flex-direction: column; justify-content: center; padding: 40px 22px calc(24px + env(safe-area-inset-bottom)) !important; }
-  .auth-page input[type="text"], .auth-page input[type="password"] { font-size: 16px; }
+  .auth-page { padding: 0 !important; justify-content: flex-start; }
+  .auth-page .auth-card {
+    max-width: none !important; min-height: 100dvh;
+    display: flex; flex-direction: column; justify-content: center;
+    border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+    background: transparent !important; -webkit-backdrop-filter: none; backdrop-filter: none;
+    padding: 36px 20px calc(28px + env(safe-area-inset-bottom)) !important;
+  }
+}
+@media (min-height: 760px) and (max-width: 520px) {
+  .auth-page .auth-card { padding-top: 56px !important; }
 }
 
 /* =========================================================================
@@ -2023,3 +2087,18 @@ body.gpn-open #global-music-player { display: none !important; }
 .photos-feed .ig-post-head h2,
 .photos-feed .ig-post-head h3,
 .photos-feed .ig-post-head h4 { font-size: 14px !important; font-weight: 700 !important; margin: 0 !important; line-height: 1.25 !important; }
+/* Kayıt: hızlı doldurma düğmesi ve açıklaması */
+.auth-page .quick-register-button { justify-content: flex-start !important; text-align: left !important; }
+.auth-page .quick-register-button .quick-register-icon {
+  flex: 0 0 auto !important; display: grid !important; place-items: center;
+  width: 32px !important; height: 32px !important; min-width: 32px !important; max-width: 32px !important;
+  margin: 0 !important; padding: 0 !important; border-radius: 9px !important;
+  background: rgba(201,169,110,.16) !important; color: #e7c98d !important; font-size: 14px !important;
+}
+.auth-page .quick-register-button .quick-register-icon img,
+.auth-page .quick-register-button .quick-register-icon i { width: auto !important; height: auto !important; font-size: 14px !important; }
+.auth-page .quick-register-button strong { font-size: 14.5px !important; font-weight: 700 !important; }
+.auth-page .quick-register-note,
+.auth-page .quick-register-button + p,
+.auth-page .quick-register-button + small { display: block; margin: -4px 0 16px; font-size: 12px !important; line-height: 1.5; color: #7e7e7e !important; text-align: left !important; }
+.auth-page .register-avatar-card { border-radius: 14px !important; border: 1px solid #242428 !important; background: #121214 !important; }

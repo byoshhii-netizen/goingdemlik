@@ -13835,7 +13835,7 @@ function renderLogin(app) {
   document.title = 'Giriş Yap - ' + siteName;
   app.innerHTML = `<div class="auth-page auth-page--login">
     <div class="auth-card auth-card--enhanced card card-body">
-      <img class="auth-site-logo" src="/cigcig2.png" alt="CigCig">
+      <img class="auth-site-logo" src="/cigcig2.png" alt="" onerror="this.setAttribute('data-broken','1')">
       <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
       <div class="auth-title">Tekrar hoş geldin</div>
       <p class="auth-subtitle">Hesabına giriş yap ve kaldığın yerden devam et.</p>
@@ -13965,7 +13965,7 @@ function renderRegister(app) {
   document.title = 'Kayıt Ol - ' + siteName;
   app.innerHTML = `<div class="auth-page">
     <div class="auth-card auth-card--enhanced auth-card--register card card-body">
-      <img class="auth-site-logo" src="/cigcig2.png" alt="CigCig">
+      <img class="auth-site-logo" src="/cigcig2.png" alt="" onerror="this.setAttribute('data-broken','1')">
       <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
       <div class="auth-title">Kayıt Ol</div>
       <p class="auth-subtitle">CigCig'de kendi alanını oluştur.</p>
@@ -14169,7 +14169,7 @@ function renderForgotPassword(app) {
   const renderEmailStep = () => {
     app.innerHTML = `<div class="auth-page">
       <div class="auth-card auth-card--enhanced card card-body">
-        <img class="auth-site-logo" src="/cigcig2.png" alt="CigCig">
+        <img class="auth-site-logo" src="/cigcig2.png" alt="" onerror="this.setAttribute('data-broken','1')">
         <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
         <div class="auth-title">Şifremi Unuttum</div>
         <p class="auth-subtitle">Hesabındaki e-posta adresini yaz, sana doğrulama kodunu gönderelim.</p>
