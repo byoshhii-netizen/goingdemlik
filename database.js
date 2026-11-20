@@ -1237,6 +1237,10 @@ async function initDb() {
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS shared_gif_url TEXT NOT NULL DEFAULT '';
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_limit INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_view_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS voice_url TEXT NOT NULL DEFAULT '';
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS voice_waveform JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS voice_listened_at TIMESTAMPTZ;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_by_sender_at TIMESTAMP;
     ALTER TABLE dm_messages ADD COLUMN IF NOT EXISTS deleted_by_receiver_at TIMESTAMP;

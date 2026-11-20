@@ -377,14 +377,17 @@ function toast(msg, type = 'success') {
   const c = $('#toast-container');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
-  t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span>${msg}</span>`;
+  t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span></span>`;
+  // Mesaj her zaman düz metin olarak basılır (sunucu hata metinleri üzerinden XSS engellenir).
+  t.querySelector('span').textContent = String(msg ?? '');
+  t.setAttribute('role', type === 'error' ? 'alert' : 'status');
   c.appendChild(t);
   setTimeout(() => t.remove(), 3500);
 }
 
 function escHtml(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if (s === null || s === undefined || s === false || s === '') return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function hasPermission(name) {
@@ -487,6 +490,7 @@ if (profileEntry) {
   }
 }
 $('#admin-login-btn').addEventListener('click', tryLogin);
+$('#admin-login-form')?.addEventListener('submit', event => { event.preventDefault(); tryLogin(); });
 $('#admin-username-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 $('#admin-pw-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
@@ -494,7 +498,14 @@ async function tryLogin() {
   if (profileEntry && !profileEntryReady) return;
   const username = $('#admin-username-input').value.trim();
   const pw = $('#admin-pw-input').value;
-  if ((!profileEntry && !username) || !pw) return;
+  if ((!profileEntry && !username) || !pw) {
+    $('#admin-login-err').textContent = 'Kullanıcı adı ve şifre gerekli.';
+    return;
+  }
+  const loginButton = $('#admin-login-btn');
+  if (loginButton.disabled) return;
+  loginButton.disabled = true;
+  $('#admin-login-err').textContent = '';
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (profileEntry) headers.Authorization = 'Bearer ' + (localStorage.getItem('token') || '');
@@ -512,6 +523,9 @@ async function tryLogin() {
   } catch (error) {
     adminToken = ''; sessionStorage.removeItem('admin_token');
     $('#admin-login-err').textContent = error.message;
+    $('#admin-pw-input').value = '';
+  } finally {
+    loginButton.disabled = false;
   }
 }
 
@@ -521,8 +535,93 @@ function showPanel() {
   loadTopbarStats();
   setupNav();
   applyAuthorityNav();
-  loadSection('dashboard');
+  const requested = adminSectionFromLocation();
+  const allowed = isSectionVisible(requested) ? requested : 'dashboard';
+  loadSection(allowed, { history: 'replace' });
 }
+
+// ===== ROUTER =====
+// Her bölümün kendi adresi vardır: /gubukgak/kullanicilar, /gubukgak/ayarlar ...
+// Sayfa yenilense veya bağlantı paylaşılsa da aynı bölüm açılır; geri/ileri tuşları çalışır.
+const ADMIN_SECTION_SLUGS = {
+  dashboard: '',
+  'content-analytics': 'analitik',
+  users: 'kullanicilar',
+  badges: 'rozetler',
+  levels: 'seviyeler',
+  'two-factor': 'iki-adimli-dogrulama',
+  'quick-registration-logs': 'hizli-kayit-loglari',
+  'account-deletions': 'hesap-silme-talepleri',
+  journalists: 'gazeteciler',
+  forums: 'konular',
+  books: 'kitaplar',
+  poems: 'siirler',
+  videos: 'videolar',
+  photos: 'fotograflar',
+  stories: 'hikayeler',
+  songs: 'muzikler',
+  artists: 'artistler',
+  'artist-apps': 'artist-basvurulari',
+  groups: 'gruplar',
+  tags: 'etiketler',
+  'newspaper-settings': 'gazete-ayarlari',
+  'message-reports': 'bildirilen-mesajlar',
+  'user-reports': 'kullanici-bildirimleri',
+  messages: 'mesaj-denetimi',
+  warnings: 'ihtarlar',
+  'child-safety': 'cocuk-guvenligi',
+  'ad-submissions': 'reklam-havuzu',
+  'video-ads': 'video-reklamlari',
+  'music-ads': 'muzik-reklamlari',
+  'reals-ads': 'reals-reklamlari',
+  shop: 'magaza',
+  'shop-orders': 'siparisler',
+  'shop-settings': 'odeme-sistemi',
+  notifications: 'bildirimler',
+  announcements: 'duyurular',
+  'homepage-sections': 'ana-sayfa-bolumleri',
+  settings: 'ayarlar',
+  logs: 'loglar',
+  'route-logs': 'route-loglari',
+  'authority-logs': 'yetkili-loglari'
+};
+const ADMIN_SLUG_SECTIONS = Object.fromEntries(Object.entries(ADMIN_SECTION_SLUGS).map(([section, slug]) => [slug, section]));
+const ADMIN_BASE = (() => {
+  const meta = document.querySelector('meta[name="admin-base"]')?.content || '';
+  if (/^\/[A-Za-z0-9_-]+$/.test(meta)) return meta;
+  return '/' + (location.pathname.split('/').filter(Boolean)[0] || 'gubukgak');
+})();
+
+function adminSectionUrl(section) {
+  const slug = ADMIN_SECTION_SLUGS[section];
+  return slug ? `${ADMIN_BASE}/${slug}` : ADMIN_BASE;
+}
+
+function adminSectionFromLocation() {
+  const rest = location.pathname.slice(ADMIN_BASE.length).replace(/^\/+|\/+$/g, '');
+  const slug = decodeURIComponent(rest.split('/')[0] || '');
+  return ADMIN_SLUG_SECTIONS[slug] || (ADMIN_SECTION_SLUGS[slug] !== undefined ? slug : 'dashboard');
+}
+
+function isSectionVisible(section) {
+  const item = document.querySelector(`.adm-nav-item[data-section="${CSS.escape(section)}"]`);
+  return Boolean(item) && item.style.display !== 'none';
+}
+
+function sectionMeta(section) {
+  const item = document.querySelector(`.adm-nav-item[data-section="${CSS.escape(section)}"]`);
+  return {
+    label: item?.querySelector('.adm-nav-label')?.textContent.trim() || 'Kontrol Merkezi',
+    group: item?.closest('.adm-nav-group')?.querySelector('.adm-section-label span')?.textContent.trim() || 'Genel',
+    icon: item?.querySelector('.adm-nav-icon i')?.className || 'fas fa-gauge-high'
+  };
+}
+
+window.addEventListener('popstate', () => {
+  if (!$('#admin-panel')?.classList.contains('visible')) return;
+  const section = adminSectionFromLocation();
+  loadSection(isSectionVisible(section) ? section : 'dashboard', { history: 'none' });
+});
 
 function applyAuthorityNav() {
   if (!adminProfile || adminProfile.is_super_admin) return;
@@ -542,6 +641,10 @@ function applyAuthorityNav() {
   if (hasPermission('can_assign_badges')) visible.add('badges');
   if (hasPermission('can_view_users')) { visible.add('messages'); visible.add('message-reports'); visible.add('user-reports'); }
   $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
+  // İçinde görünür bölüm kalmayan grupları gizle.
+  $$('.adm-nav-group').forEach(group => {
+    group.hidden = ![...group.querySelectorAll('.adm-nav-item')].some(item => item.style.display !== 'none');
+  });
 }
 
 $('#admin-logout-btn').addEventListener('click', async () => {
@@ -556,30 +659,185 @@ $('#admin-logout-btn').addEventListener('click', async () => {
   location.reload();
 });
 
+let adminNavReady = false;
 function setupNav() {
+  if (adminNavReady) return;
+  adminNavReady = true;
   $$('.adm-nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-      $$('.adm-nav-item').forEach(i => i.classList.remove('active'));
-      item.classList.add('active');
+    item.setAttribute('href', adminSectionUrl(item.dataset.section));
+    item.addEventListener('click', event => {
+      // Ctrl/Cmd/orta tık: yeni sekmede aç (normal bağlantı davranışı).
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return;
+      event.preventDefault();
       loadSection(item.dataset.section);
     });
   });
+
+  // Grup başlıkları açılır/kapanır, tercih hatırlanır.
+  let collapsed = [];
+  try { collapsed = JSON.parse(localStorage.getItem('adm_nav_collapsed') || '[]'); } catch { collapsed = []; }
+  $$('.adm-nav-group').forEach(group => {
+    const button = group.querySelector('.adm-section-label');
+    const key = group.dataset.group;
+    const setCollapsed = value => {
+      group.classList.toggle('is-collapsed', value);
+      button.setAttribute('aria-expanded', String(!value));
+    };
+    setCollapsed(collapsed.includes(key));
+    button.addEventListener('click', () => {
+      const next = !group.classList.contains('is-collapsed');
+      setCollapsed(next);
+      const set = new Set(collapsed);
+      if (next) set.add(key); else set.delete(key);
+      collapsed = [...set];
+      try { localStorage.setItem('adm_nav_collapsed', JSON.stringify(collapsed)); } catch { /* yoksay */ }
+    });
+  });
+
+  // Menü içi arama
+  const filter = $('#adm-nav-filter');
+  filter?.addEventListener('input', () => {
+    const term = filter.value.trim().toLocaleLowerCase('tr-TR');
+    let matches = 0;
+    $$('.adm-nav-group').forEach(group => {
+      let groupMatches = 0;
+      group.querySelectorAll('.adm-nav-item').forEach(item => {
+        if (item.style.display === 'none') return;
+        const hit = !term || item.textContent.toLocaleLowerCase('tr-TR').includes(term);
+        item.classList.toggle('is-filtered-out', !hit);
+        if (hit) groupMatches += 1;
+      });
+      group.classList.toggle('is-filtering', Boolean(term));
+      group.classList.toggle('is-filtered-out', Boolean(term) && !groupMatches);
+      matches += groupMatches;
+    });
+    const empty = $('#adm-nav-empty');
+    if (empty) empty.hidden = matches > 0;
+  });
+  filter?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      const first = [...$$('.adm-nav-item')].find(item => item.style.display !== 'none' && !item.classList.contains('is-filtered-out'));
+      if (first) { loadSection(first.dataset.section); filter.value = ''; filter.dispatchEvent(new Event('input')); }
+    }
+    if (event.key === 'Escape') { filter.value = ''; filter.dispatchEvent(new Event('input')); filter.blur(); }
+  });
+
+  // Mobil çekmece menü
+  const sidebar = $('#adm-sidebar');
+  const scrim = $('#adm-scrim');
+  const toggle = $('#adm-menu-toggle');
+  const openDrawer = open => {
+    document.body.classList.toggle('adm-drawer-open', open);
+    if (scrim) scrim.hidden = !open;
+    toggle?.setAttribute('aria-expanded', String(open));
+    if (open) setTimeout(() => sidebar?.querySelector('.adm-nav-item.active')?.scrollIntoView({ block: 'center' }), 60);
+  };
+  window.__admCloseDrawer = () => openDrawer(false);
+  toggle?.addEventListener('click', () => openDrawer(!document.body.classList.contains('adm-drawer-open')));
+  scrim?.addEventListener('click', () => openDrawer(false));
+  $('#adm-sidebar-close')?.addEventListener('click', () => openDrawer(false));
+
+  $('#adm-refresh-btn')?.addEventListener('click', () => loadSection(currentSection, { history: 'none' }));
+  $('#adm-command-btn')?.addEventListener('click', openCommandPalette);
+  document.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openCommandPalette();
+    } else if (event.key === 'Escape') {
+      if (!$('#adm-palette')?.hidden) closeCommandPalette();
+      else if (document.body.classList.contains('adm-drawer-open')) openDrawer(false);
+    }
+  });
 }
 
-async function loadTopbarStats() {
-  try {
-    const users = await adminApi('/users');
-    const forums = await adminApi('/forums');
-    const el = $('#adm-topbar-stats');
-    if (el) el.innerHTML = `
-      <span><i class="fas fa-users" style="color:#5865F2;margin-right:4px"></i>${users.length} üye</span>
-      <span><i class="fas fa-comments" style="color:#dc2626;margin-right:4px"></i>${forums.length} konu</span>`;
-  } catch {}
+function openCommandPalette() {
+  const palette = $('#adm-palette');
+  const input = $('#adm-palette-input');
+  const list = $('#adm-palette-list');
+  if (!palette || !input || !list) return;
+  const sections = [...$$('.adm-nav-item')].filter(item => item.style.display !== 'none').map(item => ({
+    section: item.dataset.section,
+    ...sectionMeta(item.dataset.section)
+  }));
+  let selected = 0;
+  const render = () => {
+    const term = input.value.trim().toLocaleLowerCase('tr-TR');
+    const results = sections.filter(entry => !term || `${entry.label} ${entry.group}`.toLocaleLowerCase('tr-TR').includes(term));
+    selected = Math.min(selected, Math.max(0, results.length - 1));
+    list.innerHTML = results.length ? results.map((entry, index) => `<button type="button" class="adm-palette-item${index === selected ? ' is-selected' : ''}" data-section="${escHtml(entry.section)}" role="option" aria-selected="${index === selected}"><i class="${escHtml(entry.icon)}"></i><span>${escHtml(entry.label)}</span><small>${escHtml(entry.group)}</small></button>`).join('') : '<div class="adm-palette-empty">Sonuç yok</div>';
+    return results;
+  };
+  let results = render();
+  input.oninput = () => { selected = 0; results = render(); };
+  input.onkeydown = event => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); selected = Math.min(results.length - 1, selected + 1); results = render(); list.querySelector('.is-selected')?.scrollIntoView({ block: 'nearest' }); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); selected = Math.max(0, selected - 1); results = render(); list.querySelector('.is-selected')?.scrollIntoView({ block: 'nearest' }); }
+    else if (event.key === 'Enter' && results[selected]) { event.preventDefault(); closeCommandPalette(); loadSection(results[selected].section); }
+  };
+  list.onclick = event => {
+    const button = event.target.closest('[data-section]');
+    if (!button) return;
+    closeCommandPalette();
+    loadSection(button.dataset.section);
+  };
+  palette.querySelector('[data-palette-close]').onclick = closeCommandPalette;
+  palette.hidden = false;
+  input.value = '';
+  results = render();
+  setTimeout(() => input.focus(), 20);
 }
 
-function loadSection(section) {
+function closeCommandPalette() {
+  const palette = $('#adm-palette');
+  if (palette) palette.hidden = true;
+}
+
+function loadTopbarStats() {
+  // Eskiden tüm kullanıcı ve konu listeleri burada indiriliyordu; artık yalnızca kimlik gösterilir.
+  const name = adminProfile?.username || 'Yetkili';
+  const role = adminProfile?.is_super_admin ? 'Ana admin' : 'Yetkili hesabı';
+  const nameEl = $('#adm-me-name');
+  const roleEl = $('#adm-me-role');
+  const avatarEl = $('#adm-me-avatar');
+  if (nameEl) nameEl.textContent = name;
+  if (roleEl) roleEl.textContent = role;
+  if (avatarEl) avatarEl.textContent = String(name).trim().charAt(0).toLocaleUpperCase('tr-TR') || 'A';
+  const stats = $('#adm-topbar-stats');
+  if (stats) {
+    stats.innerHTML = '';
+    const chip = document.createElement('span');
+    chip.className = `adm-role-chip${adminProfile?.is_super_admin ? ' is-super' : ''}`;
+    chip.innerHTML = `<i class="fas ${adminProfile?.is_super_admin ? 'fa-crown' : 'fa-user-shield'}"></i><span></span>`;
+    chip.querySelector('span').textContent = role;
+    stats.appendChild(chip);
+  }
+}
+
+function loadSection(section, { history: historyMode = 'push' } = {}) {
+  if (!ADMIN_SECTION_SLUGS.hasOwnProperty(section)) section = 'dashboard';
   currentSection = section;
+  const targetUrl = adminSectionUrl(section);
+  if (historyMode !== 'none' && location.pathname !== targetUrl) {
+    if (historyMode === 'replace') history.replaceState({ section }, '', targetUrl);
+    else history.pushState({ section }, '', targetUrl);
+  } else if (historyMode === 'replace' && location.search) {
+    history.replaceState({ section }, '', targetUrl);
+  }
+  $$('.adm-nav-item').forEach(item => {
+    const active = item.dataset.section === section;
+    item.classList.toggle('active', active);
+    if (active) item.setAttribute('aria-current', 'page'); else item.removeAttribute('aria-current');
+  });
+  const meta = sectionMeta(section);
+  document.title = `${meta.label} · CigCig Yönetim`;
+  const title = $('#adm-page-title');
+  const group = $('#adm-crumb-group');
+  if (title) title.textContent = meta.label;
+  if (group) group.textContent = meta.group;
+  window.__admCloseDrawer?.();
   const main = $('#admin-main');
+  main.scrollTop = 0;
+  window.scrollTo(0, 0);
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
   const map = {
     dashboard: renderDashboard, users: renderUsers, 'quick-registration-logs': renderQuickRegistrationLogs, 'two-factor': renderTwoFactorUsers,
@@ -883,107 +1141,107 @@ async function renderHomepageSections(main) {
 // ===== DASHBOARD =====
 async function renderDashboard(main) {
   main.innerHTML = '<div class="loading-center"><div class="spinner"></div></div>';
-  
-  // Her isteği ayrı ayrı çek, biri patlarsa diğerleri etkilenmesin
-  const [users, forums, books, groups, photos, videos, stories, logs] = await Promise.all([
-    adminApi('/users').catch(() => []),
-    adminApi('/forums').catch(() => []),
-    adminApi('/books').catch(() => []),
-    adminApi('/groups').catch(() => []),
-    adminApi('/photos').catch(() => []),
-    adminApi('/videos').catch(() => []),
-    adminApi('/stories').catch(() => []),
-    adminApi('/logs?limit=5').catch(() => []),
+  const [overviewResult, logsResult] = await Promise.allSettled([
+    adminApi('/overview'),
+    hasPermission('can_view_logs') || adminProfile?.is_super_admin ? adminApi('/logs?limit=8') : Promise.resolve([])
   ]);
-
-  const banned = Array.isArray(users) ? users.filter(u => u.banned).length : 0;
-  const admins = Array.isArray(users) ? users.filter(u => u.is_admin).length : 0;
-  const activeStories = Array.isArray(stories) ? stories.filter(story => !story.is_suspended && new Date(story.expires_at) > new Date()).length : 0;
-  const inactiveStories = Array.isArray(stories) ? stories.length - activeStories : 0;
+  if (currentSection !== 'dashboard') return;
+  const m = overviewResult.status === 'fulfilled' ? (overviewResult.value?.metrics || {}) : {};
+  const logs = logsResult.status === 'fulfilled' && Array.isArray(logsResult.value) ? logsResult.value.slice(0, 8) : [];
+  const fmt = value => value === null || value === undefined ? '—' : Number(value).toLocaleString('tr-TR');
+  const hour = new Date().getHours();
+  const greeting = hour < 6 ? 'İyi geceler' : hour < 12 ? 'Günaydın' : hour < 18 ? 'İyi günler' : 'İyi akşamlar';
+  const canOpen = section => isSectionVisible(section);
+  const kpi = (icon, tone, label, value, sub, section) => `
+    <${canOpen(section) ? `a href="${adminSectionUrl(section)}" data-go="${section}"` : 'div'} class="adm-kpi adm-tone-${tone}">
+      <span class="adm-kpi-icon"><i class="fas ${icon}"></i></span>
+      <span class="adm-kpi-body"><span class="adm-kpi-label">${label}</span><strong class="adm-kpi-value">${fmt(value)}</strong>${sub ? `<span class="adm-kpi-sub">${sub}</span>` : ''}</span>
+    </${canOpen(section) ? 'a' : 'div'}>`;
+  const pending = [
+    ['user-reports', 'fa-shield-heart', 'Açık kullanıcı bildirimi', m.pending_user_reports, 'red'],
+    ['ad-submissions', 'fa-inbox', 'Onay bekleyen reklam', m.pending_ad_submissions, 'amber'],
+    ['artist-apps', 'fa-microphone', 'Bekleyen artist başvurusu', m.pending_artist_apps, 'violet'],
+    ['account-deletions', 'fa-user-clock', 'Hesap silme talebi', m.pending_account_deletions, 'slate']
+  ].filter(([section]) => canOpen(section));
+  const totalPending = pending.reduce((sum, item) => sum + (Number(item[3]) || 0), 0);
+  const quick = [
+    ['users', 'fa-magnifying-glass', 'Kullanıcı bul'],
+    ['announcements', 'fa-bullhorn', 'Duyuru yayınla'],
+    ['notifications', 'fa-bell', 'Bildirim gönder'],
+    ['videos', 'fa-clapperboard', 'Reals yönet'],
+    ['settings', 'fa-gear', 'Site ayarları'],
+    ['logs', 'fa-clock-rotate-left', 'İşlem logları']
+  ].filter(([section]) => canOpen(section));
 
   main.innerHTML = `
-    <div class="adm-section-header">
-      <div class="adm-section-title"><div class="icon-pill"><i class="fas fa-chart-line"></i></div> Dashboard</div>
+    <section class="adm-hero">
+      <div>
+        <p class="adm-hero-eyebrow">${escHtml(new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }))}</p>
+        <h1>${greeting}, ${escHtml(adminProfile?.username || 'yetkili')}</h1>
+        <p class="adm-hero-sub">${totalPending ? `İlgilenmeni bekleyen <strong>${fmt(totalPending)}</strong> kayıt var.` : 'Bekleyen iş yok, her şey yolunda görünüyor.'}</p>
+      </div>
+      <div class="adm-hero-live"><span class="adm-live-dot"></span><span><strong>${fmt(m.online)}</strong> çevrimiçi</span></div>
+    </section>
+
+    <div class="adm-kpis">
+      ${kpi('fa-users', 'blue', 'Toplam üye', m.users, m.users_24h !== null && m.users_24h !== undefined ? `+${fmt(m.users_24h)} son 24 saat · +${fmt(m.users_7d)} bu hafta` : '', 'users')}
+      ${kpi('fa-clapperboard', 'pink', 'Reals', m.reals, `${fmt(m.videos)} uzun video`, 'videos')}
+      ${kpi('fa-images', 'violet', 'Fotoğraf', m.photos, `${fmt(m.stories_active)} aktif hikâye`, 'photos')}
+      ${kpi('fa-comments', 'green', 'Konu', m.forums, `${fmt(m.books)} kitap`, 'forums')}
+      ${kpi('fa-music', 'amber', 'Müzik', m.songs, '', 'songs')}
+      ${kpi('fa-people-group', 'cyan', 'Grup', m.groups, '', 'groups')}
+      ${kpi('fa-paper-plane', 'slate', 'Mesaj (24 saat)', m.messages_24h, '', 'messages')}
+      ${kpi('fa-ban', 'red', 'Yasaklı hesap', m.banned, `${fmt(m.admins)} yetkili`, 'users')}
     </div>
-    <div class="adm-stats">
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#5865F2"></div>
-        <div class="adm-stat-icon" style="color:#7c87f5"><i class="fas fa-users"></i></div>
-        <div class="adm-stat-num">${Array.isArray(users) ? users.length : 0}</div>
-        <div class="adm-stat-label">Toplam Üye</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#dc2626"></div>
-        <div class="adm-stat-icon" style="color:#ef4444"><i class="fas fa-comments"></i></div>
-        <div class="adm-stat-num">${Array.isArray(forums) ? forums.length : 0}</div>
-        <div class="adm-stat-label">Toplam Konu</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#22c55e"></div>
-        <div class="adm-stat-icon" style="color:#4ade80"><i class="fas fa-book"></i></div>
-        <div class="adm-stat-num">${Array.isArray(books) ? books.length : 0}</div>
-        <div class="adm-stat-label">Toplam Kitap</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#f97316"></div>
-        <div class="adm-stat-icon" style="color:#fb923c"><i class="fas fa-users-cog"></i></div>
-        <div class="adm-stat-num">${Array.isArray(groups) ? groups.length : 0}</div>
-        <div class="adm-stat-label">Toplam Grup</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#ec4899"></div>
-        <div class="adm-stat-icon" style="color:#f472b6"><i class="fas fa-images"></i></div>
-        <div class="adm-stat-num">${Array.isArray(photos) ? photos.length : 0}</div>
-        <div class="adm-stat-label">Toplam Fotoğraf</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#06b6d4"></div>
-        <div class="adm-stat-icon" style="color:#22d3ee"><i class="fas fa-circle-play"></i></div>
-        <div class="adm-stat-num">${Array.isArray(videos) ? videos.filter(video => video.is_reals).length : 0}</div>
-        <div class="adm-stat-label">Toplam Reals</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#eab308"></div>
-        <div class="adm-stat-icon" style="color:#facc15"><i class="fas fa-clapperboard"></i></div>
-        <div class="adm-stat-num">${activeStories}</div>
-        <div class="adm-stat-label">Aktif Hikaye</div>
-      </div>
-      <div class="adm-stat-card">
-        <div class="adm-stat-glow" style="background:#ef4444"></div>
-        <div class="adm-stat-icon" style="color:#f87171"><i class="fas fa-eye-slash"></i></div>
-        <div class="adm-stat-num">${inactiveStories}</div>
-        <div class="adm-stat-label">Pasif Hikaye</div>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-      <div class="card">
-        <div class="card-header"><span><i class="fas fa-shield" style="color:#5865F2;margin-right:8px"></i>Sistem Özeti</span></div>
-        <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--bg4);border-radius:8px">
-            <span style="font-size:13px">Banlı Üye</span><span class="badge badge-red">${banned}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--bg4);border-radius:8px">
-            <span style="font-size:13px">Admin Sayısı</span><span class="badge badge-blue">${admins}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--bg4);border-radius:8px">
-            <span style="font-size:13px">Gruplar</span><span class="badge badge-gray">${Array.isArray(groups) ? groups.length : 0}</span>
-          </div>
+
+    <div class="adm-dash-grid">
+      <section class="card adm-dash-card">
+        <div class="card-header"><span><i class="fas fa-list-check"></i> Bekleyen işler</span>${totalPending ? `<span class="badge badge-red">${fmt(totalPending)}</span>` : ''}</div>
+        <div class="card-body adm-pending-list">
+          ${pending.length ? pending.map(([section, icon, label, value, tone]) => `
+            <a class="adm-pending-row" href="${adminSectionUrl(section)}" data-go="${section}">
+              <span class="adm-pending-icon adm-tone-${tone}"><i class="fas ${icon}"></i></span>
+              <span class="adm-pending-label">${label}</span>
+              <span class="adm-pending-count${Number(value) ? ' has-items' : ''}">${fmt(value)}</span>
+              <i class="fas fa-chevron-right adm-pending-go"></i>
+            </a>`).join('') : '<div class="adm-empty-mini">Bu hesap için bekleyen iş bölümü yok.</div>'}
         </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span><i class="fas fa-history" style="color:#f97316;margin-right:8px"></i>Son İşlemler</span></div>
-        <div class="card-body" style="padding:8px">
-          ${Array.isArray(logs) && logs.length ? logs.map(l => `
-            <div style="padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px">
-              <span style="color:var(--red2);font-weight:600">${escHtml(l.actor)}</span>
-              <span style="color:var(--text2);margin:0 4px">→</span>
-              <span>${escHtml(l.action)}</span>
-              <span style="float:right;color:var(--text3)">${timeAgo(l.created_at)}</span>
-            </div>`).join('') : '<div style="padding:20px;text-align:center;color:var(--text3)">Henüz log yok</div>'}
+      </section>
+
+      <section class="card adm-dash-card">
+        <div class="card-header"><span><i class="fas fa-bolt"></i> Hızlı işlemler</span></div>
+        <div class="card-body adm-quick-grid">
+          ${quick.map(([section, icon, label]) => `<a class="adm-quick" href="${adminSectionUrl(section)}" data-go="${section}"><i class="fas ${icon}"></i><span>${label}</span></a>`).join('') || '<div class="adm-empty-mini">Hızlı işlem yok.</div>'}
         </div>
-      </div>
-      </div>
+      </section>
+
+      <section class="card adm-dash-card adm-dash-wide">
+        <div class="card-header"><span><i class="fas fa-clock-rotate-left"></i> Son işlemler</span>${canOpen('logs') ? `<a class="btn btn-ghost btn-sm" href="${adminSectionUrl('logs')}" data-go="logs">Tümü <i class="fas fa-arrow-right"></i></a>` : ''}</div>
+        <div class="card-body adm-activity">
+          ${logs.length ? logs.map(log => `
+            <div class="adm-activity-row">
+              <span class="adm-activity-avatar">${escHtml(String(log.actor || '?').charAt(0).toLocaleUpperCase('tr-TR'))}</span>
+              <span class="adm-activity-text"><strong>${escHtml(log.actor || 'Sistem')}</strong> <span>${escHtml(log.action || '')}</span>${log.target ? ` <em>${escHtml(log.target)}</em>` : ''}</span>
+              <time title="${escHtml(formatDate(log.created_at))}">${escHtml(timeAgo(log.created_at))}</time>
+            </div>`).join('') : '<div class="adm-empty-mini">Görüntülenecek işlem kaydı yok.</div>'}
+        </div>
+      </section>
     </div>`;
+
+  main.querySelectorAll('[data-go]').forEach(link => link.addEventListener('click', event => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+    event.preventDefault();
+    loadSection(link.dataset.go);
+  }));
+  // Sol menüde bekleyen iş rozetleri
+  const badgeFor = { 'user-reports': m.pending_user_reports, 'ad-submissions': m.pending_ad_submissions, 'artist-apps': m.pending_artist_apps, 'account-deletions': m.pending_account_deletions };
+  Object.entries(badgeFor).forEach(([section, value]) => {
+    const badge = document.querySelector(`.adm-nav-item[data-section="${section}"] .adm-nav-badge`);
+    if (!badge) return;
+    const count = Number(value) || 0;
+    badge.hidden = count === 0;
+    badge.textContent = count > 99 ? '99+' : String(count);
+  });
 }
 
 // ===== USERS =====

@@ -1,9 +1,11 @@
-const CACHE_NAME = 'cigcig-app-shell-v16';
+const CACHE_NAME = 'cigcig-app-shell-v17';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',
   '/style.css',
   '/dialogs.css',
+  '/cigcig-pro.css',
+  '/voice-notes.js',
   '/theme.js',
   '/homepage-sections.js',
   '/app.js',

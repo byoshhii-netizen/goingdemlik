@@ -32,6 +32,20 @@ window.visualViewport?.addEventListener('scroll', syncViewportHeight, { passive:
 // atama kontrollü PUT isteklerine mevcut oturum tokenını da ekle.
 const nativeFetch = window.fetch.bind(window);
 let browserFingerprintPromise = null;
+async function openAdminPanel(event) {
+  event.preventDefault();
+  try {
+    const response = await nativeFetch('/api/admin/panel-entry', {
+      headers: { Authorization: `Bearer ${currentToken || ''}` }
+    });
+    if (response.redirected) return window.location.assign(response.url);
+    const data = await response.json();
+    window.alert(data.error || 'Admin paneli açılamadı.');
+  } catch (error) {
+    console.error('Admin paneli açılamadı:', error);
+    window.alert('Admin paneli açılamadı.');
+  }
+}
 function getBrowserFingerprint() {
   if (!window.crypto?.subtle) return Promise.resolve('');
   if (!browserFingerprintPromise) {
@@ -499,7 +513,10 @@ function toast(msg, type = 'success', duration = 2200) {
   const c = $('#toast-container');
   const t = document.createElement('div');
   t.className = `toast ${type}`;
-  t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span>${msg}</span>`;
+  t.innerHTML = `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i><span></span>`;
+  // Mesaj her zaman düz metin olarak basılır (sunucu hata metinleri üzerinden XSS engellenir).
+  t.querySelector('span').textContent = String(msg ?? '');
+  t.setAttribute('role', type === 'error' ? 'alert' : 'status');
   c.appendChild(t);
   setTimeout(() => t.remove(), duration);
 }
@@ -692,12 +709,12 @@ function formatCount(value) {
 }
 
 function showDescriptionModal(text, sourceElement = null) {
-  const realsVideo = sourceElement?.closest('.reals-item')?.querySelector('video');
+  const realsVideo = sourceElement?.closest('.ig-reel, .reals-item')?.querySelector('video');
   if (realsVideo) {
     const wasPlaying = !realsVideo.paused;
     if (wasPlaying) realsVideo.pause();
     window.__realsResumeVideo = () => {
-      if (wasPlaying && location.pathname === '/reals') realsVideo.play().catch(() => {});
+      if (wasPlaying && location.pathname.startsWith('/reals')) realsVideo.play().catch(() => {});
     };
   }
   showModal('Açıklama', `<div class="description-modal">
@@ -1166,8 +1183,9 @@ function mediaDateSearchTerms(dt) {
 }
 
 function escHtml(s) {
-  if (!s) return '';
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  if (s === null || s === undefined || s === false || s === '') return '';
+  // Sayı/nesne gelse bile güvenle metne çevrilir; tek tırnak da kaçırılır (öznitelik enjeksiyonuna karşı).
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function squareCoverFile(file, size = 1000) {
@@ -1959,6 +1977,7 @@ function renderRoute(fullPath) {
   let rotateDmSuggestions = false;
   const wasOnReals = document.body.classList.contains('reals-page');
   const isGoingToReals = path === '/reals' || path.startsWith('/reals/');
+  if (wasOnReals && !isGoingToReals) window.__igReelsCleanup?.();
   if (wasOnReals && !isGoingToReals && window.__realsVideoResizeHandler) {
     window.removeEventListener('resize', window.__realsVideoResizeHandler);
     window.__realsVideoResizeHandler = null;
@@ -1990,6 +2009,7 @@ function renderRoute(fullPath) {
     dmSuggestionsReturningFromProfile = false;
   }
   previousRenderedRoutePath = path;
+  if (!path.startsWith('/reals')) window.__lastNonReelsPath = fullPath;
   document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path));
   document.body.classList.toggle('forgot-password-route', isForgotPasswordRoute(path));
   const leavingSongDetail = !path.startsWith('/muzik/');
@@ -2024,7 +2044,7 @@ function renderRoute(fullPath) {
   // Mesaj başlığı/sohbet ekranında footer gizlenir; genel mesaj listesi sabit kalır.
   const siteFooter = document.getElementById('site-footer');
   if (siteFooter) {
-    siteFooter.style.display = (isDmChatRoute || path === '/reals') ? 'none' : '';
+    siteFooter.style.display = (isDmChatRoute || path === '/reals' || path.startsWith('/reals/')) ? 'none' : '';
   }
   const app = $('#app');
   const segs = path.split('/').filter(Boolean);
@@ -2356,18 +2376,91 @@ function getVideoPlaybackUrl(src) {
   return getCompatibleVideoUrl(src) || src;
 }
 
+// =====================================================================
+// REALS — Instagram Reels seviyesinde dikey video akışı
+// - CSS scroll-snap + IntersectionObserver: kaydırma biter bitmez anında oynatma
+// - Sadece aktif ±1 videonun kaynağı yüklüdür (iOS/Android'de bellek ve decoder sınırı)
+// - Sonraki video önceden yüklenir; yavaş bağlantıda yalnızca meta veri
+// - Sonsuz akış (sayfalı yükleme), reklam araya ekleme, misafir izleme sınırı
+// - Dokun: ses aç/kapat · Basılı tut: duraklat · Çift dokun: beğen · İlerleme çubuğu sürüklenebilir
+// =====================================================================
+const IG_REELS_PAGE_SIZE = 20;
+const IG_REELS_OPTIMIZE_CLOUDINARY = true;
+
+function igReelsCloudinaryVariant(src, kind) {
+  try {
+    const url = new URL(src, location.href);
+    if (url.hostname.toLowerCase() !== 'res.cloudinary.com' || !url.pathname.includes('/video/upload/')
+      || /\/s--[^/]+--\//.test(url.pathname)) return null;
+    // Zaten dönüştürülmüş bir adresse dokunma.
+    const afterUpload = url.pathname.split('/video/upload/')[1] || '';
+    if (/^(?:[a-z]{1,3}_[^/]+,?)+\//.test(afterUpload) && !/^v\d+\//.test(afterUpload)) {
+      if (kind === 'video') return null;
+    }
+    if (kind === 'poster') {
+      url.pathname = url.pathname
+        .replace('/video/upload/', '/video/upload/so_0,q_auto,w_720,c_limit/')
+        .replace(/\.[a-z0-9]+$/i, '.jpg');
+      return url.href;
+    }
+    // Akıllı kalite + cihaza uygun codec + telefon ekranına uygun çözünürlük.
+    const transform = isAppleMobileBrowser() ? 'q_auto,vc_h264,w_1080,c_limit,f_mp4' : 'q_auto,vc_auto,w_1080,c_limit';
+    url.pathname = url.pathname.replace('/video/upload/', `/video/upload/${transform}/`);
+    if (isAppleMobileBrowser()) url.pathname = url.pathname.replace(/\.(mov|webm|mkv|avi)$/i, '.mp4');
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function igReelsSourceChain(src) {
+  const chain = [];
+  if (IG_REELS_OPTIMIZE_CLOUDINARY) {
+    const optimized = igReelsCloudinaryVariant(src, 'video');
+    if (optimized) chain.push(optimized);
+  }
+  chain.push(getVideoPlaybackUrl(src));
+  const compatible = getCompatibleVideoUrl(src);
+  if (compatible) chain.push(compatible);
+  if (src) chain.push(src);
+  return [...new Set(chain.filter(Boolean))];
+}
+
+function igReelsSlowNetwork() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!connection) return false;
+  return Boolean(connection.saveData) || /(^|-)2g$|^3g$/.test(String(connection.effectiveType || ''));
+}
+
+function igReelsCount(value) {
+  const number = Math.max(0, Number(value) || 0);
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(number >= 10_000_000 ? 0 : 1).replace('.', ',').replace(/,0$/, '')} Mn`;
+  if (number >= 10_000) return `${(number / 1000).toFixed(number >= 100_000 ? 0 : 1).replace('.', ',').replace(/,0$/, '')} B`;
+  return number.toLocaleString('tr-TR');
+}
+
 async function renderRealsFeed(app, initialId = null) {
+  window.__igReelsCleanup?.();
   document.title = 'Reals – ' + siteName;
   updatePageMeta('Reals – ' + siteName, 'Kısa dikey videolar', '');
+  const onReelsRoute = () => location.pathname === '/reals' || location.pathname.startsWith('/reals/');
+
+  app.innerHTML = `<div class="ig-reels" role="region" aria-label="Reals">
+    <div class="ig-reels-feed" id="ig-reels-feed" tabindex="-1">
+      <div class="ig-reels-skeleton" role="status" aria-label="Reals yükleniyor"><span class="ig-reels-spinner"></span></div>
+    </div>
+  </div>`;
+
   let realsInfoSettings;
   try {
     realsInfoSettings = await api('/reals-settings');
   } catch (error) {
-    app.innerHTML = `<div class="reals-container"><div class="reals-feed-message" role="alert"><span class="reals-feed-message-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Reals ayarları yüklenemedi</strong><span>${escHtml(error.message || 'Lütfen tekrar deneyin.')}</span><button type="button" class="btn btn-outline btn-sm" id="reals-settings-retry">Tekrar dene</button></div></div>`;
-    app.querySelector('#reals-settings-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
+    if (!app.isConnected || !onReelsRoute()) return;
+    app.innerHTML = `<div class="ig-reels"><div class="ig-reels-message" role="alert"><span class="ig-reels-message-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Reals ayarları yüklenemedi</strong><span>${escHtml(error.message || 'Lütfen tekrar deneyin.')}</span><button type="button" class="ig-reels-pill-btn" id="ig-reels-retry">Tekrar dene</button></div></div>`;
+    app.querySelector('#ig-reels-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
     return;
   }
-  if (!app.isConnected || !(location.pathname === '/reals' || location.pathname.startsWith('/reals/'))) return;
+  if (!app.isConnected || !onReelsRoute()) return;
   if (realsInfoSettings.maintenanceEnabled) {
     renderRealsMaintenanceScreen(app, realsInfoSettings.maintenanceMessage);
     return;
@@ -2381,827 +2474,927 @@ async function renderRealsFeed(app, initialId = null) {
         return;
       }
     } catch (error) {
-      if (error.data?.code === 'REALS_MAINTENANCE') {
-        renderRealsMaintenanceScreen(app, error.data.error);
-        return;
-      }
-      app.innerHTML = `<div class="container page"><div class="empty-state"><p>${escHtml(error.message || 'Reals erişimi doğrulanamadı.')}</p></div></div>`;
+      if (error.data?.code === 'REALS_MAINTENANCE') { renderRealsMaintenanceScreen(app, error.data.error); return; }
+      app.innerHTML = `<div class="ig-reels"><div class="ig-reels-message" role="alert"><span class="ig-reels-message-icon"><i class="fas fa-lock"></i></span><strong>Reals'a erişilemedi</strong><span>${escHtml(error.message || 'Reals erişimi doğrulanamadı.')}</span></div></div>`;
       return;
     }
-    if (!app.isConnected || !(location.pathname === '/reals' || location.pathname.startsWith('/reals/'))) return;
+    if (!app.isConnected || !onReelsRoute()) return;
   }
-  app.innerHTML = `
-    <div class="reals-container">
-      <button type="button" class="reals-info-btn" id="reals-info-btn" title="Reals hakkında" aria-label="Reals hakkında" hidden>?</button>
-      <div id="reals-list" class="reals-list" aria-live="polite">
-        <div class="reals-feed-loading" role="status">
-          <i class="reals-loader-ring" aria-hidden="true"></i>
-          <span>Reals yükleniyor</span>
-        </div>
-      </div>
-    </div>`;
-  const listEl = document.getElementById('reals-list');
 
-  const infoButton = document.getElementById('reals-info-btn');
-  const shouldShowInfo = realsInfoSettings.infoEnabled !== false && !localStorage.getItem('cigcig_reals_info_seen');
-  if (infoButton) infoButton.hidden = !shouldShowInfo;
-  if (shouldShowInfo) localStorage.setItem('cigcig_reals_info_seen', '1');
-
-  // Reals ve reklamları tek seferde, birbirinden bağımsız sonuçlarla yükle.
-  const [realsResult, adsResult] = await Promise.allSettled([
-    api('/reals'),
-    api('/reals-ads')
+  // İlk sayfa + (varsa) bağlantıyla açılan video + reklamlar paralel yüklenir.
+  const [realsResult, adsResult, initialResult] = await Promise.allSettled([
+    api(`/reals?limit=${IG_REELS_PAGE_SIZE}&offset=0`),
+    api('/reals-ads'),
+    initialId ? api('/video/' + encodeURIComponent(initialId)) : Promise.resolve(null)
   ]);
-  if (!listEl?.isConnected || !app.contains(listEl)) return;
+  if (!app.isConnected || !onReelsRoute()) return;
+  const root = app.querySelector('.ig-reels');
+  const feed = app.querySelector('#ig-reels-feed');
+  if (!root || !feed) return;
+
   if (realsResult.status === 'rejected') {
-    if (realsResult.reason?.data?.code === 'REALS_MAINTENANCE') {
-      renderRealsMaintenanceScreen(app, realsResult.reason.data.error);
-      return;
-    }
-    const message = realsResult.reason?.message || 'Reals akışı yüklenemedi.';
-    listEl.innerHTML = `<div class="reals-feed-message" role="alert"><span class="reals-feed-message-icon"><i class="fas fa-triangle-exclamation"></i></span><strong>Akışa ulaşılamadı</strong><span>${escHtml(message)}</span><button type="button" class="btn btn-outline btn-sm" id="reals-feed-retry">Tekrar dene</button></div>`;
-    listEl.querySelector('#reals-feed-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
+    if (realsResult.reason?.data?.code === 'REALS_MAINTENANCE') { renderRealsMaintenanceScreen(app, realsResult.reason.data.error); return; }
+    feed.innerHTML = `<div class="ig-reels-message" role="alert"><span class="ig-reels-message-icon"><i class="fas fa-wifi"></i></span><strong>Akışa ulaşılamadı</strong><span>${escHtml(realsResult.reason?.message || 'Reals akışı yüklenemedi.')}</span><button type="button" class="ig-reels-pill-btn" id="ig-reels-retry">Tekrar dene</button></div>`;
+    feed.querySelector('#ig-reels-retry')?.addEventListener('click', () => renderRealsFeed(app, initialId));
     return;
   }
-  const reals = Array.isArray(realsResult.value) ? realsResult.value : [];
+  const firstPage = Array.isArray(realsResult.value) ? realsResult.value : [];
   const realsAds = adsResult.status === 'fulfilled' && Array.isArray(adsResult.value) ? adsResult.value : [];
-  if (adsResult.status === 'rejected') console.warn('Reals reklamları yüklenemedi; akış reklamsız devam ediyor:', adsResult.reason?.message);
-  if (!reals.length) {
-    listEl.innerHTML = '<div class="reals-feed-message"><span class="reals-feed-message-icon"><i class="fas fa-circle-play"></i></span><strong>Şimdilik yeni Reals yok</strong><span>Yeni videolar paylaşıldığında burada görünecek.</span></div>';
+  const activeAds = realsAds.filter(ad => ad.active === 1 || ad.active === true);
+  const initialReal = initialResult.status === 'fulfilled' && initialResult.value?.is_reals ? initialResult.value : null;
+
+  if (!firstPage.length && !initialReal) {
+    feed.innerHTML = '<div class="ig-reels-message"><span class="ig-reels-message-icon"><i class="fas fa-clapperboard"></i></span><strong>Henüz Reals yok</strong><span>Yeni videolar paylaşıldığında burada görünecek.</span></div>';
     return;
   }
 
-  const orderedReals = shuffleArray(reals);
-  const activeRealsAds = Array.isArray(realsAds) ? realsAds.filter(ad => ad.active === 1 || ad.active === true) : [];
-  let feedItems = [];
-  orderedReals.forEach((real, realIndex) => {
-    feedItems.push(real);
-    const count = realIndex + 1;
-    const dueAds = activeRealsAds.filter(ad => ad.frequency_mode === 'count' && count % Math.max(1, Number(ad.frequency_value) || 1) === 0);
-    if (dueAds.length) {
-      const selected = dueAds[(Math.floor(count / Math.max(1, Number(dueAds[0].frequency_value) || 1)) - 1) % dueAds.length];
-      feedItems.push({ ...selected, isRealsAd: true, feedKey: `ad-${selected.id}-${count}` });
-    }
-  });
-  const initialIndex = initialId
-    ? feedItems.findIndex(item => !item.isRealsAd && String(item.id) === String(initialId))
-    : -1;
-  listEl.addEventListener('selectstart', event => event.preventDefault());
-  const savedRealsMute = localStorage.getItem('cigcig_reals_muted');
-  let realsMuted = savedRealsMute === null || savedRealsMute === '1';
-  function syncRealsMuteButtons() {
-    listEl.querySelectorAll('.mute-btn').forEach(btn => {
-      btn.innerHTML = '<i class="fas fa-volume-' + (realsMuted ? 'mute' : 'up') + '"></i>';
-      btn.title = realsMuted ? 'Sesi aç/kapat' : 'Sesi aç/kapat';
-    });
-  }
+  // ---------- Durum ----------
+  const controller = new AbortController();
+  const { signal } = controller;
+  const seenIds = new Set();
+  const feedItems = [];
   const followStates = new Map();
   const followRequests = new Map();
+  const viewedIds = new Set();
+  let realCount = 0;
+  let nextOffset = firstPage.length;
+  let hasMore = firstPage.length >= IG_REELS_PAGE_SIZE;
+  let loadingMore = false;
+  let activeIndex = -1;
+  let elements = [];
+  const savedMute = localStorage.getItem('cigcig_reals_muted');
+  let muted = savedMute === null ? true : savedMute === '1';
+  const cameFromPath = typeof window.__lastNonReelsPath === 'string' ? window.__lastNonReelsPath : '/';
 
-  document.getElementById('reals-info-btn')?.addEventListener('click', async () => {
-    showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(realsInfoSettings.reminder || '')}</p></div>`);
-  });
-
-  let watchedIds = new Set();
-  let idx = 0;
-  let items = [];
-  const loadedRealsIndices = new Set();
-  const replayTimers = new Map();
-  function clearReplayCountdown(item) {
-    const timer = replayTimers.get(item);
-    if (timer) clearInterval(timer);
-    replayTimers.delete(item);
-    item?.classList.remove('reals-is-replaying');
-    const overlay = item?.querySelector('.reals-replay-countdown');
-    if (overlay) {
-      overlay.hidden = true;
-      overlay.querySelector('.reals-replay-number').textContent = '2';
-    }
-  }
-  function startReplayCountdown(item, video) {
-    if (replayTimers.has(item)) return;
-    const overlay = item.querySelector('.reals-replay-countdown');
-    const number = overlay?.querySelector('.reals-replay-number');
-    if (!overlay || !number) return;
-    let seconds = 2;
-    number.textContent = String(seconds);
-    number.classList.remove('is-ticking');
-    void number.offsetWidth;
-    number.classList.add('is-ticking');
-    overlay.hidden = false;
-    item.classList.add('reals-is-replaying');
-    const timer = setInterval(() => {
-      seconds -= 1;
-      if (seconds > 0) {
-        number.textContent = String(seconds);
-        number.classList.remove('is-ticking');
-        void number.offsetWidth;
-        number.classList.add('is-ticking');
-        return;
+  const pushReals = list => {
+    const fresh = list.filter(item => item && !seenIds.has(String(item.id)));
+    fresh.forEach(item => seenIds.add(String(item.id)));
+    const ordered = shuffleArray(fresh);
+    const added = [];
+    ordered.forEach(real => {
+      added.push(real);
+      realCount += 1;
+      const dueAds = activeAds.filter(ad => ad.frequency_mode === 'count' && realCount % Math.max(1, Number(ad.frequency_value) || 1) === 0);
+      if (dueAds.length) {
+        const pick = dueAds[Math.floor(realCount / Math.max(1, Number(dueAds[0].frequency_value) || 1)) % dueAds.length];
+        added.push({ ...pick, isRealsAd: true, feedKey: `ad-${pick.id}-${realCount}` });
       }
-      clearReplayCountdown(item);
-      item.classList.remove('reals-is-replaying');
-      if (!item.isConnected || !item.classList.contains('is-active') || !location.pathname.startsWith('/reals')) return;
-      video.currentTime = 0;
-      video.play().catch(() => {});
-    }, 1000);
-    replayTimers.set(item, timer);
-  }
-  function ensureRealsFollowState(item) {
-    const button = item?.querySelector('.reals-follow-btn');
-    const username = button?.dataset.username;
-    if (!username || !currentUser || followStates.has(username)) return;
-    if (followRequests.has(username)) return;
-    const request = api('/users/' + encodeURIComponent(username) + '/follow-status')
-      .then(state => {
-        if (followStates.has(username)) return;
-        followStates.set(username, state);
-        if (!document.body.contains(item)) return;
-        const followButton = item.querySelector('.reals-follow-btn');
-        if (state.blocked) {
-          followButton?.remove();
-        } else if (state.following && followButton) {
-          const status = document.createElement('span');
-          status.className = 'reals-follow-status';
-          status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
-          followButton.replaceWith(status);
-        } else if (followButton) {
-          followButton.textContent = state.pending ? 'İstek gönderildi' : 'Takip et';
-        }
-      })
-      .catch(() => {})
-      .finally(() => followRequests.delete(username));
-    followRequests.set(username, request);
-  }
-  async function openRealsComments(video, isAd = false) {
-    const commentBase = isAd ? '/reals-ads/' + encodeURIComponent(video.id) : '/video/' + encodeURIComponent(video.id);
-    const previousScrollTop = listEl.scrollTop;
-    const oldSheet = document.getElementById('reals-comments-sheet');
-    oldSheet?.remove();
-    const sheet = document.createElement('div');
-    sheet.id = 'reals-comments-sheet';
-    sheet.className = 'reals-comments-sheet';
-    sheet.innerHTML = `<div class="reals-comments-backdrop"></div><section class="reals-comments-panel" role="dialog" aria-modal="true" aria-label="Yorumlar">
-      <header class="reals-comments-header"><strong>Yorumlar</strong><button type="button" class="reals-comments-close" aria-label="Yorumları kapat"><i class="fas fa-times"></i></button></header>
-      <div class="reals-comments-list"><div class="loading-center"><div class="spinner"></div></div></div>
-      ${currentUser ? '<form class="reals-comment-form"><textarea maxlength="2000" rows="1" placeholder="Yorum yaz..." aria-label="Yorum yaz"></textarea><button type="submit" aria-label="Yorumu gönder"><i class="fas fa-paper-plane"></i></button></form>' : '<div class="reals-comment-login">Yorum yapmak için giriş yapın.</div>'}
-    </section>`;
-    document.body.appendChild(sheet);
-    const close = () => {
-      sheet.remove();
-      listEl.scrollTop = previousScrollTop;
-      requestAnimationFrame(() => { listEl.scrollTop = previousScrollTop; });
-    };
-    sheet.querySelector('.reals-comments-close')?.addEventListener('click', close);
-    sheet.querySelector('.reals-comments-backdrop')?.addEventListener('click', close);
-    const list = sheet.querySelector('.reals-comments-list');
-    const commentInput = sheet.querySelector('.reals-comment-form textarea');
-    const resizeCommentInput = () => {
-      if (!commentInput) return;
-      commentInput.style.height = '42px';
-      const height = Math.min(commentInput.scrollHeight, 120);
-      commentInput.style.height = `${height}px`;
-      commentInput.style.overflowY = commentInput.scrollHeight > 120 ? 'auto' : 'hidden';
-    };
-    commentInput?.addEventListener('input', resizeCommentInput);
-    let comments = [];
-    const updateCommentCount = count => {
-      const total = Math.max(0, Number(count) || 0);
-      video.comment_count = total;
-      const feedElement = items.find(item => String(item.dataset.id) === String(isAd ? `ad-${video.id}` : video.id));
-      const counter = feedElement?.querySelector('.comment-btn .count');
-      if (counter) counter.textContent = total;
-    };
-    const renderComments = values => {
-      list.innerHTML = values.length
-        ? values.map(comment => renderVideoComment(comment, !isAd && Number(currentUser?.id) === Number(video.user_id), !isAd)).join('')
-        : '<div class="reals-comments-empty"><i class="far fa-comment-dots"></i><p>Henüz yorum yok.</p><span>İlk yorumu sen yaz.</span></div>';
-    };
-    try {
-      comments = await api(commentBase + '/comments');
-      if (!list || !document.body.contains(sheet)) return;
-      renderComments(comments);
-      list.addEventListener('click', async event => {
-        const editButton = event.target.closest('.video-comment-edit');
-        if (editButton) {
-          const nextContent = await CigCigDialogs.prompt('Yorumunu güncelle', editButton.dataset.content, { title: 'Yorumu düzenle', multiline: true });
-          if (nextContent === null) return;
-          try {
-            const updated = await api(commentBase + '/comments/' + editButton.dataset.id, { method: 'PUT', body: JSON.stringify({ content: nextContent.trim() }) });
-            comments = comments.map(comment => String(comment.id) === String(updated.id) ? { ...comment, ...updated } : comment);
-            renderComments(comments);
-            toast('Yorum güncellendi.');
-          } catch (error) { toast(error.message, 'error'); }
-          return;
-        }
-        const pinButton = event.target.closest('.video-comment-pin');
-        if (pinButton) {
-          pinButton.disabled = true;
-          try {
-            await api(commentBase + '/comments/' + pinButton.dataset.id + '/pin', { method: 'POST' });
-            comments = await api(commentBase + '/comments');
-            renderComments(comments);
-            toast(pinButton.dataset.pinned === 'true' ? 'Yorum sabitlemesi kaldırıldı.' : 'Yorum sabitlendi.');
-          } catch (error) { toast(error.message, 'error'); }
-          return;
-        }
-        const likeButton = event.target.closest('.video-comment-like');
-        const deleteButton = event.target.closest('.video-comment-delete');
-        if (deleteButton) {
-          if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
-          try {
-            const result = await api(commentBase + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' });
-            comments = comments.filter(comment => String(comment.id) !== String(deleteButton.dataset.id));
-            renderComments(comments);
-            updateCommentCount(result.comment_count);
-          } catch (error) { toast(error.message, 'error'); }
-          return;
-        }
-        if (!likeButton) return;
-        try {
-          likeButton.disabled = true;
-          const result = await api(commentBase + '/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
-          const count = likeButton.querySelector('.video-comment-count');
-          count.textContent = Math.max(0, (parseInt(count.textContent) || 0) + (result.liked ? 1 : -1));
-          likeButton.classList.toggle('liked', result.liked);
-          const icon = likeButton.querySelector('i');
-          if (icon) icon.className = `${result.liked ? 'fas' : 'far'} fa-heart`;
-        } catch (error) { toast(error.message, 'error'); } finally { likeButton.disabled = false; }
-      });
-    } catch (error) {
-      list.innerHTML = `<div class="reals-comments-empty"><i class="fas fa-exclamation-circle"></i><p>${escHtml(error.message)}</p></div>`;
-    }
-    sheet.querySelector('.reals-comment-form')?.addEventListener('submit', async event => {
-      event.preventDefault();
-      const input = event.currentTarget.querySelector('textarea');
-      const content = input.value.trim();
-      if (!content) return;
-      const button = event.currentTarget.querySelector('button');
-      button.disabled = true;
-      try {
-        const result = await api(commentBase + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
-        comments = await api(commentBase + '/comments');
-        renderComments(comments);
-        updateCommentCount(result.comment_count);
-        input.value = '';
-        resizeCommentInput();
-        list.scrollTop = list.scrollHeight;
-      } catch (error) { toast(error.message, 'error'); } finally { button.disabled = false; }
     });
-  }
-  function setRealsVideoSource(videoEl, src) {
-    if (!src) {
-      videoEl.removeAttribute('src');
-      videoEl.load();
-      return;
-    }
-    const playbackUrl = getVideoPlaybackUrl(src);
-    if (videoEl.src === new URL(playbackUrl, location.href).href) return;
-    videoEl.src = playbackUrl;
-    videoEl.load();
-  }
-  function fitRealsVideoFrame(videoEl) {
-    const videoWidth = videoEl.videoWidth;
-    const videoHeight = videoEl.videoHeight;
-    const item = videoEl.closest('.reals-item');
-    const frame = videoEl.closest('.reals-video-box');
-    if (!videoWidth || !videoHeight || !item || !frame) return;
-
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    if (isMobile) {
-      // CSS keeps the vertical 9:16 frame within the visual viewport on phones.
-      // Clear desktop measurements left behind after an orientation/viewport change.
-      frame.style.removeProperty('width');
-      frame.style.removeProperty('height');
-      return;
-    }
-    const maxWidth = Math.max(1, Math.min(400, item.clientWidth - 28));
-    const maxHeight = Math.max(1, Math.min(720, item.clientHeight - 88));
-    const frameHeight = Math.min(maxHeight, maxWidth * 16 / 9);
-    const frameWidth = frameHeight * 9 / 16;
-    frame.style.setProperty('width', `${Math.round(frameWidth)}px`, 'important');
-    frame.style.setProperty('height', `${Math.round(frameHeight)}px`, 'important');
-  }
-  const showRealsPlaybackError = (item, message) => {
-    const retry = item?.querySelector('.reals-video-retry');
-    if (!retry) return;
-    retry.hidden = false;
-    retry.querySelector('span').textContent = message;
+    return added;
   };
-  const stopRealsSongAudio = () => {
+  if (initialReal) {
+    seenIds.add(String(initialReal.id));
+    feedItems.push(initialReal);
+    realCount += 1;
+  }
+  feedItems.push(...pushReals(firstPage));
+
+  const keyOf = item => item.isRealsAd ? (item.feedKey || `ad-${item.id}`) : String(item.id);
+
+  // ---------- Şablon ----------
+  const actionButton = (cls, icon, label, count = null, extra = '') => `<button type="button" class="ig-reel-action ${cls}" aria-label="${escHtml(label)}" ${extra}><span class="ig-reel-action-icon"><i class="${icon}"></i></span>${count === null ? '' : `<span class="ig-reel-action-count">${escHtml(count)}</span>`}</button>`;
+
+  function itemHTML(r, index) {
+    const isAd = !!r.isRealsAd;
+    const key = keyOf(r);
+    const poster = isAd ? (r.cover_url || '') : (r.banner_image || r.thumbnail_url || igReelsCloudinaryVariant(r.video_url, 'poster') || '');
+    if (!isAd && currentUser && r.username && !followStates.has(r.username)) {
+      followStates.set(r.username, { following: !!r.viewer_following, pending: !!r.viewer_follow_pending, blocked: !!r.blocked_relationship });
+    }
+    const followState = followStates.get(r.username) || {};
+    const canFollow = !isAd && currentUser && r.username !== currentUser.username && !r.is_private && !r.blocked_relationship && !followState.following;
+    const description = String(r.description || '').trim();
+    const caption = description
+      ? `<div class="ig-reel-caption" data-expanded="false"><span class="ig-reel-caption-text">${hashtagTextHTML(description)}</span>${description.length > 80 || description.includes('\n') ? '<button type="button" class="ig-reel-caption-more">daha fazla</button>' : ''}</div>`
+      : '';
+    const sound = r.song_title
+      ? `${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}`
+      : r.sound_name ? escHtml(r.sound_name) : (isAd ? 'Sponsorlu' : `${escHtml(r.username || '')} · Orijinal ses`);
+    return `<article class="ig-reel${isAd ? ' is-ad' : ''}" data-index="${index}" data-key="${escHtml(key)}" data-id="${escHtml(String(r.id))}"${isAd ? ` data-ad-id="${escHtml(String(r.id))}"` : ''} data-song-audio="${escHtml(isAd ? '' : (r.song_audio_url || ''))}" data-song-start="${Number(r.song_start_seconds) || 0}" aria-roledescription="Reals videosu" aria-label="${escHtml(isAd ? (r.title || 'Reklam') : `${r.username || ''} paylaşımı`)}">
+      <div class="ig-reel-stage">
+        <div class="ig-reel-backdrop" data-bg="${escHtml(poster)}" aria-hidden="true"></div>
+        <video class="ig-reel-video" playsinline webkit-playsinline muted loop preload="none" disablepictureinpicture disableremoteplayback x-webkit-airplay="deny" controlslist="nodownload noplaybackrate" data-poster="${escHtml(poster)}"${isAd ? '' : ` style="filter:${escHtml(mediaFilterCss(r.media_filter))}"`}></video>
+        <div class="ig-reel-shade" aria-hidden="true"></div>
+        <div class="ig-reel-spinner" aria-hidden="true"><span class="ig-reels-spinner"></span></div>
+        <div class="ig-reel-flash" aria-hidden="true"><i class="fas fa-volume-xmark"></i></div>
+        <div class="ig-reel-paused" aria-hidden="true"><i class="fas fa-play"></i></div>
+        <button type="button" class="ig-reel-error" hidden><i class="fas fa-rotate-right"></i><span>Video oynatılamadı · Tekrar dene</span></button>
+        <div class="ig-reel-hearts" aria-hidden="true"></div>
+        <div class="ig-reel-info">
+          ${isAd
+            ? `<div class="ig-reel-author"><span class="ig-reel-ad-badge"><i class="fas fa-bullhorn"></i></span><div class="ig-reel-author-text"><strong>${escHtml(r.title || 'Sponsorlu')}</strong><small>Sponsorlu</small></div></div>`
+            : `<div class="ig-reel-author"><a href="${profileRoute(r.username)}" data-link class="ig-reel-avatar" aria-label="${escHtml(r.username)} profili">${avatarImg(r, 'ig-reel-avatar-img')}</a><a href="${profileRoute(r.username)}" data-link class="ig-reel-username">${escHtml(r.nickname || r.username || '')}${Number(r.is_red_verified) === 1 ? ' <i class="fas fa-circle-check ig-reel-verified" aria-label="Doğrulanmış"></i>' : ''}</a>${canFollow ? `<button type="button" class="ig-reel-follow" data-username="${escHtml(r.username)}">${followState.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>`}
+          ${!isAd && r.title ? `<div class="ig-reel-title">${escHtml(r.title)}</div>` : ''}
+          ${caption}
+          ${isAd && r.site_url ? `<a class="ig-reel-cta" href="${escHtml(normalizeExternalUrl(r.site_url))}" target="_blank" rel="noopener noreferrer sponsored" data-ad-click>Daha fazla bilgi<i class="fas fa-chevron-right"></i></a>` : ''}
+          <div class="ig-reel-meta-row">
+            <span class="ig-reel-sound"><i class="fas fa-music"></i><span class="ig-reel-sound-track"><span>${sound}</span></span></span>
+            ${!isAd && r.location ? `<span class="ig-reel-location"><i class="fas fa-location-dot"></i>${escHtml(r.location)}</span>` : ''}
+          </div>
+        </div>
+        <div class="ig-reel-progress" role="slider" aria-label="Video konumu" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="-1"><span class="ig-reel-progress-fill"></span></div>
+      </div>
+      <div class="ig-reel-actions">
+        ${r.show_likes !== 0 ? actionButton(`ig-like${r.liked ? ' is-on' : ''}`, `${r.liked ? 'fas' : 'far'} fa-heart`, 'Beğen', igReelsCount(r.like_count)) : actionButton(`ig-like${r.liked ? ' is-on' : ''}`, `${r.liked ? 'fas' : 'far'} fa-heart`, 'Beğen')}
+        ${(isAd ? r.allow_comments !== 0 : true) ? actionButton('ig-comment', 'far fa-comment', 'Yorumlar', igReelsCount(r.comment_count)) : ''}
+        ${isAd ? '' : actionButton('ig-share', 'far fa-paper-plane', 'Mesajla gönder')}
+        ${isAd ? '' : actionButton(`ig-save${r.saved ? ' is-on' : ''}`, `${r.saved ? 'fas' : 'far'} fa-bookmark`, 'Kaydet')}
+        ${actionButton('ig-more', 'fas fa-ellipsis', 'Daha fazla')}
+        ${isAd ? '' : `<a href="${profileRoute(r.username)}" data-link class="ig-reel-disc" aria-label="Sesi kullanan profil">${avatarImg(r, 'ig-reel-disc-img')}</a>`}
+      </div>
+    </article>`;
+  }
+
+  // ---------- Üst bar ----------
+  root.insertAdjacentHTML('afterbegin', `<header class="ig-reels-top">
+      <button type="button" class="ig-reels-icon-btn ig-reels-back" aria-label="Geri"><i class="fas fa-arrow-left"></i></button>
+      <h1 class="ig-reels-heading">Reals</h1>
+      <div class="ig-reels-top-actions">
+        ${realsInfoSettings.infoEnabled !== false ? '<button type="button" class="ig-reels-icon-btn ig-reels-info" aria-label="Reals hakkında"><i class="far fa-circle-question"></i></button>' : ''}
+        <button type="button" class="ig-reels-icon-btn ig-reels-mute" aria-label="Sesi aç/kapat"><i class="fas fa-volume-xmark"></i></button>
+        ${currentUser ? '<button type="button" class="ig-reels-icon-btn ig-reels-create" aria-label="Reals oluştur"><i class="fas fa-camera"></i></button>' : ''}
+      </div>
+    </header>
+    <div class="ig-reels-nav" aria-hidden="false">
+      <button type="button" class="ig-reels-nav-btn" data-dir="-1" aria-label="Önceki video"><i class="fas fa-chevron-up"></i></button>
+      <button type="button" class="ig-reels-nav-btn" data-dir="1" aria-label="Sonraki video"><i class="fas fa-chevron-down"></i></button>
+    </div>`);
+
+  feed.innerHTML = feedItems.map((item, index) => itemHTML(item, index)).join('') + '<div class="ig-reels-sentinel" aria-hidden="true"></div>';
+  elements = [...feed.querySelectorAll('.ig-reel')];
+
+  // ---------- Medya yönetimi ----------
+  const videoOf = el => el?.querySelector('.ig-reel-video');
+  const itemOf = el => feedItems[Number(el?.dataset.index)];
+
+  function setPoster(el) {
+    const video = videoOf(el);
+    if (!video || video.dataset.posterApplied === '1') return;
+    const poster = video.dataset.poster;
+    if (poster) video.poster = poster;
+    const bg = el.querySelector('.ig-reel-backdrop');
+    if (bg?.dataset.bg) bg.style.backgroundImage = `url("${bg.dataset.bg.replace(/"/g, '%22')}")`;
+    video.dataset.posterApplied = '1';
+  }
+
+  function attachSource(el, preload) {
+    const video = videoOf(el);
+    const item = itemOf(el);
+    if (!video || !item) return;
+    setPoster(el);
+    video.preload = preload;
+    if (video.dataset.srcAttached === '1') return;
+    const chain = igReelsSourceChain(item.video_url);
+    video.dataset.chain = JSON.stringify(chain);
+    video.dataset.chainIndex = '0';
+    video.src = chain[0] || '';
+    video.dataset.srcAttached = '1';
+  }
+
+  function detachSource(el) {
+    const video = videoOf(el);
+    if (!video || video.dataset.srcAttached !== '1') return;
+    video.pause();
+    video.removeAttribute('src');
+    try { video.load(); } catch { /* yoksay */ }
+    video.dataset.srcAttached = '0';
+    el.classList.remove('is-loading', 'is-paused', 'has-error');
+  }
+
+  function tryNextSource(el) {
+    const video = videoOf(el);
+    if (!video) return false;
+    let chain = [];
+    try { chain = JSON.parse(video.dataset.chain || '[]'); } catch { chain = []; }
+    const next = Number(video.dataset.chainIndex || 0) + 1;
+    if (next >= chain.length) return false;
+    video.dataset.chainIndex = String(next);
+    video.src = chain[next];
+    video.load();
+    if (el.classList.contains('is-active')) playActive();
+    return true;
+  }
+
+  // Sadece tek bir şarkı sesi; videonun kendi sesi şarkı varsa susturulur.
+  const stopSong = () => {
     if (!activeRealsAudio) return;
     activeRealsAudio.pause();
     untrackMediaAudio(activeRealsAudio);
     activeRealsAudio = null;
   };
-  const syncRealsSongAudio = item => {
-    if (realsMuted || !item?.dataset.songAudio || item.dataset.adId) {
-      stopRealsSongAudio();
+  const syncSong = el => {
+    const songUrl = el?.dataset.songAudio;
+    if (muted || !songUrl || el.dataset.adId || !el.classList.contains('is-active')) { stopSong(); return; }
+    const absolute = new URL(songUrl, location.href).href;
+    if (activeRealsAudio?.src === absolute) {
+      if (activeRealsAudio.paused && !videoOf(el)?.paused) activeRealsAudio.play().catch(() => {});
       return;
     }
-    const audioUrl = new URL(item.dataset.songAudio, location.href).href;
-    if (activeRealsAudio?.src === audioUrl) {
-      if (activeRealsAudio.paused) activeRealsAudio.play().catch(error => console.warn('Reals müziği oynatılamadı:', error.message));
-      return;
-    }
-    stopRealsSongAudio();
-    const audio = trackMediaAudio(new Audio(audioUrl));
+    stopSong();
+    const audio = trackMediaAudio(new Audio(absolute));
     audio.preload = 'auto';
     activeRealsAudio = audio;
-    let start = Math.max(0, Number(item.dataset.songStart) || 0);
+    let start = Math.max(0, Number(el.dataset.songStart) || 0);
     let stopAt = null;
     audio.addEventListener('loadedmetadata', () => {
       const duration = Number(audio.duration);
       if (Number.isFinite(duration) && duration > 0) {
         start = Math.min(start, Math.max(0, duration - 0.1));
-        audio.currentTime = start;
         stopAt = Math.min(duration, start + 30);
-      } else audio.currentTime = start;
+      }
+      audio.currentTime = start;
     }, { once: true });
     audio.addEventListener('timeupdate', () => {
-      if (stopAt !== null && audio.currentTime >= stopAt - 0.08) {
-        audio.currentTime = start;
-        stopAt = Math.min(Number(audio.duration) || start + 30, start + 30);
-      }
+      if (stopAt !== null && audio.currentTime >= stopAt - 0.08) audio.currentTime = start;
     });
-    audio.addEventListener('error', () => {
-      if (activeRealsAudio === audio) console.error('Reals müziği yüklenemedi:', audio.error?.message || 'Bilinmeyen ses hatası');
-    }, { once: true });
-    audio.play().catch(error => {
-      if (activeRealsAudio === audio) console.warn('Reals müziği kullanıcı etkileşimi bekliyor:', error.message);
-    });
+    audio.play().catch(() => {});
   };
 
-  function renderItems() {
-    loadedRealsIndices.clear();
-    listEl.innerHTML = feedItems.map(r => {
-      if (r.isRealsAd) {
-        const site = normalizeExternalUrl(r.site_url || '#');
-        return `
-      <div class="reals-item reals-ad-item" data-id="ad-${r.id}" data-ad-id="${r.id}" data-video-url="${escHtml(r.video_url)}">
-        <div class="reals-video-box reals-ad-box">
-        <video class="reals-video reals-ad-video" preload="none" playsinline webkit-playsinline muted poster="${escHtml(r.cover_url || '')}" aria-label="${escHtml(r.title)}"></video>
-        <div class="reals-video-loading" aria-hidden="true"><span class="reals-loader-ring"></span><span>Video yükleniyor</span></div>
-        <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
-        <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
-        <div class="reals-meta">
-          <div class="reals-ad-byline"><span class="reals-ad-badge"><i class="fas fa-bullhorn"></i> REKLAM</span><span>Sponsorlu içerik</span></div>
-          <a class="reals-ad-title-link" href="${escHtml(site)}" target="_blank" rel="noopener noreferrer" data-ad-click>${escHtml(r.title || '')}<i class="fas fa-arrow-up-right-from-square"></i></a>
-          ${hashtagDescriptionPreviewHTML(r.description, 'reals-desc', 40)}
-        </div>
-        <div class="reals-right-actions">
-          ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn ad-like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
-          ${r.allow_comments !== 0 ? `<button class="reals-action-btn comment-btn ad-comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>` : ''}
-        </div>
-        </div>
-      </div>`;
-      }
-      if (currentUser && r.username && !followStates.has(r.username)) {
-        followStates.set(r.username, {
-          following: !!r.viewer_following,
-          pending: !!r.viewer_follow_pending,
-          blocked: !!r.blocked_relationship
-        });
-      }
-      return `
-      <div class="reals-item" data-id="${r.id}" data-slug="${escHtml(r.slug)}" data-video-url="${escHtml(r.video_url)}" data-song-audio="${escHtml(r.song_audio_url || '')}" data-song-start="${Number(r.song_start_seconds) || 0}">
-        <div class="reals-video-box">
-        <video class="reals-video" preload="none" playsinline webkit-playsinline muted poster="${escHtml(r.banner_image || '')}" style="filter:${mediaFilterCss(r.media_filter)}"></video>
-        <div class="reals-video-loading" aria-hidden="true"><span class="reals-loader-ring"></span><span>Video yükleniyor</span></div>
-        <button type="button" class="reals-play-overlay" aria-label="Videoyu durdur veya başlat"><span><i class="fas fa-pause"></i></span></button>
-        <button type="button" class="reals-video-retry" hidden><i class="fas fa-rotate-right"></i><span>Video başlatılamadı · Tekrar dene</span></button>
-        <div class="reals-heart-burst" aria-hidden="true"><i class="fas fa-heart"></i></div>
-        <div class="reals-replay-countdown" hidden aria-live="assertive" aria-label="Video yeniden başlıyor"><div class="reals-replay-orbit"><span class="reals-replay-number">2</span></div><strong>Yeniden başlıyor</strong></div>
-        <div class="reals-top-controls"><button class="reals-icon-btn mute-btn" title="Sesi aç/kapat"><i class="fas fa-volume-${realsMuted ? 'mute' : 'up'}"></i></button></div>
-        <button class="reals-icon-btn reals-close-btn" title="Reals'tan çık"><i class="fas fa-times"></i></button>
-        <div class="reals-meta">
-          <div class="reals-user-row"><a href="${profileRoute(r.username)}" data-link class="reals-user">${avatarImg(r, 'avatar-sm reals-user-avatar')} ${userDisplayName(r)}</a>${currentUser && r.username !== currentUser.username && !r.is_private && !r.blocked_relationship ? (followStates.get(r.username)?.following
-            ? '<span class="reals-follow-status"><i class="fas fa-check"></i> Takip edildi</span>'
-            : `<button type="button" class="reals-follow-btn" data-username="${escHtml(r.username)}">${followStates.get(r.username)?.pending ? 'İstek gönderildi' : 'Takip et'}</button>`) : ''}</div>
-          <div class="reals-title">${escHtml(r.title || '')}</div>
-          ${r.song_title ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.song_title)}${r.song_artist ? ` · ${escHtml(r.song_artist)}` : ''}</div>` : (r.sound_name ? `<div class="reals-sound"><i class="fas fa-music"></i> ${escHtml(r.sound_name)}</div>` : '')}
-          ${r.location ? `<div class="reals-location"><i class="fas fa-location-dot"></i> ${escHtml(r.location)}</div>` : ''}
-          ${hashtagDescriptionPreviewHTML(r.description, 'reals-desc', 40)}
-        </div>
-        <div class="reals-right-actions">
-          ${r.show_likes !== 0 ? `<button class="reals-action-btn like-btn"><i class="far fa-heart"></i><span class="count">${r.like_count||0}</span></button>` : ''}
-          <button class="reals-action-btn comment-btn"><i class="far fa-comment"></i><span class="count">${r.comment_count||0}</span></button>
-          <button class="reals-action-btn save-btn" title="Kaydet"><i class="far fa-bookmark"></i><span>Kaydet</span></button>
-          <button class="reals-action-btn resend-btn" title="Bağlantıyı paylaş"><i class="fas fa-share-alt"></i><span>Paylaş</span></button>
-          <button class="reals-action-btn share-btn" title="Mesaj olarak ilet"><i class="fas fa-paper-plane"></i><span>İlet</span></button>
-        </div>
-        </div>
-      </div>`;
-    }).join('');
-    items = Array.from(document.querySelectorAll('.reals-item'));
-    if (window.__realsVideoResizeHandler) window.removeEventListener('resize', window.__realsVideoResizeHandler);
-    window.__realsVideoResizeHandler = () => items.forEach(item => fitRealsVideoFrame(item.querySelector('video')));
-    window.addEventListener('resize', window.__realsVideoResizeHandler, { passive: true });
-    const feedItemByKey = new Map(feedItems.map(feedItem => [
-      String(feedItem.isRealsAd ? `ad-${feedItem.id}` : feedItem.id),
-      feedItem
-    ]));
-    const getFeedItem = item => feedItemByKey.get(item?.dataset.id);
-    items.forEach(it => {
-      const video = getFeedItem(it);
-      const likeButton = it.querySelector('.like-btn');
-      if (likeButton && video?.liked) {
-        likeButton.classList.add('active');
-        likeButton.querySelector('i').className = 'fas fa-heart';
-      }
-    });
-    items.forEach(it => {
-      const vid = it.querySelector('video');
-      setRealsVideoSource(vid, '');
-      const setVideoLoading = isLoading => {
-        if (isLoading && !it.classList.contains('is-active')) return;
-        it.classList.toggle('reals-is-loading', isLoading);
-      };
-      const retryCompatibleVideo = () => {
-        if (it.dataset.realsCompatibilityRetry === '1') return false;
-        const compatibleUrl = getCompatibleVideoUrl(it.dataset.videoUrl);
-        if (!compatibleUrl || compatibleUrl === vid.currentSrc) return false;
-        it.dataset.realsCompatibilityRetry = '1';
-        setVideoLoading(true);
-        setRealsVideoSource(vid, compatibleUrl);
-        vid.muted = true;
-        vid.play().catch(error => {
-          if (error.name === 'AbortError') return;
-          setVideoLoading(false);
-          showRealsPlaybackError(it, 'Video biçimi dönüştürülemedi · Tekrar dene');
-          console.error('Reals uyumlu video başlatılamadı:', error.message);
-        });
-        return true;
-      };
-      vid.addEventListener('loadedmetadata', () => fitRealsVideoFrame(vid));
-      it.addEventListener('reals-cancel-replay', () => clearReplayCountdown(it));
-      vid.addEventListener('loadstart', () => setVideoLoading(true));
-      vid.addEventListener('waiting', () => setVideoLoading(true));
-      vid.addEventListener('stalled', () => setVideoLoading(true));
-      vid.addEventListener('loadeddata', () => setVideoLoading(false));
-      vid.addEventListener('playing', () => setVideoLoading(false));
-      let clickTimer = null;
-      let lastTouchTapAt = 0;
-      let suppressClickUntil = 0;
-      let touchStartPoint = null;
-      it.addEventListener('pointerdown', event => {
-        if (event.pointerType === 'touch') touchStartPoint = { x: event.clientX, y: event.clientY };
-      }, { passive: true });
-      it.addEventListener('pointercancel', event => {
-        if (event.pointerType !== 'touch') return;
-        touchStartPoint = null;
-        suppressClickUntil = Date.now() + 450;
-        lastTouchTapAt = 0;
-      }, { passive: true });
-      const likeFromDoubleTap = () => {
-        const likeButton = it.querySelector('.like-btn');
-        if (!likeButton) return;
-        it.classList.remove('reals-heart-animate');
-        void it.offsetWidth;
-        it.classList.add('reals-heart-animate');
-        if (!likeButton.classList.contains('active') && !likeButton.disabled) likeButton.click();
-      };
-      it.addEventListener('click', event => {
-        if (Date.now() < suppressClickUntil) { event.preventDefault(); return; }
-        if (event.target.closest('button,a,input')) return;
-        if (it.classList.contains('reals-ad-item')) return;
-        if (event.detail > 1) {
-          clearTimeout(clickTimer);
-          suppressClickUntil = Date.now() + 400;
-          likeFromDoubleTap();
+  const applyMuteToVideo = el => {
+    const video = videoOf(el);
+    if (!video) return;
+    const silenceForSong = !!el.dataset.songAudio && !el.dataset.adId;
+    video.muted = muted || silenceForSong;
+  };
+
+  function syncMuteUi() {
+    const icon = muted ? 'fa-volume-xmark' : 'fa-volume-high';
+    root.querySelector('.ig-reels-mute')?.replaceChildren(Object.assign(document.createElement('i'), { className: `fas ${icon}` }));
+    root.classList.toggle('is-muted', muted);
+  }
+
+  function flash(el, iconClass) {
+    const node = el?.querySelector('.ig-reel-flash');
+    if (!node) return;
+    node.innerHTML = `<i class="${iconClass}"></i>`;
+    node.classList.remove('is-visible');
+    void node.offsetWidth;
+    node.classList.add('is-visible');
+  }
+
+  function setMuted(nextMuted, el = elements[activeIndex]) {
+    muted = nextMuted;
+    localStorage.setItem('cigcig_reals_muted', muted ? '1' : '0');
+    if (el) {
+      applyMuteToVideo(el);
+      syncSong(el);
+    }
+    syncMuteUi();
+  }
+
+  let loadingTimer = 0;
+  function playActive() {
+    const el = elements[activeIndex];
+    const video = videoOf(el);
+    if (!el || !video || !root.isConnected) return;
+    applyMuteToVideo(el);
+    clearTimeout(loadingTimer);
+    if (video.readyState < 3) loadingTimer = setTimeout(() => { if (video.readyState < 3 && el.classList.contains('is-active')) el.classList.add('is-loading'); }, 350);
+    const attempt = video.play();
+    if (attempt?.catch) {
+      attempt.then(() => {
+        el.classList.remove('is-paused');
+        syncSong(el);
+      }).catch(error => {
+        if (error?.name === 'AbortError' || !el.classList.contains('is-active')) return;
+        if (error?.name === 'NotAllowedError' && !video.muted) {
+          // Tarayıcı sesli otomatik oynatmayı engelledi: sessiz devam et, dokununca ses açılır.
+          muted = true;
+          syncMuteUi();
+          applyMuteToVideo(el);
+          video.play().catch(() => el.classList.add('is-paused'));
           return;
         }
-        clearTimeout(clickTimer);
-        clickTimer = setTimeout(() => { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }, 220);
+        if (error?.name === 'NotAllowedError') { el.classList.add('is-paused'); return; }
+        if (!tryNextSource(el)) el.querySelector('.ig-reel-error')?.removeAttribute('hidden');
       });
-      it.addEventListener('pointerup', event => {
-        if (event.pointerType !== 'touch' || event.target.closest('button,a,input') || it.classList.contains('reals-ad-item')) return;
-        const now = Date.now();
-        const moved = touchStartPoint
-          && Math.hypot(event.clientX - touchStartPoint.x, event.clientY - touchStartPoint.y) > 12;
-        touchStartPoint = null;
-        if (moved) {
-          clearTimeout(clickTimer);
-          suppressClickUntil = now + 450;
-          lastTouchTapAt = 0;
-          return;
-        }
-        if (now - lastTouchTapAt <= 320) {
-          clearTimeout(clickTimer);
-          suppressClickUntil = now + 450;
-          likeFromDoubleTap();
-          lastTouchTapAt = 0;
-        } else {
-          lastTouchTapAt = now;
-        }
-      });
-      it.querySelector('.reals-play-overlay')?.addEventListener('click', event => {
-        event.stopPropagation();
-        if (vid.paused) {
-          if (realsMuted) {
-            realsMuted = false;
-            localStorage.setItem('cigcig_reals_muted', '0');
-            vid.muted = !!it.dataset.songAudio;
-            syncRealsMuteButtons();
-            syncRealsSongAudio(it);
-          }
-          vid.play().catch(error => {
-            if (error.name === 'AbortError') return;
-            showRealsPlaybackError(it, error.name === 'NotAllowedError' ? 'Oynatmak için tekrar dokun' : 'Video başlatılamadı · Tekrar dene');
-            console.error('Reals videosu başlatılamadı:', error.message);
-          });
-        } else vid.pause();
-      });
-      it.addEventListener('dblclick', event => {
-        if (Date.now() < suppressClickUntil || event.target.closest('button,a,input')) return;
-        clearTimeout(clickTimer);
-        likeFromDoubleTap();
-      });
-      vid.addEventListener('play', () => {
-        const retryButton = it.querySelector('.reals-video-retry');
-        if (retryButton) retryButton.hidden = true;
-        delete it.dataset.realsNetworkRetry;
-        if (replayTimers.has(it)) clearReplayCountdown(it);
-        const icon = it.querySelector('.reals-play-overlay i');
-        if (icon) icon.className = 'fas fa-pause';
-        it.classList.remove('reals-is-paused');
-        if (!it.dataset.adId && !vid.muted) syncRealsSongAudio(it);
-      });
-      vid.addEventListener('pause', () => {
-        if (it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
-          vid.play().catch(() => {});
-          return;
-        }
-        if (activeRealsAudio && it.classList.contains('is-active')) activeRealsAudio.pause();
-        setVideoLoading(false);
-        it.querySelector('.reals-play-overlay i')?.classList.replace('fa-pause', 'fa-play');
-        it.classList.add('reals-is-paused');
-      });
-      vid.addEventListener('error', () => {
-        if (!it.classList.contains('is-active')) return;
-        const errorCode = vid.error?.code;
-        if ([MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED, MediaError.MEDIA_ERR_DECODE].includes(errorCode)
-          && retryCompatibleVideo()) return;
-        if (errorCode === MediaError.MEDIA_ERR_NETWORK && it.dataset.realsNetworkRetry !== '1') {
-          it.dataset.realsNetworkRetry = '1';
-          setVideoLoading(true);
-          window.setTimeout(() => {
-            if (!it.isConnected || !it.classList.contains('is-active')) return;
-            setRealsVideoSource(vid, '');
-            requestAnimationFrame(() => {
-              if (!it.isConnected || !it.classList.contains('is-active')) return;
-              setRealsVideoSource(vid, it.dataset.videoUrl);
-              vid.muted = true;
-              vid.play().catch(error => {
-                if (error.name === 'AbortError') return;
-                setVideoLoading(false);
-                showRealsPlaybackError(it, 'Bağlantı kesildi · Yeniden dene');
-              });
-            });
-          }, 450);
-          return;
-        }
-        setVideoLoading(false);
-        const message = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || errorCode === MediaError.MEDIA_ERR_DECODE
-          ? 'Bu video biçimi oynatılamıyor · Tekrar dene'
-          : 'Video yüklenemedi · Tekrar dene';
-        showRealsPlaybackError(it, message);
-        console.error('Reals videosu yüklenemedi:', { code: errorCode, message: vid.error?.message, source: vid.currentSrc });
-      });
-      it.querySelector('.reals-video-retry')?.addEventListener('click', event => {
-        event.stopPropagation();
-        const retry = event.currentTarget;
-        retry.disabled = true;
-        retry.querySelector('span').textContent = 'Video yükleniyor...';
-        delete it.dataset.realsNetworkRetry;
-        delete it.dataset.realsCompatibilityRetry;
-        setRealsVideoSource(vid, '');
-        requestAnimationFrame(() => {
-          if (!it.isConnected || !it.classList.contains('is-active')) return;
-          setRealsVideoSource(vid, it.dataset.videoUrl);
-          vid.muted = true;
-          vid.play().catch(error => {
-            if (error.name === 'AbortError') return;
-            showRealsPlaybackError(it, 'Video başlatılamadı · Tekrar dene');
-            console.error('Reals tekrar başlatılamadı:', error.message);
-          }).finally(() => { retry.disabled = false; });
-        });
-      });
-      vid.addEventListener('ended', () => {
-        if (!it.classList.contains('reals-ad-item') && it.classList.contains('is-active')) {
-          startReplayCountdown(it, vid);
-        }
-      });
-    });
-    listEl.querySelectorAll('.mute-btn').forEach(btn => btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const item = btn.closest('.reals-item');
-      const video = item?.querySelector('video');
-      if (!video || !item) return;
-      realsMuted = !realsMuted;
-      localStorage.setItem('cigcig_reals_muted', realsMuted ? '1' : '0');
-      video.muted = realsMuted || !!item.dataset.songAudio;
-      syncRealsSongAudio(item);
-      syncRealsMuteButtons();
-    }));
-    listEl.querySelectorAll('[data-ad-click]').forEach(link => link.addEventListener('click', event => {
-      const ad = getFeedItem(link.closest('.reals-ad-item'));
-      if (ad) api(`/reals-ads/${ad.id}/click`, { method: 'POST' }).catch(() => {});
-    }));
-    listEl.querySelectorAll('.reals-close-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); navigate('/'); }));
-    listEl.querySelectorAll('.like-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const item = getFeedItem(it); const id = it.dataset.id; try {
-        btn.disabled = true;
-        const result = await api(item?.isRealsAd ? `/reals-ads/${item.id}/like` : `/video/${id}/like`, { method:'POST' });
-        const span = btn.querySelector('.count'); span.textContent = result.like_count; btn.classList.toggle('active', result.liked);
-        btn.querySelector('i').className = result.liked ? 'fas fa-heart' : 'far fa-heart';
-      } catch(e){ toast(e.message,'error'); } finally { btn.disabled=false; }
-    }));
-    listEl.querySelectorAll('.reals-follow-btn').forEach(btn => btn.addEventListener('click', async e => {
-      e.stopPropagation();
-      if (btn.disabled) return;
+    }
+  }
+
+  async function registerView(el) {
+    const item = itemOf(el);
+    if (!item || viewedIds.has(keyOf(item))) return true;
+    if (!currentUser && !item.isRealsAd && el.dataset.guestChecked !== 'true') {
       try {
-        const username = btn.dataset.username;
-        const state = followStates.get(username) || {};
-        const isFollowing = state.following || state.pending;
-        btn.disabled = true;
-        btn.classList.add('is-loading');
-        const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: isFollowing ? 'DELETE' : 'POST' });
-        followStates.set(username, { ...state, ...result });
-        if (result.following) {
-          const status = document.createElement('span');
-          status.className = 'reals-follow-status';
-          status.innerHTML = '<i class="fas fa-check"></i> Takip edildi';
-          btn.replaceWith(status);
-        } else {
-          btn.textContent = result.pending ? 'İstek gönderildi' : 'Takip et';
+        const access = await api('/guest-reals/view', { method: 'POST', body: JSON.stringify({ video_id: item.id }) });
+        if (!access.allowed) {
+          toast('Misafir Reals izleme sınırına ulaştın. 24 saat sonra tekrar deneyebilirsin.', 'error');
+          navigate('/giris');
+          return false;
         }
-      } catch (error) { toast(error.message, 'error'); }
-      finally { btn.disabled = false; btn.classList.remove('is-loading'); }
-    }));
-    listEl.querySelectorAll('.comment-btn').forEach(btn => btn.addEventListener('click', e => {
-      e.stopPropagation();
-      const video = getFeedItem(btn.closest('.reals-item'));
-      if (video) openRealsComments(video, !!video.isRealsAd);
-    }));
-    listEl.querySelectorAll('.save-btn').forEach(btn => btn.addEventListener('click', async e => {
-      e.stopPropagation(); const slug = btn.closest('.reals-item').dataset.slug;
-      try { const result = await api(`/video/${slug}/save`, { method: 'POST' }); btn.classList.toggle('active', result.saved); btn.querySelector('i').className = result.saved ? 'fas fa-bookmark' : 'far fa-bookmark'; } catch (error) { toast(error.message, 'error'); }
-    }));
-    listEl.querySelectorAll('.resend-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = getFeedItem(it); if (!video) return;
-      const shareUrl = `${location.origin}/reals/${encodeURIComponent(video.id)}`;
-      try { await navigator.clipboard.writeText(shareUrl); toast('Reals bağlantısı kopyalandı'); } catch { toast(shareUrl); }
-    }));
-    listEl.querySelectorAll('.share-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-      e.stopPropagation(); const it = btn.closest('.reals-item'); const video = getFeedItem(it); if (video && !video.isRealsAd) showForwardVideoModal(video);
-    }));
+        el.dataset.guestChecked = 'true';
+      } catch (error) {
+        toast(error.data?.error || error.message || 'Reals erişimi doğrulanamadı.', 'error');
+        navigate('/giris');
+        return false;
+      }
+    }
+    viewedIds.add(keyOf(item));
+    (item.isRealsAd
+      ? api('/reals-ads/' + encodeURIComponent(item.id) + '/view', { method: 'POST' })
+      : api('/video/' + encodeURIComponent(item.id) + '/view', { method: 'POST' })
+    ).catch(() => {});
+    return true;
   }
 
-  function showIndex(i, shouldScroll = true) {
-    if (i < 0) i = 0; if (i >= items.length) i = items.length-1;
-    if (i === idx && loadedRealsIndices.has(i)) return;
-    const previousId = items[idx]?.dataset.id;
-    if (previousId && i !== idx && !items[idx]?.dataset.adId) watchedIds.add(Number(previousId));
-    const previousIdx = idx;
-    if (previousIdx !== i) clearReplayCountdown(items[previousIdx]);
-    idx = i;
-    stopRealsSongAudio();
-    const activeItem = items[idx];
-    const activeRealId = activeItem && !activeItem.classList.contains('reals-ad-item') ? activeItem.dataset.id : null;
-    if (activeRealId && location.pathname !== '/reals/' + encodeURIComponent(activeRealId)) {
-      history.replaceState({}, '', '/reals/' + encodeURIComponent(activeRealId));
+  function ensureFollowState(el) {
+    const button = el?.querySelector('.ig-reel-follow');
+    const username = button?.dataset.username;
+    if (!username || !currentUser || followStates.has(username) || followRequests.has(username)) return;
+    const request = api('/users/' + encodeURIComponent(username) + '/follow-status')
+      .then(state => {
+        followStates.set(username, state);
+        if (state.blocked || state.following) el.querySelectorAll(`.ig-reel-follow[data-username="${CSS.escape(username)}"]`).forEach(node => node.remove());
+        else if (button.isConnected) button.textContent = state.pending ? 'İstek gönderildi' : 'Takip et';
+      })
+      .catch(() => {})
+      .finally(() => followRequests.delete(username));
+    followRequests.set(username, request);
+  }
+
+  async function activate(index) {
+    if (index < 0 || index >= elements.length || index === activeIndex) return;
+    const previous = elements[activeIndex];
+    if (previous) {
+      previous.classList.remove('is-active', 'is-loading', 'is-holding');
+      const prevVideo = videoOf(previous);
+      prevVideo?.pause();
     }
-    if (shouldScroll) listEl.scrollTo({ top: i * listEl.clientHeight, behavior: 'smooth' });
-    for (const j of [...loadedRealsIndices]) {
-      if (j === idx || j === idx + 1) continue;
-      const item = items[j];
-      const video = items[j]?.querySelector('video');
-      if (video) {
-        item?.classList.remove('is-active');
-        item?.classList.remove('reals-is-loading');
-        delete item.dataset.realsNetworkRetry;
-        delete item.dataset.realsCompatibilityRetry;
+    stopSong();
+    activeIndex = index;
+    const el = elements[index];
+    el.classList.add('is-active');
+    el.classList.remove('is-paused');
+    el.querySelector('.ig-reel-error')?.setAttribute('hidden', '');
+
+    // Kaynak penceresi: aktif, sonraki (önyükleme) ve önceki. Diğerleri boşaltılır.
+    const slow = igReelsSlowNetwork();
+    elements.forEach((node, i) => {
+      const distance = i - index;
+      if (distance === 0) attachSource(node, 'auto');
+      else if (distance === 1) attachSource(node, slow ? 'metadata' : 'auto');
+      else if (distance === 2 && !slow) attachSource(node, 'metadata');
+      else if (distance === -1) attachSource(node, 'metadata');
+      else if (Math.abs(distance) <= 4) { setPoster(node); detachSource(node); }
+      else detachSource(node);
+    });
+    const video = videoOf(el);
+    if (video && video.currentTime > 0 && !el.classList.contains('is-ad')) {
+      try { video.currentTime = 0; } catch { /* yoksay */ }
+    }
+
+    const item = itemOf(el);
+    if (item && !item.isRealsAd) {
+      const target = '/reals/' + encodeURIComponent(item.id);
+      if (location.pathname !== target) history.replaceState(history.state || {}, '', target);
+    }
+    ensureFollowState(el);
+    const allowed = await registerView(el);
+    if (!allowed || activeIndex !== index) return;
+    playActive();
+    if (index >= elements.length - 5) loadMore();
+  }
+
+  // ---------- Sonsuz akış ----------
+  async function loadMore() {
+    if (loadingMore || !hasMore || signal.aborted) return;
+    loadingMore = true;
+    try {
+      const page = await api(`/reals?limit=${IG_REELS_PAGE_SIZE}&offset=${nextOffset}`);
+      if (signal.aborted || !root.isConnected) return;
+      const list = Array.isArray(page) ? page : [];
+      nextOffset += list.length;
+      if (list.length < IG_REELS_PAGE_SIZE) hasMore = false;
+      const added = pushReals(list);
+      if (!added.length) return;
+      const startIndex = feedItems.length;
+      feedItems.push(...added);
+      const sentinel = feed.querySelector('.ig-reels-sentinel');
+      const html = added.map((item, offset) => itemHTML(item, startIndex + offset)).join('');
+      sentinel.insertAdjacentHTML('beforebegin', html);
+      const newEls = [...feed.querySelectorAll('.ig-reel')].filter(node => Number(node.dataset.index) >= startIndex);
+      elements.push(...newEls);
+      newEls.forEach(bindItem);
+      newEls.forEach(el => observer.observe(el));
+    } catch (error) {
+      console.warn('Reals sayfası yüklenemedi:', error.message);
+    } finally {
+      loadingMore = false;
+    }
+  }
+
+  // ---------- Görünürlük ----------
+  const observer = new IntersectionObserver(entries => {
+    let best = null;
+    entries.forEach(entry => {
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.6 && (!best || entry.intersectionRatio > best.intersectionRatio)) best = entry;
+    });
+    if (best) activate(elements.indexOf(best.target));
+  }, { root: feed, threshold: [0.6, 0.85] });
+
+  function scrollToIndex(index, behavior = 'smooth') {
+    const target = elements[Math.max(0, Math.min(elements.length - 1, index))];
+    if (!target) return;
+    feed.scrollTo({ top: target.offsetTop, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : behavior });
+  }
+
+  // ---------- Etkileşimler ----------
+  function spawnHeart(el, x, y) {
+    const layer = el.querySelector('.ig-reel-hearts');
+    if (!layer) return;
+    const rect = layer.getBoundingClientRect();
+    const heart = document.createElement('i');
+    heart.className = 'fas fa-heart';
+    heart.style.left = `${(x ?? rect.left + rect.width / 2) - rect.left}px`;
+    heart.style.top = `${(y ?? rect.top + rect.height / 2) - rect.top}px`;
+    heart.style.setProperty('--tilt', `${Math.round(Math.random() * 40 - 20)}deg`);
+    layer.appendChild(heart);
+    setTimeout(() => heart.remove(), 900);
+  }
+
+  async function toggleLike(el, { forceOn = false } = {}) {
+    const item = itemOf(el);
+    const button = el.querySelector('.ig-like');
+    if (!item || !button) return;
+    if (!currentUser) { toast('Beğenmek için giriş yap.', 'error'); return; }
+    if (forceOn && button.classList.contains('is-on')) return;
+    if (button.dataset.busy === '1') return;
+    button.dataset.busy = '1';
+    const wasOn = button.classList.contains('is-on');
+    const optimisticOn = !wasOn;
+    const counter = button.querySelector('.ig-reel-action-count');
+    const before = Number(item.like_count) || 0;
+    button.classList.toggle('is-on', optimisticOn);
+    button.querySelector('i').className = `${optimisticOn ? 'fas' : 'far'} fa-heart`;
+    if (optimisticOn) button.classList.add('is-popping');
+    setTimeout(() => button.classList.remove('is-popping'), 400);
+    if (counter) counter.textContent = igReelsCount(before + (optimisticOn ? 1 : -1));
+    try {
+      const result = await api(item.isRealsAd ? `/reals-ads/${encodeURIComponent(item.id)}/like` : `/video/${encodeURIComponent(item.id)}/like`, { method: 'POST' });
+      item.liked = !!result.liked;
+      item.like_count = Number(result.like_count) || 0;
+      button.classList.toggle('is-on', item.liked);
+      button.querySelector('i').className = `${item.liked ? 'fas' : 'far'} fa-heart`;
+      if (counter) counter.textContent = igReelsCount(item.like_count);
+    } catch (error) {
+      button.classList.toggle('is-on', wasOn);
+      button.querySelector('i').className = `${wasOn ? 'fas' : 'far'} fa-heart`;
+      if (counter) counter.textContent = igReelsCount(before);
+      toast(error.message, 'error');
+    } finally {
+      delete button.dataset.busy;
+    }
+  }
+
+  function bindItem(el) {
+    const video = videoOf(el);
+    const stage = el.querySelector('.ig-reel-stage');
+    const progress = el.querySelector('.ig-reel-progress');
+    const fill = el.querySelector('.ig-reel-progress-fill');
+    if (!video || !stage) return;
+
+    video.addEventListener('loadedmetadata', () => {
+      const landscape = video.videoWidth && video.videoHeight && video.videoWidth / video.videoHeight > 0.8;
+      el.classList.toggle('is-landscape', Boolean(landscape));
+    });
+    video.addEventListener('playing', () => { clearTimeout(loadingTimer); el.classList.remove('is-loading', 'is-paused'); el.classList.add('has-played'); });
+    video.addEventListener('waiting', () => {
+      if (!el.classList.contains('is-active')) return;
+      clearTimeout(loadingTimer);
+      loadingTimer = setTimeout(() => { if (el.classList.contains('is-active') && video.readyState < 3) el.classList.add('is-loading'); }, 350);
+    });
+    video.addEventListener('canplay', () => { if (el.classList.contains('is-active')) el.classList.remove('is-loading'); });
+    video.addEventListener('pause', () => { if (activeRealsAudio && el.classList.contains('is-active')) activeRealsAudio.pause(); });
+    video.addEventListener('play', () => { if (el.classList.contains('is-active')) syncSong(el); });
+    video.addEventListener('timeupdate', () => {
+      if (!fill || !video.duration) return;
+      fill.style.transform = `scaleX(${Math.min(1, video.currentTime / video.duration)})`;
+    });
+    video.addEventListener('error', () => {
+      if (video.dataset.srcAttached !== '1') return;
+      if (tryNextSource(el)) return;
+      el.classList.remove('is-loading');
+      if (el.classList.contains('is-active')) el.querySelector('.ig-reel-error')?.removeAttribute('hidden');
+    });
+    el.querySelector('.ig-reel-error')?.addEventListener('click', event => {
+      event.stopPropagation();
+      event.currentTarget.setAttribute('hidden', '');
+      detachSource(el);
+      attachSource(el, 'auto');
+      playActive();
+    });
+
+    // Dokunma hareketleri: tek dokunuş = ses, çift = beğeni, basılı tut = duraklat.
+    let tapTimer = 0;
+    let lastTap = 0;
+    let holdTimer = 0;
+    let holding = false;
+    let start = null;
+    stage.addEventListener('pointerdown', event => {
+      if (event.target.closest('button, a, .ig-reel-progress, .ig-reel-caption')) return;
+      start = { x: event.clientX, y: event.clientY, t: Date.now() };
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => {
+        if (!start || !el.classList.contains('is-active')) return;
+        holding = true;
+        el.classList.add('is-holding');
         video.pause();
-        setRealsVideoSource(video, '');
-        video.currentTime = 0;
-        video.muted = true;
+      }, 260);
+    });
+    const endHold = () => {
+      clearTimeout(holdTimer);
+      if (holding) {
+        holding = false;
+        el.classList.remove('is-holding');
+        if (el.classList.contains('is-active') && !el.classList.contains('is-paused')) playActive();
+        return true;
       }
-      loadedRealsIndices.delete(j);
-    }
-    for (let j = idx; j <= Math.min(items.length - 1, idx + 1); j++) {
-      const it = items[j];
-      if (!it) continue;
-      it.classList.toggle('is-active', j === idx);
-      const vid = it.querySelector('video');
-      const videoUrl = it.dataset.videoUrl;
-      vid.preload = j === idx ? 'auto' : 'none';
-      vid.playsInline = true;
-      it.classList.toggle('reals-is-loading', j === idx && vid.readyState < 2);
-      ensureRealsFollowState(it);
-      if (j !== idx) {
-        if (!loadedRealsIndices.has(j)) setRealsVideoSource(vid, videoUrl);
-        loadedRealsIndices.add(j);
-        continue;
+      return false;
+    };
+    stage.addEventListener('pointermove', event => {
+      if (!start) return;
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) {
+        start = null;
+        clearTimeout(holdTimer);
       }
-      setRealsVideoSource(vid, videoUrl);
-      loadedRealsIndices.add(j);
-      vid.muted = realsMuted || !!it.dataset.songAudio;
-      (async () => {
-        if (!currentUser && !it.dataset.adId && it.dataset.guestChecked !== 'true') {
-          try {
-            const access = await api('/guest-reals/view', { method: 'POST', body: JSON.stringify({ video_id: it.dataset.id }) });
-            if (!access.allowed) {
-              toast('Misafir Reals izleme sınırına ulaştın. 24 saat sonra tekrar deneyebilirsin.', 'error');
-              navigate('/giris');
-              return;
-            }
-            it.dataset.guestChecked = 'true';
-          } catch (error) {
-            toast(error.data?.error || error.message || 'Reals erişimi doğrulanamadı.', 'error');
-            navigate('/giris');
-            return;
-          }
+    }, { passive: true });
+    stage.addEventListener('pointercancel', () => { start = null; endHold(); });
+    stage.addEventListener('pointerup', event => {
+      if (event.target.closest('button, a, .ig-reel-progress, .ig-reel-caption')) return;
+      const wasHold = endHold();
+      if (!start || wasHold) { start = null; return; }
+      start = null;
+      const now = Date.now();
+      if (now - lastTap < 280) {
+        clearTimeout(tapTimer);
+        lastTap = 0;
+        spawnHeart(el, event.clientX, event.clientY);
+        toggleLike(el, { forceOn: true });
+        return;
+      }
+      lastTap = now;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => {
+        if (!el.classList.contains('is-active')) return;
+        if (el.classList.contains('is-paused') || video.paused) {
+          el.classList.remove('is-paused');
+          playActive();
+          return;
         }
-        if (idx !== j || !it.isConnected) return;
-        const viewPromise = it.dataset.adId
-          ? api('/reals-ads/' + it.dataset.adId + '/view', { method: 'POST' })
-          : api('/video/' + it.dataset.id + '/view', { method: 'POST' });
-        viewPromise.catch(() => {});
-        vid.play().catch(async error => {
-          if (idx !== j || !it.isConnected) return;
-          if (error.name === 'AbortError') return;
-          if (!vid.muted) {
-            vid.muted = true;
-            realsMuted = true;
-            localStorage.setItem('cigcig_reals_muted', '1');
-            syncRealsSongAudio(null);
-            syncRealsMuteButtons();
-            try {
-              await vid.play();
-            } catch (playError) {
-              if (playError.name === 'AbortError') return;
-              if (playError.name !== 'NotAllowedError' && retryCompatibleVideo()) return;
-              showRealsPlaybackError(it, 'Oynatmak için tekrar dokun');
-              console.error('Reals videosu başlatılamadı:', playError.message);
-            }
-          } else {
-            if (error.name !== 'NotAllowedError' && retryCompatibleVideo()) return;
-            showRealsPlaybackError(it, error.name === 'NotAllowedError' ? 'Oynatmak için dokun' : 'Video başlatılamadı · Tekrar dene');
-            console.error('Reals videosu başlatılamadı:', error.message);
-          }
+        setMuted(!muted, el);
+        flash(el, muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high');
+      }, 260);
+    });
+    stage.addEventListener('contextmenu', event => event.preventDefault());
+
+    // İlerleme çubuğu: sürükleyerek sar.
+    if (progress) {
+      let scrubbing = false;
+      const seek = clientX => {
+        if (!video.duration) return;
+        const rect = progress.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        video.currentTime = ratio * video.duration;
+        if (fill) fill.style.transform = `scaleX(${ratio})`;
+      };
+      progress.addEventListener('pointerdown', event => {
+        event.stopPropagation();
+        scrubbing = true;
+        el.classList.add('is-scrubbing');
+        try { progress.setPointerCapture(event.pointerId); } catch { /* yoksay */ }
+        seek(event.clientX);
+      });
+      progress.addEventListener('pointermove', event => { if (scrubbing) seek(event.clientX); });
+      const stop = () => { scrubbing = false; el.classList.remove('is-scrubbing'); };
+      progress.addEventListener('pointerup', stop);
+      progress.addEventListener('pointercancel', stop);
+    }
+
+    // Açıklama genişlet
+    el.querySelector('.ig-reel-caption-more')?.addEventListener('click', event => {
+      event.stopPropagation();
+      const caption = event.currentTarget.closest('.ig-reel-caption');
+      const expanded = caption.dataset.expanded === 'true';
+      caption.dataset.expanded = expanded ? 'false' : 'true';
+      event.currentTarget.textContent = expanded ? 'daha fazla' : 'daha az';
+      el.classList.toggle('is-caption-open', !expanded);
+    });
+
+    el.querySelector('.ig-like')?.addEventListener('click', event => { event.stopPropagation(); toggleLike(el); });
+    el.querySelector('.ig-comment')?.addEventListener('click', event => {
+      event.stopPropagation();
+      const item = itemOf(el);
+      if (item) openRealsComments(item, el, !!item.isRealsAd);
+    });
+    el.querySelector('.ig-share')?.addEventListener('click', event => {
+      event.stopPropagation();
+      const item = itemOf(el);
+      if (!item) return;
+      if (!currentUser) { toast('Göndermek için giriş yap.', 'error'); return; }
+      showForwardVideoModal(item);
+    });
+    el.querySelector('.ig-save')?.addEventListener('click', async event => {
+      event.stopPropagation();
+      const button = event.currentTarget;
+      const item = itemOf(el);
+      if (!item || !currentUser) { toast('Kaydetmek için giriş yap.', 'error'); return; }
+      try {
+        const result = await api(`/video/${encodeURIComponent(item.slug || item.id)}/save`, { method: 'POST' });
+        item.saved = !!result.saved;
+        button.classList.toggle('is-on', item.saved);
+        button.querySelector('i').className = `${item.saved ? 'fas' : 'far'} fa-bookmark`;
+        toast(item.saved ? 'Kaydedildi' : 'Kaydedilenlerden çıkarıldı');
+      } catch (error) { toast(error.message, 'error'); }
+    });
+    el.querySelector('.ig-more')?.addEventListener('click', event => {
+      event.stopPropagation();
+      openMoreSheet(el);
+    });
+    el.querySelector('.ig-reel-follow')?.addEventListener('click', async event => {
+      event.stopPropagation();
+      const button = event.currentTarget;
+      const username = button.dataset.username;
+      if (button.disabled) return;
+      const state = followStates.get(username) || {};
+      button.disabled = true;
+      try {
+        const result = await api('/users/' + encodeURIComponent(username) + '/follow', { method: state.pending ? 'DELETE' : 'POST' });
+        followStates.set(username, { ...state, ...result });
+        feed.querySelectorAll(`.ig-reel-follow[data-username="${CSS.escape(username)}"]`).forEach(node => {
+          if (result.following) node.remove();
+          else node.textContent = result.pending ? 'İstek gönderildi' : 'Takip et';
         });
-        if (!it.dataset.adId) syncRealsSongAudio(it);
-      })();
-    }
-    if (previousIdx !== idx) {
-      const previousItem = items[previousIdx];
-      if (previousItem && previousIdx >= Math.max(0, idx - 1) && previousIdx <= Math.min(items.length - 1, idx + 1)) {
-        previousItem.querySelector('video')?.pause();
-      }
-    }
+        if (result.following) toast(`@${username} takip ediliyor`);
+      } catch (error) { toast(error.message, 'error'); }
+      finally { button.disabled = false; }
+    });
+    el.querySelector('[data-ad-click]')?.addEventListener('click', () => {
+      const item = itemOf(el);
+      if (item) api(`/reals-ads/${encodeURIComponent(item.id)}/click`, { method: 'POST' }).catch(() => {});
+    });
   }
 
-  renderItems();
-  syncRealsMuteButtons();
-  showIndex(initialIndex >= 0 ? initialIndex : 0, initialIndex >= 0);
-  activeRealsAds.filter(ad => ad.frequency_mode === 'time').forEach(ad => {
+  function openMoreSheet(el) {
+    const item = itemOf(el);
+    if (!item) return;
+    const shareUrl = item.isRealsAd ? normalizeExternalUrl(item.site_url || location.origin) : `${location.origin}/reals/${encodeURIComponent(item.id)}`;
+    document.getElementById('ig-reels-sheet')?.remove();
+    const sheet = document.createElement('div');
+    sheet.id = 'ig-reels-sheet';
+    sheet.className = 'ig-sheet';
+    sheet.innerHTML = `<div class="ig-sheet-backdrop"></div><section class="ig-sheet-panel" role="dialog" aria-modal="true" aria-label="Seçenekler">
+      <span class="ig-sheet-grabber" aria-hidden="true"></span>
+      <button type="button" class="ig-sheet-row" data-act="copy"><i class="fas fa-link"></i>Bağlantıyı kopyala</button>
+      ${navigator.share ? '<button type="button" class="ig-sheet-row" data-act="share"><i class="fas fa-arrow-up-from-bracket"></i>Paylaş…</button>' : ''}
+      ${!item.isRealsAd ? `<button type="button" class="ig-sheet-row" data-act="profile"><i class="far fa-user"></i>@${escHtml(item.username || '')} profiline git</button>` : ''}
+      ${!item.isRealsAd && currentUser && item.username !== currentUser.username ? '<button type="button" class="ig-sheet-row is-danger" data-act="report"><i class="far fa-flag"></i>Bildir</button>' : ''}
+      <button type="button" class="ig-sheet-row is-muted" data-act="close">Vazgeç</button>
+    </section>`;
+    document.body.appendChild(sheet);
+    requestAnimationFrame(() => sheet.classList.add('is-open'));
+    const close = () => { sheet.classList.remove('is-open'); setTimeout(() => sheet.remove(), 220); };
+    sheet.querySelector('.ig-sheet-backdrop').addEventListener('click', close);
+    sheet.addEventListener('click', async event => {
+      const act = event.target.closest('[data-act]')?.dataset.act;
+      if (!act) return;
+      if (act === 'copy') {
+        try { await navigator.clipboard.writeText(shareUrl); toast('Bağlantı kopyalandı'); } catch { toast(shareUrl); }
+      } else if (act === 'share') {
+        try { await navigator.share({ title: item.title || 'Reals', url: shareUrl }); } catch { /* kullanıcı iptal etti */ }
+      } else if (act === 'profile') {
+        navigate(profileRoute(item.username));
+      } else if (act === 'report') {
+        navigate('/bildir');
+      }
+      close();
+    });
+  }
+
+  // ---------- Yorumlar (alt sayfa) ----------
+  async function openRealsComments(video, el, isAd = false) {
+    const commentBase = isAd ? '/reals-ads/' + encodeURIComponent(video.id) : '/video/' + encodeURIComponent(video.id);
+    document.getElementById('reals-comments-sheet')?.remove();
+    const sheet = document.createElement('div');
+    sheet.id = 'reals-comments-sheet';
+    sheet.className = 'ig-sheet ig-comments';
+    sheet.innerHTML = `<div class="ig-sheet-backdrop"></div><section class="ig-sheet-panel ig-comments-panel" role="dialog" aria-modal="true" aria-label="Yorumlar">
+      <span class="ig-sheet-grabber" aria-hidden="true"></span>
+      <header class="ig-comments-header"><strong>Yorumlar</strong><button type="button" class="ig-comments-close" aria-label="Yorumları kapat"><i class="fas fa-xmark"></i></button></header>
+      <div class="ig-comments-list"><div class="ig-comments-loading"><span class="ig-reels-spinner"></span></div></div>
+      ${currentUser ? `<form class="ig-comment-form">${avatarImg(currentUser, 'ig-comment-me')}<textarea maxlength="2000" rows="1" placeholder="Yorum ekle..." aria-label="Yorum yaz" enterkeyhint="send"></textarea><button type="submit" aria-label="Yorumu gönder" disabled>Paylaş</button></form>` : '<div class="ig-comment-login"><a href="/giris" data-link>Yorum yapmak için giriş yap</a></div>'}
+    </section>`;
+    document.body.appendChild(sheet);
+    root.classList.add('has-sheet');
+    requestAnimationFrame(() => sheet.classList.add('is-open'));
+    const panel = sheet.querySelector('.ig-sheet-panel');
+    const close = () => {
+      sheet.classList.remove('is-open');
+      root.classList.remove('has-sheet');
+      setTimeout(() => sheet.remove(), 220);
+    };
+    sheet.querySelector('.ig-comments-close')?.addEventListener('click', close);
+    sheet.querySelector('.ig-sheet-backdrop')?.addEventListener('click', close);
+    // Tutamaçtan aşağı sürükleyerek kapat
+    const grabber = sheet.querySelector('.ig-sheet-grabber');
+    let dragStart = null;
+    const header = sheet.querySelector('.ig-comments-header');
+    [grabber, header].forEach(handle => handle?.addEventListener('pointerdown', event => {
+      if (event.target.closest('button')) return;
+      dragStart = event.clientY;
+      panel.style.transition = 'none';
+      try { handle.setPointerCapture(event.pointerId); } catch { /* yoksay */ }
+    }));
+    [grabber, header].forEach(handle => handle?.addEventListener('pointermove', event => {
+      if (dragStart === null) return;
+      panel.style.transform = `translateY(${Math.max(0, event.clientY - dragStart)}px)`;
+    }));
+    [grabber, header].forEach(handle => handle?.addEventListener('pointerup', event => {
+      if (dragStart === null) return;
+      const moved = event.clientY - dragStart;
+      dragStart = null;
+      panel.style.transition = '';
+      panel.style.transform = '';
+      if (moved > 110) close();
+    }));
+
+    const list = sheet.querySelector('.ig-comments-list');
+    const input = sheet.querySelector('.ig-comment-form textarea');
+    const submit = sheet.querySelector('.ig-comment-form button[type="submit"]');
+    input?.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 110)}px`;
+      if (submit) submit.disabled = !input.value.trim();
+    });
+    let comments = [];
+    const updateCount = count => {
+      video.comment_count = Math.max(0, Number(count) || 0);
+      const counter = el?.querySelector('.ig-comment .ig-reel-action-count');
+      if (counter) counter.textContent = igReelsCount(video.comment_count);
+    };
+    const renderComments = values => {
+      list.innerHTML = values.length
+        ? values.map(comment => renderVideoComment(comment, !isAd && Number(currentUser?.id) === Number(video.user_id), !isAd)).join('')
+        : '<div class="ig-comments-empty"><i class="far fa-comments"></i><strong>Henüz yorum yok</strong><span>Sohbeti başlat.</span></div>';
+    };
+    try {
+      comments = await api(commentBase + '/comments');
+      if (!document.body.contains(sheet)) return;
+      renderComments(comments);
+    } catch (error) {
+      list.innerHTML = `<div class="ig-comments-empty"><i class="fas fa-circle-exclamation"></i><span>${escHtml(error.message)}</span></div>`;
+    }
+    list.addEventListener('click', async event => {
+      const editButton = event.target.closest('.video-comment-edit');
+      if (editButton) {
+        const nextContent = await CigCigDialogs.prompt('Yorumunu güncelle', editButton.dataset.content, { title: 'Yorumu düzenle', multiline: true });
+        if (nextContent === null) return;
+        try {
+          const updated = await api(commentBase + '/comments/' + editButton.dataset.id, { method: 'PUT', body: JSON.stringify({ content: nextContent.trim() }) });
+          comments = comments.map(comment => String(comment.id) === String(updated.id) ? { ...comment, ...updated } : comment);
+          renderComments(comments);
+        } catch (error) { toast(error.message, 'error'); }
+        return;
+      }
+      const pinButton = event.target.closest('.video-comment-pin');
+      if (pinButton) {
+        pinButton.disabled = true;
+        try {
+          await api(commentBase + '/comments/' + pinButton.dataset.id + '/pin', { method: 'POST' });
+          comments = await api(commentBase + '/comments');
+          renderComments(comments);
+        } catch (error) { toast(error.message, 'error'); }
+        return;
+      }
+      const deleteButton = event.target.closest('.video-comment-delete');
+      if (deleteButton) {
+        if (!await CigCigDialogs.confirm('Bu yorum silinsin mi?')) return;
+        try {
+          const result = await api(commentBase + '/comments/' + deleteButton.dataset.id, { method: 'DELETE' });
+          comments = comments.filter(comment => String(comment.id) !== String(deleteButton.dataset.id));
+          renderComments(comments);
+          updateCount(result.comment_count);
+        } catch (error) { toast(error.message, 'error'); }
+        return;
+      }
+      const likeButton = event.target.closest('.video-comment-like');
+      if (!likeButton) return;
+      try {
+        likeButton.disabled = true;
+        const result = await api(commentBase + '/comments/' + likeButton.dataset.id + '/like', { method: 'POST' });
+        const count = likeButton.querySelector('.video-comment-count');
+        if (count) count.textContent = Math.max(0, (parseInt(count.textContent, 10) || 0) + (result.liked ? 1 : -1));
+        likeButton.classList.toggle('liked', result.liked);
+        const icon = likeButton.querySelector('i');
+        if (icon) icon.className = `${result.liked ? 'fas' : 'far'} fa-heart`;
+      } catch (error) { toast(error.message, 'error'); } finally { likeButton.disabled = false; }
+    });
+    const sendComment = async () => {
+      const content = input?.value.trim();
+      if (!content || submit?.disabled) return;
+      submit.disabled = true;
+      try {
+        const result = await api(commentBase + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
+        comments = await api(commentBase + '/comments');
+        renderComments(comments);
+        updateCount(result.comment_count);
+        input.value = '';
+        input.style.height = 'auto';
+        list.scrollTop = list.scrollHeight;
+      } catch (error) { toast(error.message, 'error'); submit.disabled = false; }
+    };
+    sheet.querySelector('.ig-comment-form')?.addEventListener('submit', event => { event.preventDefault(); sendComment(); });
+    input?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && !matchMedia('(pointer: coarse)').matches) { event.preventDefault(); sendComment(); }
+    });
+  }
+
+  // ---------- Global bağlamalar ----------
+  elements.forEach(bindItem);
+  elements.forEach(el => observer.observe(el));
+  syncMuteUi();
+
+  root.querySelector('.ig-reels-back')?.addEventListener('click', () => navigate(cameFromPath || '/'));
+  root.querySelector('.ig-reels-mute')?.addEventListener('click', () => {
+    setMuted(!muted);
+    flash(elements[activeIndex], muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high');
+  });
+  root.querySelector('.ig-reels-create')?.addEventListener('click', () => showNewVideoModal(null, true));
+  root.querySelector('.ig-reels-info')?.addEventListener('click', () => {
+    showModal('Reals hakkında', `<div class="reals-info-modal"><i class="fas fa-circle-play"></i><p>${escHtml(realsInfoSettings.reminder || '')}</p></div>`);
+  });
+  root.querySelectorAll('.ig-reels-nav-btn').forEach(button => button.addEventListener('click', () => {
+    scrollToIndex(activeIndex + Number(button.dataset.dir));
+  }));
+
+  const onKeydown = event => {
+    if (!root.isConnected) { cleanup(); return; }
+    if (event.target.closest?.('input, textarea, [contenteditable="true"]') || document.getElementById('reals-comments-sheet')) return;
+    if (event.key === 'ArrowDown' || event.key === 'PageDown' || event.key === 'j') { event.preventDefault(); scrollToIndex(activeIndex + 1); }
+    else if (event.key === 'ArrowUp' || event.key === 'PageUp' || event.key === 'k') { event.preventDefault(); scrollToIndex(activeIndex - 1); }
+    else if (event.key === 'm' || event.key === 'M') { setMuted(!muted); flash(elements[activeIndex], muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high'); }
+    else if (event.key === ' ') {
+      event.preventDefault();
+      const el = elements[activeIndex];
+      const video = videoOf(el);
+      if (!video) return;
+      if (video.paused) { el.classList.remove('is-paused'); playActive(); }
+      else { video.pause(); el.classList.add('is-paused'); }
+    }
+  };
+  window.addEventListener('keydown', onKeydown, { signal });
+
+  // Sekme gizlenince durdur, geri gelince devam et.
+  document.addEventListener('visibilitychange', () => {
+    if (!root.isConnected) { cleanup(); return; }
+    const el = elements[activeIndex];
+    const video = videoOf(el);
+    if (!video) return;
+    if (document.hidden) { video.pause(); activeRealsAudio?.pause(); }
+    else if (!el.classList.contains('is-paused') && !document.getElementById('reals-comments-sheet')) playActive();
+  }, { signal });
+
+  // Sayfa (route) değişince her şeyi temizle.
+  const appWatcher = new MutationObserver(() => { if (!root.isConnected) cleanup(); });
+  appWatcher.observe(app, { childList: true });
+
+  // Zaman bazlı reklamlar
+  activeAds.filter(ad => ad.frequency_mode === 'time').forEach(ad => {
     const amount = Math.max(1, Number(ad.frequency_value) || 1);
     const unitMs = ad.frequency_unit === 'hours' ? 3600000 : 60000;
-    window.setTimeout(() => {
-      if (location.pathname !== '/reals' || feedItems.some(item => item.isRealsAd && String(item.id) === String(ad.id))) return;
-      feedItems.splice(Math.min(idx + 1, feedItems.length), 0, { ...ad, isRealsAd: true, feedKey: `ad-${ad.id}-time` });
-      renderItems();
-      showIndex(Math.min(idx + 1, items.length - 1), false);
+    const timer = setTimeout(() => {
+      if (!root.isConnected || !onReelsRoute()) return;
+      const insertAt = Math.min(activeIndex + 1, elements.length);
+      const adItem = { ...ad, isRealsAd: true, feedKey: `ad-${ad.id}-time-${Date.now()}` };
+      feedItems.push(adItem);
+      const index = feedItems.length - 1;
+      const reference = elements[insertAt] || feed.querySelector('.ig-reels-sentinel');
+      reference.insertAdjacentHTML('beforebegin', itemHTML(adItem, index));
+      const adEl = reference.previousElementSibling;
+      // data-index feedItems'a işaret eder; ekrandaki sıra için elements dizisi kullanılır.
+      elements.splice(insertAt, 0, adEl);
+      if (insertAt <= activeIndex) activeIndex += 1;
+      bindItem(adEl);
+      observer.observe(adEl);
     }, amount * unitMs);
+    signal.addEventListener('abort', () => clearTimeout(timer));
   });
 
-  let scrollFrame = null;
-  let scrollEndTimer = null;
-  const settleRealsScroll = () => {
-    clearTimeout(scrollEndTimer);
-    scrollEndTimer = null;
-    const nextIndex = Math.max(0, Math.min(items.length - 1, Math.round(listEl.scrollTop / Math.max(1, listEl.clientHeight))));
-    if (nextIndex !== idx) showIndex(nextIndex, false);
-  };
-  const supportsScrollEnd = 'onscrollend' in listEl;
-  listEl.addEventListener('scroll', () => {
-    if (supportsScrollEnd) return;
-    if (scrollFrame) return;
-    scrollFrame = requestAnimationFrame(() => {
-      scrollFrame = null;
-      clearTimeout(scrollEndTimer);
-      scrollEndTimer = setTimeout(settleRealsScroll, 260);
-    });
-  }, { passive: true });
-  listEl.addEventListener('scrollend', settleRealsScroll, { passive: true });
-  if (window.__realsKeydownHandler) window.removeEventListener('keydown', window.__realsKeydownHandler);
-  window.__realsKeydownHandler = e => {
-    if (location.pathname !== '/reals') return;
-    if (e.key === 'ArrowDown' || e.key === 'PageDown') { e.preventDefault(); showIndex(idx+1); }
-    if (e.key === 'ArrowUp' || e.key === 'PageUp') { e.preventDefault(); showIndex(idx-1); }
-  };
-  window.addEventListener('keydown', window.__realsKeydownHandler);
+  function cleanup() {
+    if (signal.aborted) return;
+    controller.abort();
+    observer.disconnect();
+    appWatcher.disconnect();
+    clearTimeout(loadingTimer);
+    stopSong();
+    elements.forEach(el => detachSource(el));
+    document.getElementById('reals-comments-sheet')?.remove();
+    document.getElementById('ig-reels-sheet')?.remove();
+    if (window.__igReelsCleanup === cleanup) window.__igReelsCleanup = null;
+  }
+  window.__igReelsCleanup = cleanup;
+
+  // İlk video: bağlantıyla açıldıysa o, değilse en üstteki.
+  activate(0);
 }
 
 
@@ -3249,6 +3442,9 @@ function syncRealtimeSocket() {
   realtimeSocket.on('dm:conversation-cleared', handleRealtimeDmConversationCleared);
   realtimeSocket.on('dm:read', handleRealtimeDmRead);
   realtimeSocket.on('dm:typing', handleRealtimeDmTyping);
+  realtimeSocket.on('dm:voice-listened', event => {
+    if (event?.messageId) window.CigCigVoice?.markRemoteListened(event.messageId);
+  });
   realtimeSocket.on('dm:theme', event => {
     if (!event?.conversationId || !event.themeKey) return;
     const chat = document.querySelector(`.dm-chat[data-conversation-id="${CSS.escape(String(event.conversationId))}"]`);
@@ -3262,6 +3458,10 @@ function syncRealtimeSocket() {
   realtimeSocket.on('friends:updated', event => {
     loadNotifCount();
     if (location.pathname === '/arkadaslar') refreshFriendsRoute(event?.tab);
+  });
+  realtimeSocket.on('connect', () => {
+    // Bağlantı koptuysa arada kaçan mesajlar için açık sohbet hemen eşitlensin.
+    window.__dmForcePoll = true;
   });
   realtimeSocket.on('connect_error', error => {
     console.warn('Gerçek zamanlı mesaj bağlantısı kurulamadı:', error.message);
@@ -3392,7 +3592,8 @@ async function handleRealtimeDirectMessage(event) {
         console.error('Yeni mesaj alınamadı:', error.message);
       }
     }
-  } else if (location.pathname === '/mesajlar') {
+  } else if (location.pathname === '/mesajlar' && !document.querySelector(`.dm-conv-item[data-username="${CSS.escape(peerUsername)}"]`)) {
+    // Yeni bir sohbet: listeyi yeniden oluştur. Var olan sohbetler aşağıda yerinde güncellenir.
     renderRoute(location.pathname + location.search);
   } else {
     const item = document.querySelector(`.dm-conv-item[data-username="${CSS.escape(peerUsername)}"]`);
@@ -3437,9 +3638,13 @@ function handleRealtimeDirectMessageEdit(event) {
       window.__dmSharedSongAudio = null;
       window.__dmSharedSongButton = null;
     }
-    const previous = row.previousElementSibling?.matches('.dm-msg-wrap')
-      ? { sender_id: row.previousElementSibling.dataset.senderId, created_at: row.previousElementSibling.dataset.createdAt }
-      : null;
+    const previousSibling = row.previousElementSibling;
+    const previous = previousSibling?.matches('.dm-msg-wrap')
+      ? { sender_id: previousSibling.dataset.senderId, created_at: previousSibling.dataset.createdAt }
+      : previousSibling?.matches('.dm-day-sep')
+        // Gün ayracı zaten var; ikinci bir ayraç üretilmesin.
+        ? { sender_id: '__day_separator__', created_at: row.dataset.createdAt }
+        : null;
     row.outerHTML = dmMessageHTML(event.message, currentUser.id, dmSelectionMode, previous);
     return;
   }
@@ -7134,11 +7339,11 @@ async function renderBookDetail(app, slug) {
     </div>` : '');
 
   const chapListHTML = chapters.map(c => `
-    <div class="chapter-item">
+    <div class="chapter-item${isOwner ? ' book-chapter-drop-target' : ''}" ${isOwner ? `data-drop-chapter="${escHtml(c.id)}"` : ''}>
       <div class="chapter-title"><i class="fas fa-bookmark" style="color:var(--accent-red);font-size:12px"></i> ${escHtml(c.title)}
         ${isOwner ? `<button class="btn btn-ghost btn-sm del-chapter" data-id="${c.id}" style="float:right;padding:0 6px;color:var(--accent-red2)"><i class="fas fa-trash"></i></button>` : ''}
       </div>
-      ${(chapPages[c.id] || []).map(p => pageItemHTML(p, slug)).join('')}
+      ${(chapPages[c.id] || []).map(p => pageItemHTML(p, slug, isOwner)).join('')}
     </div>`).join('');
 
   const bookActionButtons = `
@@ -7148,13 +7353,15 @@ async function renderBookDetail(app, slug) {
       <button class="btn btn-outline btn-sm" id="book-share-btn"><i class="fas fa-share-nodes"></i> Paylaş</button>
     </div>`;
 
-  const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug)).join('');
+  const unassignedHTML = unassigned.map(p => pageItemHTML(p, slug, isOwner)).join('');
   const draftPagesHTML = draftPages.map(page => `
-    <a class="book-draft-item" href="/kitap/${escHtml(slug)}/yaz/${escHtml(page.slug)}" data-link>
-      <i class="fas fa-file-pen"></i>
-      <span>      <strong>${escHtml(page.title === 'Taslak sayfa' || !page.title ? 'Adsız sayfa taslağı' : page.title)}</strong><small>Yalnızca sen görebilirsin · Yazmaya devam et</small></span>
-      <i class="fas fa-arrow-right"></i>
-    </a>`).join('');
+    <div class="book-draft-item book-page-draggable" draggable="true" data-book-page-slug="${escHtml(page.slug)}">
+      <i class="fas fa-grip-vertical book-page-drag-handle" aria-hidden="true"></i>
+      <a href="/kitap/${escHtml(slug)}/yaz/${escHtml(page.slug)}" data-link>
+        <strong>${escHtml(page.title === 'Taslak sayfa' || !page.title ? 'Adsız sayfa taslağı' : page.title)}</strong><small>Yalnızca sen görebilirsin · Yazmaya devam et</small>
+      </a>
+      <button type="button" class="btn btn-ghost btn-sm delete-book-draft" data-page-slug="${escHtml(page.slug)}" aria-label="Taslağı sil"><i class="fas fa-trash"></i></button>
+    </div>`).join('');
 
   // Kitap yorumları kapatıldı: kitap sayfasında yorum alanı gösterilmeyecek.
 
@@ -7219,6 +7426,7 @@ async function renderBookDetail(app, slug) {
           <button class="btn btn-outline btn-sm" id="edit-book-btn"><i class="fas fa-edit"></i> Düzenle</button>
           <button class="btn btn-primary btn-sm" id="add-page-btn"><i class="fas fa-plus"></i> Sayfa Ekle</button>
           <button class="btn btn-outline btn-sm" id="add-chap-btn"><i class="fas fa-folder-plus"></i> Bölüm Ekle</button>
+          <button class="btn btn-outline btn-sm" id="add-intro-chapter-btn"><i class="fas fa-book-open"></i> Giriş bölümü ekle</button>
           <button class="btn btn-danger btn-sm" id="del-book-btn"><i class="fas fa-trash"></i> Sil</button>
         </div>` : ''}
       </div>
@@ -7227,7 +7435,9 @@ async function renderBookDetail(app, slug) {
       ${resumeHTML}
       ${draftPages.length ? `<section class="book-drafts"><h2><i class="fas fa-lock"></i> Özel taslakların</h2><p>Bu sayfaları yalnızca sen görebilirsin. Yayınladığında kitapta herkese açılır.</p>${draftPagesHTML}</section>` : ''}
       ${!chapters.length && !sortedPages.length && !draftPages.length ? '<div class="empty-state"><i class="fas fa-file-alt"></i><p>Henüz sayfa yok.</p></div>' : ''}
-      ${unassignedHTML}
+      ${isOwner
+        ? `<div class="book-chapter-drop-target book-unassigned-drop-target" data-drop-chapter="">${unassignedHTML || '<div class="book-unassigned-drop-hint">Bölümsüz bırakmak için sayfayı buraya sürükleyin.</div>'}</div>`
+        : unassignedHTML}
       ${chapListHTML}
     </div>
   </div>`;
@@ -7326,6 +7536,19 @@ async function renderBookDetail(app, slug) {
     });
     $('#add-page-btn').addEventListener('click', () => navigate('/kitap/' + encodeURIComponent(slug) + '/yaz'));
     $('#add-chap-btn').addEventListener('click', () => showAddChapterModal(slug));
+    $('#add-intro-chapter-btn').addEventListener('click', () => {
+      showAddChapterModal(slug);
+      $('#ch-title').value = 'Giriş';
+      $('#ch-order').value = '-1';
+    });
+    document.querySelectorAll('.delete-book-draft').forEach(button => {
+      button.addEventListener('click', async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        await confirmAndDeleteBookDraft(slug, button.dataset.pageSlug);
+      });
+    });
+    attachBookChapterDragAndDrop(slug);
     document.querySelectorAll('.del-chapter').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
@@ -7505,9 +7728,67 @@ async function renderBookDetail(app, slug) {
   });
 }
 
-function pageItemHTML(p, bookSlug) {
-  const canEdit = currentUser && !!bookSlug;
-  return `<div class="page-item">
+async function confirmAndDeleteBookDraft(bookSlug, pageSlug) {
+  if (!await CigCigDialogs.confirm('Bu taslağı silmek istediğinize emin misiniz? Bu işlem geri alınamaz.')) return;
+  if (!await CigCigDialogs.confirm('Taslak kalıcı olarak silinecek. Silmeyi kesinleştirmek istiyor musunuz?')) return;
+  try {
+    await api(`/book/${encodeURIComponent(bookSlug)}/page/${encodeURIComponent(pageSlug)}/draft`, { method: 'DELETE' });
+    toast('Taslak silindi');
+    renderRoute(location.pathname);
+  } catch (error) { toast(error.message, 'error'); }
+}
+
+function attachBookChapterDragAndDrop(bookSlug) {
+  const list = $('.chapters-list');
+  if (!list) return;
+  let draggedPageSlug = '';
+  list.addEventListener('dragstart', event => {
+    const page = event.target.closest('.book-page-draggable');
+    if (!page) return;
+    draggedPageSlug = page.dataset.bookPageSlug || '';
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', draggedPageSlug);
+    requestAnimationFrame(() => page.classList.add('is-dragging'));
+  });
+  list.addEventListener('dragend', event => {
+    event.target.closest('.book-page-draggable')?.classList.remove('is-dragging');
+    list.querySelectorAll('.book-chapter-drop-target.is-drop-target').forEach(target => target.classList.remove('is-drop-target'));
+    draggedPageSlug = '';
+  });
+  list.addEventListener('dragover', event => {
+    const target = event.target.closest('.book-chapter-drop-target');
+    if (!target || !draggedPageSlug) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    list.querySelectorAll('.book-chapter-drop-target.is-drop-target').forEach(item => item.classList.toggle('is-drop-target', item === target));
+  });
+  list.addEventListener('dragleave', event => {
+    const target = event.target.closest('.book-chapter-drop-target');
+    if (target && !target.contains(event.relatedTarget)) target.classList.remove('is-drop-target');
+  });
+  list.addEventListener('drop', async event => {
+    const target = event.target.closest('.book-chapter-drop-target');
+    if (!target || !draggedPageSlug) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const pageSlug = draggedPageSlug;
+    const chapterId = target.dataset.dropChapter || null;
+    target.classList.remove('is-drop-target');
+    try {
+      await api(`/book/${encodeURIComponent(bookSlug)}/page/${encodeURIComponent(pageSlug)}/chapter`, {
+        method: 'PUT',
+        body: JSON.stringify({ chapter_id: chapterId })
+      });
+      toast(chapterId ? 'Sayfa bölüme eklendi' : 'Sayfa bölümden çıkarıldı');
+      renderRoute(location.pathname);
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+function pageItemHTML(p, bookSlug, isOwner = false) {
+  return `<div class="page-item${isOwner ? ' book-page-draggable' : ''}"${isOwner ? ` draggable="true" data-book-page-slug="${escHtml(p.slug)}"` : ''}>
+    ${isOwner ? '<i class="fas fa-grip-vertical book-page-drag-handle" aria-label="Sürükleyerek bölüme taşı"></i>' : ''}
+    <span class="book-page-item-number">${p.page_num}</span>
     <a href="/kitap/${escHtml(bookSlug)}/sayfa/${escHtml(p.slug)}" data-link class="page-title">${escHtml(p.title)}</a>
   </div>`;
 }
@@ -8088,8 +8369,9 @@ async function renderPageReader(app, bookSlug, pageSlug) {
       <span>${escHtml(page.title)}</span>
     </div>
 
-    ${isOwner ? `<div style="display:flex;gap:8px;margin-bottom:16px">
+    ${isOwner ? `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button class="btn btn-outline btn-sm" id="edit-page-btn"><i class="fas fa-edit"></i> ${data.draft ? 'Taslağa devam et' : 'Düzenle'}</button>
+      ${data.draft ? '<button class="btn btn-outline btn-sm" id="delete-page-draft-btn"><i class="fas fa-trash"></i> Düzenleme taslağını sil</button>' : ''}
       <button class="btn btn-danger btn-sm" id="del-page-btn"><i class="fas fa-trash"></i> Sil</button>
     </div>` : ''}
 
@@ -8191,6 +8473,7 @@ async function renderPageReader(app, bookSlug, pageSlug) {
 
   if (isOwner) {
     $('#edit-page-btn').addEventListener('click', () => navigate(`/kitap/${encodeURIComponent(bookSlug)}/yaz/${encodeURIComponent(pageSlug)}`));
+    $('#delete-page-draft-btn')?.addEventListener('click', () => confirmAndDeleteBookDraft(bookSlug, pageSlug));
     $('#del-page-btn').addEventListener('click', async () => {
       if (!await CigCigDialogs.confirm('Sayfa silinsin mi?')) return;
       try { await api(`/book/${bookSlug}/page/${pageSlug}`, { method: 'DELETE' }); toast('Sayfa silindi'); navigate('/kitap/' + bookSlug); } catch (e) { toast(e.message, 'error'); }
@@ -9758,7 +10041,7 @@ function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyo
 
 function pauseRealsForComposer() {
   if (!location.pathname.startsWith('/reals')) return;
-  const item = document.querySelector('.reals-item.is-active');
+  const item = document.querySelector('.ig-reel.is-active, .reals-item.is-active');
   const video = item?.querySelector('video');
   if (!video) return;
   const wasReplaying = !!item.querySelector('.reals-replay-countdown:not([hidden])');
@@ -11163,7 +11446,7 @@ async function renderProfile(app, username) {
         ${user.avatar && !user.avatar_removed ? `<img src="${escHtml(user.avatar)}" class="profile-avatar" alt="" />` : `<div class="profile-avatar-placeholder"><i class="fas fa-user"></i></div>`}
       </div>
       <div class="profile-header-actions${isOwn ? ' is-own' : ' is-other'}">
-        ${isOwn && currentUser?.is_admin ? '<a href="/gubukgak?from=profile" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
+        ${isOwn && currentUser?.is_admin ? '<a href="/api/admin/panel-entry" onclick="openAdminPanel(event)" class="profile-admin-icon-btn" aria-label="Yetkili paneli" title="Yetkili paneli"><i class="fas fa-shield-halved" aria-hidden="true"></i></a>' : ''}
         ${isOwn ? '<a href="/ayarlar" data-link class="profile-edit-settings-btn" aria-label="Profili düzenle" title="Profili düzenle"><i class="fas fa-gear" aria-hidden="true"></i></a>' : ''}
         ${profileBadgesButtonHTML(badges)}
       </div>
@@ -15814,9 +16097,10 @@ async function renderDMChat(username) {
         <div class="dm-img-preview-wrap" id="dm-img-preview-wrap" hidden></div>
         <button class="dm-image-limit-toggle" id="dm-image-limit-toggle" type="button" title="Fotoğraf sınırını ayarla" aria-label="Fotoğraf sınırını ayarla" aria-controls="dm-image-view-limit-wrap" aria-expanded="false" hidden><i class="fas fa-eye" aria-hidden="true"></i></button>
         <span class="dm-img-upload-status" id="dm-img-upload-status" aria-live="polite"></span>
-        <textarea id="dm-input" placeholder="Mesaj yaz..." rows="1"></textarea>
+        <textarea id="dm-input" placeholder="Mesaj" rows="1" enterkeyhint="send" autocomplete="off" autocapitalize="sentences" maxlength="5000"></textarea>
       </div>
-      <button class="dm-send-btn" id="dm-send-btn" type="button"><i class="fas fa-paper-plane"></i></button>
+      <button class="dm-send-btn" id="dm-send-btn" type="button" aria-label="Gönder"><i class="fas fa-paper-plane"></i></button>
+      <button class="dm-send-btn dm-mic-btn" id="dm-mic-btn" type="button" aria-label="Sesli mesaj kaydet (basılı tut)" title="Sesli mesaj"><i class="fas fa-microphone"></i></button>
     </div>
   </div>`;
 
@@ -15918,12 +16202,56 @@ async function renderDMChat(username) {
   enhanceLinkPreviews(msgsEl);
   installMessageSelectionGestures(msgsEl, '.dm-msg-wrap', enterDmSelection);
 
+  // Eski mesajları yukarı kaydırınca sayfa sayfa yükle (ilk açılış hızlı kalsın).
+  if (msgsEl) {
+    let olderLoading = false;
+    let olderExhausted = orderedMessages.length < 100 || Boolean(requestedMessageId);
+    const loadOlderMessages = async () => {
+      if (olderLoading || olderExhausted || !msgsEl.isConnected) return;
+      const firstRow = msgsEl.querySelector(':scope > .dm-msg-wrap[data-id]:not([data-pending])');
+      const oldestId = Number(firstRow?.dataset.id) || 0;
+      if (!oldestId) { olderExhausted = true; return; }
+      olderLoading = true;
+      const loader = document.createElement('div');
+      loader.className = 'dm-older-loader';
+      loader.innerHTML = '<span class="spinner"></span>';
+      msgsEl.prepend(loader);
+      try {
+        const older = await api(`/conversation/${encodeURIComponent(username)}?limit=60&before_id=${oldestId}`, { headers: searchUnlockHeaders });
+        if (!isCurrentChatRender()) return;
+        const list = (Array.isArray(older) ? older : older?.messages || [])
+          .filter(message => !message.deleted_for_all && !msgsEl.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`))
+          .sort((left, right) => Number(left.id) - Number(right.id));
+        if (list.length < 60) olderExhausted = true;
+        if (!list.length) return;
+        loader.remove();
+        const firstSeparator = msgsEl.firstElementChild?.matches('.dm-day-sep') ? msgsEl.firstElementChild : null;
+        const previousHeight = msgsEl.scrollHeight;
+        const previousTop = msgsEl.scrollTop;
+        if (firstSeparator && firstSeparator.dataset.day === dmDayKey(list[list.length - 1].created_at)) {
+          firstSeparator.remove();
+        }
+        msgsEl.insertAdjacentHTML('afterbegin', dmMessagesHTML(list, currentUser.id));
+        msgsEl.scrollTop = previousTop + (msgsEl.scrollHeight - previousHeight);
+        enhanceLinkPreviews(msgsEl);
+      } catch (error) {
+        console.warn('Eski mesajlar yüklenemedi:', error.message);
+      } finally {
+        loader.remove();
+        olderLoading = false;
+      }
+    };
+    msgsEl.addEventListener('scroll', () => {
+      if (msgsEl.scrollTop < 160) loadOlderMessages();
+    }, { passive: true });
+  }
+
   // Reply management
   const setReply = (id) => { replyToId = id; };
   const startDmReply = row => {
     if (!row) return;
     setReply(row.dataset.id);
-    const replyText = row.dataset.content?.trim() || (row.querySelector('.dm-message-image, .dm-ephemeral-open') ? 'Fotoğraf' : 'Mesaj');
+    const replyText = row.dataset.content?.trim() || (row.querySelector('.cg-voice') ? '🎤 Sesli mesaj' : row.querySelector('.dm-message-image, .dm-ephemeral-open') ? 'Fotoğraf' : 'Mesaj');
     const replyBar = document.getElementById('dm-reply-bar');
     const replyLabel = document.getElementById('dm-reply-text');
     if (replyBar) replyBar.classList.add('visible');
@@ -15962,6 +16290,7 @@ async function renderDMChat(username) {
     }
     preview.hidden = pendingImgs.length === 0;
     inputWrap?.classList.toggle('dm-has-images', pendingImgs.length > 0);
+    window.__dmSyncComposerMode?.();
     if (viewLimitWrap) viewLimitWrap.hidden = pendingImgs.length === 0 || !imageLimitPanelOpen;
     if (viewLimitToggle) {
       viewLimitToggle.hidden = pendingImgs.length === 0;
@@ -16072,7 +16401,8 @@ async function renderDMChat(username) {
     });
     textareaEl.addEventListener('input', () => {
       textareaEl.style.height = 'auto';
-      textareaEl.style.height = Math.min(textareaEl.scrollHeight, 120) + 'px';
+      textareaEl.style.height = Math.min(textareaEl.scrollHeight, 132) + 'px';
+      window.__dmSyncComposerMode?.();
       if (dmTypingTimer) clearTimeout(dmTypingTimer);
       const conversationId = document.querySelector('.dm-chat')?.dataset.conversationId;
       if (textareaEl.value.trim() && conversationId && !isSelfConversation) {
@@ -16123,6 +16453,7 @@ async function renderDMChat(username) {
       window.__dmClearImg();
       if (uploadStatus) uploadStatus.textContent = '';
       if (inputEl) { inputEl.value = ''; inputEl.style.height = 'auto'; }
+      window.__dmSyncComposerMode?.();
       window.__dmClearReply?.();
       const el = document.getElementById('dm-messages');
       if (el) {
@@ -16141,8 +16472,15 @@ async function renderDMChat(username) {
   };
 
   document.getElementById('dm-send-btn')?.addEventListener('click', sendDmMessage);
+  const dmIsTouchDevice = window.matchMedia('(pointer: coarse)').matches;
   textareaEl?.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDmMessage(); }
+    if (e.isComposing || e.keyCode === 229) return;
+    // Telefonlarda Enter yeni satır ekler (WhatsApp gibi); gönderim butonla yapılır.
+    if (e.key === 'Enter' && !e.shiftKey && !dmIsTouchDevice) { e.preventDefault(); sendDmMessage(); }
+  });
+  // Gönder butonuna dokunurken klavyenin kapanmasını engelle (odak textarea'da kalsın).
+  document.getElementById('dm-send-btn')?.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'mouse') event.preventDefault();
   });
 
   // Msg menu button clicks
@@ -16162,6 +16500,83 @@ async function renderDMChat(username) {
     window.__dmClearReply?.();
     return message;
   };
+  // ===== Sesli mesaj (WhatsApp tarzı) =====
+  const dmInputBar = document.querySelector('.dm-chat .dm-input-bar');
+  const dmMicButton = document.getElementById('dm-mic-btn');
+  const voiceSupported = Boolean(window.CigCigVoice?.isSupported());
+  window.__dmSyncComposerMode = () => {
+    const input = document.getElementById('dm-input');
+    const hasContent = Boolean(input?.value.trim()) || pendingImgs.length > 0;
+    dmInputBar?.classList.toggle('has-content', hasContent || !voiceSupported);
+  };
+  window.__dmSyncComposerMode();
+  window.__dmVoiceRecorder?.destroy?.();
+  window.__dmVoiceRecorder = null;
+  if (voiceSupported && dmInputBar && dmMicButton) {
+    const sendVoiceNote = async recording => {
+      const list = document.getElementById('dm-messages');
+      if (!list) return;
+      const holder = document.createElement('div');
+      holder.innerHTML = window.CigCigVoice.pendingBubbleHTML(recording.duration);
+      const pendingRow = holder.firstElementChild;
+      const typingRow = list.querySelector(':scope > .dm-peer-typing-row');
+      list.insertBefore(pendingRow, typingRow || null);
+      list.scrollTop = list.scrollHeight;
+      const voiceEl = pendingRow.querySelector('.cg-voice');
+      const status = pendingRow.querySelector('.cg-voice-status');
+      const replyId = replyToId;
+      try {
+        const uploaded = await window.CigCigVoice.uploadVoice(recording, ratio => {
+          voiceEl?.style.setProperty('--cg-upload', String(Math.round(ratio * 100)));
+          if (status) status.textContent = `Yükleniyor %${Math.round(ratio * 100)}`;
+        });
+        if (status) status.textContent = 'Gönderiliyor…';
+        const message = await api(`/conversation/${encodeURIComponent(username)}/messages`, {
+          method: 'POST',
+          body: JSON.stringify({
+            voice_url: uploaded.voice_url,
+            voice_duration: uploaded.voice_duration,
+            voice_waveform: uploaded.voice_waveform,
+            voice_token: uploaded.voice_token,
+            reply_to_id: replyId
+          })
+        });
+        pendingRow.remove();
+        if (replyId && replyToId === replyId) window.__dmClearReply?.();
+        const el = document.getElementById('dm-messages');
+        if (el && !el.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(message.id))}"]`)) {
+          appendDMMessage(el, message, currentUser.id, false);
+          el.scrollTop = el.scrollHeight;
+        }
+        lastPollMsgId = Math.max(lastPollMsgId, Number(message.id) || 0);
+      } catch (error) {
+        pendingRow.classList.add('is-failed');
+        if (status) status.textContent = 'Gönderilemedi · tekrar dene';
+        const retry = pendingRow.querySelector('.cg-voice-spinner');
+        if (retry) {
+          retry.outerHTML = '<button type="button" class="cg-voice-play cg-voice-retry" aria-label="Tekrar gönder"><i class="fas fa-rotate-right"></i></button>';
+          pendingRow.querySelector('.cg-voice-retry')?.addEventListener('click', event => {
+            event.stopPropagation();
+            pendingRow.remove();
+            sendVoiceNote(recording);
+          }, { once: true });
+        }
+        toast(error.message || 'Sesli mesaj gönderilemedi.', 'error');
+      }
+    };
+    window.__dmVoiceRecorder = new window.CigCigVoice.VoiceRecorder({
+      inputBar: dmInputBar,
+      micButton: dmMicButton,
+      onSend: sendVoiceNote,
+      onStateChange: recording => {
+        if (recording) {
+          stopLocalDmTyping();
+          window.CigCigVoice.stopPlayback();
+        }
+      }
+    });
+  }
+
   const attachButton = document.getElementById('dm-attach-btn');
   const attachMenu = document.getElementById('dm-attach-menu');
   const closeAttachMenu = () => {
@@ -16464,11 +16879,19 @@ async function renderDMChat(username) {
     } catch (e) { toast(e.message, 'error'); }
   });
 
-  // Poll for new messages
+  // Yedek senkronizasyon: anlık bağlantı (socket) açıkken yeni mesajlar zaten anında gelir;
+  // bu durumda yalnızca 20 sn'de bir silme/düzenleme eşitlemesi yapılır. Bağlantı yoksa 3 sn'de bir.
+  // Sekme arka plandayken hiç sorgu atılmaz (pil ve veri tasarrufu).
   let dmPollInFlight = false;
+  let dmLastPollAt = Date.now();
   dmPollTimer = setInterval(async () => {
     if (!document.getElementById('dm-messages')) { clearInterval(dmPollTimer); dmPollTimer = null; return; }
-    if (dmPollInFlight) return;
+    if (dmPollInFlight || document.hidden) return;
+    const socketLive = Boolean(realtimeSocket?.connected);
+    const forced = window.__dmForcePoll === true;
+    if (!forced && Date.now() - dmLastPollAt < (socketLive ? 20000 : 3000)) return;
+    window.__dmForcePoll = false;
+    dmLastPollAt = Date.now();
     dmPollInFlight = true;
     try {
       const deletionCheckpoint = lastPollDeletionAt;
@@ -16661,6 +17084,40 @@ function installMessageReplySwipeGesture(container, onReply, { rowSelector = '.d
   }, true);
 }
 
+// WhatsApp tarzı saat (14:05) ve gün ayraçları (Bugün / Dün / 12 Kasım 2026)
+function dmClockTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+}
+function dmFullTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function dmDayKey(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+function dmDayLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (dmDayKey(date) === dmDayKey(today)) return 'Bugün';
+  if (dmDayKey(date) === dmDayKey(yesterday)) return 'Dün';
+  const diffDays = (today - date) / 86400000;
+  if (diffDays < 7) return date.toLocaleDateString('tr-TR', { weekday: 'long' });
+  return date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
+function dmDaySeparatorHTML(message, previousMessage) {
+  const key = dmDayKey(message?.created_at);
+  if (!key) return '';
+  if (previousMessage && dmDayKey(previousMessage.created_at) === key) return '';
+  return `<div class="dm-day-sep" data-day="${escHtml(key)}"><span>${escHtml(dmDayLabel(message.created_at))}</span></div>`;
+}
+
 function dmMessagesHTML(messages, myId) {
   let previousMessage = null;
   return messages.map(message => {
@@ -16683,9 +17140,22 @@ function dmMessageImageUrls(message) {
 }
 
 function appendDMMessage(container, message, myId, selMode) {
-  const previousElement = container.lastElementChild?.matches('.dm-msg-wrap')
-    ? container.lastElementChild
-    : null;
+  // Yazıyor göstergesi her zaman en altta kalsın; yeni mesaj onun önüne eklenir.
+  const typingRow = container.querySelector(':scope > .dm-peer-typing-row');
+  const rows = container.querySelectorAll(':scope > .dm-msg-wrap:not([data-pending])');
+  const previousElement = rows.length ? rows[rows.length - 1] : null;
+  if (typingRow) {
+    const previousMessage = previousElement
+      ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt }
+      : null;
+    const template = document.createElement('template');
+    template.innerHTML = dmMessageHTML(message, myId, selMode, previousMessage);
+    const nodes = [...template.content.children];
+    nodes.forEach(node => container.insertBefore(node, typingRow));
+    const added = nodes.find(node => node.matches('.dm-msg-wrap'));
+    if (added) animateMessageEntry(added);
+    return;
+  }
   const previousMessage = previousElement
     ? { sender_id: previousElement.dataset.senderId, created_at: previousElement.dataset.createdAt, deleted_for_all: previousElement.dataset.deletedForAll === 'true' }
     : null;
@@ -17349,7 +17819,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     && Number.isFinite(messageTime)
     && Number.isFinite(previousTime)
     && Math.abs(messageTime - previousTime) <= 60_000;
-  const messageBubbleContent = `${Number(m.image_view_limit) > 0 && !isOwn
+  const messageBubbleContent = `${m.voice_url && window.CigCigVoice ? window.CigCigVoice.bubbleHTML(m, isOwn) : ''}${Number(m.image_view_limit) > 0 && !isOwn
       ? Number(m.image_view_count) >= Number(m.image_view_limit)
         ? `<span class="dm-ephemeral-expired"><i class="fas fa-eye-slash"></i> Fotoğrafın görüntüleme hakkı doldu</span>`
         : `<button type="button" class="dm-ephemeral-open" data-message-id="${m.id}" data-view-limit="${Number(m.image_view_limit)}" data-view-count="${Number(m.image_view_count) || 0}" aria-label="Sınırlı görüntülemeli fotoğrafı aç"><i class="fas fa-eye"></i><span>Fotoğraf</span><small>${Number(m.image_view_limit) - (Number(m.image_view_count) || 0)} görüntüleme</small></button>`
@@ -17402,7 +17872,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
     ${dmMessageReactionsHTML(m.reactions, myId)}
     ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}`;
 
-  return `<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
+  return `${dmDaySeparatorHTML(m, previousMessage)}<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${m.voice_url ? ' dm-has-voice' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -17423,7 +17893,7 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
         : ''}
       <div class="dm-msg-bubble${m.edited_at ? ' is-edited' : ''}">${messageBubbleContent}</div>
       <div class="dm-msg-meta">
-        <span style="font-size:10px;color:var(--text-muted)">${timeAgo(m.created_at)}</span>
+        <time class="dm-msg-time" datetime="${escHtml(String(m.created_at || ''))}" title="${escHtml(dmFullTimestamp(m.created_at))}">${escHtml(dmClockTime(m.created_at))}</time>
         ${isOwn
           ? `<span class="dm-read-status${m.read_at ? ' is-read' : ''}" data-message-id="${escHtml(String(m.id))}" style="font-size:11px;margin-left:2px">${m.read_at
               ? '<i class="fas fa-check-double" title="Okundu" aria-label="Okundu"></i>'

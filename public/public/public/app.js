@@ -3,6 +3,21 @@ let currentToken = localStorage.getItem('token');
 let realsFeedOrder = null;
 let siteName = '';
 
+async function openAdminPanel(event) {
+  event.preventDefault();
+  try {
+    const response = await fetch('/api/admin/panel-entry', {
+      headers: { Authorization: `Bearer ${currentToken || ''}` }
+    });
+    if (response.redirected) return window.location.assign(response.url);
+    const data = await response.json();
+    window.alert(data.error || 'Admin paneli açılamadı.');
+  } catch (error) {
+    console.error('Admin paneli açılamadı:', error);
+    window.alert('Admin paneli açılamadı.');
+  }
+}
+
 const SITE_URL = 'https://cigcig.xyz';
 
 function $(sel) { return document.querySelector(sel); }
@@ -2932,7 +2947,7 @@ async function renderProfile(app, username) {
           ${profileSongs.length ? `<div class="profile-stat"><div class="profile-stat-num">${profileSongs.length}</div><div class="profile-stat-label">Müzik</div></div>` : ''}
           <div class="profile-stat"><div class="profile-stat-num">${user.comment_count}</div><div class="profile-stat-label">Yorum</div></div>
         </div>
-        ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/gubukgak" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
+        ${isOwn ? `<a href="/ayarlar" data-link class="btn btn-outline btn-sm" style="margin-top:16px"><i class="fas fa-cog"></i> Profili Düzenle</a>${currentUser && currentUser.is_admin ? `<a href="/api/admin/panel-entry" onclick="openAdminPanel(event)" class="btn btn-sm" style="margin-top:8px;background:linear-gradient(135deg,#1a1aff,#5865F2);border:none;color:#fff"><i class="fas fa-shield"></i> Admin Panel</a>` : ''}` : ''}
         ${!isOwn && currentUser ? `<div style="display:flex;gap:8px;margin-top:16px;position:relative">
           <button id="profile-msg-btn" class="btn btn-outline btn-sm" onclick="navigate('/mesajlar/${escHtml(user.username)}')"><i class="fas fa-envelope"></i> Mesaj</button>
           <button id="profile-more-btn" class="btn btn-ghost btn-sm" style="padding:5px 9px"><i class="fas fa-ellipsis-h"></i></button>

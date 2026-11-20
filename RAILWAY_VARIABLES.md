@@ -61,6 +61,12 @@ OPENAI_API_KEY=<OpenAI API anahtari>
 
 Not: R2 ve Cloudinary anahtarlarini bu dosyaya veya git reposuna gercek degerleriyle yazmayin. Railway Variables uzerinden girin.
 
+Ana admin paneli varsayilan olarak `/gubukgak` adresinde calisir; her bolumun kendi adresi vardir (ornek: `/gubukgak/kullanicilar`, `/gubukgak/ayarlar`, `/gubukgak/reals-reklamlari`). Farkli bir yol istersen Railway Variables alaninda `ADMIN_PANEL_PATH=/yeni-yol` tanimla (3-128 URL-guvenli karakter). Gizli yol tek basina guvenlik saglamaz: tum admin API'leri ayrica admin oturumu ve yetki kontrolunden gecer, giris denemeleri sinirlandirilir ve sayfa arama motorlarina kapatilir.
+
+## Sesli mesajlar
+
+Sesli mesajlar Cloudinary'de `cigcig/voice` klasorune yuklenir ve her cihazda (iPhone dahil) calismasi icin MP3 olarak teslim edilir. Bu ozellik icin yukaridaki Cloudinary degiskenlerinden biri tanimli olmalidir. Istege bagli: `DM_VOICE_RATE_LIMIT_MAX` (10 dakikada kullanici basina sesli mesaj siniri, varsayilan 80).
+
 Müzik sözlerini OpenAI Whisper ile otomatik çıkarmak için `OPENAI_API_KEY` değişkenini de Railway Variables alanına ekleyin. Bu özellik kullanıldığında seçilen ses dosyası OpenAI'a gönderilir; anahtar tanımlı değilse otomatik söz çıkarma çalışmaz.
 
 ## E-posta ve 2 asamali dogrulama

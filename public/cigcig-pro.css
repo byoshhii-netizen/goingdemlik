@@ -1,0 +1,1035 @@
+/* ==========================================================================
+   CigCig Pro katmanı
+   - Reals: Instagram Reels tarzı tam ekran dikey akış (ig-* sınıfları)
+   - Mesajlar: WhatsApp tarzı mobil sohbet, sesli mesaj kaydı ve oynatıcı
+   Bu dosya style.css'ten SONRA yüklenir ve eski katmanların üzerine yazar.
+   ========================================================================== */
+
+/* -------------------------------------------------------------------------
+   REALS
+   ------------------------------------------------------------------------- */
+body.reals-page {
+  --ig-bottom-clearance: 0px;
+  background: #000 !important;
+  overscroll-behavior: none;
+}
+body.reals-page #app {
+  padding: 0 !important;
+  margin: 0 !important;
+  max-width: none !important;
+  min-height: 0 !important;
+}
+body.reals-page #site-footer { display: none !important; }
+
+.ig-reels {
+  position: fixed;
+  inset: 0 0 var(--ig-bottom-clearance) 0;
+  z-index: 30;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
+}
+.ig-reels-feed {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  outline: none;
+  touch-action: pan-y;
+}
+.ig-reels-feed::-webkit-scrollbar { display: none; }
+.ig-reels-sentinel { height: 1px; }
+
+.ig-reel {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow: hidden;
+  contain: layout paint;
+  background: #000;
+}
+.ig-reel-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+  touch-action: pan-y;
+}
+.ig-reel-backdrop {
+  position: absolute;
+  inset: -40px;
+  background: #111 center / cover no-repeat;
+  filter: blur(36px) brightness(.45) saturate(1.2);
+  transform: translateZ(0);
+  opacity: 0;
+  transition: opacity .3s ease;
+}
+.ig-reel.is-landscape .ig-reel-backdrop { opacity: 1; }
+.ig-reel-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: transparent;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+.ig-reel.is-landscape .ig-reel-video { object-fit: contain; }
+.ig-reel-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgba(0,0,0,.42) 0%, rgba(0,0,0,0) 16%),
+    linear-gradient(to top, rgba(0,0,0,.62) 0%, rgba(0,0,0,.18) 26%, rgba(0,0,0,0) 42%);
+}
+.ig-reel.is-caption-open .ig-reel-shade {
+  background: linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.55) 45%, rgba(0,0,0,.1) 75%);
+}
+
+/* Yükleniyor */
+.ig-reels-spinner {
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.22);
+  border-top-color: #fff;
+  animation: igSpin .8s linear infinite;
+}
+@keyframes igSpin { to { transform: rotate(360deg); } }
+.ig-reel-spinner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+.ig-reel.is-loading .ig-reel-spinner { opacity: 1; }
+.ig-reels-skeleton {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, #1a1a1a 0%, #000 70%);
+}
+
+/* Ses / duraklatma göstergeleri */
+.ig-reel-flash,
+.ig-reel-paused {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 72px;
+  height: 72px;
+  margin: -36px 0 0 -36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(0,0,0,.5);
+  color: #fff;
+  font-size: 26px;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(.7);
+}
+.ig-reel-flash.is-visible { animation: igFlash .7s ease forwards; }
+@keyframes igFlash {
+  0% { opacity: 0; transform: scale(.6); }
+  20% { opacity: 1; transform: scale(1); }
+  70% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+.ig-reel.is-paused .ig-reel-paused { opacity: 1; transform: scale(1); transition: opacity .15s ease, transform .15s ease; }
+.ig-reel.is-paused .ig-reel-paused i { margin-left: 5px; }
+
+.ig-reel-error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20,20,20,.86);
+  color: #fff;
+  font: 600 14px/1.2 inherit;
+  cursor: pointer;
+  z-index: 4;
+}
+.ig-reel-error[hidden] { display: none; }
+
+/* Çift dokunuş kalpleri */
+.ig-reel-hearts { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.ig-reel-hearts i {
+  position: absolute;
+  font-size: 92px;
+  color: #fff;
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,.35));
+  transform: translate(-50%, -50%) rotate(var(--tilt, 0deg)) scale(0);
+  animation: igHeart .9s cubic-bezier(.17,.89,.32,1.28) forwards;
+}
+@keyframes igHeart {
+  0% { transform: translate(-50%, -50%) rotate(var(--tilt)) scale(0); opacity: 0; }
+  15% { transform: translate(-50%, -50%) rotate(var(--tilt)) scale(1.2); opacity: 1; }
+  30% { transform: translate(-50%, -50%) rotate(var(--tilt)) scale(.95); }
+  45% { transform: translate(-50%, -50%) rotate(var(--tilt)) scale(1); }
+  80% { opacity: 1; }
+  100% { transform: translate(-50%, -160%) rotate(var(--tilt)) scale(.9); opacity: 0; }
+}
+
+/* Basılı tutarken arayüzü gizle (Instagram davranışı) */
+.ig-reel.is-holding .ig-reel-info,
+.ig-reel.is-holding .ig-reel-actions,
+.ig-reel.is-holding .ig-reel-shade,
+.ig-reel.is-holding .ig-reel-progress { opacity: 0; transition: opacity .2s ease; }
+.ig-reels:has(.ig-reel.is-active.is-holding) .ig-reels-top { opacity: 0; }
+
+/* Alt bilgi */
+.ig-reel-info {
+  position: absolute;
+  left: 14px;
+  right: 76px;
+  bottom: 18px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-shadow: 0 1px 2px rgba(0,0,0,.45);
+  transition: opacity .2s ease;
+}
+.ig-reel-author { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ig-reel-avatar { flex: 0 0 auto; display: block; border-radius: 50%; line-height: 0; }
+.ig-reel-avatar-img, .ig-reel-avatar .avatar-placeholder {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255,255,255,.9);
+  display: grid;
+  place-items: center;
+  background: #333;
+  color: #ddd;
+  font-size: 14px;
+}
+.ig-reel-username {
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 14.5px;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.ig-reel-verified { color: #4aa3ff; font-size: 12px; margin-left: 2px; }
+.ig-reel-follow {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,.75);
+  background: transparent;
+  color: #fff;
+  font: 700 13px/1 inherit;
+  cursor: pointer;
+  text-shadow: none;
+}
+.ig-reel-follow:active { transform: scale(.96); }
+.ig-reel-follow:disabled { opacity: .6; }
+.ig-reel-title { font-weight: 700; font-size: 14px; line-height: 1.3; }
+.ig-reel-caption { font-size: 14px; line-height: 1.38; color: #f5f5f5; }
+.ig-reel-caption .ig-reel-caption-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-line;
+  word-break: break-word;
+}
+.ig-reel-caption[data-expanded="true"] .ig-reel-caption-text {
+  -webkit-line-clamp: unset;
+  display: block;
+  max-height: 40dvh;
+  overflow-y: auto;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.ig-reel-caption a, .ig-reel-caption .hashtag-link, .ig-reel-caption [class*="hashtag"] { color: #fff !important; font-weight: 700; text-decoration: none; }
+.ig-reel-caption-more {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin-top: 2px;
+  color: rgba(255,255,255,.75);
+  font: 600 13.5px/1.3 inherit;
+  cursor: pointer;
+}
+.ig-reel-meta-row { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 13px; }
+.ig-reel-sound, .ig-reel-location { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ig-reel-sound i, .ig-reel-location i { font-size: 11px; flex: 0 0 auto; }
+.ig-reel-sound-track { overflow: hidden; max-width: 58vw; white-space: nowrap; mask-image: linear-gradient(90deg, #000 85%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.ig-reel-sound-track span { display: inline-block; padding-right: 28px; }
+.ig-reel.is-active:not(.is-paused) .ig-reel-sound-track span { animation: igMarquee 9s linear infinite; }
+@keyframes igMarquee { 0%, 12% { transform: translateX(0); } 100% { transform: translateX(-60%); } }
+.ig-reel-location { opacity: .9; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ig-reel-ad-badge {
+  width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: rgba(255,255,255,.18); font-size: 14px;
+}
+.ig-reel-author-text { display: flex; flex-direction: column; min-width: 0; }
+.ig-reel-author-text strong { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ig-reel-author-text small { font-size: 12px; opacity: .85; }
+.ig-reel-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 14px; border-radius: 8px;
+  background: rgba(255,255,255,.95); color: #111 !important;
+  font-weight: 700; font-size: 14px; text-decoration: none; text-shadow: none;
+}
+
+/* İlerleme çubuğu */
+.ig-reel-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 14px;
+  z-index: 3;
+  cursor: pointer;
+  touch-action: none;
+}
+.ig-reel-progress::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: rgba(255,255,255,.25);
+  transition: height .15s ease;
+}
+.ig-reel-progress-fill {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2px;
+  background: #fff;
+  transform-origin: left center;
+  transform: scaleX(0);
+  transition: height .15s ease;
+  will-change: transform;
+}
+.ig-reel.is-scrubbing .ig-reel-progress::before,
+.ig-reel.is-scrubbing .ig-reel-progress-fill,
+.ig-reel-progress:hover::before,
+.ig-reel-progress:hover .ig-reel-progress-fill { height: 5px; }
+
+/* Sağ eylem sütunu */
+.ig-reel-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  transition: opacity .2s ease;
+}
+.ig-reel-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 48px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ig-reel-action-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 36px;
+  font-size: 26px;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.45));
+  transition: transform .12s ease;
+}
+.ig-reel-action:active .ig-reel-action-icon { transform: scale(.86); }
+.ig-reel-action-count { font-size: 12.5px; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+.ig-like.is-on .ig-reel-action-icon { color: #ff3040; }
+.ig-like.is-popping .ig-reel-action-icon { animation: igPop .38s cubic-bezier(.17,.89,.32,1.4); }
+@keyframes igPop { 0% { transform: scale(1); } 40% { transform: scale(1.3); } 100% { transform: scale(1); } }
+.ig-save.is-on .ig-reel-action-icon { color: #fff; }
+.ig-more .ig-reel-action-icon { font-size: 22px; }
+.ig-reel-disc {
+  display: block;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid #fff;
+  margin-top: 4px;
+  line-height: 0;
+}
+.ig-reel-disc-img, .ig-reel-disc .avatar-placeholder { width: 100% !important; height: 100% !important; object-fit: cover; border-radius: 0 !important; display: grid; place-items: center; background: #333; color: #bbb; font-size: 12px; }
+
+/* Üst bar */
+.ig-reels-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(env(safe-area-inset-top) + 8px) 10px 8px;
+  pointer-events: none;
+  transition: opacity .2s ease;
+}
+.ig-reels-top > * { pointer-events: auto; }
+.ig-reels-heading {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -.3px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0,0,0,.4);
+}
+.ig-reels-top-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.ig-reels-icon-btn {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #fff;
+  font-size: 21px;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,.45));
+  -webkit-tap-highlight-color: transparent;
+}
+.ig-reels-icon-btn:active { transform: scale(.9); }
+.ig-reels-icon-btn:focus-visible, .ig-reel-action:focus-visible, .ig-reels-nav-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.ig-reels-nav { display: none; }
+
+/* Boş/hata durumu */
+.ig-reels-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px;
+  text-align: center;
+  color: #eee;
+}
+.ig-reels-message strong { font-size: 19px; }
+.ig-reels-message span { color: #aaa; font-size: 14px; max-width: 320px; line-height: 1.5; }
+.ig-reels-message-icon { width: 76px; height: 76px; border-radius: 50%; border: 2px solid #fff; display: grid; place-items: center; font-size: 30px; margin-bottom: 6px; }
+.ig-reels-pill-btn { margin-top: 8px; padding: 10px 20px; border-radius: 10px; border: 0; background: #fff; color: #000; font-weight: 700; cursor: pointer; }
+
+/* Telefon: alt menü görünür kalır, Reals kalan alanı doldurur */
+@media (max-width: 768px) {
+  body.reals-page { --ig-bottom-clearance: calc(52px + env(safe-area-inset-bottom)); }
+  body.reals-page #mobile-bottom-bar,
+  body.reals-page .mobile-bottom-bar {
+    z-index: 60 !important;
+    background: #000 !important;
+    border-top: 1px solid rgba(255,255,255,.08) !important;
+    height: var(--ig-bottom-clearance) !important;
+  }
+  .ig-reels-back { display: none; }
+  .ig-reels-top { padding-left: 14px; }
+}
+
+/* Masaüstü / tablet: Instagram web düzeni (ortalanmış 9:16 kare, sağda eylemler) */
+@media (min-width: 769px) {
+  body.reals-page { --ig-bottom-clearance: 0px; }
+  .ig-reels { background: #0b0b0b; }
+  .ig-reel { display: flex; align-items: center; justify-content: center; gap: 18px; background: transparent; }
+  .ig-reel-stage {
+    position: relative;
+    inset: auto;
+    height: calc(100% - 32px);
+    max-height: 920px;
+    aspect-ratio: 9 / 16;
+    width: auto;
+    max-width: calc(100vw - 220px);
+    border-radius: 12px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .ig-reel-actions {
+    position: static;
+    align-self: flex-end;
+    margin-bottom: 26px;
+    gap: 20px;
+  }
+  .ig-reel-action-icon { width: 46px; height: 46px; border-radius: 50%; background: rgba(255,255,255,.08); font-size: 22px; filter: none; }
+  .ig-reel-action:hover .ig-reel-action-icon { background: rgba(255,255,255,.16); }
+  .ig-reel-info { right: 16px; bottom: 20px; }
+  .ig-reels-top { padding: 14px 18px; }
+  .ig-reels-heading { font-size: 20px; }
+  .ig-reels-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    position: absolute;
+    right: 28px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 6;
+  }
+  .ig-reels-nav-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: 0;
+    background: rgba(255,255,255,.1);
+    color: #fff;
+    font-size: 17px;
+    cursor: pointer;
+  }
+  .ig-reels-nav-btn:hover { background: rgba(255,255,255,.2); }
+  .ig-reel-sound-track { max-width: 220px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ig-reel-sound-track span, .ig-reel-hearts i, .ig-like.is-popping .ig-reel-action-icon { animation: none !important; }
+}
+
+/* Alt sayfalar (yorumlar / seçenekler) */
+.ig-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  pointer-events: none;
+}
+.ig-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  opacity: 0;
+  transition: opacity .22s ease;
+  pointer-events: auto;
+}
+.ig-sheet-panel {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: 86dvh;
+  display: flex;
+  flex-direction: column;
+  background: #1c1c1e;
+  color: #f5f5f5;
+  border-radius: 16px 16px 0 0;
+  padding: 6px 0 calc(8px + env(safe-area-inset-bottom));
+  transform: translateY(100%);
+  transition: transform .26s cubic-bezier(.2,.8,.2,1);
+  pointer-events: auto;
+  box-shadow: 0 -10px 40px rgba(0,0,0,.4);
+}
+.ig-sheet.is-open .ig-sheet-backdrop { opacity: 1; }
+.ig-sheet.is-open .ig-sheet-panel { transform: translateY(0); }
+.ig-sheet-grabber { display: block; width: 40px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.3); margin: 6px auto 8px; flex: 0 0 auto; cursor: grab; touch-action: none; }
+.ig-sheet-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 15px 22px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: 500 15px/1.2 inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ig-sheet-row i { width: 22px; text-align: center; font-size: 18px; }
+.ig-sheet-row:hover, .ig-sheet-row:active { background: rgba(255,255,255,.06); }
+.ig-sheet-row.is-danger { color: #ff4d5e; }
+.ig-sheet-row.is-muted { justify-content: center; color: #aaa; border-top: 1px solid rgba(255,255,255,.08); margin-top: 4px; }
+
+.ig-comments .ig-sheet-panel { height: 72dvh; }
+.ig-comments-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 16px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  touch-action: none;
+}
+.ig-comments-header strong { font-size: 15px; }
+.ig-comments-close { position: absolute; right: 10px; top: -6px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: none; color: #ddd; font-size: 18px; cursor: pointer; }
+.ig-comments-list { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 8px 14px; -webkit-overflow-scrolling: touch; }
+.ig-comments-list .video-comment { color: #eee; }
+.ig-comments-loading, .ig-comments-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 220px; color: #aaa; text-align: center; }
+.ig-comments-empty i { font-size: 34px; color: #ddd; }
+.ig-comments-empty strong { color: #fff; font-size: 17px; }
+.ig-comment-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 14px 4px;
+  border-top: 1px solid rgba(255,255,255,.08);
+}
+.ig-comment-me { width: 34px !important; height: 34px !important; border-radius: 50%; object-fit: cover; flex: 0 0 auto; display: grid; place-items: center; background: #333; }
+.ig-comment-form textarea {
+  flex: 1 1 auto;
+  min-height: 40px;
+  max-height: 110px;
+  padding: 10px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: #2c2c2e;
+  color: #fff;
+  font: 15px/1.35 inherit;
+  resize: none;
+  outline: none;
+}
+.ig-comment-form textarea:focus { border-color: rgba(255,255,255,.35); }
+.ig-comment-form button { flex: 0 0 auto; white-space: nowrap; height: 40px; padding: 0 6px; border: 0; background: none; color: #4aa3ff; font: 700 15px/1 inherit; cursor: pointer; }
+.ig-comment-form button:disabled { opacity: .4; cursor: default; }
+.ig-comment-login { padding: 14px; text-align: center; border-top: 1px solid rgba(255,255,255,.08); }
+.ig-comment-login a { color: #4aa3ff; font-weight: 600; }
+@media (min-width: 769px) {
+  .ig-sheet { align-items: center; }
+  .ig-sheet-panel { border-radius: 16px; max-height: 80vh; }
+  .ig-comments .ig-sheet-panel { height: min(680px, 80vh); }
+}
+
+/* -------------------------------------------------------------------------
+   MESAJLAR — WhatsApp tarzı sohbet
+   ------------------------------------------------------------------------- */
+.dm-chat .dm-messages {
+  scroll-behavior: auto;
+  overflow-anchor: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  contain: content;
+}
+/* Ekran dışındaki mesajlar çizilmez: uzun sohbetlerde kaydırma akıcı kalır */
+.dm-chat .dm-messages > .dm-msg-wrap {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+.dm-chat .dm-messages > .dm-msg-wrap.dm-has-voice { contain-intrinsic-size: auto 78px; }
+
+/* Gün ayracı */
+.dm-day-sep {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 8px;
+  position: sticky;
+  top: 6px;
+  z-index: 2;
+  pointer-events: none;
+}
+.dm-day-sep span {
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-card2, #1b1b1b) 88%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--text-secondary, #bbb);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  box-shadow: 0 1px 1px rgba(0,0,0,.25);
+}
+.dm-older-loader { display: flex; justify-content: center; padding: 10px 0; }
+.dm-older-loader .spinner { width: 22px; height: 22px; }
+
+/* Saat */
+.dm-msg-time { font-size: 11px; color: var(--text-muted, #777); font-variant-numeric: tabular-nums; letter-spacing: .2px; }
+
+/* Gönder / mikrofon geçişi */
+.dm-chat .dm-input-bar { position: relative; }
+.dm-chat .dm-mic-btn { display: none; }
+.dm-chat .dm-input-bar:not(.has-content) .dm-mic-btn { display: inline-flex; }
+.dm-chat .dm-input-bar:not(.has-content) #dm-send-btn { display: none; }
+.dm-chat .dm-mic-btn {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  align-items: center;
+  justify-content: center;
+}
+.dm-chat .dm-input-bar.is-recording .dm-mic-btn {
+  transform: scale(1.35);
+  background: #e5484d !important;
+  color: #fff !important;
+  box-shadow: 0 0 0 8px rgba(229,72,77,.18);
+  z-index: 6;
+  position: relative;
+}
+.dm-chat .dm-input-bar.is-rec-locked .dm-mic-btn { visibility: hidden; }
+.dm-chat .dm-input-bar.is-recording .dm-attach-slot,
+.dm-chat .dm-input-bar.is-recording .dm-input-wrap { visibility: hidden; }
+
+/* Kayıt arayüzü */
+.cg-rec {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  padding: inherit;
+  padding-right: 64px;
+  background: var(--bg-card, #0b0b0b);
+  animation: cgRecIn .16s ease;
+}
+.cg-rec.is-locked { padding-right: inherit; }
+.cg-rec.is-leaving { opacity: 0; transition: opacity .15s ease; }
+.cg-rec.is-cancelled .cg-rec-row { animation: cgRecTrash .4s ease forwards; }
+@keyframes cgRecIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cgRecTrash { to { transform: translateX(-40px); opacity: 0; } }
+.cg-rec-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; height: 44px; }
+.cg-rec-dot { width: 10px; height: 10px; border-radius: 50%; background: #e5484d; flex: 0 0 auto; animation: cgRecBlink 1s ease-in-out infinite; }
+.cg-rec.is-paused .cg-rec-dot { animation: none; opacity: .5; }
+@keyframes cgRecBlink { 50% { opacity: .2; } }
+.cg-rec-clock { font-variant-numeric: tabular-nums; font-size: 15px; color: var(--text-primary, #eee); min-width: 42px; flex: 0 0 auto; }
+.cg-rec-live-wave { flex: 1 1 auto; min-width: 0; height: 28px; display: none; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; }
+.cg-rec-live-wave i { flex: 0 0 3px; width: 3px; border-radius: 2px; background: var(--text-secondary, #aaa); min-height: 3px; }
+.cg-rec.is-locked .cg-rec-live-wave { display: flex; }
+.cg-rec-slide-hint {
+  flex: 1 1 auto;
+  text-align: center;
+  color: var(--text-muted, #888);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  transform: translateX(calc(var(--cg-rec-slide, 0px) * -1));
+  animation: cgRecHint 1.6s ease-in-out infinite;
+}
+.cg-rec.is-near-cancel .cg-rec-slide-hint { color: #e5484d; }
+@keyframes cgRecHint { 50% { opacity: .55; } }
+.cg-rec.is-locked .cg-rec-slide-hint { display: none; }
+.cg-rec-btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  display: none;
+  place-items: center;
+  background: transparent;
+  color: var(--text-secondary, #bbb);
+  font-size: 17px;
+  cursor: pointer;
+}
+.cg-rec.is-locked .cg-rec-btn { display: grid; }
+.cg-rec-trash { color: #e5484d; }
+.cg-rec-send { background: var(--accent-red, #25d366) !important; color: var(--accent-contrast, #fff) !important; width: 44px; height: 44px; }
+.cg-rec-lock {
+  position: absolute;
+  right: 12px;
+  bottom: calc(100% + 10px + var(--cg-rec-lift, 0px));
+  width: 40px;
+  padding: 10px 0 8px;
+  border-radius: 22px;
+  background: var(--bg-card2, #1b1b1b);
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary, #bbb);
+  font-size: 14px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.cg-rec-lock .fa-chevron-up { font-size: 11px; animation: cgRecLift 1.2s ease-in-out infinite; }
+@keyframes cgRecLift { 50% { transform: translateY(-4px); } }
+.cg-rec.is-near-lock .cg-rec-lock { color: var(--accent-red2, #fff); }
+.cg-rec.is-locked .cg-rec-lock, .cg-rec:not(.is-live) .cg-rec-lock { display: none; }
+.cg-rec-hint {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #2b2b2b;
+  color: #fff;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .18s ease, transform .18s ease;
+  pointer-events: none;
+  z-index: 7;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.cg-rec-hint.is-visible { opacity: 1; transform: translateY(0); }
+
+/* Sesli mesaj balonu */
+.dm-msg-bubble:has(> .cg-voice) { min-width: min(270px, 72vw); }
+.cg-voice {
+  --cg-voice-accent: var(--accent-red2, #53bdeb);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(300px, 70vw);
+  min-height: 46px;
+  padding: 2px 0;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.cg-voice-play {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,.12);
+  color: inherit;
+  font-size: 15px;
+  cursor: pointer;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+.cg-voice-play .fa-play { margin-left: 3px; }
+.cg-voice-play:active { transform: scale(.92); }
+.cg-voice.is-buffering .cg-voice-play::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  animation: igSpin .8s linear infinite;
+}
+.cg-voice.has-error .cg-voice-play { color: #e5484d; }
+.cg-voice-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cg-voice-wave {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.cg-voice-wave i {
+  flex: 1 1 0;
+  min-width: 2px;
+  max-width: 4px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: .38;
+  transition: opacity .12s linear;
+}
+.cg-voice-wave i.is-played { opacity: 1; color: var(--cg-voice-accent); }
+.cg-voice-thumb {
+  position: absolute;
+  top: 50%;
+  left: var(--cg-voice-progress, 0%);
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--cg-voice-accent);
+  opacity: 0;
+  transition: opacity .15s ease;
+  pointer-events: none;
+}
+.cg-voice.is-active .cg-voice-thumb { opacity: 1; }
+.cg-voice-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; opacity: .8; }
+.cg-voice-time { font-variant-numeric: tabular-nums; }
+.cg-voice-rate {
+  display: none;
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: 0;
+  background: rgba(255,255,255,.16);
+  color: inherit;
+  font: 700 11px/1.5 inherit;
+  cursor: pointer;
+}
+.cg-voice.is-active .cg-voice-rate { display: inline-block; }
+.cg-voice-mic {
+  flex: 0 0 auto;
+  width: 22px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--cg-voice-accent);
+}
+.cg-voice.is-own .cg-voice-mic { color: currentColor; opacity: .55; }
+.cg-voice.is-own.is-peer-listened .cg-voice-mic { color: #53bdeb; opacity: 1; }
+.cg-voice:not(.is-own):not(.is-listened) .cg-voice-mic::after {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 7px;
+  margin: 3px auto 0;
+  border-radius: 50%;
+  background: #53bdeb;
+}
+.cg-voice.is-uploading .cg-voice-wave i { opacity: .25; }
+.cg-voice-spinner { cursor: default; }
+.cg-voice-spinner svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.cg-voice-spinner circle { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-dasharray: 94.25; stroke-dashoffset: calc(94.25 - 94.25 * var(--cg-upload, 6) / 100); opacity: .9; transition: stroke-dashoffset .2s linear; }
+.cg-voice-spinner i { font-size: 13px; }
+.cg-voice-pending.is-failed .cg-voice-status { color: #e5484d; }
+.cg-voice-retry { color: #e5484d; }
+
+/* --- Mobil sohbet ekranı (WhatsApp düzeni) --- */
+@media (max-width: 768px) {
+  body.dm-chat-route .dm-chat {
+    display: flex !important;
+    flex-direction: column !important;
+    background: var(--bg-primary, #0b0b0b);
+  }
+  body.dm-chat-route .dm-chat-header {
+    position: relative;
+    z-index: 4;
+    gap: 8px;
+    background: color-mix(in srgb, var(--bg-card, #0b0b0b) 92%, transparent) !important;
+    -webkit-backdrop-filter: saturate(160%) blur(14px);
+    backdrop-filter: saturate(160%) blur(14px);
+    border-bottom: 1px solid rgba(255,255,255,.06) !important;
+  }
+  body.dm-chat-route .dm-mobile-back-btn {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 38px;
+    margin-left: -6px;
+    border-radius: 50%;
+    font-size: 18px;
+  }
+  body.dm-chat-route .dm-messages {
+    flex: 1 1 auto !important;
+    padding: 6px 8px 10px !important;
+    gap: 2px;
+    background-color: var(--bg-primary, #0b0b0b);
+    background-image:
+      radial-gradient(circle at 20% 15%, rgba(255,255,255,.025) 0 1px, transparent 1.5px),
+      radial-gradient(circle at 70% 65%, rgba(255,255,255,.02) 0 1px, transparent 1.5px);
+    background-size: 26px 26px, 34px 34px;
+  }
+  /* Birebir sohbette isim/avatar tekrarına gerek yok (WhatsApp düzeni); başlıkta zaten var */
+  body.dm-chat-route .dm-msg-sender,
+  body.dm-chat-route .dm-msg-avatar-link { display: none !important; }
+  body.dm-chat-route .dm-msg-wrap { margin-top: 6px; padding-left: 0 !important; }
+  body.dm-chat-route .dm-msg-wrap:not(.dm-own) .dm-msg-content { margin-left: 0 !important; }
+  body.dm-chat-route .dm-chat-header .btn,
+  body.dm-chat-route .dm-chat-header button,
+  body.dm-chat-route .dm-chat-header #dm-options-btn,
+  body.dm-chat-route .dm-chat-header #dm-chat-search-messages-btn,
+  body.dm-chat-route .dm-chat-header #dm-mobile-back-btn {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    min-width: 38px;
+    height: 38px;
+    border-radius: 50% !important;
+  }
+  body.dm-chat-route .dm-chat-header button:active { background: rgba(255,255,255,.08) !important; }
+  body.dm-chat-route .dm-day-sep span { background: color-mix(in srgb, var(--bg-card2, #1b1b1b) 96%, transparent); }
+  body.dm-chat-route .dm-msg-wrap.dm-continued { margin-top: 2px; }
+  body.dm-chat-route .dm-msg-content { max-width: 82% !important; }
+  body.dm-chat-route .dm-msg-bubble {
+    font-size: 15.5px !important;
+    line-height: 1.38 !important;
+    padding: 7px 10px 7px !important;
+    border-radius: 16px !important;
+    box-shadow: 0 1px .5px rgba(0,0,0,.25);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  body.dm-chat-route .dm-msg-wrap.dm-own:not(.dm-continued) .dm-msg-bubble { border-top-right-radius: 5px !important; }
+  body.dm-chat-route .dm-msg-wrap:not(.dm-own):not(.dm-continued) .dm-msg-bubble { border-top-left-radius: 5px !important; }
+  body.dm-chat-route .dm-msg-meta { gap: 4px; margin-top: 1px; min-height: 16px; }
+  body.dm-chat-route .dm-msg-menu-btn { display: none !important; }
+
+  /* Giriş çubuğu: hap şeklinde metin alanı + yuvarlak gönder/mikrofon */
+  body.dm-chat-route .dm-input-bar {
+    display: flex !important;
+    align-items: flex-end !important;
+    gap: 6px !important;
+    background: var(--bg-primary, #0b0b0b) !important;
+    border-top: 0 !important;
+    padding-top: 6px !important;
+  }
+  body.dm-chat-route .dm-input-wrap {
+    flex: 1 1 auto !important;
+    min-height: 44px;
+    border-radius: 22px !important;
+    background: var(--bg-card2, #1b1b1b) !important;
+    border: 1px solid rgba(255,255,255,.06) !important;
+    padding: 0 6px 0 14px !important;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  body.dm-chat-route .dm-input-wrap textarea#dm-input {
+    min-height: 42px !important;
+    max-height: 132px;
+    padding: 11px 0 !important;
+    font-size: 16px !important; /* iOS: 16px altı odaklanınca zoom yapar */
+    line-height: 1.3 !important;
+    background: transparent !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    resize: none;
+    flex: 1 1 auto;
+  }
+  body.dm-chat-route .dm-attach-plus,
+  body.dm-chat-route .dm-send-btn {
+    flex: 0 0 auto;
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px;
+    border-radius: 50% !important;
+    padding: 0 !important;
+    font-size: 18px !important;
+  }
+  body.dm-chat-route .dm-send-btn {
+    background: var(--accent-red, #25d366) !important;
+    color: var(--accent-contrast, #fff) !important;
+    border: 0 !important;
+  }
+  body.dm-chat-route .dm-attach-plus { background: transparent !important; border: 0 !important; color: var(--text-secondary, #bbb) !important; }
+  body.dm-chat-route .cg-rec { padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); padding-right: 64px; background: var(--bg-primary, #0b0b0b); align-items: flex-end; }
+  body.dm-chat-route .cg-rec.is-locked { padding-right: max(8px, env(safe-area-inset-right)); }
+  body.dm-chat-route .cg-rec-row { background: var(--bg-card2, #1b1b1b); border-radius: 22px; padding: 0 8px 0 14px; }
+  body.dm-chat-route .cg-rec.is-locked .cg-rec-row { padding: 0 2px 0 4px; }
+  body.dm-chat-route .dm-reply-bar.visible { border-radius: 14px 14px 0 0; margin: 0 8px; }
+}
+
+/* Masaüstünde de saat/ayraç uyumu */
+@media (min-width: 769px) {
+  .dm-chat .dm-input-bar.is-recording .dm-mic-btn { transform: none; box-shadow: none; }
+}

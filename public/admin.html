@@ -2,8 +2,12 @@
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CigCig Yetkili Paneli</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="robots" content="noindex, nofollow, noarchive" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="admin-base" content="__ADMIN_BASE__" />
+  <title>CigCig Yönetim Merkezi</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -886,106 +890,170 @@
       .journalist-remove-btn { margin-left:auto; }
     }
   </style>
+  <link rel="stylesheet" href="/admin-pro.css?v=1" />
 </head>
 <body>
 
-<!-- ===== LOGIN ===== -->
+<!-- ===== GİRİŞ ===== -->
 <div id="login-screen">
+  <div class="adm-login-art" aria-hidden="true"><span></span><span></span><span></span></div>
   <div class="login-box">
     <div class="login-hex">
       <div class="login-shield"><img src="/cigcig2.png" alt="CigCig" /></div>
       <div class="login-title">CigCig<span>.</span></div>
-      <div class="login-sub">Yetkili Paneli</div>
-      </div>
-      <div class="form-group" id="admin-username-group"><label for="admin-username-input">Kullanıcı Adı</label><input type="text" id="admin-username-input" placeholder="Kullanıcı adınız" autocomplete="username" /></div>
-    <div class="login-divider"></div>
-    <div class="form-group"><label>Panel Şifresi</label><input type="password" id="admin-pw-input" placeholder="Şifrenizi girin" autocomplete="current-password" /></div>
-    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;font-size:14px" id="admin-login-btn">
-      <i class="fas fa-unlock-alt"></i> Giriş Yap
-    </button>
-    <div id="admin-login-err" style="color:var(--red2);font-size:12px;margin-top:10px;text-align:center"></div>
+      <div class="login-sub">Yönetim Merkezi</div>
+    </div>
+    <form id="admin-login-form" autocomplete="on" onsubmit="return false">
+      <div class="form-group" id="admin-username-group"><label for="admin-username-input">Kullanıcı Adı</label><input type="text" id="admin-username-input" placeholder="Kullanıcı adınız" autocomplete="username" autocapitalize="off" spellcheck="false" /></div>
+      <div class="form-group"><label for="admin-pw-input">Panel Şifresi</label><input type="password" id="admin-pw-input" placeholder="Şifrenizi girin" autocomplete="current-password" /></div>
+      <button class="btn btn-primary adm-login-submit" type="button" id="admin-login-btn">
+        <i class="fas fa-lock-open"></i> Giriş Yap
+      </button>
+      <div id="admin-login-err" role="alert"></div>
+    </form>
+    <p class="adm-login-note"><i class="fas fa-shield-halved"></i> Bu alan yalnızca yetkili hesaplar içindir. Tüm girişler kayıt altına alınır.</p>
   </div>
 </div>
 
 <!-- ===== PANEL ===== -->
 <div id="admin-panel">
-
-  <!-- TOP BAR -->
-  <div class="adm-topbar">
+  <aside class="adm-sidebar" id="adm-sidebar" aria-label="Yönetim menüsü">
     <div class="adm-brand">
-      <div class="adm-brand-icon"><img src="/cigcig2.png" alt="CigCig" /></div>
-      <span class="adm-brand-text">CigCig</span>
-      <span class="adm-brand-badge">KONTROL</span>
+      <div class="adm-brand-icon"><img src="/cigcig2.png" alt="" /></div>
+      <div class="adm-brand-text"><strong>CigCig</strong><small>Yönetim Merkezi</small></div>
+      <button type="button" class="adm-icon-btn adm-sidebar-close" id="adm-sidebar-close" aria-label="Menüyü kapat"><i class="fas fa-xmark"></i></button>
     </div>
-    <div class="adm-topbar-right">
-      <div id="adm-topbar-stats" style="display:flex;gap:16px;font-size:12px;color:var(--text2)"></div>
-      <button class="btn btn-ghost btn-sm" id="admin-logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış</button>
+    <label class="adm-nav-search">
+      <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+      <input type="search" id="adm-nav-filter" placeholder="Bölüm ara" aria-label="Menüde ara" autocomplete="off" />
+      <kbd>Ctrl K</kbd>
+    </label>
+    <nav class="adm-nav" id="adm-nav">
+      <div class="adm-nav-group" data-group="0">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>Genel</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item active" data-section="dashboard" href="#"><span class="adm-nav-icon"><i class="fas fa-gauge-high"></i></span><span class="adm-nav-label">Kontrol Merkezi</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="content-analytics" href="#"><span class="adm-nav-icon"><i class="fas fa-chart-pie"></i></span><span class="adm-nav-label">İzlenme Analitiği</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-group" data-group="1">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>Kullanıcılar</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item" data-section="users" href="#"><span class="adm-nav-icon"><i class="fas fa-users"></i></span><span class="adm-nav-label">Kullanıcılar</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="badges" href="#"><span class="adm-nav-icon"><i class="fas fa-award"></i></span><span class="adm-nav-label">Rozetler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="levels" href="#"><span class="adm-nav-icon"><i class="fas fa-layer-group"></i></span><span class="adm-nav-label">Seviyeler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="two-factor" href="#"><span class="adm-nav-icon"><i class="fas fa-shield-halved"></i></span><span class="adm-nav-label">2AD Yönetimi</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="quick-registration-logs" href="#"><span class="adm-nav-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span class="adm-nav-label">Hızlı Kayıt Logları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="account-deletions" href="#"><span class="adm-nav-icon"><i class="fas fa-user-clock"></i></span><span class="adm-nav-label">Hesap Silme Talepleri</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="journalists" href="#"><span class="adm-nav-icon"><i class="fas fa-id-card"></i></span><span class="adm-nav-label">Gazeteciler</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-group" data-group="2">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>İçerik</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item" data-section="forums" href="#"><span class="adm-nav-icon"><i class="fas fa-comments"></i></span><span class="adm-nav-label">Konular</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="books" href="#"><span class="adm-nav-icon"><i class="fas fa-book"></i></span><span class="adm-nav-label">Kitaplar</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="poems" href="#"><span class="adm-nav-icon"><i class="fas fa-pen-fancy"></i></span><span class="adm-nav-label">Şiirler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="videos" href="#"><span class="adm-nav-icon"><i class="fas fa-video"></i></span><span class="adm-nav-label">Videolar & Reals</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="photos" href="#"><span class="adm-nav-icon"><i class="fas fa-images"></i></span><span class="adm-nav-label">Fotoğraflar</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="stories" href="#"><span class="adm-nav-icon"><i class="fas fa-circle-play"></i></span><span class="adm-nav-label">Hikayeler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="songs" href="#"><span class="adm-nav-icon"><i class="fas fa-music"></i></span><span class="adm-nav-label">Müzikler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="artists" href="#"><span class="adm-nav-icon"><i class="fas fa-microphone-lines"></i></span><span class="adm-nav-label">Artistler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="artist-apps" href="#"><span class="adm-nav-icon"><i class="fas fa-microphone"></i></span><span class="adm-nav-label">Artist Başvuruları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="groups" href="#"><span class="adm-nav-icon"><i class="fas fa-people-group"></i></span><span class="adm-nav-label">Gruplar</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="tags" href="#"><span class="adm-nav-icon"><i class="fas fa-tags"></i></span><span class="adm-nav-label">Etiketler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="newspaper-settings" href="#"><span class="adm-nav-icon"><i class="fas fa-newspaper"></i></span><span class="adm-nav-label">Gazete Ayarları</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-group" data-group="3">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>Moderasyon</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item" data-section="message-reports" href="#"><span class="adm-nav-icon"><i class="fas fa-flag"></i></span><span class="adm-nav-label">Bildirilen Mesajlar</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="user-reports" href="#"><span class="adm-nav-icon"><i class="fas fa-shield-heart"></i></span><span class="adm-nav-label">Kullanıcı Bildirimleri</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="messages" href="#"><span class="adm-nav-icon"><i class="fas fa-envelope"></i></span><span class="adm-nav-label">Mesaj Denetimi</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="warnings" href="#"><span class="adm-nav-icon"><i class="fas fa-triangle-exclamation"></i></span><span class="adm-nav-label">İhtarlar</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="child-safety" href="#"><span class="adm-nav-icon"><i class="fas fa-child-reaching"></i></span><span class="adm-nav-label">Çocuk Güvenliği</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-group" data-group="4">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>Reklam & Mağaza</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item" data-section="ad-submissions" href="#"><span class="adm-nav-icon"><i class="fas fa-inbox"></i></span><span class="adm-nav-label">Reklam Havuzu</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="video-ads" href="#"><span class="adm-nav-icon"><i class="fas fa-bullhorn"></i></span><span class="adm-nav-label">Video Reklamları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="music-ads" href="#"><span class="adm-nav-icon"><i class="fas fa-headphones"></i></span><span class="adm-nav-label">Müzik Reklamları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="reals-ads" href="#"><span class="adm-nav-icon"><i class="fas fa-clapperboard"></i></span><span class="adm-nav-label">Reals Reklamları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="shop" href="#"><span class="adm-nav-icon"><i class="fas fa-store"></i></span><span class="adm-nav-label">Mağaza Ürünleri</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="shop-orders" href="#"><span class="adm-nav-icon"><i class="fas fa-receipt"></i></span><span class="adm-nav-label">Siparişler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="shop-settings" href="#"><span class="adm-nav-icon"><i class="fas fa-credit-card"></i></span><span class="adm-nav-label">Ödeme Sistemi</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-group" data-group="5">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>İletişim</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item" data-section="notifications" href="#"><span class="adm-nav-icon"><i class="fas fa-bell"></i></span><span class="adm-nav-label">Bildirimler</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="announcements" href="#"><span class="adm-nav-icon"><i class="fas fa-bullhorn"></i></span><span class="adm-nav-label">Duyurular</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-group" data-group="6">
+        <button type="button" class="adm-section-label" aria-expanded="true"><span>Sistem</span><i class="fas fa-chevron-down"></i></button>
+        <div class="adm-nav-group-items">
+          <a class="adm-nav-item" data-section="homepage-sections" href="#"><span class="adm-nav-icon"><i class="fas fa-table-cells-large"></i></span><span class="adm-nav-label">Ana Sayfa Bölümleri</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="settings" href="#"><span class="adm-nav-icon"><i class="fas fa-gear"></i></span><span class="adm-nav-label">Site Ayarları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="logs" href="#"><span class="adm-nav-icon"><i class="fas fa-clock-rotate-left"></i></span><span class="adm-nav-label">İşlem Logları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="route-logs" href="#"><span class="adm-nav-icon"><i class="fas fa-route"></i></span><span class="adm-nav-label">Route Logları</span><span class="adm-nav-badge" hidden></span></a>
+          <a class="adm-nav-item" data-section="authority-logs" href="#"><span class="adm-nav-icon"><i class="fas fa-user-shield"></i></span><span class="adm-nav-label">Yetkili Logları</span><span class="adm-nav-badge" hidden></span></a>
+        </div>
+      </div>
+      <div class="adm-nav-empty" id="adm-nav-empty" hidden>Eşleşen bölüm yok</div>
+    </nav>
+    <div class="adm-sidebar-foot">
+      <div class="adm-me">
+        <span class="adm-me-avatar" id="adm-me-avatar">A</span>
+        <span class="adm-me-text"><strong id="adm-me-name">Yetkili</strong><small id="adm-me-role">Yetkili hesabı</small></span>
+      </div>
+      <button type="button" class="adm-icon-btn" id="admin-logout-btn" title="Çıkış yap" aria-label="Çıkış yap"><i class="fas fa-arrow-right-from-bracket"></i></button>
     </div>
-  </div>
+  </aside>
+  <div class="adm-scrim" id="adm-scrim" hidden></div>
 
-  <div class="adm-body">
-    <!-- SIDEBAR -->
-    <div class="adm-sidebar" id="adm-sidebar">
-      <div class="adm-section-label">GENEL</div>
-      <div class="adm-nav-item active" data-section="dashboard"><div class="adm-nav-icon"><i class="fas fa-chart-line"></i></div> Dashboard</div>
-      <div class="adm-nav-item" data-section="users"><div class="adm-nav-icon"><i class="fas fa-users"></i></div> Kullanıcılar</div>
-      <div class="adm-nav-item" data-section="quick-registration-logs"><div class="adm-nav-icon"><i class="fas fa-wand-magic-sparkles"></i></div> Hızlı Kayıt Logları</div>
-      <div class="adm-nav-item" data-section="journalists"><div class="adm-nav-icon"><i class="fas fa-newspaper"></i></div> Gazeteciler</div>
-      <div class="adm-nav-item" data-section="newspaper-settings"><div class="adm-nav-icon"><i class="fas fa-pen-to-square"></i></div> Gazete Ayarları</div>
-      <div class="adm-nav-item" data-section="account-deletions"><div class="adm-nav-icon"><i class="fas fa-user-clock"></i></div> Hesap Silme Talepleri</div>
-      <div class="adm-nav-item" data-section="two-factor"><div class="adm-nav-icon"><i class="fas fa-shield-halved"></i></div> 2AD Yönetimi</div>
-      <div class="adm-nav-item" data-section="badges"><div class="adm-nav-icon"><i class="fas fa-award"></i></div> Rozetler</div>
-
-      <div class="adm-section-label">İÇERİK</div>
-      <div class="adm-nav-item" data-section="forums"><div class="adm-nav-icon"><i class="fas fa-comments"></i></div> Konular</div>
-      <div class="adm-nav-item" data-section="books"><div class="adm-nav-icon"><i class="fas fa-book"></i></div> Kitaplar</div>
-      <div class="adm-nav-item" data-section="poems"><div class="adm-nav-icon"><i class="fas fa-pen-fancy"></i></div> Şiirler</div>
-      <div class="adm-nav-item" data-section="videos"><div class="adm-nav-icon"><i class="fas fa-video"></i></div> Videolar</div>
-      <div class="adm-nav-item" data-section="photos"><div class="adm-nav-icon"><i class="fas fa-images"></i></div> Fotoğraflar</div>
-      <div class="adm-nav-item" data-section="stories"><div class="adm-nav-icon"><i class="fas fa-circle-play"></i></div> Hikayeler</div>
-      <div class="adm-nav-item" data-section="content-analytics"><div class="adm-nav-icon"><i class="fas fa-chart-pie"></i></div> İzlenme Analitiği</div>
-      <div class="adm-nav-item" data-section="ad-submissions"><div class="adm-nav-icon"><i class="fas fa-inbox"></i></div> Reklam Havuzu</div>
-      <div class="adm-nav-item" data-section="video-ads"><div class="adm-nav-icon"><i class="fas fa-bullhorn"></i></div> Video Reklamları</div>
-      <div class="adm-nav-item" data-section="music-ads"><div class="adm-nav-icon"><i class="fas fa-headphones"></i></div> Müzik Reklamları</div>
-      <div class="adm-nav-item" data-section="reals-ads"><div class="adm-nav-icon"><i class="fas fa-circle-play"></i></div> Reals Reklamları</div>
-      <div class="adm-nav-item" data-section="groups"><div class="adm-nav-icon"><i class="fas fa-users-cog"></i></div> Gruplar</div>
-      <div class="adm-nav-item" data-section="artists"><div class="adm-nav-icon"><i class="fas fa-microphone-alt"></i></div> Artistler</div>
-
-      <div class="adm-section-label">SİSTEM</div>
-      <div class="adm-nav-item" data-section="levels"><div class="adm-nav-icon"><i class="fas fa-layer-group"></i></div> Seviyeler</div>
-      <div class="adm-nav-item" data-section="tags"><div class="adm-nav-icon"><i class="fas fa-tags"></i></div> Etiketler</div>
-      <div class="adm-nav-item" data-section="notifications"><div class="adm-nav-icon"><i class="fas fa-bell"></i></div> Bildirimler</div>
-      <div class="adm-nav-item" data-section="announcements"><div class="adm-nav-icon"><i class="fas fa-bullhorn"></i></div> Duyurular</div>
-      <div class="adm-nav-item" data-section="songs"><div class="adm-nav-icon"><i class="fas fa-music"></i></div> Müzikler</div>
-      <div class="adm-nav-item" data-section="artist-apps"><div class="adm-nav-icon"><i class="fas fa-microphone"></i></div> Artist Başvuruları</div>
-      <div class="adm-nav-item" data-section="homepage-sections"><div class="adm-nav-icon"><i class="fas fa-th-large"></i></div> Ana Sayfa Bölümleri</div>
-      <div class="adm-nav-item" data-section="messages"><div class="adm-nav-icon"><i class="fas fa-envelope"></i></div> Mesajlar</div>
-      <div class="adm-nav-item" data-section="message-reports"><div class="adm-nav-icon"><i class="fas fa-flag"></i></div> Bildirilenler</div>
-      <div class="adm-nav-item" data-section="user-reports"><div class="adm-nav-icon"><i class="fas fa-shield-heart"></i></div> Kullanıcı Bildirimleri</div>
-      <div class="adm-nav-item" data-section="child-safety"><div class="adm-nav-icon"><i class="fas fa-child-reaching"></i></div> Çocuk Güvenliği</div>
-      <div class="adm-nav-item" data-section="warnings"><div class="adm-nav-icon"><i class="fas fa-bullhorn"></i></div> İhtarlar</div>
-      <div class="adm-nav-item" data-section="shop"><div class="adm-nav-icon"><i class="fas fa-store"></i></div> Mağaza Ürünleri</div>
-      <div class="adm-nav-item" data-section="shop-orders"><div class="adm-nav-icon"><i class="fas fa-receipt"></i></div> Siparişler</div>
-      <div class="adm-nav-item" data-section="shop-settings"><div class="adm-nav-icon"><i class="fas fa-credit-card"></i></div> Ödeme Sistemi</div>
-      <div class="adm-nav-item" data-section="logs"><div class="adm-nav-icon"><i class="fas fa-history"></i></div> Loglar</div>
-      <div class="adm-nav-item" data-section="route-logs"><div class="adm-nav-icon"><i class="fas fa-route"></i></div> Route Log</div>
-      <div class="adm-nav-item" data-section="authority-logs"><div class="adm-nav-icon"><i class="fas fa-user-shield"></i></div> Yetkili Logları</div>
-      <div class="adm-nav-item" data-section="settings"><div class="adm-nav-icon"><i class="fas fa-cog"></i></div> Site Ayarları</div>
-    </div>
-
-    <!-- MAIN -->
-    <div class="adm-main" id="admin-main">
+  <div class="adm-shell">
+    <header class="adm-topbar">
+      <button type="button" class="adm-icon-btn adm-menu-toggle" id="adm-menu-toggle" aria-label="Menüyü aç" aria-controls="adm-sidebar" aria-expanded="false"><i class="fas fa-bars"></i></button>
+      <div class="adm-crumbs" aria-label="Konum">
+        <span class="adm-crumb-root">Yönetim</span>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        <span class="adm-crumb-group" id="adm-crumb-group">Genel</span>
+        <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        <strong id="adm-page-title">Kontrol Merkezi</strong>
+      </div>
+      <div class="adm-topbar-right">
+        <div id="adm-topbar-stats" class="adm-topbar-stats"></div>
+        <button type="button" class="adm-icon-btn" id="adm-command-btn" title="Hızlı geçiş (Ctrl+K)" aria-label="Hızlı geçiş"><i class="fas fa-magnifying-glass"></i></button>
+        <button type="button" class="adm-icon-btn" id="adm-refresh-btn" title="Bölümü yenile" aria-label="Bölümü yenile"><i class="fas fa-rotate-right"></i></button>
+        <a class="adm-icon-btn" href="/" target="_blank" rel="noopener" title="Siteyi aç" aria-label="Siteyi yeni sekmede aç"><i class="fas fa-arrow-up-right-from-square"></i></a>
+      </div>
+    </header>
+    <main class="adm-main" id="admin-main" tabindex="-1">
       <div class="loading-center"><div class="spinner"></div></div>
-    </div>
+    </main>
+  </div>
+</div>
+
+<!-- HIZLI GEÇİŞ -->
+<div class="adm-palette" id="adm-palette" hidden>
+  <div class="adm-palette-backdrop" data-palette-close></div>
+  <div class="adm-palette-box" role="dialog" aria-modal="true" aria-label="Hızlı geçiş">
+    <label class="adm-palette-input"><i class="fas fa-magnifying-glass"></i><input type="search" id="adm-palette-input" placeholder="Bölüm adı yazın…" autocomplete="off" /><kbd>Esc</kbd></label>
+    <div class="adm-palette-list" id="adm-palette-list" role="listbox"></div>
   </div>
 </div>
 
 <!-- MODAL -->
 <div class="modal-overlay hidden" id="modal-overlay">
-  <div class="modal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
     <div class="modal-header">
       <h3 id="modal-title"></h3>
-      <button class="modal-close" id="modal-close"><i class="fas fa-times"></i></button>
+      <button class="modal-close" id="modal-close" aria-label="Kapat"><i class="fas fa-times"></i></button>
     </div>
     <div class="modal-body" id="modal-body"></div>
   </div>
@@ -1020,6 +1088,6 @@ function applyThemeColor(hex) {
 })();
 </script>
 <script src="/dialogs.js?v=20261017-native-dialogs"></script>
-<script src="admin.js?v=content-time-seconds-1"></script>
+<script src="/admin.js?v=2"></script>
 </body>
 </html>

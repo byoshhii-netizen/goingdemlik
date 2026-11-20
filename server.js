@@ -62,8 +62,68 @@ const defaultChildSafetyPolicy = {
 };
 
 const app = express();
+
+// ===== ASYNC HATA GÜVENLİĞİ =====
+// Express 4 async handler'lardan fırlayan hataları yakalamaz; Node 22'de yakalanmayan
+// promise reddi süreci düşürür. Tüm route handler'larını hatayı next()'e iletecek şekilde sarıyoruz.
+function wrapAsyncHandler(handler) {
+  if (typeof handler !== 'function' || handler.length >= 4 || handler.__cigcigWrapped) return handler;
+  // Alt uygulamalar ve Router nesneleri (handle/stack taşıyan) olduğu gibi bırakılır.
+  if (typeof handler.handle === 'function' || Array.isArray(handler.stack)) return handler;
+  const wrapped = function cigcigAsyncHandler(req, res, next) {
+    try {
+      const result = handler.call(this, req, res, next);
+      if (result && typeof result.then === 'function') {
+        result.catch(error => {
+          if (res.headersSent) {
+            console.error('[route] Yanıt gönderildikten sonra hata:', req.method, req.originalUrl, error?.message || error);
+            return;
+          }
+          next(error);
+        });
+      }
+      return result;
+    } catch (error) {
+      return next(error);
+    }
+  };
+  wrapped.__cigcigWrapped = true;
+  return wrapped;
+}
+function wrapHandlerArgs(args) {
+  return args.map(arg => Array.isArray(arg) ? wrapHandlerArgs(arg) : wrapAsyncHandler(arg));
+}
+for (const method of ['get', 'post', 'put', 'patch', 'delete', 'all', 'use']) {
+  const original = app[method].bind(app);
+  app[method] = function patchedRouteMethod(...args) {
+    // app.get('ayar') gibi tek argümanlı ayar okumalarını bozma.
+    if (method === 'get' && args.length === 1 && typeof args[0] === 'string') return original(...args);
+    return original(...wrapHandlerArgs(args));
+  };
+}
+process.on('unhandledRejection', reason => {
+  console.error('[process] Yakalanmayan promise reddi:', reason?.stack || reason);
+});
+
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  maxHttpBufferSize: 1e5,
+  pingTimeout: 20000,
+  pingInterval: 25000
+});
+// Ana admin paneli varsayılan olarak /gubukgak altında çalışır. ADMIN_PANEL_PATH ile değiştirilebilir.
+// Gizli yol tek başına güvenlik sağlamaz: tüm admin API'leri ayrıca token + yetki kontrolünden geçer.
+const configuredAdminPanelPath = String(process.env.ADMIN_PANEL_PATH || '/gubukgak').trim().replace(/\/+$/, '');
+const adminPanelPath = /^\/[A-Za-z0-9_-]{3,128}$/.test(configuredAdminPanelPath)
+  ? configuredAdminPanelPath
+  : '/gubukgak';
+if (configuredAdminPanelPath !== adminPanelPath) {
+  console.error('[admin] ADMIN_PANEL_PATH geçersiz; varsayılan /gubukgak kullanılıyor.');
+}
+function isAdminPanelRequestPath(requestPath) {
+  const normalized = String(requestPath || '').replace(/\/+$/, '') || '/';
+  return normalized === adminPanelPath || normalized.startsWith(`${adminPanelPath}/`);
+}
 async function query(text, params = []) {
   const isNotificationInsert = /^\s*INSERT\s+INTO\s+notifications\b/i.test(String(text));
   const statement = isNotificationInsert && !/\bRETURNING\b/i.test(String(text))
@@ -274,7 +334,7 @@ function closeFriendsVisibilitySql(contentAlias, viewerIdParam) {
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const appAssetHash = crypto.createHash('sha256');
-for (const file of ['server.js', 'public/index.html', 'public/admin.html', 'public/app.js', 'public/admin.js', 'public/style.css', 'public/dialogs.js', 'public/dialogs.css', 'public/theme.js', 'public/homepage-sections.js']) {
+for (const file of ['server.js', 'public/index.html', 'public/admin.html', 'public/app.js', 'public/admin.js', 'public/admin-pro.css', 'public/style.css', 'public/cigcig-pro.css', 'public/voice-notes.js', 'public/dialogs.js', 'public/dialogs.css', 'public/theme.js', 'public/homepage-sections.js']) {
   appAssetHash.update(fs.readFileSync(path.join(__dirname, file)));
 }
 const APP_ASSET_VERSION = appAssetHash.digest('hex').slice(0, 16);
@@ -335,7 +395,16 @@ if (!USE_CLOUDINARY) {
   app.use('/uploads', express.static(UPLOAD_DIR, {
     maxAge: 24 * 60 * 60 * 1000,
     redirect: false,
-    index: false
+    index: false,
+    dotfiles: 'deny',
+    setHeaders(res, filePath) {
+      // Kullanıcı yüklemeleri hiçbir zaman sitenin kökeninde script çalıştıramaz.
+      res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'; sandbox");
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      if (!/\.(jpe?g|png|gif|webp|avif|heic|heif|mp4|webm|mov|ogg|ogv|mp3|m4a|aac|wav|flac|oga|opus)$/i.test(filePath)) {
+        res.setHeader('Content-Disposition', 'attachment');
+      }
+    }
   }));
 }
 
@@ -350,9 +419,15 @@ app.use((req, res, next) => {
   }
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
+  // Eski XSS filtresi modern tarayıcılarda kendi açıklarını doğurabildiği için kapalı tutulur; CSP koruma sağlar.
+  res.setHeader('X-XSS-Protection', '0');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  // Sesli mesaj ve DM kamerası için mikrofon/kamera yalnızca kendi alan adımızda açılır.
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(self), camera=(self), payment=(), usb=(), interest-cohort=()');
+  if (req.secure || String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://pagead2.googlesyndication.com https://partner.googleadservices.com https://www.googletagmanager.com https://googleads.g.doubleclick.net; " +
@@ -361,7 +436,8 @@ app.use((req, res, next) => {
     "img-src 'self' data: https: blob:; " +
     "media-src 'self' https: blob:; " +
     "connect-src 'self' https://api.spotify.com https://pagead2.googlesyndication.com " + R2_CSP_ORIGINS.join(' ') + "; " +
-    "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com;"
+    "frame-src https://googleads.g.doubleclick.net https://tpc.googlesyndication.com; " +
+    "object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
   );
   // Statik dosyalarda source map'leri engelle
   if (req.path.endsWith('.map')) {
@@ -1021,7 +1097,7 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
     messageId: message.id,
     senderId: sender.id,
     usernames: [sender.username, recipient.username],
-    preview: message.content || (message.image_url ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
+    preview: message.content || (message.voice_url ? '🎤 Sesli mesaj' : message.image_url ? 'Fotoğraf' : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj')
   });
   if (String(sender.id) !== String(recipient.id)) {
     query(`SELECT CASE WHEN user1_id=$2 THEN
@@ -1031,7 +1107,7 @@ function emitDirectMessage(conversationId, sender, recipient, message) {
       FROM dm_conversations WHERE id=$1`, [conversationId, recipient.id])
       .then(({ rows }) => {
         const muted = rows[0]?.muted === true;
-        const preview = message.content || (message.image_url || message.image_urls?.length
+        const preview = message.content || (message.voice_url ? '🎤 Sesli mesaj' : message.image_url || message.image_urls?.length
           ? 'Fotoğraf'
           : message.shared_gif_url ? 'GIF' : message.shared_song_id ? 'Müzik' : 'Yeni mesaj');
         io.to(`user:${recipient.id}`).emit('dm:incoming', {
@@ -1117,9 +1193,11 @@ async function adminMiddleware(req, res, next) {
   // IP kontrolü — ADMIN_IPS set edilmişse API'yi de koru
   const allowed = getAdminIPs();
   if (allowed.length > 0) {
-    const clientIP = (req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.ip || '').split(',')[0].trim();
+    // X-Forwarded-For istemci tarafından taklit edilebilir; trust proxy ayarıyla çözülmüş req.ip kullanılır.
+    const clientIP = String(req.ip || '').replace(/^::ffff:/, '').trim();
     if (!allowed.includes(clientIP)) return res.status(404).json({ error: 'Not found' });
   }
+  res.setHeader('Cache-Control', 'no-store');
   const token = String(req.headers['x-admin-token'] || '').trim();
   if (!token) return res.status(401).json({ error: 'Admin token gerekli' });
   const { rows: masterRows } = await query(`SELECT s.key, s.value, a.token
@@ -1286,14 +1364,31 @@ async function checkDailyLimit(userId, user, type) {
 }
 
 // ===== MULTER / UPLOAD =====
+// Diske yazılan dosyanın uzantısı kullanıcıdan gelen ada değil, izinli listeye göre belirlenir.
+// Böylece "resim.html" gibi bir dosya statik sunucuda HTML olarak çalıştırılamaz.
+const SAFE_UPLOAD_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.heif',
+  '.mp4', '.webm', '.mov', '.ogg', '.ogv', '.mp3', '.m4a', '.aac', '.wav', '.flac', '.oga', '.opus',
+  '.pdf', '.txt', '.zip', '.rar', '.7z', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv'
+]);
+const MIME_EXTENSION_FALLBACK = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp', 'image/avif': '.avif',
+  'image/heic': '.heic', 'image/heif': '.heif', 'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
+  'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/aac': '.aac', 'audio/wav': '.wav', 'audio/ogg': '.ogg', 'audio/webm': '.webm'
+};
+function safeUploadExtension(file) {
+  const ext = path.extname(String(file?.originalname || '')).toLowerCase();
+  if (SAFE_UPLOAD_EXTENSIONS.has(ext)) return ext;
+  const mime = String(file?.mimetype || '').split(';')[0].trim().toLowerCase();
+  return MIME_EXTENSION_FALLBACK[mime] || '.bin';
+}
 // Memory storage — Cloudinary varsa RAM'den upload, yoksa disk'e yaz
 const storage = USE_CLOUDINARY
   ? multer.memoryStorage()
   : multer.diskStorage({
       destination: (req, file, cb) => cb(null, UPLOAD_DIR),
       filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname);
-        cb(null, randomUUID() + ext);
+        cb(null, randomUUID() + safeUploadExtension(file));
       }
     });
 const upload = multer({
@@ -1355,7 +1450,7 @@ const playlistCoverUpload = multer({
 
 const largeVideoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname))
+  filename: (req, file, cb) => cb(null, randomUUID() + safeUploadExtension(file))
 });
 const largeVideoUpload = multer({
   storage: largeVideoStorage,
@@ -1741,10 +1836,26 @@ app.get('/sitemap.xml', async (req, res) => {
 app.get('/konular', (req, res) => { res.redirect(301, '/forum'); });
 
 // Prevent direct access to legacy admin entry paths
-app.get(['/admin.html','/panel-giris'], (req, res) => { res.status(404).end(); });
+app.get(['/admin', '/admin.html', '/panel-giris'], (req, res) => { res.status(404).end(); });
 
-// New admin entry path
-app.get('/gubukgak', (req, res) => { res.sendFile(path.join(__dirname, 'public', 'admin.html')); });
+// Ana admin paneli: /gubukgak ve tüm alt route'ları (/gubukgak/kullanicilar, /gubukgak/ayarlar ...)
+// aynı tek sayfa uygulamayı döndürür; istemci tarafı router ilgili bölümü açar.
+let adminPanelHtmlCache = null;
+function renderAdminPanelHtml() {
+  if (!adminPanelHtmlCache || process.env.NODE_ENV !== 'production') {
+    const template = fs.readFileSync(path.join(__dirname, 'public', 'admin.html'), 'utf8');
+    adminPanelHtmlCache = template
+      .replace(/__ADMIN_BASE__/g, adminPanelPath)
+      .replace(/((?:src|href)=["']\/(?:admin|admin-pro|dialogs)\.(?:js|css))\?v=[^"']*/g, `$1?v=${APP_ASSET_VERSION}`);
+  }
+  return adminPanelHtmlCache;
+}
+app.get([adminPanelPath, `${adminPanelPath}/*`], (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.type('html').send(renderAdminPanelHtml());
+});
 
 // VMB yönetimi, ana admin panelinden ayrı ve yalnızca özel panel hesabıyla açılır.
 app.get(['/vmb-panel', '/vmb-panel.html'], (req, res) => {
@@ -1757,7 +1868,15 @@ app.post('/api/vmb-admin/auth/login', async (req, res) => {
   if (!VMB_PANEL_AUTH_CONFIGURED) {
     return res.status(503).json({ error: 'VMB panel kimlik bilgileri yapılandırılmamış' });
   }
-  if (username !== VMB_PANEL_USERNAME || password !== VMB_PANEL_PASSWORD) {
+  const safeTextEqual = (left, right) => {
+    const a = crypto.createHash('sha256').update(String(left)).digest();
+    const b = crypto.createHash('sha256').update(String(right)).digest();
+    return crypto.timingSafeEqual(a, b);
+  };
+  // Sabit zamanlı karşılaştırma: yanıt süresinden şifre tahmini yapılamaz.
+  const usernameOk = safeTextEqual(username, VMB_PANEL_USERNAME);
+  const passwordOk = safeTextEqual(password, VMB_PANEL_PASSWORD);
+  if (!usernameOk || !passwordOk) {
     return res.status(401).json({ error: 'VMB panel bilgileri doğrulanamadı' });
   }
   const token = generateToken('vmb-admin');
@@ -1770,6 +1889,12 @@ app.delete('/api/vmb-admin/auth/logout', vmbAdminMiddleware, async (req, res) =>
   const token = String(req.headers['x-vmb-admin-token'] || '').trim();
   await query('DELETE FROM vmb_admin_sessions WHERE token=$1', [token]);
   res.json({ ok: true });
+});
+
+app.get('/api/admin/panel-entry', authMiddleware, (req, res) => {
+  if (!req.user.is_admin) return res.status(403).json({ error: 'Yetkili hesabı gerekli' });
+  if (!adminPanelPath) return res.status(503).json({ error: 'Admin panel yolu yapılandırılmamış' });
+  return res.redirect(302, adminPanelPath);
 });
 
 app.get('/api/admin/auth/identity', authMiddleware, async (req, res) => {
@@ -1857,7 +1982,7 @@ app.post('/api/admin/auth/login', async (req, res) => {
 app.use(async (req, res, next) => {
   if (
     req.path.startsWith('/api/') ||
-    req.path === '/gubukgak' ||
+    isAdminPanelRequestPath(req.path) ||
     req.path === '/vmb-panel' ||
     req.path === '/vmb-panel.html' ||
     req.method !== 'GET' ||
@@ -1900,7 +2025,7 @@ app.use(async (req, res, next) => {
   // site geneli giriş zorunluluğu açıkken erişilebilir kalmalıdır.
   if (
     req.path.startsWith('/api/') ||
-    req.path === '/gubukgak' ||
+    isAdminPanelRequestPath(req.path) ||
     req.path === '/vmb-panel' ||
     req.path === '/vmb-panel.html' ||
     req.method !== 'GET' ||
@@ -1955,7 +2080,7 @@ function setNoStoreHeaders(res) {
 
 function versionAppHtml(html) {
   const versioned = html.replace(
-    /((?:src|href)=["'])(\/?(?:theme|homepage-sections|style|dialogs|app|admin)\.(?:js|css)(?:\?[^"']*)?)(["'])/gi,
+    /((?:src|href)=["'])(\/?(?:theme|homepage-sections|style|dialogs|app|admin|admin-pro|cigcig-pro|voice-notes)\.(?:js|css)(?:\?[^"']*)?)(["'])/gi,
     (_match, prefix, assetPath, quote) => `${prefix}${assetPath.split('?')[0]}?v=${APP_ASSET_VERSION}${quote}`
   );
   const versionMeta = `<meta name="cigcig-app-version" content="${APP_ASSET_VERSION}" />`;
@@ -1978,9 +2103,6 @@ app.use((req, res, next) => {
 });
 
 app.get(['/', '/index.html'], (req, res) => sendUncachedAppHtml(res));
-app.get(['/admin', '/admin.html'], (req, res) => {
-  res.type('html').send(fs.readFileSync(path.join(__dirname, 'public', 'admin.html'), 'utf8'));
-});
 
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 24 * 60 * 60 * 1000,
@@ -2000,6 +2122,40 @@ function sendUncachedAppHtml(res, status = 200) {
   setNoStoreHeaders(res);
   return res.type('html').send(fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8'));
 }
+
+// Yeni panel ana sayfası için tek istekte özet sayılar (tüm listeleri çekmek yerine COUNT).
+app.get('/api/admin/overview', adminMiddleware, async (req, res) => {
+  const metric = async (key, sql) => {
+    try {
+      const { rows } = await query(sql);
+      return [key, Number(rows[0]?.c) || 0];
+    } catch (error) {
+      return [key, null];
+    }
+  };
+  const results = await Promise.all([
+    metric('users', 'SELECT COUNT(*) AS c FROM users'),
+    metric('users_24h', "SELECT COUNT(*) AS c FROM users WHERE created_at >= NOW() - INTERVAL '24 hours'"),
+    metric('users_7d', "SELECT COUNT(*) AS c FROM users WHERE created_at >= NOW() - INTERVAL '7 days'"),
+    metric('banned', 'SELECT COUNT(*) AS c FROM users WHERE COALESCE(banned,0)<>0'),
+    metric('admins', 'SELECT COUNT(*) AS c FROM users WHERE is_admin=1'),
+    metric('online', "SELECT COUNT(DISTINCT user_id) AS c FROM user_presence_sessions WHERE last_heartbeat >= NOW() - INTERVAL '60 seconds'"),
+    metric('forums', 'SELECT COUNT(*) AS c FROM forums'),
+    metric('books', 'SELECT COUNT(*) AS c FROM books'),
+    metric('groups', 'SELECT COUNT(*) AS c FROM groups'),
+    metric('photos', 'SELECT COUNT(*) AS c FROM photos'),
+    metric('reals', 'SELECT COUNT(*) AS c FROM videos WHERE is_reals=1'),
+    metric('videos', 'SELECT COUNT(*) AS c FROM videos WHERE COALESCE(is_reals,0)=0'),
+    metric('songs', 'SELECT COUNT(*) AS c FROM songs'),
+    metric('stories_active', 'SELECT COUNT(*) AS c FROM stories WHERE COALESCE(is_suspended,0)=0 AND (expires_at > NOW() OR COALESCE(is_permanent,0)=1)'),
+    metric('messages_24h', "SELECT COUNT(*) AS c FROM dm_messages WHERE created_at >= NOW() - INTERVAL '24 hours'"),
+    metric('pending_user_reports', "SELECT COUNT(*) AS c FROM user_reports WHERE status='open'"),
+    metric('pending_ad_submissions', "SELECT COUNT(*) AS c FROM ad_submissions WHERE status='pending'"),
+    metric('pending_artist_apps', "SELECT COUNT(*) AS c FROM artist_applications WHERE status='pending'"),
+    metric('pending_account_deletions', 'SELECT COUNT(*) AS c FROM users WHERE is_deleted=1 AND delete_requested_at IS NOT NULL')
+  ]);
+  res.json({ generated_at: new Date().toISOString(), metrics: Object.fromEntries(results) });
+});
 
 app.get('/api/admin/me', adminMiddleware, (req, res) => {
   res.json({ username: req.adminUser.username, is_super_admin: req.adminUser.isSuperAdmin, permissions: req.adminUser.permissions || null });
@@ -4902,6 +5058,31 @@ app.put('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {
   res.json(rows[0]);
 });
 
+app.put('/api/book/:slug/page/:pageSlug/chapter', authMiddleware, async (req, res) => {
+  const { rows: books } = await query('SELECT id,user_id FROM books WHERE slug=$1', [req.params.slug]);
+  if (!books.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = books[0];
+  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+
+  const { rows: pages } = await query('SELECT id FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
+  if (!pages.length) return res.status(404).json({ error: 'Sayfa bulunamadı' });
+
+  const chapterId = req.body?.chapter_id ? String(req.body.chapter_id) : null;
+  if (chapterId !== null) {
+    if (!/^\d+$/.test(chapterId)) return res.status(400).json({ error: 'Geçersiz bölüm' });
+    const { rows: chapters } = await query('SELECT id FROM book_chapters WHERE id=$1 AND book_id=$2', [chapterId, book.id]);
+    if (!chapters.length) return res.status(400).json({ error: 'Bu bölüm kitaba ait değil' });
+  }
+
+  const pageId = pages[0].id;
+  await query(`WITH moved_page AS (
+    UPDATE book_pages SET chapter_id=$1,updated_at=NOW() WHERE id=$2 RETURNING id
+  )
+  UPDATE book_page_drafts SET chapter_id=$1,updated_at=NOW()
+  WHERE page_id IN (SELECT id FROM moved_page)`, [chapterId, pageId]);
+  res.json({ ok: true, chapter_id: chapterId });
+});
+
 app.delete('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) => {
   const { rows: bRows } = await query('SELECT * FROM books WHERE slug=$1', [req.params.slug]);
   if (!bRows.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
@@ -4916,6 +5097,25 @@ app.delete('/api/book/:slug/page/:pageSlug', authMiddleware, async (req, res) =>
   const { rows: remaining } = await query('SELECT id FROM book_pages WHERE book_id=$1 AND is_published=1 ORDER BY page_num ASC', [book.id]);
   for (let i = 0; i < remaining.length; i++) {
     await query('UPDATE book_pages SET page_num=$1 WHERE id=$2', [i+1, remaining[i].id]);
+  }
+  res.json({ ok: true });
+});
+
+app.delete('/api/book/:slug/page/:pageSlug/draft', authMiddleware, async (req, res) => {
+  const { rows: books } = await query('SELECT id,user_id FROM books WHERE slug=$1', [req.params.slug]);
+  if (!books.length) return res.status(404).json({ error: 'Kitap bulunamadı' });
+  const book = books[0];
+  if (book.user_id != req.user.id) return res.status(403).json({ error: 'Yetki yok' });
+
+  const { rows: pages } = await query('SELECT id,is_published FROM book_pages WHERE slug=$1 AND book_id=$2', [req.params.pageSlug, book.id]);
+  if (!pages.length) return res.status(404).json({ error: 'Taslak bulunamadı' });
+  const page = pages[0];
+  if (page.is_published) {
+    const { rows: drafts } = await query('DELETE FROM book_page_drafts WHERE page_id=$1 RETURNING page_id', [page.id]);
+    if (!drafts.length) return res.status(404).json({ error: 'Sayfanın düzenleme taslağı bulunamadı' });
+  } else {
+    const { rows: deletedPages } = await query('DELETE FROM book_pages WHERE id=$1 AND is_published=0 RETURNING id', [page.id]);
+    if (!deletedPages.length) return res.status(409).json({ error: 'Sayfa yayın durumu değişti. Listeyi yenileyip tekrar deneyin.' });
   }
   res.json({ ok: true });
 });
@@ -12216,7 +12416,7 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT m.content
+      (SELECT CASE WHEN COALESCE(NULLIF(BTRIM(m.content),''),'')='' AND COALESCE(m.voice_url,'')<>'' THEN '🎤 Sesli mesaj' ELSE m.content END
         FROM dm_messages m WHERE m.conversation_id=c.id AND COALESCE(m.deleted_for_all,0)=0
           AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message,
@@ -12275,7 +12475,7 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT m.content
+      (SELECT CASE WHEN COALESCE(NULLIF(BTRIM(m.content),''),'')='' AND COALESCE(m.voice_url,'')<>'' THEN '🎤 Sesli mesaj' ELSE m.content END
         FROM dm_messages m WHERE m.conversation_id=c.id AND COALESCE(m.deleted_for_all,0)=0
           AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
         ORDER BY m.created_at DESC LIMIT 1) as last_message
@@ -12322,7 +12522,7 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       CASE WHEN COALESCE(viewer_dm_settings.show_online_status,1)=1
         AND COALESCE(other_dm_settings.show_online_status,1)=1
         THEN presence.last_active ELSE NULL END as other_last_active,
-      (SELECT m.content
+      (SELECT CASE WHEN COALESCE(NULLIF(BTRIM(m.content),''),'')='' AND COALESCE(m.voice_url,'')<>'' THEN '🎤 Sesli mesaj' ELSE m.content END
         FROM dm_messages m
         WHERE m.conversation_id=c.id AND COALESCE(m.deleted_for_all,0)=0
           AND CASE WHEN m.sender_id=$1 THEN COALESCE(m.deleted_by_sender,0)=0 ELSE COALESCE(m.deleted_by_receiver,0)=0 END
@@ -12531,6 +12731,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
   const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 10000);
   const afterId = Math.max(Number.parseInt(req.query.after_id, 10) || 0, 0);
   const aroundId = Math.max(Number.parseInt(req.query.around_id, 10) || 0, 0);
+  // Eski mesajları sayfa sayfa yüklemek için (sohbet yukarı kaydırıldığında).
+  const beforeId = Math.max(Number.parseInt(req.query.before_id, 10) || 0, 0);
   const requestedDeletionCheckpoint = req.query.after_deleted_at
     ? new Date(String(req.query.after_deleted_at))
     : new Date(0);
@@ -12553,6 +12755,10 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_song_id END AS shared_song_id,
       CASE WHEN m.deleted_for_all=1 THEN 0 ELSE m.song_start_seconds END AS song_start_seconds,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.shared_gif_url END AS shared_gif_url,
+      CASE WHEN m.deleted_for_all=1 THEN '' ELSE m.voice_url END AS voice_url,
+      CASE WHEN m.deleted_for_all=1 THEN 0 ELSE m.voice_duration END AS voice_duration,
+      CASE WHEN m.deleted_for_all=1 THEN '[]'::jsonb ELSE m.voice_waveform END AS voice_waveform,
+      m.voice_listened_at,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.reply_to_id END AS reply_to_id,
       m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.deleted_for_all_at, m.created_at,
       CASE WHEN COALESCE(viewer_receipt_settings.read_receipts_enabled,1)=1
@@ -12582,7 +12788,8 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.cover_url END as song_cover_url,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.audio_url END as song_audio_url,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE song.slug END as song_slug,
-      CASE WHEN m.deleted_for_all=1 OR r.deleted_for_all=1 THEN NULL ELSE r.content END as reply_content,
+      CASE WHEN m.deleted_for_all=1 OR r.deleted_for_all=1 THEN NULL
+        WHEN COALESCE(BTRIM(r.content),'')='' AND COALESCE(r.voice_url,'')<>'' THEN '🎤 Sesli mesaj' ELSE r.content END as reply_content,
       r.deleted_for_all as reply_deleted_for_all,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE ru.username END as reply_username,
       CASE WHEN m.deleted_for_all=1 THEN '[]'::json ELSE COALESCE((
@@ -12613,14 +12820,15 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       AND ($2=1 OR COALESCE(m.deleted_by_sender,0)=0 OR m.sender_id!=$3)
       AND ($2=1 OR COALESCE(m.deleted_by_receiver,0)=0 OR m.sender_id=$3)
       AND ($8=0 OR ABS(m.id-$8) <= 50)
+      AND ($9=0 OR m.id < $9)
     ORDER BY CASE WHEN $6=0 THEN m.id END DESC,
       CASE WHEN m.id>$6 THEN 0 ELSE 1 END ASC,
       CASE WHEN m.id>$6 THEN m.id END ASC,
       m.deleted_for_all_at DESC NULLS LAST, m.id DESC
     LIMIT $4 OFFSET $5
-  `, [conv.id, 0, uid, requestedLimit, offset, afterId, afterDeletedAt, aroundId]);
+  `, [conv.id, 0, uid, requestedLimit, offset, afterId, afterDeletedAt, aroundId, beforeId]);
 
-  if (afterId) return res.json(msgs);
+  if (afterId || beforeId) return res.json(msgs);
 
   if (msgs.length && String(other.id) !== String(uid)) {
     const lastId = Math.max(...msgs.map(message => Number(message.id)));
@@ -12760,6 +12968,122 @@ app.get('/api/giphy/search', authMiddleware, async (req, res) => {
   }
 });
 
+// ===== SESLİ MESAJ (WhatsApp tarzı) =====
+// Ses kaydı tarayıcıda alınır, sunucu üzerinden Cloudinary'ye yüklenir ve her cihazda çalışması
+// için MP3 olarak teslim edilir. Dönen imzalı token, mesaj gönderilirken URL'nin bu kullanıcıya ait
+// gerçek bir yükleme olduğunu doğrular (başkası rastgele URL ile sesli mesaj gönderemez).
+const DM_VOICE_TOKEN_SECRET = APP_SECRET || crypto.randomBytes(32).toString('hex');
+const DM_VOICE_MAX_SECONDS = 15 * 60;
+const DM_VOICE_TOKEN_TTL_MS = 60 * 60 * 1000;
+const dmVoiceUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const mime = String(file.mimetype || '').split(';')[0].trim().toLowerCase();
+    const allowed = ['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/aac', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'video/webm', 'video/mp4', 'application/octet-stream'];
+    if (allowed.includes(mime)) return cb(null, true);
+    const error = new Error('Sesli mesaj biçimi desteklenmiyor.');
+    error.status = 400;
+    cb(error);
+  }
+});
+const dmVoiceLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: Number(process.env.DM_VOICE_RATE_LIMIT_MAX || 80),
+  keyGenerator: req => String(req.user.id),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Kısa sürede çok fazla sesli mesaj gönderdin. Biraz bekleyip tekrar dene.' }
+});
+function sanitizeVoiceWaveform(value) {
+  let list = value;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { list = []; }
+  }
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 64).map(item => Math.max(0, Math.min(100, Math.round(Number(item) || 0))));
+}
+function signDmVoiceToken(userId, url, duration, issuedAt) {
+  return crypto.createHmac('sha256', DM_VOICE_TOKEN_SECRET)
+    .update(`dm-voice:${userId}:${url}:${duration}:${issuedAt}`)
+    .digest('hex');
+}
+function verifyDmVoiceToken(userId, url, duration, token) {
+  const [issuedAtRaw, signature] = String(token || '').split('.');
+  const issuedAt = Number(issuedAtRaw);
+  if (!Number.isSafeInteger(issuedAt) || !signature || !/^[a-f0-9]{64}$/.test(signature)) return false;
+  if (Date.now() - issuedAt > DM_VOICE_TOKEN_TTL_MS || issuedAt > Date.now() + 60000) return false;
+  const expected = signDmVoiceToken(userId, url, duration, issuedAt);
+  return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'));
+}
+function uploadDmVoiceToCloudinary(buffer) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream({
+      resource_type: 'video',
+      folder: 'cigcig/voice',
+      public_id: randomUUID(),
+      overwrite: false
+    }, (error, result) => {
+      if (error) return reject(new Error(error.message || 'Cloudinary yükleme hatası'));
+      if (!result?.public_id) return reject(new Error('Cloudinary yanıtı eksik'));
+      resolve(result);
+    });
+    stream.end(buffer);
+  });
+}
+
+app.post('/api/dm/voice-upload', authMiddleware, dmVoiceLimiter, dmVoiceUpload.single('audio'), async (req, res) => {
+  if (await denyIfRestricted(req, res, 'message')) return;
+  if (!USE_CLOUDINARY) return res.status(503).json({ error: 'Sesli mesaj depolaması yapılandırılmamış (Cloudinary).' });
+  if (!req.file?.buffer?.length) return res.status(400).json({ error: 'Ses kaydı bulunamadı.' });
+  if (req.file.buffer.length < 600) return res.status(400).json({ error: 'Ses kaydı çok kısa.' });
+  const clientDuration = Number(req.body?.duration);
+  let result;
+  try {
+    result = await uploadDmVoiceToCloudinary(req.file.buffer);
+  } catch (error) {
+    console.error('[dm-voice] Cloudinary yüklemesi başarısız:', error.message);
+    return res.status(502).json({ error: 'Sesli mesaj yüklenemedi. Lütfen tekrar dene.' });
+  }
+  const measured = Number(result.duration);
+  const duration = Math.max(1, Math.min(DM_VOICE_MAX_SECONDS, Math.round(
+    Number.isFinite(measured) && measured > 0 ? measured : (Number.isFinite(clientDuration) ? clientDuration : 1)
+  )));
+  // MP3 teslimatı iOS Safari dahil tüm tarayıcılarda oynatılabilir (WebM/Opus iPhone'da çalışmaz).
+  const voiceUrl = cloudinary.url(result.public_id, {
+    resource_type: 'video',
+    type: 'upload',
+    format: 'mp3',
+    secure: true,
+    version: result.version
+  });
+  const issuedAt = Date.now();
+  res.json({
+    voice_url: voiceUrl,
+    voice_duration: duration,
+    voice_waveform: sanitizeVoiceWaveform(req.body?.waveform),
+    voice_token: `${issuedAt}.${signDmVoiceToken(req.user.id, voiceUrl, duration, issuedAt)}`
+  });
+});
+
+app.post('/api/messages/:id/voice-listened', authMiddleware, async (req, res) => {
+  if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası.' });
+  const { rows } = await query(`
+    UPDATE dm_messages m SET voice_listened_at=NOW()
+    FROM dm_conversations c
+    WHERE m.id=$1 AND c.id=m.conversation_id AND m.sender_id<>$2
+      AND (c.user1_id=$2 OR c.user2_id=$2) AND COALESCE(m.voice_url,'')<>'' AND m.voice_listened_at IS NULL
+    RETURNING m.id, m.conversation_id, m.sender_id, m.voice_listened_at`, [req.params.id, req.user.id]);
+  if (rows[0]) {
+    io.to(`user:${rows[0].sender_id}`).emit('dm:voice-listened', {
+      conversationId: rows[0].conversation_id,
+      messageId: rows[0].id,
+      listenedAt: rows[0].voice_listened_at
+    });
+  }
+  res.json({ ok: true });
+});
+
 app.post('/api/conversation/:username/messages', authMiddleware, upload.single('image'), async (req, res) => {
   const { rows: target } = await query('SELECT id,username,is_private,dm_message_permission FROM users WHERE username=$1', [req.params.username]);
   if (await denyIfRestricted(req, res, 'message')) return;
@@ -12785,14 +13109,61 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     await query('UPDATE dm_conversations SET hidden_by_user2=0 WHERE id=$1', [conv.id]);
   }
   let { content, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, shared_gif_url, reply_to_id, image_url: bodyImageUrl } = req.body;
+  // Paylaşılan içerik kimlikleri yalnızca pozitif tam sayı olabilir.
+  const normalizeSharedId = value => {
+    if (value === undefined || value === null || value === '') return null;
+    const id = Number(value);
+    return Number.isSafeInteger(id) && id > 0 ? id : NaN;
+  };
+  for (const key of ['shared_forum_id', 'shared_video_id', 'shared_book_id', 'shared_photo_id', 'shared_story_id']) {
+    if (Number.isNaN(normalizeSharedId(req.body?.[key]))) return res.status(400).json({ error: 'Paylaşılan içerik geçersiz.' });
+  }
+  shared_forum_id = normalizeSharedId(shared_forum_id);
+  shared_video_id = normalizeSharedId(shared_video_id);
+  shared_book_id = normalizeSharedId(shared_book_id);
+  shared_photo_id = normalizeSharedId(shared_photo_id);
+  shared_story_id = normalizeSharedId(shared_story_id);
+  // Yanıtlanan mesaj aynı sohbete ait olmalı; aksi halde başka sohbetlerin içeriği sızabilir.
+  if (reply_to_id !== undefined && reply_to_id !== null && reply_to_id !== '') {
+    const replyId = Number(reply_to_id);
+    if (!Number.isSafeInteger(replyId) || replyId < 1) return res.status(400).json({ error: 'Yanıtlanan mesaj geçersiz.' });
+    const { rows: replyRows } = await query('SELECT id FROM dm_messages WHERE id=$1 AND conversation_id=$2', [replyId, conv.id]);
+    reply_to_id = replyRows.length ? replyId : null;
+  } else {
+    reply_to_id = null;
+  }
+  // Sesli mesaj
+  let voiceUrl = '';
+  let voiceDuration = 0;
+  let voiceWaveform = [];
+  if (req.body?.voice_url) {
+    voiceUrl = String(req.body.voice_url).trim();
+    voiceDuration = Number(req.body.voice_duration);
+    if (!voiceUrl || voiceUrl.length > 2048 || !Number.isSafeInteger(voiceDuration)
+      || !verifyDmVoiceToken(uid, voiceUrl, voiceDuration, req.body.voice_token)) {
+      return res.status(400).json({ error: 'Sesli mesaj doğrulanamadı. Lütfen tekrar kaydet.' });
+    }
+    voiceWaveform = sanitizeVoiceWaveform(req.body.voice_waveform);
+  }
   const songStartSeconds = Number(req.body?.song_start_seconds ?? 0);
   if (!Number.isInteger(songStartSeconds) || songStartSeconds < 0 || songStartSeconds > 3600) return res.status(400).json({ error: 'Müzik başlangıç zamanı geçersiz.' });
   content = content == null ? '' : String(content);
+  if (content.length > 5000) return res.status(400).json({ error: 'Mesaj en fazla 5000 karakter olabilir.' });
   const requestedImageUrls = Array.isArray(req.body?.image_urls)
     ? req.body.image_urls.map(url => String(url || '').trim()).filter(Boolean)
     : bodyImageUrl ? [String(bodyImageUrl).trim()] : [];
   if (requestedImageUrls.length > 10) return res.status(400).json({ error: 'Bir mesajda en fazla 10 fotoğraf gönderebilirsiniz.' });
-  if (requestedImageUrls.some(url => url.length > 2048)) return res.status(400).json({ error: 'Fotoğraf adresi geçersiz.' });
+  const isAllowedDmImageUrl = url => {
+    if (url.length > 2048) return false;
+    if (/^\/uploads\/[A-Za-z0-9._-]+$/.test(url)) return true;
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+  if (!requestedImageUrls.every(isAllowedDmImageUrl)) return res.status(400).json({ error: 'Fotoğraf adresi geçersiz.' });
   const imageUrls = [...requestedImageUrls];
   let image_url = imageUrls[0] || '';
   const imageViewLimit = Number(req.body?.image_view_limit ?? 0);
@@ -12836,15 +13207,16 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   } else {
     shared_newspaper_id = null;
   }
-  if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id && !shared_song_id && !shared_gif_url) return res.status(400).json({ error: 'Mesaj boş olamaz' });
+  if (!content.trim() && !imageUrls.length && !shared_forum_id && !shared_video_id && !shared_book_id && !shared_photo_id && !shared_story_id && !shared_newspaper_id && !shared_song_id && !shared_gif_url && !voiceUrl) return res.status(400).json({ error: 'Mesaj boş olamaz' });
   const { rows: msgRows } = await query(
-    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, song_start_seconds, shared_gif_url, reply_to_id) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *',
-    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_song_id ? songStartSeconds : 0, shared_gif_url, reply_to_id||null]
+    'INSERT INTO dm_messages (conversation_id, sender_id, content, image_url, image_urls, image_view_limit, shared_forum_id, shared_video_id, shared_book_id, shared_photo_id, shared_story_id, shared_newspaper_id, shared_song_id, song_start_seconds, shared_gif_url, reply_to_id, voice_url, voice_duration, voice_waveform) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb) RETURNING *',
+    [conv.id, uid, content||'', image_url, JSON.stringify(imageUrls), imageViewLimit, shared_forum_id||null, shared_video_id||null, shared_book_id||null, shared_photo_id||null, shared_story_id||null, shared_newspaper_id, shared_song_id, shared_song_id ? songStartSeconds : 0, shared_gif_url, reply_to_id||null, voiceUrl, voiceUrl ? voiceDuration : 0, JSON.stringify(voiceWaveform)]
   );
   const postInsertTasks = [
     query('UPDATE dm_conversations SET last_message_at=NOW() WHERE id=$1', [conv.id]),
     query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.song_start_seconds,m.shared_gif_url,
+      m.voice_url, m.voice_duration, m.voice_waveform, m.voice_listened_at,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -12854,7 +13226,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
       st.media_url as story_media_url, st.caption as story_caption, su.username as story_username,
       nw.newspaper_name, nw.newspaper_date, nw.image_url as newspaper_image,
       song.title as song_title, song.artist_name as song_artist, song.cover_url as song_cover_url, song.audio_url as song_audio_url, song.slug as song_slug,
-      r.content as reply_content, ru.username as reply_username,
+      CASE WHEN COALESCE(BTRIM(r.content),'')='' AND COALESCE(r.voice_url,'')<>'' THEN '🎤 Sesli mesaj' ELSE r.content END as reply_content, ru.username as reply_username,
       '[]'::json AS reactions
     FROM dm_messages m JOIN users u ON m.sender_id=u.id
     LEFT JOIN forums f ON m.shared_forum_id=f.id
@@ -13090,7 +13462,7 @@ app.put('/api/messages/:id', authMiddleware, async (req, res) => {
   if (msg.sender_id != req.user.id) return res.status(403).json({ error: 'Sadece kendi mesajınızı düzenleyebilirsiniz' });
   if (msg.deleted_for_all || msg.deleted_by_sender) return res.status(400).json({ error: 'Silinmiş mesaj düzenlenemez' });
   if (!String(msg.content || '').trim()) return res.status(400).json({ error: 'Metin içermeyen mesaj düzenlenemez' });
-  if (!content && !msg.image_url && !msg.shared_forum_id && !msg.shared_video_id && !msg.shared_book_id && !msg.shared_photo_id && !msg.shared_story_id && !msg.shared_newspaper_id && !msg.shared_song_id && !msg.shared_gif_url) {
+  if (!content && !msg.image_url && !msg.shared_forum_id && !msg.shared_video_id && !msg.shared_book_id && !msg.shared_photo_id && !msg.shared_story_id && !msg.shared_newspaper_id && !msg.shared_song_id && !msg.shared_gif_url && !msg.voice_url) {
     return res.status(400).json({ error: 'Mesaj boş olamaz' });
   }
 
@@ -13390,16 +13762,22 @@ app.get('/api/admin/conversations/:id/messages', adminMiddleware, async (req, re
 });
 
 app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
   if (req.path.startsWith('/api/')) {
     const status = err instanceof multer.MulterError
       ? (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400)
-      : (err.status || 500);
+      : (Number(err.status || err.statusCode) || 500);
+    if (status >= 500) {
+      console.error('[api] Sunucu hatası:', req.method, req.originalUrl, err?.stack || err);
+    }
+    // 5xx hatalarında veritabanı/altyapı ayrıntıları istemciye sızdırılmaz.
     const message = err.code === 'LIMIT_FILE_SIZE'
       ? 'Dosya boyutu sınırını aşıyor.'
-      : (err.message || 'Sunucu hatası');
+      : status >= 500 ? 'Sunucu hatası. Lütfen tekrar deneyin.' : (err.message || 'İstek işlenemedi');
     return res.status(status).json({ error: message });
   }
-  next(err);
+  console.error('[web] Sunucu hatası:', req.method, req.originalUrl, err?.stack || err);
+  return res.status(500).send('Bir hata oluştu.');
 });
 
 // ===================================================================
