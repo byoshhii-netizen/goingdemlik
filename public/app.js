@@ -12300,6 +12300,7 @@ async function renderSettings(app) {
         <div class="settings-nav-item" data-section="username"><i class="fas fa-at"></i> Kullanıcı Adı</div>
         <div class="settings-nav-item" data-section="password"><i class="fas fa-lock"></i> Şifre</div>
         <div class="settings-nav-item" data-section="two-factor"><i class="fas fa-shield-halved"></i> 2 Aşamalı Doğrulama</div>
+        <div class="settings-nav-item" data-section="security"><i class="fas fa-shield-heart"></i> Güvenlik</div>
         ${(currentUser.is_vip || currentUser.is_plus) ? '<div class="settings-nav-item" data-section="appearance"><i class="fas fa-palette"></i> Görünüm</div>' : ''}
         <div class="settings-nav-item" data-section="messages"><i class="fas fa-comments"></i> Mesajlar</div>
         <div class="settings-nav-item" data-section="account-status"><i class="fas fa-user-shield"></i> Hesap Durumu</div>
@@ -12489,6 +12490,121 @@ async function renderSettingsSection(section) {
   const el = $('#settings-content'); if (!el) return;
   if (section === 'appearance' && !currentUser?.is_vip && !currentUser?.is_plus) {
     renderSettingsSection('profile');
+    return;
+  }
+  if (section === 'security') {
+    el.innerHTML = `<section class="card security-page">
+      <div class="card-header"><span><i class="fas fa-mobile-screen" aria-hidden="true"></i> Açık oturumlar</span></div>
+      <div class="card-body">
+        <p class="settings-help">Hesabının şu anda açık olduğu cihazlar. Tanımadığın bir cihaz görürsen oturumunu kapat.</p>
+        <div id="security-sessions" class="sec-list"><div class="loading-center"><div class="spinner"></div></div></div>
+        <button type="button" class="btn btn-outline sec-logout-all" id="security-logout-all"><i class="fas fa-right-from-bracket"></i> Diğer tüm cihazlardan çıkış yap</button>
+      </div>
+    </section>
+    <section class="card security-page">
+      <div class="card-header"><span><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Giriş geçmişi</span></div>
+      <div class="card-body">
+        <p class="settings-help">Hesabın açıldığından beri yapılan girişler: cihaz, tarayıcı, IP, konum ve tarih.</p>
+        <div class="sec-search"><i class="fas fa-search" aria-hidden="true"></i>
+          <input type="search" id="security-search" placeholder="Cihaz, tarayıcı, IP veya konum ara…" />
+        </div>
+        <div id="security-logins" class="sec-list"><div class="loading-center"><div class="spinner"></div></div></div>
+      </div>
+    </section>`;
+
+    const fmtWhen = value => {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+    const deviceIcon = row => {
+      const os = String(row.os || row.device || '').toLowerCase();
+      if (os.includes('iphone')) return 'fa-mobile-screen-button';
+      if (os.includes('ipad')) return 'fa-tablet-screen-button';
+      if (os.includes('android')) return 'fa-mobile-screen';
+      if (os.includes('mac')) return 'fa-laptop';
+      if (os.includes('windows')) return 'fa-desktop';
+      return 'fa-circle-question';
+    };
+
+    const loadSessions = async () => {
+      const box = document.getElementById('security-sessions');
+      try {
+        const sessions = await api('/me/security/sessions');
+        if (!box?.isConnected) return;
+        box.innerHTML = sessions.length ? sessions.map(row => `
+          <div class="sec-row${row.is_current ? ' is-current' : ''}" data-session="${escHtml(row.id)}">
+            <span class="sec-icon"><i class="fas ${deviceIcon(row)}"></i></span>
+            <div class="sec-main">
+              <strong>${escHtml(row.device || 'Bilinmeyen cihaz')} · ${escHtml(row.browser || '')}</strong>
+              <small>${escHtml(row.location || 'Konum bilinmiyor')} · ${escHtml(row.ip || '')}</small>
+              <small>Son görülme: ${escHtml(fmtWhen(row.last_seen_at))}</small>
+            </div>
+            ${row.is_current
+              ? '<span class="sec-badge">Bu cihaz</span>'
+              : '<button type="button" class="sec-kick" data-kick aria-label="Bu cihazdan çıkış yap"><i class="fas fa-xmark"></i></button>'}
+          </div>`).join('') : '<p class="sec-empty">Açık oturum bulunamadı.</p>';
+      } catch (error) {
+        if (box?.isConnected) box.innerHTML = '<p class="sec-empty">Oturumlar yüklenemedi.</p>';
+      }
+    };
+
+    const loadLogins = async (search = '') => {
+      const box = document.getElementById('security-logins');
+      try {
+        const events = await api('/me/security/logins' + (search ? `?q=${encodeURIComponent(search)}` : ''));
+        if (!box?.isConnected) return;
+        box.innerHTML = events.length ? events.map(row => `
+          <div class="sec-row">
+            <span class="sec-icon"><i class="fas ${deviceIcon(row)}"></i></span>
+            <div class="sec-main">
+              <strong>${escHtml(row.device || 'Bilinmeyen cihaz')} · ${escHtml(row.browser || '')}</strong>
+              <small>${escHtml(row.location || 'Konum bilinmiyor')} · ${escHtml(row.ip || '')}</small>
+              <small>${escHtml(fmtWhen(row.created_at))}</small>
+            </div>
+          </div>`).join('') : '<p class="sec-empty">Kayıt bulunamadı.</p>';
+      } catch (error) {
+        if (box?.isConnected) box.innerHTML = '<p class="sec-empty">Giriş geçmişi yüklenemedi.</p>';
+      }
+    };
+
+    document.getElementById('security-sessions')?.addEventListener('click', async event => {
+      const button = event.target.closest('[data-kick]');
+      if (!button) return;
+      const row = button.closest('[data-session]');
+      if (!await CigCigDialogs.confirm('Bu cihazdan çıkış yapılsın mı?')) return;
+      button.disabled = true;
+      try {
+        await api(`/me/security/sessions/${encodeURIComponent(row.dataset.session)}`, { method: 'DELETE' });
+        row.remove();
+        toast('Cihazdan çıkış yapıldı');
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message || 'Çıkış yapılamadı', 'error');
+      }
+    });
+    document.getElementById('security-logout-all')?.addEventListener('click', async event => {
+      if (!await CigCigDialogs.confirm('Bu cihaz dışındaki tüm cihazlardan çıkış yapılsın mı?')) return;
+      const button = event.currentTarget;
+      button.disabled = true;
+      try {
+        await api('/me/security/sessions?keep_current=1', { method: 'DELETE' });
+        toast('Diğer cihazlardan çıkış yapıldı');
+        loadSessions();
+      } catch (error) {
+        toast(error.message || 'Çıkış yapılamadı', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+    let searchTimer = 0;
+    document.getElementById('security-search')?.addEventListener('input', event => {
+      clearTimeout(searchTimer);
+      const value = event.target.value.trim();
+      searchTimer = setTimeout(() => loadLogins(value), 260);
+    });
+    loadSessions();
+    loadLogins();
     return;
   }
   if (section === 'story-visibility') {
@@ -14192,53 +14308,123 @@ function renderForgotPassword(app) {
   let challenge = '';
   let resetToken = '';
 
+  let songChallengeOptions = [];
+  let songPicks = [];
+
+  // 1. adım: kullanıcı adı ya da e-posta
   const renderEmailStep = () => {
     app.innerHTML = `<div class="auth-page">
       <div class="auth-card auth-card--enhanced card card-body">
         <img class="auth-site-logo" src="/cigcig2.png" alt="" onerror="this.setAttribute('data-broken','1')">
         <div class="auth-site-wordmark auth-site-wordmark--brand">CigCig</div>
         <div class="auth-title">Şifremi Unuttum</div>
-        <p class="auth-subtitle">Hesabındaki e-posta adresini yaz, sana doğrulama kodunu gönderelim.</p>
+        <p class="auth-subtitle">Kullanıcı adını ya da e-posta adresini yaz, hesabını bulalım.</p>
         <div class="form-group">
-          <label>E-posta</label>
-          <input type="email" id="forgot-email" placeholder="ornek@mail.com" autocomplete="email" />
+          <label>Kullanıcı adı veya e-posta</label>
+          <input type="text" id="forgot-email" placeholder="@kullanıcı_adı veya ornek@mail.com" autocomplete="username" />
         </div>
-        <button class="btn btn-primary" style="width:100%;margin-top:4px" id="forgot-send-btn">Kod Gönder</button>
+        <button class="btn btn-primary" style="width:100%;margin-top:4px" id="forgot-send-btn">Devam et</button>
         <div id="forgot-email-error" class="form-error mt-4" style="text-align:center"></div>
         <div class="auth-footer"><a href="/giris" data-link class="auth-link">Giriş ekranına dön</a></div>
       </div>
     </div>`;
 
-    const requestCode = async () => {
-      const email = $('#forgot-email').value.trim();
+    const lookupAccount = async () => {
+      const identifier = $('#forgot-email').value.trim().replace(/^@/, '');
       const error = $('#forgot-email-error');
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        error.textContent = 'Geçerli bir e-posta adresi girin';
+      if (identifier.length < 3) {
+        error.textContent = 'Kullanıcı adını ya da e-posta adresini yaz.';
         return;
       }
       const button = $('#forgot-send-btn');
       button.disabled = true;
-      button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Gönderiliyor';
+      button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Aranıyor';
       error.textContent = '';
       try {
-        const data = await api('/auth/forgot-password/request', { method: 'POST', body: JSON.stringify({ email }) });
-        if (!data.challenge) {
-          error.textContent = 'Bu e-posta ile kayıtlı bir hesap bulunamadı. Kayıt olurken kullandığın e-postayı yaz.';
-          button.disabled = false;
-          button.textContent = 'Kod Gönder';
+        const found = await api('/auth/forgot-password/lookup', { method: 'POST', body: JSON.stringify({ identifier }) });
+        if (found.method === 'email') {
+          button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Kod gönderiliyor';
+          const sent = await api('/auth/forgot-password/request', { method: 'POST', body: JSON.stringify({ identifier }) });
+          if (!sent.challenge) throw new Error(sent.message || 'Kod gönderilemedi.');
+          challenge = sent.challenge;
+          renderCodeStep(sent.maskedEmail || found.maskedEmail);
           return;
         }
-        challenge = data.challenge;
-        renderCodeStep(data.maskedEmail);
+        if (found.method === 'songs') {
+          challenge = found.challenge;
+          songChallengeOptions = found.options || [];
+          songPicks = [];
+          renderSongStep(found.username);
+          return;
+        }
+        throw new Error(found.error || 'Bu hesap için kurtarma yapılamıyor.');
       } catch (e) {
         error.textContent = e.message;
         button.disabled = false;
-        button.textContent = 'Kod Gönder';
+        button.textContent = 'Devam et';
       }
     };
-    $('#forgot-send-btn').addEventListener('click', requestCode);
-    $('#forgot-email').addEventListener('keydown', e => { if (e.key === 'Enter') requestCode(); });
+    $('#forgot-send-btn').addEventListener('click', lookupAccount);
+    $('#forgot-email').addEventListener('keydown', e => { if (e.key === 'Enter') lookupAccount(); });
     $('#forgot-email').focus();
+  };
+
+  // E-posta yoksa: son dinlenen 2 şarkıyı sırasıyla seç
+  const renderSongStep = username => {
+    const render = () => {
+      app.innerHTML = `<div class="auth-page">
+        <div class="auth-card auth-card--enhanced card card-body">
+          <div class="auth-title"><i class="fas fa-music" style="color:var(--accent-red2)"></i> Hesabını doğrula</div>
+          <p class="auth-subtitle"><strong>@${escHtml(username || '')}</strong> hesabının tanımlanmış bir e-postası yok.
+            Son dinlediğin <strong>iki şarkıyı sırasıyla</strong> seç. Yanlış seçimde kurtarma kabul edilmez.</p>
+          <div class="forgot-song-picks">
+            <span class="forgot-song-slot${songPicks[0] ? ' is-filled' : ''}">1. ${songPicks[0] ? escHtml(songPicks[0].title) : 'En son dinlediğin'}</span>
+            <span class="forgot-song-slot${songPicks[1] ? ' is-filled' : ''}">2. ${songPicks[1] ? escHtml(songPicks[1].title) : 'Ondan önceki'}</span>
+          </div>
+          <div class="forgot-song-grid">
+            ${songChallengeOptions.map(option => `
+              <button type="button" class="forgot-song-option${songPicks.some(pick => pick.song_id === option.song_id) ? ' is-picked' : ''}" data-song="${escHtml(option.song_id)}">
+                <strong>${escHtml(option.title || 'Şarkı')}</strong><small>${escHtml(option.artist_name || '')}</small>
+              </button>`).join('')}
+          </div>
+          <div class="forgot-song-actions">
+            <button class="btn btn-ghost" id="forgot-song-reset" type="button">Seçimi temizle</button>
+            <button class="btn btn-primary" id="forgot-song-verify" type="button" ${songPicks.length === 2 ? '' : 'disabled'}>Doğrula</button>
+          </div>
+          <div id="forgot-song-error" class="form-error mt-4" style="text-align:center"></div>
+          <div class="auth-footer"><a href="/giris" data-link class="auth-link">Giriş ekranına dön</a></div>
+        </div>
+      </div>`;
+
+      app.querySelectorAll('[data-song]').forEach(button => button.addEventListener('click', () => {
+        const id = Number(button.dataset.song);
+        if (songPicks.some(pick => pick.song_id === id)) return;
+        if (songPicks.length >= 2) return;
+        const option = songChallengeOptions.find(item => Number(item.song_id) === id);
+        if (option) songPicks.push({ ...option, song_id: id });
+        render();
+      }));
+      $('#forgot-song-reset').addEventListener('click', () => { songPicks = []; render(); });
+      $('#forgot-song-verify').addEventListener('click', async () => {
+        const button = $('#forgot-song-verify');
+        const error = $('#forgot-song-error');
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Doğrulanıyor';
+        try {
+          const data = await api('/auth/forgot-password/songs/verify', {
+            method: 'POST',
+            body: JSON.stringify({ challenge, song_ids: songPicks.map(pick => pick.song_id) })
+          });
+          resetToken = data.reset_token;
+          renderResetStep();
+        } catch (e) {
+          error.textContent = e.message;
+          songPicks = [];
+          setTimeout(() => { render(); $('#forgot-song-error').textContent = e.message; }, 50);
+        }
+      });
+    };
+    render();
   };
 
   const renderCodeStep = maskedEmail => {
@@ -25351,10 +25537,16 @@ init();
 (function bindKeyboardAwareLayout() {
   if (!window.visualViewport) return;
   const vv = window.visualViewport;
+  const root = document.documentElement;
   const sync = () => {
     const keyboardHeight = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    document.body.classList.toggle('keyboard-open', keyboardHeight > 120);
-    document.documentElement.style.setProperty('--kb-inset', `${Math.round(keyboardHeight)}px`);
+    const open = keyboardHeight > 120;
+    document.body.classList.toggle('keyboard-open', open);
+    root.style.setProperty('--kb-inset', `${Math.round(keyboardHeight)}px`);
+    // iOS'ta klavye açıkken gerçek görünür yükseklik; 100vh yanlış kalıyor
+    root.style.setProperty('--app-vh', `${Math.round(vv.height)}px`);
+    // Klavye açıkken alt güvenli alan boşluğu kalmamalı (iPhone'daki büyük boşluk)
+    root.style.setProperty('--safe-bottom', open ? '0px' : 'env(safe-area-inset-bottom)');
   };
   vv.addEventListener('resize', sync);
   vv.addEventListener('scroll', sync);

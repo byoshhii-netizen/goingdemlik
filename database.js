@@ -883,6 +883,36 @@ async function initDb() {
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS nsfw_score REAL;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_nsfw SMALLINT NOT NULL DEFAULT 0;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS nsfw_score REAL;
+    -- Kullanıcı dinleme geçmişi (şifre kurtarmada "son dinlediğin 2 şarkı" için)
+    CREATE TABLE IF NOT EXISTS user_song_plays (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      song_id BIGINT NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+      played_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_song_plays_user ON user_song_plays(user_id, played_at DESC);
+    -- Giriş kayıtları (güvenlik sayfası)
+    CREATE TABLE IF NOT EXISTS login_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      session_token TEXT,
+      ip TEXT NOT NULL DEFAULT '',
+      user_agent TEXT NOT NULL DEFAULT '',
+      device TEXT NOT NULL DEFAULT '',
+      browser TEXT NOT NULL DEFAULT '',
+      os TEXT NOT NULL DEFAULT '',
+      location TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'success',
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_login_events_user ON login_events(user_id, created_at DESC);
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP NOT NULL DEFAULT NOW();
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS device TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS browser TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
     CREATE TABLE IF NOT EXISTS nsfw_flags (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,

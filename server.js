@@ -583,6 +583,52 @@ function getIp(req) {
   return String(req.ip || '').trim();
 }
 
+// ===== OTURUM / GİRİŞ KAYITLARI =====
+// User-Agent'tan okunabilir cihaz, tarayıcı ve işletim sistemi çıkarır.
+function describeClient(req) {
+  const ua = String(req.headers['user-agent'] || '').slice(0, 400);
+  let os = 'Bilinmiyor';
+  if (/iPhone/i.test(ua)) os = 'iPhone';
+  else if (/iPad/i.test(ua)) os = 'iPad';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Windows NT/i.test(ua)) os = 'Windows';
+  else if (/Mac OS X/i.test(ua)) os = 'macOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+  let browser = 'Bilinmiyor';
+  if (/Edg\//i.test(ua)) browser = 'Edge';
+  else if (/OPR\/|Opera/i.test(ua)) browser = 'Opera';
+  else if (/SamsungBrowser/i.test(ua)) browser = 'Samsung Internet';
+  else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+  else if (/Chrome\//i.test(ua)) browser = 'Chrome';
+  else if (/Safari\//i.test(ua)) browser = 'Safari';
+  const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua);
+  const device = os === 'Bilinmiyor' ? (isMobile ? 'Telefon' : 'Bilgisayar') : os;
+  // Konum: ters vekil başlıkları varsa kullan (Cloudflare / Railway)
+  const country = String(req.headers['cf-ipcountry'] || '').trim().toUpperCase();
+  const city = String(req.headers['cf-ipcity'] || '').trim();
+  const location = [city, country].filter(Boolean).join(', ') || '';
+  return { ua, os, browser, device, location, ip: getIp(req).replace(/^::ffff:/, '') };
+}
+
+async function recordLoginEvent(userId, token, req, status = 'success') {
+  try {
+    const info = describeClient(req);
+    await query(
+      `INSERT INTO login_events (user_id, session_token, ip, user_agent, device, browser, os, location, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [userId, token || null, info.ip, info.ua, info.device, info.browser, info.os, info.location, status]
+    );
+    if (token) {
+      await query(
+        'UPDATE sessions SET ip=$1, user_agent=$2, device=$3, browser=$4, os=$5, location=$6, last_seen_at=NOW() WHERE token=$7',
+        [info.ip, info.ua, info.device, info.browser, info.os, info.location, token]
+      );
+    }
+  } catch (error) {
+    console.error('[GÜVENLİK] giriş kaydı yazılamadı:', error.message);
+  }
+}
+
 function hashUltraBanSignal(type, value) {
   if (!APP_SECRET) throw new Error('Ultra Ban için APP_SECRET yapılandırılmalıdır.');
   return crypto.createHmac('sha256', APP_SECRET)
@@ -723,6 +769,7 @@ async function completeTwoFactorChallenge(challenge, value) {
   await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
   const token = generateToken(record.user_id);
   await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, record.user_id]);
+  await recordLoginEvent(record.user_id, token, req);
   return token;
 }
 
@@ -2817,6 +2864,7 @@ app.post('/api/auth/register', avatarUpload.single('avatar'), async (req, res) =
     await trackInviteRegistration(inviteCode, user, ip);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
+    await recordLoginEvent(user.id, token, req);
     await recordUserAccessSignals(user.id, req);
     await logAction(usernameValue, 'register', '', '', ip);
     setSessionCookie(res, token);
@@ -2867,6 +2915,7 @@ app.post('/api/auth/login', async (req, res) => {
     await query('UPDATE users SET last_active=NOW(), ip=$1 WHERE id=$2', [ip, user.id]);
     const token = generateToken(user.id);
     await query('INSERT INTO sessions (token,user_id) VALUES ($1,$2)', [token, user.id]);
+    await recordLoginEvent(user.id, token, req);
     await recordUserAccessSignals(user.id, req);
     await logAction(user.username, 'login', '', '', ip);
     setSessionCookie(res, token);
@@ -2909,13 +2958,171 @@ app.post('/api/auth/verify-registration-email', async (req, res) => {
   } catch (e) { res.status(500).json({ error: 'E-posta doğrulama işlemi başarısız' }); }
 });
 
+// ===== GÜVENLİK: giriş kayıtları ve açık oturumlar =====
+app.get('/api/me/security/logins', authMiddleware, async (req, res) => {
+  const search = String(req.query.q || '').trim().slice(0, 60);
+  const params = [req.user.id];
+  let where = 'WHERE user_id = $1';
+  if (search) {
+    params.push(`%${search}%`);
+    where += ` AND (ip ILIKE $${params.length} OR device ILIKE $${params.length} OR browser ILIKE $${params.length}
+                 OR os ILIKE $${params.length} OR location ILIKE $${params.length})`;
+  }
+  const { rows } = await query(
+    `SELECT id, ip, device, browser, os, location, status, created_at
+     FROM login_events ${where} ORDER BY created_at DESC LIMIT 200`, params);
+  res.json(rows);
+});
+
+app.get('/api/me/security/sessions', authMiddleware, async (req, res) => {
+  const currentToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  const { rows } = await query(
+    `SELECT token, ip, device, browser, os, location, created_at, last_seen_at
+     FROM sessions WHERE user_id=$1 AND expires_at > NOW() ORDER BY last_seen_at DESC LIMIT 100`,
+    [req.user.id]
+  );
+  res.json(rows.map(row => ({
+    id: crypto.createHash('sha256').update(String(row.token)).digest('hex').slice(0, 24),
+    is_current: row.token === currentToken,
+    ip: row.ip, device: row.device, browser: row.browser, os: row.os,
+    location: row.location, created_at: row.created_at, last_seen_at: row.last_seen_at
+  })));
+});
+
+app.delete('/api/me/security/sessions/:id', authMiddleware, async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^[a-f0-9]{24}$/.test(id)) return res.status(400).json({ error: 'Geçersiz oturum' });
+  const currentToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  const { rows } = await query('SELECT token FROM sessions WHERE user_id=$1', [req.user.id]);
+  const target = rows.find(row => crypto.createHash('sha256').update(String(row.token)).digest('hex').slice(0, 24) === id);
+  if (!target) return res.status(404).json({ error: 'Oturum bulunamadı' });
+  if (target.token === currentToken) return res.status(400).json({ error: 'Bu cihazdasın; buradan çıkmak için oturumu kapat.' });
+  await query('DELETE FROM sessions WHERE token=$1', [target.token]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/me/security/sessions', authMiddleware, async (req, res) => {
+  const keepCurrent = String(req.query.keep_current || '1') === '1';
+  const currentToken = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  if (keepCurrent && currentToken) {
+    await query('DELETE FROM sessions WHERE user_id=$1 AND token <> $2', [req.user.id, currentToken]);
+  } else {
+    await query('DELETE FROM sessions WHERE user_id=$1', [req.user.id]);
+  }
+  res.json({ ok: true });
+});
+
+// ===== ŞİFREMİ UNUTTUM: hesap arama (kullanıcı adı veya e-posta) =====
+app.post('/api/auth/forgot-password/lookup', async (req, res) => {
+  try {
+    const identifier = String(req.body?.identifier || '').trim();
+    if (identifier.length < 3 || identifier.length > 120) {
+      return res.status(400).json({ error: 'Kullanıcı adı veya e-posta girin' });
+    }
+    const { rows } = await query(
+      `SELECT id, username, email FROM users
+       WHERE (LOWER(username)=LOWER($1) OR LOWER(email)=LOWER($1)) AND COALESCE(is_deleted,0)=0 LIMIT 1`,
+      [identifier]
+    );
+    const user = rows[0];
+    if (!user) return res.status(404).json({ error: 'Böyle bir hesap bulunamadı.' });
+
+    if (user.email) {
+      return res.json({ ok: true, method: 'email', username: user.username, maskedEmail: maskEmail(user.email) });
+    }
+    // E-posta tanımlı değil: son dinlenen 2 şarkı sorusu
+    const { rows: recent } = await query(
+      `SELECT DISTINCT ON (p.song_id) p.song_id, p.played_at, s.title, s.artist_name
+       FROM user_song_plays p JOIN songs s ON s.id = p.song_id
+       WHERE p.user_id=$1 AND s.status='active'
+       ORDER BY p.song_id, p.played_at DESC`, [user.id]);
+    recent.sort((a, b) => new Date(b.played_at) - new Date(a.played_at));
+    const answer = recent.slice(0, 2);
+    if (answer.length < 2) {
+      return res.status(409).json({
+        error: 'Hesabınızın tanımlanmış bir e-postası yok ve kurtarma için yeterli dinleme geçmişi bulunamadı. Lütfen yöneticiyle iletişime geçin.',
+        method: 'none'
+      });
+    }
+    // Şıklar: doğru 2 şarkı + rastgele 6 şarkı, karıştırılmış
+    const { rows: decoys } = await query(
+      `SELECT id AS song_id, title, artist_name FROM songs
+       WHERE status='active' AND id <> ALL($1::bigint[]) ORDER BY RANDOM() LIMIT 6`,
+      [answer.map(item => item.song_id)]
+    );
+    const options = [...answer.map(item => ({ song_id: item.song_id, title: item.title, artist_name: item.artist_name })), ...decoys];
+    for (let i = options.length - 1; i > 0; i--) {
+      const j = crypto.randomInt(i + 1);
+      [options[i], options[j]] = [options[j], options[i]];
+    }
+    const challenge = createChallengeToken();
+    await query("DELETE FROM auth_challenges WHERE user_id=$1 AND purpose IN ('password_reset','password_reset_verified')", [user.id]);
+    await query(
+      `INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,target_value,expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6,NOW()+INTERVAL '10 minutes')`,
+      [hashChallengeValue(challenge), user.id, 'password_reset', 'songs',
+       hashChallengeValue(answer.map(item => String(item.song_id)).join('-')), '']
+    );
+    res.json({ ok: true, method: 'songs', username: user.username, challenge, options });
+  } catch (error) {
+    console.error('[ŞİFRE] hesap arama hatası:', error.message);
+    res.status(500).json({ error: 'Hesap bilgisi alınamadı' });
+  }
+});
+
+// Son dinlenen 2 şarkıyı sırasıyla doğrula — yanlışta kesinlikle kabul etme
+app.post('/api/auth/forgot-password/songs/verify', async (req, res) => {
+  try {
+    const challenge = String(req.body?.challenge || '');
+    const picks = Array.isArray(req.body?.song_ids) ? req.body.song_ids.map(id => String(Number(id))) : [];
+    if (!/^[a-f0-9]{64}$/i.test(challenge) || picks.length !== 2 || picks.some(id => id === 'NaN')) {
+      return res.status(400).json({ error: 'İki şarkıyı sırasıyla seçin' });
+    }
+    const { rows } = await query(
+      `SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND purpose='password_reset' AND method='songs' AND expires_at > NOW() LIMIT 1`,
+      [hashChallengeValue(challenge)]
+    );
+    const record = rows[0];
+    if (!record) return res.status(401).json({ error: 'Doğrulama oturumu geçersiz veya süresi dolmuş' });
+    if (record.attempts >= 3) {
+      await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
+      return res.status(429).json({ error: 'Çok fazla yanlış deneme. Bu kurtarma oturumu kapatıldı.' });
+    }
+    await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
+    const given = hashChallengeValue(picks.join('-'));
+    // Sabit zamanlı karşılaştırma
+    const ok = given.length === record.code_hash.length
+      && crypto.timingSafeEqual(Buffer.from(given), Buffer.from(record.code_hash));
+    if (!ok) return res.status(401).json({ error: 'Seçim yanlış. Son dinlediğin iki şarkıyı sırasıyla seçmelisin.' });
+
+    const resetToken = createChallengeToken();
+    await query(
+      `UPDATE auth_challenges SET purpose='password_reset_verified', method='songs', code_hash=$1, attempts=0,
+       expires_at=NOW()+INTERVAL '10 minutes' WHERE id=$2`,
+      [hashChallengeValue(resetToken), record.id]
+    );
+    await query('UPDATE users SET password_reset_required=1,password_reset_expires_at=NOW()+INTERVAL \'10 minutes\' WHERE id=$1', [record.user_id]);
+    await query('DELETE FROM sessions WHERE user_id=$1', [record.user_id]);
+    res.json({ ok: true, reset_token: resetToken });
+  } catch (error) {
+    console.error('[ŞİFRE] şarkı doğrulama hatası:', error.message);
+    res.status(500).json({ error: 'Doğrulama yapılamadı' });
+  }
+});
+
 app.post('/api/auth/forgot-password/request', async (req, res) => {
   try {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    if (!isValidEmail(email)) return res.status(400).json({ error: 'Geçerli bir e-posta adresi girin' });
+    // Kullanıcı adı veya e-posta kabul edilir
+    const identifier = String(req.body?.identifier || req.body?.email || '').trim();
+    if (identifier.length < 3) return res.status(400).json({ error: 'Kullanıcı adı veya e-posta girin' });
 
-    const { rows } = await query('SELECT id,username,email FROM users WHERE LOWER(email)=LOWER($1) AND COALESCE(is_deleted,0)=0 LIMIT 1', [email]);
+    const { rows } = await query(
+      'SELECT id,username,email FROM users WHERE (LOWER(email)=LOWER($1) OR LOWER(username)=LOWER($1)) AND COALESCE(is_deleted,0)=0 LIMIT 1',
+      [identifier]
+    );
     const user = rows[0];
+    const email = String(user?.email || '').trim().toLowerCase();
+    if (user && !email) return res.status(409).json({ error: 'Hesabınızın tanımlanmış bir e-postası yok.', method: 'none' });
     // Hesap varlığını açığa çıkarmadan, sadece kayıtlı hesaplar için akışı başlat.
     if (!user) return res.json({ ok: true, sent: false, message: 'Bu e-posta kayıtlıysa doğrulama kodu gönderildi.' });
     if (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET) return res.status(503).json({ error: 'E-posta servisi yapılandırılmamış' });
@@ -7840,7 +8047,10 @@ app.post('/api/stories/:id/view', optionalAuth, async (req, res) => {
   const { rows: story } = await query(`SELECT s.id FROM stories s JOIN users u ON u.id=s.user_id WHERE (s.public_id=$1 OR s.id::text=$1) AND (s.expires_at>NOW() OR COALESCE(s.is_permanent,0)=1) AND s.is_suspended=0 AND NOT EXISTS(SELECT 1 FROM user_story_visibility usv WHERE usv.user_id=$2 AND usv.hidden_user_id=s.user_id) AND ${closeFriendsVisibilitySql('s', '$2')} AND (s.user_id=$2 OR COALESCE(u.is_private,0)=0 OR EXISTS(SELECT 1 FROM follows f WHERE f.follower_id=$2 AND f.following_id=s.user_id AND f.status='accepted'))`, [req.params.id, viewerId]);
   if (!story.length) return res.status(404).json({ error: 'Hikaye bulunamadı' });
   await recordContentView('story', story[0].id, req);
-  if (req.user?.id) {
+  // Kendi hikayeni izlemek "görüldü" sayılmaz
+  const { rows: ownerRows } = await query('SELECT user_id FROM stories WHERE id=$1', [story[0].id]);
+  const isOwnStory = req.user?.id && String(ownerRows[0]?.user_id) === String(req.user.id);
+  if (req.user?.id && !isOwnStory) {
     await query(`INSERT INTO story_views (story_id,viewer_id,view_count,viewed_at)
       VALUES ($1,$2,1,NOW())
       ON CONFLICT (story_id,viewer_id)
@@ -10297,11 +10507,19 @@ app.get('/api/songs/:slug', async (req, res) => {
 });
 
 // Dinlenme sayısı artır
-app.post('/api/songs/:slug/play', async (req, res) => {
+app.post('/api/songs/:slug/play', optionalAuth, async (req, res) => {
   const { rows } = await query("SELECT id FROM songs WHERE slug=$1 AND status='active' AND (song_type <> 'other' OR COALESCE((SELECT value FROM settings WHERE key='other_songs_enabled'), '1') <> '0')", [req.params.slug]);
   if (!rows.length) return res.status(404).json({ error: 'Müzik bulunamadı' });
   await query('UPDATE songs SET play_count=play_count+1 WHERE id=$1', [rows[0].id]);
   await recordContentView('song', rows[0].id, req);
+  // Kullanıcının dinleme geçmişi (şifre kurtarma doğrulaması için)
+  if (req.user?.id) {
+    try {
+      await query('INSERT INTO user_song_plays (user_id, song_id) VALUES ($1,$2)', [req.user.id, rows[0].id]);
+      await query(`DELETE FROM user_song_plays WHERE user_id=$1 AND id NOT IN
+        (SELECT id FROM user_song_plays WHERE user_id=$1 ORDER BY played_at DESC LIMIT 50)`, [req.user.id]);
+    } catch { /* geçmiş yazılamazsa dinlemeyi engelleme */ }
+  }
   res.json({ ok: true });
 });
 

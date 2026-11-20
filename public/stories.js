@@ -89,7 +89,9 @@
     const { group, story } = current();
     if (!story) { close(); return; }
     stopMedia();
-    story.viewed = true;
+    // Kendi hikayemiz görülmüş sayılmaz
+    const viewer = typeof currentUser !== 'undefined' ? currentUser : null;
+    if (!(viewer && String(viewer.id) === String(story.user_id))) story.viewed = true;
     const isVideo = story.media_type === 'video';
     const filter = g('mediaFilterCss') ? mediaFilterCss(story.media_filter) : 'none';
     const src = isVideo && g('getVideoPlaybackUrl') ? getVideoPlaybackUrl(story.media_url) : story.media_url;

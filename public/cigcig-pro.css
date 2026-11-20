@@ -2362,3 +2362,68 @@ body.cgps-open { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }
+/* Şifremi unuttum: son dinlenen şarkı doğrulaması */
+.forgot-song-picks { display: flex; gap: 8px; margin: 4px 0 14px; }
+.forgot-song-slot { flex: 1 1 0; min-width: 0; padding: 10px 12px; border-radius: 12px; border: 1px dashed #343438; background: #161618; color: #8b8b8b; font-size: 12.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forgot-song-slot.is-filled { border-style: solid; border-color: #c9a96e; background: rgba(201,169,110,.12); color: #f0e3c8; font-weight: 700; }
+.forgot-song-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.forgot-song-option { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 12px; border: 1px solid #2a2a2e; border-radius: 12px; background: #19191c; color: #ededed; text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+.forgot-song-option strong { font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forgot-song-option small { font-size: 12px; color: #8b8b8b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.forgot-song-option:hover { border-color: #3d3d42; background: #1f1f23; }
+.forgot-song-option.is-picked { border-color: #c9a96e; background: rgba(201,169,110,.14); opacity: .75; }
+.forgot-song-actions { display: flex; gap: 8px; }
+.forgot-song-actions .btn { flex: 1 1 0; height: 46px; border-radius: 12px !important; }
+@media (max-width: 400px) { .forgot-song-grid { grid-template-columns: 1fr; } }
+
+/* =========================================================================
+   AYARLAR > GÜVENLİK — oturumlar ve giriş geçmişi
+   ========================================================================= */
+.security-page + .security-page { margin-top: 14px; }
+.sec-search { position: relative; display: flex; align-items: center; margin: 10px 0 12px; }
+.sec-search i { position: absolute; left: 14px; color: #7d7d7d; font-size: 13px; pointer-events: none; }
+.sec-search input { width: 100%; box-sizing: border-box; height: 44px; padding: 0 14px 0 38px; border-radius: 12px; border: 1px solid #2a2a2e; background: #19191c; color: #eee; font-size: 15px; }
+.sec-search input:focus { outline: none; border-color: #c9a96e; }
+.sec-list { display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; }
+.sec-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #242428; border-radius: 14px; background: #151518; }
+.sec-row.is-current { border-color: #2f7d5b; background: rgba(47,125,91,.1); }
+.sec-icon { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: rgba(255,255,255,.06); color: #d8b87c; font-size: 16px; }
+.sec-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sec-main strong { font-size: 14.5px; font-weight: 700; color: #f1f1f1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-main small { font-size: 12.5px; color: #8b8b8b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-badge { flex: 0 0 auto; padding: 4px 10px; border-radius: 999px; background: rgba(47,125,91,.22); color: #6fd7a6; font-size: 11.5px; font-weight: 800; }
+.sec-kick { flex: 0 0 auto; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255,107,107,.12); color: #ff8e8e; font-size: 15px; cursor: pointer; display: grid; place-items: center; }
+.sec-kick:hover { background: rgba(255,107,107,.22); }
+.sec-kick:active { transform: scale(.92); }
+.sec-kick:disabled { opacity: .4; }
+.sec-empty { padding: 20px 4px; text-align: center; color: #7d7d7d; font-size: 13.5px; }
+.sec-logout-all { width: 100%; margin-top: 12px; height: 46px; border-radius: 12px !important; color: #ff8e8e !important; border-color: rgba(255,107,107,.35) !important; font-weight: 700; }
+
+/* =========================================================================
+   iOS: klavye boşluğu ve büyük iPhone (16 Pro Max) boyutları
+   ========================================================================= */
+:root { --safe-bottom: env(safe-area-inset-bottom); --app-vh: 100dvh; }
+/* Klavye açıkken alt güvenli alan boşluğu kalkar — iPhone'daki büyük boşluğun sebebi buydu */
+body.keyboard-open .dm-input-bar,
+body.keyboard-open .group-message-input-bar,
+body.keyboard-open .cgps-bottom,
+body.keyboard-open .social-compose-submit,
+body.keyboard-open .auth-page .auth-card { padding-bottom: 0 !important; margin-bottom: 0 !important; }
+body.keyboard-open .dm-chat,
+body.keyboard-open .chat-container { padding-bottom: 0 !important; }
+/* Klavye açıkken sohbet gerçek görünür yüksekliğe otursun */
+body.keyboard-open .dm-chat { height: var(--app-vh) !important; max-height: var(--app-vh) !important; }
+body.keyboard-open .dm-messages,
+body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
+/* 100vh yerine dvh: iOS'ta adres çubuğu açılıp kapanınca zıplamayı önler */
+.dm-chat, .story-fullscreen-overlay, #gp-now, #cg-photo-send, .auth-page { min-height: 100dvh; }
+/* Büyük iPhone'lar (16 Pro Max 440px) ve katlanabilirler için ara kırılım */
+@media (min-width: 431px) and (max-width: 560px) {
+  .photos-feed .photo-card.ig-post { max-width: 100% !important; }
+  .forgot-song-grid { grid-template-columns: 1fr 1fr; }
+  .profile-page .profile-avatar-wrap { width: 90px !important; height: 90px !important; min-width: 90px !important; max-width: 90px !important; }
+  .cg-composer-bar strong { font-size: 17px; }
+}
+/* Dinamik ada / çentik: üst çubuk güvenli alanı hep korusun */
+.navbar, .mobile-top-bar { padding-top: env(safe-area-inset-top); }
+.mobile-bottom-bar { padding-bottom: var(--safe-bottom); }
