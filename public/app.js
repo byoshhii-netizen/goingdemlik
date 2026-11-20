@@ -1778,7 +1778,11 @@ function renderContent(text) {
     links.push({ placeholder, url, href, imageHref: siteImageUrl(href), isImage: /\.(?:png|jpe?g|gif|webp|avif|bmp)(?:[?#].*)?$/i.test(url) });
     return placeholder + trailing;
   });
-  safe = safe;
+  // Etiket (#) ve bahsetme (@) bağlantıları — yorumlarda ve mesajlarda da çalışır
+  safe = safe.replace(/(^|[\s(\[{>])#([\p{L}\p{N}_]{1,60})/gu, (match, prefix, tag) =>
+    `${prefix}<a class="content-hashtag" href="/medyakesfet?tag=${encodeURIComponent(tag.toLocaleLowerCase('tr-TR'))}" data-hashtag="${tag}">#${tag}</a>`);
+  safe = safe.replace(/(^|[\s(\[{>])@([a-zA-Z0-9_.çğıöşüÇĞİÖŞÜ]{3,30})/gu, (match, prefix, name) =>
+    `${prefix}<a class="content-mention" href="/profil/${encodeURIComponent(name)}" data-link data-mention="${name}">@${name}</a>`);
   links.forEach(({ placeholder, url, href, imageHref, isImage }) => {
     safe = safe.replaceAll(placeholder, isImage
       ? `<a href="${imageHref}" target="_blank" rel="noopener noreferrer" class="inline-image-link"><img src="${imageHref}" alt="Paylaşılan görsel" loading="lazy" /></a>`
@@ -16507,6 +16511,8 @@ async function renderDMChat(username) {
       <span class="dm-selection-label" aria-live="polite">0</span>
       <div class="dm-sel-tools">
         <button type="button" class="dm-sel-icon" id="dm-sel-reply" title="Yanıtla" aria-label="Yanıtla"><i class="fas fa-reply"></i></button>
+        <button type="button" class="dm-sel-icon" id="dm-sel-star" title="Yıldızla" aria-label="Yıldızla"><i class="far fa-star"></i></button>
+        <button type="button" class="dm-sel-icon" id="dm-sel-react" title="Tepki ver" aria-label="Tepki ver"><i class="far fa-face-smile"></i></button>
         <button type="button" class="dm-sel-icon" id="dm-sel-copy" title="Kopyala" aria-label="Kopyala"><i class="far fa-copy"></i></button>
         <button type="button" class="dm-sel-icon" id="dm-sel-delete-me" title="Benden sil" aria-label="Benden sil"><i class="far fa-trash-can"></i><span>Benden sil</span></button>
         <button type="button" class="dm-sel-icon is-danger" id="dm-sel-delete-all" title="Herkesten sil" aria-label="Herkesten sil"${isSelfConversation ? ' hidden' : ''}><i class="fas fa-trash-can"></i><span>Herkesten sil</span></button>
@@ -17301,10 +17307,8 @@ async function renderDMChat(username) {
       dmLongPressTimer = null;
       dmLongPressTriggered = true;
       button.style.opacity = '1';
+      // Tek menü: emoji şeridi zaten menünün içinde (iki panel açılmasın)
       showDmMsgMenu(button, row.dataset.id, row.classList.contains('dm-own'), username, startDmReply);
-      showDmReactionPicker(button, row.dataset.id, {
-        onReaction: emoji => recordDmReactionUsage(username, emoji)
-      });
     }, 520);
   }, { passive: true });
   const cancelDmLongPress = event => {
@@ -17377,8 +17381,53 @@ async function renderDMChat(username) {
     catch { toast('Kopyalanamadı', 'error'); }
     exitDmSelection();
   });
+  // Yıldızlı mesaj varsa toplu silmeden önce ayrıca sor
+  const confirmStarredBeforeDelete = async ids => {
+    try {
+      const { count } = await api('/messages/starred-count', { method: 'POST', body: JSON.stringify({ ids }) });
+      if (!count) return true;
+      return CigCigDialogs.confirm(
+        `Seçtiğin mesajlardan ${count} tanesi yıldızlı. Yıldızlı mesajlar da silinsin mi?`
+      );
+    } catch { return true; }
+  };
+
+  document.getElementById('dm-sel-star')?.addEventListener('click', async () => {
+    const ids = [...dmSelectedIds];
+    if (!ids.length) return;
+    try {
+      await Promise.all(ids.map(id => api(`/messages/${encodeURIComponent(id)}/star`, { method: 'POST' })));
+      ids.forEach(id => {
+        const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(id)}"]`);
+        if (!row) return;
+        const starred = row.dataset.starred !== 'true';
+        row.dataset.starred = String(starred);
+        row.classList.toggle('is-starred', starred);
+      });
+      exitDmSelection();
+      toast('Yıldız güncellendi');
+    } catch (error) { toast(error.message || 'Yıldızlanamadı', 'error'); }
+  });
+
+  document.getElementById('dm-sel-react')?.addEventListener('click', event => {
+    const ids = [...dmSelectedIds];
+    if (!ids.length) return;
+    showDmReactionPicker(event.currentTarget, ids[0], {
+      prompt: `${ids.length} mesaja tepki ver`,
+      onReaction: async emoji => {
+        recordDmReactionUsage(username, emoji);
+        await Promise.all(ids.slice(1).map(id =>
+          api(`/messages/${encodeURIComponent(id)}/reactions`, { method: 'POST', body: JSON.stringify({ emoji }) }).catch(() => {})
+        ));
+        exitDmSelection();
+        renderDMChat(username);
+      }
+    });
+  });
+
   document.getElementById('dm-sel-delete-me')?.addEventListener('click', async () => {
     if (!dmSelectedIds.size) return;
+    if (!await confirmStarredBeforeDelete([...dmSelectedIds])) return;
     if (!await CigCigDialogs.confirm(`${dmSelectedIds.size} mesaj sohbet görünümünüzden kaldırılacak. Yetkili denetim arşivinde korunabilir. Devam edilsin mi?`)) return;
     try {
       await api('/messages/delete-bulk', { method: 'POST', body: JSON.stringify({ ids: [...dmSelectedIds], mode: 'me' }) });
@@ -17391,6 +17440,7 @@ async function renderDMChat(username) {
       const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(id)}"]`);
       return !!row && String(row.dataset.senderId) === String(currentUser?.id);
     })) return;
+    if (!await confirmStarredBeforeDelete([...dmSelectedIds])) return;
     if (!await CigCigDialogs.confirm(`${dmSelectedIds.size} mesaj iki taraftaki sohbet görünümünden kaldırılacak. Yetkili denetim arşivinde korunabilir. Devam edilsin mi?`)) return;
     try {
       await api('/messages/delete-bulk', { method: 'POST', body: JSON.stringify({ ids: [...dmSelectedIds], mode: 'all' }) });
@@ -18412,10 +18462,11 @@ function dmMessageHTML(m, myId, selMode, previousMessage = null) {
          </a>`
       : ''}
     ${messageText ? `<span>${renderContent(messageText)}</span>` : ''}
+    ${m.starred ? '<span class="dm-star-mark" title="Yıldızlı mesaj" aria-label="Yıldızlı mesaj"><i class="fas fa-star"></i></span>' : ''}
     ${dmMessageReactionsHTML(m.reactions, myId)}
     ${m.edited_at ? '<i class="fas fa-pen dm-msg-edited-mark" title="Düzenlendi"></i>' : ''}`;
 
-  return `${dmDaySeparatorHTML(m, previousMessage)}<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${m.voice_url ? ' dm-has-voice' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
+  return `${dmDaySeparatorHTML(m, previousMessage)}<div class="dm-msg-wrap${isOwn ? ' dm-own' : ''}${isContinued ? ' dm-continued' : ''}${m.voice_url ? ' dm-has-voice' : ''}${m.starred ? ' is-starred' : ''}${dmSelectedIds.has(String(m.id)) ? ' dm-msg-selected' : ''}" data-id="${m.id}" data-starred="${m.starred ? 'true' : 'false'}" data-sender-id="${escHtml(String(m.sender_id))}" data-created-at="${escHtml(String(m.created_at || ''))}" data-content="${escHtml(messageText)}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     <div class="dm-msg-cb-wrap" style="display:${selMode ? 'flex' : 'none'};align-items:center">
       <input type="checkbox" class="dm-msg-cb" data-id="${m.id}" ${dmSelectedIds.has(String(m.id)) ? 'checked' : ''} />
     </div>
@@ -18644,13 +18695,36 @@ function isDmMessageEditable(messageRow) {
 function openDmMessageEditor(messageRow, username) {
   if (!isDmMessageEditable(messageRow)) return false;
   const msgId = messageRow.dataset.id;
-  showModal('Mesajı düzenle', `
-    <div class="form-group">
-      <label for="edit-dm-message">Mesaj metni</label>
-      <textarea id="edit-dm-message" rows="5" maxlength="5000">${escHtml(messageRow.dataset.content)}</textarea>
-    </div>
-    <button type="button" class="btn btn-primary" id="save-dm-message-edit" style="width:100%">Kaydet</button>
-    <div id="edit-dm-message-error" class="form-error mt-4"></div>`);
+  // WhatsApp tarzı: sohbetin altında düzenleme çubuğu
+  showModal('', `
+    <div class="dm-edit-sheet">
+      <div class="dm-edit-head">
+        <span class="dm-edit-title"><i class="fas fa-pen"></i> Mesajı düzenle</span>
+        <button type="button" class="dm-edit-x" id="cancel-dm-message-edit" aria-label="Vazgeç"><i class="fas fa-xmark"></i></button>
+      </div>
+      <div class="dm-edit-original"><span>Özgün mesaj</span><p>${escHtml(messageRow.dataset.content)}</p></div>
+      <div class="dm-edit-row">
+        <textarea id="edit-dm-message" rows="1" maxlength="5000" placeholder="Mesajı düzenle…">${escHtml(messageRow.dataset.content)}</textarea>
+        <button type="button" class="dm-edit-save" id="save-dm-message-edit" aria-label="Kaydet"><i class="fas fa-check"></i></button>
+      </div>
+      <div id="edit-dm-message-error" class="form-error"></div>
+      <p class="dm-edit-note">Düzenlenen mesajlarda "düzenlendi" etiketi görünür.</p>
+    </div>`, 'dm-edit-modal');
+  document.getElementById('cancel-dm-message-edit')?.addEventListener('click', () => hideModal());
+  const editArea = document.getElementById('edit-dm-message');
+  const autoGrow = () => {
+    if (!editArea) return;
+    editArea.style.height = 'auto';
+    editArea.style.height = `${Math.min(140, editArea.scrollHeight)}px`;
+  };
+  editArea?.addEventListener('input', autoGrow);
+  setTimeout(autoGrow, 0);
+  editArea?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById('save-dm-message-edit')?.click();
+    }
+  });
   const input = document.getElementById('edit-dm-message');
   const saveButton = document.getElementById('save-dm-message-edit');
   const errorMessage = document.getElementById('edit-dm-message-error');
@@ -18737,6 +18811,7 @@ function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
   const items = [
     { label: '<i class="fas fa-face-smile fa-fw"></i> Başka emoji', action: 'react' },
     ...(messageRow?.dataset.deletedForAll !== 'true' ? [{ label: '<i class="fas fa-reply fa-fw"></i> Yanıtla', action: 'reply' }] : []),
+    { label: '<i class="fas fa-star fa-fw"></i> Yıldızla', action: 'star' },
     { label: '<i class="fas fa-check-square fa-fw"></i> Seç', action: 'select' },
     ...(canEdit ? [{ label: '<i class="fas fa-pen fa-fw"></i> Düzenle', action: 'edit' }] : []),
     ...(canEditMusic ? [{ label: '<i class="fas fa-music fa-fw"></i> Müziği değiştir', action: 'edit-music' }] : []),
@@ -18757,6 +18832,21 @@ function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
         });
       } else if (item.action === 'reply') {
         startDmReply?.(messageRow);
+      } else if (item.action === 'star') {
+        try {
+          const result = await api(`/messages/${encodeURIComponent(msgId)}/star`, { method: 'POST' });
+          const row = document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(String(msgId))}"]`);
+          if (row) {
+            row.dataset.starred = String(Boolean(result?.starred));
+            row.classList.toggle('is-starred', Boolean(result?.starred));
+            const bubble = row.querySelector('.dm-msg-bubble');
+            row.querySelector('.dm-star-mark')?.remove();
+            if (result?.starred && bubble) {
+              bubble.insertAdjacentHTML('beforeend', '<span class="dm-star-mark" title="Yıldızlı mesaj"><i class="fas fa-star"></i></span>');
+            }
+          }
+          toast(result?.starred ? 'Mesaj yıldızlandı' : 'Yıldız kaldırıldı');
+        } catch (error) { toast(error.message || 'Yıldızlanamadı', 'error'); }
       } else if (item.action === 'select') {
         enterDmSelection(msgId);
       } else if (item.action === 'edit') {
@@ -21275,10 +21365,10 @@ async function renderMusicDetail(app, slug) {
     <div class="song-detail-page">
       <a href="/muzikler" data-link class="song-detail-back"><i class="fas fa-arrow-left"></i><span>Müziklere dön</span></a>
       <div class="song-detail-hero">
-        <div class="song-detail-cover-wrap has-vinyl">
+        <div class="song-detail-cover-wrap has-vinyl"${song.cover_url ? ` style="--song-cover:url('${escHtml(song.cover_url)}')"` : ''}>
           <div class="song-vinyl" aria-hidden="true"><span class="song-vinyl-label"${song.cover_url ? ` style="background-image:url('${escHtml(song.cover_url)}')"` : ''}></span></div>
           ${song.cover_url
-            ? `<img src="${escHtml(song.cover_url)}" class="song-detail-cover" />`
+            ? `<div class="song-detail-cover song-detail-cover-art" role="img" aria-label="${escHtml(song.title || 'Şarkı')} kapağı"></div>`
             : `<div class="song-detail-cover song-detail-cover-ph"><i class="fas fa-music"></i></div>`}
         </div>
         <div class="song-detail-meta-col">
@@ -25966,3 +26056,96 @@ function openPhotoSendSheet({ items, onSend, onEdit, onRemove, caption = '' }) {
   document.body.classList.add('cgps-open');
   return { close, refresh: render };
 }
+
+// Yorum kutularında @ ile kullanıcı etiketleme ve # ile etiket önerisi
+(function () {
+  const FIELD_SELECTOR = '#comment-input, #video-comment-input, #newspaper-comment-input, .comment-input, [data-comment-input]';
+  let box = null;
+  let activeField = null;
+  let items = [];
+  let picked = 0;
+
+  const close = () => { box?.remove(); box = null; activeField = null; items = []; picked = 0; };
+
+  const context = field => {
+    const caret = field.selectionStart ?? field.value.length;
+    const before = field.value.slice(0, caret);
+    const match = /(?:^|[\s(\[{])@([a-zA-Z0-9_.çğıöşüÇĞİÖŞÜ]{1,30})$/u.exec(before);
+    return match ? { query: match[1], start: caret - match[1].length - 1, caret } : null;
+  };
+
+  const place = field => {
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'comment-mention-suggestions';
+      document.body.appendChild(box);
+      box.addEventListener('mousedown', event => {
+        const option = event.target.closest('[data-username]');
+        if (!option) return;
+        event.preventDefault();
+        apply(option.dataset.username);
+      });
+    }
+    const rect = field.getBoundingClientRect();
+    box.style.left = `${Math.round(rect.left)}px`;
+    box.style.width = `${Math.round(rect.width)}px`;
+    const below = window.innerHeight - rect.bottom;
+    if (below > 200) box.style.top = `${Math.round(rect.bottom + 4)}px`;
+    else box.style.top = `${Math.round(rect.top - Math.min(220, items.length * 46 + 8) - 4)}px`;
+  };
+
+  const apply = username => {
+    if (!activeField) return;
+    const info = context(activeField);
+    if (!info) { close(); return; }
+    const before = activeField.value.slice(0, info.start);
+    const after = activeField.value.slice(info.caret);
+    activeField.value = `${before}@${username} ${after.trimStart()}`;
+    const position = (`${before}@${username} `).length;
+    activeField.focus();
+    activeField.setSelectionRange(position, position);
+    activeField.dispatchEvent(new Event('input', { bubbles: true }));
+    close();
+  };
+
+  let timer = 0;
+  document.addEventListener('input', event => {
+    const field = event.target.closest?.(FIELD_SELECTOR);
+    if (!field) return;
+    const info = context(field);
+    if (!info) { close(); return; }
+    activeField = field;
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      try {
+        const results = await api(`/search/users?q=${encodeURIComponent(info.query)}&limit=6`);
+        items = Array.isArray(results) ? results.slice(0, 6) : (results?.users || []).slice(0, 6);
+        if (!items.length) { close(); return; }
+        picked = 0;
+        place(field);
+        box.innerHTML = items.map((user, index) => `
+          <button type="button" class="comment-mention-item${index === 0 ? ' is-active' : ''}" data-username="${escHtml(user.username)}">
+            ${hasUsableAvatar(user) ? `<img src="${escHtml(user.avatar)}" alt="" />` : '<span class="comment-mention-ph"><i class="fas fa-user"></i></span>'}
+            <span><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+          </button>`).join('');
+      } catch { close(); }
+    }, 180);
+  }, true);
+
+  document.addEventListener('keydown', event => {
+    if (!box || !items.length) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      picked = (picked + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length;
+      [...box.children].forEach((child, index) => child.classList.toggle('is-active', index === picked));
+    } else if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault();
+      apply(items[picked].username);
+    } else if (event.key === 'Escape') close();
+  }, true);
+
+  document.addEventListener('click', event => {
+    if (box && !event.target.closest('.comment-mention-suggestions') && !event.target.closest(FIELD_SELECTOR)) close();
+  });
+  window.addEventListener('scroll', () => { if (activeField) place(activeField); }, true);
+})();

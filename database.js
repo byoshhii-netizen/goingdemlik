@@ -883,6 +883,14 @@ async function initDb() {
     ALTER TABLE videos ADD COLUMN IF NOT EXISTS nsfw_score REAL;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_nsfw SMALLINT NOT NULL DEFAULT 0;
     ALTER TABLE stories ADD COLUMN IF NOT EXISTS nsfw_score REAL;
+    -- Yıldızlı mesajlar (kişiye özel)
+    CREATE TABLE IF NOT EXISTS dm_message_stars (
+      message_id BIGINT NOT NULL REFERENCES dm_messages(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (message_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dm_message_stars_user ON dm_message_stars(user_id, created_at DESC);
     -- Kullanıcı dinleme geçmişi (şifre kurtarmada "son dinlediğin 2 şarkı" için)
     CREATE TABLE IF NOT EXISTS user_song_plays (
       id BIGSERIAL PRIMARY KEY,

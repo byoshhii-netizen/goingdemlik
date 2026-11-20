@@ -8342,6 +8342,9 @@ app.post('/api/photos/:id/comments', authMiddleware, async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: 'Fotoğraf bulunamadı' });
     if (Number(rows[0].allow_comments ?? photoExists[0].allow_comments ?? 1) !== 1) return res.status(403).json({ error: 'Yorumlara izin verilmemiş' });
     await query('INSERT INTO photo_comments (photo_id,user_id,content) VALUES ($1,$2,$3)', [photoId, req.user.id, content.trim()]);
+    // Yorumda @bahsetme varsa bildirim gönder
+    parseMentionsAndNotify(content.trim(), req.user, 'comment_mention', '/foto/' + photoId, '')
+      .catch(error => console.error('[bahsetme] foto yorumu:', error.message));
     const { rows: photoOwner } = await query('SELECT p.user_id,p.title FROM photos p WHERE p.id=$1', [photoId]);
     if (photoOwner[0] && photoOwner[0].user_id !== req.user.id) {
       await query('INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,$2,$3,$4,$5,$6,$7)', [photoOwner[0].user_id, 'photo_comment', req.user.username, req.user.avatar || '', 'Fotoğrafına yorum geldi', `@${req.user.username} fotoğrafına yorum yaptı.`, '/foto/' + photoId]).catch(() => {});
@@ -13377,6 +13380,7 @@ app.get('/api/conversation/:username', authMiddleware, async (req, res) => {
       CASE WHEN m.deleted_for_all=1 THEN '' ELSE m.voice_url END AS voice_url,
       CASE WHEN m.deleted_for_all=1 THEN 0 ELSE m.voice_duration END AS voice_duration,
       CASE WHEN m.deleted_for_all=1 THEN '[]'::jsonb ELSE m.voice_waveform END AS voice_waveform,
+      EXISTS(SELECT 1 FROM dm_message_stars dms WHERE dms.message_id=m.id AND dms.user_id=$3) AS starred,
       m.voice_listened_at,
       CASE WHEN m.deleted_for_all=1 THEN NULL ELSE m.reply_to_id END AS reply_to_id,
       m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.deleted_for_all_at, m.created_at,
@@ -13836,6 +13840,7 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
     query(`
     SELECT m.id, m.conversation_id, m.sender_id, m.content, m.image_url, m.image_urls, m.image_view_limit,m.image_view_count,m.shared_forum_id, m.shared_video_id, m.shared_book_id, m.shared_photo_id, m.shared_story_id, m.shared_newspaper_id,m.shared_song_id,m.song_start_seconds,m.shared_gif_url,
       m.voice_url, m.voice_duration, m.voice_waveform, m.voice_listened_at,
+      false AS starred,
       m.reply_to_id, m.deleted_by_sender, m.deleted_by_receiver, m.deleted_for_all, m.created_at, m.read_at, m.edited_at,
       u.username as sender_username, u.nickname as sender_nickname, u.avatar as sender_avatar, u.avatar_removed as sender_avatar_removed, u.name_color as sender_name_color,
       f.title as forum_title, f.slug as forum_slug, f.banner_image as forum_banner,
@@ -13875,6 +13880,47 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
 });
 
 const DM_REACTION_EMOJIS = new Set(['❤️','😂','😍','😮','😢','👍','👎','🔥','👏','🎉','🙏','🥰','🤔','💯','😎','✨','🤗','😡']);
+
+// ===== YILDIZLI MESAJLAR =====
+async function userCanSeeDmMessage(messageId, userId) {
+  const { rows } = await query(
+    `SELECT m.id FROM dm_messages m JOIN conversations c ON c.id = m.conversation_id
+     WHERE m.id=$1 AND (c.user1_id=$2 OR c.user2_id=$2) LIMIT 1`, [messageId, userId]);
+  return rows.length > 0;
+}
+
+app.post('/api/messages/:id/star', authMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id)) return res.status(400).json({ error: 'Geçersiz mesaj' });
+  if (!await userCanSeeDmMessage(id, req.user.id)) return res.status(404).json({ error: 'Mesaj bulunamadı' });
+  const { rows } = await query('SELECT 1 FROM dm_message_stars WHERE message_id=$1 AND user_id=$2', [id, req.user.id]);
+  if (rows.length) {
+    await query('DELETE FROM dm_message_stars WHERE message_id=$1 AND user_id=$2', [id, req.user.id]);
+    return res.json({ ok: true, starred: false });
+  }
+  await query('INSERT INTO dm_message_stars (message_id, user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, req.user.id]);
+  res.json({ ok: true, starred: true });
+});
+
+// Seçilen mesajlardan kaçı yıldızlı — toplu silmeden önce sorulur
+app.post('/api/messages/starred-count', authMiddleware, async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isSafeInteger).slice(0, 200) : [];
+  if (!ids.length) return res.json({ count: 0 });
+  const { rows } = await query(
+    'SELECT COUNT(*)::int AS count FROM dm_message_stars WHERE user_id=$1 AND message_id = ANY($2::bigint[])',
+    [req.user.id, ids]);
+  res.json({ count: rows[0]?.count || 0 });
+});
+
+app.get('/api/messages/starred', authMiddleware, async (req, res) => {
+  const { rows } = await query(
+    `SELECT m.id, m.content, m.created_at, m.sender_id, u.username, u.nickname
+     FROM dm_message_stars st
+     JOIN dm_messages m ON m.id = st.message_id
+     LEFT JOIN users u ON u.id = m.sender_id
+     WHERE st.user_id=$1 ORDER BY st.created_at DESC LIMIT 200`, [req.user.id]);
+  res.json(rows);
+});
 
 app.post('/api/messages/:id/reactions', authMiddleware, async (req, res) => {
   if (!/^\d+$/.test(req.params.id)) return res.status(400).json({ error: 'Geçersiz mesaj numarası.' });
@@ -15386,12 +15432,16 @@ app.get('/api/video/:slug/comments', optionalAuth, async (req, res) => {
 app.post('/api/video/:slug/comments', authMiddleware, async (req, res) => {
   if (await denyIfRestricted(req, res, 'comment')) return;
   const content = String(req.body.content || '').trim();
-  const { rows: video } = await query(`SELECT v.id,v.user_id,v.allow_comments,u.is_private FROM videos v JOIN users u ON u.id=v.user_id WHERE v.slug=$1 OR v.id::text=$1`, [req.params.slug]);
+  const { rows: video } = await query(`SELECT v.id,v.user_id,v.allow_comments,v.is_reals,v.title,u.is_private FROM videos v JOIN users u ON u.id=v.user_id WHERE v.slug=$1 OR v.id::text=$1`, [req.params.slug]);
   if (!video.length) return res.status(404).json({ error: 'Video bulunamadı' });
   if (video[0].is_private && video[0].user_id != req.user.id && !(await query("SELECT 1 FROM follows WHERE follower_id=$1 AND following_id=$2 AND status='accepted'", [req.user.id, video[0].user_id])).rows.length) return res.status(403).json({ error: 'Bu hesap gizli.' });
   if (video[0].allow_comments !== 1) return res.status(403).json({ error: 'Yorumlar kapalı' });
   if (!content) return res.status(400).json({ error: 'Yorum boş olamaz' });
   const { rows } = await query('INSERT INTO video_comments (video_id,user_id,content) VALUES ($1,$2,$3) RETURNING *', [video[0].id, req.user.id, content.slice(0, 1000)]);
+  // Yorumda @bahsetme varsa bildirim gönder (Reals ve videolar)
+  parseMentionsAndNotify(content.slice(0, 1000), req.user, 'comment_mention',
+    (video[0].is_reals ? '/reals/' : '/video/') + req.params.slug, video[0].title || '')
+    .catch(error => console.error('[bahsetme] video yorumu:', error.message));
   const { rows: countRows } = await query('SELECT COUNT(*)::int AS comment_count FROM video_comments WHERE video_id=$1', [video[0].id]);
   res.json({ ...rows[0], username: req.user.username, avatar: req.user.avatar, comment_count: countRows[0].comment_count });
 });
