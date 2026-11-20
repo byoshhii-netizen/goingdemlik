@@ -10125,6 +10125,51 @@ app.get('/api/songs', async (req, res) => {
 });
 
 // Tek müzik
+// Otomatik şarkı sözleri: sanatçı/şarkı adından LRCLIB'den zamanlanmış (senkron) söz çeker, 24 saat önbellekler
+const autoLyricsCache = new Map();
+function parseLrcToSegments(lrc) {
+  const lines = [];
+  for (const raw of String(lrc || '').split(/\r?\n/)) {
+    const match = raw.match(/^\s*\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]\s*(.*)$/);
+    if (!match) continue;
+    const text = match[4].trim();
+    if (!text) continue;
+    const frac = match[3] ? Number(match[3].padEnd(3, '0')) / 1000 : 0;
+    lines.push({ start: Number(match[1]) * 60 + Number(match[2]) + frac, text });
+  }
+  return lines.map((line, index) => ({
+    start: Number(line.start.toFixed(2)),
+    end: Number((index + 1 < lines.length ? lines[index + 1].start : line.start + 5).toFixed(2)),
+    text: line.text
+  })).filter(segment => segment.end > segment.start);
+}
+app.get('/api/songs/:slug/auto-lyrics', optionalAuth, async (req, res) => {
+  const { rows } = await query("SELECT title, artist_name, lyrics, lyrics_timed FROM songs WHERE slug=$1 AND status='active'", [req.params.slug]);
+  const song = rows[0];
+  if (!song) return res.status(404).json({ error: 'Şarkı bulunamadı' });
+  let timed = song.lyrics_timed;
+  if (typeof timed === 'string') { try { timed = JSON.parse(timed); } catch { timed = []; } }
+  if (Array.isArray(timed) && timed.length) return res.json({ lyrics_timed: timed, source: 'song' });
+  const key = req.params.slug;
+  const cached = autoLyricsCache.get(key);
+  if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return res.json(cached.value);
+  let value = { lyrics_timed: [], source: 'none' };
+  try {
+    const url = new URL('https://lrclib.net/api/get');
+    url.searchParams.set('track_name', String(song.title || ''));
+    url.searchParams.set('artist_name', String(song.artist_name || ''));
+    const response = await fetch(url, { signal: AbortSignal.timeout(6000), headers: { 'User-Agent': 'CigCig/1.0 (lyrics lookup)' } });
+    if (response.ok) {
+      const data = await response.json();
+      const segments = parseLrcToSegments(data?.syncedLyrics);
+      if (segments.length) value = { lyrics_timed: segments, source: 'lrclib' };
+      else if (data?.plainLyrics) value = { lyrics_timed: [], lyrics: String(data.plainLyrics).slice(0, 8000), source: 'lrclib-plain' };
+    }
+  } catch { /* ağ hatası: sözsüz devam */ }
+  autoLyricsCache.set(key, { at: Date.now(), value });
+  res.json(value);
+});
+
 app.get('/api/songs/:slug', async (req, res) => {
   const { rows } = await query(
     `SELECT s.*, u.username as uploader, u.avatar as uploader_avatar, u.is_artist,

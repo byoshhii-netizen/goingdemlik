@@ -9964,7 +9964,7 @@ function realsMediaCardHTML(v, showSave = false) {
   return `<article class="photo-card reals-media-card ig-post" data-reals-id="${escHtml(v.id)}" data-reals-slug="${escHtml(v.slug || v.id)}" data-owner-id="${escHtml(v.user_id)}" data-reals-route="${route}">
     <div class="photo-card-head ig-post-head">
       <a class="ig-post-avatar" href="${profileRoute(v.username)}" data-link aria-label="${escHtml(v.username)} profili">${avatarImg(v)}</a>
-      <div class="photo-card-identity ig-post-identity"><div class="ig-post-userline"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<span class="ig-post-dot" aria-hidden="true">•</span><a class="photo-card-date ig-post-age" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}" title="${escHtml(formatDateTime(v.created_at))}">${escHtml(timeAgo(v.created_at))}</time></a>` : ''}</div><span class="ig-post-location"><i class="fas fa-clapperboard"></i> Reals</span></div>
+      <div class="photo-card-identity ig-post-identity"><div class="ig-post-userline"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<span class="ig-post-dot" aria-hidden="true">•</span><a class="photo-card-date ig-post-age" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}" title="${escHtml(formatDateTime(v.created_at))}">${escHtml(timeAgo(v.created_at))}</time></a>` : ''}</div></div>
     </div>
     <div class="photo-media-wrap ig-post-media ig-post-media-video">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
@@ -20709,6 +20709,7 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
       <div class="song-lyrics-text song-lyrics-timed" id="gp-lyrics-content"></div>
     </div>`;
   player.style.display = 'block';
+  player.querySelector('.gplayer-info')?.addEventListener('click', () => window.CigCigNowPlaying?.open());
   document.getElementById('gp-listen-together')?.addEventListener('click', () => createListeningRoomFromSong(song));
   const lyricsButton = document.getElementById('gp-lyrics-toggle');
   const lyricsPanel = document.getElementById('gp-lyrics-panel');
@@ -20725,11 +20726,18 @@ function openMiniPlayer(audioUrl, slug, song, queue, queueIndex, options = {}) {
     lyricsButton.classList.toggle('active', lyricsPanel.classList.contains('open'));
   });
   if (!miniLyricsText.trim() && !miniLyrics.length && slug && !song?.is_music_ad) {
-    api('/songs/' + encodeURIComponent(slug)).then(details => {
+    api('/songs/' + encodeURIComponent(slug)).then(async details => {
       if (currentAudio !== audio) return;
       miniLyrics = getTimedLyrics(details);
       miniLyricsText = String(details.lyrics || '');
       renderMiniLyrics();
+      if (!miniLyrics.length && !miniLyricsText.trim()) {
+        const auto = await api('/songs/' + encodeURIComponent(slug) + '/auto-lyrics').catch(() => null);
+        if (currentAudio !== audio || !auto) return;
+        if (auto.lyrics_timed?.length) miniLyrics = auto.lyrics_timed;
+        else if (auto.lyrics) miniLyricsText = auto.lyrics;
+        renderMiniLyrics();
+      }
     }).catch(error => {
       if (currentAudio === audio) toast(error.message || 'Şarkı sözleri yüklenemedi.', 'error');
     });
@@ -25240,4 +25248,290 @@ init();
     if (!(field instanceof HTMLElement) || !field.matches('input, textarea, [contenteditable="true"]')) return;
     setTimeout(() => field.scrollIntoView({ block: 'center', behavior: 'smooth' }), 280);
   });
+})();
+
+// -------------------------------------------------------------------------
+// Tam ekran "Şimdi çalıyor" — Spotify tarzı: plak animasyonu, senkron sözler, büyük kontroller
+// Veriyi ve kontrolleri mevcut global oynatıcıdan (currentAudio + #gp-* düğmeleri) alır.
+// -------------------------------------------------------------------------
+(function () {
+  let root = null, raf = 0, lastLyricsHtml = '';
+  const $n = id => document.getElementById(id);
+  const fmt = s => { s = Math.max(0, Math.floor(Number(s) || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  function build() {
+    if (root) return root;
+    root = document.createElement('div');
+    root.id = 'gp-now';
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-label', 'Şimdi çalıyor');
+    root.innerHTML = `
+      <div class="gpn-bg" aria-hidden="true"></div>
+      <div class="gpn-grain" aria-hidden="true"></div>
+      <header class="gpn-top">
+        <button type="button" class="gpn-icon-btn" data-gpn="close" aria-label="Kapat"><i class="fas fa-chevron-down"></i></button>
+        <div class="gpn-top-label"><span class="gpn-eq" aria-hidden="true"><i></i><i></i><i></i></span> Şimdi çalıyor</div>
+        <button type="button" class="gpn-icon-btn" data-gpn="lyrics" aria-label="Şarkı sözleri"><i class="fas fa-align-left"></i></button>
+      </header>
+      <section class="gpn-stage">
+        <div class="gpn-record">
+          <div class="gpn-disc" id="gpn-disc"><span class="gpn-label"></span></div>
+          <img class="gpn-sleeve" id="gpn-sleeve" alt="" />
+          <div class="gpn-sleeve-ph" id="gpn-sleeve-ph"><i class="fas fa-music"></i></div>
+        </div>
+        <div class="gpn-lyrics" id="gpn-lyrics">
+          <div class="gpn-lyrics-scroll" id="gpn-lyrics-scroll"><p class="gpn-lyrics-empty">Bu şarkı için söz bulunamadı.</p></div>
+        </div>
+      </section>
+      <section class="gpn-meta">
+        <div class="gpn-title" id="gpn-title"></div>
+        <div class="gpn-artist" id="gpn-artist"></div>
+      </section>
+      <section class="gpn-progress">
+        <input type="range" id="gpn-seek" min="0" max="100" step="0.1" value="0" aria-label="Şarkı konumu" />
+        <div class="gpn-times"><span id="gpn-cur">0:00</span><span id="gpn-dur">0:00</span></div>
+      </section>
+      <section class="gpn-controls">
+        <button type="button" class="gpn-side" data-gpn="shuffle" aria-label="Karıştır"><i class="fas fa-shuffle"></i></button>
+        <button type="button" class="gpn-skip" data-gpn="prev" aria-label="Önceki"><i class="fas fa-backward-step"></i></button>
+        <button type="button" class="gpn-play" data-gpn="play" aria-label="Oynat / duraklat"><i class="fas fa-play"></i></button>
+        <button type="button" class="gpn-skip" data-gpn="next" aria-label="Sonraki"><i class="fas fa-forward-step"></i></button>
+        <button type="button" class="gpn-side" data-gpn="repeat" aria-label="Tekrarla"><i class="fas fa-repeat"></i></button>
+      </section>`;
+    document.body.appendChild(root);
+    root.addEventListener('click', event => {
+      const btn = event.target.closest('[data-gpn]');
+      if (!btn) return;
+      const action = btn.dataset.gpn;
+      if (action === 'close') close();
+      else if (action === 'lyrics') root.classList.toggle('show-lyrics');
+      else if (action === 'play') $n('gp-play')?.click();
+      else if (action === 'prev') $n('gp-prev')?.click();
+      else if (action === 'next') $n('gp-next')?.click();
+      else if (action === 'shuffle') $n('gp-shuffle')?.click();
+      else if (action === 'repeat') $n('gp-repeat')?.click();
+    });
+    const seek = $n('gpn-seek');
+    seek.addEventListener('input', () => {
+      const audio = window.currentAudio;
+      if (audio?.duration) audio.currentTime = (Number(seek.value) / 100) * audio.duration;
+    });
+    let swipeY = null;
+    root.querySelector('.gpn-top').addEventListener('touchstart', e => { swipeY = e.touches[0].clientY; }, { passive: true });
+    root.addEventListener('touchend', e => {
+      if (swipeY !== null && e.changedTouches[0].clientY - swipeY > 90) close();
+      swipeY = null;
+    }, { passive: true });
+    return root;
+  }
+
+  function syncMeta() {
+    const title = document.querySelector('#global-music-player .gplayer-title')?.textContent || '';
+    const artist = document.querySelector('#global-music-player .gplayer-artist')?.textContent || '';
+    const cover = document.querySelector('#global-music-player .gplayer-cover');
+    const coverSrc = cover && cover.tagName === 'IMG' ? cover.getAttribute('src') : '';
+    $n('gpn-title').textContent = title;
+    $n('gpn-artist').textContent = artist;
+    const sleeve = $n('gpn-sleeve'), ph = $n('gpn-sleeve-ph');
+    if (coverSrc) {
+      if (sleeve.getAttribute('src') !== coverSrc) sleeve.src = coverSrc;
+      sleeve.hidden = false; ph.hidden = true;
+      root.style.setProperty('--gpn-cover', `url("${coverSrc.replace(/"/g, '%22')}")`);
+    } else {
+      sleeve.hidden = true; ph.hidden = false; root.style.removeProperty('--gpn-cover');
+    }
+  }
+
+  function syncLyrics(audio) {
+    const source = $n('gp-lyrics-content');
+    const target = $n('gpn-lyrics-scroll');
+    if (!source || !target) return;
+    const html = source.innerHTML;
+    if (html !== lastLyricsHtml) {
+      lastLyricsHtml = html;
+      target.innerHTML = html && html.trim() ? html : '<p class="gpn-lyrics-empty">Bu şarkı için söz bulunamadı.</p>';
+    }
+    if (audio && typeof updateLyricsHighlight === 'function' && root.classList.contains('show-lyrics')) {
+      updateLyricsHighlight(target, audio.currentTime);
+      const active = target.querySelector('.is-active, .active, .current');
+      if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }
+
+  function tick() {
+    if (!root || !root.classList.contains('open')) return;
+    const audio = window.currentAudio;
+    const playing = audio && !audio.paused;
+    root.classList.toggle('is-playing', Boolean(playing));
+    root.querySelector('.gpn-play i').className = playing ? 'fas fa-pause' : 'fas fa-play';
+    const dur = audio?.duration || 0, cur = audio?.currentTime || 0;
+    const seek = $n('gpn-seek');
+    if (document.activeElement !== seek) seek.value = dur ? (cur / dur) * 100 : 0;
+    seek.style.setProperty('--p', `${seek.value}%`);
+    $n('gpn-cur').textContent = fmt(cur);
+    $n('gpn-dur').textContent = fmt(dur);
+    syncLyrics(audio);
+    raf = requestAnimationFrame(tick);
+  }
+
+  function open() {
+    if (!document.querySelector('#global-music-player .gplayer-title')) return;
+    build();
+    syncMeta();
+    lastLyricsHtml = '';
+    root.classList.add('open');
+    document.body.classList.add('gpn-open');
+    cancelAnimationFrame(raf);
+    tick();
+  }
+
+  function close() {
+    if (!root) return;
+    root.classList.remove('open', 'show-lyrics');
+    document.body.classList.remove('gpn-open');
+    cancelAnimationFrame(raf);
+  }
+
+  window.CigCigNowPlaying = { open, close, isOpen: () => Boolean(root?.classList.contains('open')) };
+})();
+
+// -------------------------------------------------------------------------
+// Müzik kesit seçici: dalga formunu parmakla sürükleyerek 30 sn'lik aralığı kaydır,
+// +/- düğmeleriyle ince ayar yap, tek dokunuşla önizle. Mevcut *-song-start girdisini günceller.
+// -------------------------------------------------------------------------
+(function () {
+  const CLIP = 30;
+  const pairs = [
+    ['video-song-start', 'video-song-waveform'],
+    ['story-song-start', 'story-song-waveform'],
+    ['photo-song-start', 'photo-song-waveform'],
+    ['edit-photo-song-start', 'edit-photo-song-waveform'],
+    ['dm-note-song-start', 'dm-note-song-waveform']
+  ];
+  const fmt = s => `${Math.floor(s / 60)}:${String(Math.floor(s) % 60).padStart(2, '0')}`;
+
+  function setStart(input, seconds) {
+    const max = Math.max(0, Number(input.max) || 0);
+    const next = Math.min(max, Math.max(0, Math.round(seconds * 10) / 10));
+    if (String(next) === String(input.value)) return;
+    input.value = String(next);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function enhance(startId, waveId) {
+    const input = document.getElementById(startId);
+    const wave = document.getElementById(waveId);
+    if (!input || !wave || wave.dataset.clipEnhanced) return;
+    wave.dataset.clipEnhanced = '1';
+    wave.classList.add('cg-clip-picker');
+    wave.style.touchAction = 'pan-y';
+    // ince ayar düğmeleri
+    const bar = document.createElement('div');
+    bar.className = 'cg-clip-nudges';
+    bar.innerHTML = `
+      <button type="button" data-nudge="-5" aria-label="5 saniye geri">−5 sn</button>
+      <button type="button" data-nudge="-1" aria-label="1 saniye geri">−1</button>
+      <span class="cg-clip-range" aria-live="polite"></span>
+      <button type="button" data-nudge="1" aria-label="1 saniye ileri">+1</button>
+      <button type="button" data-nudge="5" aria-label="5 saniye ileri">+5 sn</button>`;
+    wave.insertAdjacentElement('afterend', bar);
+    const label = bar.querySelector('.cg-clip-range');
+    const refreshLabel = () => {
+      const start = Number(input.value) || 0;
+      label.textContent = `${fmt(start)} – ${fmt(start + CLIP)}`;
+    };
+    input.addEventListener('input', refreshLabel);
+    refreshLabel();
+    bar.addEventListener('click', event => {
+      const btn = event.target.closest('[data-nudge]');
+      if (!btn) return;
+      setStart(input, (Number(input.value) || 0) + Number(btn.dataset.nudge));
+    });
+    // parmakla sürükleme: dokunulan nokta klip merkezine gelir
+    let dragging = false;
+    const pick = clientX => {
+      const rect = wave.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      const max = Math.max(0, Number(input.max) || 0);
+      const timeline = max + CLIP;
+      setStart(input, ratio * timeline - CLIP / 2);
+    };
+    wave.addEventListener('pointerdown', event => {
+      dragging = true;
+      wave.setPointerCapture?.(event.pointerId);
+      wave.classList.add('is-dragging');
+      pick(event.clientX);
+    });
+    wave.addEventListener('pointermove', event => { if (dragging) pick(event.clientX); });
+    const end = () => { dragging = false; wave.classList.remove('is-dragging'); };
+    wave.addEventListener('pointerup', end);
+    wave.addEventListener('pointercancel', end);
+    // klavye: sol/sağ ok ile ayarla
+    wave.tabIndex = 0;
+    wave.setAttribute('role', 'slider');
+    wave.setAttribute('aria-label', 'Klip başlangıcı');
+    wave.addEventListener('keydown', event => {
+      if (event.key === 'ArrowLeft') { event.preventDefault(); setStart(input, (Number(input.value) || 0) - 1); }
+      if (event.key === 'ArrowRight') { event.preventDefault(); setStart(input, (Number(input.value) || 0) + 1); }
+    });
+  }
+
+  // Düzenleyiciler sonradan açıldığı için birkaç kez tarar
+  const scan = () => pairs.forEach(([startId, waveId]) => enhance(startId, waveId));
+  document.addEventListener('focusin', scan, true);
+  document.addEventListener('click', () => setTimeout(scan, 0), true);
+  setInterval(scan, 1200);
+})();
+
+// -------------------------------------------------------------------------
+// Yükleme panelleri: telefonda Instagram düzeni (üstte X / başlık / Paylaş),
+// video panelinde YouTube Studio düzeni. Mevcut alanlara dokunmaz, üstüne kabuk ekler.
+// -------------------------------------------------------------------------
+(function () {
+  const TITLES = {
+    'social-compose-story': 'Hikaye',
+    'social-compose-photo': 'Yeni gönderi',
+    'social-compose-reals': 'Yeni Reals',
+    'social-compose-video-standalone': 'Video yükle'
+  };
+
+  function decorate(modal) {
+    if (!modal || modal.dataset.composerShell === '1') return;
+    const compose = modal.querySelector('.social-compose');
+    const submit = modal.querySelector('.social-compose-submit');
+    if (!compose || !submit) return;
+    modal.dataset.composerShell = '1';
+    const kind = Object.keys(TITLES).find(name => compose.classList.contains(name)) || 'social-compose-photo';
+    modal.classList.add('cg-composer');
+    if (kind === 'social-compose-video-standalone') modal.classList.add('cg-composer-video');
+
+    const bar = document.createElement('div');
+    bar.className = 'cg-composer-bar';
+    bar.innerHTML = `
+      <button type="button" class="cg-composer-x" aria-label="Kapat"><i class="fas fa-xmark"></i></button>
+      <strong>${TITLES[kind]}</strong>
+      <button type="button" class="cg-composer-go">${kind === 'social-compose-video-standalone' ? 'Yayınla' : 'Paylaş'}</button>`;
+    compose.parentElement.insertBefore(bar, compose);
+    bar.querySelector('.cg-composer-x').addEventListener('click', () => {
+      (modal.querySelector('.modal-close') || { click() { hideModal(); } }).click();
+    });
+    const go = bar.querySelector('.cg-composer-go');
+    go.addEventListener('click', () => submit.click());
+    // Gerçek butonun durumunu üstteki butona yansıt
+    const sync = () => {
+      go.disabled = submit.disabled;
+      go.classList.toggle('is-busy', submit.disabled);
+    };
+    new MutationObserver(sync).observe(submit, { attributes: true, attributeFilter: ['disabled'] });
+    sync();
+  }
+
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay) return;
+  new MutationObserver(() => {
+    const modal = document.getElementById('modal');
+    if (!modal) return;
+    if (modal.classList.contains('social-compose-modal')) decorate(modal);
+    else delete modal.dataset.composerShell;
+  }).observe(overlay, { attributes: true, childList: true, subtree: true });
 })();

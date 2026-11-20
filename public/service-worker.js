@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cigcig-app-shell-v19';
+const CACHE_NAME = 'cigcig-app-shell-v21';
 const APP_SHELL_URLS = [
   '/',
   '/index.html',

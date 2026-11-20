@@ -72,6 +72,160 @@
     return navigator.mediaDevices.getUserMedia({ audio: true });
   }
 
+  // ---------- Ses efektleri ----------
+  // Mikrofon sesi WebAudio zincirinden geçirilir; karşı tarafa işlenmiş ses gider.
+  const VOICE_EFFECTS = [
+    { id: 'none', label: 'Normal', icon: 'fa-microphone' },
+    { id: 'deep', label: 'Kalın', icon: 'fa-user-secret' },
+    { id: 'high', label: 'İnce', icon: 'fa-child-reaching' },
+    { id: 'robot', label: 'Robot', icon: 'fa-robot' },
+    { id: 'echo', label: 'Yankı', icon: 'fa-water' },
+    { id: 'radio', label: 'Telsiz', icon: 'fa-tower-broadcast' }
+  ];
+
+  // Gecikme hattı tabanlı perde kaydırıcı (iki kanal çapraz geçişli)
+  function buildPitchShifter(ctx, ratio) {
+    const windowSize = 0.1;
+    const input = ctx.createGain();
+    const output = ctx.createGain();
+    const sweep = ctx.createOscillator();
+    sweep.type = 'sawtooth';
+    sweep.frequency.value = Math.abs(1 - ratio) / windowSize || 0.001;
+    const fade = ctx.createOscillator();
+    fade.type = 'triangle';
+    fade.frequency.value = sweep.frequency.value;
+    const nodes = [sweep, fade];
+    for (let index = 0; index < 2; index++) {
+      const delay = ctx.createDelay(1);
+      delay.delayTime.value = windowSize / 2;
+      const depth = ctx.createGain();
+      depth.gain.value = (ratio < 1 ? 1 : -1) * windowSize / 2;
+      const phase = ctx.createGain();
+      phase.gain.value = index === 0 ? 1 : -1;
+      sweep.connect(phase).connect(depth).connect(delay.delayTime);
+      const win = ctx.createGain();
+      win.gain.value = 0.5;
+      const winDepth = ctx.createGain();
+      winDepth.gain.value = index === 0 ? 0.5 : -0.5;
+      fade.connect(winDepth).connect(win.gain);
+      input.connect(delay).connect(win).connect(output);
+      nodes.push(delay, depth, phase, win, winDepth);
+    }
+    sweep.start(); fade.start();
+    return { input, output, nodes };
+  }
+
+  function buildEffectChain(ctx, source, effectId) {
+    const extra = [];
+    let tail = source;
+    const connect = node => { tail.connect(node); tail = node; return node; };
+    if (effectId === 'deep' || effectId === 'high') {
+      const shifter = buildPitchShifter(ctx, effectId === 'deep' ? 0.72 : 1.5);
+      tail.connect(shifter.input);
+      tail = shifter.output;
+      extra.push(...shifter.nodes);
+      const tone = ctx.createBiquadFilter();
+      tone.type = effectId === 'deep' ? 'lowshelf' : 'highshelf';
+      tone.frequency.value = effectId === 'deep' ? 320 : 2200;
+      tone.gain.value = 5;
+      extra.push(connect(tone));
+    } else if (effectId === 'robot') {
+      const ring = ctx.createGain();
+      ring.gain.value = 0;
+      const carrier = ctx.createOscillator();
+      carrier.type = 'sine';
+      carrier.frequency.value = 58;
+      carrier.connect(ring.gain);
+      carrier.start();
+      extra.push(connect(ring), carrier);
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = 1100;
+      band.Q.value = 0.9;
+      extra.push(connect(band));
+    } else if (effectId === 'echo') {
+      const split = tail;
+      const delay = ctx.createDelay(1);
+      delay.delayTime.value = 0.23;
+      const feedback = ctx.createGain();
+      feedback.gain.value = 0.34;
+      const wet = ctx.createGain();
+      wet.gain.value = 0.55;
+      const mix = ctx.createGain();
+      split.connect(mix);
+      split.connect(delay);
+      delay.connect(feedback).connect(delay);
+      delay.connect(wet).connect(mix);
+      tail = mix;
+      extra.push(delay, feedback, wet, mix);
+    } else if (effectId === 'radio') {
+      const band = ctx.createBiquadFilter();
+      band.type = 'bandpass';
+      band.frequency.value = 1500;
+      band.Q.value = 1.4;
+      extra.push(connect(band));
+      const shaper = ctx.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < curve.length; i++) {
+        const x = (i / (curve.length - 1)) * 2 - 1;
+        curve[i] = Math.tanh(x * 4);
+      }
+      shaper.curve = curve;
+      extra.push(connect(shaper));
+    }
+    return { output: tail, extra };
+  }
+
+  // Zinciri (yeniden) kurar; call.stream her zaman karşı tarafa giden akıştır.
+  function applyVoiceEffect(effectId) {
+    if (!call?.rawStream) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    call.effect = effectId;
+    try { localStorage.setItem('cigcig_call_effect', effectId); } catch { /* yoksay */ }
+    if (effectId === 'none' && !call.effectCtx) { renderCall(); return; }
+    if (!call.effectCtx) {
+      call.effectCtx = new Ctx();
+      call.effectSource = call.effectCtx.createMediaStreamSource(call.rawStream);
+      call.effectDest = call.effectCtx.createMediaStreamDestination();
+      const outTrack = call.effectDest.stream.getAudioTracks()[0];
+      outTrack.enabled = !call.muted;
+      // Eşlere giden parçayı değiştir
+      for (const peer of call.peers.values()) {
+        const sender = peer.pc.getSenders().find(item => item.track?.kind === 'audio');
+        sender?.replaceTrack(outTrack).catch(() => {});
+      }
+      call.stream = call.effectDest.stream;
+    }
+    call.effectCtx.resume?.().catch(() => {});
+    call.effectNodes?.forEach(node => { try { node.disconnect(); node.stop?.(); } catch { /* yoksay */ } });
+    try { call.effectSource.disconnect(); } catch { /* yoksay */ }
+    const { output, extra } = buildEffectChain(call.effectCtx, call.effectSource, effectId);
+    output.connect(call.effectDest);
+    call.effectNodes = extra;
+    renderCall();
+  }
+
+  function renderEffectSheet() {
+    const root = document.getElementById('cgc-root');
+    if (!root || !call) return;
+    const existing = root.querySelector('.cgc-fx-sheet');
+    if (existing) { existing.remove(); return; }
+    const sheet = document.createElement('div');
+    sheet.className = 'cgc-fx-sheet';
+    sheet.innerHTML = `<div class="cgc-fx-head">Ses efekti</div>
+      <div class="cgc-fx-grid">${VOICE_EFFECTS.map(effect => `
+        <button type="button" class="cgc-fx${(call.effect || 'none') === effect.id ? ' is-on' : ''}" data-fx="${effect.id}">
+          <i class="fas ${effect.icon}"></i><span>${effect.label}</span>
+        </button>`).join('')}</div>`;
+    sheet.addEventListener('click', event => {
+      const button = event.target.closest('[data-fx]');
+      if (!button) return;
+      applyVoiceEffect(button.dataset.fx);
+    });
+    root.querySelector('.cgc-active')?.appendChild(sheet);
+  }
+
   // ---------- Arayüz ----------
   function ensureRoot() {
     let root = document.getElementById('cgc-root');
@@ -130,6 +284,7 @@
       <div class="cgc-controls">
         <button type="button" class="cgc-round is-ghost${call.speaker ? ' is-on' : ''}" data-act="speaker" aria-label="Hoparlör" ${call.canPickSpeaker ? '' : 'hidden'}><i class="fas fa-volume-high"></i></button>
         <button type="button" class="cgc-round is-ghost${call.muted ? ' is-on' : ''}" data-act="mute" aria-label="${call.muted ? 'Mikrofonu aç' : 'Sessize al'}"><i class="fas fa-microphone${call.muted ? '-slash' : ''}"></i></button>
+        <button type="button" class="cgc-round is-ghost${call.effect && call.effect !== 'none' ? ' is-on' : ''}" data-act="fx" aria-label="Ses efekti"><i class="fas fa-wand-magic-sparkles"></i></button>
         <button type="button" class="cgc-round is-decline" data-act="hangup" aria-label="Aramayı bitir"><i class="fas fa-phone-slash"></i></button>
       </div>
     </section>
@@ -139,6 +294,7 @@
     root.querySelector('[data-act="mute"]').addEventListener('click', toggleMute);
     root.querySelector('[data-act="hangup"]').addEventListener('click', () => hangup());
     root.querySelector('[data-act="speaker"]')?.addEventListener('click', toggleSpeaker);
+    root.querySelector('[data-act="fx"]')?.addEventListener('click', renderEffectSheet);
     updateStatus();
   }
 
@@ -273,6 +429,9 @@
     clearInterval(call.timer);
     for (const socketId of [...call.peers.keys()]) closePeer(socketId);
     call.stream?.getTracks().forEach(track => track.stop());
+    call.rawStream?.getTracks().forEach(track => track.stop());
+    call.effectNodes?.forEach(node => { try { node.disconnect(); node.stop?.(); } catch { /* yoksay */ } });
+    call.effectCtx?.close().catch(() => {});
     call.audioCtx?.close().catch(() => {});
     call.wakeLock?.release?.().catch(() => {});
     const duration = call.connectedAt ? fmt((Date.now() - call.connectedAt) / 1000) : '';
@@ -299,6 +458,10 @@
       me: null,
       iceServers: iceServers || [{ urls: 'stun:stun.l.google.com:19302' }],
       stream,
+      rawStream: stream,
+      effect: 'none',
+      effectCtx: null,
+      effectNodes: null,
       peers: new Map(),
       participantInfo: new Map(),
       muted: false,
@@ -417,6 +580,7 @@
     if (!call) return;
     call.muted = !call.muted;
     call.stream.getAudioTracks().forEach(track => { track.enabled = !call.muted; });
+    call.rawStream?.getAudioTracks().forEach(track => { track.enabled = !call.muted; });
     socket?.emit('call:mute', { callId: call.id, muted: call.muted });
     renderCall();
   }
