@@ -579,6 +579,7 @@ const ADMIN_SECTION_SLUGS = {
   'shop-settings': 'odeme-sistemi',
   notifications: 'bildirimler',
   'chat-appearance': 'sohbet-gorunumu',
+  'nsfw': 'nsfw-korumasi',
   announcements: 'duyurular',
   'homepage-sections': 'ana-sayfa-bolumleri',
   settings: 'ayarlar',
@@ -859,6 +860,7 @@ function loadSection(section, { history: historyMode = 'push' } = {}) {
     , badges: renderBadges
     , 'homepage-sections': renderHomepageSections
     , 'chat-appearance': renderChatAppearance
+    , nsfw: renderNsfwProtection
   };
   if (map[section]) map[section](main);
 }
@@ -6091,4 +6093,92 @@ async function renderChatAppearance(main) {
     finally { button.disabled = false; }
   });
   paint();
+}
+
+
+// ===== NSFW KORUMASI =====
+async function renderNsfwProtection(main) {
+  main.innerHTML = `
+    <div class="adm-head"><h1>NSFW Koruması</h1><p>Uygunsuz görselleri yüklenirken engelle, şüphelileri bulanıklaştır.</p></div>
+    <div class="adm-card nsfw-settings-card">
+      <div class="adm-card-head"><h2>Ayarlar</h2></div>
+      <div class="adm-card-body">
+        <label class="adm-switch-row">
+          <input type="checkbox" id="nsfw-enabled" />
+          <span><strong>Korumayı aç</strong><small>Açıkken herkese açık yüklemeler taranır; eşiği aşan içerik yayınlanmaz.</small></span>
+        </label>
+        <label class="adm-switch-row">
+          <input type="checkbox" id="nsfw-blur" />
+          <span><strong>Şüphelileri bulanıklaştır</strong><small>Eşiğin altındaki şüpheli içerik yayınlanır ama bulanık gelir; kullanıcı "NSFW'yi gör" ile açar.</small></span>
+        </label>
+        <div class="adm-field">
+          <label for="nsfw-threshold">Engelleme eşiği</label>
+          <input type="number" id="nsfw-threshold" min="0.1" max="1" step="0.05" />
+          <small>0.75 önerilir. Düşürürsen daha çok içerik engellenir.</small>
+        </div>
+        <button class="adm-btn adm-btn-primary" id="nsfw-save">Kaydet</button>
+        <p class="nsfw-api-note" id="nsfw-api-note"></p>
+      </div>
+    </div>
+    <div class="adm-card">
+      <div class="adm-card-head"><h2>Bildiriler</h2><p>Engellenen ve bulanıklaştırılan yüklemeler.</p></div>
+      <div class="adm-card-body"><div id="nsfw-flag-list" class="nsfw-flag-list">Yükleniyor…</div></div>
+    </div>`;
+
+  const settings = await adminApi('/settings').catch(() => ({}));
+  const value = key => (settings?.[key] ?? settings?.settings?.[key] ?? '');
+  document.getElementById('nsfw-enabled').checked = String(value('nsfw_protection_enabled')) === '1';
+  document.getElementById('nsfw-blur').checked = String(value('nsfw_blur_enabled')) === '1';
+  document.getElementById('nsfw-threshold').value = Number(value('nsfw_threshold')) || 0.75;
+  document.getElementById('nsfw-api-note').textContent =
+    'Tarama servisi NSFW_API_URL ortam değişkeni ile bağlanır. Bağlı değilse içerik engellenmez.';
+
+  document.getElementById('nsfw-save').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      await adminApi('/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+          nsfw_protection_enabled: document.getElementById('nsfw-enabled').checked ? '1' : '0',
+          nsfw_blur_enabled: document.getElementById('nsfw-blur').checked ? '1' : '0',
+          nsfw_threshold: String(document.getElementById('nsfw-threshold').value || '0.75')
+        })
+      });
+      toast('NSFW ayarları kaydedildi');
+    } catch (error) {
+      toast(error.message || 'Kaydedilemedi', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  const list = document.getElementById('nsfw-flag-list');
+  try {
+    const flags = await adminApi('/nsfw-flags?status=open');
+    list.innerHTML = flags.length ? flags.map(flag => `
+      <div class="nsfw-flag" data-flag="${flag.id}">
+        <span class="nsfw-flag-badge ${flag.action === 'blocked' ? 'is-blocked' : 'is-blurred'}">${flag.action === 'blocked' ? 'Engellendi' : 'Bulanık'}</span>
+        <div class="nsfw-flag-main">
+          <strong>${flag.username ? '@' + flag.username : 'Bilinmeyen kullanıcı'}</strong>
+          <small>${flag.content_type} · skor ${Number(flag.score || 0).toFixed(2)} · ${new Date(flag.created_at).toLocaleString('tr-TR')}</small>
+        </div>
+        <button class="adm-btn adm-btn-sm nsfw-flag-done" type="button">İncelendi</button>
+      </div>`).join('') : '<p class="adm-empty">Bekleyen bildiri yok.</p>';
+  } catch (error) {
+    list.innerHTML = '<p class="adm-empty">Bildiriler yüklenemedi.</p>';
+  }
+  list.addEventListener('click', async event => {
+    const button = event.target.closest('.nsfw-flag-done');
+    if (!button) return;
+    const row = button.closest('[data-flag]');
+    button.disabled = true;
+    try {
+      await adminApi(`/nsfw-flags/${row.dataset.flag}/review`, { method: 'POST' });
+      row.remove();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message || 'İşlenemedi', 'error');
+    }
+  });
 }

@@ -7326,6 +7326,99 @@ app.post('/api/photos/:id/save', authMiddleware, async (req, res) => {
   res.json({ saved: !existing.length });
 });
 
+// ===== NSFW KORUMASI =====
+// Sınıflandırma dışarıdan takılabilir: NSFW_API_URL ayarlanırsa oraya {image_url} POST edilir
+// ve {"nsfw": 0..1} beklenir. Ayarlanmazsa koruma "bilinmiyor" döner ve içerik engellenmez.
+const NSFW_API_URL = String(process.env.NSFW_API_URL || '').trim();
+const NSFW_API_KEY = String(process.env.NSFW_API_KEY || '').trim();
+
+async function nsfwSettings() {
+  const { rows } = await query("SELECT key, value FROM settings WHERE key = ANY($1)",
+    [['nsfw_protection_enabled', 'nsfw_blur_enabled', 'nsfw_threshold']]);
+  const map = {};
+  rows.forEach(row => { map[row.key] = row.value; });
+  return {
+    enabled: map.nsfw_protection_enabled === '1',
+    blur: map.nsfw_blur_enabled === '1',
+    threshold: Number(map.nsfw_threshold) > 0 ? Number(map.nsfw_threshold) : 0.75
+  };
+}
+
+async function classifyNsfw(mediaUrl) {
+  if (!NSFW_API_URL || !mediaUrl) return null;
+  try {
+    const response = await fetch(NSFW_API_URL, {
+      method: 'POST',
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(NSFW_API_KEY ? { Authorization: `Bearer ${NSFW_API_KEY}` } : {})
+      },
+      body: JSON.stringify({ image_url: mediaUrl, url: mediaUrl })
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const score = Number(data?.nsfw ?? data?.score ?? data?.unsafe);
+    return Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function recordNsfwFlag({ userId, contentType, contentId, mediaUrl, score, action }) {
+  try {
+    await query(
+      'INSERT INTO nsfw_flags (user_id, content_type, content_id, media_url, score, action) VALUES ($1,$2,$3,$4,$5,$6)',
+      [userId || null, contentType, contentId || null, String(mediaUrl || '').slice(0, 2048), score, action]
+    );
+  } catch (error) {
+    console.error('[NSFW] kayıt eklenemedi:', error.message);
+  }
+}
+
+// Yüklenen medyayı denetler. Engellenmesi gerekiyorsa {blocked:true} döner.
+async function screenMediaForNsfw(userId, contentType, mediaUrls) {
+  const settings = await nsfwSettings();
+  if (!settings.enabled) return { blocked: false, isNsfw: 0, score: null };
+  const urls = (Array.isArray(mediaUrls) ? mediaUrls : [mediaUrls]).filter(Boolean).slice(0, 4);
+  let worst = null;
+  for (const url of urls) {
+    const score = await classifyNsfw(url);
+    if (score !== null && (worst === null || score > worst.score)) worst = { score, url };
+  }
+  if (!worst) return { blocked: false, isNsfw: 0, score: null };
+  if (worst.score >= settings.threshold) {
+    await recordNsfwFlag({ userId, contentType, mediaUrl: worst.url, score: worst.score, action: 'blocked' });
+    return { blocked: true, score: worst.score };
+  }
+  if (settings.blur && worst.score >= settings.threshold * 0.6) {
+    await recordNsfwFlag({ userId, contentType, mediaUrl: worst.url, score: worst.score, action: 'blurred' });
+    return { blocked: false, isNsfw: 1, score: worst.score };
+  }
+  return { blocked: false, isNsfw: 0, score: worst.score };
+}
+
+const NSFW_BLOCK_MESSAGE = 'Bu içerik uygunsuz (NSFW) olarak değerlendirildi ve yayınlanamaz. Hatalı olduğunu düşünüyorsan yöneticiyle iletişime geç.';
+
+// Admin: NSFW bildirimleri
+app.get('/api/admin/nsfw-flags', adminMiddleware, async (req, res) => {
+  const status = ['open', 'reviewed', 'all'].includes(String(req.query.status)) ? String(req.query.status) : 'open';
+  const params = [];
+  let where = '';
+  if (status !== 'all') { params.push(status); where = `WHERE f.status = $${params.length}`; }
+  const { rows } = await query(
+    `SELECT f.*, u.username FROM nsfw_flags f LEFT JOIN users u ON u.id = f.user_id
+     ${where} ORDER BY f.created_at DESC LIMIT 200`, params);
+  res.json(rows);
+});
+
+app.post('/api/admin/nsfw-flags/:id/review', adminMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id)) return res.status(400).json({ error: 'Geçersiz kayıt' });
+  await query('UPDATE nsfw_flags SET status=$1, reviewed_by=$2 WHERE id=$3', ['reviewed', req.user.id, id]);
+  res.json({ ok: true });
+});
+
 app.post('/api/photos', authMiddleware, uploadLimiter, upload.fields([{ name: 'image', maxCount: 1 }, { name: 'images', maxCount: 10 }]), async (req, res) => {
   if (await denyIfRestricted(req, res, 'photo')) return;
   await ensurePhotoInteractionSchema();
@@ -7337,6 +7430,8 @@ app.post('/api/photos', authMiddleware, uploadLimiter, upload.fields([{ name: 'i
     const imageUrls = [];
     for (const file of files) imageUrls.push(await handleUpload(file));
     const url = imageUrls[0];
+    const nsfw = await screenMediaForNsfw(req.user.id, 'photo', imageUrls);
+    if (nsfw.blocked) return res.status(422).json({ error: NSFW_BLOCK_MESSAGE, nsfw_blocked: true });
     const b = req.body;
     const songStart = Math.max(0, parseInt(b.song_start_seconds, 10) || 0);
     const { rows } = await query(`INSERT INTO photos (user_id,url,image_urls,public_id,title,caption,location,song_id,song_start_seconds,show_likes,allow_comments,allow_shares,close_friends_only)
@@ -9588,6 +9683,13 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     }
     value = String(value);
   }
+  // NSFW koruması
+  if (key === 'nsfw_protection_enabled' || key === 'nsfw_blur_enabled') value = boolValue(value) ? '1' : '0';
+  if (key === 'nsfw_threshold') {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0.1 || number > 1) return res.status(400).json({ error: 'NSFW eşiği 0.1 ile 1 arasında olmalı' });
+    value = String(number);
+  }
   // Sohbet arka plan deseni (WhatsApp "doodle")
   if (key === 'dm_wallpaper_enabled') value = boolValue(value) ? '1' : '0';
   if (key === 'dm_wallpaper_url') {
@@ -10953,7 +11055,8 @@ app.get('/api/settings/public', async (req, res) => {
     'first_visit_auth','mobile_home_auth_required','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
     'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url','default_avatar_size',
-    'dm_wallpaper_enabled','dm_wallpaper_url','dm_wallpaper_opacity','dm_wallpaper_size','dm_wallpaper_tint'
+    'dm_wallpaper_enabled','dm_wallpaper_url','dm_wallpaper_opacity','dm_wallpaper_size','dm_wallpaper_tint',
+    'nsfw_protection_enabled','nsfw_blur_enabled'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
@@ -14977,6 +15080,8 @@ app.post('/api/videos', authMiddleware, async (req, res) => {
     if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
   }
   if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
+  const videoNsfw = await screenMediaForNsfw(req.user.id, is_reals ? 'reals' : 'video', [banner_image, video_url]);
+  if (videoNsfw.blocked) return res.status(422).json({ error: NSFW_BLOCK_MESSAGE, nsfw_blocked: true });
   const durationSeconds = Math.ceil(Number(req.body.duration_seconds) || 0);
   if (durationSeconds < 0 || durationSeconds > 86400) return res.status(400).json({ error: 'Video süresi geçersiz.' });
   if (is_reals && durationSeconds > 180) return res.status(400).json({ error: 'Reals videoları en fazla 3 dakika olabilir.' });

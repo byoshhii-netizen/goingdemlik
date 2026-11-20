@@ -876,6 +876,26 @@ async function initDb() {
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS reply_to_id BIGINT REFERENCES group_messages(id) ON DELETE SET NULL;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_url TEXT;
+    -- NSFW koruması
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS is_nsfw SMALLINT NOT NULL DEFAULT 0;
+    ALTER TABLE photos ADD COLUMN IF NOT EXISTS nsfw_score REAL;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS is_nsfw SMALLINT NOT NULL DEFAULT 0;
+    ALTER TABLE videos ADD COLUMN IF NOT EXISTS nsfw_score REAL;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS is_nsfw SMALLINT NOT NULL DEFAULT 0;
+    ALTER TABLE stories ADD COLUMN IF NOT EXISTS nsfw_score REAL;
+    CREATE TABLE IF NOT EXISTS nsfw_flags (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      content_type TEXT NOT NULL,
+      content_id BIGINT,
+      media_url TEXT NOT NULL DEFAULT '',
+      score REAL,
+      action TEXT NOT NULL DEFAULT 'blocked',
+      status TEXT NOT NULL DEFAULT 'open',
+      reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_nsfw_flags_status_created ON nsfw_flags(status, created_at DESC);
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_waveform JSONB;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_listened_at TIMESTAMP;
