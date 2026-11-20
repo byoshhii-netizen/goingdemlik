@@ -1033,3 +1033,672 @@ body.reals-page #site-footer { display: none !important; }
 @media (min-width: 769px) {
   .dm-chat .dm-input-bar.is-recording .dm-mic-btn { transform: none; box-shadow: none; }
 }
+
+/* -------------------------------------------------------------------------
+   Mesaj seçimi (WhatsApp tarzı üst araç çubuğu)
+   ------------------------------------------------------------------------- */
+.dm-chat { position: relative; }
+.dm-chat .dm-sel-actions-bar {
+  display: none !important;
+  position: absolute !important;
+  top: 0; left: 0; right: 0;
+  z-index: 8;
+  align-items: center !important;
+  gap: 4px !important;
+  min-height: 60px;
+  padding: calc(env(safe-area-inset-top)) 8px 0 !important;
+  margin: 0 !important;
+  flex-wrap: nowrap !important;
+  background: var(--bg-card, #0b0b0b) !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255,255,255,.08) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+  animation: dmSelIn .16s ease;
+}
+body.dm-chat-route .dm-chat .dm-sel-actions-bar { min-height: calc(60px + env(safe-area-inset-top)); }
+.dm-chat .dm-sel-actions-bar.visible { display: flex !important; }
+@keyframes dmSelIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.dm-sel-actions-bar .dm-selection-label { font-size: 19px; font-weight: 700; color: var(--text-primary, #fff); margin-left: 6px; min-width: 24px; font-variant-numeric: tabular-nums; }
+.dm-sel-tools { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.dm-sel-icon {
+  height: 42px; min-width: 42px; padding: 0 10px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: 0; border-radius: 21px; background: transparent;
+  color: var(--text-primary, #eee); font: 600 13px/1 inherit; cursor: pointer;
+}
+.dm-sel-icon i { font-size: 17px; }
+.dm-sel-icon:hover, .dm-sel-icon:active { background: rgba(255,255,255,.08); }
+.dm-sel-icon.is-danger { color: #ff5a5f; }
+.dm-sel-icon:disabled { opacity: .35; }
+.dm-sel-icon[hidden] { display: none; }
+@media (max-width: 520px) { .dm-sel-icon span { display: none; } }
+
+/* Seçili satır: tam genişlik vurgu, kutu/çerçeve yok */
+.dm-chat .dm-msg-wrap.dm-msg-selected {
+  outline: 0 !important;
+  border-radius: 0 !important;
+  background: color-mix(in srgb, var(--accent-red, #25d366) 20%, transparent) !important;
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--accent-red, #25d366) 20%, transparent);
+  clip-path: inset(0 -100vmax);
+}
+.dm-chat.dm-selection-mode .dm-msg-wrap { cursor: pointer; -webkit-user-select: none; user-select: none; }
+.dm-chat.dm-selection-mode .dm-msg-wrap * { pointer-events: none; }
+.dm-chat.dm-selection-mode .dm-msg-wrap .dm-msg-cb { pointer-events: auto; }
+/* Onay kutuları: dokunmatikte gizli (satıra dokunmak yeterli), masaüstünde yuvarlak tik */
+@media (pointer: coarse) { .dm-chat .dm-msg-cb-wrap { display: none !important; } }
+.dm-chat .dm-msg-cb {
+  appearance: none; -webkit-appearance: none;
+  width: 20px; height: 20px; margin: 0 8px 0 2px; border-radius: 50%;
+  border: 2px solid var(--text-muted, #777); background: transparent; cursor: pointer;
+  display: grid; place-items: center;
+}
+.dm-chat .dm-msg-cb:checked { background: var(--accent-red, #25d366); border-color: var(--accent-red, #25d366); }
+.dm-chat .dm-msg-cb:checked::after { content: ""; width: 5px; height: 9px; border: solid #fff; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+/* Uzun basışta iOS büyüteç / kopyala balonu çıkmasın */
+@media (pointer: coarse) {
+  .dm-chat .dm-msg-bubble { -webkit-touch-callout: none; }
+  .dm-chat .dm-msg-wrap { -webkit-user-select: none; user-select: none; }
+}
+
+/* Mikrofon yardım penceresi */
+.cg-mic-help { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center; padding: 20px; background: rgba(0,0,0,.55); }
+.cg-mic-help-card { width: min(380px, 100%); padding: 24px 20px 18px; border-radius: 18px; background: #1c1c1e; color: #f2f2f2; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.cg-mic-help-icon { width: 56px; height: 56px; margin: 0 auto 12px; border-radius: 50%; display: grid; place-items: center; background: rgba(229,72,77,.15); color: #e5484d; font-size: 22px; }
+.cg-mic-help-card strong { display: block; font-size: 17px; margin-bottom: 8px; }
+.cg-mic-help-card p { color: #bbb; font-size: 14px; line-height: 1.5; margin: 0 0 16px; }
+.cg-mic-help-card button { width: 100%; height: 44px; border: 0; border-radius: 12px; background: var(--accent-red, #25d366); color: var(--accent-contrast, #fff); font-weight: 700; font-size: 15px; cursor: pointer; }
+
+/* Reals kırmızı tik */
+.ig-reel-username .red-verification-tick { display: inline-flex; vertical-align: -2px; margin-left: 3px; }
+.ig-reel-username .red-verification-tick-image { width: 15px; height: 15px; }
+
+/* -------------------------------------------------------------------------
+   GAZETELER — sade başlık
+   ------------------------------------------------------------------------- */
+.newspaper-page .newspaper-hero { display: none !important; }
+.newspaper-compact-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 18px 0 16px; margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,.07);
+}
+.newspaper-compact-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.newspaper-compact-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; flex: 0 0 auto; background: color-mix(in srgb, var(--accent-red, #bda275) 16%, transparent); color: var(--accent-red2, #d4b896); font-size: 18px; }
+.newspaper-compact-title h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.3px; line-height: 1.15; }
+.newspaper-compact-title p { margin: 2px 0 0; color: var(--text-muted, #888); font-size: 13px; }
+.newspaper-compact-publish {
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px;
+  border: 0; border-radius: 10px; background: var(--accent-red, #bda275); color: var(--accent-contrast, #fff);
+  font: 700 14px/1 inherit; cursor: pointer; white-space: nowrap;
+}
+.newspaper-compact-publish:active { transform: scale(.97); }
+@media (max-width: 520px) {
+  .newspaper-compact-publish span { display: none; }
+  .newspaper-compact-publish { width: 40px; padding: 0; justify-content: center; }
+  .newspaper-compact-title h1 { font-size: 19px; }
+}
+.newspaper-desktop-only { text-align: center; padding: 6px 4px 2px; }
+.newspaper-desktop-only-icon { width: 64px; height: 64px; margin: 0 auto 14px; border-radius: 18px; display: grid; place-items: center; font-size: 26px; background: color-mix(in srgb, var(--accent-red, #bda275) 16%, transparent); color: var(--accent-red2, #d4b896); }
+.newspaper-desktop-only h2 { font-size: 18px; margin: 0 0 8px; }
+.newspaper-desktop-only p { color: var(--text-secondary, #bbb); font-size: 14px; line-height: 1.55; margin: 0 0 10px; }
+.newspaper-desktop-only-tip { font-size: 13px !important; color: var(--text-muted, #888) !important; }
+.newspaper-desktop-only-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 14px; }
+
+/* -------------------------------------------------------------------------
+   GAZETE EDİTÖRÜ — tam ekran, profesyonel 3 sütunlu düzen (yalnızca masaüstü)
+   ------------------------------------------------------------------------- */
+@media (min-width: 1024px) {
+  #modal-overlay:has(.newspaper-editor-modal) { padding: 0 !important; align-items: stretch !important; }
+  #modal.newspaper-editor-modal {
+    width: 100vw !important; max-width: none !important; height: 100dvh !important; max-height: none !important;
+    margin: 0 !important; border-radius: 0 !important; border: 0 !important;
+    display: flex !important; flex-direction: column !important; background: #17171a !important;
+  }
+  #modal.newspaper-editor-modal .modal-header {
+    flex: 0 0 auto; height: 54px; padding: 0 18px !important; display: flex; align-items: center;
+    background: #101012; border-bottom: 1px solid rgba(255,255,255,.07);
+  }
+  #modal.newspaper-editor-modal #modal-title { font: 700 15px/1 Inter, system-ui, sans-serif !important; letter-spacing: .2px; }
+  #modal.newspaper-editor-modal .modal-body { flex: 1 1 auto; min-height: 0; padding: 0 !important; overflow: hidden !important; max-height: none !important; }
+  .newspaper-editor-modal .newspaper-composer {
+    display: grid !important;
+    grid-template-columns: 272px minmax(0, 1fr) 340px;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: 100%; gap: 0 !important; margin: 0 !important;
+  }
+  .newspaper-editor-modal .newspaper-editor-workspace { display: contents !important; }
+  /* Sol: araç çubuğu */
+  .newspaper-editor-modal .newspaper-editor-tools {
+    grid-column: 1; grid-row: 1 / -1; position: static !important; height: 100% !important; max-height: none !important;
+    overflow-y: auto; margin: 0 !important; border-radius: 0 !important; border: 0 !important;
+    border-right: 1px solid rgba(255,255,255,.07) !important; background: #121214 !important; padding: 16px !important;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .newspaper-editor-modal .newspaper-editor-add-tools { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px !important; }
+  .newspaper-editor-modal .newspaper-editor-add-tools button {
+    display: flex !important; flex-direction: column; align-items: center; justify-content: center; gap: 7px;
+    height: 74px; border-radius: 12px !important; border: 1px solid rgba(255,255,255,.08) !important;
+    background: #1b1b1f !important; color: #e8e8ea !important; font-size: 12px !important; font-weight: 600 !important;
+    transition: background .15s ease, border-color .15s ease, transform .1s ease;
+  }
+  .newspaper-editor-modal .newspaper-editor-add-tools button i { font-size: 18px; color: var(--accent-red2, #d4b896); }
+  .newspaper-editor-modal .newspaper-editor-add-tools button:hover { background: #232328 !important; border-color: rgba(255,255,255,.18) !important; }
+  .newspaper-editor-modal .newspaper-editor-add-tools button:active { transform: scale(.97); }
+  .newspaper-editor-modal .newspaper-composer-publish,
+  .newspaper-editor-modal .newspaper-composer-save-exit { width: 100%; height: 44px; border-radius: 11px !important; justify-content: center; }
+  .newspaper-editor-modal .newspaper-composer-publish { margin-top: auto !important; }
+  /* Orta: tuval */
+  .newspaper-editor-modal .newspaper-editor-stage-wrap {
+    grid-column: 2; grid-row: 1 / -1; overflow: auto; min-width: 0; height: 100%;
+    padding: 28px 32px 60px !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important;
+    background: radial-gradient(circle at 50% 0%, #2a2a30 0%, #1d1d21 60%) !important;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .newspaper-editor-modal .newspaper-editor-scale-note { width: min(100%, 820px); color: #8a8a92 !important; margin-bottom: 10px !important; }
+  .newspaper-editor-modal .newspaper-editor-sheet {
+    width: min(100%, 820px) !important; margin: 0 auto !important; flex: 0 0 auto;
+    box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 18px 60px rgba(0,0,0,.55) !important; border-radius: 2px !important;
+  }
+  /* Sağ: belge ve marka ayarları */
+  .newspaper-editor-modal .newspaper-composer-topbar {
+    grid-column: 3; grid-row: 1; margin: 0 !important; border-radius: 0 !important; border: 0 !important;
+    border-left: 1px solid rgba(255,255,255,.07) !important; border-bottom: 1px solid rgba(255,255,255,.07) !important;
+    background: #121214 !important; padding: 16px !important; display: grid !important; grid-template-columns: 1fr !important; gap: 12px !important;
+  }
+  .newspaper-editor-modal .newspaper-brand-panel {
+    grid-column: 3; grid-row: 2; overflow-y: auto; margin: 0 !important; border-radius: 0 !important; border: 0 !important;
+    border-left: 1px solid rgba(255,255,255,.07) !important; background: #121214 !important; padding: 16px !important;
+  }
+  .newspaper-editor-modal .newspaper-brand-fields { grid-template-columns: 1fr 1fr !important; gap: 10px !important; }
+  .newspaper-editor-modal .newspaper-brand-fields .newspaper-brand-image-field { grid-column: 1 / -1; }
+  .newspaper-editor-modal label > span { font-size: 11px !important; font-weight: 700 !important; letter-spacing: .4px; text-transform: uppercase; color: #8a8a92 !important; }
+  .newspaper-editor-modal input, .newspaper-editor-modal select, .newspaper-editor-modal textarea {
+    background: #1b1b1f !important; border: 1px solid rgba(255,255,255,.09) !important; border-radius: 9px !important; color: #eee !important;
+  }
+  .newspaper-editor-modal input:focus, .newspaper-editor-modal textarea:focus, .newspaper-editor-modal select:focus { border-color: var(--accent-red, #bda275) !important; outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-red, #bda275) 22%, transparent); }
+  .newspaper-editor-modal .newspaper-composer-hint { color: #8a8a92 !important; font-size: 12px; }
+}
+@media (min-width: 1024px) {
+  .newspaper-editor-modal .newspaper-editor-selection { flex: 0 0 auto !important; max-height: none !important; height: auto !important; overflow: visible !important; display: grid; gap: 10px; }
+  .newspaper-editor-modal .newspaper-editor-selection label { display: grid; gap: 6px; margin: 0; }
+  .newspaper-editor-modal .newspaper-editor-dimensions { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .newspaper-editor-modal .newspaper-editor-dimensions input { width: 100%; height: 38px; }
+  .newspaper-editor-modal input[type="color"] { height: 38px; padding: 4px !important; cursor: pointer; }
+  .newspaper-editor-modal .newspaper-editor-tip { flex: 0 0 auto; }
+}
+
+/* -------------------------------------------------------------------------
+   Ek sohbet temaları (otomatik üretildi)
+   ------------------------------------------------------------------------- */
+body .dm-chat[data-dm-theme="whatsapp"] { --dm-accent: #00a884; background-color: #0b141a; }
+.dm-chat[data-dm-theme="whatsapp"] .dm-messages { background-color: #0b141a !important; }
+.dm-chat[data-dm-theme="whatsapp"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: #005c4b !important; border-color: transparent !important; color: #e9edef !important; }
+.dm-chat[data-dm-theme="whatsapp"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="whatsapp"] .dm-peer-typing-bubble { background: #202c33 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="whatsapp"] .dm-send-btn, .dm-chat[data-dm-theme="whatsapp"] .cg-rec-send { background: #00a884 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="whatsapp"] .cg-voice { --cg-voice-accent: #00a884; }
+body .dm-chat[data-dm-theme="midnight"] { --dm-accent: #5c7cfa; background-color: #0c0f1d; }
+.dm-chat[data-dm-theme="midnight"] .dm-messages { background-color: #0c0f1d !important; }
+.dm-chat[data-dm-theme="midnight"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#364fc7,#4c6ef5) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="midnight"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="midnight"] .dm-peer-typing-bubble { background: #1f2433 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="midnight"] .dm-send-btn, .dm-chat[data-dm-theme="midnight"] .cg-rec-send { background: #5c7cfa !important; color: #fff !important; }
+.dm-chat[data-dm-theme="midnight"] .cg-voice { --cg-voice-accent: #5c7cfa; }
+body .dm-chat[data-dm-theme="aurora"] { --dm-accent: #2cb67d; background-color: #0e0d14; }
+.dm-chat[data-dm-theme="aurora"] .dm-messages { background-color: #0e0d14 !important; }
+.dm-chat[data-dm-theme="aurora"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#7f5af0,#2cb67d) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="aurora"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="aurora"] .dm-peer-typing-bubble { background: #17161d !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="aurora"] .dm-send-btn, .dm-chat[data-dm-theme="aurora"] .cg-rec-send { background: #2cb67d !important; color: #fff !important; }
+.dm-chat[data-dm-theme="aurora"] .cg-voice { --cg-voice-accent: #2cb67d; }
+body .dm-chat[data-dm-theme="cherry"] { --dm-accent: #f06595; background-color: #140a0e; }
+.dm-chat[data-dm-theme="cherry"] .dm-messages { background-color: #140a0e !important; }
+.dm-chat[data-dm-theme="cherry"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#c2185b,#e8467c) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="cherry"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="cherry"] .dm-peer-typing-bubble { background: #2a1a20 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="cherry"] .dm-send-btn, .dm-chat[data-dm-theme="cherry"] .cg-rec-send { background: #f06595 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="cherry"] .cg-voice { --cg-voice-accent: #f06595; }
+body .dm-chat[data-dm-theme="mango"] { --dm-accent: #ff922b; background-color: #15100a; }
+.dm-chat[data-dm-theme="mango"] .dm-messages { background-color: #15100a !important; }
+.dm-chat[data-dm-theme="mango"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#f08c00,#f76707) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="mango"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="mango"] .dm-peer-typing-bubble { background: #2b2116 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="mango"] .dm-send-btn, .dm-chat[data-dm-theme="mango"] .cg-rec-send { background: #ff922b !important; color: #fff !important; }
+.dm-chat[data-dm-theme="mango"] .cg-voice { --cg-voice-accent: #ff922b; }
+body .dm-chat[data-dm-theme="lagoon"] { --dm-accent: #20c997; background-color: #081416; }
+.dm-chat[data-dm-theme="lagoon"] .dm-messages { background-color: #081416 !important; }
+.dm-chat[data-dm-theme="lagoon"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#0ca678,#1098ad) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="lagoon"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="lagoon"] .dm-peer-typing-bubble { background: #142426 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="lagoon"] .dm-send-btn, .dm-chat[data-dm-theme="lagoon"] .cg-rec-send { background: #20c997 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="lagoon"] .cg-voice { --cg-voice-accent: #20c997; }
+body .dm-chat[data-dm-theme="grape"] { --dm-accent: #9775fa; background-color: #110c18; }
+.dm-chat[data-dm-theme="grape"] .dm-messages { background-color: #110c18 !important; }
+.dm-chat[data-dm-theme="grape"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#6741d9,#9c36b5) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="grape"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="grape"] .dm-peer-typing-bubble { background: #221a2e !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="grape"] .dm-send-btn, .dm-chat[data-dm-theme="grape"] .cg-rec-send { background: #9775fa !important; color: #fff !important; }
+.dm-chat[data-dm-theme="grape"] .cg-voice { --cg-voice-accent: #9775fa; }
+body .dm-chat[data-dm-theme="coffee"] { --dm-accent: #c69c72; background-color: #14100c; }
+.dm-chat[data-dm-theme="coffee"] .dm-messages { background-color: #14100c !important; }
+.dm-chat[data-dm-theme="coffee"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#6f4e37,#8d6748) !important; border-color: transparent !important; color: #fff8f0 !important; }
+.dm-chat[data-dm-theme="coffee"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="coffee"] .dm-peer-typing-bubble { background: #2a221c !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="coffee"] .dm-send-btn, .dm-chat[data-dm-theme="coffee"] .cg-rec-send { background: #c69c72 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="coffee"] .cg-voice { --cg-voice-accent: #c69c72; }
+body .dm-chat[data-dm-theme="mono"] { --dm-accent: #f1f3f5; background-color: #000000; }
+.dm-chat[data-dm-theme="mono"] .dm-messages { background-color: #000000 !important; }
+.dm-chat[data-dm-theme="mono"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: #f1f3f5 !important; border-color: transparent !important; color: #111 !important; }
+.dm-chat[data-dm-theme="mono"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="mono"] .dm-peer-typing-bubble { background: #212529 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="mono"] .dm-send-btn, .dm-chat[data-dm-theme="mono"] .cg-rec-send { background: #f1f3f5 !important; color: #111 !important; }
+.dm-chat[data-dm-theme="mono"] .cg-voice { --cg-voice-accent: #111; }
+body .dm-chat[data-dm-theme="candy"] { --dm-accent: #f783ac; background-color: #120b14; }
+.dm-chat[data-dm-theme="candy"] .dm-messages { background-color: #120b14 !important; }
+.dm-chat[data-dm-theme="candy"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#ff6b9d,#c86bfa) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="candy"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="candy"] .dm-peer-typing-bubble { background: #2b1d2e !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="candy"] .dm-send-btn, .dm-chat[data-dm-theme="candy"] .cg-rec-send { background: #f783ac !important; color: #fff !important; }
+.dm-chat[data-dm-theme="candy"] .cg-voice { --cg-voice-accent: #f783ac; }
+body .dm-chat[data-dm-theme="ice"] { --dm-accent: #4dabf7; background-color: #0a121b; }
+.dm-chat[data-dm-theme="ice"] .dm-messages { background-color: #0a121b !important; }
+.dm-chat[data-dm-theme="ice"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#1c7ed6,#4dabf7) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="ice"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="ice"] .dm-peer-typing-bubble { background: #1b2836 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="ice"] .dm-send-btn, .dm-chat[data-dm-theme="ice"] .cg-rec-send { background: #4dabf7 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="ice"] .cg-voice { --cg-voice-accent: #4dabf7; }
+body .dm-chat[data-dm-theme="fire"] { --dm-accent: #ff6b6b; background-color: #140b09; }
+.dm-chat[data-dm-theme="fire"] .dm-messages { background-color: #140b09 !important; }
+.dm-chat[data-dm-theme="fire"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#e03131,#f76707) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="fire"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="fire"] .dm-peer-typing-bubble { background: #2c1a17 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="fire"] .dm-send-btn, .dm-chat[data-dm-theme="fire"] .cg-rec-send { background: #ff6b6b !important; color: #fff !important; }
+.dm-chat[data-dm-theme="fire"] .cg-voice { --cg-voice-accent: #ff6b6b; }
+body .dm-chat[data-dm-theme="emerald"] { --dm-accent: #40c057; background-color: #08120e; }
+.dm-chat[data-dm-theme="emerald"] .dm-messages { background-color: #08120e !important; }
+.dm-chat[data-dm-theme="emerald"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#087f5b,#2f9e44) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="emerald"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="emerald"] .dm-peer-typing-bubble { background: #172520 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="emerald"] .dm-send-btn, .dm-chat[data-dm-theme="emerald"] .cg-rec-send { background: #40c057 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="emerald"] .cg-voice { --cg-voice-accent: #40c057; }
+body .dm-chat[data-dm-theme="gold"] { --dm-accent: #d4b483; background-color: #120f0a; }
+.dm-chat[data-dm-theme="gold"] .dm-messages { background-color: #120f0a !important; }
+.dm-chat[data-dm-theme="gold"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#a07a3f,#d4b483) !important; border-color: transparent !important; color: #1b1407 !important; }
+.dm-chat[data-dm-theme="gold"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="gold"] .dm-peer-typing-bubble { background: #26211a !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="gold"] .dm-send-btn, .dm-chat[data-dm-theme="gold"] .cg-rec-send { background: #d4b483 !important; color: #111 !important; }
+.dm-chat[data-dm-theme="gold"] .cg-voice { --cg-voice-accent: #d4b483; }
+body .dm-chat[data-dm-theme="neon"] { --dm-accent: #f72585; background-color: #0b0716; }
+.dm-chat[data-dm-theme="neon"] .dm-messages { background-color: #0b0716 !important; }
+.dm-chat[data-dm-theme="neon"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#f72585,#7209b7) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="neon"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="neon"] .dm-peer-typing-bubble { background: #1a1430 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="neon"] .dm-send-btn, .dm-chat[data-dm-theme="neon"] .cg-rec-send { background: #f72585 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="neon"] .cg-voice { --cg-voice-accent: #f72585; }
+body .dm-chat[data-dm-theme="sky"] { --dm-accent: #3bc9db; background-color: #0a0f1a; }
+.dm-chat[data-dm-theme="sky"] .dm-messages { background-color: #0a0f1a !important; }
+.dm-chat[data-dm-theme="sky"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#15aabf,#4263eb) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="sky"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="sky"] .dm-peer-typing-bubble { background: #1a2333 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="sky"] .dm-send-btn, .dm-chat[data-dm-theme="sky"] .cg-rec-send { background: #3bc9db !important; color: #fff !important; }
+.dm-chat[data-dm-theme="sky"] .cg-voice { --cg-voice-accent: #3bc9db; }
+body .dm-chat[data-dm-theme="peach"] { --dm-accent: #ffa94d; background-color: #140d0d; }
+.dm-chat[data-dm-theme="peach"] .dm-messages { background-color: #140d0d !important; }
+.dm-chat[data-dm-theme="peach"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#ff8787,#ffa94d) !important; border-color: transparent !important; color: #2b1200 !important; }
+.dm-chat[data-dm-theme="peach"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="peach"] .dm-peer-typing-bubble { background: #2c2020 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="peach"] .dm-send-btn, .dm-chat[data-dm-theme="peach"] .cg-rec-send { background: #ffa94d !important; color: #111 !important; }
+.dm-chat[data-dm-theme="peach"] .cg-voice { --cg-voice-accent: #ffa94d; }
+body .dm-chat[data-dm-theme="ocean_deep"] { --dm-accent: #339af0; background-color: #060c16; }
+.dm-chat[data-dm-theme="ocean_deep"] .dm-messages { background-color: #060c16 !important; }
+.dm-chat[data-dm-theme="ocean_deep"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#0b3d91,#1971c2) !important; border-color: transparent !important; color: #fff !important; }
+.dm-chat[data-dm-theme="ocean_deep"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="ocean_deep"] .dm-peer-typing-bubble { background: #152030 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="ocean_deep"] .dm-send-btn, .dm-chat[data-dm-theme="ocean_deep"] .cg-rec-send { background: #339af0 !important; color: #fff !important; }
+.dm-chat[data-dm-theme="ocean_deep"] .cg-voice { --cg-voice-accent: #339af0; }
+body .dm-chat[data-dm-theme="rosegold"] { --dm-accent: #e8b4a0; background-color: #130d0f; }
+.dm-chat[data-dm-theme="rosegold"] .dm-messages { background-color: #130d0f !important; }
+.dm-chat[data-dm-theme="rosegold"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: linear-gradient(135deg,#b76e79,#e8b4a0) !important; border-color: transparent !important; color: #2a0f12 !important; }
+.dm-chat[data-dm-theme="rosegold"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="rosegold"] .dm-peer-typing-bubble { background: #2a2022 !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="rosegold"] .dm-send-btn, .dm-chat[data-dm-theme="rosegold"] .cg-rec-send { background: #e8b4a0 !important; color: #111 !important; }
+.dm-chat[data-dm-theme="rosegold"] .cg-voice { --cg-voice-accent: #e8b4a0; }
+body .dm-chat[data-dm-theme="matrix"] { --dm-accent: #2fe02f; background-color: #000000; }
+.dm-chat[data-dm-theme="matrix"] .dm-messages { background-color: #000000 !important; }
+.dm-chat[data-dm-theme="matrix"] .dm-msg-wrap.dm-own .dm-msg-bubble { background: #0b3d0b !important; border-color: transparent !important; color: #7CFC00 !important; }
+.dm-chat[data-dm-theme="matrix"] .dm-msg-wrap:not(.dm-own) .dm-msg-bubble, .dm-chat[data-dm-theme="matrix"] .dm-peer-typing-bubble { background: #0f1a0f !important; border-color: transparent !important; color: #eceff1 !important; }
+.dm-chat[data-dm-theme="matrix"] .dm-send-btn, .dm-chat[data-dm-theme="matrix"] .cg-rec-send { background: #2fe02f !important; color: #fff !important; }
+.dm-chat[data-dm-theme="matrix"] .cg-voice { --cg-voice-accent: #2fe02f; }
+
+/* -------------------------------------------------------------------------
+   Sohbet arka plan deseni (admin panelinden)
+   Ekran genişliğine göre ölçeklenir: telefonda daha küçük, masaüstünde tam boyut.
+   ------------------------------------------------------------------------- */
+/* Desen, kaymayan sohbet kabuğunun arkasına yerleşir; mesajlar şeffaf zemin üzerinde kayar. */
+html.has-chat-wallpaper .dm-chat,
+html.has-chat-wallpaper .chat-container { position: relative; isolation: isolate; }
+html.has-chat-wallpaper :where(.dm-chat, .chat-container) { background-color: var(--bg-primary, #0b0b0b); }
+html.has-chat-wallpaper .dm-chat .dm-messages,
+html.has-chat-wallpaper .chat-container .chat-messages { position: relative; z-index: 1; background-color: transparent !important; background-image: none !important; }
+html.has-chat-wallpaper .dm-chat > :not(.dm-messages),
+html.has-chat-wallpaper .chat-container > :not(.chat-messages) { position: relative; z-index: 2; }
+html.has-chat-wallpaper .dm-chat::before,
+html.has-chat-wallpaper .chat-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--cg-chat-wallpaper-opacity, .08);
+  background-color: #fff;
+  -webkit-mask-image: var(--cg-chat-wallpaper);
+  mask-image: var(--cg-chat-wallpaper);
+  -webkit-mask-repeat: repeat;
+  mask-repeat: repeat;
+  -webkit-mask-size: clamp(140px, calc(var(--cg-chat-wallpaper-size, 360px) * 0.62), var(--cg-chat-wallpaper-size, 360px));
+  mask-size: clamp(140px, calc(var(--cg-chat-wallpaper-size, 360px) * 0.62), var(--cg-chat-wallpaper-size, 360px));
+}
+@media (min-width: 769px) {
+  html.has-chat-wallpaper .dm-chat::before,
+  html.has-chat-wallpaper .chat-container::before { -webkit-mask-size: var(--cg-chat-wallpaper-size, 360px); mask-size: var(--cg-chat-wallpaper-size, 360px); }
+}
+html.has-chat-wallpaper[data-chat-wallpaper-tint="accent"] .dm-chat::before,
+html.has-chat-wallpaper[data-chat-wallpaper-tint="accent"] .chat-container::before { background-color: var(--dm-accent, var(--accent-red, #bda275)); }
+html.has-chat-wallpaper[data-chat-wallpaper-tint="original"] .dm-chat::before,
+html.has-chat-wallpaper[data-chat-wallpaper-tint="original"] .chat-container::before {
+  background-color: transparent;
+  -webkit-mask-image: none; mask-image: none;
+  background-image: var(--cg-chat-wallpaper);
+  background-repeat: repeat;
+  background-size: clamp(140px, calc(var(--cg-chat-wallpaper-size, 360px) * 0.62), var(--cg-chat-wallpaper-size, 360px));
+}
+@media (min-width: 769px) {
+  html.has-chat-wallpaper[data-chat-wallpaper-tint="original"] .dm-chat::before,
+  html.has-chat-wallpaper[data-chat-wallpaper-tint="original"] .chat-container::before { background-size: var(--cg-chat-wallpaper-size, 360px); }
+}
+
+/* -------------------------------------------------------------------------
+   Profil fotoğrafı büyütme (Instagram tarzı)
+   ------------------------------------------------------------------------- */
+body.cg-scroll-locked { overflow: hidden !important; }
+.cg-avatar-zoom { position: fixed; inset: 0; z-index: 9500; display: grid; place-items: center; }
+.cg-avatar-zoom-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.72); -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); opacity: 0; transition: opacity .24s ease; }
+.cg-avatar-zoom.is-open .cg-avatar-zoom-backdrop { opacity: 1; }
+.cg-avatar-zoom-card { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; }
+.cg-avatar-zoom-circle {
+  width: min(78vw, 64vh, 420px); aspect-ratio: 1; border-radius: 50%; overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.08);
+  transition: transform .26s cubic-bezier(.2,.85,.25,1); will-change: transform; touch-action: none; cursor: pointer; background: #222;
+}
+.cg-avatar-zoom-circle img { width: 100%; height: 100%; object-fit: cover; display: block; -webkit-user-select: none; user-select: none; }
+.cg-avatar-zoom-circle img.is-swapping { animation: cgAvatarSwap .22s ease; }
+@keyframes cgAvatarSwap { from { opacity: .3; transform: scale(.97); } to { opacity: 1; transform: none; } }
+.cg-avatar-zoom-dots, .cg-avatar-zoom-name, .cg-avatar-zoom-manage { opacity: 0; transform: translateY(8px); transition: opacity .2s ease .08s, transform .2s ease .08s; }
+.cg-avatar-zoom.is-open .cg-avatar-zoom-dots, .cg-avatar-zoom.is-open .cg-avatar-zoom-name, .cg-avatar-zoom.is-open .cg-avatar-zoom-manage { opacity: 1; transform: none; }
+.cg-avatar-zoom-dots { display: flex; gap: 6px; }
+.cg-avatar-zoom-dots span { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.35); transition: background .2s, transform .2s; }
+.cg-avatar-zoom-dots span.is-active { background: #fff; transform: scale(1.25); }
+.cg-avatar-zoom-name { display: flex; flex-direction: column; align-items: center; color: #fff; text-align: center; }
+.cg-avatar-zoom-name strong { font-size: 17px; }
+.cg-avatar-zoom-name small { color: rgba(255,255,255,.65); font-size: 13px; }
+.cg-avatar-zoom-manage { height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.1); color: #fff; font: 600 14px/1 inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+
+/* -------------------------------------------------------------------------
+   Profil kapak görseli ("arka profil") — üstte kapak, avatar kapağın kenarına biner
+   ------------------------------------------------------------------------- */
+.profile-page.has-profile-background {
+  --cg-cover-h: clamp(150px, 34vw, 300px);
+  position: relative; isolation: isolate;
+  padding: 0 !important; border: 0 !important; border-radius: 0 !important;
+  background: none !important; box-shadow: none !important;
+  padding-top: calc(var(--cg-cover-h) - 64px) !important;
+}
+.profile-page.has-profile-background::before {
+  content: ""; position: absolute; z-index: -1; left: 50%; top: 0;
+  width: min(100vw, 1100px); margin-left: calc(min(100vw, 1100px) / -2); height: var(--cg-cover-h);
+  background: var(--profile-background-image) center / cover no-repeat;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent 100%);
+}
+@media (min-width: 769px) { .profile-page.has-profile-background::before { border-radius: 0 0 22px 22px; } }
+.profile-page.has-profile-background .profile-header {
+  border: 0 !important; background: transparent !important; box-shadow: none !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+.profile-page.has-profile-background .profile-avatar-wrap .profile-avatar,
+.profile-page.has-profile-background .profile-avatar-wrap .profile-avatar-placeholder {
+  box-shadow: 0 0 0 4px var(--bg-primary, #0b0b0b), 0 10px 30px rgba(0,0,0,.45);
+}
+.profile-page.has-profile-background .profile-tabs { background: transparent !important; border: 0 !important; border-top: 1px solid rgba(255,255,255,.08) !important; border-radius: 0 !important; box-shadow: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.profile-page.has-profile-background .profile-tabs .tab { color: var(--text-secondary, #aaa) !important; }
+.profile-page.has-profile-background .profile-tabs .tab.active { color: var(--text-primary, #fff) !important; background: transparent !important; }
+.profile-page.has-profile-background .profile-archiveable-card,
+.profile-page.has-profile-background .profile-page > .card { background: var(--bg-card, #0b0b0b) !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+
+/* -------------------------------------------------------------------------
+   SESLİ ARAMA
+   ------------------------------------------------------------------------- */
+.dm-chat-header .dm-call-btn i { font-size: 17px; }
+.group-call-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.07); }
+.group-call-bar-text { color: var(--text-secondary, #aaa); font-size: 13px; font-weight: 600; display: inline-flex; gap: 8px; align-items: center; }
+.group-call-btn { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px; border: 0; border-radius: 17px; background: rgba(37,211,102,.14); color: #25d366; font: 700 13px/1 inherit; cursor: pointer; }
+.group-call-btn.is-live { background: #25d366; color: #062; animation: cgcLive 1.6s ease-in-out infinite; }
+@keyframes cgcLive { 50% { box-shadow: 0 0 0 6px rgba(37,211,102,.18); } }
+
+#cgc-root { position: relative; z-index: 9800; }
+.cgc-screen {
+  position: fixed; inset: 0; z-index: 9800; display: flex; flex-direction: column; align-items: center;
+  padding: calc(env(safe-area-inset-top) + 12px) 20px calc(env(safe-area-inset-bottom) + 28px);
+  color: #fff; background: #0b141a; overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+  animation: cgcIn .22s ease;
+}
+@keyframes cgcIn { from { opacity: 0; transform: scale(1.02); } to { opacity: 1; transform: none; } }
+.cgc-screen.is-minimized { display: none; }
+.cgc-bg { position: absolute; inset: -60px; z-index: -1; background: radial-gradient(140% 90% at 50% 25%, #1f3a35 0%, #0b141a 70%); }
+.cgc-bg[style*="--cgc-bg"] { background: var(--cgc-bg) center / cover; filter: blur(48px) brightness(.35) saturate(1.2); }
+.cgc-top { width: 100%; max-width: 560px; display: flex; align-items: center; justify-content: center; position: relative; min-height: 44px; }
+.cgc-top .cgc-icon { position: absolute; left: 0; width: 42px; height: 42px; border: 0; border-radius: 50%; background: rgba(255,255,255,.08); color: #fff; font-size: 16px; cursor: pointer; }
+.cgc-top-time { position: absolute; right: 4px; font-size: 13px; opacity: .75; font-variant-numeric: tabular-nums; }
+.cgc-lock { font-size: 12.5px; opacity: .72; display: inline-flex; gap: 6px; align-items: center; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cgc-hero { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
+.cgc-hero h2 { margin: 16px 0 0; font-size: 28px; font-weight: 700; letter-spacing: -.3px; }
+.cgc-hero p, .cgc-status { margin: 0; font-size: 16px; opacity: .8; font-variant-numeric: tabular-nums; }
+.cgc-status-group { margin: 14px 0 0; }
+.cgc-avatar { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; background: #2a3942; color: #fff; font-size: 26px; font-weight: 700; flex: 0 0 auto; }
+.cgc-avatar.is-xl { width: min(42vw, 176px); height: min(42vw, 176px); font-size: 64px; }
+.cgc-pulse { position: relative; border-radius: 50%; }
+.cgc-pulse::before, .cgc-pulse::after { content: ""; position: absolute; inset: -14px; border-radius: 50%; border: 2px solid rgba(255,255,255,.18); animation: cgcRing 2s ease-out infinite; }
+.cgc-pulse::after { animation-delay: 1s; }
+.cgc-pulse.is-connected::before, .cgc-pulse.is-connected::after { animation: none; opacity: 0; }
+.cgc-pulse.is-speaking { box-shadow: 0 0 0 5px rgba(37,211,102,.7); transition: box-shadow .12s ease; }
+@keyframes cgcRing { from { transform: scale(.92); opacity: .9; } to { transform: scale(1.35); opacity: 0; } }
+.cgc-incoming-actions { display: flex; gap: min(30vw, 140px); margin-top: auto; }
+.cgc-incoming-labels { display: flex; gap: min(30vw, 140px); margin-top: 10px; font-size: 13px; opacity: .8; }
+.cgc-incoming-labels span { width: 72px; text-align: center; }
+.cgc-round { width: 72px; height: 72px; border: 0; border-radius: 50%; display: grid; place-items: center; font-size: 26px; color: #fff; cursor: pointer; transition: transform .12s ease, background .15s ease; -webkit-tap-highlight-color: transparent; }
+.cgc-round:active { transform: scale(.92); }
+.cgc-round[hidden] { display: none; }
+.cgc-round.is-accept { background: #25d366; animation: cgcBounce 1.4s ease-in-out infinite; }
+.cgc-round.is-decline { background: #f0384b; }
+.cgc-round.is-decline i { transform: rotate(0deg); }
+.cgc-round.is-ghost { background: rgba(255,255,255,.12); width: 62px; height: 62px; font-size: 22px; }
+.cgc-round.is-ghost.is-on { background: #fff; color: #0b141a; }
+@keyframes cgcBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.cgc-controls { margin-top: auto; display: flex; align-items: center; gap: 26px; padding: 16px 26px; border-radius: 999px; background: rgba(255,255,255,.06); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.cgc-grid { flex: 1 1 auto; width: 100%; max-width: 720px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-content: center; padding: 18px 0; }
+.cgc-grid[data-count="2"] { grid-template-columns: minmax(0, 1fr); max-width: 360px; }
+@media (min-width: 720px) { .cgc-grid:not([data-count="2"]):not([data-count="3"]):not([data-count="4"]) { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.cgc-tile { position: relative; aspect-ratio: 1 / 1; max-height: 34vh; border-radius: 18px; background: rgba(255,255,255,.06); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; transition: box-shadow .12s ease; }
+.cgc-tile .cgc-avatar { width: 38%; height: auto; aspect-ratio: 1; font-size: 30px; }
+.cgc-tile span { font-size: 14px; font-weight: 600; max-width: 90%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cgc-tile em { font-size: 11px; opacity: .65; font-style: normal; }
+.cgc-tile.is-speaking { box-shadow: inset 0 0 0 3px #25d366; }
+.cgc-tile-mute { position: absolute; top: 10px; right: 10px; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: rgba(0,0,0,.45); font-size: 12px; }
+.cgc-pill {
+  position: fixed; z-index: 9790; left: 50%; top: calc(env(safe-area-inset-top) + 8px); transform: translate(-50%, -140%);
+  display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px; border: 0; border-radius: 20px;
+  background: #25d366; color: #052e16; font: 700 13.5px/1 -apple-system, Inter, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  transition: transform .22s ease; cursor: pointer; max-width: calc(100vw - 32px);
+}
+.cgc-pill.is-visible { transform: translate(-50%, 0); }
+.cgc-pill span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+.cgc-pill b { font-variant-numeric: tabular-nums; }
+.cgc-ended-toast { position: fixed; z-index: 9800; left: 50%; top: calc(env(safe-area-inset-top) + 14px); transform: translateX(-50%); padding: 10px 18px; border-radius: 20px; background: rgba(20,20,22,.94); color: #fff; font: 600 14px/1.2 -apple-system, Inter, sans-serif; box-shadow: 0 8px 24px rgba(0,0,0,.35); animation: cgcIn .2s ease; }
+.cgc-remote-audio { display: none; }
+
+/* -------------------------------------------------------------------------
+   HİKAYELER — Instagram tarzı görüntüleyici
+   ------------------------------------------------------------------------- */
+.story-user.is-close-friends .story-ring { background: linear-gradient(135deg, #2ee66b, #0fa958) !important; }
+body.igs-open #mobile-bottom-bar, body.igs-open .mobile-bottom-bar { visibility: hidden; }
+.igs-route-placeholder { min-height: 100dvh; background: #000; }
+.igs { position: fixed; inset: 0; z-index: 9400; display: flex; align-items: center; justify-content: center; touch-action: none; -webkit-user-select: none; user-select: none; }
+.igs.is-closing { animation: igsOut .2s ease forwards; }
+@keyframes igsOut { to { opacity: 0; transform: scale(.96); } }
+.igs-backdrop { position: absolute; inset: 0; background: #0b0b0b; transition: opacity .15s linear; }
+.igs-stage { position: relative; width: 100%; height: 100%; perspective: 1200px; }
+.igs-card {
+  position: absolute; inset: 0; overflow: hidden; background: #111; color: #fff;
+  transition: transform .2s ease; will-change: transform;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+}
+@media (min-width: 769px) {
+  .igs-stage { width: min(calc((100dvh - 40px) * 9 / 16), 440px); height: calc(100dvh - 40px); }
+  .igs-card { border-radius: 12px; }
+  .igs-side { position: relative; z-index: 2; width: 40px; height: 40px; margin: 0 22px; border: 0; border-radius: 50%; background: rgba(255,255,255,.88); color: #111; font-size: 14px; cursor: pointer; }
+  .igs-side[hidden] { visibility: hidden; display: block; }
+}
+@media (max-width: 768px) { .igs-side { display: none; } }
+.igs-card.is-appearing { animation: igsFade .18s ease; }
+.igs-card.is-fading { animation: igsFadeOut .18s ease forwards; }
+@keyframes igsFade { from { opacity: .4; } to { opacity: 1; } }
+@keyframes igsFadeOut { to { opacity: 0; } }
+.igs-card.is-entering-right { animation: igsCubeInR .32s cubic-bezier(.3,.8,.3,1); transform-origin: left center; }
+.igs-card.is-leaving-left { animation: igsCubeOutL .32s cubic-bezier(.3,.8,.3,1) forwards; transform-origin: right center; }
+.igs-card.is-entering-left { animation: igsCubeInL .32s cubic-bezier(.3,.8,.3,1); transform-origin: right center; }
+.igs-card.is-leaving-right { animation: igsCubeOutR .32s cubic-bezier(.3,.8,.3,1) forwards; transform-origin: left center; }
+@keyframes igsCubeInR { from { transform: translateX(100%) rotateY(-70deg); } to { transform: none; } }
+@keyframes igsCubeOutL { to { transform: translateX(-100%) rotateY(70deg); opacity: .4; } }
+@keyframes igsCubeInL { from { transform: translateX(-100%) rotateY(70deg); } to { transform: none; } }
+@keyframes igsCubeOutR { to { transform: translateX(100%) rotateY(-70deg); opacity: .4; } }
+.igs-media-wrap { position: absolute; inset: 0; display: grid; place-items: center; background: #000; }
+.igs-media-wrap::before { content: ""; position: absolute; inset: -40px; background: var(--igs-bg, none) center / cover; filter: blur(30px) brightness(.55); }
+.igs-media { position: relative; width: 100% !important; height: 100% !important; max-width: none !important; max-height: none !important; object-fit: contain; opacity: 0; transition: opacity .18s ease; pointer-events: none; }
+video.igs-media { object-fit: cover; }
+.igs-card.is-ready .igs-media { opacity: 1; }
+.igs-loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.igs-loading span { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255,255,255,.2); border-top-color: #fff; animation: igSpin .8s linear infinite; opacity: 0; transition: opacity .2s; transition-delay: .25s; }
+.igs-card:not(.is-ready) .igs-loading span, .igs-card.is-buffering .igs-loading span { opacity: 1; }
+.igs-shade-top { position: absolute; left: 0; right: 0; top: 0; height: 130px; background: linear-gradient(rgba(0,0,0,.55), transparent); pointer-events: none; }
+.igs-shade-bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 160px; background: linear-gradient(transparent, rgba(0,0,0,.6)); pointer-events: none; }
+.igs-head { position: absolute; z-index: 3; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 8px) 10px 0; transition: opacity .2s ease; }
+.igs-progress { display: flex; gap: 3px; }
+.igs-progress span { flex: 1 1 0; height: 2.5px; border-radius: 2px; background: rgba(255,255,255,.35); overflow: hidden; }
+.igs-progress span i { display: block; height: 100%; background: #fff; transform-origin: left center; transform: scaleX(0); }
+.igs-progress span.is-done i { transform: scaleX(1); }
+.igs-user { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
+.igs-user-link { display: inline-flex; align-items: center; gap: 8px; color: #fff !important; text-decoration: none; min-width: 0; }
+.igs-user-link strong { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
+.igs-user .red-verification-tick-image { width: 14px; height: 14px; }
+.igs-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; display: grid; place-items: center; background: #333; color: #aaa; font-size: 13px; }
+.igs-user time { color: rgba(255,255,255,.75); font-size: 13px; white-space: nowrap; flex: 0 0 auto; }
+.igs-cf-badge { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%; background: #1fbf5a; color: #fff; font-size: 10px; }
+.igs-card.is-close-friends .igs-avatar { box-shadow: 0 0 0 2px #1fbf5a; }
+.igs-head-actions { margin-left: auto; display: flex; align-items: center; }
+.igs-icon { width: 40px; height: 40px; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: #fff; font-size: 20px; cursor: pointer; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+.igs-icon:active { transform: scale(.9); }
+.igs-song { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0 40px; font-size: 12.5px; color: rgba(255,255,255,.92); }
+.igs-caption { position: absolute; z-index: 3; left: 16px; right: 16px; bottom: 86px; margin: 0; text-align: center; font-size: 16px; line-height: 1.4; text-shadow: 0 1px 4px rgba(0,0,0,.6); white-space: pre-line; pointer-events: none; }
+.igs-foot { position: absolute; z-index: 4; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 10px 10px calc(env(safe-area-inset-bottom) + 12px); transition: opacity .2s ease; }
+.igs-reply { flex: 1 1 auto; min-width: 0; }
+.igs-reply input { width: 100%; height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid rgba(255,255,255,.55); background: transparent; color: #fff; font-size: 15px; outline: none; }
+.igs-reply input::placeholder { color: rgba(255,255,255,.85); }
+.igs-card.is-typing .igs-reply input { background: rgba(0,0,0,.55); border-color: #fff; }
+.igs-like.is-on { color: #ff3040; }
+.igs-viewers { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border: 0; border-radius: 20px; background: rgba(0,0,0,.35); color: #fff; font: 600 13.5px/1 inherit; cursor: pointer; margin-right: auto; }
+.igs-tap { position: absolute; top: 90px; bottom: 80px; z-index: 2; }
+.igs-tap-prev { left: 0; width: 32%; }
+.igs-tap-next { right: 0; width: 68%; }
+.igs-card.is-holding .igs-head, .igs-card.is-holding .igs-foot, .igs-card.is-holding .igs-caption { opacity: 0; }
+.igs-hearts { position: absolute; inset: 0; z-index: 5; pointer-events: none; display: grid; place-items: center; }
+.igs-hearts i { font-size: 96px; color: #fff; filter: drop-shadow(0 6px 18px rgba(0,0,0,.4)); animation: igHeartCenter .9s cubic-bezier(.17,.89,.32,1.28) forwards; }
+@keyframes igHeartCenter { 0% { transform: scale(0); opacity: 0; } 15% { transform: scale(1.2); opacity: 1; } 30% { transform: scale(.95); } 80% { opacity: 1; } 100% { transform: scale(1) translateY(-40px); opacity: 0; } }
+.igs-sheet { z-index: 9600; }
+
+/* Filtre seçici: Instagram gibi yatay kaydırılan şerit */
+.media-filter-choices { display: flex !important; flex-wrap: nowrap !important; gap: 10px !important; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; padding: 4px 2px 10px; scrollbar-width: none; }
+.media-filter-choices::-webkit-scrollbar { display: none; }
+.media-filter-choice { flex: 0 0 76px !important; scroll-snap-align: start; display: flex !important; flex-direction: column; align-items: center; gap: 6px; padding: 0 !important; border: 0 !important; background: none !important; cursor: pointer; }
+.media-filter-choice-preview { width: 76px !important; height: 76px !important; border-radius: 4px; overflow: hidden; display: grid; place-items: center; background: #222; }
+.media-filter-choice-preview img { width: 100%; height: 100%; object-fit: cover; }
+.media-filter-choice-label { font-size: 11.5px; color: var(--text-secondary, #aaa); white-space: nowrap; }
+.media-filter-choice.is-selected .media-filter-choice-label { color: var(--text-primary, #fff); font-weight: 700; }
+.media-filter-choice.is-selected .media-filter-choice-preview { box-shadow: 0 0 0 2px var(--text-primary, #fff); }
+
+/* -------------------------------------------------------------------------
+   ANA SAYFA GÖNDERİLERİ — Instagram akışı
+   ------------------------------------------------------------------------- */
+.photo-card.ig-post {
+  padding: 0 !important; overflow: visible !important; margin: 0 auto 18px !important; max-width: 470px;
+  background: transparent !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important;
+  border-bottom: 1px solid rgba(255,255,255,.08) !important; padding-bottom: 14px !important;
+  content-visibility: auto; contain-intrinsic-size: auto 720px;
+}
+.ig-post-head { display: flex !important; align-items: center !important; gap: 10px !important; padding: 8px 4px 10px !important; background: none !important; border: 0 !important; }
+.ig-post-avatar { flex: 0 0 auto; line-height: 0; border-radius: 50%; padding: 2px; background: linear-gradient(45deg,#feda75,#fa7e1e,#d62976,#962fbf,#4f5bd5); }
+.ig-post-avatar .avatar-sm, .ig-post-avatar img { width: 34px !important; height: 34px !important; border-radius: 50%; border: 2px solid var(--bg-primary, #0b0b0b); object-fit: cover; display: grid; place-items: center; }
+.ig-post-identity { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ig-post-userline { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 14px; }
+.ig-post-userline > a:first-child { color: var(--text-primary, #fff) !important; font-weight: 700; text-decoration: none; min-width: 0; overflow: hidden; }
+.ig-post-userline .user-badge { display: inline-flex; align-items: center; gap: 4px; }
+.ig-post-userline .user-display-identity { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 4px; }
+.ig-post-userline .user-display-identity small { display: none !important; }
+.ig-post-dot { color: var(--text-muted, #777); font-size: 11px; }
+.ig-post-age { color: var(--text-muted, #888) !important; font-size: 13.5px; text-decoration: none; white-space: nowrap; }
+.ig-post-song-row { display: flex; min-width: 0; margin: 0 !important; padding: 0 !important; background: none !important; border: 0 !important; }
+.ig-post-song { display: inline-flex !important; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 0 !important; margin: 0 !important; border: 0 !important; background: none !important; color: var(--text-primary, #eee) !important; font-size: 12.5px !important; cursor: pointer; text-align: left; }
+.ig-post-song i { font-size: 10px; flex: 0 0 auto; }
+.ig-post-song span { display: inline-flex !important; flex-direction: row !important; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ig-post-song strong { font-weight: 500 !important; font-size: 12.5px !important; overflow: hidden; text-overflow: ellipsis; }
+.ig-post-song .photo-song-artist::before { content: "· "; }
+.ig-post-song small { font-size: 12.5px !important; color: var(--text-secondary, #aaa) !important; }
+.ig-post-song .photo-song-unavailable[hidden] { display: none !important; }
+.ig-post-location { font-size: 12.5px; color: var(--text-primary, #ddd); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ig-post-head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.ig-post-head-actions .photo-audio-controls { display: flex; align-items: center; gap: 4px; }
+.ig-post-head-actions .photo-volume { display: none; width: 70px; }
+@media (hover: hover) { .ig-post-head-actions .photo-audio-controls:hover .photo-volume { display: block; } }
+.ig-post-head-actions .photo-audio-toggle, .ig-post-head-actions .btn { width: 34px; height: 34px; min-width: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 50% !important; background: transparent !important; color: var(--text-primary, #eee) !important; display: grid !important; place-items: center; font-size: 15px; }
+.ig-post-head-actions .photo-card-owner-actions { display: flex; gap: 0; }
+/* Medya: kenardan kenara, en fazla 4:5, siyah bant yerine bulanık zemin */
+.ig-post-media { position: relative; overflow: hidden; border-radius: 4px; background: #000; aspect-ratio: auto; max-height: min(587px, 125vw); display: grid; place-items: center; }
+@media (max-width: 520px) { .photo-card.ig-post { max-width: none; } .ig-post-media { border-radius: 0; margin: 0 calc(-1 * var(--ig-post-bleed, 12px)); } .ig-post-head, .ig-post-body { padding-left: 0 !important; padding-right: 0 !important; } }
+.ig-post-media .photo-media-backdrop { position: absolute; inset: -30px; background-size: cover; background-position: center; filter: blur(28px) brightness(.5); }
+.ig-post-media .photo-native-link { position: relative; width: 100%; display: grid; place-items: center; }
+.ig-post-media .photo-native { width: 100% !important; height: auto !important; max-height: min(587px, 125vw); object-fit: contain; display: block; }
+.ig-post-media .photo-gallery-controls .photo-gallery-dots { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; gap: 4px; }
+.ig-post-media .photo-gallery-dot { width: 6px !important; height: 6px !important; padding: 0 !important; border-radius: 50% !important; border: 0 !important; background: rgba(255,255,255,.5) !important; }
+.ig-post-media .photo-gallery-dot.active { background: #fff !important; }
+.ig-post-media .photo-gallery-arrow { position: absolute; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; border: 0; background: rgba(255,255,255,.85); color: #111; font-size: 11px; display: grid; place-items: center; cursor: pointer; }
+.ig-post-media .photo-gallery-prev { left: 10px; } .ig-post-media .photo-gallery-next { right: 10px; }
+@media (hover: none) { .ig-post-media .photo-gallery-arrow { display: none; } }
+/* Eylemler */
+.ig-post-body { padding: 8px 4px 0 !important; background: none !important; }
+.ig-post-actions { display: flex !important; align-items: center !important; gap: 4px !important; margin: 0 0 6px !important; padding: 0 !important; border: 0 !important; flex-wrap: nowrap !important; }
+.ig-post-actions .btn { height: 40px; min-width: 0 !important; padding: 0 6px !important; border: 0 !important; background: transparent !important; color: var(--text-primary, #f2f2f2) !important; display: inline-flex !important; align-items: center; gap: 6px; font-size: 14px !important; font-weight: 600 !important; box-shadow: none !important; }
+.ig-post-actions .btn i { font-size: 23px; }
+.ig-post-actions .photo-like-group { display: inline-flex; align-items: center; }
+.ig-post-actions .photo-like-count { padding-left: 0 !important; }
+.ig-post-actions .photo-like.liked i { color: #ff3040; }
+.ig-post-actions .photo-like:active i { transform: scale(.85); }
+.ig-post-actions-spacer { flex: 1 1 auto; }
+.ig-post-actions .media-explore-save { position: static !important; background: transparent !important; border: 0 !important; color: var(--text-primary, #fff) !important; font-size: 22px; }
+.ig-post-caption { font-size: 14px; line-height: 1.45; color: var(--text-primary, #eee); word-break: break-word; }
+.ig-post-caption-user { font-weight: 700; color: var(--text-primary, #fff) !important; text-decoration: none; margin-right: 2px; }
+.ig-post-caption .photo-caption-preview { display: inline; }
+.ig-post-caption .description-preview-more { background: none; border: 0; padding: 0; color: var(--text-muted, #888); font: inherit; cursor: pointer; }
+.ig-post-title { font-weight: 600; }
+.ig-post-location-line { display: block; margin-top: 4px; color: var(--text-muted, #888); font-size: 12.5px; }
+.ig-post-avatar { width: 40px !important; height: 40px !important; min-width: 40px; max-width: 40px; display: grid !important; place-items: center; box-sizing: border-box; }
+.ig-post-avatar > * { width: 34px !important; height: 34px !important; max-width: 34px; }
+@media (max-width: 520px) { .ig-post-media { width: auto !important; } }
+.ig-post-actions .photo-like-group { border: 0 !important; background: none !important; padding: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+.ig-post-actions .btn i { font-size: 22px !important; }
+.ig-post-actions .btn span { font-size: 14px; }
+.ig-post-media-video { aspect-ratio: 4 / 5; max-height: min(587px, 125vw); }
+.ig-post-media-video .photo-native-link, .ig-post-media-video .reals-media-preview { width: 100% !important; height: 100% !important; max-height: none !important; object-fit: cover; }
+.ig-post-media-video .reals-media-sound-toggle { position: absolute; right: 10px; bottom: 10px; width: 30px; height: 30px; border-radius: 50%; border: 0; background: rgba(0,0,0,.6); color: #fff; font-size: 12px; display: grid; place-items: center; }
+.ig-post .ig-post-location i { font-size: 10px; margin-right: 3px; }
+.ig-post-views { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary, #aaa); font-size: 13.5px; font-weight: 600; padding: 0 6px; }
+.ig-post-views i { font-size: 12px !important; }
+.ig-post .media-explore-save-row { position: absolute; right: 0; margin-top: -46px; }
+.ig-post .ig-post-body { position: relative; }
+@media (max-width: 520px) {
+  .ig-post-media { width: calc(100% + 2 * var(--ig-post-bleed, 12px)) !important; max-width: none !important; margin-left: calc(-1 * var(--ig-post-bleed, 12px)) !important; margin-right: 0 !important; }
+  .ig-post-media-video { max-height: none !important; }
+}
+.ig-post-media-video .reals-media-sound-toggle { position: absolute !important; right: 10px !important; bottom: 10px !important; top: auto !important; left: auto !important; width: 30px !important; height: 30px !important; min-width: 0 !important; padding: 0 !important; border-radius: 50% !important; border: 0 !important; background: rgba(0,0,0,.6) !important; color: #fff !important; font-size: 12px !important; box-shadow: none !important; }
+.ig-post .ig-post-location { font-size: 12.5px !important; font-weight: 400 !important; color: var(--text-secondary, #bbb) !important; }
+html body .photo-card.ig-post .ig-post-media-video button.reals-media-sound-toggle { width: 30px !important; height: 30px !important; min-width: 30px !important; min-height: 30px !important; right: 10px !important; bottom: 10px !important; font-size: 12px !important; }

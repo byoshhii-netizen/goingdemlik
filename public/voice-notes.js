@@ -335,6 +335,66 @@
   }
 
   // ===================================================================
+  // MİKROFON ERİŞİMİ (Android / iOS uyumlu)
+  // ===================================================================
+  // Bazı Android cihazlar channelCount gibi kısıtları desteklemez (OverconstrainedError).
+  // Önce ideal ayarlar denenir, olmazsa en sade istek ile tekrar denenir.
+  async function acquireMicrophone() {
+    const attempts = [
+      { audio: { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } } },
+      { audio: true }
+    ];
+    let lastError = null;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        lastError = error;
+        if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') break;
+      }
+    }
+    throw lastError || new Error('Mikrofon başlatılamadı');
+  }
+
+  async function microphonePermissionState() {
+    try {
+      const status = await navigator.permissions?.query({ name: 'microphone' });
+      return status?.state || 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  function showMicrophoneHelp(error) {
+    const name = error?.name || '';
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    let title = 'Mikrofon başlatılamadı';
+    let body = 'Mikrofon başka bir uygulama tarafından kullanılıyor olabilir. Diğer uygulamaları kapatıp tekrar dene.';
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      title = 'Mikrofon izni gerekli';
+      body = isAndroid
+        ? 'Chrome\'da adres çubuğundaki kilit (⋮ değil, soldaki simge) → İzinler → Mikrofon → İzin ver. Ana ekrana eklenmiş uygulamada: Ayarlar → Uygulamalar → Chrome (veya CigCig) → İzinler → Mikrofon → İzin ver. Sonra sayfayı yenile.'
+        : isIOS
+          ? 'Ayarlar → Safari → Mikrofon → Sor veya İzin Ver. Ardından sayfayı yenileyip tekrar dene.'
+          : 'Adres çubuğundaki kilit simgesine tıklayıp mikrofona izin ver, ardından sayfayı yenile.';
+    } else if (name === 'NotFoundError') {
+      title = 'Mikrofon bulunamadı';
+      body = 'Cihazda kullanılabilir bir mikrofon bulunamadı.';
+    }
+    document.getElementById('cg-mic-help')?.remove();
+    const box = document.createElement('div');
+    box.id = 'cg-mic-help';
+    box.className = 'cg-mic-help';
+    box.setAttribute('role', 'alertdialog');
+    box.innerHTML = '<div class="cg-mic-help-card"><span class="cg-mic-help-icon"><i class="fas fa-microphone-slash"></i></span><strong></strong><p></p><button type="button">Tamam</button></div>';
+    box.querySelector('strong').textContent = title;
+    box.querySelector('p').textContent = body;
+    box.addEventListener('click', event => { if (event.target === box || event.target.closest('button')) box.remove(); });
+    document.body.appendChild(box);
+  }
+
+  // ===================================================================
   // KAYDEDİCİ
   // ===================================================================
   class VoiceRecorder {
@@ -358,6 +418,8 @@
       this.pointer = null;
       this.cancelled = false;
       this.overlay = null;
+      this.permissionReady = false;
+      microphonePermissionState().then(state => { if (state === 'granted') this.permissionReady = true; });
       this.bindMic();
     }
 
@@ -393,6 +455,23 @@
       }
       // Fare ile tek tık: eller serbest (kilitli) kayıt. Dokunmatik: basılı tut.
       const locked = event.pointerType === 'mouse';
+      if (!locked && !this.permissionReady) {
+        // İlk kullanımda izin penceresi basılı tutma hareketini böler (özellikle Android).
+        // Önce izni al, sonra kullanıcı basılı tutarak kaydetsin.
+        event.preventDefault();
+        microphonePermissionState().then(async state => {
+          if (state === 'granted') { this.permissionReady = true; this.hint('Kaydetmek için basılı tut'); return; }
+          try {
+            const stream = await acquireMicrophone();
+            stream.getTracks().forEach(track => track.stop());
+            this.permissionReady = true;
+            this.hint('Mikrofon hazır · Kaydetmek için basılı tut');
+          } catch (error) {
+            showMicrophoneHelp(error);
+          }
+        });
+        return;
+      }
       this.pointer = locked ? null : { id: event.pointerId, x: event.clientX, y: event.clientY, downAt: Date.now() };
       if (!locked) {
         try { this.micButton.setPointerCapture(event.pointerId); } catch { /* yoksay */ }
@@ -473,15 +552,13 @@
         if (Ctx) this.audioContext = new Ctx();
       } catch { this.audioContext = null; }
       try {
-        this.stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 }
-        });
+        this.stream = await acquireMicrophone();
       } catch (error) {
         this.teardown();
-        const denied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError';
-        this.toast(denied ? 'Mikrofon izni verilmedi. Tarayıcı ayarlarından mikrofona izin ver.' : 'Mikrofon başlatılamadı.', 'error');
+        showMicrophoneHelp(error);
         return;
       }
+      this.permissionReady = true;
       if (this.cancelled || this.state !== 'starting') { this.teardown(); return; }
       const mimeType = pickMimeType();
       try {
@@ -710,6 +787,8 @@
 
   window.CigCigVoice = {
     isSupported,
+    acquireMicrophone,
+    showMicrophoneHelp,
     VoiceRecorder,
     bubbleHTML,
     pendingBubbleHTML,

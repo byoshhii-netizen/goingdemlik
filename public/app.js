@@ -815,7 +815,29 @@ const MEDIA_FILTERS = [
   { value: 'cool', label: 'Soğuk', css: 'saturate(.9) hue-rotate(14deg) brightness(1.04)' },
   { value: 'mono', label: 'Siyah-beyaz', css: 'grayscale(1) contrast(1.08)' },
   { value: 'fade', label: 'Soluk', css: 'saturate(.72) contrast(.92) brightness(1.08)' },
-  { value: 'dramatic', label: 'Dramatik', css: 'contrast(1.28) saturate(1.12) brightness(.94)' }
+  { value: 'dramatic', label: 'Dramatik', css: 'contrast(1.28) saturate(1.12) brightness(.94)' },
+  { value: 'clarendon', label: 'Clarendon', css: 'contrast(1.2) saturate(1.35)' },
+  { value: 'gingham', label: 'Gingham', css: 'brightness(1.05) hue-rotate(-10deg) sepia(.04)' },
+  { value: 'moon', label: 'Moon', css: 'grayscale(1) contrast(1.1) brightness(1.1)' },
+  { value: 'lark', label: 'Lark', css: 'contrast(.9) brightness(1.1) saturate(1.1)' },
+  { value: 'reyes', label: 'Reyes', css: 'sepia(.22) brightness(1.1) contrast(.85) saturate(.75)' },
+  { value: 'juno', label: 'Juno', css: 'saturate(1.4) contrast(1.15) hue-rotate(-6deg)' },
+  { value: 'slumber', label: 'Slumber', css: 'saturate(.66) brightness(1.05) sepia(.1)' },
+  { value: 'crema', label: 'Crema', css: 'sepia(.25) contrast(.9) brightness(1.05) saturate(.9)' },
+  { value: 'ludwig', label: 'Ludwig', css: 'brightness(1.05) contrast(1.05) saturate(.9) sepia(.08)' },
+  { value: 'aden', label: 'Aden', css: 'hue-rotate(-20deg) contrast(.9) saturate(.85) brightness(1.2)' },
+  { value: 'perpetua', label: 'Perpetua', css: 'brightness(1.05) saturate(1.1) hue-rotate(-4deg)' },
+  { value: 'valencia', label: 'Valencia', css: 'contrast(1.08) brightness(1.08) sepia(.08)' },
+  { value: 'xpro', label: 'X-Pro II', css: 'contrast(1.3) brightness(.8) sepia(.3) saturate(1.5) hue-rotate(-20deg)' },
+  { value: 'lofi', label: 'Lo-Fi', css: 'saturate(1.1) contrast(1.5)' },
+  { value: 'nashville', label: 'Nashville', css: 'sepia(.25) contrast(1.2) brightness(1.05) saturate(1.2) hue-rotate(-15deg)' },
+  { value: 'hudson', label: 'Hudson', css: 'brightness(1.2) contrast(.9) saturate(1.1) hue-rotate(10deg)' },
+  { value: 'amaro', label: 'Amaro', css: 'hue-rotate(-10deg) contrast(.9) brightness(1.1) saturate(1.5)' },
+  { value: 'rise', label: 'Rise', css: 'brightness(1.05) sepia(.2) contrast(.9) saturate(.9)' },
+  { value: 'inkwell', label: 'Inkwell', css: 'sepia(.3) contrast(1.1) brightness(1.1) grayscale(1)' },
+  { value: 'willow', label: 'Willow', css: 'grayscale(.5) contrast(.95) brightness(.9)' },
+  { value: 'earlybird', label: 'Earlybird', css: 'contrast(.9) sepia(.2)' },
+  { value: 'toaster', label: 'Toaster', css: 'contrast(1.5) brightness(.9) sepia(.15)' }
 ];
 
 function mediaFilterCss(value) {
@@ -1387,8 +1409,33 @@ async function getMobileCreateAction(path = location.pathname) {
   return configuredMobileCreateAction;
 }
 
+function isCurrentUserJournalist() {
+  return Boolean(currentUser) && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+}
+function isNewspaperRoute() {
+  return location.pathname === '/gazeteler' || location.pathname.startsWith('/gazete/');
+}
+async function ensureJournalistDirectory() {
+  if (!currentUser) return false;
+  if (!journalistDirectory.size) {
+    try { await refreshJournalistDirectory(); } catch { return false; }
+  }
+  return isCurrentUserJournalist();
+}
+
 async function handleMobileCreateAction() {
-  const action = await getMobileCreateAction();
+  // Gazeteler sayfasında: gazeteci ise + doğrudan gazete panelini açar,
+  // değilse varsayılan (ana sayfadaki) oluşturma menüsü açılır.
+  if (isNewspaperRoute() && currentUser) {
+    if (await ensureJournalistDirectory()) {
+      closeMobileCreateMenu();
+      return showNewspaperUploadModal();
+    }
+    openMobileCreateMenu();
+    return;
+  }
+  let action = await getMobileCreateAction();
+  if (action === 'newspaper' && !(await ensureJournalistDirectory())) action = 'media';
   if (action === 'media') {
     openMobileCreateMenu();
     return;
@@ -2010,6 +2057,10 @@ function renderRoute(fullPath) {
   }
   previousRenderedRoutePath = path;
   if (!path.startsWith('/reals')) window.__lastNonReelsPath = fullPath;
+  if (!path.startsWith('/hikaye/')) {
+    window.__lastNonStoryPath = fullPath;
+    if (window.CigCigStories?.isOpen()) window.CigCigStories.close(true);
+  }
   document.body.classList.toggle('auth-route', path === '/giris' || path === '/kayit' || isForgotPasswordRoute(path));
   document.body.classList.toggle('forgot-password-route', isForgotPasswordRoute(path));
   const leavingSongDetail = !path.startsWith('/muzik/');
@@ -2583,7 +2634,7 @@ async function renderRealsFeed(app, initialId = null) {
         <div class="ig-reel-info">
           ${isAd
             ? `<div class="ig-reel-author"><span class="ig-reel-ad-badge"><i class="fas fa-bullhorn"></i></span><div class="ig-reel-author-text"><strong>${escHtml(r.title || 'Sponsorlu')}</strong><small>Sponsorlu</small></div></div>`
-            : `<div class="ig-reel-author"><a href="${profileRoute(r.username)}" data-link class="ig-reel-avatar" aria-label="${escHtml(r.username)} profili">${avatarImg(r, 'ig-reel-avatar-img')}</a><a href="${profileRoute(r.username)}" data-link class="ig-reel-username">${escHtml(r.nickname || r.username || '')}${Number(r.is_red_verified) === 1 ? ' <i class="fas fa-circle-check ig-reel-verified" aria-label="Doğrulanmış"></i>' : ''}</a>${canFollow ? `<button type="button" class="ig-reel-follow" data-username="${escHtml(r.username)}">${followState.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>`}
+            : `<div class="ig-reel-author"><a href="${profileRoute(r.username)}" data-link class="ig-reel-avatar" aria-label="${escHtml(r.username)} profili">${avatarImg(r, 'ig-reel-avatar-img')}</a><a href="${profileRoute(r.username)}" data-link class="ig-reel-username">${escHtml(r.nickname || r.username || '')}${redVerificationIconHTML(r.is_red_verified, r.red_verified_at)}</a>${canFollow ? `<button type="button" class="ig-reel-follow" data-username="${escHtml(r.username)}">${followState.pending ? 'İstek gönderildi' : 'Takip et'}</button>` : ''}</div>`}
           ${!isAd && r.title ? `<div class="ig-reel-title">${escHtml(r.title)}</div>` : ''}
           ${caption}
           ${isAd && r.site_url ? `<a class="ig-reel-cta" href="${escHtml(normalizeExternalUrl(r.site_url))}" target="_blank" rel="noopener noreferrer sponsored" data-ad-click>Daha fazla bilgi<i class="fas fa-chevron-right"></i></a>` : ''}
@@ -3036,13 +3087,16 @@ async function renderRealsFeed(app, initialId = null) {
       clearTimeout(tapTimer);
       tapTimer = setTimeout(() => {
         if (!el.classList.contains('is-active')) return;
+        // Ortaya dokunmak videoyu durdurur/başlatır; ses sağ üstteki butondan yönetilir.
         if (el.classList.contains('is-paused') || video.paused) {
           el.classList.remove('is-paused');
           playActive();
+          flash(el, 'fas fa-play');
           return;
         }
-        setMuted(!muted, el);
-        flash(el, muted ? 'fas fa-volume-xmark' : 'fas fa-volume-high');
+        video.pause();
+        activeRealsAudio?.pause();
+        el.classList.add('is-paused');
       }, 260);
     });
     stage.addEventListener('contextmenu', event => event.preventDefault());
@@ -3428,6 +3482,7 @@ function syncRealtimeSocket() {
   realtimeSocket?.disconnect();
   realtimeSocketToken = currentToken;
   realtimeSocket = window.io({ auth: { token: currentToken } });
+  window.CigCigCall?.attachSocket(realtimeSocket);
   realtimeSocket.on('dm:message', handleRealtimeDirectMessage);
   realtimeSocket.on('dm:incoming', handleRealtimeIncomingMessage);
   realtimeSocket.on('notification:new', notification => {
@@ -3936,8 +3991,15 @@ document.addEventListener('click', e => {
   if (!$('#notif-btn-wrap')?.contains(e.target)) $('#notif-dropdown')?.classList.add('hidden');
 });
 
-$('#nav-new-btn')?.addEventListener('click', e => {
+$('#nav-new-btn')?.addEventListener('click', async e => {
   e.stopPropagation();
+  if (isNewspaperRoute() && currentUser && await ensureJournalistDirectory()) {
+    closeDesktopCreateMenu();
+    showNewspaperUploadModal();
+    return;
+  }
+  const navNewspaperItem = document.getElementById('nav-newspaper-publish');
+  if (navNewspaperItem) navNewspaperItem.hidden = !isCurrentUserJournalist();
   const dropdown = $('#new-dropdown');
   const isOpening = dropdown.classList.contains('hidden');
   dropdown.classList.toggle('hidden', !isOpening);
@@ -4575,14 +4637,14 @@ function newspaperCardHTML(newspaper) {
 async function renderNewspaperList(app) {
   document.title = 'Gazeteler – ' + siteName;
   updatePageMeta('Gazeteler – ' + siteName, 'CigCig gazetecilerinin yayımladığı gazeteleri keşfet.', '');
-  const isJournalist = currentUser && journalistDirectory.has(String(currentUser.username || '').toLocaleLowerCase('tr-TR'));
+  if (currentUser) await ensureJournalistDirectory();
+  const isJournalist = isCurrentUserJournalist();
   app.innerHTML = `
     <div class="container page newspaper-page">
-      <section class="newspaper-hero">
-        <div class="newspaper-hero-copy"><span class="newspaper-eyebrow"><i class="fas fa-circle"></i> CigCig</span><h1>Gazeteler</h1><p>CigCig'de yayımlanan gazeteleri keşfet.</p><div class="newspaper-hero-rule"><span></span><i class="fas fa-star"></i><span></span></div></div>
-        <div class="newspaper-hero-art" aria-hidden="true"><span class="newspaper-hero-orbit newspaper-hero-orbit-one"></span><span class="newspaper-hero-orbit newspaper-hero-orbit-two"></span><i class="fas fa-newspaper"></i></div>
-        <div class="newspaper-hero-bottom">${isJournalist ? '<button type="button" class="btn btn-primary newspaper-publish-button" id="newspaper-publish"><i class="fas fa-plus"></i> Yeni gazete yayımla</button>' : '<span class="newspaper-hero-note">Yalnızca CigCig gazetecileri yayın yapabilir.</span>'}</div>
-      </section>
+      <header class="newspaper-compact-header">
+        <div class="newspaper-compact-title"><span class="newspaper-compact-icon"><i class="fas fa-newspaper"></i></span><div><h1>Gazeteler</h1><p>CigCig'de yayımlanan sayılar</p></div></div>
+        ${isJournalist ? '<button type="button" class="newspaper-compact-publish" id="newspaper-publish"><i class="fas fa-plus"></i><span>Gazete yayımla</span></button>' : ''}
+      </header>
       <div class="newspaper-feed-heading"><div><span class="newspaper-eyebrow">ARŞİVDEN SEÇKİLER</span><h2>Yayımlanan sayılar</h2></div><span class="newspaper-feed-count" id="newspaper-feed-count"></span></div>
       <div class="newspaper-grid" id="newspaper-grid"><div class="loading-center"><div class="spinner"></div></div></div>
     </div>`;
@@ -5602,7 +5664,32 @@ function loadNewspaperImage(src) {
   });
 }
 
+function isNewspaperEditorDeviceAllowed() {
+  // Gazete tasarım editörü A4 tuval ve hassas sürükle-bırak gerektirir: yalnızca bilgisayarda.
+  const narrow = window.matchMedia('(max-width: 1023px)').matches;
+  const touchOnly = window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(any-pointer: fine)').matches;
+  const mobileUa = /Android|iPhone|iPod|Mobile/i.test(navigator.userAgent);
+  return !(narrow || touchOnly || mobileUa);
+}
+
+function showNewspaperDesktopOnlyNotice() {
+  showModal('Bilgisayar gerekli', `
+    <section class="newspaper-desktop-only">
+      <span class="newspaper-desktop-only-icon"><i class="fas fa-desktop"></i></span>
+      <h2>Gazete oluşturma yalnızca bilgisayardan yapılabilir</h2>
+      <p>A4 sayfa düzeni, sürükle-bırak yerleşim ve baskı kalitesinde önizleme telefon ekranında doğru çalışmaz. Lütfen bir bilgisayar ile deneyiniz.</p>
+      <p class="newspaper-desktop-only-tip"><i class="fas fa-lightbulb"></i> Hazır bir gazete görselin varsa onu telefondan da yükleyebilirsin.</p>
+      <div class="newspaper-desktop-only-actions">
+        <button type="button" class="btn btn-outline" id="newspaper-desktop-only-photo"><i class="fas fa-image"></i> Hazır görsel yükle</button>
+        <button type="button" class="btn btn-primary" id="newspaper-desktop-only-close">Anladım</button>
+      </div>
+    </section>`);
+  $('#newspaper-desktop-only-close')?.addEventListener('click', hideModal);
+  $('#newspaper-desktop-only-photo')?.addEventListener('click', showNewspaperPhotoUploadModal);
+}
+
 async function showNewspaperComposer(draftId = null) {
+  if (!isNewspaperEditorDeviceAllowed()) return showNewspaperDesktopOnlyNotice();
   let drafts;
   try { drafts = await getNewspaperDrafts(); }
   catch (error) {
@@ -8675,6 +8762,7 @@ function showNewGroupModal() {
 let chatPollInterval = null;
 
 async function renderGroupDetail(app, slug) {
+  applyChatWallpaper();
   let groupSlugPath = encodeURIComponent(slug);
   if (chatPollInterval) { clearInterval(chatPollInterval); chatPollInterval = null; }
   app.innerHTML = `<div class="container page"><div class="loading-center"><div class="spinner"></div></div></div>`;
@@ -8811,6 +8899,7 @@ async function renderGroupDetail(app, slug) {
       <div>
         ${group.allow_chat ? `
           <div class="chat-container">
+            ${currentUser && (isMember || isOwner) ? `<div class="group-call-bar" id="group-call-bar"><span class="group-call-bar-text"><i class="fas fa-users"></i> Grup sohbeti</span><button type="button" class="group-call-btn" id="group-call-btn" data-group-slug="${escHtml(group.slug)}" data-group-id="${escHtml(String(group.id))}"><i class="fas fa-phone"></i><span>Sesli arama</span></button></div>` : ''}
             <div id="load-more-msgs-wrap" style="text-align:center;padding:8px;display:${messages.length >= 60 ? 'block' : 'none'}">
               <button class="btn btn-outline btn-sm" id="load-more-msgs"><i class="fas fa-history"></i> Önceki Mesajlar</button>
             </div>
@@ -8980,6 +9069,17 @@ async function renderGroupDetail(app, slug) {
 
   // Önceki mesajları yükle
   let oldestMsgId = messages.length > 0 ? messages[0].id : null;
+  const groupCallButton = $('#group-call-btn');
+  if (groupCallButton && window.CigCigCall) {
+    groupCallButton.addEventListener('click', () => window.CigCigCall.startGroup(groupCallButton.dataset.groupSlug));
+    // Devam eden bir grup araması varsa "Katıl" olarak göster
+    window.CigCigCall.activeGroup(groupCallButton.dataset.groupId).then(result => {
+      if (!result?.active || !groupCallButton.isConnected) return;
+      const count = result.call?.participants?.length || 0;
+      groupCallButton.classList.add('is-live');
+      groupCallButton.innerHTML = `<i class="fas fa-phone-volume"></i><span>Aramaya katıl${count ? ` · ${count}` : ''}</span>`;
+    }).catch(() => {});
+  }
   $('#load-more-msgs')?.addEventListener('click', async () => {
     if (!oldestMsgId) return;
     const btn = $('#load-more-msgs');
@@ -9794,29 +9894,28 @@ function realsMediaCardHTML(v, showSave = false) {
   const dateKey = mediaDateKey(v.created_at);
   const liked = v.liked === true || v.liked === 1;
   const soundEnabled = localStorage.getItem(PHOTO_SOUND_ENABLED_KEY) === '1';
-  return `<article class="photo-card reals-media-card" data-reals-id="${escHtml(v.id)}" data-reals-slug="${escHtml(v.slug || v.id)}" data-owner-id="${escHtml(v.user_id)}" data-reals-route="${route}" style="padding:0;overflow:hidden">
-    <div class="photo-card-head" style="padding:12px">
-      ${avatarImg(v)}
-      <div class="photo-card-identity"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}">${escHtml(formatDateTime(v.created_at))}</time></a>` : ''}</div>
+  return `<article class="photo-card reals-media-card ig-post" data-reals-id="${escHtml(v.id)}" data-reals-slug="${escHtml(v.slug || v.id)}" data-owner-id="${escHtml(v.user_id)}" data-reals-route="${route}">
+    <div class="photo-card-head ig-post-head">
+      <a class="ig-post-avatar" href="${profileRoute(v.username)}" data-link aria-label="${escHtml(v.username)} profili">${avatarImg(v)}</a>
+      <div class="photo-card-identity ig-post-identity"><div class="ig-post-userline"><a href="${profileRoute(v.username)}" data-link>${displayName}</a>${dateKey ? `<span class="ig-post-dot" aria-hidden="true">•</span><a class="photo-card-date ig-post-age" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(v.created_at || '')}" title="${escHtml(formatDateTime(v.created_at))}">${escHtml(timeAgo(v.created_at))}</time></a>` : ''}</div><span class="ig-post-location"><i class="fas fa-clapperboard"></i> Reals</span></div>
     </div>
-    <div class="photo-media-wrap">
+    <div class="photo-media-wrap ig-post-media ig-post-media-video">
       <a class="photo-native-link reals-media-open" href="${route}" data-link aria-label="${escHtml(v.title || 'Reals videosunu izle')}">
         <video class="photo-native reals-media-preview" data-video-url="${escHtml(v.video_url || '')}" poster="${escHtml(siteImageUrl(cover))}" muted playsinline loop preload="none" aria-label="${escHtml(v.title || 'Reals videosu')}"></video>
       </a>
       <button type="button" class="photo-audio-toggle reals-media-sound-toggle" aria-pressed="${soundEnabled}" aria-label="${soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç'}" title="${soundEnabled ? 'Videonun sesini kapat' : 'Videonun sesini aç'}"><i class="fas ${soundEnabled ? 'fa-volume-high' : 'fa-volume-off'}"></i></button>
       <button type="button" class="reals-media-retry" hidden><i class="fas fa-rotate-right"></i><span>Video yüklenemedi · Tekrar dene</span></button>
     </div>
-    <div class="photo-card-content">
-      <h3>${escHtml(v.title || 'Reals')}</h3>
-      ${v.description?.trim() ? hashtagDescriptionPreviewHTML(v.description, 'photo-caption-preview', 180) : ''}
-      <div class="photo-actions reals-media-stats">
+    <div class="photo-card-content ig-post-body">
+      <div class="photo-actions reals-media-stats ig-post-actions">
         ${v.show_likes !== false && Number(v.show_likes) !== 0 ? `<button type="button" class="btn btn-ghost btn-sm reals-media-like${liked ? ' liked' : ''}" data-liked="${liked}" data-like-count="${Number(v.like_count) || 0}" aria-label="${liked ? 'Beğeniyi kaldır' : 'Reals videosunu beğen'}"><i class="${liked ? 'fas' : 'far'} fa-heart"></i> <span>${formatCount(v.like_count)}</span></button>` : ''}
         ${v.allow_comments !== false && Number(v.allow_comments) !== 0 ? `<button type="button" class="btn btn-ghost btn-sm reals-media-comment" data-comment-count="${Number(v.comment_count) || 0}" aria-label="Yorumları aç"><i class="far fa-comment"></i> <span>${formatCount(v.comment_count)}</span></button>` : ''}
-        <span><i class="fas fa-play"></i> ${formatCount(v.views)}</span>
-        <button type="button" class="btn btn-ghost btn-sm reals-media-share" aria-label="Reals bağlantısını paylaş"><i class="fas fa-share-alt"></i> Paylaş</button>
-        <button type="button" class="btn btn-ghost btn-sm reals-media-forward" aria-label="Reals videosunu ilet"><i class="fas fa-paper-plane"></i> İlet</button>
+        <span class="ig-post-views"><i class="fas fa-play"></i> ${formatCount(v.views)}</span>
+        <button type="button" class="btn btn-ghost btn-sm reals-media-share" aria-label="Reals bağlantısını paylaş"><i class="fas fa-arrow-up-from-bracket"></i></button>
+        <button type="button" class="btn btn-ghost btn-sm reals-media-forward" aria-label="Reals videosunu ilet"><i class="far fa-paper-plane"></i></button>
       </div>
       ${showSave ? mediaExploreSaveButtonHTML(v) : ''}
+      ${v.title || v.description?.trim() ? `<div class="ig-post-caption"><a class="ig-post-caption-user" href="${profileRoute(v.username)}" data-link>${escHtml(v.username)}</a> ${v.title ? `<strong class="ig-post-title">${escHtml(v.title)}</strong> ` : ''}${v.description?.trim() ? hashtagDescriptionPreviewHTML(v.description, 'photo-caption-preview', 140) : ''}</div>` : ''}
     </div>
   </article>`;
 }
@@ -14908,6 +15007,89 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     overlay.querySelector('.profile-avatar-gallery-close').focus();
   };
 
+  // Instagram tarzı: profil fotoğrafına dokununca büyük, yuvarlak önizleme açılır.
+  // Birden fazla foto varsa kaydırılarak gezilir; sahibi buradan yönetim galerisine geçer.
+  const openZoom = () => {
+    if (!photos.length) { if (canViewOwnAvatar) openViewer(profileIndex); return; }
+    stopRotation();
+    let index = profileIndex;
+    const sourceRect = trigger.getBoundingClientRect();
+    const overlay = document.createElement('div');
+    overlay.className = 'cg-avatar-zoom';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Profil fotoğrafı');
+    overlay.innerHTML = `<div class="cg-avatar-zoom-backdrop"></div>
+      <div class="cg-avatar-zoom-card">
+        <div class="cg-avatar-zoom-circle"><img alt="" draggable="false" /></div>
+        ${photos.length > 1 ? `<div class="cg-avatar-zoom-dots">${photos.map((_, i) => `<span data-dot="${i}"></span>`).join('')}</div>` : ''}
+        <div class="cg-avatar-zoom-name"><strong>${escHtml(user.nickname || user.username || '')}</strong><small>@${escHtml(user.username || '')}</small></div>
+        ${isOwner ? '<button type="button" class="cg-avatar-zoom-manage"><i class="fas fa-images"></i> Profil fotoğraflarını yönet</button>' : ''}
+      </div>`;
+    const circle = overlay.querySelector('.cg-avatar-zoom-circle');
+    const image = overlay.querySelector('img');
+    const paint = () => {
+      image.src = photos[index].image_url;
+      overlay.querySelectorAll('[data-dot]').forEach(dot => dot.classList.toggle('is-active', Number(dot.dataset.dot) === index));
+    };
+    paint();
+    document.body.appendChild(overlay);
+    document.body.classList.add('cg-scroll-locked');
+    // Profildeki küçük avatarın konumundan büyüyerek açıl
+    const target = circle.getBoundingClientRect();
+    const dx = sourceRect.left + sourceRect.width / 2 - (target.left + target.width / 2);
+    const dy = sourceRect.top + sourceRect.height / 2 - (target.top + target.height / 2);
+    const scale = Math.max(0.1, sourceRect.width / Math.max(1, target.width));
+    circle.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      overlay.classList.add('is-open');
+      circle.style.transform = '';
+    }));
+    const close = () => {
+      if (overlay.classList.contains('is-closing')) return;
+      overlay.classList.add('is-closing');
+      overlay.classList.remove('is-open');
+      const now = trigger.getBoundingClientRect();
+      const t = circle.getBoundingClientRect();
+      circle.style.transform = `translate(${now.left + now.width / 2 - (t.left + t.width / 2)}px, ${now.top + now.height / 2 - (t.top + t.height / 2)}px) scale(${Math.max(0.1, now.width / Math.max(1, t.width))})`;
+      document.removeEventListener('keydown', onKey);
+      setTimeout(() => { overlay.remove(); document.body.classList.remove('cg-scroll-locked'); rotateProfileAvatar(); }, 240);
+    };
+    const step = delta => {
+      if (photos.length < 2) return;
+      index = (index + delta + photos.length) % photos.length;
+      image.classList.remove('is-swapping');
+      void image.offsetWidth;
+      image.classList.add('is-swapping');
+      paint();
+    };
+    const onKey = event => {
+      if (event.key === 'Escape') close();
+      if (event.key === 'ArrowRight') step(1);
+      if (event.key === 'ArrowLeft') step(-1);
+    };
+    document.addEventListener('keydown', onKey);
+    let start = null;
+    circle.addEventListener('pointerdown', event => { start = { x: event.clientX, y: event.clientY }; });
+    circle.addEventListener('pointerup', event => {
+      if (!start) return;
+      const dx2 = event.clientX - start.x;
+      const dy2 = event.clientY - start.y;
+      start = null;
+      if (Math.abs(dx2) > 40 && Math.abs(dx2) > Math.abs(dy2)) { step(dx2 < 0 ? 1 : -1); return; }
+      if (dy2 > 70) { close(); return; }
+      if (Math.abs(dx2) < 8 && Math.abs(dy2) < 8 && photos.length > 1) step(1);
+    });
+    overlay.querySelector('.cg-avatar-zoom-backdrop').addEventListener('click', close);
+    overlay.querySelector('.cg-avatar-zoom-card').addEventListener('click', event => { if (event.target === event.currentTarget) close(); });
+    overlay.querySelector('.cg-avatar-zoom-manage')?.addEventListener('click', () => {
+      overlay.remove();
+      document.body.classList.remove('cg-scroll-locked');
+      document.removeEventListener('keydown', onKey);
+      openViewer(index);
+    });
+  };
+
   let touchStart = null;
   let touchFallbackStart = null;
   let suppressClickUntil = 0;
@@ -14924,7 +15106,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     event.preventDefault();
     event.stopPropagation();
     suppressClickUntil = Date.now() + 700;
-    openViewer(profileIndex);
+    openZoom();
   }, true);
   trigger.addEventListener('pointercancel', () => { touchStart = null; }, true);
   trigger.addEventListener('touchstart', event => {
@@ -14940,7 +15122,7 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     event.preventDefault();
     event.stopPropagation();
     suppressClickUntil = Date.now() + 700;
-    openViewer(profileIndex);
+    openZoom();
   }, { capture: true, passive: false });
   trigger.addEventListener('touchcancel', () => { touchFallbackStart = null; }, true);
   trigger.addEventListener('click', event => {
@@ -14951,12 +15133,12 @@ function bindProfileAvatarViewer(root = document, user = null, archivePhotos = [
     }
     event.preventDefault();
     event.stopPropagation();
-    openViewer(profileIndex);
+    openZoom();
   }, true);
   trigger.addEventListener('keydown', event => {
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      openViewer(profileIndex);
+      openZoom();
     }
   });
   rotateProfileAvatar();
@@ -15875,6 +16057,7 @@ const dmTemporaryUnlocks = new Map();
 
 async function renderDMChat(username) {
   const renderGeneration = ++dmChatRenderGeneration;
+  applyChatWallpaper();
   dmMessageResizeObserver?.disconnect();
   dmMessageMutationObserver?.disconnect();
   dmMessageResizeObserver = null;
@@ -16035,15 +16218,20 @@ async function renderDMChat(username) {
         </div>
       </div>
       <div class="dm-chat-header-right">
+        ${isSelfConversation ? '' : '<button class="btn btn-ghost btn-sm dm-call-btn" id="dm-call-btn" title="Sesli ara" aria-label="Sesli ara"><i class="fas fa-phone"></i></button>'}
         <button class="btn btn-ghost btn-sm" id="dm-chat-search-messages-btn" title="Bu sohbette ara" aria-label="Bu sohbette ara"><i class="fas fa-magnifying-glass-plus"></i></button>
         <button class="btn btn-ghost btn-sm" id="dm-options-btn" title="Sohbet seçenekleri"><i class="fas fa-ellipsis-v"></i></button>
       </div>
     </div>
-    <div class="dm-sel-actions-bar" id="dm-sel-actions-bar" role="toolbar" aria-label="Seçilen mesaj işlemleri">
-      <span class="dm-selection-label" aria-live="polite">0 mesaj seçildi</span>
-      <button class="btn btn-outline btn-sm" id="dm-sel-delete-me"><i class="fas fa-trash"></i> Benden Sil</button>
-      <button class="btn btn-danger btn-sm" id="dm-sel-delete-all"${isSelfConversation ? ' hidden' : ''}><i class="fas fa-trash-alt"></i> Herkesten Sil</button>
-      <button class="btn btn-ghost btn-sm" id="dm-sel-cancel"><i class="fas fa-times"></i> İptal</button>
+    <div class="dm-sel-actions-bar" id="dm-sel-actions-bar" role="toolbar" aria-label="Seçilen mesaj işlemleri" aria-hidden="true">
+      <button type="button" class="dm-sel-icon" id="dm-sel-cancel" aria-label="Seçimi kapat"><i class="fas fa-arrow-left"></i></button>
+      <span class="dm-selection-label" aria-live="polite">0</span>
+      <div class="dm-sel-tools">
+        <button type="button" class="dm-sel-icon" id="dm-sel-reply" title="Yanıtla" aria-label="Yanıtla"><i class="fas fa-reply"></i></button>
+        <button type="button" class="dm-sel-icon" id="dm-sel-copy" title="Kopyala" aria-label="Kopyala"><i class="far fa-copy"></i></button>
+        <button type="button" class="dm-sel-icon" id="dm-sel-delete-me" title="Benden sil" aria-label="Benden sil"><i class="far fa-trash-can"></i><span>Benden sil</span></button>
+        <button type="button" class="dm-sel-icon is-danger" id="dm-sel-delete-all" title="Herkesten sil" aria-label="Herkesten sil"${isSelfConversation ? ' hidden' : ''}><i class="fas fa-trash-can"></i><span>Herkesten sil</span></button>
+      </div>
     </div>
 
     <!-- Messages -->
@@ -16139,6 +16327,10 @@ async function renderDMChat(username) {
   // Mobile back
   document.getElementById('dm-mobile-back-btn')?.addEventListener('click', () => navigate('/mesajlar'));
   document.getElementById('dm-chat-search-messages-btn')?.addEventListener('click', () => openDmMessageSearch(Number(conv.id)));
+  document.getElementById('dm-call-btn')?.addEventListener('click', () => {
+    if (!window.CigCigCall) { toast('Sesli arama yüklenemedi', 'error'); return; }
+    window.CigCigCall.startDirect(other.username);
+  });
   const layout = document.querySelector('.dm-layout');
   if (layout) layout.classList.add('dm-mobile-chat-open');
 
@@ -16625,6 +16817,7 @@ async function renderDMChat(username) {
       const checkbox = selectionRow.querySelector('.dm-msg-cb');
       if (checkbox) checkbox.checked = checked;
       selectionRow.classList.toggle('dm-msg-selected', checked);
+      if (!dmSelectedIds.size) { exitDmSelection(); return; }
       updateDmSelActions();
       return;
     }
@@ -16713,6 +16906,7 @@ async function renderDMChat(username) {
       const id = cb.dataset.id;
       if (cb.checked) dmSelectedIds.add(id); else dmSelectedIds.delete(id);
       cb.closest('.dm-msg-wrap')?.classList.toggle('dm-msg-selected', cb.checked);
+      if (!dmSelectedIds.size) { exitDmSelection(); return; }
       updateDmSelActions();
       return;
     }
@@ -16858,6 +17052,19 @@ async function renderDMChat(username) {
 
   // Sel actions
   document.getElementById('dm-sel-cancel')?.addEventListener('click', exitDmSelection);
+  const selectedDmRows = () => [...document.querySelectorAll('#dm-messages .dm-msg-wrap.dm-msg-selected')];
+  document.getElementById('dm-sel-reply')?.addEventListener('click', () => {
+    const [row] = selectedDmRows();
+    exitDmSelection();
+    if (row) startDmReply(row);
+  });
+  document.getElementById('dm-sel-copy')?.addEventListener('click', async () => {
+    const text = selectedDmRows().map(row => String(row.dataset.content || '').trim()).filter(Boolean).join('\n');
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); toast('Kopyalandı'); }
+    catch { toast('Kopyalanamadı', 'error'); }
+    exitDmSelection();
+  });
   document.getElementById('dm-sel-delete-me')?.addEventListener('click', async () => {
     if (!dmSelectedIds.size) return;
     if (!await CigCigDialogs.confirm(`${dmSelectedIds.size} mesaj sohbet görünümünüzden kaldırılacak. Yetkili denetim arşivinde korunabilir. Devam edilsin mi?`)) return;
@@ -16970,7 +17177,12 @@ function updateDmSelActions() {
     bar.setAttribute('aria-hidden', String(!dmSelectionMode));
   }
   const selectionLabel = bar?.querySelector('.dm-selection-label');
-  if (selectionLabel) selectionLabel.textContent = dmSelectedIds.size ? `${dmSelectedIds.size} mesaj seçildi` : 'Mesaj seçimi';
+  if (selectionLabel) selectionLabel.textContent = String(dmSelectedIds.size);
+  const selectedRows = [...dmSelectedIds].map(id => document.querySelector(`.dm-msg-wrap[data-id="${CSS.escape(id)}"]`)).filter(Boolean);
+  const replyButton = document.getElementById('dm-sel-reply');
+  const copyButton = document.getElementById('dm-sel-copy');
+  if (replyButton) replyButton.hidden = selectedRows.length !== 1;
+  if (copyButton) copyButton.hidden = !selectedRows.some(row => String(row.dataset.content || '').trim());
   if (deleteMeButton) deleteMeButton.disabled = dmSelectedIds.size === 0;
   const isSelfConversation = document.querySelector('.dm-chat')?.dataset.selfConversation === 'true';
   if (deleteAllButton) deleteAllButton.hidden = isSelfConversation || !dmSelectedIds.size || !onlyOwnMessages;
@@ -17082,6 +17294,25 @@ function installMessageReplySwipeGesture(container, onReply, { rowSelector = '.d
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
+}
+
+// Admin panelinden ayarlanan sohbet arka plan deseni (WhatsApp "doodle")
+let chatWallpaperLoadedAt = 0;
+async function applyChatWallpaper(force = false) {
+  if (!force && Date.now() - chatWallpaperLoadedAt < 5 * 60 * 1000) return;
+  chatWallpaperLoadedAt = Date.now();
+  let settings = {};
+  try { settings = await api('/settings/public'); } catch { return; }
+  const root = document.documentElement;
+  const url = String(settings.dm_wallpaper_url || '').trim();
+  const enabled = settings.dm_wallpaper_enabled === '1' && url;
+  root.classList.toggle('has-chat-wallpaper', Boolean(enabled));
+  if (!enabled) return;
+  const safeUrl = url.replace(/["\\\n\r]/g, encodeURIComponent);
+  root.style.setProperty('--cg-chat-wallpaper', `url("${safeUrl}")`);
+  root.style.setProperty('--cg-chat-wallpaper-opacity', String(Math.min(1, Math.max(0.02, Number(settings.dm_wallpaper_opacity) || 0.08))));
+  root.style.setProperty('--cg-chat-wallpaper-size', `${Math.min(900, Math.max(120, Number(settings.dm_wallpaper_size) || 360))}px`);
+  root.dataset.chatWallpaperTint = ['light', 'accent', 'original'].includes(settings.dm_wallpaper_tint) ? settings.dm_wallpaper_tint : 'light';
 }
 
 // WhatsApp tarzı saat (14:05) ve gün ayraçları (Bugün / Dün / 12 Kasım 2026)
@@ -18340,7 +18571,52 @@ const DM_THEME_LABELS = {
   ocean: 'Gece Mavisi',
   rose: 'Bordo',
   forest: 'Adaçayı',
-  lavender: 'Erik'
+  lavender: 'Erik',
+  whatsapp: 'Klasik Yeşil',
+  midnight: 'Gece Yarısı',
+  aurora: 'Kuzey Işıkları',
+  cherry: 'Kiraz',
+  mango: 'Mango',
+  lagoon: 'Lagün',
+  grape: 'Üzüm',
+  coffee: 'Kahve',
+  mono: 'Siyah Beyaz',
+  candy: 'Şeker',
+  ice: 'Buz',
+  fire: 'Ateş',
+  emerald: 'Zümrüt',
+  gold: 'Altın',
+  neon: 'Neon',
+  sky: 'Gökyüzü',
+  peach: 'Şeftali',
+  ocean_deep: 'Derin Deniz',
+  rosegold: 'Rose Gold',
+  matrix: 'Matrix'
+};
+const DM_THEME_SWATCHES = {
+  default: 'linear-gradient(135deg,#292929,#4a4a4a)', sunset: 'linear-gradient(135deg,#785744,#b17b56)',
+  ocean: 'linear-gradient(135deg,#344d67,#52758b)', rose: 'linear-gradient(135deg,#70444d,#a76570)',
+  forest: 'linear-gradient(135deg,#435d50,#718975)', lavender: 'linear-gradient(135deg,#574d68,#81758f)',
+  whatsapp: 'linear-gradient(135deg,#005c4b,#00a884)',
+  midnight: 'linear-gradient(135deg,#364fc7,#4c6ef5)',
+  aurora: 'linear-gradient(135deg,#7f5af0,#2cb67d)',
+  cherry: 'linear-gradient(135deg,#c2185b,#e8467c)',
+  mango: 'linear-gradient(135deg,#f08c00,#f76707)',
+  lagoon: 'linear-gradient(135deg,#0ca678,#1098ad)',
+  grape: 'linear-gradient(135deg,#6741d9,#9c36b5)',
+  coffee: 'linear-gradient(135deg,#6f4e37,#8d6748)',
+  mono: 'linear-gradient(135deg,#f1f3f5,#f1f3f5)',
+  candy: 'linear-gradient(135deg,#ff6b9d,#c86bfa)',
+  ice: 'linear-gradient(135deg,#1c7ed6,#4dabf7)',
+  fire: 'linear-gradient(135deg,#e03131,#f76707)',
+  emerald: 'linear-gradient(135deg,#087f5b,#2f9e44)',
+  gold: 'linear-gradient(135deg,#a07a3f,#d4b483)',
+  neon: 'linear-gradient(135deg,#f72585,#7209b7)',
+  sky: 'linear-gradient(135deg,#15aabf,#4263eb)',
+  peach: 'linear-gradient(135deg,#ff8787,#ffa94d)',
+  ocean_deep: 'linear-gradient(135deg,#0b3d91,#1971c2)',
+  rosegold: 'linear-gradient(135deg,#b76e79,#e8b4a0)',
+  matrix: 'linear-gradient(135deg,#0b3d0b,#2fe02f)'
 };
 
 function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConversationOverride = false) {
@@ -18384,11 +18660,7 @@ function showFirstDmThemePrompt(conversation, currentTheme = 'default', hasConve
 
 function dmThemeOptionsHTML(selectedTheme = 'default', buttons = false) {
   const options = Object.entries(DM_THEME_LABELS);
-  if (buttons) return options.map(([key, label]) => `<button type="button" class="dm-theme-option" data-theme-key="${key}" aria-pressed="${key === selectedTheme}"><span class="dm-theme-swatch" style="--dm-theme-swatch:${({
-    default: 'linear-gradient(135deg,#292929,#4a4a4a)', sunset: 'linear-gradient(135deg,#785744,#b17b56)',
-    ocean: 'linear-gradient(135deg,#344d67,#52758b)', rose: 'linear-gradient(135deg,#70444d,#a76570)',
-    forest: 'linear-gradient(135deg,#435d50,#718975)', lavender: 'linear-gradient(135deg,#574d68,#81758f)'
-  })[key]}"></span>${label}</button>`).join('');
+  if (buttons) return options.map(([key, label]) => `<button type="button" class="dm-theme-option" data-theme-key="${key}" aria-pressed="${key === selectedTheme}"><span class="dm-theme-swatch" style="--dm-theme-swatch:${DM_THEME_SWATCHES[key] || DM_THEME_SWATCHES.default}"></span>${label}</button>`).join('');
   return options.map(([key, label]) => `<option value="${key}" ${key === selectedTheme ? 'selected' : ''}>${label}</option>`).join('');
 }
 
@@ -21534,7 +21806,7 @@ async function loadStoriesBar(container) {
     if (!visibleGroups.length && !currentUser) { container.innerHTML = ''; return; }
     const ownGroup = visibleGroups.find(group => group.user_id === ownUserId);
     const otherGroups = visibleGroups.filter(group => group.user_id !== ownUserId);
-    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}${redVerificationIconHTML(group.is_red_verified, group.red_verified_at)}</small></button>`).join('')}</div></div>`;
+    container.innerHTML = `<div class="stories-strip"><div class="stories-scroll">${currentUser ? `<div class="story-own-wrap ${ownGroup ? 'has-story' : 'no-story'} ${ownGroup && ownGroup.stories.every(story => story.viewed) ? 'viewed' : ''}"><button type="button" class="story-user story-own" data-story-group="-1"><span class="story-ring">${currentUser.avatar && !currentUser.avatar_removed ? `<img src="${escHtml(currentUser.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>Hikayen</small></button><button type="button" class="story-add-corner" id="story-add-btn" aria-label="Hikaye ekle"><i class="fas fa-plus"></i></button></div>` : ''}${otherGroups.map((group, index) => `<button type="button" class="story-user ${group.stories.every(story => story.viewed) ? 'viewed' : ''}${group.stories.some(story => !story.viewed && (Number(story.close_friends_only) === 1 || story.close_friends_only === true)) ? ' is-close-friends' : ''}" data-story-group="${index}"><span class="story-ring">${group.avatar && !group.avatar_removed ? `<img src="${escHtml(group.avatar)}" class="story-avatar-media" alt="" />` : '<i class="fas fa-user"></i>'}</span><small>${escHtml(group.username)}${redVerificationIconHTML(group.is_red_verified, group.red_verified_at)}</small></button>`).join('')}</div></div>`;
     const openGroup = index => {
       const group = groupedStories[index];
       let storyIndex = group.stories.findIndex(story => !story.viewed);
@@ -22081,6 +22353,23 @@ async function renderStoryRoute(app, storyId) {
     storyGroups.forEach(group => group.stories.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)));
     const storySequence = storyGroups.flatMap(group => group.stories);
     const storyIndex = Math.max(0, storySequence.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id));
+    // Yeni Instagram tarzı görüntüleyici: tek katman, hikayeler arası geçişte sayfa yeniden çizilmez.
+    if (window.CigCigStories) {
+      document.title = '@' + story.username + ' hikayesi - ' + siteName;
+      app.innerHTML = '<div class="igs-route-placeholder"></div>';
+      // Görülmemiş hikayesi olan kişiler önce gelir; açılan kişi başta olacak şekilde sırala
+      const startGroup = storyGroups.find(group => group.stories.some(item => String(item.id) === String(story.id) || item.public_id === story.public_id));
+      const ordered = [startGroup, ...storyGroups.filter(group => group !== startGroup)
+        .sort((a, b) => Number(a.stories.every(item => item.viewed)) - Number(b.stories.every(item => item.viewed)))].filter(Boolean);
+      const startIndex = Math.max(0, startGroup.stories.findIndex(item => String(item.id) === String(story.id) || item.public_id === story.public_id));
+      window.CigCigStories.open({
+        groups: ordered,
+        groupIndex: 0,
+        storyIndex: startIndex,
+        onClose: () => navigate(window.__lastNonStoryPath && !window.__lastNonStoryPath.startsWith('/hikaye/') ? window.__lastNonStoryPath : '/')
+      });
+      return;
+    }
     const previousStory = storySequence[storyIndex - 1];
     const nextStory = storySequence[storyIndex + 1];
     [previousStory, nextStory].filter(item => item?.media_url).forEach(item => {
@@ -22579,31 +22868,38 @@ function photoCardHTML(p, showSave = false) {
   const imageUrls = photoImageUrls(p);
   const dateKey = mediaDateKey(p.created_at);
   const galleryControls = imageUrls.length > 1 ? `<div class="photo-gallery-controls" aria-label="Fotoğraf galerisi"><button type="button" class="photo-gallery-arrow photo-gallery-prev" data-gallery-step="-1" aria-label="Önceki fotoğraf"><i class="fas fa-chevron-left"></i></button><div class="photo-gallery-dots">${imageUrls.map((_, index) => `<button type="button" class="photo-gallery-dot${index === 0 ? ' active' : ''}" data-gallery-go="${index}" aria-label="${index + 1}. fotoğraf" aria-current="${index === 0 ? 'true' : 'false'}"></button>`).join('')}</div><button type="button" class="photo-gallery-arrow photo-gallery-next" data-gallery-step="1" aria-label="Sonraki fotoğraf"><i class="fas fa-chevron-right"></i></button></div>` : '';
-  return `<article class="photo-card" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0" style="padding:0;overflow:hidden">
-    <div class="photo-card-head" style="padding:12px">
-      ${avatarImg(p)}
-      <div class="photo-card-identity">
-        <a href="${profileRoute(p.username)}" data-link>${userDisplayName(p)}</a>
-        ${dateKey ? `<a class="photo-card-date" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(p.created_at || '')}">${escHtml(formatDateTime(p.created_at))}</time></a>` : ''}
+  const isOwnPost = currentUser && currentUser.id === p.user_id;
+  const songBlock = p.song_title && p.song_id
+    ? `<div class="photo-song-row ig-post-song-row"><button class="photo-song photo-song-card ig-post-song${p.song_status === 'active' ? '' : ' is-unavailable'}" data-audio="${escHtml(p.song_audio_url || '')}" data-song-slug="${escHtml(p.song_slug || '')}" data-song-status="${escHtml(p.song_status || 'unavailable')}" data-start="${Number(p.song_start_seconds) || 0}" type="button"><i class="fas fa-music" aria-hidden="true"></i><span><strong>${escHtml(p.song_title)}</strong>${p.song_artist ? `<small class="photo-song-artist">${escHtml(p.song_artist)}</small>` : ''}<small class="photo-song-unavailable"${p.song_status === 'active' ? ' hidden' : ''}>Müzik kullanımda değil</small></span></button></div>`
+    : p.location ? `<span class="ig-post-location">${escHtml(p.location)}</span>` : '';
+  // Instagram düzeni: başlık · medya · eylemler · beğeni · açıklama · tarih
+  return `<article class="photo-card ig-post" data-photo-id="${p.id}" data-owner-id="${p.user_id}" data-photo-url="${escHtml(p.url)}" data-gallery-images="${escHtml(JSON.stringify(imageUrls))}" data-gallery-index="0">
+    <div class="photo-card-head ig-post-head">
+      <a class="ig-post-avatar" href="${profileRoute(p.username)}" data-link aria-label="${escHtml(p.username)} profili">${avatarImg(p)}</a>
+      <div class="photo-card-identity ig-post-identity">
+        <div class="ig-post-userline"><a href="${profileRoute(p.username)}" data-link>${userDisplayName(p)}</a>${dateKey ? `<span class="ig-post-dot" aria-hidden="true">•</span><a class="photo-card-date ig-post-age" href="/medyakesfet?date=${encodeURIComponent(dateKey)}" data-link><time datetime="${escHtml(p.created_at || '')}" title="${escHtml(formatDateTime(p.created_at))}">${escHtml(timeAgo(p.created_at))}</time></a>` : ''}</div>
+        ${songBlock}
       </div>
-      ${currentUser && currentUser.id === p.user_id ? '<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil"><i class="fas fa-trash"></i></button></div>' : ''}
+      <div class="ig-post-head-actions">
+        ${p.song_title && p.song_id ? `<div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>` : ''}
+        ${isOwnPost ? '<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle" aria-label="Düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil" aria-label="Sil"><i class="far fa-trash-can"></i></button></div>' : ''}
+      </div>
     </div>
-    ${p.song_title && p.song_id ? `<div class="photo-song-row"><button class="photo-song photo-song-card${p.song_status === 'active' ? '' : ' is-unavailable'}" data-audio="${escHtml(p.song_audio_url || '')}" data-song-slug="${escHtml(p.song_slug || '')}" data-song-status="${escHtml(p.song_status || 'unavailable')}" data-start="${Number(p.song_start_seconds) || 0}" type="button"><i class="fas fa-music" aria-hidden="true"></i><span><strong>${escHtml(p.song_title)}</strong>${p.song_artist ? `<small class="photo-song-artist">${escHtml(p.song_artist)}</small>` : ''}<small class="photo-song-unavailable"${p.song_status === 'active' ? ' hidden' : ''}>Müzik kullanımda değil</small></span></button><div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div></div>` : ''}
-    <div class="photo-media-wrap">
+    <div class="photo-media-wrap ig-post-media">
       <div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div>
-      <div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title || p.caption || '')}" draggable="false"/></div>
+      <div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title || p.caption || '')}" draggable="false" loading="lazy" decoding="async" style="filter:${escHtml(mediaFilterCss(p.media_filter))}"/></div>
       ${galleryControls}
     </div>
-    ${showSave ? mediaExploreSaveButtonHTML(p, 'photo') : ''}
-    <div class="photo-card-content">
-      ${p.title ? `<h3>${escHtml(p.title)}</h3>` : ''}
-      ${p.caption ? hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 180) : ''}
-      ${p.location ? `<small><i class="fas fa-map-marker-alt"></i> ${escHtml(p.location)}</small>` : ''}
-      <div class="photo-actions">
+    <div class="photo-card-content ig-post-body">
+      <div class="photo-actions ig-post-actions">
         ${p.show_likes ? `<span class="photo-like-group"><button class="btn btn-ghost btn-sm photo-like ${p.liked ? 'liked' : ''}" data-liked="${p.liked ? 'true' : 'false'}" data-like-count="${Number(p.like_count) || 0}" title="${p.liked ? 'Beğeniyi kaldır' : 'Beğen'}" aria-label="${p.liked ? 'Beğeniyi kaldır' : 'Beğen'}"><i class="${p.liked ? 'fas' : 'far'} fa-heart"></i></button><button class="btn btn-ghost btn-sm photo-like-count" type="button" data-photo-likes-count="${p.id}" aria-label="${Number(p.like_count) || 0} beğenen kişiyi göster"><span>${p.like_count}</span></button></span>` : ''}
-        ${p.allow_comments ? `<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count) || 0}"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>` : ''}
-        ${p.allow_shares ? '<button class="btn btn-ghost btn-sm photo-share"><i class="fas fa-share-alt"></i> Paylaş</button><button class="btn btn-ghost btn-sm photo-forward"><i class="fas fa-paper-plane"></i> İlet</button>' : ''}
+        ${p.allow_comments ? `<button class="btn btn-ghost btn-sm photo-comment" data-comment-count="${Number(p.comment_count) || 0}" aria-label="Yorumlar"><i class="far fa-comment"></i> <span>${p.comment_count}</span></button>` : ''}
+        ${p.allow_shares ? '<button class="btn btn-ghost btn-sm photo-forward" aria-label="Mesajla gönder"><i class="far fa-paper-plane"></i></button><button class="btn btn-ghost btn-sm photo-share" aria-label="Paylaş"><i class="fas fa-arrow-up-from-bracket"></i></button>' : ''}
+        <span class="ig-post-actions-spacer"></span>
+        ${showSave ? mediaExploreSaveButtonHTML(p, 'photo') : ''}
       </div>
+      ${p.title || p.caption ? `<div class="ig-post-caption"><a class="ig-post-caption-user" href="${profileRoute(p.username)}" data-link>${escHtml(p.username)}</a> ${p.title ? `<strong class="ig-post-title">${escHtml(p.title)}</strong> ` : ''}${p.caption ? hashtagDescriptionPreviewHTML(p.caption, 'photo-caption-preview', 140) : ''}</div>` : ''}
+      ${p.location && p.song_title ? `<small class="ig-post-location-line"><i class="fas fa-location-dot"></i> ${escHtml(p.location)}</small>` : ''}
     </div>
   </article>`;
 }

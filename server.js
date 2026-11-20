@@ -334,7 +334,7 @@ function closeFriendsVisibilitySql(contentAlias, viewerIdParam) {
 app.disable('x-powered-by');
 const PORT = process.env.PORT || 3000;
 const appAssetHash = crypto.createHash('sha256');
-for (const file of ['server.js', 'public/index.html', 'public/admin.html', 'public/app.js', 'public/admin.js', 'public/admin-pro.css', 'public/style.css', 'public/cigcig-pro.css', 'public/voice-notes.js', 'public/dialogs.js', 'public/dialogs.css', 'public/theme.js', 'public/homepage-sections.js']) {
+for (const file of ['server.js', 'public/index.html', 'public/admin.html', 'public/app.js', 'public/admin.js', 'public/admin-pro.css', 'public/style.css', 'public/cigcig-pro.css', 'public/voice-notes.js', 'public/calls.js', 'public/stories.js', 'public/dialogs.js', 'public/dialogs.css', 'public/theme.js', 'public/homepage-sections.js']) {
   appAssetHash.update(fs.readFileSync(path.join(__dirname, file)));
 }
 const APP_ASSET_VERSION = appAssetHash.digest('hex').slice(0, 16);
@@ -575,7 +575,7 @@ function escapeHtml(str) {
 }
 
 function normalizeMediaFilter(value) {
-  const allowed = ['none', 'vivid', 'warm', 'cool', 'mono', 'fade', 'dramatic'];
+  const allowed = ['none', 'vivid', 'warm', 'cool', 'mono', 'fade', 'dramatic', 'clarendon', 'gingham', 'moon', 'lark', 'reyes', 'juno', 'slumber', 'crema', 'ludwig', 'aden', 'perpetua', 'valencia', 'xpro', 'lofi', 'nashville', 'hudson', 'amaro', 'rise', 'inkwell', 'willow', 'earlybird', 'toaster'];
   return allowed.includes(String(value || 'none')) ? String(value || 'none') : 'none';
 }
 
@@ -1088,8 +1088,222 @@ io.on('connection', socket => {
       });
     }
     socket.data.dmTypingConversations.clear();
+    leaveAllCalls(socket, 'disconnect');
   });
+  registerCallHandlers(socket);
 });
+
+// =====================================================================
+// SESLİ ARAMA (WebRTC) — sinyalleşme socket.io üzerinden yapılır, ses doğrudan
+// cihazlar arasında (peer-to-peer) akar. Grup aramalarında her katılımcı diğerleriyle
+// ayrı bağlantı kurar (mesh, en fazla CALL_MAX_PARTICIPANTS kişi).
+// =====================================================================
+const CALL_MAX_PARTICIPANTS = Math.min(12, Math.max(2, Number(process.env.CALL_MAX_PARTICIPANTS || 8)));
+const CALL_RING_TIMEOUT_MS = 45000;
+const activeCalls = new Map(); // callId -> call
+const activeGroupCalls = new Map(); // groupId -> callId
+
+function callPublicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    nickname: user.nickname || '',
+    avatar: user.avatar && !user.avatar_removed ? user.avatar : ''
+  };
+}
+function callSnapshot(call) {
+  return {
+    callId: call.id,
+    type: call.type,
+    groupId: call.groupId || null,
+    groupName: call.groupName || '',
+    groupSlug: call.groupSlug || '',
+    startedAt: call.startedAt,
+    connectedAt: call.connectedAt,
+    caller: call.caller,
+    participants: [...call.participants.values()].map(p => ({ socketId: p.socketId, user: p.user, muted: !!p.muted }))
+  };
+}
+function endCall(call, reason = 'ended') {
+  if (!activeCalls.has(call.id)) return;
+  clearTimeout(call.ringTimer);
+  activeCalls.delete(call.id);
+  if (call.groupId && activeGroupCalls.get(String(call.groupId)) === call.id) activeGroupCalls.delete(String(call.groupId));
+  const rooms = new Set([...call.invitedUserIds].map(id => `user:${id}`));
+  for (const participant of call.participants.values()) rooms.add(participant.socketId);
+  io.to([...rooms]).emit('call:ended', { callId: call.id, reason });
+}
+function leaveCall(socket, callId, reason = 'left') {
+  const call = activeCalls.get(callId);
+  if (!call || !call.participants.has(socket.id)) return;
+  call.participants.delete(socket.id);
+  socket.data.calls?.delete(callId);
+  for (const participant of call.participants.values()) {
+    io.to(participant.socketId).emit('call:participant-left', { callId, socketId: socket.id, userId: socket.data.user.id });
+  }
+  // Birebir aramada biri kapatınca arama biter; grupta son kişi çıkınca biter.
+  if (call.type === 'direct' || call.participants.size === 0) {
+    endCall(call, call.connectedAt ? reason : 'cancelled');
+  }
+}
+function leaveAllCalls(socket, reason) {
+  for (const callId of [...(socket.data.calls || [])]) leaveCall(socket, callId, reason);
+}
+function callIceServers() {
+  const servers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478'] }];
+  const turnUrls = String(process.env.TURN_URLS || process.env.TURN_URL || '').split(',').map(item => item.trim()).filter(Boolean);
+  if (turnUrls.length && process.env.TURN_USERNAME && process.env.TURN_CREDENTIAL) {
+    servers.push({ urls: turnUrls, username: process.env.TURN_USERNAME, credential: process.env.TURN_CREDENTIAL });
+  }
+  return servers;
+}
+
+function registerCallHandlers(socket) {
+  socket.data.calls = new Set();
+  const user = socket.data.user;
+  const rateWindow = { start: Date.now(), count: 0 };
+  const allow = () => {
+    const now = Date.now();
+    if (now - rateWindow.start > 10000) { rateWindow.start = now; rateWindow.count = 0; }
+    rateWindow.count += 1;
+    return rateWindow.count <= 400; // ICE adayları için yeterli, taşkına karşı sınırlı
+  };
+  const reply = (ack, payload) => { if (typeof ack === 'function') ack(payload); };
+
+  socket.on('call:start', async (payload, ack) => {
+    try {
+      if (!allow()) return reply(ack, { error: 'Çok fazla istek' });
+      const targetUsername = typeof payload?.username === 'string' ? payload.username.trim() : '';
+      const groupSlug = typeof payload?.groupSlug === 'string' ? payload.groupSlug.trim() : '';
+      if (targetUsername) {
+        const { rows } = await query('SELECT id,username,nickname,avatar,avatar_removed,dm_message_permission,banned FROM users WHERE username=$1 AND COALESCE(is_deleted,0)=0', [targetUsername]);
+        const target = rows[0];
+        if (!target || target.banned) return reply(ack, { error: 'Kullanıcı bulunamadı' });
+        if (String(target.id) === String(user.id)) return reply(ack, { error: 'Kendini arayamazsın' });
+        if (await getBlockBetween(user.id, target.id)) return reply(ack, { error: 'Bu kullanıcıyı arayamazsın' });
+        if (!(await maySendDm(user.id, target.id, target.dm_message_permission))) return reply(ack, { error: 'Bu kullanıcı yalnızca belirli kişilerden arama kabul ediyor' });
+        const busy = [...activeCalls.values()].some(call => call.type === 'direct' && call.connectedAt
+          && [...call.participants.values()].some(p => String(p.user.id) === String(target.id)));
+        const call = {
+          id: randomUUID(), type: 'direct', caller: callPublicUser(user), startedAt: new Date().toISOString(), connectedAt: null,
+          invitedUserIds: new Set([String(target.id), String(user.id)]), participants: new Map(), ringTimer: null
+        };
+        call.participants.set(socket.id, { socketId: socket.id, user: callPublicUser(user), muted: false });
+        activeCalls.set(call.id, call);
+        socket.data.calls.add(call.id);
+        call.ringTimer = setTimeout(() => {
+          if (activeCalls.has(call.id) && !call.connectedAt) {
+            endCall(call, 'missed');
+            query("INSERT INTO notifications (user_id,type,actor_username,actor_avatar,title,body,link) VALUES ($1,'missed_call',$2,$3,$4,$5,$6)",
+              [target.id, user.username, user.avatar || '', 'Cevapsız arama', `@${user.username} seni aradı.`, '/mesajlar/' + encodeURIComponent(user.username)]).catch(() => {});
+          }
+        }, CALL_RING_TIMEOUT_MS);
+        io.to(`user:${target.id}`).emit('call:incoming', { ...callSnapshot(call), busy });
+        // Arayanın diğer sekmeleri/cihazları
+        socket.to(`user:${user.id}`).emit('call:outgoing-elsewhere', { callId: call.id });
+        sendWebPushToUser(target.id, 'messages', { title: user.nickname || user.username, body: '📞 Seni arıyor…', url: '/mesajlar/' + encodeURIComponent(user.username), thread: 'call-' + call.id }).catch(() => {});
+        return reply(ack, { ok: true, call: callSnapshot(call), iceServers: callIceServers(), peer: callPublicUser(target) });
+      }
+      if (groupSlug) {
+        const { rows: groups } = await query('SELECT id,name,slug,owner_id FROM groups WHERE slug=$1', [groupSlug]);
+        const group = groups[0];
+        if (!group) return reply(ack, { error: 'Grup bulunamadı' });
+        const { rows: members } = await query('SELECT user_id FROM group_members WHERE group_id=$1', [group.id]);
+        const memberIds = new Set(members.map(row => String(row.user_id)));
+        if (group.owner_id) memberIds.add(String(group.owner_id));
+        if (!memberIds.has(String(user.id))) return reply(ack, { error: 'Bu grubun üyesi değilsin' });
+        let call = activeCalls.get(activeGroupCalls.get(String(group.id)));
+        if (!call) {
+          call = {
+            id: randomUUID(), type: 'group', groupId: group.id, groupName: group.name, groupSlug: group.slug,
+            caller: callPublicUser(user), startedAt: new Date().toISOString(), connectedAt: null,
+            invitedUserIds: memberIds, participants: new Map(), ringTimer: null
+          };
+          activeCalls.set(call.id, call);
+          activeGroupCalls.set(String(group.id), call.id);
+          for (const memberId of memberIds) {
+            if (memberId !== String(user.id)) io.to(`user:${memberId}`).emit('call:incoming', callSnapshot(call));
+          }
+        }
+        return reply(ack, { ok: true, call: callSnapshot(call), iceServers: callIceServers(), join: true });
+      }
+      return reply(ack, { error: 'Aranacak kişi veya grup gerekli' });
+    } catch (error) {
+      console.error('[call:start]', error.message);
+      return reply(ack, { error: 'Arama başlatılamadı' });
+    }
+  });
+
+  socket.on('call:join', (payload, ack) => {
+    const call = activeCalls.get(String(payload?.callId || ''));
+    if (!call) return reply(ack, { error: 'Arama sona ermiş' });
+    if (!call.invitedUserIds.has(String(user.id))) return reply(ack, { error: 'Bu aramaya katılamazsın' });
+    if (call.participants.size >= CALL_MAX_PARTICIPANTS && !call.participants.has(socket.id)) return reply(ack, { error: 'Arama dolu' });
+    // Aynı kullanıcının başka bir cihazı zaten bağlıysa onu çıkar (tek cihaz).
+    for (const participant of [...call.participants.values()]) {
+      if (String(participant.user.id) === String(user.id) && participant.socketId !== socket.id) {
+        io.to(participant.socketId).emit('call:ended', { callId: call.id, reason: 'answered-elsewhere' });
+        const otherSocket = io.sockets.sockets.get(participant.socketId);
+        if (otherSocket) leaveCall(otherSocket, call.id, 'left');
+      }
+    }
+    const existing = [...call.participants.values()];
+    call.participants.set(socket.id, { socketId: socket.id, user: callPublicUser(user), muted: false });
+    socket.data.calls.add(call.id);
+    if (!call.connectedAt && call.participants.size >= 2) {
+      call.connectedAt = new Date().toISOString();
+      clearTimeout(call.ringTimer);
+    }
+    // Diğer cihazlarında çalan zili sustur
+    socket.to(`user:${user.id}`).emit('call:answered-elsewhere', { callId: call.id });
+    for (const participant of existing) {
+      io.to(participant.socketId).emit('call:participant-joined', {
+        callId: call.id, socketId: socket.id, user: callPublicUser(user), connectedAt: call.connectedAt
+      });
+    }
+    reply(ack, { ok: true, call: callSnapshot(call), iceServers: callIceServers() });
+  });
+
+  socket.on('call:decline', payload => {
+    const call = activeCalls.get(String(payload?.callId || ''));
+    if (!call || !call.invitedUserIds.has(String(user.id))) return;
+    socket.to(`user:${user.id}`).emit('call:answered-elsewhere', { callId: call.id });
+    if (call.type === 'direct' && !call.connectedAt) {
+      endCall(call, payload?.busy ? 'busy' : 'declined');
+    }
+  });
+
+  socket.on('call:signal', payload => {
+    if (!allow()) return;
+    const call = activeCalls.get(String(payload?.callId || ''));
+    const to = String(payload?.to || '');
+    if (!call || !call.participants.has(socket.id) || !call.participants.has(to)) return;
+    const data = payload?.data;
+    if (!data || typeof data !== 'object') return;
+    const size = JSON.stringify(data).length;
+    if (size > 20000) return;
+    io.to(to).emit('call:signal', { callId: call.id, from: socket.id, data });
+  });
+
+  socket.on('call:mute', payload => {
+    const call = activeCalls.get(String(payload?.callId || ''));
+    const participant = call?.participants.get(socket.id);
+    if (!participant) return;
+    participant.muted = !!payload?.muted;
+    for (const other of call.participants.values()) {
+      if (other.socketId !== socket.id) io.to(other.socketId).emit('call:mute', { callId: call.id, socketId: socket.id, muted: participant.muted });
+    }
+  });
+
+  socket.on('call:leave', payload => leaveCall(socket, String(payload?.callId || ''), 'left'));
+
+  socket.on('call:active-group', (payload, ack) => {
+    const callId = activeGroupCalls.get(String(payload?.groupId || ''));
+    const call = callId && activeCalls.get(callId);
+    if (!call || !call.invitedUserIds.has(String(user.id))) return reply(ack, { active: false });
+    reply(ack, { active: true, call: callSnapshot(call) });
+  });
+}
 
 function emitDirectMessage(conversationId, sender, recipient, message) {
   io.to([`user:${sender.id}`, `user:${recipient.id}`]).emit('dm:message', {
@@ -2080,7 +2294,7 @@ function setNoStoreHeaders(res) {
 
 function versionAppHtml(html) {
   const versioned = html.replace(
-    /((?:src|href)=["'])(\/?(?:theme|homepage-sections|style|dialogs|app|admin|admin-pro|cigcig-pro|voice-notes)\.(?:js|css)(?:\?[^"']*)?)(["'])/gi,
+    /((?:src|href)=["'])(\/?(?:theme|homepage-sections|style|dialogs|app|admin|admin-pro|cigcig-pro|voice-notes|calls|stories)\.(?:js|css)(?:\?[^"']*)?)(["'])/gi,
     (_match, prefix, assetPath, quote) => `${prefix}${assetPath.split('?')[0]}?v=${APP_ASSET_VERSION}${quote}`
   );
   const versionMeta = `<meta name="cigcig-app-version" content="${APP_ASSET_VERSION}" />`;
@@ -6226,7 +6440,8 @@ app.get('/api/user/:username/saved-photos', authMiddleware, async (req, res) => 
   res.json(rows);
 });
 
-const DM_THEME_KEYS = new Set(['default', 'sunset', 'ocean', 'rose', 'forest', 'lavender']);
+const DM_THEME_KEYS = new Set(["default", "sunset", "ocean", "rose", "forest", "lavender", "whatsapp", "midnight", "aurora", "cherry", "mango", "lagoon", "grape", "coffee", "mono", "candy", "ice", "fire", "emerald", "gold", "neon", "sky", "peach", "ocean_deep", "rosegold", "matrix"]);
+const DM_THEME_SQL_LIST = [...DM_THEME_KEYS].map(key => `'${key}'`).join(',');
 
 async function getDmThemeForUser(conversation, userId) {
   const [{ rows: settings }, { rows: localTheme }, { rows: globalTheme }] = await Promise.all([
@@ -9369,6 +9584,27 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     }
     value = String(value);
   }
+  // Sohbet arka plan deseni (WhatsApp "doodle")
+  if (key === 'dm_wallpaper_enabled') value = boolValue(value) ? '1' : '0';
+  if (key === 'dm_wallpaper_url') {
+    value = String(value || '').trim();
+    if (value && (value.length > 2048 || !(/^https:\/\//i.test(value) || /^\/uploads\/[A-Za-z0-9._-]+$/.test(value)))) {
+      return res.status(400).json({ error: 'Desen adresi https:// ile başlamalı veya yüklenmiş bir dosya olmalı' });
+    }
+  }
+  if (key === 'dm_wallpaper_opacity') {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number < 0.02 || number > 1) return res.status(400).json({ error: 'Desen görünürlüğü 0.02 ile 1 arasında olmalı' });
+    value = String(Math.round(number * 100) / 100);
+  }
+  if (key === 'dm_wallpaper_size') {
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < 120 || number > 900) return res.status(400).json({ error: 'Desen boyutu 120-900 px arasında olmalı' });
+    value = String(number);
+  }
+  if (key === 'dm_wallpaper_tint' && !['light', 'accent', 'original'].includes(String(value))) {
+    return res.status(400).json({ error: 'Geçerli bir desen rengi seçin' });
+  }
   if (key === 'dm_default_theme_key') {
     if (!DM_THEME_KEYS.has(String(value))) {
       return res.status(400).json({ error: 'Geçerli bir varsayılan mesaj teması seçin' });
@@ -9463,6 +9699,18 @@ app.post('/api/admin/upload-newspaper-asset', adminMiddleware, upload.single('im
     res.json({ url: await handleUpload(req.file) });
   } catch (error) {
     res.status(400).json({ error: error.message || 'Gazete görseli yüklenemedi' });
+  }
+});
+
+app.post('/api/admin/upload-chat-wallpaper', adminMiddleware, upload.single('image'), async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Sohbet desenini yalnızca ana admin değiştirebilir' });
+  if (!req.file || !/^image\/(png|webp|jpeg|jpg|gif)$/.test(req.file.mimetype || '')) {
+    return res.status(400).json({ error: 'PNG, WEBP, JPG veya GIF desen görseli seçin' });
+  }
+  try {
+    res.json({ url: await handleUpload(req.file) });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Desen yüklenemedi' });
   }
 });
 
@@ -10655,7 +10903,8 @@ app.get('/api/settings/public', async (req, res) => {
     'device_theme_enabled','theme_picker_enabled','homepage_sections','homepage_sections_desktop','profile_tabs','footer_copyright_text',
     'first_visit_auth','mobile_home_auth_required','message_notification_sound_url','mention_notification_sound_url','content_count_combined',
     'photo_song_clip_seconds','music_page_tagline','level_system_enabled','badge_system_enabled','other_songs_enabled','beta_mode_enabled','newspaper_left_quote','newspaper_right_quote','newspaper_author',
-    'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url','default_avatar_size'
+    'newspaper_flag_url','newspaper_background_url','loading_screen_title','loading_screen_tagline','loading_screen_status','default_avatar_url','default_avatar_size',
+    'dm_wallpaper_enabled','dm_wallpaper_url','dm_wallpaper_opacity','dm_wallpaper_size','dm_wallpaper_tint'
   ];
   const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [keys]);
   const obj = {};
@@ -12392,9 +12641,9 @@ app.get('/api/conversations', authMiddleware, async (req, res) => {
         THEN ct.theme_key
         ELSE COALESCE(NULLIF(c.shared_theme_key,''),ct.theme_key,
           CASE WHEN COALESCE(dus.default_theme_custom,0)=1
-            AND dus.default_theme_key IN ('default','sunset','ocean','rose','forest','lavender')
+            AND dus.default_theme_key IN (${DM_THEME_SQL_LIST})
             THEN dus.default_theme_key END,
-          CASE WHEN dm_global_theme.value IN ('default','sunset','ocean','rose','forest','lavender')
+          CASE WHEN dm_global_theme.value IN (${DM_THEME_SQL_LIST})
             THEN dm_global_theme.value END,
           dus.default_theme_key,'default')
       END AS theme_key,

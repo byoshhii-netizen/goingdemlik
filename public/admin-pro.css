@@ -446,3 +446,14 @@ a.adm-kpi:hover { border-color: var(--border-strong); background: var(--bg3); tr
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Sohbet görünümü */
+.chat-look-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr); gap: 14px; }
+@media (max-width: 960px) { .chat-look-grid { grid-template-columns: minmax(0, 1fr); } }
+.chat-look-switch { display: inline-flex !important; align-items: center; gap: 8px; margin: 0 !important; text-transform: none !important; letter-spacing: 0 !important; font-size: 13px !important; color: var(--text) !important; cursor: pointer; }
+.chat-look-switch input { width: 18px; height: 18px; }
+.chat-look-phone { position: relative; overflow: hidden; height: 420px; max-width: 300px; margin: 0 auto; padding: 18px 12px; border-radius: 26px; border: 6px solid #222; background: #0b141a; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; }
+.chat-look-pattern { position: absolute; inset: 0; background-repeat: repeat; -webkit-mask-repeat: repeat; mask-repeat: repeat; pointer-events: none; }
+.chat-look-bubble { position: relative; max-width: 78%; padding: 7px 11px; border-radius: 12px; font-size: 13px; line-height: 1.35; }
+.chat-look-bubble.is-in { align-self: flex-start; background: #202c33; color: #e9edef; border-top-left-radius: 4px; }
+.chat-look-bubble.is-out { align-self: flex-end; background: #005c4b; color: #e9edef; border-top-right-radius: 4px; }

@@ -578,6 +578,7 @@ const ADMIN_SECTION_SLUGS = {
   'shop-orders': 'siparisler',
   'shop-settings': 'odeme-sistemi',
   notifications: 'bildirimler',
+  'chat-appearance': 'sohbet-gorunumu',
   announcements: 'duyurular',
   'homepage-sections': 'ana-sayfa-bolumleri',
   settings: 'ayarlar',
@@ -639,6 +640,7 @@ function applyAuthorityNav() {
   if (hasPermission('can_review_artists')) visible.add('artists');
   if (hasPermission('can_review_artists')) visible.add('artist-apps');
   if (hasPermission('can_assign_badges')) visible.add('badges');
+  // Sohbet görünümü yalnızca ana admine açıktır (super admin için tüm menü zaten görünür).
   if (hasPermission('can_view_users')) { visible.add('messages'); visible.add('message-reports'); visible.add('user-reports'); }
   $$('.adm-nav-item').forEach(item => { item.style.display = visible.has(item.dataset.section) ? '' : 'none'; });
   // İçinde görünür bölüm kalmayan grupları gizle.
@@ -856,6 +858,7 @@ function loadSection(section, { history: historyMode = 'push' } = {}) {
     'shop-settings': renderShopSettings
     , badges: renderBadges
     , 'homepage-sections': renderHomepageSections
+    , 'chat-appearance': renderChatAppearance
   };
   if (map[section]) map[section](main);
 }
@@ -4625,7 +4628,7 @@ async function renderSettings(main) {
         <div class="card-header"><span><i class="fas fa-comments" style="color:var(--red2);margin-right:8px"></i>Varsayılan Mesaj Teması</span></div>
         <div class="card-body">
           <div class="form-group"><label for="s-dm-default-theme">Yeni ve varsayılan temayı kullanan üyeler</label><select id="s-dm-default-theme">
-            ${[['default', 'Varsayılan'], ['sunset', 'Gün Batımı'], ['ocean', 'Okyanus'], ['rose', 'Gül'], ['forest', 'Orman'], ['lavender', 'Lavanta']].map(([key, label]) => `<option value="${key}" ${(settings['dm_default_theme_key'] || 'default') === key ? 'selected' : ''}>${label}</option>`).join('')}
+            ${[["default", "Varsayılan"], ["sunset", "Bakır"], ["ocean", "Gece Mavisi"], ["rose", "Bordo"], ["forest", "Adaçayı"], ["lavender", "Erik"], ["whatsapp", "Klasik Yeşil"], ["midnight", "Gece Yarısı"], ["aurora", "Kuzey Işıkları"], ["cherry", "Kiraz"], ["mango", "Mango"], ["lagoon", "Lagün"], ["grape", "Üzüm"], ["coffee", "Kahve"], ["mono", "Siyah Beyaz"], ["candy", "Şeker"], ["ice", "Buz"], ["fire", "Ateş"], ["emerald", "Zümrüt"], ["gold", "Altın"], ["neon", "Neon"], ["sky", "Gökyüzü"], ["peach", "Şeftali"], ["ocean_deep", "Derin Deniz"], ["rosegold", "Rose Gold"], ["matrix", "Matrix"]].map(([key, label]) => `<option value="${key}" ${(settings['dm_default_theme_key'] || 'default') === key ? 'selected' : ''}>${label}</option>`).join('')}
           </select></div>
           <small style="display:block;color:var(--text2);line-height:1.5;margin-bottom:14px">Kişisel mesaj temasını değiştirmiş üyelerin seçimi korunur; bu ayar yalnızca varsayılan temayı kullananları etkiler.</small>
           <button class="btn btn-primary" id="s-dm-default-theme-save" style="width:100%;justify-content:center"><i class="fas fa-save"></i> Temayı kaydet</button>
@@ -5963,4 +5966,129 @@ async function renderShopSettings(main) {
 
   // toast referansı
   window.adminToastFn = toast;
+}
+
+
+// ===== SOHBET GÖRÜNÜMÜ (WhatsApp tarzı arka plan deseni) =====
+async function renderChatAppearance(main) {
+  let settings = {};
+  try { settings = await adminApi('/settings'); } catch (error) {
+    main.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red2)">${escHtml(error.message)}</div></div>`;
+    return;
+  }
+  if (Array.isArray(settings)) settings = Object.fromEntries(settings.map(row => [row.key, row.value]));
+  const state = {
+    enabled: settings.dm_wallpaper_enabled === '1',
+    url: settings.dm_wallpaper_url || '',
+    opacity: Number(settings.dm_wallpaper_opacity) || 0.08,
+    size: Number(settings.dm_wallpaper_size) || 360,
+    tint: settings.dm_wallpaper_tint || 'light'
+  };
+  main.innerHTML = `
+    <div class="adm-section-header"><div class="adm-section-title"><div class="icon-pill"><i class="fas fa-panorama"></i></div> Sohbet Görünümü</div></div>
+    <div class="chat-look-grid">
+      <section class="card">
+        <div class="card-header"><span><i class="fas fa-shapes"></i> Arka plan deseni</span>
+          <label class="chat-look-switch"><input type="checkbox" id="cl-enabled" ${state.enabled ? 'checked' : ''} /><span>Etkin</span></label></div>
+        <div class="card-body" style="display:grid;gap:16px">
+          <p style="color:var(--text2);font-size:13px;line-height:1.6;margin:0">WhatsApp'taki gibi tüm sohbetlerin arkasında görünen tekrarlı desen. Şeffaf arka planlı PNG/WEBP önerilir (ör. 600×600 çizgi deseni). Telefonda ve bilgisayarda ekran genişliğine göre otomatik ölçeklenir.</p>
+          <div class="form-group"><label>Desen görseli</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <input id="cl-url" type="url" placeholder="https://… veya yükleyin" value="${escHtml(state.url)}" style="flex:1 1 260px" />
+              <label class="btn btn-outline" style="margin:0;text-transform:none;letter-spacing:0;font-size:13px"><i class="fas fa-upload"></i> Yükle<input type="file" id="cl-file" accept="image/png,image/webp,image/jpeg,image/gif" hidden /></label>
+              <button type="button" class="btn btn-ghost" id="cl-clear"><i class="fas fa-xmark"></i> Kaldır</button>
+            </div>
+          </div>
+          <div class="form-group"><label>Görünürlük · <span id="cl-opacity-val">${Math.round(state.opacity * 100)}%</span></label><input id="cl-opacity" type="range" min="2" max="60" value="${Math.round(state.opacity * 100)}" /></div>
+          <div class="form-group"><label>Desen boyutu · <span id="cl-size-val">${state.size}px</span> <small style="text-transform:none;letter-spacing:0;color:var(--text3)">(telefonda otomatik küçülür)</small></label><input id="cl-size" type="range" min="120" max="900" step="10" value="${state.size}" /></div>
+          <div class="form-group"><label>Desen rengi</label>
+            <select id="cl-tint">
+              <option value="light" ${state.tint === 'light' ? 'selected' : ''}>Açık (koyu temalarda önerilen)</option>
+              <option value="accent" ${state.tint === 'accent' ? 'selected' : ''}>Tema rengine boya</option>
+              <option value="original" ${state.tint === 'original' ? 'selected' : ''}>Görselin kendi rengi</option>
+            </select></div>
+          <button type="button" class="btn btn-primary" id="cl-save" style="justify-content:center"><i class="fas fa-floppy-disk"></i> Kaydet ve herkese uygula</button>
+          <div id="cl-msg" style="font-size:13px;min-height:18px"></div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-header"><span><i class="fas fa-mobile-screen"></i> Canlı önizleme</span></div>
+        <div class="card-body"><div class="chat-look-phone" id="cl-preview">
+          <div class="chat-look-pattern"></div>
+          <div class="chat-look-bubble is-in">Selam! Yeni desen nasıl? 👋</div>
+          <div class="chat-look-bubble is-out">Çok iyi görünüyor 😍</div>
+          <div class="chat-look-bubble is-in">Telefonda da aynı mı?</div>
+          <div class="chat-look-bubble is-out">Evet, ekrana göre ölçekleniyor</div>
+        </div></div>
+      </section>
+    </div>`;
+  const $id = id => document.getElementById(id);
+  const preview = $id('cl-preview');
+  const paint = () => {
+    const pattern = preview.querySelector('.chat-look-pattern');
+    const on = $id('cl-enabled').checked && $id('cl-url').value.trim();
+    const url = $id('cl-url').value.trim();
+    const opacity = Number($id('cl-opacity').value) / 100;
+    const size = Number($id('cl-size').value);
+    const tint = $id('cl-tint').value;
+    $id('cl-opacity-val').textContent = `${Math.round(opacity * 100)}%`;
+    $id('cl-size-val').textContent = `${size}px`;
+    pattern.style.display = on ? 'block' : 'none';
+    pattern.style.opacity = String(opacity);
+    const cssUrl = `url("${url.replace(/"/g, '%22')}")`;
+    pattern.style.backgroundImage = tint === 'original' ? cssUrl : 'none';
+    pattern.style.backgroundColor = tint === 'original' ? 'transparent' : (tint === 'accent' ? 'var(--red2)' : '#ffffff');
+    pattern.style.webkitMaskImage = tint === 'original' ? 'none' : cssUrl;
+    pattern.style.maskImage = tint === 'original' ? 'none' : cssUrl;
+    const scaled = `${Math.round(size * 0.6)}px`;
+    pattern.style.backgroundSize = scaled;
+    pattern.style.webkitMaskSize = scaled;
+    pattern.style.maskSize = scaled;
+  };
+  ['cl-enabled', 'cl-url', 'cl-opacity', 'cl-size', 'cl-tint'].forEach(id => $id(id).addEventListener('input', paint));
+  $id('cl-enabled').addEventListener('change', paint);
+  $id('cl-clear').addEventListener('click', () => { $id('cl-url').value = ''; paint(); });
+  $id('cl-file').addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const msg = $id('cl-msg');
+    if (file.size > 5 * 1024 * 1024) { msg.style.color = 'var(--red2)'; msg.textContent = 'Desen en fazla 5 MB olabilir.'; return; }
+    msg.style.color = 'var(--text2)'; msg.textContent = 'Yükleniyor…';
+    try {
+      const form = new FormData();
+      form.append('image', file);
+      const response = await fetch('/api/admin/upload-chat-wallpaper', { method: 'POST', headers: { 'X-Admin-Token': adminToken }, body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Desen yüklenemedi');
+      $id('cl-url').value = result.url;
+      $id('cl-enabled').checked = true;
+      msg.textContent = 'Yüklendi. Kaydet ile herkese uygula.';
+      paint();
+    } catch (error) { msg.style.color = 'var(--red2)'; msg.textContent = error.message; }
+    event.target.value = '';
+  });
+  $id('cl-save').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const msg = $id('cl-msg');
+    button.disabled = true;
+    const values = [
+      ['dm_wallpaper_url', $id('cl-url').value.trim()],
+      ['dm_wallpaper_opacity', String(Number($id('cl-opacity').value) / 100)],
+      ['dm_wallpaper_size', String(Number($id('cl-size').value))],
+      ['dm_wallpaper_tint', $id('cl-tint').value],
+      ['dm_wallpaper_enabled', $id('cl-enabled').checked && $id('cl-url').value.trim() ? '1' : '0']
+    ];
+    try {
+      for (const [key, value] of values) {
+        const response = await fetch('/api/admin/settings', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken }, body: JSON.stringify({ key, value }) });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error || 'Ayar kaydedilemedi');
+      }
+      msg.style.color = 'var(--green)';
+      msg.textContent = '✓ Kaydedildi. Kullanıcılar sohbeti açtığında yeni desen görünür.';
+      toast('Sohbet görünümü kaydedildi');
+    } catch (error) { msg.style.color = 'var(--red2)'; msg.textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+  paint();
 }
