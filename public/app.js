@@ -1116,12 +1116,19 @@ function updateLyricsHighlight(root, time) {
   }
 }
 
-function apiFormWithTimeout(path, formData, timeout = 120000) {
+function apiFormWithTimeout(path, formData, timeout = 120000, onProgress = null) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api' + path);
     if (currentToken) xhr.setRequestHeader('Authorization', 'Bearer ' + currentToken);
     xhr.timeout = timeout;
+    if (typeof onProgress === 'function') {
+      xhr.upload.addEventListener('progress', event => {
+        if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+      });
+      // Dosya sunucuya ulaştı, artık işleniyor
+      xhr.upload.addEventListener('load', () => onProgress(100));
+    }
     xhr.onload = () => {
       let data = {};
       try { data = JSON.parse(xhr.responseText || '{}'); } catch { reject(new Error('Sunucudan geçersiz yanıt geldi.')); return; }
@@ -10627,6 +10634,7 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         let uploadTarget = '/api/upload-video';
         let uploadUrl = '';
         let uploadContentType = videoFile.type || 'video/mp4';
+        let useSignedUpload = false;
         if (isReals) {
           const extensionType = {
             '.mp4': 'video/mp4', '.m4v': 'video/x-m4v', '.mov': 'video/quicktime',
@@ -10634,9 +10642,18 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           }[videoFile.name.toLowerCase().match(/\.[^.]+$/)?.[0]];
           uploadContentType = videoFile.type.startsWith('video/') ? videoFile.type : extensionType;
           if (!uploadContentType) throw new Error('Bu video biçimi desteklenmiyor. MP4, MOV veya WebM dosyası seçin.');
-          const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: uploadContentType, content_length: videoFile.size }) });
-          uploadTarget = signed.public_url;
-          uploadUrl = signed.upload_url;
+          try {
+            const signed = await api('/reals/upload-url', { method: 'POST', body: JSON.stringify({ filename: videoFile.name, content_type: uploadContentType, content_length: videoFile.size }) });
+            uploadTarget = signed.public_url;
+            uploadUrl = signed.upload_url;
+            useSignedUpload = true;
+          } catch (signedError) {
+            // R2 yapılandırılmamışsa doğrudan sunucuya yükle (Cloudinary / yerel depolama)
+            console.warn('[reals] İmzalı yükleme kullanılamıyor, sunucu üzerinden yükleniyor:', signedError.message);
+            uploadTarget = '/api/upload-video';
+            uploadUrl = '';
+            useSignedUpload = false;
+          }
         }
         const xhr = new XMLHttpRequest();
         xhr.upload.addEventListener('progress', e => {
@@ -10649,20 +10666,20 @@ async function showNewVideoModal(existing = null, forceReals = false) {
         const uploadResult = await new Promise((resolve, reject) => {
           xhr.addEventListener('load', () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-              if (isReals) return resolve({});
+              if (useSignedUpload) return resolve({});
               try { return resolve(JSON.parse(xhr.responseText)); } catch { return reject(new Error('Yanıt geçersiz')); }
             }
             try { const data = JSON.parse(xhr.responseText); reject(new Error(data.error || 'Yükleme hatası')); } catch { reject(new Error('Yükleme hatası')); }
           });
           xhr.addEventListener('error', () => reject(new Error('Yükleme hatası')));
           xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
-          xhr.open(isReals ? 'PUT' : 'POST', isReals ? uploadUrl : uploadTarget);
+          xhr.open(useSignedUpload ? 'PUT' : 'POST', useSignedUpload ? uploadUrl : uploadTarget);
           xhr.timeout = 60 * 60 * 1000;
-          if (isReals) xhr.setRequestHeader('Content-Type', uploadContentType);
+          if (useSignedUpload) xhr.setRequestHeader('Content-Type', uploadContentType);
           else xhr.setRequestHeader('Authorization', 'Bearer ' + (localStorage.getItem('token') || ''));
-          xhr.send(isReals ? videoFile : (() => { const fd = new FormData(); fd.append('file', videoFile); return fd; })());
+          xhr.send(useSignedUpload ? videoFile : (() => { const fd = new FormData(); fd.append('file', videoFile); return fd; })());
         });
-        videoUrl = isReals ? uploadTarget : uploadResult.url;
+        videoUrl = useSignedUpload ? uploadTarget : uploadResult.url;
       }
       if (bannerFile) {
         const fd = new FormData(); fd.append('file', bannerFile);
@@ -12125,11 +12142,11 @@ async function renderProfile(app, username) {
 
       function renderMenu(fs) {
         const items = buildMenuItems(fs);
-        moreMenu.innerHTML = `<div class="profile-menu-sheet-header"><span class="profile-menu-sheet-grabber" aria-hidden="true"></span><strong>Profil seçenekleri</strong><button type="button" class="profile-menu-sheet-close" aria-label="Menüyü kapat"><i class="fas fa-times"></i></button></div>${items.map(item =>
+        moreMenu.innerHTML = `<div class="profile-menu-sheet-header"><span class="profile-menu-sheet-grabber" aria-hidden="true"></span><strong>Profil seçenekleri</strong><button type="button" class="profile-menu-sheet-close" aria-label="Menüyü kapat"><i class="fas fa-times"></i></button></div><div class="profile-menu-sheet-list">${items.map(item =>
           `<div class="profile-menu-item${item.danger ? ' danger' : ''}" role="menuitem" tabindex="0" data-action="${item.action}" data-id="${item.id || ''}" style="display:flex;align-items:center;gap:12px;padding:14px 16px;cursor:pointer;transition:background 0.15s;font-size:14px;color:${item.danger ? 'var(--accent-red2)' : 'var(--text-primary)'};border-bottom:1px solid var(--border)">
             <i class="fas ${item.icon}" style="width:18px;text-align:center;flex-shrink:0"></i> <span>${item.label}</span>
           </div>`
-        ).join('')}`;
+        ).join('')}</div>`;
         moreMenu.querySelector('.profile-menu-sheet-close')?.addEventListener('click', closeProfileMenuUI);
         // Son item'ın border'ını kaldır
         const lastItem = moreMenu.querySelector('.profile-menu-item:last-child');
@@ -22923,13 +22940,71 @@ function showStoryUploadModal() {
       const duration = $('#story-duration').value;
       const filter = selectedStoryFilters[0] || selectedStoryDefaultFilter;
       let postedCount = 0;
+
+      // ----- Gerçek yükleme ilerlemesi -----
+      let progressBox = document.getElementById('story-upload-progress');
+      if (!progressBox) {
+        progressBox = document.createElement('div');
+        progressBox.id = 'story-upload-progress';
+        progressBox.className = 'story-upload-progress';
+        $('#story-error').insertAdjacentElement('beforebegin', progressBox);
+      }
+      const setProgress = (percent, label) => {
+        const known = Number.isFinite(percent);
+        const value = known ? Math.max(0, Math.min(100, Math.round(percent))) : 0;
+        progressBox.hidden = false;
+        progressBox.classList.toggle('is-indeterminate', !known);
+        progressBox.innerHTML = `<div class="story-upload-progress-head"><span>${escHtml(label)}</span><strong>${known ? '%' + value : ''}</strong></div><div class="story-upload-progress-track"><div class="story-upload-progress-bar" style="width:${known ? value : 100}%"></div></div>`;
+      };
+      const hideProgress = () => { progressBox.hidden = true; progressBox.classList.remove('is-indeterminate'); };
+      const putWithProgress = (url, uploadFile, contentType, label) => new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', url);
+        xhr.timeout = 60 * 60 * 1000;
+        xhr.setRequestHeader('Content-Type', contentType);
+        xhr.upload.addEventListener('progress', event => {
+          if (event.lengthComputable) setProgress((event.loaded / event.total) * 100, label);
+        });
+        xhr.addEventListener('load', () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+          else reject(new Error(`Hikaye videosu yüklenemedi (${xhr.status}).`));
+        });
+        xhr.addEventListener('error', () => reject(new Error('Yükleme sırasında bağlantı hatası oluştu.')));
+        xhr.addEventListener('timeout', () => reject(new Error('Yükleme zaman aşımına uğradı. Dosya boyutunu küçültüp tekrar deneyin.')));
+        xhr.send(uploadFile);
+      });
+
       try {
         const file = files[0];
         if (file.type.startsWith('video/')) {
-          const signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type, content_length: file.size }) });
-          const response = await fetch(signed.upload_url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-          if (!response.ok) throw new Error('Hikaye videosu R2’ye yüklenemedi.');
-          await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption, duration_hours: duration, media_filter: filter, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0, close_friends_only: $('#story-close-friends').checked }) });
+          setProgress(null, 'Video hazırlanıyor');
+          let signed = null;
+          try {
+            signed = await api('/stories/upload-url', { method: 'POST', body: JSON.stringify({ filename: file.name, content_type: file.type, content_length: file.size }) });
+          } catch (signedError) {
+            // R2 yapılandırılmamışsa videoyu doğrudan sunucuya yükle
+            console.warn('[hikaye] İmzalı yükleme kullanılamıyor, sunucu üzerinden yükleniyor:', signedError.message);
+            signed = null;
+          }
+          if (signed) {
+            await putWithProgress(signed.upload_url, file, file.type, 'Video yükleniyor');
+            setProgress(100, 'Hikaye oluşturuluyor');
+            await api('/stories/from-url', { method: 'POST', body: JSON.stringify({ media_url: signed.public_url, caption, duration_hours: duration, media_filter: filter, song_id: selectedSong?.id || null, song_start_seconds: $('#story-song-start').value || 0, close_friends_only: $('#story-close-friends').checked }) });
+          } else {
+            const form = new FormData();
+            form.append('media', file);
+            form.append('caption', caption);
+            form.append('duration_hours', duration);
+            form.append('media_filter', filter);
+            form.append('close_friends_only', $('#story-close-friends').checked);
+            if (selectedSong) {
+              form.append('song_id', selectedSong.id);
+              form.append('song_start_seconds', $('#story-song-start').value || 0);
+            }
+            await apiFormWithTimeout('/stories', form, 60 * 60 * 1000, percent => {
+              setProgress(percent, percent >= 100 ? 'Video işleniyor' : 'Video yükleniyor');
+            });
+          }
           postedCount = 1;
         } else {
           for (const [index, imageFile] of files.entries()) {
@@ -22943,16 +23018,22 @@ function showStoryUploadModal() {
               form.append('song_id', selectedSong.id);
               form.append('song_start_seconds', $('#story-song-start').value || 0);
             }
-            await apiFormWithTimeout('/stories', form);
+            const label = files.length > 1 ? `Fotoğraf ${index + 1}/${files.length} yükleniyor` : 'Fotoğraf yükleniyor';
+            setProgress(0, label);
+            await apiFormWithTimeout('/stories', form, 10 * 60 * 1000, percent => {
+              setProgress(percent, percent >= 100 ? 'Hikaye oluşturuluyor' : label);
+            });
             postedCount++;
           }
         }
+        hideProgress();
         storyPreviewUrls.forEach(URL.revokeObjectURL);
         hideModal();
         toast(postedCount > 1 ? `${postedCount} hikaye paylaşıldı.` : 'Hikaye paylaşıldı');
         document.querySelectorAll('#stories-bar,#home-stories-bar').forEach(loadStoriesBar);
       }
       catch (error) {
+        hideProgress();
         submitButton.disabled = false;
         submitButton.innerHTML = 'Paylaş';
         if (postedCount && postedCount < files.length) {
