@@ -2259,100 +2259,6 @@ body.cgps-open { overflow: hidden; }
   .dm-photo-tools { flex-wrap: wrap; gap: 6px; }
 }
 
-@media (max-width: 900px) {
-/* =========================================================================
-   PROFİL SAYFASI — Instagram düzeni: avatar solda, sayaçlar sağda, sade
-   ========================================================================= */
-.profile-page .profile-header {
-  display: grid !important;
-  grid-template-columns: auto 1fr;
-  grid-template-areas: "avatar stats" "bio bio" "actions actions";
-  align-items: center; gap: 14px 18px;
-  padding: 16px 14px 14px !important;
-  border: 0 !important; border-radius: 0 !important;
-  background: none !important; box-shadow: none !important;
-  border-bottom: 1px solid rgba(255,255,255,.08) !important;
-}
-.profile-page .profile-avatar-wrap { grid-area: avatar; width: 84px !important; height: 84px !important; min-width: 84px !important; max-width: 84px !important; flex-basis: 84px !important; margin: 0 !important; }
-.profile-page .profile-stats {
-  grid-area: stats; margin: 0 !important;
-  display: grid !important; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-  gap: 4px; align-items: start; text-align: center; overflow-x: auto; scrollbar-width: none;
-}
-.profile-page .profile-stats::-webkit-scrollbar { display: none; }
-.profile-page .profile-stat {
-  display: flex !important; flex-direction: column; align-items: center; gap: 1px;
-  min-width: 0; padding: 4px 2px !important; border: 0 !important; background: none !important; cursor: pointer;
-}
-.profile-page .profile-stat-num { font-size: 17px !important; font-weight: 800 !important; color: var(--text-primary, #fff) !important; line-height: 1.2; }
-.profile-page .profile-stat-label { font-size: 12.5px !important; color: var(--text-secondary, #9a9a9a) !important; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-/* Ad, kullanıcı adı, biyografi: solda, dar aralıklı */
-.profile-page .profile-identity, .profile-page .profile-bio-wrap, .profile-page .profile-header > :not(.profile-avatar-wrap):not(.profile-stats):not(.profile-actions) { grid-area: bio; text-align: left !important; }
-.profile-page .profile-header h1, .profile-page .profile-name { font-size: 16px !important; font-weight: 700 !important; margin: 0 !important; text-align: left !important; }
-.profile-page .profile-username { font-size: 14px !important; color: var(--text-secondary, #9a9a9a) !important; text-align: left !important; }
-.profile-page .profile-bio { font-size: 14px !important; line-height: 1.45; text-align: left !important; margin: 4px 0 0 !important; }
-/* Butonlar: tam genişlik, eşit */
-.profile-page .profile-actions { grid-area: actions; display: flex !important; gap: 8px; margin: 2px 0 0 !important; width: 100%; }
-.profile-page .profile-actions > button:not(#profile-more-btn):not(#profile-more-backdrop) { flex: 1 1 0; min-width: 0; height: 36px; border-radius: 10px !important; font-size: 14px !important; font-weight: 700 !important; }
-.profile-page .profile-actions #profile-more-btn { flex: 0 0 auto; width: 40px; height: 36px; border-radius: 10px !important; }
-/* Sekmeler: Instagram gibi ikon şeridi */
-.profile-page .profile-tabs { display: flex !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-bottom: 1px solid rgba(255,255,255,.08) !important; background: none !important; border-radius: 0 !important; overflow-x: auto; scrollbar-width: none; }
-.profile-page .profile-tabs::-webkit-scrollbar { display: none; }
-.profile-page .profile-tabs .tab { flex: 1 1 0; min-width: 54px; height: 46px; border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; color: var(--text-muted, #8a8a8a) !important; font-size: 17px; }
-.profile-page .profile-tabs .tab.active { color: var(--text-primary, #fff) !important; border-bottom-color: var(--text-primary, #fff) !important; background: none !important; }
-@media (max-width: 420px) {
-  .profile-page .profile-avatar-wrap { width: 72px !important; height: 72px !important; min-width: 72px !important; max-width: 72px !important; }
-
-}
-  .profile-page .profile-stat-num { font-size: 15.5px !important; }
-  .profile-page .profile-stat-label { font-size: 11.5px !important; }
-}
-/* Profil arka planı: sadece üst bant, altında okunurluk için karartma */
-.profile-page.has-profile-background { position: relative; isolation: isolate; background: none !important; border: 0 !important; padding: 0 !important; }
-.profile-page.has-profile-background::before {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 190px; z-index: -2;
-  background-image: var(--profile-background-image); background-size: cover; background-position: center;
-}
-.profile-page.has-profile-background::after {
-  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 190px; z-index: -1;
-  background: linear-gradient(180deg, rgba(8,8,10,.55) 0%, rgba(8,8,10,.82) 55%, var(--bg-primary, #0b0b0b) 100%);
-}
-.profile-page.has-profile-background .profile-header,
-.profile-page.has-profile-background .profile-tabs,
-.profile-page.has-profile-background .card,
-.profile-page.has-profile-background .profile-archiveable-card { background: transparent !important; backdrop-filter: none !important; }
-.profile-page.has-profile-background .profile-avatar-wrap { box-shadow: 0 0 0 3px var(--bg-primary, #0b0b0b); border-radius: 50%; }
-/* Kimlik bilgileri sola */
-.profile-page .profile-header .profile-card-identity,
-.profile-page .profile-header .user-identity,
-.profile-page .profile-header .user-display-identity { align-items: flex-start !important; text-align: left !important; }
-.profile-page .profile-header > div:not(.profile-avatar-wrap):not(.profile-stats):not(.profile-actions) { text-align: left !important; }
-/* Rozet düğmesi sayaçların üstüne binmesin */
-.profile-page .profile-header .profile-badge-button,
-.profile-page .profile-header [class*="badge"][class*="btn"],
-.profile-page .profile-header .profile-badges-trigger { position: static !important; grid-area: avatar; justify-self: end; align-self: end; margin: 0 !important; }
-/* Profil: kimlik bloklarını sola hizala, rozet düğmesini sayaçlardan ayır */
-.profile-page .profile-info { grid-area: bio; min-width: 0; }
-.profile-page .profile-info > *,
-.profile-page .profile-username,
-.profile-page .profile-username * { text-align: left !important; justify-content: flex-start !important; align-items: flex-start !important; }
-.profile-page .profile-username .user-display-identity,
-.profile-page .profile-username .user-identity,
-.profile-page .profile-username .user-badge { display: flex !important; flex-direction: column; align-items: flex-start !important; gap: 1px; }
-.profile-page .profile-username strong { font-size: 16px !important; font-weight: 700 !important; }
-.profile-page .profile-username small { font-size: 14px !important; color: var(--text-secondary, #9a9a9a) !important; }
-.profile-page .profile-header-actions {
-  position: static !important; grid-area: avatar; justify-self: end; align-self: start;
-  display: flex; gap: 6px; width: auto !important; margin: 0 !important;
-}
-.profile-page .profile-header { grid-template-areas: "avatar badges" "bio bio" !important; grid-template-columns: auto 1fr !important; align-items: start !important; }
-.profile-page .profile-header-actions { grid-area: badges; }
-.profile-page .profile-stats { grid-area: auto; width: 100%; margin-top: 10px !important; }
-.profile-page .profile-actions { grid-area: auto; }
-.profile-page .profile-stats { padding-right: 4px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
-.profile-page .profile-stat { scroll-snap-align: start; }
-@media (max-width: 440px) { .profile-page .profile-stat-num { font-size: 15px !important; } .profile-page .profile-stat-label { font-size: 11px !important; } }
-
 /* =========================================================================
    PERFORMANS — telefonda kasmayı azaltan ayarlar
    ========================================================================= */
@@ -2536,3 +2442,129 @@ body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
 }
 .song-detail-cover-wrap.has-vinyl .song-detail-cover-ph { position: relative; z-index: 2; width: 100%; height: 100%; display: grid; place-items: center; }
 @media (min-width: 761px) { .song-detail-cover-wrap.has-vinyl { width: 240px; height: 240px; } }
+
+/* =========================================================================
+   PROFİL AVATARI — her kırılımda tam daire
+   Kolon düzeninde flex-basis yüksekliği belirlediği için width/height
+   çakışıyor ve avatar elips görünüyordu.
+   ========================================================================= */
+@media (max-width: 600px) {
+  .profile-header > .profile-avatar-wrap {
+    flex-basis: auto !important;
+    height: auto !important;
+    aspect-ratio: 1 / 1 !important;
+  }
+}
+
+/* =========================================================================
+   GİRİŞ / KAYIT — masaüstünde sol menü boşluğu kadar sağa kaymasın
+   Menü auth sayfasında gizleniyor ama #app'teki 238px'lik sol boşluk
+   kalıyordu.
+   ========================================================================= */
+@media (min-width: 1000px) {
+  body.auth-route #app,
+  body.auth-route #site-footer { margin-left: 0 !important; }
+}
+
+/* =========================================================================
+   YORUMLARDA GIF
+   ========================================================================= */
+.comment-gif-btn {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 30px; min-width: 38px; padding: 0 9px;
+  border: 1px solid rgba(255,255,255,.16); border-radius: 9px;
+  background: rgba(255,255,255,.05); color: #d8b87c;
+  font: 800 11px/1 Inter, system-ui, sans-serif; letter-spacing: .5px;
+  cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .1s ease;
+}
+.comment-gif-btn:hover { background: rgba(216,184,124,.14); border-color: rgba(216,184,124,.45); }
+.comment-gif-btn:active { transform: scale(.94); }
+.comment-compose-footer { display: flex; align-items: center; gap: 8px; }
+.comment-compose-footer #comment-char-count { margin-right: auto; }
+.comment-form .comment-gif-btn { align-self: flex-end; margin-bottom: 2px; }
+
+/* Gönderme simgesi (eski "Paylaş" yazısı yerine) */
+.ig-comment-form .ig-comment-send {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; min-width: 40px; height: 40px; padding: 0;
+  border-radius: 50%; color: #4aa3ff; font-size: 16px;
+}
+.ig-comment-form .ig-comment-send:not(:disabled):hover { background: rgba(74,163,255,.14); }
+.ig-comment-form .comment-gif-btn { height: 32px; min-width: 36px; }
+
+/* Yorum içindeki GIF/görsel */
+.comment-content .inline-image-link,
+.ig-comment-text .inline-image-link {
+  display: block; max-width: 230px; margin-top: 6px;
+  border-radius: 14px; overflow: hidden; line-height: 0;
+}
+.comment-content .inline-image-link img,
+.ig-comment-text .inline-image-link img {
+  display: block; width: 100%; height: auto; border-radius: 14px;
+}
+
+/* =========================================================================
+   UYGULAMA ŞİFRESİ — ayar kartı
+   ========================================================================= */
+.app-lock-toggle { display: flex; align-items: flex-start; gap: 11px; margin: 4px 0 16px; cursor: pointer; }
+.app-lock-toggle input { width: 18px; height: 18px; margin-top: 2px; accent-color: #c9a96e; flex: 0 0 auto; }
+.app-lock-toggle span { display: grid; gap: 3px; }
+.app-lock-toggle small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.app-lock-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.app-lock-presets button {
+  height: 36px; padding: 0 13px;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-card2); color: var(--text-secondary);
+  font: 600 12.5px/1 inherit; cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.app-lock-presets button:hover { border-color: rgba(201,169,110,.5); color: var(--text-primary); }
+.app-lock-presets button.is-active {
+  border-color: #c9a96e; color: #f1e4cb;
+  background: rgba(201,169,110,.16);
+}
+.app-lock-custom { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
+@media (max-width: 480px) { .app-lock-custom { grid-template-columns: 1fr; } }
+#app-lock-summary { margin: 10px 0 4px; }
+
+/* =========================================================================
+   UYGULAMA ŞİFRESİ — tam ekran kilit
+   ========================================================================= */
+body.app-lock-active { overflow: hidden; }
+.app-lock-gate {
+  position: fixed; z-index: 2147483000; inset: 0;
+  display: grid; place-items: center; padding: 22px;
+  background: rgba(4,4,6,.93);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+}
+.app-lock-gate-panel {
+  box-sizing: border-box; width: 100%; max-width: 380px;
+  display: grid; gap: 12px; justify-items: center; text-align: center;
+  padding: 30px 24px 24px;
+  border: 1px solid #232326; border-radius: 22px;
+  background: rgba(17,17,19,.96);
+  box-shadow: 0 28px 70px rgba(0,0,0,.6);
+}
+.app-lock-gate-icon {
+  display: grid; place-items: center; width: 54px; height: 54px;
+  border-radius: 50%; background: rgba(201,169,110,.16); color: #d8b87c; font-size: 21px;
+}
+.app-lock-gate-panel strong { font-size: 18px; color: #f1f1f1; }
+.app-lock-gate-panel p { margin: 0; color: #8b8b8b; font-size: 13.5px; line-height: 1.5; }
+.app-lock-gate-panel input {
+  box-sizing: border-box; width: 100%; height: 46px; padding: 0 14px;
+  border: 1px solid #2a2a2e; border-radius: 12px;
+  background: #1a1a1d; color: #eee; font-size: 15px;
+}
+.app-lock-gate-panel input:focus {
+  outline: none; border-color: #c9a96e;
+  box-shadow: 0 0 0 3px rgba(201,169,110,.16);
+}
+.app-lock-gate-panel .btn-primary { width: 100%; min-height: 46px; font-weight: 700; }
+.app-lock-gate-error { min-height: 18px; color: #ff6b6b; font-size: 13px; }
+.app-lock-gate-logout {
+  border: 0; background: none; color: #8b8b8b;
+  font: 600 13px/1 inherit; text-decoration: underline; cursor: pointer;
+}
+.app-lock-gate-logout:hover { color: #c6c6c6; }

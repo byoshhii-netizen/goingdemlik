@@ -1018,7 +1018,10 @@ async function api(path, options = {}) {
     const text = await res.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
-    if (!res.ok) { const error = new Error(data.error || 'Hata'); error.data = data; throw error; }
+    if (!res.ok) {
+      if (res.status === 423 && data.app_lock_required) { try { showAppLockGate(data); } catch { /* yoksay */ } }
+      const error = new Error(data.error || 'Hata'); error.data = data; throw error;
+    }
     if (canCache && requestCacheVersion === routeDataCacheVersion) {
       routeDataCache.set(cacheKey, { data: cloneApiData(data), expiresAt: Date.now() + ROUTE_DATA_CACHE_MS });
       if (routeDataCache.size > 40) routeDataCache.delete(routeDataCache.keys().next().value);
@@ -3239,7 +3242,7 @@ async function renderRealsFeed(app, initialId = null) {
       <span class="ig-sheet-grabber" aria-hidden="true"></span>
       <header class="ig-comments-header"><strong>Yorumlar</strong><button type="button" class="ig-comments-close" aria-label="Yorumları kapat"><i class="fas fa-xmark"></i></button></header>
       <div class="ig-comments-list"><div class="ig-comments-loading"><span class="ig-reels-spinner"></span></div></div>
-      ${currentUser ? `<form class="ig-comment-form">${avatarImg(currentUser, 'ig-comment-me')}<textarea maxlength="2000" rows="1" placeholder="Yorum ekle..." aria-label="Yorum yaz" enterkeyhint="send"></textarea><button type="submit" aria-label="Yorumu gönder" disabled>Paylaş</button></form>` : '<div class="ig-comment-login"><a href="/giris" data-link>Yorum yapmak için giriş yap</a></div>'}
+      ${currentUser ? `<form class="ig-comment-form">${avatarImg(currentUser, 'ig-comment-me')}<textarea maxlength="2000" rows="1" placeholder="Yorum ekle..." aria-label="Yorum yaz" enterkeyhint="send"></textarea><button type="button" class="comment-gif-btn ig-comment-gif" aria-label="GIF ara ve gönder" title="GIF">GIF</button><button type="submit" class="ig-comment-send" aria-label="Yorumu gönder" title="Gönder" disabled><i class="fas fa-paper-plane" aria-hidden="true"></i></button></form>` : '<div class="ig-comment-login"><a href="/giris" data-link>Yorum yapmak için giriş yap</a></div>'}
     </section>`;
     document.body.appendChild(sheet);
     root.classList.add('has-sheet');
@@ -3346,20 +3349,23 @@ async function renderRealsFeed(app, initialId = null) {
         if (icon) icon.className = `${result.liked ? 'fas' : 'far'} fa-heart`;
       } catch (error) { toast(error.message, 'error'); } finally { likeButton.disabled = false; }
     });
-    const sendComment = async () => {
-      const content = input?.value.trim();
-      if (!content || submit?.disabled) return;
-      submit.disabled = true;
+    const sendComment = async (override = '') => {
+      const content = String(override || input?.value || '').trim();
+      if (!content) return;
+      if (!override && submit?.disabled) return;
+      if (submit) submit.disabled = true;
       try {
         const result = await api(commentBase + '/comments', { method: 'POST', body: JSON.stringify({ content }) });
         comments = await api(commentBase + '/comments');
         renderComments(comments);
         updateCount(result.comment_count);
-        input.value = '';
-        input.style.height = 'auto';
+        if (input) { input.value = ''; input.style.height = 'auto'; }
         list.scrollTop = list.scrollHeight;
-      } catch (error) { toast(error.message, 'error'); submit.disabled = false; }
+      } catch (error) { toast(error.message, 'error'); if (submit) submit.disabled = false; throw error; }
     };
+    sheet.querySelector('.ig-comment-gif')?.addEventListener('click', () => {
+      showDmGifPicker(async gif => { await sendComment(gif.url); });
+    });
     sheet.querySelector('.ig-comment-form')?.addEventListener('submit', event => { event.preventDefault(); sendComment(); });
     input?.addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.shiftKey && !matchMedia('(pointer: coarse)').matches) { event.preventDefault(); sendComment(); }
@@ -6457,7 +6463,7 @@ async function renderPoemDetail(app, slug) {
           </div>
            <div class="comment-form" role="form" aria-label="Yorum yaz">
             ${avatarImg(currentUser, 'comment-avatar')}
-             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
+             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000</span><button type="button" class="comment-gif-btn" data-gif-input="#comment-input" data-gif-submit="#comment-submit" title="GIF ara ve gönder" aria-label="GIF ara ve gönder">GIF</button><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
           </div>` : `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>`}
         <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
@@ -6922,7 +6928,7 @@ async function renderForumDetail(app, slug) {
           </div>
            <div class="comment-form" role="form" aria-label="Yorum yaz">
             ${avatarImg(currentUser, 'comment-avatar')}
-             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000</span><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
+             <div class="comment-compose-body"><textarea id="comment-input" maxlength="2000" placeholder="Yorumunu yaz..."></textarea><div class="comment-compose-footer"><span id="comment-char-count">0 / 2.000</span><button type="button" class="comment-gif-btn" data-gif-input="#comment-input" data-gif-submit="#comment-submit" title="GIF ara ve gönder" aria-label="GIF ara ve gönder">GIF</button><button class="btn btn-primary btn-sm" id="comment-submit"><i class="fas fa-paper-plane"></i><span>Gönder</span></button></div></div>
           </div>` : (!currentUser && forum.allow_comments ? `<p class="text-secondary" style="margin-bottom:16px">Yorum yapmak için <a href="/giris" data-link class="auth-link">giriş yapın</a>.</p>` : (!forum.allow_comments ? `<p class="text-muted" style="margin-bottom:16px">Yorumlar kapatılmış.</p>` : ''))}
          <div id="comments-list">${commentTreeHTML(comments)}</div>
       </div>
@@ -10793,7 +10799,7 @@ async function renderVideoDetail(app, slug) {
         </div>
         <div class="video-comments-card">
           <div class="comments-title"><i class="fas fa-comments"></i> Yorumlar (${comments.length})</div>
-          ${currentUser ? `<div class="comment-form"><textarea id="video-comment-input" placeholder="Yorum yaz..."></textarea><button class="btn btn-primary btn-sm" id="video-comment-submit"><i class="fas fa-paper-plane"></i></button></div>` : '<div class="empty-state"><i class="fas fa-sign-in-alt"></i><p>Yorum yapmak için giriş yapın.</p></div>'}
+          ${currentUser ? `<div class="comment-form"><textarea id="video-comment-input" placeholder="Yorum yaz..."></textarea><button type="button" class="comment-gif-btn" data-gif-input="#video-comment-input" data-gif-submit="#video-comment-submit" title="GIF ara ve gönder" aria-label="GIF ara ve gönder">GIF</button><button class="btn btn-primary btn-sm" id="video-comment-submit"><i class="fas fa-paper-plane"></i></button></div>` : '<div class="empty-state"><i class="fas fa-sign-in-alt"></i><p>Yorum yapmak için giriş yapın.</p></div>'}
           <div id="video-comments-list">${comments.map(c => renderVideoComment(c, isOwner)).join('')}</div>
         </div>
       </div>
@@ -12497,7 +12503,39 @@ async function renderSettingsSection(section) {
     return;
   }
   if (section === 'security') {
-    el.innerHTML = `<section class="card security-page">
+    el.innerHTML = `<section class="card security-page app-lock-card">
+      <div class="card-header"><span><i class="fas fa-lock" aria-hidden="true"></i> Uygulama şifresi</span></div>
+      <div class="card-body">
+        <p class="settings-help">Hesabına giriş yapılmış olsa bile, bu şifre girilmeden uygulama kullanılamaz. Başka bir cihazdan giriş yapılırsa o cihazda da ilk adımda bu şifre sorulur.</p>
+        <label class="app-lock-toggle">
+          <input type="checkbox" id="app-lock-enabled" />
+          <span><strong>Uygulama şifresini aç</strong><small>Kapattığında tüm cihazlarda kilit kalkar.</small></span>
+        </label>
+        <div id="app-lock-fields" hidden>
+          <div class="form-group"><label id="app-lock-password-label">Uygulama şifresi</label><input type="password" id="app-lock-password" autocomplete="new-password" maxlength="64" placeholder="En az 4 karakter" /></div>
+          <div class="form-group"><label>Uygulama şifresi tekrar</label><input type="password" id="app-lock-password2" autocomplete="new-password" maxlength="64" placeholder="Tekrar yaz" /></div>
+          <div class="form-group">
+            <label>Şifre kaç günde bir sorulsun?</label>
+            <div class="app-lock-presets" id="app-lock-presets">
+              <button type="button" data-unit="day" data-value="3">3 günde bir</button>
+              <button type="button" data-unit="day" data-value="7">7 günde bir</button>
+              <button type="button" data-unit="day" data-value="14">14 günde bir</button>
+              <button type="button" data-unit="day" data-value="30">30 günde bir</button>
+              <button type="button" data-custom="1">Siz belirleyin</button>
+            </div>
+          </div>
+          <div class="app-lock-custom" id="app-lock-custom" hidden>
+            <div class="form-group"><label>Birim</label><select id="app-lock-unit"><option value="day">Gün</option><option value="hour">Saat</option></select></div>
+            <div class="form-group"><label id="app-lock-value-label">Değer (1-90 gün)</label><input type="number" id="app-lock-value" min="1" max="90" step="1" value="7" /></div>
+          </div>
+          <p class="form-hint" id="app-lock-summary"></p>
+        </div>
+        <div class="form-group"><label>Hesap şifren</label><input type="password" id="app-lock-account-password" autocomplete="current-password" placeholder="Değişikliği onaylamak için" /></div>
+        <button type="button" class="btn btn-primary" id="app-lock-save"><i class="fas fa-save"></i> Uygulama şifresi ayarını kaydet</button>
+        <div id="app-lock-msg" class="form-error mt-4"></div>
+      </div>
+    </section>
+    <section class="card security-page">
       <div class="card-header"><span><i class="fas fa-mobile-screen" aria-hidden="true"></i> Açık oturumlar</span></div>
       <div class="card-body">
         <p class="settings-help">Hesabının şu anda açık olduğu cihazlar. Tanımadığın bir cihaz görürsen oturumunu kapat.</p>
@@ -12609,6 +12647,115 @@ async function renderSettingsSection(section) {
     });
     loadSessions();
     loadLogins();
+
+    // ----- Uygulama şifresi (app lock) ayarı -----
+    (async () => {
+      const toggle = document.getElementById('app-lock-enabled');
+      const fields = document.getElementById('app-lock-fields');
+      const presets = document.getElementById('app-lock-presets');
+      const custom = document.getElementById('app-lock-custom');
+      const unitSelect = document.getElementById('app-lock-unit');
+      const valueInput = document.getElementById('app-lock-value');
+      const valueLabel = document.getElementById('app-lock-value-label');
+      const summary = document.getElementById('app-lock-summary');
+      const passwordLabel = document.getElementById('app-lock-password-label');
+      const saveButton = document.getElementById('app-lock-save');
+      const msg = document.getElementById('app-lock-msg');
+      if (!toggle || !saveButton) return;
+
+      let state = { enabled: false, has_password: false, interval_unit: 'day', interval_value: 7 };
+      try { state = { ...state, ...(await api('/me/app-lock')) }; } catch { /* varsayılanlarla devam */ }
+      if (!toggle.isConnected) return;
+
+      const describe = (unit, value) => unit === 'hour'
+        ? `Şifre ${value} saatte bir, tüm cihazlarda yeniden sorulur.`
+        : `Şifre ${value} günde bir, tüm cihazlarda yeniden sorulur.`;
+
+      const syncUi = () => {
+        const unit = unitSelect.value === 'hour' ? 'hour' : 'day';
+        const value = Math.min(Math.max(Number.parseInt(valueInput.value, 10) || 1, 1), 90);
+        fields.hidden = !toggle.checked;
+        valueLabel.textContent = unit === 'hour' ? 'Değer (1-90 saat)' : 'Değer (1-90 gün)';
+        summary.textContent = describe(unit, value);
+        passwordLabel.textContent = state.has_password
+          ? 'Yeni uygulama şifresi (değiştirmek istemiyorsan boş bırak)'
+          : 'Uygulama şifresi';
+        const isPreset = unit === 'day' && [3, 7, 14, 30].includes(value) && custom.hidden;
+        presets.querySelectorAll('button').forEach(button => {
+          const matches = button.dataset.custom
+            ? !custom.hidden
+            : (isPreset && button.dataset.unit === unit && Number(button.dataset.value) === value);
+          button.classList.toggle('is-active', Boolean(matches));
+        });
+      };
+
+      toggle.checked = Boolean(state.enabled);
+      unitSelect.value = state.interval_unit === 'hour' ? 'hour' : 'day';
+      valueInput.value = String(state.interval_value || 7);
+      custom.hidden = !(unitSelect.value === 'hour' || ![3, 7, 14, 30].includes(Number(state.interval_value)));
+      syncUi();
+
+      toggle.addEventListener('change', syncUi);
+      unitSelect.addEventListener('change', () => {
+        valueInput.value = String(Math.min(Number.parseInt(valueInput.value, 10) || 1, 90));
+        syncUi();
+      });
+      valueInput.addEventListener('input', syncUi);
+      presets.addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        if (button.dataset.custom) { custom.hidden = false; }
+        else {
+          custom.hidden = true;
+          unitSelect.value = button.dataset.unit;
+          valueInput.value = button.dataset.value;
+        }
+        syncUi();
+      });
+
+      saveButton.addEventListener('click', async () => {
+        const accountPassword = document.getElementById('app-lock-account-password').value;
+        const appPassword = document.getElementById('app-lock-password').value.trim();
+        const appPassword2 = document.getElementById('app-lock-password2').value.trim();
+        const unit = unitSelect.value === 'hour' ? 'hour' : 'day';
+        const value = Number.parseInt(valueInput.value, 10) || 0;
+        msg.style.color = '';
+        if (!accountPassword) { msg.textContent = 'Hesap şifreni gir'; return; }
+        if (toggle.checked) {
+          if (!state.has_password && !appPassword) { msg.textContent = 'Bir uygulama şifresi belirlemelisin'; return; }
+          if (appPassword && (appPassword.length < 4 || appPassword.length > 64)) { msg.textContent = 'Uygulama şifresi 4-64 karakter arasında olmalı'; return; }
+          if (appPassword && appPassword !== appPassword2) { msg.textContent = 'Uygulama şifreleri birbirini tutmuyor'; return; }
+          if (value < 1 || value > 90) { msg.textContent = unit === 'hour' ? 'Saat değeri 1-90 arasında olmalı' : 'Gün değeri 1-90 arasında olmalı'; return; }
+        }
+        saveButton.disabled = true;
+        try {
+          const updated = await api('/me/app-lock', {
+            method: 'PUT',
+            body: JSON.stringify({
+              enabled: toggle.checked,
+              password: accountPassword,
+              app_password: appPassword,
+              interval_unit: unit,
+              interval_value: value
+            })
+          });
+          state = { ...state, ...updated };
+          document.getElementById('app-lock-account-password').value = '';
+          document.getElementById('app-lock-password').value = '';
+          document.getElementById('app-lock-password2').value = '';
+          syncUi();
+          msg.style.color = 'var(--green)';
+          msg.textContent = updated.enabled
+            ? `Uygulama şifresi açık. ${describe(updated.interval_unit, updated.interval_value)}`
+            : 'Uygulama şifresi kapatıldı.';
+        } catch (error) {
+          msg.style.color = '';
+          msg.textContent = error.message || 'Ayar kaydedilemedi';
+        } finally {
+          saveButton.disabled = false;
+        }
+      });
+    })();
     return;
   }
   if (section === 'story-visibility') {
@@ -13001,7 +13148,7 @@ async function renderSettingsSection(section) {
     });
 
   } else if (section === 'two-factor') {
-    let config = { method: 'none', question: '', email: '' };
+    let config = { method: 'none', question: '', email: '', has_pin: false };
     try { config = await api('/profile/2fa'); } catch (e) { el.innerHTML = `<div class="card card-body"><div class="form-error">${escHtml(e.message)}</div></div>`; return; }
     el.innerHTML = `
       <div class="card">
@@ -13015,7 +13162,13 @@ async function renderSettingsSection(section) {
             <option value="none" ${config.method === 'none' ? 'selected' : ''}>Kapalı</option>
             <option value="email" ${config.method === 'email' ? 'selected' : ''} ${currentUser.email ? '' : 'disabled'}>E-posta kodu${currentUser.email ? '' : ' (önce e-posta ekle)'}</option>
             <option value="question" ${config.method === 'question' ? 'selected' : ''}>Güvenlik sorusu</option>
+            <option value="pin" ${config.method === 'pin' ? 'selected' : ''}>PIN ile doğrulama</option>
           </select></div>
+          <div id="s-2fa-pin-fields" style="display:${config.method === 'pin' ? 'block' : 'none'};padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
+            <div class="form-hint" style="margin-bottom:10px">6 haneli bir PIN belirle. Girişte şifreni yazdıktan sonra bu PIN de sorulur; PIN girilmeden hesaba girilemez.</div>
+            <div class="form-group"><label>${config.has_pin ? 'Yeni PIN (değiştirmek istemiyorsan boş bırak)' : '6 haneli PIN'}</label><input type="password" id="s-2fa-pin" inputmode="numeric" autocomplete="new-password" maxlength="6" placeholder="● ● ● ● ● ●" /></div>
+            <div class="form-group"><label>PIN tekrar</label><input type="password" id="s-2fa-pin2" inputmode="numeric" autocomplete="new-password" maxlength="6" placeholder="● ● ● ● ● ●" /></div>
+          </div>
           <div id="s-2fa-question-fields" style="display:${config.method === 'question' ? 'block' : 'none'};padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
             <div class="form-group"><label>Soru</label><select id="s-2fa-question">
               <option value="En sevdiğin yemek nedir?" ${config.question === 'En sevdiğin yemek nedir?' ? 'selected' : ''}>En sevdiğin yemek nedir?</option>
@@ -13048,17 +13201,33 @@ async function renderSettingsSection(section) {
     const syncTwoFactorFields = () => {
       const method = $('#s-2fa-method').value;
       $('#s-2fa-question-fields').style.display = method === 'question' ? 'block' : 'none';
+      $('#s-2fa-pin-fields').style.display = method === 'pin' ? 'block' : 'none';
       $('#s-2fa-email-info').style.display = method === 'email' ? 'block' : 'none';
     };
+    ['#s-2fa-pin', '#s-2fa-pin2'].forEach(selector => {
+      $(selector)?.addEventListener('input', event => {
+        event.target.value = event.target.value.replace(/\D/g, '').slice(0, 6);
+      });
+    });
     $('#s-2fa-method').addEventListener('change', syncTwoFactorFields);
     $('#save-2fa-btn').addEventListener('click', async () => {
       const method = $('#s-2fa-method').value;
       const msg = $('#s-2fa-msg');
+      const pin = $('#s-2fa-pin')?.value.trim() || '';
+      const pin2 = $('#s-2fa-pin2')?.value.trim() || '';
+      if (method === 'pin') {
+        if (!pin && !config.has_pin) { msg.style.color = ''; msg.textContent = '6 haneli bir PIN belirlemelisin'; return; }
+        if (pin && !/^\d{6}$/.test(pin)) { msg.style.color = ''; msg.textContent = 'PIN tam 6 rakamdan oluşmalıdır'; return; }
+        if (pin && pin !== pin2) { msg.style.color = ''; msg.textContent = 'PIN alanları birbirini tutmuyor'; return; }
+      }
       try {
-        const updated = await api('/profile/2fa', { method: 'PUT', body: JSON.stringify({ method, question: $('#s-2fa-question')?.value, answer: $('#s-2fa-answer')?.value, password: $('#s-2fa-password').value }) });
+        const updated = await api('/profile/2fa', { method: 'PUT', body: JSON.stringify({ method, question: $('#s-2fa-question')?.value, answer: $('#s-2fa-answer')?.value, pin, password: $('#s-2fa-password').value }) });
         msg.style.color = 'var(--green)'; msg.textContent = '2AD ayarın güncellendi';
         if (currentUser) { currentUser.two_factor_method = updated.method; currentUser.two_factor_question = updated.question; }
+        config.has_pin = Boolean(updated.has_pin);
         $('#s-2fa-password').value = ''; if ($('#s-2fa-answer')) $('#s-2fa-answer').value = '';
+        if ($('#s-2fa-pin')) $('#s-2fa-pin').value = '';
+        if ($('#s-2fa-pin2')) $('#s-2fa-pin2').value = '';
       } catch (e) { msg.style.color = ''; msg.textContent = e.message; }
     });
     let emailChallenge = '';
@@ -14016,13 +14185,19 @@ function renderLogin(app) {
     try {
       const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) });
       if (data.two_factor_required) {
+        const twoFactorSteps = {
+          email: { label: 'E-posta kodu', hint: `${escHtml(data.maskedEmail || '')} adresine 6 haneli bir kod gönderdik.`, placeholder: '000000', mode: 'numeric', max: '6' },
+          pin: { label: '6 haneli PIN', hint: 'Hesabın için belirlediğin 6 haneli PIN kodunu gir.', placeholder: '● ● ● ● ● ●', mode: 'numeric', max: '6' },
+          question: { label: escHtml(data.question || 'Güvenlik sorusu'), hint: 'Cevabını büyük/küçük harfe dikkat etmeden yazabilirsin.', placeholder: 'Cevabın', mode: 'text', max: '120' }
+        };
+        const twoFactorStep = twoFactorSteps[data.method] || twoFactorSteps.question;
         app.innerHTML = `<div class="auth-page"><div class="auth-card auth-card--enhanced card card-body">
           <div style="text-align:center"><div class="auth-site-wordmark"><i class="fas fa-shield-halved"></i> Güvenlik doğrulaması</div>
           <p class="auth-subtitle">Şifren doğru. Hesabına devam etmek için ikinci adımı tamamla.</p></div>
           <div class="form-group" style="padding:16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card2)">
-            <label>${data.method === 'email' ? 'E-posta kodu' : escHtml(data.question)}</label>
-            <p class="form-hint">${data.method === 'email' ? `${escHtml(data.maskedEmail)} adresine 6 haneli bir kod gönderdik.` : 'Cevabını büyük/küçük harfe dikkat etmeden yazabilirsin.'}</p>
-            <input type="text" id="login-2fa-value" inputmode="${data.method === 'email' ? 'numeric' : 'text'}" autocomplete="one-time-code" placeholder="${data.method === 'email' ? '000000' : 'Cevabın'}" maxlength="${data.method === 'email' ? '6' : '120'}" />
+            <label>${twoFactorStep.label}</label>
+            <p class="form-hint">${twoFactorStep.hint}</p>
+            <input type="text" id="login-2fa-value" class="${data.method === 'pin' ? 'auth-pin-input' : ''}" inputmode="${twoFactorStep.mode}" autocomplete="one-time-code" placeholder="${twoFactorStep.placeholder}" maxlength="${twoFactorStep.max}" />
           </div>
           <button class="btn btn-primary" style="width:100%" id="login-2fa-btn"><i class="fas fa-check"></i> Doğrula ve giriş yap</button>
           <div id="login-2fa-error" class="form-error mt-4" style="text-align:center"></div>
@@ -14038,6 +14213,11 @@ function renderLogin(app) {
           } catch (e) { $('#login-2fa-error').textContent = e.message; }
         };
         $('#login-2fa-btn').addEventListener('click', verify);
+        if (data.method === 'pin') {
+          $('#login-2fa-value').addEventListener('input', event => {
+            event.target.value = event.target.value.replace(/\D/g, '').slice(0, 6);
+          });
+        }
         $('#login-2fa-value').addEventListener('keydown', e => { if (e.key === 'Enter') verify(); });
         $('#login-2fa-value').focus();
         return;
@@ -26149,3 +26329,89 @@ function openPhotoSendSheet({ items, onSend, onEdit, onRemove, caption = '' }) {
   });
   window.addEventListener('scroll', () => { if (activeField) place(activeField); }, true);
 })();
+
+/* ============================================================
+   UYGULAMA ŞİFRESİ (APP LOCK) — tam ekran kilit
+   Sunucu 423 + app_lock_required döndüğünde devreye girer.
+   ============================================================ */
+function showAppLockGate(info = {}) {
+  if (document.getElementById('app-lock-gate')) return;
+  const describe = () => {
+    const value = Number(info.interval_value) || 0;
+    if (!value) return '';
+    return info.interval_unit === 'hour'
+      ? `Bu şifre ${value} saatte bir yeniden sorulur.`
+      : `Bu şifre ${value} günde bir yeniden sorulur.`;
+  };
+  const gate = document.createElement('div');
+  gate.id = 'app-lock-gate';
+  gate.className = 'app-lock-gate';
+  gate.innerHTML = `<div class="app-lock-gate-panel" role="dialog" aria-modal="true" aria-label="Uygulama şifresi">
+    <span class="app-lock-gate-icon"><i class="fas fa-lock" aria-hidden="true"></i></span>
+    <strong>Uygulama şifresi</strong>
+    <p>Hesabını kullanmaya devam etmek için uygulama şifreni gir.${describe() ? ` ${escHtml(describe())}` : ''}</p>
+    <input type="password" id="app-lock-gate-input" autocomplete="current-password" maxlength="64" placeholder="Uygulama şifresi" />
+    <button type="button" class="btn btn-primary" id="app-lock-gate-submit"><i class="fas fa-unlock"></i> Kilidi aç</button>
+    <div class="app-lock-gate-error" id="app-lock-gate-error" aria-live="polite"></div>
+    <button type="button" class="app-lock-gate-logout" id="app-lock-gate-logout">Çıkış yap</button>
+  </div>`;
+  document.body.appendChild(gate);
+  document.body.classList.add('app-lock-active');
+
+  const input = gate.querySelector('#app-lock-gate-input');
+  const error = gate.querySelector('#app-lock-gate-error');
+  const submit = gate.querySelector('#app-lock-gate-submit');
+  input.focus();
+
+  const unlock = async () => {
+    const value = input.value;
+    if (!value) { error.textContent = 'Uygulama şifresi gerekli'; return; }
+    submit.disabled = true;
+    error.textContent = '';
+    try {
+      const response = await fetch('/api/me/app-lock/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(currentToken ? { Authorization: 'Bearer ' + currentToken } : {}) },
+        body: JSON.stringify({ password: value })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Uygulama şifresi yanlış');
+      gate.remove();
+      document.body.classList.remove('app-lock-active');
+      location.reload();
+    } catch (e) {
+      error.textContent = e.message || 'Uygulama şifresi yanlış';
+      input.value = '';
+      input.focus();
+    } finally {
+      submit.disabled = false;
+    }
+  };
+
+  submit.addEventListener('click', unlock);
+  input.addEventListener('keydown', event => { if (event.key === 'Enter') unlock(); });
+  gate.querySelector('#app-lock-gate-logout').addEventListener('click', () => {
+    try { localStorage.removeItem('token'); } catch { /* yoksay */ }
+    location.href = '/giris';
+  });
+}
+
+/* ============================================================
+   YORUMLARDA GIF — Instagram tarzı arama ve gönderme
+   data-gif-input / data-gif-submit taşıyan her butonu çalıştırır.
+   ============================================================ */
+document.addEventListener('click', event => {
+  const button = event.target.closest('[data-gif-input]');
+  if (!button) return;
+  event.preventDefault();
+  if (!currentUser) { navigate('/giris'); return; }
+  const input = document.querySelector(button.dataset.gifInput);
+  const submit = document.querySelector(button.dataset.gifSubmit);
+  if (!input || !submit) { toast('Yorum kutusu bulunamadı', 'error'); return; }
+  showDmGifPicker(async gif => {
+    input.value = gif.url;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    submit.disabled = false;
+    submit.click();
+  });
+});

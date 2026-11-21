@@ -82,6 +82,13 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
+    -- 2AD: PIN yöntemi
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_pin_hash TEXT DEFAULT '';
+    -- Uygulama şifresi (app lock)
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_enabled INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_hash TEXT DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_interval_minutes INTEGER NOT NULL DEFAULT 10080;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_updated_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT DEFAULT '';
@@ -921,6 +928,7 @@ async function initDb() {
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS browser TEXT NOT NULL DEFAULT '';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT '';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
+    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS app_unlocked_at TIMESTAMP;
     CREATE TABLE IF NOT EXISTS nsfw_flags (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,

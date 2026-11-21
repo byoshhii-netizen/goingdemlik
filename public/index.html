@@ -34,48 +34,43 @@
   <meta name="twitter:image" content="https://cigcig.xyz/cigcig2.png" />
 
   <!-- SEO_END -->
-  <!-- Schema.org JSON-LD -->
+  <!-- Schema.org JSON-LD (site adı, logo ve site içi arama) -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "CigCig",
-    "alternateName": ["CigCig", "Cig", "Topluluk Platformu"],
-    "url": "https://cigcig.xyz",
-    "description": "Forum konuları, videolar, Reals kısa videoları, şiirler, kitaplar, müzik ve toplulukları bir araya getiren Türkçe sosyal platform.",
-    "potentialAction": {
-      "@type": "SearchAction",
-      "target": "https://cigcig.xyz/forum?q={search_term_string}",
-      "query-input": "required name=search_term_string"
-    }
-  }
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "SiteLinksSearchBox",
-    "url": "https://cigcig.xyz",
-    "potentialAction": {
-      "@type": "SearchAction",
-      "target": "https://cigcig.xyz/forum?q={search_term_string}",
-      "query-input": "required name=search_term_string"
-    }
-  }
-  </script>
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "Organization",
-    "name": "CigCig",
-    "url": "https://cigcig.xyz",
-    "logo": "https://cigcig.xyz/cigcig2.png",
-    "description": "Forum konuları, videolar, Reals kısa videoları, şiirler, kitaplar, müzik ve toplulukları bir araya getiren Türkçe sosyal platform.",
-    "sameAs": [],
-    "contactPoint": {
-      "@type": "ContactPoint",
-      "contactType": "customer support",
-      "url": "https://cigcig.xyz/giris"
-    }
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://cigcig.xyz/#website",
+        "name": "CigCig",
+        "alternateName": ["Cig Cig", "cigcig.xyz", "CigCig Topluluk Platformu", "CigCig Forum"],
+        "url": "https://cigcig.xyz/",
+        "inLanguage": "tr-TR",
+        "description": "Forum konuları, videolar, Reals kısa videoları, şiirler, kitaplar, müzik ve toplulukları bir araya getiren Türkçe sosyal platform.",
+        "publisher": { "@id": "https://cigcig.xyz/#organization" },
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": { "@type": "EntryPoint", "urlTemplate": "https://cigcig.xyz/arama?q={search_term_string}" },
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://cigcig.xyz/#organization",
+        "name": "CigCig",
+        "alternateName": "Cig Cig",
+        "url": "https://cigcig.xyz/",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://cigcig.xyz/icons/cigcig-512.png",
+          "width": 512,
+          "height": 512
+        },
+        "image": "https://cigcig.xyz/cigcig2.png",
+        "description": "Forum konuları, videolar, Reals kısa videoları, şiirler, kitaplar, müzik ve toplulukları bir araya getiren Türkçe sosyal platform.",
+        "sameAs": []
+      }
+    ]
   }
   </script>
 
@@ -106,7 +101,7 @@
   <script src="/homepage-sections.js?v=20261014-homepage-sections"></script>
   <link rel="stylesheet" href="/style.css?v=book-drafts-chapters" />
   <link rel="stylesheet" href="/dialogs.css?v=20261017-native-dialogs" />
-  <link rel="stylesheet" href="/cigcig-pro.css?v=20261121" />
+  <link rel="stylesheet" href="/cigcig-pro.css?v=20261121-guvenlik-gif" />
   <style>
     .badge-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 8px;border-radius:999px;font-size:0.85rem;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.06)}
     .user-icons{display:inline-flex;gap:6px;margin-left:8px}
@@ -136,7 +131,7 @@
         <div class="nav-link-group">
           <span class="nav-link-heading">CigCig</span>
           <a href="/" data-link class="nav-link"><i class="fas fa-house"></i><span>Ana Sayfa</span></a>
-          <a href="/konular" data-link class="nav-link"><i class="fas fa-comments"></i><span>Konular</span></a>
+          <a href="/forum" data-link class="nav-link"><i class="fas fa-comments"></i><span>Konular</span></a>
           <a href="/siirler" data-link class="nav-link"><i class="fas fa-feather-pointed"></i><span>Şiirler</span></a>
           <a href="/gazeteler" data-link class="nav-link"><i class="fas fa-newspaper"></i><span>Gazeteler</span></a>
         </div>
@@ -250,9 +245,9 @@
   <div id="announcements-container"></div>
 
   <!-- APP -->
-  <div id="app">
+  <div id="app"><!-- APP_CONTENT_START -->
     <div class="app-startup-state" aria-hidden="true"><span class="app-startup-skeleton"></span></div>
-  </div>
+  <!-- APP_CONTENT_END --></div>
 
   <!-- MODAL -->
   <div class="modal-overlay hidden" id="modal-overlay">
@@ -311,7 +306,7 @@
   <script src="/voice-notes.js?v=1"></script>
   <script src="/calls.js?v=20261121"></script>
   <script src="/stories.js?v=20261121"></script>
-  <script src="/app.js?v=book-drafts-chapters"></script>
+  <script src="/app.js?v=guvenlik-gif-20261121"></script>
 
   <script>
   // --- CigCig Badge & Icon Helpers (localStorage-based - lightweight port from Cambaz) ---

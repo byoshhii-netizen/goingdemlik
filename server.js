@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const net = require('net');
 const path = require('path');
 const fs = require('fs');
+const { createSeo } = require('./seo');
 const { once } = require('events');
 const { Readable } = require('stream');
 const multer = require('multer');
@@ -706,7 +707,84 @@ async function recordContentView(contentType, contentId, req) {
 }
 
 function normalizeSecurityAnswer(value) {
+  // Büyük/küçük harf, Türkçe I/İ/ı/i farkı ve aksanlar yok sayılır.
+  return String(value || '')
+    .trim()
+    .replace(/[\u0130\u0131I]/g, 'i')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+// Eski kayıtlar tr-TR küçük harfe göre hashlenmişti; onlar da çalışmaya devam etsin.
+function legacyNormalizeSecurityAnswer(value) {
   return String(value || '').trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
+}
+
+function matchesSecurityAnswer(value, hash) {
+  if (!hash) return false;
+  const raw = String(value || '').trim();
+  return verifyPassword(normalizeSecurityAnswer(value), hash)
+    || verifyPassword(legacyNormalizeSecurityAnswer(value), hash)
+    || verifyPassword(raw, hash);
+}
+
+// ===== UYGULAMA ŞİFRESİ (APP LOCK) =====
+const APP_LOCK_DEFAULT_MINUTES = 7 * 24 * 60;
+const APP_LOCK_MIN_MINUTES = 60;            // 1 saat
+const APP_LOCK_MAX_MINUTES = 90 * 24 * 60;  // 90 gün
+
+function parseAppLockInterval(body) {
+  const unit = String(body?.interval_unit || 'day') === 'hour' ? 'hour' : 'day';
+  const value = Number.parseInt(body?.interval_value, 10);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 90) return null;
+  const minutes = unit === 'hour' ? value * 60 : value * 1440;
+  if (minutes < APP_LOCK_MIN_MINUTES || minutes > APP_LOCK_MAX_MINUTES) return null;
+  return { unit, value, minutes };
+}
+
+function describeAppLockInterval(minutes) {
+  const total = Math.min(Math.max(Number(minutes) || APP_LOCK_DEFAULT_MINUTES, APP_LOCK_MIN_MINUTES), APP_LOCK_MAX_MINUTES);
+  return total % 1440 === 0
+    ? { interval_minutes: total, interval_unit: 'day', interval_value: total / 1440 }
+    : { interval_minutes: total, interval_unit: 'hour', interval_value: Math.max(1, Math.round(total / 60)) };
+}
+
+function appLockIsExempt(req) {
+  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  const method = String(req.method || 'GET').toUpperCase();
+  if (path === '/api/me/app-lock/unlock') return true;
+  if (path === '/api/me/app-lock' && method === 'GET') return true;
+  if (path === '/api/auth/logout') return true;
+  return false;
+}
+
+// Kilit aktifse ve bu cihazın açılma süresi dolduysa isteği 423 ile durdurur.
+async function enforceAppLock(req, res, token) {
+  const user = req.user;
+  if (!user || Number(user.app_lock_enabled) !== 1 || !user.app_lock_hash) return false;
+  if (appLockIsExempt(req)) return false;
+  const intervalMinutes = Math.min(
+    Math.max(Number(user.app_lock_interval_minutes) || APP_LOCK_DEFAULT_MINUTES, APP_LOCK_MIN_MINUTES),
+    APP_LOCK_MAX_MINUTES
+  );
+  let unlockedAt = 0;
+  try {
+    const { rows } = await query('SELECT app_unlocked_at FROM sessions WHERE token=$1', [token]);
+    unlockedAt = rows[0]?.app_unlocked_at ? new Date(rows[0].app_unlocked_at).getTime() : 0;
+  } catch { unlockedAt = 0; }
+  const changedAt = user.app_lock_updated_at ? new Date(user.app_lock_updated_at).getTime() : 0;
+  const stillValid = unlockedAt > 0
+    && unlockedAt >= changedAt
+    && (Date.now() - unlockedAt) < intervalMinutes * 60000;
+  if (stillValid) return false;
+  res.status(423).json({
+    error: 'Devam etmek için uygulama şifreni gir.',
+    app_lock_required: true,
+    ...describeAppLockInterval(intervalMinutes)
+  });
+  return true;
 }
 
 function hashChallengeValue(value) {
@@ -747,7 +825,11 @@ async function createTwoFactorChallenge(user, purpose = 'login') {
   const method = user.two_factor_method || 'none';
   const code = method === 'email' ? String(crypto.randomInt(100000, 1000000)) : '';
   await query('DELETE FROM auth_challenges WHERE user_id=$1 OR expires_at <= NOW()', [user.id]);
-  const verificationHash = method === 'question' ? user.two_factor_answer_hash : (code ? hashChallengeValue(code) : '');
+  const verificationHash = method === 'question'
+    ? user.two_factor_answer_hash
+    : method === 'pin'
+      ? (user.two_factor_pin_hash || '')
+      : (code ? hashChallengeValue(code) : '');
   await query('INSERT INTO auth_challenges (challenge_hash,user_id,purpose,method,code_hash,expires_at) VALUES ($1,$2,$3,$4,$5,NOW()+INTERVAL \'10 minutes\')', [hashChallengeValue(challenge), user.id, purpose, method, verificationHash]);
   if (code) await sendEmailCode(user.email, user.username, code);
   return { challenge, method, question: method === 'question' ? user.two_factor_question : '', maskedEmail: method === 'email' ? maskEmail(user.email) : '' };
@@ -757,14 +839,16 @@ function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
 
-async function completeTwoFactorChallenge(challenge, value) {
+async function completeTwoFactorChallenge(challenge, value, req) {
   const { rows } = await query('SELECT * FROM auth_challenges WHERE challenge_hash=$1 AND expires_at > NOW() LIMIT 1', [hashChallengeValue(challenge)]);
   const record = rows[0];
   if (!record || record.attempts >= 5) return null;
   await query('UPDATE auth_challenges SET attempts=attempts+1 WHERE id=$1', [record.id]);
   const valid = record.method === 'email'
     ? hashChallengeValue(String(value || '').trim()) === record.code_hash
-    : verifyPassword(normalizeSecurityAnswer(value), record.code_hash);
+    : record.method === 'pin'
+      ? (/^\d{6}$/.test(String(value || '').trim()) && verifyPassword(String(value || '').trim(), record.code_hash))
+      : matchesSecurityAnswer(value, record.code_hash);
   if (!valid) return null;
   await query('DELETE FROM auth_challenges WHERE id=$1', [record.id]);
   const token = generateToken(record.user_id);
@@ -806,7 +890,7 @@ function getSessionCookie(req) {
 
 function sanitizeUser(u) {
   if (!u) return null;
-  const { password_hash, spotify_token, spotify_refresh, two_factor_answer_hash, email_verification_token_hash, email_verification_expires_at, ...rest } = u;
+  const { password_hash, spotify_token, spotify_refresh, two_factor_answer_hash, two_factor_pin_hash, app_lock_hash, email_verification_token_hash, email_verification_expires_at, ...rest } = u;
   return rest;
 }
 
@@ -1045,6 +1129,8 @@ async function authMiddleware(req, res, next) {
   if (!users.length) return res.status(401).json({ error: 'Kullanıcı bulunamadı' });
   if (users[0].banned) return res.status(403).json({ error: 'Hesabınız yasaklandı' });
   req.user = users[0];
+  req.sessionToken = token;
+  if (await enforceAppLock(req, res, token)) return;
   next();
 }
 
@@ -1923,175 +2009,14 @@ async function handleR2VideoBufferUpload(file) {
   return `${publicBase}/${key}`;
 }
 
-// ===== ROBOTS & SITEMAP =====
-app.get('/robots.txt', (req, res) => {
-  res.type('text/plain');
-  res.send([
-    'User-agent: *',
-    'Allow: /',
-    'Disallow: /ayarlar',
-    'Disallow: /api/',
-    '',
-    `Sitemap: ${SITE_URL}/sitemap.xml`,
-  ].join('\n'));
+// ===== ROBOTS & SITEMAP (seo.js) =====
+// Site haritası dizini: /sitemap.xml -> /sitemap-konular.xml, /sitemap-fotograflar.xml, /sitemap-videolar.xml ...
+const seo = createSeo({
+  query, escapeHtml, SITE_URL, profileRouteKey, profileRouteSql,
+  injectMeta, serverPageBody, serverProfileLink, serverImage, safeJsonLd, sendUncachedAppHtml,
 });
-
-app.get('/sitemap.xml', async (req, res) => {
-  const [forums, books, bookPages, groups, users, songs, photos, videos, reals, poems, newspapers] = await Promise.all([
-    query(`SELECT f.slug, f.title, f.banner_image, f.updated_at FROM forums f LEFT JOIN users u ON u.id=f.user_id
-      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='forum' AND a.content_id=f.id::text)
-      ORDER BY f.updated_at DESC LIMIT 5000`).then(r => r.rows),
-    query(`SELECT b.id, b.slug, b.updated_at FROM books b LEFT JOIN users u ON u.id=b.user_id
-      WHERE b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
-        AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
-      ORDER BY b.updated_at DESC LIMIT 2000`).then(r => r.rows),
-    query(`SELECT bp.slug AS page_slug, b.slug AS book_slug, bp.created_at AS updated_at
-      FROM book_pages bp JOIN books b ON b.id=bp.book_id LEFT JOIN users u ON u.id=b.user_id
-      WHERE bp.is_published=1 AND b.is_hidden=0 AND COALESCE(b.is_unnamed,0)=0 AND COALESCE(b.password_hash,'')=''
-        AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)
-      ORDER BY bp.created_at DESC LIMIT 10000`).then(r => r.rows),
-    query("SELECT slug FROM groups WHERE COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active' LIMIT 2000").then(r => r.rows),
-    query("SELECT username FROM users WHERE banned=0 AND COALESCE(is_private,0)=0 AND COALESCE(is_deleted,0)=0 LIMIT 5000").then(r => r.rows),
-    query("SELECT s.slug, s.title, s.cover_url, s.published_at FROM songs s LEFT JOIN users u ON u.id=s.uploader_id WHERE s.status='active' AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='song' AND cs.content_id=s.id) AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='song' AND a.content_id=s.id::text) ORDER BY s.published_at DESC LIMIT 2000").then(r => r.rows),
-    query(`SELECT p.id, p.url, p.title, p.caption, p.created_at FROM photos p
-      LEFT JOIN users u ON u.id=p.user_id
-      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(p.close_friends_only,0)=0 AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='photo' AND a.content_id=p.id::text)
-      ORDER BY p.created_at DESC LIMIT 10000`).then(r => r.rows),
-    query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
-      FROM videos v JOIN users u ON u.id=v.user_id
-      WHERE v.is_reals=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='video' AND cs.content_id=v.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='video' AND a.content_id=v.id::text)
-      ORDER BY v.created_at DESC LIMIT 2000`).then(r => r.rows),
-    query(`SELECT v.slug, v.id, v.title, v.created_at, v.thumbnail_url
-      FROM videos v JOIN users u ON u.id=v.user_id
-      WHERE v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='reals' AND a.content_id=v.id::text)
-      ORDER BY v.created_at DESC LIMIT 2000`).then(r => r.rows),
-    query(`SELECT p.slug, p.title, p.updated_at, p.created_at
-      FROM poems p JOIN users u ON u.id=p.user_id
-      WHERE COALESCE(p.is_hidden,0)=0 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='poem' AND cs.content_id=p.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)
-      ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC LIMIT 2000`).then(r => r.rows),
-    query(`SELECT n.id, n.newspaper_date, n.created_at
-      FROM newspapers n JOIN users u ON u.id=n.journalist_id
-      WHERE COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
-        AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='newspaper' AND cs.content_id=n.id)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)
-        AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)
-      ORDER BY n.newspaper_date DESC, n.created_at DESC LIMIT 2000`).then(r => r.rows),
-  ]);
-  const now = new Date().toISOString();
-  const staticUrls = [
-    { url: '/',          priority: '1.0', changefreq: 'daily'  },
-    { url: '/forum',     priority: '0.9', changefreq: 'hourly' },
-    { url: '/kitaplar',  priority: '0.8', changefreq: 'daily'  },
-    { url: '/gruplar',   priority: '0.7', changefreq: 'daily'  },
-    { url: '/muzikler',  priority: '0.7', changefreq: 'daily'  },
-    { url: '/video',     priority: '0.8', changefreq: 'daily'  },
-    { url: '/reals',     priority: '0.8', changefreq: 'daily'  },
-    { url: '/siirler',   priority: '0.7', changefreq: 'daily'  },
-    { url: '/gazeteler', priority: '0.6', changefreq: 'daily'  },
-  ].map(u => `  <url><loc>${SITE_URL}${u.url}</loc><lastmod>${now}</lastmod><changefreq>${u.changefreq}</changefreq><priority>${u.priority}</priority></url>`).join('\n');
-
-  const forumUrls = forums.map(f => {
-    const imgTag = f.banner_image
-      ? `\n    <image:image><image:loc>${escapeHtml(f.banner_image)}</image:loc><image:title>${escapeHtml(f.title)}</image:title></image:image>`
-      : '';
-    const mod = f.updated_at ? `\n    <lastmod>${new Date(f.updated_at).toISOString()}</lastmod>` : '';
-    return `  <url><loc>${SITE_URL}/forum/${escapeHtml(f.slug)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.8</priority>${imgTag}\n  </url>`;
-  }).join('\n');
-
-  const bookUrls = books.map(b => {
-    const mod = b.updated_at ? `\n    <lastmod>${new Date(b.updated_at).toISOString()}</lastmod>` : '';
-    return `  <url><loc>${SITE_URL}/kitap/${escapeHtml(b.slug)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.7</priority>\n  </url>`;
-  }).join('\n');
-
-  const bookPageUrls = bookPages.map(page => {
-    const mod = page.updated_at ? `\n    <lastmod>${new Date(page.updated_at).toISOString()}</lastmod>` : '';
-    return `  <url><loc>${SITE_URL}/kitap/${escapeHtml(page.book_slug)}/sayfa/${escapeHtml(page.page_slug)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.6</priority>\n  </url>`;
-  }).join('\n');
-
-  const groupUrls = groups.map(g =>
-    `  <url><loc>${SITE_URL}/grup/${escapeHtml(g.slug)}</loc><changefreq>weekly</changefreq><priority>0.6</priority></url>`
-  ).join('\n');
-
-  const profileUrls = users.map(u =>
-    `  <url><loc>${SITE_URL}/profil/${profileRouteKey(u.username)}</loc><changefreq>weekly</changefreq><priority>0.5</priority></url>`
-  ).join('\n');
-
-  const songUrls = songs.map(s => {
-    const mod = s.published_at ? `\n    <lastmod>${new Date(s.published_at).toISOString()}</lastmod>` : '';
-    const imgTag = s.cover_url
-      ? `\n    <image:image><image:loc>${escapeHtml(s.cover_url)}</image:loc><image:title>${escapeHtml(s.title)}</image:title></image:image>`
-      : '';
-    return `  <url><loc>${SITE_URL}/muzik/${escapeHtml(s.slug)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.6</priority>${imgTag}\n  </url>`;
-  }).join('\n');
-
-  const photoUrls = photos.map(p => {
-    const mod = p.created_at ? `\n    <lastmod>${new Date(p.created_at).toISOString()}</lastmod>` : '';
-    const imageTitle = p.title || p.caption || 'CigCig fotoğrafı';
-    return `  <url><loc>${SITE_URL}/foto/${escapeHtml(p.id)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.5</priority>\n    <image:image><image:loc>${escapeHtml(p.url)}</image:loc><image:title>${escapeHtml(imageTitle)}</image:title></image:image>\n  </url>`;
-  }).join('\n');
-
-  const videoUrls = videos.map(video => {
-    const slug = video.slug || video.id;
-    const mod = video.created_at ? `\n    <lastmod>${new Date(video.created_at).toISOString()}</lastmod>` : '';
-    const imgTag = video.thumbnail_url
-      ? `\n    <image:image><image:loc>${escapeHtml(video.thumbnail_url)}</image:loc><image:title>${escapeHtml(video.title || 'CigCig videosu')}</image:title></image:image>`
-      : '';
-    return `  <url><loc>${SITE_URL}/video/${escapeHtml(slug)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.7</priority>${imgTag}\n  </url>`;
-  }).join('\n');
-
-  const realsUrls = reals.map(real => {
-    const mod = real.created_at ? `\n    <lastmod>${new Date(real.created_at).toISOString()}</lastmod>` : '';
-    const imgTag = real.thumbnail_url
-      ? `\n    <image:image><image:loc>${escapeHtml(real.thumbnail_url)}</image:loc><image:title>${escapeHtml(real.title || 'CigCig Reals')}</image:title></image:image>`
-      : '';
-    return `  <url><loc>${SITE_URL}/reals/${escapeHtml(real.id)}</loc>${mod}\n    <changefreq>weekly</changefreq><priority>0.7</priority>${imgTag}\n  </url>`;
-  }).join('\n');
-
-  const poemUrls = poems.map(poem => {
-    const mod = poem.updated_at || poem.created_at ? `\n    <lastmod>${new Date(poem.updated_at || poem.created_at).toISOString()}</lastmod>` : '';
-    return `  <url><loc>${SITE_URL}/siir/${escapeHtml(poem.slug)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.6</priority>\n  </url>`;
-  }).join('\n');
-
-  const newspaperUrls = newspapers.map(newspaper => {
-    const mod = newspaper.created_at ? `\n    <lastmod>${new Date(newspaper.created_at).toISOString()}</lastmod>` : '';
-    return `  <url><loc>${SITE_URL}/gazete/${escapeHtml(newspaper.id)}</loc>${mod}\n    <changefreq>monthly</changefreq><priority>0.5</priority>\n  </url>`;
-  }).join('\n');
-
-  res.type('application/xml');
-  res.set('Cache-Control', 'public, max-age=3600'); // 1 saat cache — sık değişmiyor
-  res.send([
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"',
-    '        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">',
-    staticUrls,
-    forumUrls,
-    bookUrls,
-    bookPageUrls,
-    groupUrls,
-    profileUrls,
-    songUrls,
-    photoUrls,
-    videoUrls,
-    realsUrls,
-    poemUrls,
-    newspaperUrls,
-    '</urlset>'
-  ].join('\n'));
-});
+seo.registerCrawlerRoutes(app);
+seo.startIndexNow();
 
 // Redirect legacy /konular to /forum (friendly route)
 app.get('/konular', (req, res) => { res.redirect(301, '/forum'); });
@@ -2259,6 +2184,9 @@ app.use(async (req, res, next) => {
       || normalizedPath === '/konular'
       || /^\/profil\/[^/]+$/.test(normalizedPath)
       || /^\/(?:muzik|forum)\/[^/]+(?:\/.*)?$/.test(normalizedPath)
+      // SEO: herkese açık içerik sayfaları arama motorlarına da açık kalsın.
+      || /^\/(?:siirler|gazeteler|video|videolar|reals|fotograflar|gruplar|medyakesfet|arama|artist-basvuru)$/.test(normalizedPath)
+      || /^\/(?:siir|gazete|video|reals|foto|grup)\/[^/]+$/.test(normalizedPath)
       || /^\/kitap\/[^/]+(?:\/sayfa\/[^/]+)?$/.test(normalizedPath)
       || /^\/[a-zA-Z0-9]{24}$/.test(normalizedPath);
     if (isPublicGuestRoute) return next();
@@ -2363,7 +2291,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.get(['/', '/index.html'], (req, res) => sendUncachedAppHtml(res));
+// Ana sayfa, profil, arama ve özel sayfalar için SEO route'ları (seo.js)
+seo.registerPages(app);
 
 app.use(express.static(path.join(__dirname, 'public'), {
   maxAge: 24 * 60 * 60 * 1000,
@@ -2928,7 +2857,7 @@ app.post('/api/auth/2fa/verify', async (req, res) => {
     const challenge = String(req.body.challenge || '');
     const value = String(req.body.value || '');
     if (!/^[a-f0-9]{64}$/i.test(challenge) || !value) return res.status(400).json({ error: 'Doğrulama bilgisi eksik' });
-    const token = await completeTwoFactorChallenge(challenge, value);
+    const token = await completeTwoFactorChallenge(challenge, value, req);
     if (!token) return res.status(401).json({ error: 'Doğrulama başarısız veya kod geçersiz' });
     const { rows } = await query('SELECT * FROM users WHERE id=(SELECT user_id FROM sessions WHERE token=$1) LIMIT 1', [token]);
     if (!rows.length) return res.status(401).json({ error: 'Oturum oluşturulamadı' });
@@ -3197,18 +3126,107 @@ app.post('/api/auth/forgot-password/reset', async (req, res) => {
 });
 
 app.get('/api/profile/2fa', authMiddleware, async (req, res) => {
-  res.json({ method: req.user.two_factor_method || 'none', question: req.user.two_factor_question || '', email: req.user.email ? maskEmail(req.user.email) : '' });
+  res.json({
+    method: req.user.two_factor_method || 'none',
+    question: req.user.two_factor_question || '',
+    email: req.user.email ? maskEmail(req.user.email) : '',
+    has_pin: Boolean(req.user.two_factor_pin_hash)
+  });
 });
 
 app.put('/api/profile/2fa', authMiddleware, async (req, res) => {
   const { method, question, answer, password } = req.body || {};
+  const pin = String(req.body?.pin || '').trim();
   if (!password || !verifyPassword(password, req.user.password_hash)) return res.status(401).json({ error: 'Hesap şifresi yanlış' });
-  if (!['none', 'email', 'question'].includes(method)) return res.status(400).json({ error: 'Geçersiz doğrulama yöntemi' });
+  if (!['none', 'email', 'question', 'pin'].includes(method)) return res.status(400).json({ error: 'Geçersiz doğrulama yöntemi' });
   if (method === 'email' && !req.user.email) return res.status(400).json({ error: 'E-posta kodu için önce ayarlardan e-posta adresi eklemen gerekiyor.' });
   if (method === 'email' && (!RESEND_API_KEY || !EMAIL_FROM || !APP_SECRET)) return res.status(503).json({ error: 'E-posta servisi yapılandırılmamış' });
   if (method === 'question' && (!question || normalizeSecurityAnswer(answer).length < 2)) return res.status(400).json({ error: 'Soru ve cevap zorunlu' });
-  await query('UPDATE users SET two_factor_method=$1,two_factor_question=$2,two_factor_answer_hash=$3 WHERE id=$4', [method, method === 'question' ? String(question).trim() : '', method === 'question' ? hashPassword(normalizeSecurityAnswer(answer)) : '', req.user.id]);
-  res.json({ ok: true, method, question: method === 'question' ? String(question).trim() : '', email: req.user.email ? maskEmail(req.user.email) : '' });
+  if (method === 'pin') {
+    if (pin && !/^\d{6}$/.test(pin)) return res.status(400).json({ error: 'PIN tam 6 rakamdan oluşmalıdır' });
+    if (!pin && !req.user.two_factor_pin_hash) return res.status(400).json({ error: '6 haneli bir PIN belirlemelisin' });
+  }
+  const nextPinHash = method === 'pin'
+    ? (pin ? hashPassword(pin) : (req.user.two_factor_pin_hash || ''))
+    : '';
+  await query(
+    'UPDATE users SET two_factor_method=$1,two_factor_question=$2,two_factor_answer_hash=$3,two_factor_pin_hash=$4 WHERE id=$5',
+    [
+      method,
+      method === 'question' ? String(question).trim() : '',
+      method === 'question' ? hashPassword(normalizeSecurityAnswer(answer)) : '',
+      nextPinHash,
+      req.user.id
+    ]
+  );
+  res.json({
+    ok: true,
+    method,
+    question: method === 'question' ? String(question).trim() : '',
+    email: req.user.email ? maskEmail(req.user.email) : '',
+    has_pin: Boolean(nextPinHash)
+  });
+});
+
+// ===== UYGULAMA ŞİFRESİ: ayar ve kilit açma =====
+app.get('/api/me/app-lock', authMiddleware, async (req, res) => {
+  res.json({
+    enabled: Number(req.user.app_lock_enabled) === 1 && Boolean(req.user.app_lock_hash),
+    has_password: Boolean(req.user.app_lock_hash),
+    ...describeAppLockInterval(req.user.app_lock_interval_minutes)
+  });
+});
+
+app.put('/api/me/app-lock', authMiddleware, async (req, res) => {
+  try {
+    const accountPassword = String(req.body?.password || '');
+    if (!accountPassword || !verifyPassword(accountPassword, req.user.password_hash)) {
+      return res.status(401).json({ error: 'Hesap şifresi yanlış' });
+    }
+    const enabled = req.body?.enabled === true;
+    if (!enabled) {
+      await query('UPDATE users SET app_lock_enabled=0,app_lock_hash=$1,app_lock_updated_at=NOW() WHERE id=$2', ['', req.user.id]);
+      await query('UPDATE sessions SET app_unlocked_at=NULL WHERE user_id=$1', [req.user.id]);
+      return res.json({ enabled: false, has_password: false, ...describeAppLockInterval(req.user.app_lock_interval_minutes) });
+    }
+    const appPassword = String(req.body?.app_password || '').trim();
+    if (appPassword && (appPassword.length < 4 || appPassword.length > 64)) {
+      return res.status(400).json({ error: 'Uygulama şifresi 4-64 karakter arasında olmalıdır' });
+    }
+    if (!appPassword && !req.user.app_lock_hash) {
+      return res.status(400).json({ error: 'Önce bir uygulama şifresi belirlemelisin' });
+    }
+    if (appPassword && verifyPassword(appPassword, req.user.password_hash)) {
+      return res.status(400).json({ error: 'Uygulama şifresi hesap şifrenden farklı olmalı' });
+    }
+    const interval = parseAppLockInterval(req.body);
+    if (!interval) {
+      return res.status(400).json({ error: 'Süre gün olarak 1-90, saat olarak 1-90 aralığında olmalıdır' });
+    }
+    const nextHash = appPassword ? hashPassword(appPassword) : req.user.app_lock_hash;
+    await query(
+      'UPDATE users SET app_lock_enabled=1,app_lock_hash=$1,app_lock_interval_minutes=$2,app_lock_updated_at=NOW() WHERE id=$3',
+      [nextHash, interval.minutes, req.user.id]
+    );
+    // Ayar değişince tüm cihazlar yeniden sorulur; ayarı yapan bu cihaz açık kalır.
+    await query('UPDATE sessions SET app_unlocked_at=NULL WHERE user_id=$1', [req.user.id]);
+    await query('UPDATE sessions SET app_unlocked_at=NOW() WHERE token=$1', [req.sessionToken]);
+    res.json({ enabled: true, has_password: true, ...describeAppLockInterval(interval.minutes) });
+  } catch (error) {
+    console.error('[app-lock] ayar kaydedilemedi:', error.message);
+    res.status(500).json({ error: 'Uygulama şifresi ayarı kaydedilemedi' });
+  }
+});
+
+app.post('/api/me/app-lock/unlock', authLimiter, authMiddleware, async (req, res) => {
+  if (Number(req.user.app_lock_enabled) !== 1 || !req.user.app_lock_hash) {
+    return res.json({ ok: true, unlocked: true });
+  }
+  const value = String(req.body?.password || '');
+  if (!value) return res.status(400).json({ error: 'Uygulama şifresi gerekli' });
+  if (!verifyPassword(value, req.user.app_lock_hash)) return res.status(401).json({ error: 'Uygulama şifresi yanlış' });
+  await query('UPDATE sessions SET app_unlocked_at=NOW() WHERE token=$1', [req.sessionToken]);
+  res.json({ ok: true, unlocked: true, ...describeAppLockInterval(req.user.app_lock_interval_minutes) });
 });
 
 app.post('/api/profile/email/request', authMiddleware, async (req, res) => {
@@ -11439,7 +11457,13 @@ app.get('/panel', (req, res) => res.status(404).end());
 
 function injectCrawlableBody(html, bodyHtml) {
   if (!bodyHtml) return html;
-  return html.replace('<div id="app"></div>', `<div id="app">${bodyHtml}</div>`);
+  // index.html'de #app içinde yükleme iskeleti var; Google'ın göreceği içerik onun yerine konur.
+  // Uygulama JS'i yüklendiğinde #app içeriğini kendi arayüzüyle değiştirir.
+  const marked = html.replace(/<!-- APP_CONTENT_START -->[\s\S]*?<!-- APP_CONTENT_END -->/,
+    () => `<!-- APP_CONTENT_START -->${bodyHtml}<!-- APP_CONTENT_END -->`);
+  if (marked !== html) return marked;
+  if (html.includes('<div id="app"></div>')) return html.replace('<div id="app"></div>', () => `<div id="app">${bodyHtml}</div>`);
+  return html.replace(/(<div id="app">)\s*<div class="app-startup-state"[^>]*>[\s\S]*?<\/div>/, (m, open) => `${open}${bodyHtml}`);
 }
 
 function serverPageBody(eyebrow, title, description, content) {
@@ -11470,25 +11494,32 @@ function injectMeta(title, desc, url, imageUrl, extraMeta, bodyHtml) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const img = imageUrl || `${SITE_URL}/cigcig2.png`;
   const extra = extraMeta || '';
+  const imgAlt = String(title || 'CigCig').split(/\s+[–|]\s+/)[0];
   const meta = `<title>${escapeHtml(title)}</title>
     <meta name="description" content="${escapeHtml(desc)}" />
     <link rel="canonical" href="${escapeHtml(url)}" />
     <meta property="og:title" content="${escapeHtml(title)}" />
     <meta property="og:description" content="${escapeHtml(desc)}" />
+    <meta property="og:type" content="${seo.ogTypeFor(url)}" />
     <meta property="og:url" content="${escapeHtml(url)}" />
     <meta property="og:site_name" content="CigCig" />
+    <meta property="og:locale" content="tr_TR" />
     <meta property="og:image" content="${escapeHtml(img)}" />
+    <meta property="og:image:alt" content="${escapeHtml(imgAlt)}" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="${escapeHtml(title)}" />
     <meta name="twitter:description" content="${escapeHtml(desc)}" />
     <meta name="twitter:image" content="${escapeHtml(img)}" />
+    <meta name="twitter:image:alt" content="${escapeHtml(imgAlt)}" />
+    ${seo.breadcrumbScript(url, title)}
     ${extra}`;
   // SEO_START/SEO_END arasını değiştir — index.html başlığından bağımsız
+  // Fonksiyonlu replace: kullanıcı başlığındaki "$&" gibi ifadeler bozulmasın.
   const injected = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,
-    `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
+    () => `<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
   if (injected !== html) return injectCrawlableBody(injected, bodyHtml);
   // Yedek: regex ile herhangi bir title tag'ını değiştir
-  return injectCrawlableBody(html.replace(/<title>[^<]*<\/title>/, meta), bodyHtml);
+  return injectCrawlableBody(html.replace(/<title>[^<]*<\/title>/, () => meta), bodyHtml);
 }
 
 app.get(['/video', '/videolar'], async (req, res) => {
@@ -11536,13 +11567,15 @@ app.get('/reals', async (req, res) => {
 app.get('/reals/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1) return sendUncachedAppHtml(res, 404);
-  const { rows } = await query(`SELECT v.id, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, u.username
+  const { rows } = await query(`SELECT v.id, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, v.duration_seconds, v.views, v.like_count, u.username
     FROM videos v JOIN users u ON u.id=v.user_id
     WHERE v.id=$1 AND v.is_reals=1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='reals' AND cs.content_id=v.id)`, [id]);
   if (!rows.length) return sendUncachedAppHtml(res, 404);
   const real = rows[0];
-  const title = real.title || 'CigCig Reals videosu';
+  const realComments = await seo.rows(`SELECT vc.id, vc.content, vc.created_at, u.username FROM video_comments vc LEFT JOIN users u ON u.id=vc.user_id
+    WHERE vc.video_id=$1 AND COALESCE(u.is_deleted,0)=0 ORDER BY vc.is_pinned DESC, vc.created_at ASC LIMIT 200`, [real.id]);
+  const title = real.title || seo.plain(real.description, 70) || `${real.username || 'CigCig'} Reals videosu`;
   const description = String(real.description || `${title} — CigCig Reals kısa videosu.`).replace(/\s+/g, ' ').slice(0, 160);
   const url = `${SITE_URL}/reals/${real.id}`;
   const body = serverPageBody('CİGCİG REALS', title, description, `<article class="seo-article">
@@ -11550,16 +11583,23 @@ app.get('/reals/:id', async (req, res) => {
     ${real.video_url ? `<video controls preload="metadata" playsinline${real.thumbnail_url ? ` poster="${escapeHtml(real.thumbnail_url)}"` : ''}><source src="${escapeHtml(real.video_url)}" /></video>` : ''}
     ${real.description ? `<div class="seo-article-text">${escapeHtml(real.description)}</div>` : ''}
     <div class="seo-content-meta">Paylaşan: ${serverProfileLink(real.username)}</div>
-  </article>`);
+  </article>${seo.commentsHtml(realComments)}`);
   const schema = safeJsonLd({
-    '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description, thumbnailUrl: real.thumbnail_url ? [real.thumbnail_url] : undefined,
-    contentUrl: real.video_url, uploadDate: real.created_at, url, publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig2.png` } }
+    '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description,
+    thumbnailUrl: real.thumbnail_url ? [real.thumbnail_url] : [`${SITE_URL}/cigcig2.png`],
+    contentUrl: real.video_url, uploadDate: real.created_at, url, embedUrl: url,
+    duration: seo.isoDuration(real.duration_seconds),
+    author: seo.personLd(real.username), creator: seo.personLd(real.username),
+    interactionStatistic: [seo.counter('WatchAction', real.views), seo.counter('LikeAction', real.like_count), seo.counter('CommentAction', realComments.length)],
+    comment: seo.commentsLd(realComments, url),
+    publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig2.png` } },
+    inLanguage: 'tr'
   });
   res.send(injectMeta(`${title} – CigCig Reals`, description, url, real.thumbnail_url, `<script type="application/ld+json">${schema}</script>`, body));
 });
 
 app.get('/video/:slug', async (req, res) => {
-  const { rows } = await query(`SELECT v.id, v.slug, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, u.username
+  const { rows } = await query(`SELECT v.id, v.slug, v.title, v.description, v.video_url, v.thumbnail_url, v.created_at, v.duration_seconds, v.views, v.like_count, u.username
     FROM videos v JOIN users u ON u.id=v.user_id
     WHERE (v.slug=$1 OR v.id::text=$1) AND v.is_reals=0
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
@@ -11567,6 +11607,8 @@ app.get('/video/:slug', async (req, res) => {
     LIMIT 1`, [req.params.slug]);
   if (!rows.length) return sendUncachedAppHtml(res, 404);
   const video = rows[0];
+  const videoComments = await seo.rows(`SELECT vc.id, vc.content, vc.created_at, u.username FROM video_comments vc LEFT JOIN users u ON u.id=vc.user_id
+    WHERE vc.video_id=$1 AND COALESCE(u.is_deleted,0)=0 ORDER BY vc.is_pinned DESC, vc.created_at ASC LIMIT 200`, [video.id]);
   const title = video.title || 'CigCig videosu';
   const description = String(video.description || `${title} — CigCig video platformında.`).replace(/\s+/g, ' ').slice(0, 160);
   const url = `${SITE_URL}/video/${video.slug || video.id}`;
@@ -11575,12 +11617,17 @@ app.get('/video/:slug', async (req, res) => {
     ${video.video_url ? `<video controls preload="metadata" playsinline${video.thumbnail_url ? ` poster="${escapeHtml(video.thumbnail_url)}"` : ''}><source src="${escapeHtml(video.video_url)}" /></video>` : ''}
     ${video.description ? `<div class="seo-article-text">${escapeHtml(video.description)}</div>` : ''}
     <div class="seo-content-meta">Paylaşan: ${serverProfileLink(video.username)}</div>
-  </article>`);
+  </article>${seo.commentsHtml(videoComments)}`);
   const schema = safeJsonLd({
     '@context': 'https://schema.org', '@type': 'VideoObject', name: title, description,
-    thumbnailUrl: video.thumbnail_url ? [video.thumbnail_url] : undefined,
-    contentUrl: video.video_url, uploadDate: video.created_at, url,
-    publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig2.png` } }
+    thumbnailUrl: video.thumbnail_url ? [video.thumbnail_url] : [`${SITE_URL}/cigcig2.png`],
+    contentUrl: video.video_url, uploadDate: video.created_at, url, embedUrl: url,
+    duration: seo.isoDuration(video.duration_seconds),
+    author: seo.personLd(video.username), creator: seo.personLd(video.username),
+    interactionStatistic: [seo.counter('WatchAction', video.views), seo.counter('LikeAction', video.like_count), seo.counter('CommentAction', videoComments.length)],
+    comment: seo.commentsLd(videoComments, url),
+    publisher: { '@type': 'Organization', name: 'CigCig', logo: { '@type': 'ImageObject', url: `${SITE_URL}/cigcig2.png` } },
+    inLanguage: 'tr'
   });
   res.send(injectMeta(`${title} – CigCig Video`, description, url, video.thumbnail_url, `<script type="application/ld+json">${schema}</script>`, body));
 });
@@ -11613,16 +11660,20 @@ app.get('/siir/:slug', async (req, res) => {
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='poem' AND a.content_id=p.id::text)`, [req.params.slug]);
   if (!rows.length) return sendUncachedAppHtml(res, 404);
   const poem = rows[0];
-  const description = String(poem.content || poem.title).replace(/\s+/g, ' ').slice(0, 160);
+  const description = seo.plain(poem.content || poem.title, 160);
   const url = `${SITE_URL}/siir/${poem.slug}`;
-  const body = serverPageBody('CİGCİG ŞİİRLERİ', poem.title, description, `<article class="seo-article">
+  const poemComments = await seo.rows(`SELECT pc.id, pc.content, pc.created_at, u.username FROM poem_comments pc LEFT JOIN users u ON u.id=pc.user_id
+    WHERE pc.poem_id=(SELECT id FROM poems WHERE slug=$1) AND COALESCE(u.is_deleted,0)=0 ORDER BY pc.created_at ASC LIMIT 200`, [poem.slug]);
+  const body = serverPageBody('CİGCİG ŞİİRLERİ', poem.title, poem.username ? `Şair: ${poem.username}` : '', `<article class="seo-article">
     <div class="seo-article-text">${escapeHtml(poem.content || '').replace(/\n/g, '<br>')}</div>
     <div class="seo-content-meta">Şair: ${serverProfileLink(poem.username)}</div>
-  </article>`);
-  res.send(injectMeta(`${poem.title} – Şiir | CigCig`, description, url, '', `<script type="application/ld+json">${safeJsonLd({
-    '@context': 'https://schema.org', '@type': 'CreativeWork', name: poem.title, text: String(poem.content || '').slice(0, 5000),
+  </article>${seo.commentsHtml(poemComments)}`);
+  res.send(injectMeta(`${poem.title}${poem.username ? ` – ${poem.username}` : ''} | Şiir – CigCig`, description, url, '', `<script type="application/ld+json">${safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'CreativeWork', genre: 'Şiir', name: poem.title, headline: poem.title, text: String(poem.content || '').slice(0, 5000),
     datePublished: poem.created_at, dateModified: poem.updated_at || poem.created_at, url,
-    author: poem.username ? { '@type': 'Person', name: poem.username } : undefined, inLanguage: 'tr'
+    author: poem.username ? seo.personLd(poem.username) : undefined, inLanguage: 'tr',
+    interactionStatistic: [seo.counter('CommentAction', poemComments.length)],
+    comment: seo.commentsLd(poemComments, url)
   })}</script>`, body));
 });
 
@@ -11657,16 +11708,21 @@ app.get('/gazete/:id', async (req, res) => {
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='newspaper' AND a.content_id=n.id::text)`, [id]);
   if (!rows.length) return sendUncachedAppHtml(res, 404);
   const newspaper = rows[0];
+  const newspaperComments = await seo.rows(`SELECT nc.id, nc.content, nc.created_at, u.username FROM newspaper_comments nc LEFT JOIN users u ON u.id=nc.user_id
+    WHERE nc.newspaper_id=$1 AND COALESCE(u.is_deleted,0)=0 ORDER BY nc.created_at ASC LIMIT 200`, [newspaper.id]);
   const title = `${newspaper.newspaper_name} – CigCig Basın Arşivi`;
   const description = `${newspaper.newspaper_name} gazetesinin ${newspaper.newspaper_date ? new Date(newspaper.newspaper_date).toLocaleDateString('tr-TR') : ''} tarihli sayısı.`;
   const url = `${SITE_URL}/gazete/${newspaper.id}`;
   const body = serverPageBody('CİGCİG BASIN ARŞİVİ', newspaper.newspaper_name, description, `<article class="seo-article">
     ${serverImage(newspaper.image_url, `${newspaper.newspaper_name} gazete sayısı`, 'seo-hero-image')}
     <div class="seo-content-meta">Yayımlayan: ${serverProfileLink(newspaper.username)}</div>
-  </article>`);
+  </article>${seo.commentsHtml(newspaperComments)}`);
   res.send(injectMeta(title, description, url, newspaper.image_url, `<script type="application/ld+json">${safeJsonLd({
     '@context': 'https://schema.org', '@type': 'ImageObject', name: newspaper.newspaper_name,
-    contentUrl: newspaper.image_url, uploadDate: newspaper.created_at, description, url
+    contentUrl: newspaper.image_url, uploadDate: newspaper.created_at, description, url,
+    creator: seo.personLd(newspaper.username), creditText: newspaper.username || 'CigCig',
+    copyrightNotice: `© ${newspaper.username || 'CigCig'}`,
+    comment: seo.commentsLd(newspaperComments, url)
   })}</script>`, body));
 });
 
@@ -11765,52 +11821,57 @@ app.get('/forum/:slug', async (req, res) => {
     FROM forums f LEFT JOIN users u ON u.id=f.user_id
     WHERE f.slug=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='forum' AND cs.content_id=f.id)`, [req.params.slug]);
-  if (!rows.length) return sendUncachedAppHtml(res);
+  if (!rows.length) return res.send(injectMeta('CigCig', 'CigCig topluluk konusu.', `${SITE_URL}/forum/${encodeURIComponent(req.params.slug)}`, '', seo.NOINDEX_META));
   const forum = rows[0];
-  const { rows: forumComments } = await query(`SELECT fc.id, fc.content, fc.created_at, u.username
+  const forumComments = await seo.rows(`SELECT fc.id, fc.content, fc.created_at, u.username
     FROM forum_comments fc LEFT JOIN users u ON u.id=fc.user_id
-    WHERE fc.forum_id=$1 ORDER BY fc.created_at ASC LIMIT 200`, [forum.id]);
-  let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const desc = escapeHtml((forum.content || '').substring(0, 160).replace(/\n/g, ' '));
-  const imgTag = forum.banner_image
-    ? `<meta property="og:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:image" content="${escapeHtml(forum.banner_image)}" /><meta name="twitter:card" content="summary_large_image" />`
-    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const forumKw = `${escapeHtml(forum.title)}, CigCig, topluluk platformu, konu`;
+    WHERE fc.forum_id=$1 AND COALESCE(u.is_deleted,0)=0 ORDER BY fc.created_at ASC LIMIT 300`, [forum.id]);
+  const tagRows = await seo.rows(`SELECT t.name FROM forum_tags ft JOIN tags t ON t.id=ft.tag_id WHERE ft.forum_id=$1`, [forum.id]);
+  const tags = [...new Set([
+    ...tagRows.map(t => t.name),
+    ...String(forum.custom_tags || '').split(/[,#]/).map(t => t.trim()).filter(Boolean)
+  ])].slice(0, 15);
+  let images = [];
+  try { images = (JSON.parse(forum.images || '[]') || []).map(i => (typeof i === 'string' ? i : i?.url)).filter(Boolean); } catch {}
+  const heroImage = forum.banner_image || forum.thumbnail || images[0] || '';
+  const url = `${SITE_URL}/forum/${forum.slug}`;
+  // Açıklama: konu metni; boşsa ilk yorumlar (Ekşi Sözlük'teki gibi entry'lerden özet).
+  const description = seo.plain(forum.content, 160)
+    || seo.plain(forumComments.slice(0, 3).map(c => c.content).join(' '), 160)
+    || `${forum.title} – CigCig topluluk konusu ve yorumları.`;
   const forumLd = safeJsonLd({
-    '@context':'https://schema.org','@type':'DiscussionForumPosting',
-    'headline': forum.title,
-    'url': `${SITE_URL}/forum/${forum.slug}`,
-    'datePublished': forum.created_at,
-    'dateModified': forum.updated_at || forum.created_at,
-    'description': (forum.content||'').substring(0,200),
-    'author':{'@type':'Person','name':forum.username||'Anonim'},
-    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL,'logo':{'@type':'ImageObject','url':`${SITE_URL}/cigcig2.png`}}
+    '@context': 'https://schema.org', '@type': 'DiscussionForumPosting',
+    '@id': url,
+    headline: String(forum.title || '').slice(0, 110),
+    url, mainEntityOfPage: url,
+    text: seo.plain(forum.content, 5000) || forum.title,
+    datePublished: forum.created_at,
+    dateModified: forum.updated_at || forum.created_at,
+    author: seo.personLd(forum.username),
+    ...(heroImage ? { image: [heroImage, ...images.filter(i => i !== heroImage)].slice(0, 5) } : {}),
+    ...(tags.length ? { keywords: tags.join(', ') } : {}),
+    interactionStatistic: [seo.counter('LikeAction', forum.like_count), seo.counter('CommentAction', forum.comment_count)],
+    commentCount: Number(forum.comment_count) || 0,
+    comment: seo.commentsLd(forumComments, url, 100),
+    isPartOf: { '@type': 'WebSite', name: 'CigCig', url: SITE_URL },
+    inLanguage: 'tr'
   });
-  const meta = `<title>${escapeHtml(forum.title)} – CigCig</title>
-    <meta name="description" content="${desc}" />
-    <meta name="keywords" content="${forumKw}" />
-    <link rel="canonical" href="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
-    <meta property="og:title" content="${escapeHtml(forum.title)} – CigCig" />
-    <meta property="og:description" content="${desc}" />
-    <meta property="og:type" content="article" />
-    <meta property="og:url" content="${SITE_URL}/forum/${escapeHtml(forum.slug)}" />
-    <meta property="og:site_name" content="CigCig" />
-    ${imgTag}
-    <script type="application/ld+json">${forumLd}</script>`;
-  const commentsBody = forumComments.length
-    ? `<section class="seo-comments"><h2>Yorumlar</h2>${forumComments.map(comment => `<article class="seo-comment">
-        <div class="seo-comment-author">${serverProfileLink(comment.username)} <time>${escapeHtml(new Date(comment.created_at).toLocaleDateString('tr-TR'))}</time></div>
-        <p>${escapeHtml(comment.content)}</p>
-      </article>`).join('')}</section>`
+  const tagsHtml = tags.length
+    ? `<p class="seo-content-meta">Etiketler: ${tags.map(t => `<a href="/forum?tag=${encodeURIComponent(t)}">#${escapeHtml(t)}</a>`).join(' ')}</p>`
     : '';
-  const forumBody = serverPageBody('CİGCİG FORUM', forum.title, 'Topluluk konusu ve yorumları.', `<article class="seo-article">
-    ${forum.banner_image ? serverImage(forum.banner_image, forum.title, 'seo-hero-image') : ''}
-    <div class="seo-content-meta">Konu sahibi: ${serverProfileLink(forum.username)} · ${escapeHtml(forum.comment_count || 0)} yorum</div>
+  const forumBody = serverPageBody('CİGCİG FORUM', forum.title, '', `<article class="seo-article">
+    ${heroImage ? serverImage(heroImage, forum.title, 'seo-hero-image') : ''}
+    <div class="seo-content-meta">Konu sahibi: ${serverProfileLink(forum.username)} · ${escapeHtml(forum.comment_count || 0)} yorum · ${escapeHtml(forum.like_count || 0)} beğeni${forum.created_at ? ` · <time datetime="${escapeHtml(new Date(forum.created_at).toISOString())}">${escapeHtml(new Date(forum.created_at).toLocaleDateString('tr-TR'))}</time>` : ''}</div>
     <div class="seo-article-text">${escapeHtml(forum.content || '')}</div>
-  </article>${commentsBody}`);
-  const r1 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  const rendered = injectCrawlableBody(r1 !== html ? r1 : html.replace(/<title>[^<]*<\/title>/,meta), forumBody);
-  res.send(rendered);
+    ${images.filter(i => i !== heroImage).slice(0, 10).map(i => serverImage(i, forum.title, 'seo-hero-image')).join('')}
+    ${tagsHtml}
+  </article>${seo.commentsHtml(forumComments)}`);
+  const keywords = `<meta name="keywords" content="${escapeHtml([forum.title, ...tags, 'CigCig', 'forum', 'konu'].join(', '))}" />
+    <meta property="article:published_time" content="${escapeHtml(forum.created_at ? new Date(forum.created_at).toISOString() : '')}" />
+    ${forum.username ? `<meta property="article:author" content="${escapeHtml(`${SITE_URL}/profil/${profileRouteKey(forum.username)}`)}" />` : ''}
+    ${tags.map(t => `<meta property="article:tag" content="${escapeHtml(t)}" />`).join('')}
+    <script type="application/ld+json">${forumLd}</script>`;
+  res.send(injectMeta(`${forum.title} – CigCig`, description, url, heroImage, keywords, forumBody));
 });
 
 app.get('/kitap/:slug', async (req, res) => {
@@ -11820,44 +11881,44 @@ app.get('/kitap/:slug', async (req, res) => {
       AND COALESCE(u.is_private,0)=0 AND COALESCE(u.is_deleted,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='book' AND cs.content_id=b.id)
       AND NOT EXISTS (SELECT 1 FROM user_content_archive a WHERE a.content_type='book' AND a.content_id=b.id::text)`, [req.params.slug]);
-  if (!rows.length) return sendUncachedAppHtml(res);
+  if (!rows.length) return res.send(injectMeta('CigCig Kitap', 'CigCig kitabı.', `${SITE_URL}/kitap/${encodeURIComponent(req.params.slug)}`, '', seo.NOINDEX_META));
   const book = rows[0];
-  let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const desc = escapeHtml((book.preface || book.title + ' – CigCig Kitap').substring(0, 160));
-  const imgTag = book.cover_image
-    ? `<meta property="og:image" content="${escapeHtml(book.cover_image)}" /><meta name="twitter:image" content="${escapeHtml(book.cover_image)}" />`
-    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const bookKw = `${escapeHtml(book.title)}${book.author_name?', '+escapeHtml(book.author_name):''}, e-kitap, CigCig kitap, topluluk platformu, ücretsiz kitap oku`;
+  const url = `${SITE_URL}/kitap/${book.slug}`;
+  const authorName = book.author_name || book.username || '';
+  const [bookPages, bookComments] = await Promise.all([
+    seo.rows(`SELECT title, content, page_num, slug FROM book_pages WHERE book_id=$1 AND is_published=1 ORDER BY page_num ASC LIMIT 300`, [book.id]),
+    seo.rows(`SELECT bc.id, bc.content, bc.created_at, u.username FROM book_comments bc LEFT JOIN users u ON u.id=bc.user_id
+      WHERE bc.book_id=$1 AND COALESCE(u.is_deleted,0)=0 ORDER BY bc.created_at ASC LIMIT 200`, [book.id]),
+  ]);
+  const description = seo.plain(book.preface, 160)
+    || seo.plain(`${book.title}${authorName ? `, ${authorName}` : ''} – CigCig'de ücretsiz oku. ${bookPages.map(p => p.title).join(', ')}`, 160);
   const bookLd = safeJsonLd({
-    '@context':'https://schema.org','@type':'Book',
-    'name': book.title,
-    'url': `${SITE_URL}/kitap/${book.slug}`,
-    'description': (book.preface||book.title).substring(0,200),
-    'author': book.author_name?{'@type':'Person','name':book.author_name}:undefined,
-    'publisher':{'@type':'Organization','name':'CigCig','url':SITE_URL},
-    'image': book.cover_image||undefined,
-    'inLanguage':'tr'
+    '@context': 'https://schema.org', '@type': 'Book',
+    '@id': url, name: book.title, url,
+    description: seo.plain(book.preface || book.title, 500),
+    author: authorName ? { '@type': 'Person', name: authorName, ...(book.username && !book.author_name ? { url: `${SITE_URL}/profil/${profileRouteKey(book.username)}` } : {}) } : undefined,
+    publisher: { '@type': 'Organization', name: 'CigCig', url: SITE_URL },
+    image: book.cover_image || undefined,
+    numberOfPages: bookPages.length || Number(book.page_count) || undefined,
+    datePublished: book.created_at || undefined,
+    dateModified: book.updated_at || undefined,
+    bookFormat: 'https://schema.org/EBook',
+    isAccessibleForFree: true,
+    inLanguage: 'tr',
+    hasPart: bookPages.slice(0, 100).map(p => ({ '@type': 'Chapter', name: p.title, position: Number(p.page_num) || undefined, url: `${url}/sayfa/${p.slug}` })),
+    interactionStatistic: [seo.counter('LikeAction', book.like_count), seo.counter('CommentAction', bookComments.length)],
+    comment: seo.commentsLd(bookComments, url)
   });
-  const meta = `<title>${escapeHtml(book.title)} – CigCig Kitap</title>
-    <meta name="description" content="${desc}" />
-    <meta name="keywords" content="${bookKw}" />
-    <link rel="canonical" href="${SITE_URL}/kitap/${escapeHtml(book.slug)}" />
-    <meta property="og:title" content="${escapeHtml(book.title)} – CigCig Kitap" />
-    <meta property="og:description" content="${desc}" />
-    <meta property="og:type" content="book" />
-    <meta property="og:url" content="${SITE_URL}/kitap/${escapeHtml(book.slug)}" />
-    <meta property="og:site_name" content="CigCig" />
-    ${imgTag}
+  const extra = `<meta name="keywords" content="${escapeHtml([book.title, authorName, 'e-kitap', 'ücretsiz kitap oku', 'CigCig kitap'].filter(Boolean).join(', '))}" />
+    ${authorName ? `<meta property="book:author" content="${escapeHtml(authorName)}" />` : ''}
     <script type="application/ld+json">${bookLd}</script>`;
-  const { rows: bookPages } = await query(`SELECT title, content, page_num, slug
-    FROM book_pages WHERE book_id=$1 AND is_published=1 ORDER BY page_num ASC LIMIT 200`, [book.id]);
-  const bookBody = serverPageBody('CİGCİG KİTAP', book.title, book.author_name ? `Yazar: ${book.author_name}` : 'CigCig topluluğunda yayınlanan kitap.', `<article class="seo-article">
-    ${book.cover_image ? serverImage(book.cover_image, book.title, 'seo-hero-image') : ''}
+  const bookBody = serverPageBody('CİGCİG KİTAP', book.title, authorName ? `Yazar: ${authorName}` : 'CigCig topluluğunda yayınlanan kitap.', `<article class="seo-article">
+    ${book.cover_image ? serverImage(book.cover_image, `${book.title} kitap kapağı`, 'seo-hero-image') : ''}
     ${book.preface ? `<p class="seo-lead">${escapeHtml(book.preface)}</p>` : ''}
     ${bookPages.length ? `<section class="seo-book-pages"><h2>İçindekiler</h2><ol>${bookPages.map(page => `<li><a href="/kitap/${escapeHtml(book.slug)}/sayfa/${escapeHtml(page.slug)}">${escapeHtml(page.title)}</a></li>`).join('')}</ol></section>` : ''}
-  </article>`);
-  const r2 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(injectCrawlableBody(r2!==html?r2:html.replace(/<title>[^<]*<\/title>/,meta), bookBody));
+    <div class="seo-content-meta">Paylaşan: ${serverProfileLink(book.username)}</div>
+  </article>${seo.commentsHtml(bookComments)}`);
+  res.send(injectMeta(`${book.title}${authorName ? ` – ${authorName}` : ''} | CigCig Kitap`, description, url, book.cover_image, extra, bookBody));
 });
 
 function renderBookTextHtml(text) {
@@ -11951,17 +12012,18 @@ app.get('/fotograflar', async (req, res) => {
 });
 
 app.get('/foto/:id', async (req, res) => {
+  if (!/^\d{1,18}$/.test(String(req.params.id))) return res.status(404).send(injectMeta('CigCig Fotoğraf', 'CigCig fotoğrafı.', `${SITE_URL}/fotograflar`, '', seo.NOINDEX_META));
   const { rows } = await query(`SELECT p.*, u.username, u.avatar, s.title AS song_title, s.artist_name AS song_artist
     FROM photos p LEFT JOIN users u ON u.id=p.user_id LEFT JOIN songs s ON s.id=p.song_id
     WHERE p.id=$1 AND COALESCE(u.is_private,0)=0 AND COALESCE(p.close_friends_only,0)=0
       AND NOT EXISTS (SELECT 1 FROM content_suspensions cs WHERE cs.content_type='photo' AND cs.content_id=p.id)`, [req.params.id]);
-  if (!rows.length) return sendUncachedAppHtml(res);
+  if (!rows.length) return res.send(injectMeta('CigCig Fotoğraf', 'CigCig fotoğrafı.', `${SITE_URL}/foto/${encodeURIComponent(req.params.id)}`, '', seo.NOINDEX_META));
   const photo = rows[0];
   const { rows: photoComments } = await query(`SELECT pc.content, pc.created_at, u.username
     FROM photo_comments pc LEFT JOIN users u ON u.id=pc.user_id
     WHERE pc.photo_id=$1 ORDER BY pc.created_at ASC LIMIT 200`, [photo.id]);
-  const title = photo.title || photo.caption || 'CigCig fotoğrafı';
-  const desc = String(photo.caption || title).replace(/\s+/g, ' ').slice(0, 160);
+  const title = photo.title || seo.plain(photo.caption, 70) || `${photo.username || 'CigCig'} fotoğrafı`;
+  const desc = seo.plain(photo.caption || `${title}${photo.location ? ` · ${photo.location}` : ''} – CigCig'de paylaşılan fotoğraf.`, 160);
   const url = `${SITE_URL}/foto/${photo.id}`;
   const comments = photoComments.length ? `<section class="seo-comments"><h2>Yorumlar</h2>${photoComments.map(comment => `<article class="seo-comment"><div class="seo-comment-author">${serverProfileLink(comment.username)} <time>${escapeHtml(new Date(comment.created_at).toLocaleDateString('tr-TR'))}</time></div><p>${escapeHtml(comment.content)}</p></article>`).join('')}</section>` : '';
   const body = serverPageBody('CİGCİG FOTOĞRAF', title, desc, `<article class="seo-article">
@@ -11969,40 +12031,44 @@ app.get('/foto/:id', async (req, res) => {
     ${photo.caption ? `<div class="seo-article-text">${escapeHtml(photo.caption)}</div>` : ''}
     <div class="seo-content-meta">Paylaşan: ${serverProfileLink(photo.username)}${photo.location ? ` · ${escapeHtml(photo.location)}` : ''}</div>
   </article>${comments}`);
-  const html = injectMeta(`${title} – CigCig Fotoğraf`, desc, url, photo.url, `<script type="application/ld+json">${safeJsonLd({
+  const html = injectMeta(`${title}${photo.username ? ` – ${photo.username}` : ''} | CigCig Fotoğraf`, desc, url, photo.url, `${Number(photo.is_nsfw) === 1 ? seo.NOINDEX_META : ''}<script type="application/ld+json">${safeJsonLd({
     '@context': 'https://schema.org', '@type': 'ImageObject', name: title, contentUrl: photo.url, url, description: desc,
-    ...(photo.created_at ? { uploadDate: photo.created_at } : {}),
-    author: photo.username ? { '@type': 'Person', name: photo.username, url: `${SITE_URL}/profil/${profileRouteKey(photo.username)}` } : undefined
+    caption: photo.caption || undefined,
+    ...(photo.created_at ? { uploadDate: photo.created_at, datePublished: photo.created_at } : {}),
+    ...(photo.location ? { contentLocation: { '@type': 'Place', name: photo.location } } : {}),
+    author: photo.username ? seo.personLd(photo.username) : undefined,
+    creator: photo.username ? seo.personLd(photo.username) : undefined,
+    creditText: photo.username || 'CigCig',
+    copyrightNotice: `© ${photo.username || 'CigCig'} – CigCig`,
+    acquireLicensePage: url,
+    interactionStatistic: [seo.counter('LikeAction', photo.like_count), seo.counter('CommentAction', photoComments.length)],
+    comment: seo.commentsLd(photoComments, url)
   })}</script>`, body);
   res.send(html);
 });
 
 app.get('/grup/:slug', async (req, res) => {
   const { rows } = await query("SELECT * FROM groups WHERE slug=$1 AND COALESCE(visibility,'public')='public' AND COALESCE(moderation_status,'active')='active'", [req.params.slug]);
-  if (!rows.length) return sendUncachedAppHtml(res);
+  if (!rows.length) return res.send(injectMeta('CigCig Grup', 'CigCig grubu.', `${SITE_URL}/grup/${encodeURIComponent(req.params.slug)}`, '', seo.NOINDEX_META));
   const group = rows[0];
-  let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
-  const desc = escapeHtml((group.description || group.name + ' – CigCig topluluğu grubu.').substring(0, 160));
-  const imgTag = group.cover_image
-    ? `<meta property="og:image" content="${escapeHtml(group.cover_image)}" />`
-    : `<meta property="og:image" content="${SITE_URL}/teatube.png" />`;
-  const meta = `<title>${escapeHtml(group.name)} – CigCig Grup</title>
-    <meta name="description" content="${desc}" />
-    <link rel="canonical" href="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
-    <meta property="og:title" content="${escapeHtml(group.name)} – CigCig Grup" />
-    <meta property="og:description" content="${desc}" />
-    <meta property="og:url" content="${SITE_URL}/grup/${escapeHtml(group.slug)}" />
-    <meta property="og:site_name" content="CigCig" />
-    ${imgTag}`;
-  const groupBody = serverPageBody('CİGCİG GRUP', group.name, group.description || 'CigCig topluluğundaki grup.', `<article class="seo-article">
-    ${group.cover_image ? serverImage(group.cover_image, group.name, 'seo-hero-image') : ''}
+  const url = `${SITE_URL}/grup/${group.slug}`;
+  const image = group.cover_image || group.banner_image || '';
+  const description = seo.plain(group.description, 160) || `${group.name} – CigCig topluluk grubu. ${Number(group.member_count) || 0} üye.`;
+  const groupLd = safeJsonLd({
+    '@context': 'https://schema.org', '@type': 'Organization',
+    name: group.name, url, description: seo.plain(group.description || group.name, 500),
+    ...(image ? { logo: image, image } : {}),
+    memberOf: { '@type': 'Organization', name: 'CigCig', url: SITE_URL },
+    interactionStatistic: [seo.counter('JoinAction', group.member_count)]
+  });
+  const groupBody = serverPageBody('CİGCİG GRUP', group.name, `${Number(group.member_count) || 0} üye`, `<article class="seo-article">
+    ${image ? serverImage(image, group.name, 'seo-hero-image') : ''}
     <div class="seo-article-text">${escapeHtml(group.description || '')}</div>
   </article>`);
-  const r3 = html.replace(/<!-- SEO_START -->[\s\S]*?<!-- SEO_END -->/m,`<!-- SEO_START -->\n  ${meta}\n  <!-- SEO_END -->`);
-  res.send(injectCrawlableBody(r3!==html?r3:html.replace(/<title>[^<]*<\/title>/,meta), groupBody));
+  res.send(injectMeta(`${group.name} – CigCig Grup`, description, url, image, `<script type="application/ld+json">${groupLd}</script>`, groupBody));
 });
 
-app.get('/profil/:username', (req, res) => sendUncachedAppHtml(res));
+// /profil/:username artık seo.js içinde (sunucu taraflı profil sayfası).
 
 // ===== KULLANICI ARAMA =====
 app.get('/api/search/users', async (req, res) => {
