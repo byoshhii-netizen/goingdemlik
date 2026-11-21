@@ -5954,15 +5954,9 @@ app.post('/api/group/:slug/messages', authMiddleware, async (req, res) => {
   const image_url = imageUrls[0] || '';
   let shared_gif_url = typeof req.body?.shared_gif_url === 'string' ? req.body.shared_gif_url.trim() : '';
   if (shared_gif_url) {
-    try {
-      const gifUrl = new URL(shared_gif_url);
-      if (gifUrl.protocol !== 'https:' || !gifUrl.hostname.endsWith('.giphy.com') || gifUrl.href.length > 2048) {
-        return res.status(400).json({ error: 'GIF adresi geçersiz.' });
-      }
-      shared_gif_url = gifUrl.href;
-    } catch {
-      return res.status(400).json({ error: 'GIF adresi geçersiz.' });
-    }
+    const resolvedGifUrl = await resolveSharedGifUrl(shared_gif_url);
+    if (!resolvedGifUrl) return res.status(400).json({ error: 'GIF adresi geçersiz.' });
+    shared_gif_url = resolvedGifUrl;
   }
   let shared_song_id = null;
   // Grup sesli mesajı (DM ile aynı imzalı yükleme akışı)
@@ -13618,6 +13612,424 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true, conversationId: conversation.id, readThroughMessageId });
 });
 
+// =========================================================================
+// CIG GIF ARŞİVİ — kullanıcıların yüklediği GIF/görseller ve etiketleri
+// =========================================================================
+const CIG_GIF_MAX_BYTES = 8 * 1024 * 1024;
+const CIG_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const CIG_GIF_MAX_DURATION_MS = 10000;
+const CIG_MEDIA_MIN_SIDE = 80;
+const CIG_GIF_MAX_SIDE = 1080;
+const CIG_IMAGE_MAX_SIDE = 2048;
+const CIG_GIF_MIN_KEYWORDS = 5;
+const CIG_GIF_MAX_KEYWORDS = 25;
+
+// GIPHY adresleri ya da Cig arşivindeki bir GIF kabul edilir.
+async function resolveSharedGifUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value || value.length > 2048) return null;
+  const candidates = [value];
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && url.hostname.endsWith('.giphy.com')) return url.href;
+    candidates.push(url.pathname);
+  } catch { /* göreli adres olabilir */ }
+  try {
+    const { rows } = await query(
+      'SELECT media_url FROM cig_gifs WHERE media_url = ANY($1::text[]) AND deleted_at IS NULL LIMIT 1',
+      [candidates]
+    );
+    return rows.length ? rows[0].media_url : null;
+  } catch { return null; }
+}
+
+const cigGifUpload = multer({
+  storage,
+  limits: { fileSize: CIG_GIF_MAX_BYTES },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['image/gif', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+    if (allowed.includes(file.mimetype)) return cb(null, true);
+    const error = new Error('Sadece GIF, PNG, JPEG veya WEBP yükleyebilirsin.');
+    error.status = 400;
+    cb(error);
+  }
+});
+
+// Harici bağımlılık olmadan dosya başlığından ölçü ve süre okur.
+function probeCigMedia(buffer) {
+  if (!buffer || buffer.length < 16) return null;
+
+  // ---- GIF ----
+  if (buffer.toString('ascii', 0, 3) === 'GIF') {
+    const width = buffer.readUInt16LE(6);
+    const height = buffer.readUInt16LE(8);
+    let durationMs = 0;
+    let frames = 0;
+    let offset = 13;
+    const flags = buffer[10];
+    if (flags & 0x80) offset += 3 * (2 << (flags & 0x07));
+    while (offset < buffer.length) {
+      const block = buffer[offset];
+      if (block === 0x3B) break;
+      if (block === 0x21) {
+        const label = buffer[offset + 1];
+        offset += 2;
+        if (label === 0xF9 && buffer[offset] === 4) durationMs += buffer.readUInt16LE(offset + 2) * 10;
+        while (offset < buffer.length && buffer[offset] !== 0) offset += buffer[offset] + 1;
+        offset += 1;
+      } else if (block === 0x2C) {
+        frames += 1;
+        const localFlags = buffer[offset + 9];
+        offset += 10;
+        if (localFlags & 0x80) offset += 3 * (2 << (localFlags & 0x07));
+        offset += 1;
+        while (offset < buffer.length && buffer[offset] !== 0) offset += buffer[offset] + 1;
+        offset += 1;
+      } else break;
+    }
+    return { type: frames > 1 ? 'gif' : 'image', width, height, durationMs, frames: frames || 1 };
+  }
+
+  // ---- PNG ----
+  if (buffer.readUInt32BE(0) === 0x89504E47) {
+    return { type: 'image', width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20), durationMs: 0, frames: 1 };
+  }
+
+  // ---- JPEG ----
+  if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
+    let offset = 2;
+    while (offset + 9 < buffer.length) {
+      if (buffer[offset] !== 0xFF) { offset += 1; continue; }
+      const marker = buffer[offset + 1];
+      if (marker === 0xD8 || marker === 0x01 || (marker >= 0xD0 && marker <= 0xD7)) { offset += 2; continue; }
+      const size = buffer.readUInt16BE(offset + 2);
+      if (marker >= 0xC0 && marker <= 0xCF && ![0xC4, 0xC8, 0xCC].includes(marker)) {
+        return { type: 'image', width: buffer.readUInt16BE(offset + 7), height: buffer.readUInt16BE(offset + 5), durationMs: 0, frames: 1 };
+      }
+      if (size < 2) break;
+      offset += 2 + size;
+    }
+    return null;
+  }
+
+  // ---- WEBP ----
+  if (buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') {
+    const format = buffer.toString('ascii', 12, 16);
+    if (format === 'VP8X' && buffer.length > 30) {
+      const width = 1 + (buffer[24] | (buffer[25] << 8) | (buffer[26] << 16));
+      const height = 1 + (buffer[27] | (buffer[28] << 8) | (buffer[29] << 16));
+      const animated = (buffer[20] & 0x02) === 0x02;
+      let durationMs = 0;
+      let frames = 0;
+      if (animated) {
+        let offset = 12;
+        while (offset + 8 <= buffer.length) {
+          const chunk = buffer.toString('ascii', offset, offset + 4);
+          const size = buffer.readUInt32LE(offset + 4);
+          if (chunk === 'ANMF' && offset + 8 + 16 <= buffer.length) {
+            frames += 1;
+            durationMs += buffer[offset + 8 + 12] | (buffer[offset + 8 + 13] << 8) | (buffer[offset + 8 + 14] << 16);
+          }
+          offset += 8 + size + (size % 2);
+          if (size === 0) break;
+        }
+      }
+      return { type: animated ? 'gif' : 'image', width, height, durationMs, frames: frames || 1 };
+    }
+    if (format === 'VP8 ' && buffer.length > 30) {
+      return { type: 'image', width: buffer.readUInt16LE(26) & 0x3FFF, height: buffer.readUInt16LE(28) & 0x3FFF, durationMs: 0, frames: 1 };
+    }
+    if (format === 'VP8L' && buffer.length > 25) {
+      const bits = buffer.readUInt32LE(21);
+      return { type: 'image', width: (bits & 0x3FFF) + 1, height: ((bits >> 14) & 0x3FFF) + 1, durationMs: 0, frames: 1 };
+    }
+  }
+  return null;
+}
+
+function normalizeGifKeyword(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[İıI]/g, 'i')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+// Boşlukla ayrılmış tek kelimelik anahtarlar
+function parseGifKeywords(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw || '').split(/[\s,]+/);
+  const seen = [];
+  for (const item of list) {
+    const keyword = normalizeGifKeyword(item);
+    if (keyword.length < 2 || keyword.length > 24) continue;
+    if (!seen.includes(keyword)) seen.push(keyword);
+    if (seen.length >= CIG_GIF_MAX_KEYWORDS) break;
+  }
+  return seen;
+}
+
+let cigGifTrigramReady = null;
+async function gifTrigramAvailable() {
+  if (cigGifTrigramReady !== null) return cigGifTrigramReady;
+  try {
+    const { rows } = await query("SELECT 1 FROM pg_extension WHERE extname='pg_trgm'");
+    cigGifTrigramReady = rows.length > 0;
+  } catch { cigGifTrigramReady = false; }
+  return cigGifTrigramReady;
+}
+
+async function loadGifKeywords(ids) {
+  if (!ids.length) return new Map();
+  const { rows } = await query('SELECT gif_id, keyword FROM cig_gif_keywords WHERE gif_id = ANY($1::bigint[]) ORDER BY keyword', [ids]);
+  const map = new Map();
+  rows.forEach(row => {
+    const key = String(row.gif_id);
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(row.keyword);
+  });
+  return map;
+}
+
+function shapeCigGif(row, keywords) {
+  return {
+    id: String(row.id),
+    source: 'cig',
+    url: row.media_url,
+    preview: row.media_url,
+    title: (keywords || []).slice(0, 3).join(' '),
+    width: Number(row.width) || 0,
+    height: Number(row.height) || 0,
+    duration_ms: Number(row.duration_ms) || 0,
+    media_type: row.media_type,
+    username: row.username || '',
+    nickname: row.nickname || '',
+    is_hidden: Number(row.is_hidden) === 1,
+    deleted_at: row.deleted_at || null,
+    created_at: row.created_at,
+    keywords: keywords || []
+  };
+}
+
+// ---- Yükleme ----
+app.post('/api/cig-gifs', authMiddleware, uploadLimiter, (req, res, next) => {
+  cigGifUpload.single('media')(req, res, error => {
+    if (error) {
+      return res.status(400).json({
+        error: error.code === 'LIMIT_FILE_SIZE'
+          ? `Dosya boyutu en fazla ${Math.round(CIG_GIF_MAX_BYTES / (1024 * 1024))} MB olabilir.`
+          : error.message
+      });
+    }
+    next();
+  });
+}, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Bir GIF ya da görsel seç.' });
+  const cleanup = () => { if (req.file?.path) fs.promises.unlink(req.file.path).catch(() => {}); };
+  try {
+    const keywords = parseGifKeywords(req.body?.keywords);
+    if (keywords.length < CIG_GIF_MIN_KEYWORDS) {
+      cleanup();
+      return res.status(400).json({ error: `En az ${CIG_GIF_MIN_KEYWORDS} anahtar kelime girmelisin.` });
+    }
+    const buffer = req.file.buffer || await fs.promises.readFile(req.file.path);
+    const probe = probeCigMedia(buffer);
+    if (!probe || !probe.width || !probe.height) {
+      cleanup();
+      return res.status(400).json({ error: 'Dosya okunamadı. GIF, PNG, JPEG veya WEBP yükle.' });
+    }
+    const isAnimated = probe.type === 'gif';
+    const maxBytes = isAnimated ? CIG_GIF_MAX_BYTES : CIG_IMAGE_MAX_BYTES;
+    const maxSide = isAnimated ? CIG_GIF_MAX_SIDE : CIG_IMAGE_MAX_SIDE;
+    if (buffer.length > maxBytes) {
+      cleanup();
+      return res.status(400).json({ error: `${isAnimated ? 'GIF' : 'Görsel'} en fazla ${Math.round(maxBytes / (1024 * 1024))} MB olabilir.` });
+    }
+    if (probe.width < CIG_MEDIA_MIN_SIDE || probe.height < CIG_MEDIA_MIN_SIDE) {
+      cleanup();
+      return res.status(400).json({ error: `En küçük boyut ${CIG_MEDIA_MIN_SIDE}x${CIG_MEDIA_MIN_SIDE} piksel olmalı.` });
+    }
+    if (probe.width > maxSide || probe.height > maxSide) {
+      cleanup();
+      return res.status(400).json({ error: `En büyük boyut ${maxSide}x${maxSide} piksel olabilir. Şu an ${probe.width}x${probe.height}.` });
+    }
+    if (isAnimated && probe.durationMs > CIG_GIF_MAX_DURATION_MS) {
+      cleanup();
+      return res.status(400).json({ error: `GIF süresi en fazla ${CIG_GIF_MAX_DURATION_MS / 1000} saniye olabilir. Şu an ${(probe.durationMs / 1000).toFixed(1)} sn.` });
+    }
+    const mediaUrl = await handleUpload(req.file);
+    const { rows } = await query(
+      `INSERT INTO cig_gifs (user_id, media_url, media_type, width, height, duration_ms, byte_size)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [req.user.id, mediaUrl, isAnimated ? 'gif' : 'image', probe.width, probe.height, probe.durationMs, buffer.length]
+    );
+    const gif = rows[0];
+    await query(
+      'INSERT INTO cig_gif_keywords (gif_id, keyword) SELECT $1, UNNEST($2::text[]) ON CONFLICT DO NOTHING',
+      [gif.id, keywords]
+    );
+    res.json(shapeCigGif({ ...gif, username: req.user.username, nickname: req.user.nickname }, keywords));
+  } catch (error) {
+    cleanup();
+    console.error('[cig-gif] yükleme başarısız:', error);
+    res.status(500).json({ error: 'GIF yüklenemedi: ' + error.message });
+  }
+});
+
+// ---- Arama (herkese açık havuz) ----
+app.get('/api/cig-gifs/search', authMiddleware, async (req, res) => {
+  try {
+    const search = String(req.query.q || '').trim().slice(0, 80);
+    const offset = Math.min(Math.max(Number.parseInt(req.query.offset, 10) || 0, 0), 4999);
+    const limit = 24;
+    const tokens = parseGifKeywords(search).slice(0, 6);
+    let rows = [];
+    if (!tokens.length) {
+      ({ rows } = await query(
+        `SELECT g.*, u.username, u.nickname FROM cig_gifs g
+         JOIN users u ON u.id = g.user_id AND COALESCE(u.is_deleted,0)=0
+         WHERE g.deleted_at IS NULL AND g.is_hidden = 0
+         ORDER BY g.use_count DESC, g.created_at DESC
+         LIMIT $1 OFFSET $2`,
+        [limit, offset]
+      ));
+    } else if (await gifTrigramAvailable()) {
+      ({ rows } = await query(
+        `SELECT g.*, u.username, u.nickname, MAX(score.value) AS rank
+         FROM cig_gifs g
+         JOIN users u ON u.id = g.user_id AND COALESCE(u.is_deleted,0)=0
+         JOIN cig_gif_keywords k ON k.gif_id = g.id
+         CROSS JOIN LATERAL (
+           SELECT MAX(CASE WHEN k.keyword = t THEN 1.0
+                           WHEN k.keyword LIKE t || '%' THEN 0.9
+                           ELSE similarity(k.keyword, t) END) AS value
+           FROM UNNEST($1::text[]) AS t
+         ) AS score
+         WHERE g.deleted_at IS NULL AND g.is_hidden = 0 AND score.value >= 0.34
+         GROUP BY g.id, u.username, u.nickname
+         ORDER BY rank DESC, g.use_count DESC, g.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [tokens, limit, offset]
+      ));
+    } else {
+      ({ rows } = await query(
+        `SELECT g.*, u.username, u.nickname, MAX(score.value) AS rank
+         FROM cig_gifs g
+         JOIN users u ON u.id = g.user_id AND COALESCE(u.is_deleted,0)=0
+         JOIN cig_gif_keywords k ON k.gif_id = g.id
+         CROSS JOIN LATERAL (
+           SELECT MAX(CASE WHEN k.keyword = t THEN 1.0
+                           WHEN k.keyword LIKE t || '%' THEN 0.9
+                           WHEN k.keyword LIKE '%' || t || '%' THEN 0.7
+                           WHEN t LIKE LEFT(k.keyword, 3) || '%' THEN 0.5
+                           ELSE 0 END) AS value
+           FROM UNNEST($1::text[]) AS t
+         ) AS score
+         WHERE g.deleted_at IS NULL AND g.is_hidden = 0 AND score.value > 0
+         GROUP BY g.id, u.username, u.nickname
+         ORDER BY rank DESC, g.use_count DESC, g.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [tokens, limit, offset]
+      ));
+    }
+    const keywordMap = await loadGifKeywords(rows.map(row => row.id));
+    res.json({
+      gifs: rows.map(row => shapeCigGif(row, keywordMap.get(String(row.id)) || [])),
+      next_offset: offset + rows.length
+    });
+  } catch (error) {
+    console.error('[cig-gif] arama başarısız:', error);
+    res.status(500).json({ error: 'GIF araması yapılamadı.' });
+  }
+});
+
+// Gönderildiğinde popülerlik sayacı
+app.post('/api/cig-gifs/:id/used', authMiddleware, async (req, res) => {
+  await query('UPDATE cig_gifs SET use_count = use_count + 1 WHERE id=$1 AND deleted_at IS NULL', [req.params.id]).catch(() => {});
+  res.json({ ok: true });
+});
+
+// ---- Giflerim ----
+app.get('/api/me/cig-gifs', authMiddleware, async (req, res) => {
+  const view = ['active', 'hidden', 'trash'].includes(String(req.query.view)) ? String(req.query.view) : 'active';
+  const condition = view === 'trash'
+    ? 'g.deleted_at IS NOT NULL'
+    : view === 'hidden'
+      ? 'g.deleted_at IS NULL AND g.is_hidden = 1'
+      : 'g.deleted_at IS NULL AND g.is_hidden = 0';
+  const { rows } = await query(
+    `SELECT g.*, u.username, u.nickname FROM cig_gifs g
+     JOIN users u ON u.id = g.user_id
+     WHERE g.user_id = $1 AND ${condition}
+     ORDER BY COALESCE(g.deleted_at, g.created_at) DESC
+     LIMIT 300`,
+    [req.user.id]
+  );
+  const keywordMap = await loadGifKeywords(rows.map(row => row.id));
+  res.json({
+    view,
+    gifs: rows.map(row => shapeCigGif(row, keywordMap.get(String(row.id)) || [])),
+    min_keywords: CIG_GIF_MIN_KEYWORDS,
+    max_keywords: CIG_GIF_MAX_KEYWORDS
+  });
+});
+
+async function ownedGif(userId, id) {
+  const { rows } = await query('SELECT * FROM cig_gifs WHERE id=$1 AND user_id=$2', [id, userId]);
+  return rows[0] || null;
+}
+
+// Gizle / göster
+app.patch('/api/me/cig-gifs/:id', authMiddleware, async (req, res) => {
+  const gif = await ownedGif(req.user.id, req.params.id);
+  if (!gif) return res.status(404).json({ error: 'GIF bulunamadı' });
+  if (gif.deleted_at) return res.status(400).json({ error: 'Silinenlerdeki bir GIF gizlenemez.' });
+  const hidden = req.body?.hidden === true;
+  await query('UPDATE cig_gifs SET is_hidden=$1 WHERE id=$2', [hidden ? 1 : 0, gif.id]);
+  res.json({ ok: true, id: String(gif.id), is_hidden: hidden });
+});
+
+// Çöpe taşı
+app.delete('/api/me/cig-gifs/:id', authMiddleware, async (req, res) => {
+  const gif = await ownedGif(req.user.id, req.params.id);
+  if (!gif) return res.status(404).json({ error: 'GIF bulunamadı' });
+  if (gif.deleted_at) return res.json({ ok: true, id: String(gif.id), deleted: true });
+  await query('UPDATE cig_gifs SET deleted_at=NOW() WHERE id=$1', [gif.id]);
+  res.json({ ok: true, id: String(gif.id), deleted: true });
+});
+
+// Geri al
+app.post('/api/me/cig-gifs/:id/restore', authMiddleware, async (req, res) => {
+  const gif = await ownedGif(req.user.id, req.params.id);
+  if (!gif) return res.status(404).json({ error: 'GIF bulunamadı' });
+  await query('UPDATE cig_gifs SET deleted_at=NULL WHERE id=$1', [gif.id]);
+  res.json({ ok: true, id: String(gif.id), restored: true });
+});
+
+// Kalıcı sil
+app.delete('/api/me/cig-gifs/:id/permanent', authMiddleware, async (req, res) => {
+  const gif = await ownedGif(req.user.id, req.params.id);
+  if (!gif) return res.status(404).json({ error: 'GIF bulunamadı' });
+  if (!gif.deleted_at) return res.status(400).json({ error: 'Önce GIF’i silinenlere taşımalısın.' });
+  await query('DELETE FROM cig_gifs WHERE id=$1', [gif.id]);
+  res.json({ ok: true, id: String(gif.id), purged: true });
+});
+
+// Anahtar kelime sil (düzenleme yok, en az 5 kalmalı)
+app.delete('/api/me/cig-gifs/:id/keywords/:keyword', authMiddleware, async (req, res) => {
+  const gif = await ownedGif(req.user.id, req.params.id);
+  if (!gif) return res.status(404).json({ error: 'GIF bulunamadı' });
+  const keyword = normalizeGifKeyword(req.params.keyword);
+  const { rows } = await query('SELECT keyword FROM cig_gif_keywords WHERE gif_id=$1 ORDER BY keyword', [gif.id]);
+  if (!rows.some(row => row.keyword === keyword)) return res.status(404).json({ error: 'Anahtar kelime bulunamadı' });
+  if (rows.length <= CIG_GIF_MIN_KEYWORDS) {
+    return res.status(400).json({ error: `En az ${CIG_GIF_MIN_KEYWORDS} anahtar kelime kalmalı. Silmek için önce yenisini ekleyemezsin; bu GIF’i silebilirsin.` });
+  }
+  await query('DELETE FROM cig_gif_keywords WHERE gif_id=$1 AND keyword=$2', [gif.id, keyword]);
+  res.json({ ok: true, keywords: rows.filter(row => row.keyword !== keyword).map(row => row.keyword) });
+});
+
 app.get('/api/giphy/search', authMiddleware, async (req, res) => {
   const apiKey = String(process.env.GIPHY_API_KEY || '').trim();
   if (!apiKey) return res.status(503).json({ error: 'GIF araması şu anda yapılandırılmamış. Yönetici GIPHY_API_KEY eklemelidir.' });
@@ -13868,15 +14280,9 @@ app.post('/api/conversation/:username/messages', authMiddleware, upload.single('
   }
   shared_gif_url = typeof shared_gif_url === 'string' ? shared_gif_url.trim() : '';
   if (shared_gif_url) {
-    try {
-      const gifUrl = new URL(shared_gif_url);
-      if (gifUrl.protocol !== 'https:' || !gifUrl.hostname.endsWith('.giphy.com') || gifUrl.href.length > 2048) {
-        return res.status(400).json({ error: 'GIF adresi geçersiz.' });
-      }
-      shared_gif_url = gifUrl.href;
-    } catch {
-      return res.status(400).json({ error: 'GIF adresi geçersiz.' });
-    }
+    const resolvedGifUrl = await resolveSharedGifUrl(shared_gif_url);
+    if (!resolvedGifUrl) return res.status(400).json({ error: 'GIF adresi geçersiz.' });
+    shared_gif_url = resolvedGifUrl;
   }
   if (req.file) {
     try {

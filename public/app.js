@@ -540,7 +540,7 @@ function showModal(title, bodyHTML, modalClass = '', { pauseMedia = true } = {})
   });
   $('#modal-title').textContent = title;
   $('#modal-body').innerHTML = bodyHTML;
-  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal', 'dm-reaction-users-modal', 'photo-likes-modal', 'dm-message-search-modal');
+  $('#modal').classList.remove('social-compose-modal', 'social-compose-photo-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'song-editor-modal', 'profile-note-viewer-modal', 'profile-badges-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'playlist-picker-modal', 'dm-image-viewer-modal', 'dm-reaction-users-modal', 'photo-likes-modal', 'dm-message-search-modal', 'cg-gif-modal');
   if (modalClass) $('#modal').classList.add(modalClass);
   $('#modal-overlay').classList.remove('hidden');
 }
@@ -566,7 +566,7 @@ function hideModal({ resumeReals = true } = {}) {
   }
   $('#modal-overlay').classList.add('hidden');
   $('#modal-overlay').classList.remove('story-fullscreen-overlay');
-  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'dm-image-viewer-modal', 'dm-reaction-users-modal', 'photo-likes-modal', 'dm-message-search-modal');
+  $('#modal')?.classList.remove('social-compose-modal', 'newspaper-editor-modal', 'dm-first-theme-modal', 'register-avatar-viewer-modal', 'dm-photo-editor-modal', 'profile-note-viewer-modal', 'red-verification-modal', 'photo-edit-modal', 'photo-description-modal', 'story-visibility-confirm-modal', 'dm-image-viewer-modal', 'dm-reaction-users-modal', 'photo-likes-modal', 'dm-message-search-modal', 'cg-gif-modal');
 }
 
 function descriptionPreviewHTML(description, className, maxLength = 150) {
@@ -18296,7 +18296,7 @@ async function showDmPhotoEditor(file, onSave) {
   });
 }
 
-function showDmGifPicker(onSelect) {
+function showLegacyGifPicker(onSelect) {
   showModal('GIF gönder', `<div class="dm-picker">
     <label class="dm-picker-search"><i class="fas fa-search"></i><input id="dm-gif-search" type="search" maxlength="80" placeholder="GIF ara..." autocomplete="off" /></label>
     <div class="dm-gif-results" id="dm-gif-results" aria-live="polite"></div>
@@ -26496,3 +26496,426 @@ document.addEventListener('click', event => {
     submit.click();
   });
 });
+
+/* ============================================================================
+   CIG GIF PANELİ — Cig | GIPHY sekmeleri, yükleme ve "Giflerim" yönetimi
+   Telefona göre tasarlanmış tam ekran alt sayfa.
+   ============================================================================ */
+const CIG_GIF_SOURCE_KEY = 'cigcig_gif_source';
+const CIG_GIF_RULES = {
+  minKeywords: 5,
+  maxKeywords: 25,
+  gifMaxMb: 8,
+  imageMaxMb: 5,
+  gifMaxSide: 1080,
+  imageMaxSide: 2048,
+  minSide: 80,
+  gifMaxSeconds: 10
+};
+
+function cigGifSource() {
+  try {
+    const saved = localStorage.getItem(CIG_GIF_SOURCE_KEY);
+    return saved === 'giphy' ? 'giphy' : 'cig';
+  } catch { return 'cig'; }
+}
+function setCigGifSource(value) {
+  try { localStorage.setItem(CIG_GIF_SOURCE_KEY, value === 'giphy' ? 'giphy' : 'cig'); } catch { /* yoksay */ }
+}
+function cigAbsoluteUrl(value) {
+  try { return new URL(String(value || ''), location.origin).href; } catch { return String(value || ''); }
+}
+
+function showDmGifPicker(onSelect) {
+  if (!currentUser) { navigate('/giris'); return; }
+
+  showModal('', `
+    <div class="cg-gif" data-view="browse">
+      <header class="cg-gif-top">
+        <button type="button" class="cg-gif-icon" data-gif-go="mine" title="Giflerim" aria-label="Giflerim">
+          <i class="fas fa-folder-open" aria-hidden="true"></i>
+        </button>
+        <div class="cg-gif-tabs" role="tablist" aria-label="GIF kaynağı">
+          <span class="cg-gif-tabs-thumb" aria-hidden="true"></span>
+          <button type="button" class="cg-gif-tab" data-gif-tab="cig" role="tab">Cig</button>
+          <button type="button" class="cg-gif-tab" data-gif-tab="giphy" role="tab">GIPHY</button>
+        </div>
+        <button type="button" class="cg-gif-icon cg-gif-icon--add" data-gif-go="upload" title="GIF ekle" aria-label="GIF ekle">
+          <i class="fas fa-plus" aria-hidden="true"></i>
+        </button>
+      </header>
+
+      <section class="cg-gif-pane" data-pane="browse">
+        <label class="cg-gif-search">
+          <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+          <input type="search" id="cg-gif-q" maxlength="80" placeholder="GIF ara…" autocomplete="off" enterkeyhint="search" />
+          <button type="button" class="cg-gif-search-clear" id="cg-gif-clear" hidden aria-label="Aramayı temizle"><i class="fas fa-xmark"></i></button>
+        </label>
+        <div class="cg-gif-grid" id="cg-gif-grid" aria-live="polite"></div>
+        <small class="cg-gif-credit" id="cg-gif-credit"></small>
+      </section>
+
+      <section class="cg-gif-pane" data-pane="upload" hidden>
+        <div class="cg-gif-subhead">
+          <button type="button" class="cg-gif-back" data-gif-go="browse" aria-label="Geri"><i class="fas fa-chevron-left"></i></button>
+          <strong>GIF / görsel ekle</strong>
+        </div>
+        <div class="cg-gif-scroll">
+          <label class="cg-gif-drop" id="cg-gif-drop">
+            <input type="file" id="cg-gif-file" accept="image/gif,image/png,image/jpeg,image/webp" hidden />
+            <div class="cg-gif-drop-empty" id="cg-gif-drop-empty">
+              <i class="fas fa-cloud-arrow-up" aria-hidden="true"></i>
+              <strong>Dosya seç</strong>
+              <small>GIF, PNG, JPEG veya WEBP</small>
+            </div>
+            <div class="cg-gif-drop-preview" id="cg-gif-drop-preview" hidden></div>
+          </label>
+          <ul class="cg-gif-rules">
+            <li><i class="fas fa-film"></i> GIF: en fazla ${CIG_GIF_RULES.gifMaxMb} MB, ${CIG_GIF_RULES.gifMaxSide}×${CIG_GIF_RULES.gifMaxSide} piksel, ${CIG_GIF_RULES.gifMaxSeconds} saniye</li>
+            <li><i class="fas fa-image"></i> Görsel: en fazla ${CIG_GIF_RULES.imageMaxMb} MB, ${CIG_GIF_RULES.imageMaxSide}×${CIG_GIF_RULES.imageMaxSide} piksel</li>
+            <li><i class="fas fa-ruler-combined"></i> En küçük kenar ${CIG_GIF_RULES.minSide} piksel</li>
+          </ul>
+          <div class="cg-gif-field">
+            <div class="cg-gif-field-head">
+              <label for="cg-gif-kw">Anahtar kelimeler</label>
+              <span class="cg-gif-kw-count" id="cg-gif-kw-count">0 / ${CIG_GIF_RULES.maxKeywords}</span>
+            </div>
+            <div class="cg-gif-chips" id="cg-gif-chips"></div>
+            <input type="text" id="cg-gif-kw" maxlength="24" placeholder="Yaz ve boşluk bırak…" autocomplete="off" autocapitalize="off" />
+            <small class="cg-gif-hint">Boşluk bıraktığında kelime eklenir. En az ${CIG_GIF_RULES.minKeywords}, en fazla ${CIG_GIF_RULES.maxKeywords}. Aramada yazım hatası olsa bile benzer kelimeler bulunur.</small>
+          </div>
+          <div class="cg-gif-progress" id="cg-gif-progress" hidden>
+            <div class="cg-gif-progress-head"><span>Yükleniyor</span><strong id="cg-gif-progress-pct">%0</strong></div>
+            <div class="cg-gif-progress-track"><div class="cg-gif-progress-bar" id="cg-gif-progress-bar"></div></div>
+          </div>
+          <div class="cg-gif-error" id="cg-gif-upload-error" aria-live="polite"></div>
+        </div>
+        <button type="button" class="cg-gif-submit" id="cg-gif-submit" disabled><i class="fas fa-check"></i> Arşive ekle</button>
+      </section>
+
+      <section class="cg-gif-pane" data-pane="mine" hidden>
+        <div class="cg-gif-subhead">
+          <button type="button" class="cg-gif-back" data-gif-go="browse" aria-label="Geri"><i class="fas fa-chevron-left"></i></button>
+          <strong>Giflerim</strong>
+        </div>
+        <div class="cg-gif-seg" role="tablist">
+          <button type="button" data-mine-view="active" class="is-active">Görünür</button>
+          <button type="button" data-mine-view="hidden">Gizli</button>
+          <button type="button" data-mine-view="trash">Silinenler</button>
+        </div>
+        <div class="cg-gif-scroll"><div class="cg-gif-mine" id="cg-gif-mine" aria-live="polite"></div></div>
+      </section>
+    </div>`, 'cg-gif-modal');
+
+  const root = document.querySelector('.cg-gif');
+  if (!root) return;
+  const grid = root.querySelector('#cg-gif-grid');
+  const credit = root.querySelector('#cg-gif-credit');
+  const searchInput = root.querySelector('#cg-gif-q');
+  const clearButton = root.querySelector('#cg-gif-clear');
+
+  let source = cigGifSource();
+  let offset = 0;
+  let requestId = 0;
+  let debounceTimer = 0;
+
+  const setView = view => {
+    root.dataset.view = view;
+    root.querySelectorAll('.cg-gif-pane').forEach(pane => { pane.hidden = pane.dataset.pane !== view; });
+    if (view === 'mine') loadMine();
+  };
+
+  const syncTabs = () => {
+    root.querySelectorAll('.cg-gif-tab').forEach(tab => {
+      const active = tab.dataset.gifTab === source;
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', String(active));
+    });
+    root.querySelector('.cg-gif-tabs')?.setAttribute('data-active', source);
+    searchInput.placeholder = source === 'giphy' ? 'GIPHY’de ara…' : 'Cig arşivinde ara…';
+    credit.textContent = source === 'giphy'
+      ? 'GIF’ler GIPHY tarafından sağlanır.'
+      : 'Cig arşivi: topluluğun yüklediği GIF ve görseller.';
+  };
+
+  const skeleton = () => {
+    grid.innerHTML = Array.from({ length: 6 }, () => '<div class="cg-gif-skeleton"></div>').join('');
+  };
+
+  const cardHTML = gif => {
+    const owner = gif.source === 'cig' && gif.username
+      ? `<span class="cg-gif-owner">@${escHtml(gif.username)}</span>`
+      : '';
+    const ratio = gif.width && gif.height ? (gif.height / gif.width) : 1;
+    return `<button type="button" class="cg-gif-card" data-pick="${escHtml(gif.url)}" data-pick-id="${escHtml(gif.id || '')}" data-pick-source="${escHtml(gif.source || 'giphy')}" data-pick-title="${escHtml(gif.title || '')}" style="--cg-ratio:${Math.max(0.5, Math.min(2.2, ratio))}" aria-label="${escHtml(gif.title || 'GIF seç')}">
+      <img src="${escHtml(gif.preview || gif.url)}" alt="${escHtml(gif.title || 'GIF')}" loading="lazy" />
+      ${owner}
+    </button>`;
+  };
+
+  const load = async (append = false) => {
+    const current = ++requestId;
+    const term = searchInput.value.trim();
+    if (!append) { offset = 0; skeleton(); }
+    const path = source === 'giphy'
+      ? `/giphy/search?q=${encodeURIComponent(term)}&offset=${offset}`
+      : `/cig-gifs/search?q=${encodeURIComponent(term)}&offset=${offset}`;
+    try {
+      const data = await api(path);
+      if (current !== requestId || !grid.isConnected) return;
+      const items = (data.gifs || []).map(gif => ({ ...gif, source: source === 'giphy' ? 'giphy' : 'cig' }));
+      const cards = items.map(cardHTML).join('');
+      if (append) grid.querySelector('.cg-gif-more')?.remove();
+      else grid.innerHTML = '';
+      if (cards) grid.insertAdjacentHTML('beforeend', cards);
+      else if (!append) {
+        grid.innerHTML = source === 'cig'
+          ? `<div class="cg-gif-empty"><i class="fas fa-ghost"></i><strong>Sonuç yok</strong><span>Cig arşivinde bu aramaya uyan GIF yok. Sağ üstteki + ile sen ekleyebilirsin.</span></div>`
+          : `<div class="cg-gif-empty"><i class="fas fa-ghost"></i><strong>Sonuç yok</strong><span>Başka bir kelime dene.</span></div>`;
+      }
+      if (items.length && Number.isFinite(Number(data.next_offset))) {
+        grid.insertAdjacentHTML('beforeend', '<button type="button" class="cg-gif-more">Daha fazla göster</button>');
+        offset = Number(data.next_offset) || offset;
+      }
+    } catch (error) {
+      if (current !== requestId || !grid.isConnected) return;
+      grid.innerHTML = `<div class="cg-gif-empty is-error"><i class="fas fa-circle-exclamation"></i><strong>Yüklenemedi</strong><span>${escHtml(error.message || 'GIF araması başarısız oldu.')}</span></div>`;
+    }
+  };
+
+  root.addEventListener('click', async event => {
+    const tab = event.target.closest('[data-gif-tab]');
+    if (tab) {
+      source = tab.dataset.gifTab;
+      setCigGifSource(source);
+      syncTabs();
+      load();
+      return;
+    }
+    const nav = event.target.closest('[data-gif-go]');
+    if (nav) { setView(nav.dataset.gifGo); return; }
+    const more = event.target.closest('.cg-gif-more');
+    if (more) { more.disabled = true; await load(true); return; }
+    const card = event.target.closest('[data-pick]');
+    if (card) {
+      card.disabled = true;
+      try {
+        const url = card.dataset.pickSource === 'cig' ? cigAbsoluteUrl(card.dataset.pick) : card.dataset.pick;
+        await onSelect({ url, title: card.dataset.pickTitle, source: card.dataset.pickSource, id: card.dataset.pickId });
+        if (card.dataset.pickSource === 'cig' && card.dataset.pickId) {
+          api(`/cig-gifs/${encodeURIComponent(card.dataset.pickId)}/used`, { method: 'POST' }).catch(() => {});
+        }
+        hideModal();
+      } catch (error) {
+        card.disabled = false;
+        toast(error.message || 'GIF gönderilemedi.', 'error');
+      }
+    }
+  });
+
+  searchInput.addEventListener('input', () => {
+    clearButton.hidden = !searchInput.value;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => load(), 320);
+  });
+  clearButton.addEventListener('click', () => {
+    searchInput.value = '';
+    clearButton.hidden = true;
+    searchInput.focus();
+    load();
+  });
+
+  /* ---------------- Yükleme ---------------- */
+  const fileInput = root.querySelector('#cg-gif-file');
+  const dropEmpty = root.querySelector('#cg-gif-drop-empty');
+  const dropPreview = root.querySelector('#cg-gif-drop-preview');
+  const chipBox = root.querySelector('#cg-gif-chips');
+  const keywordInput = root.querySelector('#cg-gif-kw');
+  const keywordCount = root.querySelector('#cg-gif-kw-count');
+  const submitButton = root.querySelector('#cg-gif-submit');
+  const uploadError = root.querySelector('#cg-gif-upload-error');
+  const progressBox = root.querySelector('#cg-gif-progress');
+  const progressBar = root.querySelector('#cg-gif-progress-bar');
+  const progressPct = root.querySelector('#cg-gif-progress-pct');
+  let chosenFile = null;
+  let previewUrl = '';
+  let keywords = [];
+
+  const normalizeKeyword = value => String(value || '')
+    .trim()
+    .replace(/[İıI]/g, 'i')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+
+  const renderChips = () => {
+    chipBox.innerHTML = keywords.map(word =>
+      `<span class="cg-gif-chip">${escHtml(word)}<button type="button" data-chip="${escHtml(word)}" aria-label="${escHtml(word)} kelimesini kaldır"><i class="fas fa-xmark"></i></button></span>`
+    ).join('');
+    keywordCount.textContent = `${keywords.length} / ${CIG_GIF_RULES.maxKeywords}`;
+    keywordCount.classList.toggle('is-ok', keywords.length >= CIG_GIF_RULES.minKeywords);
+    submitButton.disabled = !(chosenFile && keywords.length >= CIG_GIF_RULES.minKeywords);
+  };
+  const addKeyword = raw => {
+    const word = normalizeKeyword(raw);
+    if (word.length < 2) return;
+    if (keywords.length >= CIG_GIF_RULES.maxKeywords) { uploadError.textContent = `En fazla ${CIG_GIF_RULES.maxKeywords} anahtar kelime ekleyebilirsin.`; return; }
+    if (keywords.includes(word)) return;
+    keywords.push(word);
+    uploadError.textContent = '';
+    renderChips();
+  };
+
+  chipBox.addEventListener('click', event => {
+    const button = event.target.closest('[data-chip]');
+    if (!button) return;
+    keywords = keywords.filter(word => word !== button.dataset.chip);
+    renderChips();
+  });
+  keywordInput.addEventListener('keydown', event => {
+    if (event.key === ' ' || event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      addKeyword(keywordInput.value);
+      keywordInput.value = '';
+    } else if (event.key === 'Backspace' && !keywordInput.value && keywords.length) {
+      keywords.pop();
+      renderChips();
+    }
+  });
+  keywordInput.addEventListener('blur', () => { addKeyword(keywordInput.value); keywordInput.value = ''; });
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const isGif = file.type === 'image/gif';
+    const limit = (isGif ? CIG_GIF_RULES.gifMaxMb : CIG_GIF_RULES.imageMaxMb) * 1024 * 1024;
+    if (file.size > limit) {
+      uploadError.textContent = `${isGif ? 'GIF' : 'Görsel'} en fazla ${isGif ? CIG_GIF_RULES.gifMaxMb : CIG_GIF_RULES.imageMaxMb} MB olabilir.`;
+      fileInput.value = '';
+      return;
+    }
+    uploadError.textContent = '';
+    chosenFile = file;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(file);
+    dropEmpty.hidden = true;
+    dropPreview.hidden = false;
+    dropPreview.innerHTML = `<img src="${previewUrl}" alt="Seçilen dosya" /><span class="cg-gif-drop-meta">${escHtml(file.name)} · ${(file.size / (1024 * 1024)).toFixed(2)} MB</span><span class="cg-gif-drop-change">Değiştir</span>`;
+    renderChips();
+  });
+
+  submitButton.addEventListener('click', async () => {
+    if (!chosenFile || keywords.length < CIG_GIF_RULES.minKeywords) return;
+    submitButton.disabled = true;
+    uploadError.textContent = '';
+    progressBox.hidden = false;
+    progressBar.style.width = '0%';
+    progressPct.textContent = '%0';
+    const form = new FormData();
+    form.append('media', chosenFile);
+    form.append('keywords', keywords.join(' '));
+    try {
+      await apiFormWithTimeout('/cig-gifs', form, 10 * 60 * 1000, percent => {
+        progressBar.style.width = `${percent}%`;
+        progressPct.textContent = `%${percent}`;
+      });
+      toast('GIF arşivine eklendi');
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      chosenFile = null; previewUrl = ''; keywords = [];
+      dropEmpty.hidden = false; dropPreview.hidden = true; dropPreview.innerHTML = '';
+      fileInput.value = '';
+      renderChips();
+      progressBox.hidden = true;
+      source = 'cig';
+      setCigGifSource('cig');
+      syncTabs();
+      setView('browse');
+      searchInput.value = '';
+      load();
+    } catch (error) {
+      progressBox.hidden = true;
+      submitButton.disabled = false;
+      uploadError.textContent = error.message || 'GIF yüklenemedi.';
+    }
+  });
+
+  /* ---------------- Giflerim ---------------- */
+  const mineBox = root.querySelector('#cg-gif-mine');
+  let mineView = 'active';
+
+  const mineCard = gif => {
+    const chips = gif.keywords.map(word =>
+      `<span class="cg-gif-chip is-small">${escHtml(word)}${gif.keywords.length > CIG_GIF_RULES.minKeywords ? `<button type="button" data-kw-del="${escHtml(word)}" data-kw-gif="${escHtml(gif.id)}" aria-label="${escHtml(word)} kelimesini sil"><i class="fas fa-xmark"></i></button>` : ''}</span>`
+    ).join('');
+    const actions = gif.deleted_at
+      ? `<button type="button" class="cg-gif-act" data-act="restore" data-id="${escHtml(gif.id)}"><i class="fas fa-rotate-left"></i> Geri al</button>
+         <button type="button" class="cg-gif-act is-danger" data-act="purge" data-id="${escHtml(gif.id)}"><i class="fas fa-trash"></i> Kalıcı sil</button>`
+      : `<button type="button" class="cg-gif-act" data-act="${gif.is_hidden ? 'show' : 'hide'}" data-id="${escHtml(gif.id)}"><i class="fas fa-eye${gif.is_hidden ? '' : '-slash'}"></i> ${gif.is_hidden ? 'Göster' : 'Gizle'}</button>
+         <button type="button" class="cg-gif-act is-danger" data-act="delete" data-id="${escHtml(gif.id)}"><i class="fas fa-trash"></i> Sil</button>`;
+    return `<article class="cg-gif-mine-card">
+      <img src="${escHtml(gif.url)}" alt="" loading="lazy" />
+      <div class="cg-gif-mine-body">
+        <div class="cg-gif-mine-meta">${gif.media_type === 'gif' ? 'GIF' : 'Görsel'} · ${gif.width}×${gif.height}${gif.duration_ms ? ` · ${(gif.duration_ms / 1000).toFixed(1)} sn` : ''}</div>
+        <div class="cg-gif-chips is-readonly">${chips}</div>
+        ${gif.keywords.length <= CIG_GIF_RULES.minKeywords && !gif.deleted_at ? `<small class="cg-gif-hint">En az ${CIG_GIF_RULES.minKeywords} anahtar kelime kalmalı, bu yüzden silinemez.</small>` : ''}
+        <div class="cg-gif-acts">${actions}</div>
+      </div>
+    </article>`;
+  };
+
+  async function loadMine() {
+    mineBox.innerHTML = '<div class="cg-gif-loading"><span class="cg-gif-spin"></span></div>';
+    try {
+      const data = await api(`/me/cig-gifs?view=${mineView}`);
+      if (!mineBox.isConnected) return;
+      mineBox.innerHTML = data.gifs.length
+        ? data.gifs.map(mineCard).join('')
+        : `<div class="cg-gif-empty"><i class="fas fa-folder-open"></i><strong>Boş</strong><span>${mineView === 'trash' ? 'Silinenlerde bir şey yok.' : mineView === 'hidden' ? 'Gizlenmiş GIF yok.' : 'Henüz GIF eklemedin.'}</span></div>`;
+    } catch (error) {
+      if (mineBox.isConnected) mineBox.innerHTML = `<div class="cg-gif-empty is-error"><i class="fas fa-circle-exclamation"></i><span>${escHtml(error.message || 'Giflerim yüklenemedi.')}</span></div>`;
+    }
+  }
+
+  root.querySelector('.cg-gif-seg')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-mine-view]');
+    if (!button) return;
+    mineView = button.dataset.mineView;
+    root.querySelectorAll('[data-mine-view]').forEach(item => item.classList.toggle('is-active', item === button));
+    loadMine();
+  });
+
+  mineBox.addEventListener('click', async event => {
+    const keywordButton = event.target.closest('[data-kw-del]');
+    if (keywordButton) {
+      keywordButton.disabled = true;
+      try {
+        await api(`/me/cig-gifs/${encodeURIComponent(keywordButton.dataset.kwGif)}/keywords/${encodeURIComponent(keywordButton.dataset.kwDel)}`, { method: 'DELETE' });
+        loadMine();
+      } catch (error) { keywordButton.disabled = false; toast(error.message, 'error'); }
+      return;
+    }
+    const action = event.target.closest('[data-act]');
+    if (!action) return;
+    const id = encodeURIComponent(action.dataset.id);
+    action.disabled = true;
+    try {
+      if (action.dataset.act === 'hide' || action.dataset.act === 'show') {
+        await api(`/me/cig-gifs/${id}`, { method: 'PATCH', body: JSON.stringify({ hidden: action.dataset.act === 'hide' }) });
+      } else if (action.dataset.act === 'delete') {
+        if (!await CigCigDialogs.confirm('Bu GIF silinenlere taşınsın mı? İstersen oradan geri alabilirsin.')) { action.disabled = false; return; }
+        await api(`/me/cig-gifs/${id}`, { method: 'DELETE' });
+      } else if (action.dataset.act === 'restore') {
+        await api(`/me/cig-gifs/${id}/restore`, { method: 'POST' });
+      } else if (action.dataset.act === 'purge') {
+        if (!await CigCigDialogs.confirm('Bu GIF tamamen silinsin mi? Bu işlem geri alınamaz.')) { action.disabled = false; return; }
+        await api(`/me/cig-gifs/${id}/permanent`, { method: 'DELETE' });
+      }
+      loadMine();
+    } catch (error) { action.disabled = false; toast(error.message, 'error'); }
+  });
+
+  syncTabs();
+  renderChips();
+  load();
+}

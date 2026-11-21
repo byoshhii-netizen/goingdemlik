@@ -82,13 +82,6 @@ async function initDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_method TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_question TEXT DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_answer_hash TEXT DEFAULT '';
-    -- 2AD: PIN yöntemi
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_pin_hash TEXT DEFAULT '';
-    -- Uygulama şifresi (app lock)
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_enabled INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_hash TEXT DEFAULT '';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_interval_minutes INTEGER NOT NULL DEFAULT 10080;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS app_lock_updated_at TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token_hash TEXT DEFAULT '';
@@ -928,7 +921,6 @@ async function initDb() {
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS browser TEXT NOT NULL DEFAULT '';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT '';
     ALTER TABLE sessions ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT '';
-    ALTER TABLE sessions ADD COLUMN IF NOT EXISTS app_unlocked_at TIMESTAMP;
     CREATE TABLE IF NOT EXISTS nsfw_flags (
       id BIGSERIAL PRIMARY KEY,
       user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
@@ -2113,6 +2105,42 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
       PRIMARY KEY(room_id, user_id, scope)
     );
   `);
+
+  // ===== CIG GIF / ETİKET ARŞİVİ =====
+  await query(`
+    CREATE TABLE IF NOT EXISTS cig_gifs (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      media_url TEXT NOT NULL,
+      media_type TEXT NOT NULL DEFAULT 'gif',
+      width INTEGER NOT NULL DEFAULT 0,
+      height INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      byte_size INTEGER NOT NULL DEFAULT 0,
+      is_hidden INTEGER NOT NULL DEFAULT 0,
+      use_count INTEGER NOT NULL DEFAULT 0,
+      deleted_at TIMESTAMP,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_cig_gifs_user ON cig_gifs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_cig_gifs_live ON cig_gifs(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS cig_gif_keywords (
+      gif_id BIGINT NOT NULL REFERENCES cig_gifs(id) ON DELETE CASCADE,
+      keyword TEXT NOT NULL,
+      PRIMARY KEY (gif_id, keyword)
+    );
+    CREATE INDEX IF NOT EXISTS idx_cig_gif_keywords_keyword ON cig_gif_keywords(keyword);
+  `);
+
+  // Yazım hatası toleranslı arama için pg_trgm; yoksa sunucu ILIKE'a düşer.
+  try {
+    await query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+    await query('CREATE INDEX IF NOT EXISTS idx_cig_gif_keywords_trgm ON cig_gif_keywords USING gin (keyword gin_trgm_ops)');
+    console.log('pg_trgm etkin: GIF etiket aramasında yazım hatası toleransı açık.');
+  } catch (error) {
+    console.warn('pg_trgm kurulamadı, GIF araması basit eşleşmeye düşecek:', error.message);
+  }
 
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
