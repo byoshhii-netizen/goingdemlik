@@ -4113,3 +4113,169 @@ input[type="range"] { min-height: 0 !important; }
   min-height: 180px;
   height: 100%;
 }
+
+/* =========================================================================
+   ŞARKI SAYFASI — plak sahnesi
+   Kare kapak yerinde kalır, plak onun arkasından çıkar ve göbeğinde
+   şarkının kendi görseli döner. Ses ayarı bu sayfadan kaldırıldı.
+   ========================================================================= */
+.song-detail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.song-detail-topbar .song-detail-back { margin: 0 !important; }
+.song-detail-topbar .sdp-together-btn {
+  margin-left: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 38px;
+  padding: 0 15px;
+  border-radius: 999px;
+  letter-spacing: .2px;
+}
+@media (max-width: 520px) {
+  .song-detail-topbar { gap: 8px; }
+  .song-detail-topbar .sdp-together-btn { padding: 0 12px; font-size: 11.5px; }
+  .song-detail-topbar .sdp-together-btn span { display: inline; }
+}
+
+/* ── Plak ───────────────────────────────────────────────────────────────── */
+.song-vinyl {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.05) 0 19.4%, transparent 19.8%),
+    repeating-radial-gradient(circle at 50% 50%,
+      #0a0a0b 0 1.4px, #141416 1.4px 2.1px, #0d0d0f 2.1px 3.2px) !important;
+  box-shadow:
+    0 24px 54px rgba(0,0,0,.62),
+    inset 0 0 0 1px rgba(255,255,255,.07),
+    inset 0 0 36px rgba(0,0,0,.9) !important;
+}
+/* Üzerinde gezinen ışık; plak dönerken sabit durması için ters döner. */
+.song-vinyl-shine {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(from 210deg,
+    rgba(255,255,255,0) 0deg,
+    rgba(255,255,255,.14) 28deg,
+    rgba(255,255,255,0) 72deg,
+    rgba(255,255,255,0) 190deg,
+    rgba(255,255,255,.09) 214deg,
+    rgba(255,255,255,0) 252deg);
+  mix-blend-mode: screen;
+}
+.song-detail-page.is-spinning .song-vinyl-shine {
+  animation: songVinylCounterSpin 5.5s linear infinite;
+}
+@keyframes songVinylCounterSpin { from { transform: rotate(0); } to { transform: rotate(-360deg); } }
+
+/* ── Göbekteki etiket: şarkının kendi görseli ───────────────────────────── */
+.song-vinyl-label {
+  width: 38% !important;
+  height: 38% !important;
+  background-color: #17171b !important;
+  background-image: var(--song-cover, none) !important;
+  background-size: cover !important;
+  background-position: center !important;
+  background-repeat: no-repeat !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.14),
+    0 0 0 4px rgba(8,8,9,.92),
+    0 2px 10px rgba(0,0,0,.6) !important;
+}
+.song-vinyl:not(.has-art) .song-vinyl-label {
+  background-image: linear-gradient(135deg, #2c2c33, #15151a) !important;
+}
+/* Mil deliği */
+.song-vinyl-label::after {
+  width: 13% !important;
+  height: 13% !important;
+  background: #050506 !important;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,.9), 0 0 0 2px rgba(255,255,255,.08);
+}
+
+/* ── Kare kapak: plağın önünde, net kenarla ─────────────────────────────── */
+.song-detail-cover-wrap.has-vinyl .song-detail-cover {
+  border-radius: 10px;
+  border: 0;
+  box-shadow:
+    0 26px 52px rgba(0,0,0,.6),
+    0 0 0 1px rgba(255,255,255,.09);
+}
+
+/* ── Oynatıcı: ses kontrolü gitti, ilerleme çubuğu boşluğu alsın ────────── */
+.sdp-vol-wrap, .sdp-together-row { display: none !important; }
+.sdp-top-row .sdp-progress-wrap { flex: 1 1 auto; min-width: 0; }
+
+/* =========================================================================
+   CIG ARŞİVİ — tek kare ölçü
+   Arşivdeki her GIF/görsel 512x512 kutuya sığdığı için panelde de aynı
+   kare karoda dizilir; GIPHY sekmesi kendi masonry akışında kalır.
+   ========================================================================= */
+.cg-gif[data-source="cig"] .cg-gif-grid {
+  display: grid !important;
+  columns: auto !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+@media (min-width: 480px) { .cg-gif[data-source="cig"] .cg-gif-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 720px) { .cg-gif[data-source="cig"] .cg-gif-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.cg-gif[data-source="cig"] .cg-gif-card {
+  margin: 0;
+  aspect-ratio: 1 / 1 !important;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cg-gif[data-source="cig"] .cg-gif-card img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+}
+.cg-gif[data-source="cig"] .cg-gif-skeleton {
+  height: auto !important;
+  aspect-ratio: 1 / 1 !important;
+  margin: 0 !important;
+}
+.cg-gif[data-source="cig"] .cg-gif-more,
+.cg-gif[data-source="cig"] .cg-gif-empty { grid-column: 1 / -1; }
+
+/* Gönderilen GIF kaynak ölçüsünü aşmasın (512 kare kutu) */
+.dm-shared-gif, .group-message-gif {
+  max-width: min(512px, 68vw) !important;
+  max-height: 512px !important;
+  height: auto;
+  border-radius: 14px;
+}
+
+/* =========================================================================
+   YAZIYOR GÖSTERGESİ
+   Mesaj alanında yalnızca hareketli üç nokta; "yazıyor" yazısı üst barda.
+   ========================================================================= */
+.dm-peer-typing-bubble {
+  gap: 0 !important;
+  min-height: 34px;
+  padding: 0 14px !important;
+  border-radius: 4px 16px 16px 16px !important;
+}
+.dm-peer-typing-bubble .dm-typing-dots { gap: 4px; }
+.dm-peer-typing-bubble .dm-typing-dots i {
+  width: 6px;
+  height: 6px;
+  animation-duration: 1.15s;
+}
+@keyframes dmTypingBounce {
+  0%, 60%, 100% { opacity: .3; transform: translateY(0) scale(.9); }
+  30% { opacity: 1; transform: translateY(-4px) scale(1); }
+}
+/* Üst bar: sade metin */
+.dm-chat-typing {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-red2, var(--text-secondary));
+  letter-spacing: .1px;
+}

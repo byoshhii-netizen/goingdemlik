@@ -16926,7 +16926,7 @@ async function renderDMChat(username) {
           <a href="${profileRoute(other.username)}" data-link class="dm-chat-identity" style="color:${other.name_color || 'var(--text-primary)'}">
             <strong>${escHtml(other.nickname || other.username)}${isSelfConversation ? ' (Siz)' : ''}</strong>
           </a>
-          ${isSelfConversation ? '' : `<span class="dm-chat-status"><span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active, other.presence_visible)}</span><span class="dm-chat-typing" hidden aria-live="polite">Yazıyor...<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span></span>`}
+          ${isSelfConversation ? '' : `<span class="dm-chat-status"><span class="dm-presence-slot dm-chat-presence">${dmPresenceMarkup(other.is_online, other.last_active, other.presence_visible)}</span><span class="dm-chat-typing" hidden aria-live="polite">yazıyor…</span></span>`}
           <span id="dm-chat-now-playing"></span>
         </div>
       </div>
@@ -16958,7 +16958,7 @@ async function renderDMChat(username) {
             ? `<img src="${escHtml(other.avatar)}" alt="" />`
             : '<span class="avatar-placeholder"><i class="fas fa-user" aria-hidden="true"></i></span>'}
         </a>
-        <span class="dm-peer-typing-bubble">Yazıyor<span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
+        <span class="dm-peer-typing-bubble" role="img" aria-label="Yazıyor"><span class="dm-typing-dots" aria-hidden="true"><i></i><i></i><i></i></span></span>
       </div>
     </div>
 
@@ -21928,10 +21928,13 @@ async function renderMusicDetail(app, slug) {
 
   app.innerHTML = `
     <div class="song-detail-page">
-      <a href="/muzikler" data-link class="song-detail-back"><i class="fas fa-arrow-left"></i><span>Müziklere dön</span></a>
+      <div class="song-detail-topbar">
+        <a href="/muzikler" data-link class="song-detail-back"><i class="fas fa-arrow-left"></i><span>Müziklere dön</span></a>
+        ${currentUser ? '<button class="sdp-together-btn" id="detail-listen-together" type="button" title="Ortak dinleyiş başlat"><i class="fas fa-tower-broadcast" aria-hidden="true"></i><span>Ortak dinleyiş</span></button>' : ''}
+      </div>
       <div class="song-detail-hero">
         <div class="song-detail-cover-wrap has-vinyl"${song.cover_url ? ` style="--song-cover:url('${escHtml(song.cover_url)}')"` : ''}>
-          <div class="song-vinyl" aria-hidden="true"><span class="song-vinyl-label"${song.cover_url ? ` style="background-image:url('${escHtml(song.cover_url)}')"` : ''}></span></div>
+          <div class="song-vinyl${song.cover_url ? ' has-art' : ''}" aria-hidden="true"><span class="song-vinyl-shine"></span><span class="song-vinyl-label"></span></div>
           ${song.cover_url
             ? `<div class="song-detail-cover song-detail-cover-art" role="img" aria-label="${escHtml(song.title || 'Şarkı')} kapağı"></div>`
             : `<div class="song-detail-cover song-detail-cover-ph"><i class="fas fa-music"></i></div>`}
@@ -21959,13 +21962,7 @@ async function renderMusicDetail(app, slug) {
                 </div>
                 <span class="sdp-time" id="dp-dur">0:00</span>
               </div>
-              <div class="sdp-vol-wrap">
-                <button id="detail-vol-btn" class="sdp-vol-btn" type="button" title="Sesi kapat" aria-label="Sesi kapat"><i class="fas fa-volume-up"></i></button>
-                <input type="range" id="detail-vol" min="0" max="100" value="80" step="1" class="sdp-vol-slider" aria-label="Ses seviyesi" />
-                <output id="detail-vol-value" class="sdp-vol-value" for="detail-vol">80%</output>
-              </div>
             </div>
-            ${currentUser ? '<div class="sdp-together-row"><button class="sdp-together-btn" id="detail-listen-together" type="button"><i class="fas fa-tower-broadcast" aria-hidden="true"></i><span>Ortak dinleyiş başlat</span></button></div>' : ''}
             ${song.remastered_audio_url ? `<button class="song-remastered-toggle" id="song-remastered-toggle" type="button"><span class="song-remastered-icon"><i class="fas fa-wand-magic-sparkles"></i></span><span><strong>Remastered</strong><small>Daha temiz ses sürümünü dinle</small></span><i class="fas fa-arrow-right song-remastered-arrow"></i></button>` : ''}
           </div>
 
@@ -26993,13 +26990,17 @@ document.addEventListener('click', event => {
    Telefona göre tasarlanmış tam ekran alt sayfa.
    ============================================================================ */
 const CIG_GIF_SOURCE_KEY = 'cigcig_gif_source';
+// Cig arşivinin tek kare ölçüsü: her GIF/görsel 512x512 kutuya sığar ve
+// panelde de mesajda da bu kutuda gösterilir.
+const CIG_GIF_BOX_SIDE = 512;
 const CIG_GIF_RULES = {
   minKeywords: 5,
   maxKeywords: 25,
   gifMaxMb: 8,
   imageMaxMb: 5,
-  gifMaxSide: 1080,
-  imageMaxSide: 2048,
+  boxSide: CIG_GIF_BOX_SIDE,
+  gifMaxSide: CIG_GIF_BOX_SIDE,
+  imageMaxSide: CIG_GIF_BOX_SIDE,
   minSide: 80,
   gifMaxSeconds: 10
 };
@@ -27063,8 +27064,9 @@ function showDmGifPicker(onSelect) {
             <div class="cg-gif-drop-preview" id="cg-gif-drop-preview" hidden></div>
           </label>
           <ul class="cg-gif-rules">
-            <li><i class="fas fa-film"></i> GIF: en fazla ${CIG_GIF_RULES.gifMaxMb} MB, ${CIG_GIF_RULES.gifMaxSide}×${CIG_GIF_RULES.gifMaxSide} piksel, ${CIG_GIF_RULES.gifMaxSeconds} saniye</li>
-            <li><i class="fas fa-image"></i> Görsel: en fazla ${CIG_GIF_RULES.imageMaxMb} MB, ${CIG_GIF_RULES.imageMaxSide}×${CIG_GIF_RULES.imageMaxSide} piksel</li>
+            <li><i class="fas fa-vector-square"></i> Tek ölçü: <strong>${CIG_GIF_RULES.boxSide}×${CIG_GIF_RULES.boxSide}</strong> kare kutu — uzun kenar en fazla ${CIG_GIF_RULES.boxSide} piksel</li>
+            <li><i class="fas fa-film"></i> GIF: en fazla ${CIG_GIF_RULES.gifMaxMb} MB, ${CIG_GIF_RULES.gifMaxSeconds} saniye</li>
+            <li><i class="fas fa-image"></i> Görsel: en fazla ${CIG_GIF_RULES.imageMaxMb} MB</li>
             <li><i class="fas fa-ruler-combined"></i> En küçük kenar ${CIG_GIF_RULES.minSide} piksel</li>
           </ul>
           <div class="cg-gif-field">
@@ -27124,6 +27126,7 @@ function showDmGifPicker(onSelect) {
       tab.setAttribute('aria-selected', String(active));
     });
     root.querySelector('.cg-gif-tabs')?.setAttribute('data-active', source);
+    root.dataset.source = source;
     searchInput.placeholder = source === 'giphy' ? 'GIPHY’de ara…' : 'Cig arşivinde ara…';
     credit.textContent = source === 'giphy'
       ? 'GIF’ler GIPHY tarafından sağlanır.'
@@ -27138,8 +27141,7 @@ function showDmGifPicker(onSelect) {
     const owner = gif.source === 'cig' && gif.username
       ? `<span class="cg-gif-owner">@${escHtml(gif.username)}</span>`
       : '';
-    const ratio = gif.width && gif.height ? (gif.height / gif.width) : 1;
-    return `<button type="button" class="cg-gif-card" data-pick="${escHtml(gif.url)}" data-pick-id="${escHtml(gif.id || '')}" data-pick-source="${escHtml(gif.source || 'giphy')}" data-pick-title="${escHtml(gif.title || '')}" style="--cg-ratio:${Math.max(0.5, Math.min(2.2, ratio))}" aria-label="${escHtml(gif.title || 'GIF seç')}">
+    return `<button type="button" class="cg-gif-card" data-pick="${escHtml(gif.url)}" data-pick-id="${escHtml(gif.id || '')}" data-pick-source="${escHtml(gif.source || 'giphy')}" data-pick-title="${escHtml(gif.title || '')}" aria-label="${escHtml(gif.title || 'GIF seç')}">
       <img src="${escHtml(gif.preview || gif.url)}" alt="${escHtml(gif.title || 'GIF')}" loading="lazy" />
       ${owner}
     </button>`;

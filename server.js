@@ -13802,8 +13802,11 @@ const CIG_GIF_MAX_BYTES = 8 * 1024 * 1024;
 const CIG_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const CIG_GIF_MAX_DURATION_MS = 10000;
 const CIG_MEDIA_MIN_SIDE = 80;
-const CIG_GIF_MAX_SIDE = 1080;
-const CIG_IMAGE_MAX_SIDE = 2048;
+// Cig arşivindeki her şey tek bir kare kutuya sığar: 512x512.
+// Panelde de mesajda da aynı ölçüde göründükleri için arşiv derli toplu kalır.
+const CIG_GIF_BOX_SIDE = 512;
+const CIG_GIF_MAX_SIDE = CIG_GIF_BOX_SIDE;
+const CIG_IMAGE_MAX_SIDE = CIG_GIF_BOX_SIDE;
 const CIG_GIF_MIN_KEYWORDS = 5;
 const CIG_GIF_MAX_KEYWORDS = 25;
 
@@ -14035,7 +14038,7 @@ app.post('/api/cig-gifs', authMiddleware, uploadLimiter, (req, res, next) => {
     }
     if (probe.width > maxSide || probe.height > maxSide) {
       cleanup();
-      return res.status(400).json({ error: `En büyük boyut ${maxSide}x${maxSide} piksel olabilir. Şu an ${probe.width}x${probe.height}.` });
+      return res.status(400).json({ error: `Cig arşivi ${CIG_GIF_BOX_SIDE}x${CIG_GIF_BOX_SIDE} kare kutuya sığan dosyalar alır. Bu dosya ${probe.width}x${probe.height}; uzun kenarı en fazla ${CIG_GIF_BOX_SIDE} piksel olacak şekilde küçült.` });
     }
     if (isAnimated && probe.durationMs > CIG_GIF_MAX_DURATION_MS) {
       cleanup();
@@ -14153,6 +14156,7 @@ app.get('/api/me/cig-gifs', authMiddleware, async (req, res) => {
   res.json({
     view,
     gifs: rows.map(row => shapeCigGif(row, keywordMap.get(String(row.id)) || [])),
+    box_side: CIG_GIF_BOX_SIDE,
     min_keywords: CIG_GIF_MIN_KEYWORDS,
     max_keywords: CIG_GIF_MAX_KEYWORDS
   });
