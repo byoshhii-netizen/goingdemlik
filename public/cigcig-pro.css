@@ -3878,8 +3878,13 @@ input[type="range"] { min-height: 0 !important; }
   overflow: hidden;
   background: #000;
 }
-.photos-feed .reals-media-card .photo-media-wrap > *,
-.photos-feed .reals-media-card .ig-post-media > * {
+/* Yalnızca medya kabı doldursun; ses tuşu gibi kontroller kendi yerinde kalsın */
+.photos-feed .reals-media-card .photo-media-wrap > .photo-native-link,
+.photos-feed .reals-media-card .photo-media-wrap > video,
+.photos-feed .reals-media-card .photo-media-wrap > img,
+.photos-feed .reals-media-card .ig-post-media > .photo-native-link,
+.photos-feed .reals-media-card .ig-post-media > video,
+.photos-feed .reals-media-card .ig-post-media > img {
   position: absolute !important;
   inset: 0 !important;
   width: 100% !important;
@@ -3993,4 +3998,88 @@ input[type="range"] { min-height: 0 !important; }
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
   pointer-events: none;
+}
+
+/* =========================================================================
+   REALS SES TUŞU — fotoğraflardaki gibi sağ altta
+   ========================================================================= */
+.photos-feed .reals-media-card .photo-audio-toggle.reals-media-sound-toggle {
+  position: absolute !important;
+  inset: auto 10px 10px auto !important;
+  z-index: 4;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  display: grid !important;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.22) !important;
+  border-radius: 50% !important;
+  background: rgba(10,10,12,.62) !important;
+  color: #fff !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0,0,0,.4);
+}
+.photos-feed .reals-media-card .photo-audio-toggle.reals-media-sound-toggle i {
+  width: 15px !important; height: 15px !important;
+  line-height: 15px !important; font-size: 15px !important;
+}
+.photos-feed .reals-media-card .photo-audio-toggle.reals-media-sound-toggle:active { transform: scale(.92); }
+
+/* =========================================================================
+   ŞARKI SAYFASI — plak büyüsün, pembe arka plan kalksın
+   ========================================================================= */
+.song-detail-page::before {
+  background: radial-gradient(70% 100% at 25% 0%, rgba(255,255,255,.07), transparent 65%),
+              radial-gradient(60% 90% at 85% 10%, rgba(255,255,255,.05), transparent 65%) !important;
+}
+/* Plak kapaktan belirgin şekilde taşsın */
+.song-vinyl {
+  width: 122% !important;
+  transform: translate(-20%, -50%) !important;
+}
+@keyframes songVinylSpin {
+  from { transform: translate(-20%, -50%) rotate(0); }
+  to   { transform: translate(-20%, -50%) rotate(360deg); }
+}
+/* Etiket nötr renkte */
+.song-vinyl-label {
+  width: 30% !important;
+  height: 30% !important;
+  background: linear-gradient(135deg, #3a3a40, #202024) !important;
+  box-shadow: inset 0 0 0 3px rgba(0,0,0,.45) !important;
+}
+.song-detail-type {
+  background: rgba(255,255,255,.08) !important;
+  color: var(--text-secondary) !important;
+}
+@media (max-width: 600px) {
+  .song-vinyl { width: 112% !important; transform: translate(-16%, -50%) !important; }
+}
+
+/* =========================================================================
+   PLAYLIST — "Ortak başlat" taşmasın
+   ========================================================================= */
+.playlist-detail-actions,
+.pl-detail-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+#pl-listen-together {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 14px;
+  white-space: nowrap;
+  border-radius: 999px;
+}
+@media (max-width: 520px) {
+  #pl-listen-together { width: 100%; justify-content: center; }
 }

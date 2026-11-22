@@ -10678,8 +10678,12 @@ async function showNewVideoModal(existing = null, forceReals = false) {
             uploadUrl = signed.upload_url;
             useSignedUpload = true;
           } catch (signedError) {
-            // R2 yapılandırılmamışsa doğrudan sunucuya yükle (Cloudinary / yerel depolama)
-            console.warn('[reals] İmzalı yükleme kullanılamıyor, sunucu üzerinden yükleniyor:', signedError.message);
+            const info = signedError?.data || {};
+            // Bakım modu, hesap kısıtlaması gibi gerçek retleri olduğu gibi göster;
+            // yoksa koca videoyu boşuna yükleyip sonunda hata veriyoruz.
+            const storageMissing = typeof info.error === 'string' && /depolama ayarlanmam/i.test(info.error);
+            if (!storageMissing) throw signedError;
+            console.warn('[reals] R2 yapılandırılmamış, sunucu üzerinden yükleniyor.');
             uploadTarget = '/api/upload-video';
             uploadUrl = '';
             useSignedUpload = false;
@@ -19464,7 +19468,7 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
           : '<button class="btn btn-outline" id="dm-opt-mute"><i class="fas fa-bell-slash"></i> Sessize Al</button>'}
       </div>
       <div class="dm-options-actions">
-        <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Konuşmayı kilitle</button>
+        <button class="btn btn-outline" id="dm-opt-hide" hidden><i class="fas fa-lock"></i> Konuşmayı kilitle</button>
         <button class="btn btn-outline" id="dm-opt-unlock" hidden><i class="fas fa-lock-open"></i> Kilidi kaldır</button>
         ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>' : ''}
         <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
@@ -19532,17 +19536,20 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
     hideModal();
     showDmMessageLockPrompt(username);
   });
-  // Kilitli sohbetlerde "kilitle" yerine "kilidi kaldır" gösterilsin
+  // Kilitli sohbette kilitleme tuşu hiç görünmesin.
+  // Durumu önceden bilmiyorsak kilitleme tuşunu da gizli tut, cevap gelince karar ver.
   (async () => {
+    const lockButton = document.getElementById('dm-opt-hide');
+    const unlockButton = document.getElementById('dm-opt-unlock');
+    if (!lockButton || !unlockButton) return;
+    let locked = false;
     try {
       const state = await api(`/conversation/${encodeURIComponent(username)}/lock-state`);
-      if (!state?.locked) return;
-      const lockButton = document.getElementById('dm-opt-hide');
-      const unlockButton = document.getElementById('dm-opt-unlock');
-      if (!unlockButton) return;
-      if (lockButton) lockButton.hidden = true;
-      unlockButton.hidden = false;
-    } catch { /* yoksay */ }
+      locked = Boolean(state?.locked);
+    } catch { locked = false; }
+    if (!lockButton.isConnected) return;
+    lockButton.hidden = locked;
+    unlockButton.hidden = !locked;
   })();
   document.getElementById('dm-opt-unlock')?.addEventListener('click', () => {
     hideModal();
