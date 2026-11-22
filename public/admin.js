@@ -586,6 +586,12 @@ const ADMIN_SECTION_SLUGS = {
   logs: 'loglar',
   'route-logs': 'route-loglari',
   firewall: 'guvenlik-duvari',
+  'cc-overview': 'ana-kontrol',
+  'cc-content': 'icerik-yonetimi',
+  'cc-users': 'kullanici-kontrolu',
+  'cc-switches': 'site-anahtarlari',
+  'cc-uploads': 'yukleme-hatalari',
+  'cc-audit': 'denetim-kaydi',
   'authority-logs': 'yetkili-loglari'
 };
 const ADMIN_SLUG_SECTIONS = Object.fromEntries(Object.entries(ADMIN_SECTION_SLUGS).map(([section, slug]) => [slug, section]));
@@ -848,7 +854,9 @@ function loadSection(section, { history: historyMode = 'push' } = {}) {
     journalists: renderJournalists, 'newspaper-settings': renderNewspaperSettings,
     'account-deletions': renderAccountDeletions,
     forums: renderForums, books: renderBooks, poems: renderPoems, videos: renderVideos, photos: renderAdminPhotos, stories: renderAdminStories, 'ad-submissions': renderAdSubmissions, 'video-ads': renderVideoAds, 'music-ads': renderMusicAds, 'reals-ads': renderRealsAds, groups: renderGroups, artists: renderArtists,
-    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, firewall: renderFirewall, 'authority-logs': renderAuthorityLogs,
+    levels: renderLevels, tags: renderTags, logs: renderLogs, 'route-logs': renderRouteLogs, firewall: renderFirewall,
+    'cc-overview': renderCcOverview, 'cc-content': renderCcContent, 'cc-users': renderCcUsers,
+    'cc-switches': renderCcSwitches, 'cc-uploads': renderCcUploads, 'cc-audit': renderCcAudit, 'authority-logs': renderAuthorityLogs,
     settings: renderSettings, messages: renderAdminMessages, 'message-reports': renderMessageReports,
     'user-reports': renderUserReports, 'child-safety': renderChildSafetySettings, warnings: renderWarnings,
     notifications: renderAdminNotifications,
@@ -4098,6 +4106,723 @@ async function fwSettings(pane) {
   });
 }
 
+
+// =========================================================================
+// ANA KONTROL — yalnızca ana admin
+// Genel bakış · İçerik yönetimi · Kullanıcı kontrolü · Site anahtarları ·
+// Yükleme hataları · Denetim kaydı
+// =========================================================================
+const ccState = {
+  types: null,
+  content: { type: 'forum', q: '', user: '', status: '', sort: 'new', since: '', offset: 0, selected: new Set() },
+  users: { q: '', filter: '', sort: 'new', offset: 0 }
+};
+
+function ccFormatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = value / 1024; let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+function ccFormatUptime(seconds) {
+  const s = Number(seconds) || 0;
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return d ? `${d} gün ${h} sa` : h ? `${h} sa ${m} dk` : `${m} dk`;
+}
+function ccNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('tr-TR');
+}
+function ccAvatar(src, name) {
+  return src
+    ? `<img class="cc-avatar" src="${escHtml(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<span class="cc-avatar cc-avatar--ph">${escHtml(String(name || '?').slice(0, 1).toUpperCase())}</span>`;
+}
+function ccSiteUrl(path) {
+  return path ? `${location.origin}${path}` : '';
+}
+async function ccTypes() {
+  if (!ccState.types) ccState.types = await adminApi('/cc/content-types');
+  return ccState.types;
+}
+async function ccConfirm(message) {
+  if (window.CigCigDialogs?.confirm) return window.CigCigDialogs.confirm(message);
+  return confirm(message);
+}
+async function ccPrompt(message, fallback = '') {
+  if (window.CigCigDialogs?.prompt) return window.CigCigDialogs.prompt(message, fallback);
+  return prompt(message, fallback);
+}
+function ccOpenContent(filter = {}) {
+  Object.assign(ccState.content, { q: '', user: '', status: '', since: '', offset: 0, selected: new Set() }, filter);
+  loadSection('cc-content');
+}
+
+// ── 1. Genel bakış ─────────────────────────────────────────────────────────
+async function renderCcOverview(main) {
+  let data;
+  try { data = await adminApi('/cc/overview'); }
+  catch (error) { main.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; return; }
+  const users = data.users || {};
+  const e = data.emergency || {};
+  const groups = {};
+  Object.entries(data.types).forEach(([key, meta]) => { (groups[meta.group] ||= []).push(key); });
+  const totalContent = Object.values(data.content).reduce((sum, row) => sum + (Number(row?.total) || 0), 0);
+  const content24 = Object.values(data.content).reduce((sum, row) => sum + (Number(row?.last_24h) || 0), 0);
+
+  main.innerHTML = `
+    <div class="cc-page">
+      <header class="cc-hero cc-hero--command">
+        <div class="cc-hero-icon"><i class="fas fa-crown"></i></div>
+        <div class="cc-hero-text">
+          <h1>Ana Kontrol</h1>
+          <p>CigCig’in tamamı tek ekranda: içerik, kullanıcılar, sistem ve acil durum anahtarları.</p>
+        </div>
+        <button class="cc-btn" id="cc-refresh" type="button"><i class="fas fa-rotate"></i> Yenile</button>
+      </header>
+
+      ${e.maintenance || e.readonly || e.registrationClosed ? `<div class="cc-alert cc-alert--danger"><i class="fas fa-triangle-exclamation"></i>
+        <span>Aktif acil durum: ${[e.maintenance && 'site bakımda', e.readonly && 'salt okunur mod', e.registrationClosed && 'kayıtlar kapalı'].filter(Boolean).join(' · ')}</span>
+        <button class="cc-btn cc-btn--sm" data-go="cc-switches" type="button">Anahtarlara git</button></div>` : ''}
+
+      <div class="cc-kpis">
+        <div class="cc-kpi cc-kpi--accent"><span><i class="fas fa-users"></i> Üye</span><strong>${ccNumber(users.total)}</strong><em>+${ccNumber(users.new_24h)} son 24 saat</em></div>
+        <div class="cc-kpi"><span><i class="fas fa-signal"></i> Şu an çevrimiçi</span><strong>${ccNumber(users.online)}</strong><em>${ccNumber(users.active_24h)} kişi bugün aktif</em></div>
+        <div class="cc-kpi"><span><i class="fas fa-layer-group"></i> Toplam içerik</span><strong>${ccNumber(totalContent)}</strong><em>+${ccNumber(content24)} son 24 saat</em></div>
+        <div class="cc-kpi"><span><i class="fas fa-flag"></i> Açık şikâyet</span><strong>${ccNumber(data.open_reports)}</strong><em>${ccNumber(users.banned)} yasaklı üye</em></div>
+      </div>
+
+      <section class="cc-card">
+        <div class="cc-card-head"><h2><i class="fas fa-power-off"></i> Acil durum</h2><small>Tek dokunuşla tüm site için geçerli olur.</small></div>
+        <div class="cc-emergency">
+          ${[['site_maintenance_enabled', 'maintenance', 'screwdriver-wrench', 'Site bakımı', 'Ziyaretçiler bakım ekranı görür'],
+             ['readonly_mode_enabled', 'readonly', 'lock', 'Salt okunur', 'Kimse paylaşım yapamaz'],
+             ['registration_closed', 'registrationClosed', 'user-slash', 'Kayıtlar kapalı', 'Yeni üye alınmaz']]
+            .map(([key, stateKey, icon, label, hint]) => `
+            <button class="cc-emergency-btn${e[stateKey] ? ' is-on' : ''}" data-switch="${key}" data-on="${e[stateKey] ? '1' : '0'}" type="button">
+              <i class="fas fa-${icon}"></i><strong>${label}</strong><small>${e[stateKey] ? 'AÇIK · kapatmak için dokun' : hint}</small>
+            </button>`).join('')}
+        </div>
+      </section>
+
+      <section class="cc-card">
+        <div class="cc-card-head"><h2><i class="fas fa-shapes"></i> İçerik</h2><small>Bir türe dokun, o içerikleri yönet.</small></div>
+        ${Object.entries(groups).map(([group, keys]) => `
+          <div class="cc-tile-group"><h3>${escHtml(group)}</h3>
+            <div class="cc-tiles">
+              ${keys.map(key => {
+                const row = data.content[key] || {};
+                const meta = data.types[key];
+                return `<button class="cc-tile" data-type="${key}" type="button">
+                  <i class="fas fa-${escHtml(meta.icon)}"></i>
+                  <span class="cc-tile-label">${escHtml(meta.label)}</span>
+                  <strong>${row.total === null || row.total === undefined ? '—' : ccNumber(row.total)}</strong>
+                  ${Number(row.last_24h) ? `<em>+${ccNumber(row.last_24h)}</em>` : ''}
+                </button>`;
+              }).join('')}
+            </div></div>`).join('')}
+      </section>
+
+      <div class="cc-split">
+        <section class="cc-card">
+          <div class="cc-card-head"><h2><i class="fas fa-plug-circle-check"></i> Entegrasyonlar</h2></div>
+          <div class="cc-health">
+            ${data.integrations.map(item => `
+              <div class="cc-health-row${item.link ? ' is-link' : ''}" ${item.link ? `data-go="${item.link}"` : ''}>
+                <span class="cc-dot cc-dot--${item.ok === null ? 'muted' : item.warn ? 'warn' : item.ok ? 'ok' : 'off'}"></span>
+                <strong>${escHtml(item.label)}</strong>
+                <span>${escHtml(item.value)}</span>
+                ${!item.ok && item.envs ? `<small title="Railway → Variables">${item.envs.map(name => `<code>${escHtml(name)}</code>`).join(' ')}</small>` : ''}
+              </div>`).join('')}
+          </div>
+          <p class="cc-note"><i class="fas fa-circle-info"></i> Kırmızı olanların değişkenleri sunucunun ortam değişkenlerine (Railway → Variables) eklenir.</p>
+        </section>
+        <section class="cc-card">
+          <div class="cc-card-head"><h2><i class="fas fa-server"></i> Sistem</h2></div>
+          <dl class="cc-dl">
+            <dt>Çalışma süresi</dt><dd>${ccFormatUptime(data.system.uptime_seconds)}</dd>
+            <dt>Bellek</dt><dd>${ccFormatBytes(data.system.rss)} <small>(heap ${ccFormatBytes(data.system.heap_used)})</small></dd>
+            <dt>Veritabanı</dt><dd>${ccFormatBytes(data.db_bytes)}</dd>
+            <dt>Node.js</dt><dd>${escHtml(data.system.node)}</dd>
+            <dt>Sürüm</dt><dd><code>${escHtml(data.system.app_version || '—')}</code></dd>
+          </dl>
+        </section>
+      </div>
+
+      <div class="cc-split">
+        <section class="cc-card">
+          <div class="cc-card-head"><h2><i class="fas fa-cloud-arrow-up"></i> Son yükleme hataları</h2>
+            <button class="cc-link-btn" data-go="cc-uploads" type="button">Tümü →</button></div>
+          ${data.upload_failures.length ? `<div class="cc-mini-list">${data.upload_failures.map(row => {
+            let detail = {}; try { detail = JSON.parse(row.detail || '{}'); } catch {}
+            return `<div class="cc-mini"><span class="cc-pill cc-pill--warn">${escHtml(row.target)}</span>
+              <span class="cc-mini-text">${escHtml(detail.message || '—')}</span>
+              <small>@${escHtml(row.actor)} · ${escHtml(timeAgo(row.created_at))}</small></div>`;
+          }).join('')}</div>` : '<div class="cc-empty cc-empty--sm"><i class="fas fa-check-circle"></i> Hata yok.</div>'}
+        </section>
+        <section class="cc-card">
+          <div class="cc-card-head"><h2><i class="fas fa-clipboard-list"></i> Son yönetici işlemleri</h2>
+            <button class="cc-link-btn" data-go="cc-audit" type="button">Tümü →</button></div>
+          ${data.recent_actions.length ? `<div class="cc-mini-list">${data.recent_actions.map(row => `
+            <div class="cc-mini"><code>${escHtml(row.action)}</code><span class="cc-mini-text">${escHtml(row.target || '')}</span>
+              <small>${escHtml(row.actor)} · ${escHtml(timeAgo(row.created_at))}</small></div>`).join('')}</div>`
+            : '<div class="cc-empty cc-empty--sm">Kayıt yok.</div>'}
+        </section>
+      </div>
+    </div>`;
+
+  $('#cc-refresh').addEventListener('click', () => renderCcOverview(main));
+  main.querySelectorAll('[data-go]').forEach(el => el.addEventListener('click', () => loadSection(el.dataset.go)));
+  main.querySelectorAll('.cc-tile').forEach(tile => tile.addEventListener('click', () => ccOpenContent({ type: tile.dataset.type })));
+  main.querySelectorAll('.cc-emergency-btn').forEach(button => button.addEventListener('click', async () => {
+    const turningOn = button.dataset.on !== '1';
+    const label = button.querySelector('strong').textContent;
+    if (turningOn && !await ccConfirm(`"${label}" tüm site için açılsın mı?`)) return;
+    button.disabled = true;
+    try {
+      await adminApi('/cc/switches', { method: 'PUT', body: JSON.stringify({ key: button.dataset.switch, value: turningOn }) });
+      toast(`${label} ${turningOn ? 'açıldı' : 'kapatıldı'}`);
+      renderCcOverview(main);
+    } catch (error) { toast(error.message, 'error'); button.disabled = false; }
+  }));
+}
+
+// ── 2. İçerik yönetimi ─────────────────────────────────────────────────────
+async function renderCcContent(main) {
+  let types;
+  try { types = await ccTypes(); }
+  catch (error) { main.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; return; }
+  const st = ccState.content;
+  if (!types.some(type => type.key === st.type)) st.type = types[0].key;
+  const groups = {};
+  types.forEach(type => { (groups[type.group] ||= []).push(type); });
+
+  main.innerHTML = `
+    <div class="cc-page cc-page--wide">
+      <div class="cc-content-layout">
+        <aside class="cc-rail">
+          ${Object.entries(groups).map(([group, list]) => `
+            <div class="cc-rail-group"><h4>${escHtml(group)}</h4>
+              ${list.map(type => `<button class="cc-rail-item${type.key === st.type ? ' is-active' : ''}" data-type="${type.key}" type="button">
+                <i class="fas fa-${escHtml(type.icon)}"></i><span>${escHtml(type.label)}</span></button>`).join('')}
+            </div>`).join('')}
+        </aside>
+        <div class="cc-content-main">
+          <div class="cc-toolbar">
+            <label class="cc-search"><i class="fas fa-magnifying-glass"></i>
+              <input type="search" id="cc-q" placeholder="Başlık, metin veya kullanıcı adı ara…" value="${escHtml(st.q)}"></label>
+            <label class="cc-search cc-search--sm"><i class="fas fa-at"></i>
+              <input type="text" id="cc-user" placeholder="Kullanıcı" value="${escHtml(st.user)}"></label>
+            <select id="cc-status">
+              <option value="">Tüm durumlar</option>
+              <option value="active"${st.status === 'active' ? ' selected' : ''}>Yayında</option>
+              <option value="suspended"${st.status === 'suspended' ? ' selected' : ''}>Askıda</option>
+              <option value="hidden"${st.status === 'hidden' ? ' selected' : ''}>Gizli</option>
+            </select>
+            <select id="cc-since">
+              <option value="">Her zaman</option>
+              ${[[24, 'Son 24 saat'], [168, 'Son 7 gün'], [720, 'Son 30 gün']].map(([v, l]) => `<option value="${v}"${String(st.since) === String(v) ? ' selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <select id="cc-sort">
+              <option value="new"${st.sort === 'new' ? ' selected' : ''}>En yeni</option>
+              <option value="old"${st.sort === 'old' ? ' selected' : ''}>En eski</option>
+              <option value="top"${st.sort === 'top' ? ' selected' : ''}>En popüler</option>
+            </select>
+          </div>
+          <div class="cc-bulkbar" id="cc-bulkbar" hidden>
+            <span id="cc-bulk-count"></span>
+            <button class="cc-btn cc-btn--sm" data-bulk="suspend" type="button"><i class="fas fa-pause"></i> Askıya al</button>
+            <button class="cc-btn cc-btn--sm" data-bulk="unsuspend" type="button"><i class="fas fa-play"></i> Askıdan çıkar</button>
+            <button class="cc-btn cc-btn--sm" data-bulk="hide" type="button"><i class="fas fa-eye-slash"></i> Gizle</button>
+            <button class="cc-btn cc-btn--sm cc-btn--danger" data-bulk="delete" type="button"><i class="fas fa-trash"></i> Sil</button>
+            <button class="cc-link-btn" id="cc-bulk-clear" type="button">Seçimi temizle</button>
+          </div>
+          <div class="cc-result-head-row"><strong id="cc-total"></strong><label class="cc-check"><input type="checkbox" id="cc-select-all"> Sayfadakileri seç</label></div>
+          <div class="cc-items" id="cc-items"><div class="cc-empty">Yükleniyor…</div></div>
+          <div class="cc-pager" id="cc-pager"></div>
+        </div>
+      </div>
+    </div>`;
+
+  const typeMeta = () => types.find(type => type.key === st.type);
+  const load = async () => {
+    const list = $('#cc-items');
+    const params = new URLSearchParams({ limit: '40', offset: String(st.offset), sort: st.sort });
+    if (st.q) params.set('q', st.q);
+    if (st.user) params.set('user', st.user);
+    if (st.status) params.set('status', st.status);
+    if (st.since) params.set('since', st.since);
+    list.innerHTML = '<div class="cc-empty">Yükleniyor…</div>';
+    try {
+      const data = await adminApi(`/cc/content/${st.type}?${params}`);
+      const meta = typeMeta();
+      $('#cc-total').textContent = `${ccNumber(data.total)} ${meta.label.toLocaleLowerCase('tr-TR')}`;
+      if (!data.items.length) { list.innerHTML = '<div class="cc-empty"><i class="fas fa-inbox"></i> Bu filtrede içerik yok.</div>'; $('#cc-pager').innerHTML = ''; return; }
+      list.innerHTML = data.items.map(item => {
+        const statuses = [item.suspended && '<span class="cc-pill cc-pill--danger">Askıda</span>', item.hidden && '<span class="cc-pill cc-pill--warn">Gizli</span>'].filter(Boolean).join('');
+        return `<article class="cc-item${item.suspended ? ' is-suspended' : ''}${item.hidden ? ' is-hidden' : ''}" data-id="${escHtml(item.id)}">
+          <label class="cc-item-check"><input type="checkbox" data-select="${escHtml(item.id)}"${st.selected.has(String(item.id)) ? ' checked' : ''}></label>
+          <div class="cc-item-media">${item.media ? `<img src="${escHtml(item.media)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<i class="fas fa-${escHtml(meta.icon)}"></i>`}</div>
+          <div class="cc-item-body">
+            <div class="cc-item-title">${escHtml(item.title || '—')} ${statuses}</div>
+            ${item.body ? `<p class="cc-item-text">${escHtml(item.body)}</p>` : ''}
+            <div class="cc-item-meta">
+              <button class="cc-owner" data-owner="${escHtml(item.owner_id || '')}" type="button">${ccAvatar(item.owner_avatar, item.owner_username)}@${escHtml(item.owner_username || 'silinmiş')}</button>
+              <span><i class="far fa-clock"></i>${escHtml(formatDate(item.created_at))}</span>
+              ${item.metric !== null && item.metric !== undefined ? `<span><i class="fas fa-chart-simple"></i>${ccNumber(item.metric)} ${escHtml(meta.metric_label)}</span>` : ''}
+              <span class="cc-muted">#${escHtml(item.id)}</span>
+            </div>
+          </div>
+          <div class="cc-item-actions">
+            ${item.link ? `<a class="cc-icon-btn" href="${escHtml(ccSiteUrl(item.link))}" target="_blank" rel="noopener" title="Sitede aç"><i class="fas fa-arrow-up-right-from-square"></i></a>` : ''}
+            ${meta.can_suspend ? (item.suspended
+              ? `<button class="cc-icon-btn" data-act="unsuspend" title="Askıdan çıkar" type="button"><i class="fas fa-play"></i></button>`
+              : `<button class="cc-icon-btn" data-act="suspend" title="Askıya al" type="button"><i class="fas fa-pause"></i></button>`) : ''}
+            ${meta.can_hide ? (item.hidden
+              ? `<button class="cc-icon-btn" data-act="unhide" title="Göster" type="button"><i class="fas fa-eye"></i></button>`
+              : `<button class="cc-icon-btn" data-act="hide" title="Gizle" type="button"><i class="fas fa-eye-slash"></i></button>`) : ''}
+            <button class="cc-icon-btn cc-icon-btn--danger" data-act="delete" title="Sil" type="button"><i class="fas fa-trash"></i></button>
+          </div>
+        </article>`;
+      }).join('');
+      const pages = Math.ceil(data.total / data.limit);
+      const page = Math.floor(st.offset / data.limit) + 1;
+      $('#cc-pager').innerHTML = pages > 1 ? `
+        <button class="cc-btn cc-btn--sm" data-page="-1" ${page <= 1 ? 'disabled' : ''} type="button"><i class="fas fa-chevron-left"></i></button>
+        <span>${page} / ${pages}</span>
+        <button class="cc-btn cc-btn--sm" data-page="1" ${page >= pages ? 'disabled' : ''} type="button"><i class="fas fa-chevron-right"></i></button>` : '';
+      $('#cc-pager').querySelectorAll('[data-page]').forEach(button => button.addEventListener('click', () => {
+        st.offset = Math.max(0, st.offset + Number(button.dataset.page) * data.limit);
+        load();
+        main.scrollIntoView?.({ block: 'start' });
+      }));
+      syncBulk();
+    } catch (error) { list.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; }
+  };
+
+  const act = async (ids, action) => {
+    const meta = typeMeta();
+    let reason = '';
+    if (action === 'delete' && !await ccConfirm(`${ids.length} ${meta.label.toLocaleLowerCase('tr-TR')} kalıcı olarak silinsin mi? Bu geri alınamaz.`)) return false;
+    if (action === 'suspend') {
+      reason = await ccPrompt('Askıya alma nedeni (kullanıcıya bildirilir):', 'Topluluk kurallarına aykırı');
+      if (reason === null || reason === undefined) return false;
+    }
+    try {
+      if (ids.length === 1) await adminApi(`/cc/content/${st.type}/${encodeURIComponent(ids[0])}/${action}`, { method: 'POST', body: JSON.stringify({ reason }) });
+      else {
+        const result = await adminApi(`/cc/content/${st.type}/bulk`, { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
+        if (result.failed.length) toast(`${result.ok} başarılı, ${result.failed.length} başarısız: ${result.failed[0].error}`, 'error');
+      }
+      const labels = { suspend: 'askıya alındı', unsuspend: 'askıdan çıkarıldı', hide: 'gizlendi', unhide: 'görünür yapıldı', delete: 'silindi' };
+      toast(`${ids.length} içerik ${labels[action]}`);
+      return true;
+    } catch (error) { toast(error.message, 'error'); return false; }
+  };
+
+  const syncBulk = () => {
+    const count = st.selected.size;
+    $('#cc-bulkbar').hidden = !count;
+    $('#cc-bulk-count').textContent = `${count} seçili`;
+    const meta = typeMeta();
+    $('#cc-bulkbar').querySelectorAll('[data-bulk="suspend"],[data-bulk="unsuspend"]').forEach(b => { b.hidden = !meta.can_suspend; });
+    $('#cc-bulkbar').querySelector('[data-bulk="hide"]').hidden = !meta.can_hide;
+  };
+
+  main.querySelectorAll('.cc-rail-item').forEach(button => button.addEventListener('click', () => {
+    st.type = button.dataset.type; st.offset = 0; st.selected = new Set(); st.status = '';
+    main.querySelectorAll('.cc-rail-item').forEach(other => other.classList.toggle('is-active', other === button));
+    $('#cc-status').value = '';
+    load();
+  }));
+  let timer = null;
+  const debounced = () => { clearTimeout(timer); timer = setTimeout(() => { st.q = $('#cc-q').value.trim(); st.user = $('#cc-user').value.trim(); st.offset = 0; load(); }, 350); };
+  $('#cc-q').addEventListener('input', debounced);
+  $('#cc-user').addEventListener('input', debounced);
+  [['#cc-status', 'status'], ['#cc-since', 'since'], ['#cc-sort', 'sort']].forEach(([sel, key]) =>
+    $(sel).addEventListener('change', event => { st[key] = event.target.value; st.offset = 0; load(); }));
+
+  $('#cc-items').addEventListener('click', async event => {
+    const owner = event.target.closest('[data-owner]');
+    if (owner?.dataset.owner) { ccOpenUser(owner.dataset.owner); return; }
+    const button = event.target.closest('[data-act]');
+    if (!button) return;
+    const id = button.closest('.cc-item').dataset.id;
+    button.disabled = true;
+    if (await act([id], button.dataset.act)) load(); else button.disabled = false;
+  });
+  $('#cc-items').addEventListener('change', event => {
+    const box = event.target.closest('[data-select]');
+    if (!box) return;
+    if (box.checked) st.selected.add(box.dataset.select); else st.selected.delete(box.dataset.select);
+    syncBulk();
+  });
+  $('#cc-select-all').addEventListener('change', event => {
+    main.querySelectorAll('[data-select]').forEach(box => {
+      box.checked = event.target.checked;
+      if (box.checked) st.selected.add(box.dataset.select); else st.selected.delete(box.dataset.select);
+    });
+    syncBulk();
+  });
+  $('#cc-bulk-clear').addEventListener('click', () => { st.selected = new Set(); main.querySelectorAll('[data-select]').forEach(b => { b.checked = false; }); $('#cc-select-all').checked = false; syncBulk(); });
+  $('#cc-bulkbar').querySelectorAll('[data-bulk]').forEach(button => button.addEventListener('click', async () => {
+    if (await act([...st.selected], button.dataset.bulk)) { st.selected = new Set(); $('#cc-select-all').checked = false; load(); }
+  }));
+  load();
+}
+
+// ── 3. Kullanıcı kontrolü ──────────────────────────────────────────────────
+function ccOpenUser(id) {
+  ccState.users.openId = String(id);
+  if (currentSection === 'cc-users') ccUserDrawer(id);
+  else loadSection('cc-users');
+}
+
+async function renderCcUsers(main) {
+  const st = ccState.users;
+  main.innerHTML = `
+    <div class="cc-page cc-page--wide">
+      <header class="cc-hero">
+        <div class="cc-hero-icon"><i class="fas fa-user-gear"></i></div>
+        <div class="cc-hero-text"><h1>Kullanıcı Kontrolü</h1>
+          <p>Bir kullanıcıya dokun: profilini düzenle, oturumlarını kapat, güvenlik ayarlarını sıfırla, içeriklerine git.</p></div>
+      </header>
+      <div class="cc-toolbar">
+        <label class="cc-search"><i class="fas fa-magnifying-glass"></i>
+          <input type="search" id="ccu-q" placeholder="Kullanıcı adı, isim, e-posta veya IP…" value="${escHtml(st.q)}"></label>
+        <select id="ccu-sort">
+          ${[['new', 'En yeni üyeler'], ['active', 'Son aktif'], ['old', 'En eski'], ['name', 'Ada göre']].map(([v, l]) => `<option value="${v}"${st.sort === v ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div class="cc-chips" id="ccu-filters">
+        ${[['', 'Tümü'], ['online', 'Çevrimiçi'], ['new', 'Bu hafta katılan'], ['banned', 'Yasaklı'], ['verified', 'Onaylı'], ['vip', 'VIP/Plus'], ['artist', 'Sanatçı'], ['admin', 'Yetkili'], ['unverified_email', 'E-postası doğrulanmamış']]
+          .map(([v, l]) => `<button class="cc-chip-btn${st.filter === v ? ' is-active' : ''}" data-filter="${v}" type="button">${l}</button>`).join('')}
+      </div>
+      <div class="cc-result-head-row"><strong id="ccu-total"></strong></div>
+      <div class="cc-user-grid" id="ccu-list"><div class="cc-empty">Yükleniyor…</div></div>
+      <div class="cc-pager" id="ccu-pager"></div>
+    </div>
+    <div class="cc-drawer" id="cc-drawer" hidden><div class="cc-drawer-scrim" data-close></div><div class="cc-drawer-panel" id="cc-drawer-panel"></div></div>`;
+
+  const load = async () => {
+    const params = new URLSearchParams({ limit: '48', offset: String(st.offset), sort: st.sort });
+    if (st.q) params.set('q', st.q);
+    if (st.filter) params.set('filter', st.filter);
+    const list = $('#ccu-list');
+    try {
+      const data = await adminApi(`/cc/users?${params}`);
+      $('#ccu-total').textContent = `${ccNumber(data.total)} kullanıcı`;
+      list.innerHTML = data.items.length ? data.items.map(user => {
+        const badges = [
+          Number(user.banned) && '<span class="cc-pill cc-pill--danger">Yasaklı</span>',
+          Number(user.is_admin) && '<span class="cc-pill cc-pill--info">Yetkili</span>',
+          Number(user.is_red_verified) && '<span class="cc-pill cc-pill--accent"><i class="fas fa-circle-check"></i></span>',
+          (Number(user.is_vip) || Number(user.is_plus)) && '<span class="cc-pill cc-pill--gold">VIP</span>'
+        ].filter(Boolean).join('');
+        const online = user.last_active && Date.now() - new Date(user.last_active).getTime() < 5 * 60000;
+        return `<button class="cc-user-card" data-user="${user.id}" type="button">
+          <span class="cc-user-avatar">${ccAvatar(Number(user.avatar_removed) ? '' : user.avatar, user.username)}${online ? '<i class="cc-online"></i>' : ''}</span>
+          <span class="cc-user-names"><strong>${escHtml(user.nickname || user.username)}</strong><small>@${escHtml(user.username)}</small></span>
+          <span class="cc-user-badges">${badges}</span>
+          <span class="cc-user-meta"><span>${escHtml(user.email || 'e-posta yok')}</span><span>Katılım ${escHtml(new Date(user.created_at).toLocaleDateString('tr-TR'))}</span><span>${user.last_active ? 'Aktif ' + escHtml(timeAgo(user.last_active)) : 'Hiç aktif olmadı'}</span></span>
+        </button>`;
+      }).join('') : '<div class="cc-empty"><i class="fas fa-user-slash"></i> Eşleşen kullanıcı yok.</div>';
+      const pages = Math.ceil(data.total / 48);
+      const page = Math.floor(st.offset / 48) + 1;
+      $('#ccu-pager').innerHTML = pages > 1 ? `<button class="cc-btn cc-btn--sm" data-page="-1" ${page <= 1 ? 'disabled' : ''} type="button"><i class="fas fa-chevron-left"></i></button><span>${page} / ${pages}</span><button class="cc-btn cc-btn--sm" data-page="1" ${page >= pages ? 'disabled' : ''} type="button"><i class="fas fa-chevron-right"></i></button>` : '';
+      $('#ccu-pager').querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => { st.offset = Math.max(0, st.offset + Number(b.dataset.page) * 48); load(); }));
+    } catch (error) { list.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; }
+  };
+
+  let timer = null;
+  $('#ccu-q').addEventListener('input', event => { clearTimeout(timer); timer = setTimeout(() => { st.q = event.target.value.trim(); st.offset = 0; load(); }, 350); });
+  $('#ccu-sort').addEventListener('change', event => { st.sort = event.target.value; st.offset = 0; load(); });
+  main.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
+    st.filter = button.dataset.filter; st.offset = 0;
+    main.querySelectorAll('[data-filter]').forEach(other => other.classList.toggle('is-active', other === button));
+    load();
+  }));
+  $('#ccu-list').addEventListener('click', event => {
+    const card = event.target.closest('[data-user]');
+    if (card) ccUserDrawer(card.dataset.user);
+  });
+  $('#cc-drawer').addEventListener('click', event => { if (event.target.closest('[data-close]')) ccCloseDrawer(); });
+  load();
+  if (st.openId) { const id = st.openId; st.openId = null; ccUserDrawer(id); }
+}
+
+function ccCloseDrawer() {
+  const drawer = $('#cc-drawer');
+  if (!drawer) return;
+  drawer.classList.remove('is-open');
+  setTimeout(() => { drawer.hidden = true; }, 220);
+  document.removeEventListener('keydown', ccDrawerKeys);
+}
+function ccDrawerKeys(event) { if (event.key === 'Escape') ccCloseDrawer(); }
+
+async function ccUserDrawer(id, tab = 'profile') {
+  const drawer = $('#cc-drawer');
+  const panel = $('#cc-drawer-panel');
+  if (!drawer || !panel) return;
+  drawer.hidden = false;
+  requestAnimationFrame(() => drawer.classList.add('is-open'));
+  document.addEventListener('keydown', ccDrawerKeys);
+  panel.innerHTML = '<div class="cc-empty">Yükleniyor…</div>';
+  let data;
+  try { data = await adminApi(`/cc/users/${id}`); }
+  catch (error) { panel.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; return; }
+  const u = data.user;
+  const types = await ccTypes().catch(() => []);
+  const typeLabel = key => types.find(type => type.key === key)?.label || key;
+  const typeIcon = key => types.find(type => type.key === key)?.icon || 'square';
+  const yes = value => Number(value) === 1 || value === true;
+  const field = (key, label, type = 'text') => `<label class="cc-field"><span>${label}</span><input type="${type}" data-field="${key}" value="${escHtml(u[key] ?? '')}"></label>`;
+  const flag = (key, label, hint) => `<label class="cc-toggle"><input type="checkbox" data-field="${key}"${yes(u[key]) ? ' checked' : ''}><span class="cc-switch"></span><span><strong>${label}</strong>${hint ? `<small>${hint}</small>` : ''}</span></label>`;
+
+  panel.innerHTML = `
+    <header class="cc-drawer-head">
+      <span class="cc-drawer-avatar">${ccAvatar(yes(u.avatar_removed) ? '' : u.avatar, u.username)}</span>
+      <div><h2>${escHtml(u.nickname || u.username)}</h2><p>@${escHtml(u.username)} · #${u.id}</p>
+        <div class="cc-user-badges">
+          ${yes(u.banned) ? '<span class="cc-pill cc-pill--danger">Yasaklı</span>' : ''}
+          ${yes(u.is_admin) ? '<span class="cc-pill cc-pill--info">Yetkili</span>' : ''}
+          ${u.two_factor_method && u.two_factor_method !== 'none' ? `<span class="cc-pill cc-pill--muted"><i class="fas fa-shield-halved"></i> 2AD: ${escHtml(u.two_factor_method)}</span>` : ''}
+          ${u.has_app_lock ? '<span class="cc-pill cc-pill--muted"><i class="fas fa-lock"></i> Uygulama şifresi</span>' : ''}
+        </div></div>
+      <div class="cc-drawer-head-actions">
+        <a class="cc-icon-btn" href="${escHtml(ccSiteUrl('/profil/' + encodeURIComponent(u.username)))}" target="_blank" rel="noopener" title="Profili aç"><i class="fas fa-arrow-up-right-from-square"></i></a>
+        <button class="cc-icon-btn" data-close type="button" title="Kapat"><i class="fas fa-xmark"></i></button>
+      </div>
+    </header>
+    <div class="cc-drawer-stats">
+      <span><strong>${ccNumber(data.social.followers)}</strong>takipçi</span>
+      <span><strong>${ccNumber(data.social.following)}</strong>takip</span>
+      <span><strong>${ccNumber(data.social.dm_sent)}</strong>mesaj</span>
+      <span><strong>${ccNumber(data.social.reports_against)}</strong>şikâyet</span>
+      <span><strong>${ccNumber(data.sessions.length)}</strong>oturum</span>
+    </div>
+    <nav class="cc-tabs" role="tablist">
+      ${[['profile', 'Profil'], ['content', 'İçerikler'], ['security', 'Güvenlik'], ['sessions', 'Oturumlar'], ['history', 'Geçmiş']]
+        .map(([key, label]) => `<button class="cc-tab${tab === key ? ' is-active' : ''}" data-tab="${key}" type="button">${label}</button>`).join('')}
+    </nav>
+    <div class="cc-drawer-body">
+      <section data-pane="profile">
+        <div class="cc-form-grid">
+          ${field('username', 'Kullanıcı adı')}${field('nickname', 'Görünen ad')}
+          ${field('email', 'E-posta', 'email')}${field('title', 'Unvan')}
+          ${field('location', 'Konum')}
+          <label class="cc-field"><span>İsim rengi</span><span class="cc-color"><input type="color" data-field="name_color" value="${escHtml(/^#[0-9a-f]{6}$/i.test(u.name_color || '') ? u.name_color : '#ffffff')}"><button class="cc-link-btn" data-clear-color type="button">Varsayılana dön</button></span></label>
+        </div>
+        <label class="cc-field"><span>Biyografi</span><textarea data-field="bio" rows="3">${escHtml(u.bio || '')}</textarea></label>
+        <div class="cc-toggle-list cc-toggle-list--grid">
+          ${flag('is_red_verified', 'Onaylı hesap', 'Kırmızı tik')}
+          ${flag('is_vip', 'VIP')}${flag('is_plus', 'Plus')}${flag('is_artist', 'Sanatçı')}
+          ${flag('is_private', 'Gizli hesap')}${flag('email_verified', 'E-posta doğrulandı')}
+          ${flag('show_in_suggestions', 'Önerilerde görünsün')}${flag('allow_mentions', 'Etiketlenebilir')}
+        </div>
+        <div class="cc-actionbar"><button class="cc-btn cc-btn--primary" id="ccu-save" type="button"><i class="fas fa-floppy-disk"></i> Değişiklikleri kaydet</button></div>
+      </section>
+      <section data-pane="content" hidden>
+        <div class="cc-tiles cc-tiles--compact">
+          ${Object.entries(data.content_counts).map(([key, total]) => `
+            <button class="cc-tile" data-goto-type="${key}" type="button" ${!total ? 'disabled' : ''}>
+              <i class="fas fa-${escHtml(typeIcon(key))}"></i><span class="cc-tile-label">${escHtml(typeLabel(key))}</span><strong>${total === null ? '—' : ccNumber(total)}</strong>
+            </button>`).join('')}
+        </div>
+      </section>
+      <section data-pane="security" hidden>
+        <div class="cc-action-grid">
+          ${[['logout_all', 'right-from-bracket', 'Tüm oturumları kapat', 'Her cihazdan çıkış yapılır.'],
+             ['reset_2fa', 'shield-halved', '2AD’yi sıfırla', 'Güvenlik sorusu, PIN ve e-posta doğrulaması kaldırılır.'],
+             ['reset_app_lock', 'lock-open', 'Uygulama şifresini kaldır', 'Hesap tekrar şifresiz açılır.'],
+             ['reset_chat_lock', 'comment-slash', 'Sohbet kilitlerini sıfırla', 'Kilitli sohbetler açılır, kilit şifreleri silinir.'],
+             ['force_password_reset', 'key', 'Şifre değiştirmeye zorla', 'Sonraki girişte yeni şifre ister.'],
+             ['verify_email', 'envelope-circle-check', 'E-postayı doğrula', 'Doğrulama beklemeden onaylanır.'],
+             ['remove_avatar', 'user-xmark', 'Profil fotoğrafını kaldır', 'Varsayılan avatar gösterilir.'],
+             ['clear_bio', 'eraser', 'Biyografiyi temizle', 'Biyografi ve bağlantılar silinir.']]
+            .map(([action, icon, label, hint]) => `<button class="cc-action" data-user-action="${action}" type="button"><i class="fas fa-${icon}"></i><strong>${label}</strong><small>${hint}</small></button>`).join('')}
+        </div>
+        <p class="cc-note"><i class="fas fa-circle-info"></i> Yasaklama ve kısıtlamalar “Kullanıcılar” bölümündeki mevcut araçlardan yapılır.</p>
+      </section>
+      <section data-pane="sessions" hidden>
+        ${data.sessions.length ? `<div class="cc-mini-list">${data.sessions.map(session => `
+          <div class="cc-mini cc-mini--row">
+            <i class="fas fa-${/iphone|android|mobile|ipad/i.test(`${session.device} ${session.os}`) ? 'mobile-screen' : 'desktop'}"></i>
+            <span class="cc-mini-text"><strong>${escHtml([session.device, session.browser, session.os].filter(Boolean).join(' · ') || 'Bilinmeyen cihaz')}</strong>
+              <small>${escHtml(session.ip || '—')} · ${escHtml(session.location || 'konum yok')} · son ${escHtml(timeAgo(session.last_seen_at || session.created_at))}</small></span>
+            <button class="cc-btn cc-btn--sm" data-revoke="${escHtml(session.token_hint)}" type="button">Kapat</button>
+          </div>`).join('')}</div>` : '<div class="cc-empty cc-empty--sm">Açık oturum yok.</div>'}
+      </section>
+      <section data-pane="history" hidden>
+        <h3 class="cc-subhead">Girişler</h3>
+        ${data.logins.length ? `<div class="cc-mini-list">${data.logins.map(row => `<div class="cc-mini"><span class="cc-pill cc-pill--${row.status === 'success' ? 'ok' : 'warn'}">${escHtml(row.status || '—')}</span><span class="cc-mini-text">${escHtml(row.ip || '')} · ${escHtml([row.device, row.browser].filter(Boolean).join(' · '))}</span><small>${escHtml(formatDate(row.created_at))}</small></div>`).join('')}</div>` : '<div class="cc-empty cc-empty--sm">Giriş kaydı yok.</div>'}
+        <h3 class="cc-subhead">Kısıtlamalar</h3>
+        ${data.restrictions.length ? `<div class="cc-mini-list">${data.restrictions.map(row => `<div class="cc-mini"><code>${escHtml(row.restriction_type || '')}</code><span class="cc-mini-text">${escHtml(row.reason || '')}</span><small>${row.revoked_at ? 'kaldırıldı' : row.expires_at ? escHtml(formatDate(row.expires_at)) + ' tarihine kadar' : 'süresiz'}</small></div>`).join('')}</div>` : '<div class="cc-empty cc-empty--sm">Kısıtlama yok.</div>'}
+        <h3 class="cc-subhead">İşlem kaydı</h3>
+        ${data.logs.length ? `<div class="cc-mini-list">${data.logs.map(row => `<div class="cc-mini"><code>${escHtml(row.action)}</code><span class="cc-mini-text">${escHtml(row.actor)} → ${escHtml(row.target || '')}</span><small>${escHtml(formatDate(row.created_at))}</small></div>`).join('')}</div>` : '<div class="cc-empty cc-empty--sm">Kayıt yok.</div>'}
+      </section>
+    </div>`;
+
+  const showTab = key => {
+    panel.querySelectorAll('.cc-tab').forEach(t => t.classList.toggle('is-active', t.dataset.tab === key));
+    panel.querySelectorAll('[data-pane]').forEach(p => { p.hidden = p.dataset.pane !== key; });
+  };
+  panel.querySelectorAll('.cc-tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+  showTab(tab);
+
+  let colorCleared = false;
+  panel.querySelector('[data-clear-color]')?.addEventListener('click', () => { colorCleared = true; toast('Kaydedince varsayılan renge döner'); });
+  $('#ccu-save').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const payload = {};
+    panel.querySelectorAll('[data-pane="profile"] [data-field]').forEach(input => {
+      const key = input.dataset.field;
+      if (input.type === 'checkbox') { if (input.checked !== yes(u[key])) payload[key] = input.checked; }
+      else if (key === 'name_color') {
+        if (colorCleared) payload.name_color = '';
+        else if (input.value.toLowerCase() !== String(u.name_color || '').toLowerCase() && u.name_color) payload.name_color = input.value;
+        else if (!u.name_color && input.value.toLowerCase() !== '#ffffff') payload.name_color = input.value;
+      } else if (input.value !== String(u[key] ?? '')) payload[key] = input.value;
+    });
+    if (!Object.keys(payload).length) { toast('Değişiklik yok'); return; }
+    button.disabled = true;
+    try { await adminApi(`/cc/users/${u.id}`, { method: 'PATCH', body: JSON.stringify(payload) }); toast('Kullanıcı güncellendi'); ccUserDrawer(u.id, 'profile'); }
+    catch (error) { toast(error.message, 'error'); button.disabled = false; }
+  });
+  panel.querySelectorAll('[data-user-action]').forEach(button => button.addEventListener('click', async () => {
+    const label = button.querySelector('strong').textContent;
+    if (!await ccConfirm(`@${u.username} için “${label}” uygulansın mı?`)) return;
+    button.disabled = true;
+    try { const result = await adminApi(`/cc/users/${u.id}/action`, { method: 'POST', body: JSON.stringify({ action: button.dataset.userAction }) }); toast(result.message || 'Tamam'); ccUserDrawer(u.id, 'security'); }
+    catch (error) { toast(error.message, 'error'); button.disabled = false; }
+  }));
+  panel.querySelectorAll('[data-revoke]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await adminApi(`/cc/users/${u.id}/sessions/${encodeURIComponent(button.dataset.revoke)}`, { method: 'DELETE' }); toast('Oturum kapatıldı'); ccUserDrawer(u.id, 'sessions'); }
+    catch (error) { toast(error.message, 'error'); button.disabled = false; }
+  }));
+  panel.querySelectorAll('[data-goto-type]').forEach(button => button.addEventListener('click', () => {
+    ccCloseDrawer();
+    ccOpenContent({ type: button.dataset.gotoType, user: u.username });
+  }));
+}
+
+// ── 4. Site anahtarları ────────────────────────────────────────────────────
+async function renderCcSwitches(main) {
+  let data;
+  try { data = await adminApi('/cc/switches'); }
+  catch (error) { main.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; return; }
+  const groups = {};
+  data.switches.forEach(item => { (groups[item.group] ||= []).push(item); });
+  main.innerHTML = `
+    <div class="cc-page">
+      <header class="cc-hero">
+        <div class="cc-hero-icon"><i class="fas fa-toggle-on"></i></div>
+        <div class="cc-hero-text"><h1>Site Anahtarları</h1><p>Sitenin özelliklerini tek yerden aç ve kapat. Değişiklik birkaç saniye içinde herkese yansır.</p></div>
+      </header>
+      ${Object.entries(groups).map(([group, items]) => `
+        <section class="cc-card${group === 'Acil durum' ? ' cc-card--danger' : ''}">
+          <div class="cc-card-head"><h2>${escHtml(group)}</h2></div>
+          <div class="cc-toggle-list">
+            ${items.map(item => `<label class="cc-toggle${item.danger ? ' cc-toggle--danger' : ''}">
+              <input type="checkbox" data-switch="${escHtml(item.key)}"${item.value ? ' checked' : ''}><span class="cc-switch"></span>
+              <span><strong>${escHtml(item.label)}</strong>${item.hint ? `<small>${escHtml(item.hint)}</small>` : ''}</span></label>`).join('')}
+          </div>
+          ${group === 'Acil durum' ? `<label class="cc-field"><span>Bakım ekranındaki mesaj</span>
+            <div class="cc-inline-form"><input type="text" id="cc-maint-msg" maxlength="300" value="${escHtml(data.maintenance_message)}" placeholder="CigCig kısa bir bakımda. Birazdan geri döneceğiz.">
+            <button class="cc-btn" id="cc-maint-save" type="button">Kaydet</button></div></label>` : ''}
+        </section>`).join('')}
+    </div>`;
+
+  main.querySelectorAll('[data-switch]').forEach(input => input.addEventListener('change', async () => {
+    const item = data.switches.find(entry => entry.key === input.dataset.switch);
+    if (item?.danger && input.checked && !await ccConfirm(`“${item.label}” açılsın mı? ${item.hint || ''}`)) { input.checked = false; return; }
+    input.disabled = true;
+    try {
+      await adminApi('/cc/switches', { method: 'PUT', body: JSON.stringify({ key: input.dataset.switch, value: input.checked }) });
+      toast(`${item?.label || 'Ayar'} ${input.checked ? 'açıldı' : 'kapatıldı'}`);
+    } catch (error) { toast(error.message, 'error'); input.checked = !input.checked; }
+    input.disabled = false;
+  }));
+  $('#cc-maint-save')?.addEventListener('click', async () => {
+    try { await adminApi('/cc/switches', { method: 'PUT', body: JSON.stringify({ key: 'site_maintenance_message', value: $('#cc-maint-msg').value }) }); toast('Bakım mesajı kaydedildi'); }
+    catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+// ── 5. Yükleme hataları ────────────────────────────────────────────────────
+async function renderCcUploads(main) {
+  let rows;
+  try { rows = await adminApi('/cc/upload-failures?limit=300'); }
+  catch (error) { main.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; return; }
+  const stages = { start: 'Başlatma', status: 'Durum', chunks: 'Parça yükleme', chunk: 'Parça kaydı', finalize: 'Depolamaya aktarım', 'finalize-start': 'Aktarım başlatma', banner: 'Kapak', publish: 'Yayınlama', client: 'Tarayıcı' };
+  const byStage = {};
+  rows.forEach(row => { byStage[row.stage] = (byStage[row.stage] || 0) + 1; });
+  main.innerHTML = `
+    <div class="cc-page">
+      <header class="cc-hero">
+        <div class="cc-hero-icon"><i class="fas fa-cloud-arrow-up"></i></div>
+        <div class="cc-hero-text"><h1>Yükleme Hataları</h1><p>Reals ve video yüklemelerinde yaşanan her hata, hangi aşamada ve neden olduğuyla burada.</p></div>
+      </header>
+      ${rows.length ? `<div class="cc-chips">${Object.entries(byStage).sort((a, b) => b[1] - a[1]).map(([stage, count]) => `<span class="cc-chip-static">${escHtml(stages[stage] || stage)} <b>${count}</b></span>`).join('')}</div>` : ''}
+      <section class="cc-card">
+        ${rows.length ? `<div class="cc-mini-list">${rows.map(row => {
+          const d = row.detail || {};
+          return `<div class="cc-fail">
+            <div class="cc-fail-head"><span class="cc-pill cc-pill--warn">${escHtml(stages[row.stage] || row.stage)}</span>
+              ${d.status ? `<code>HTTP ${escHtml(d.status)}</code>` : ''}
+              <strong>@${escHtml(row.actor)}</strong><small>${escHtml(formatDate(row.created_at))}</small></div>
+            <p class="cc-fail-msg">${escHtml(d.message || '—')}</p>
+            <div class="cc-fail-meta">
+              ${d.is_reals !== undefined ? `<span>${d.is_reals ? 'Reals' : 'Video'}</span>` : ''}
+              ${d.file_size ? `<span>${ccFormatBytes(d.file_size)}</span>` : ''}
+              ${d.file_type ? `<span>${escHtml(d.file_type)}</span>` : ''}
+              ${d.uploaded_bytes ? `<span>${ccFormatBytes(d.uploaded_bytes)} yüklenmişti</span>` : ''}
+              ${d.persisted === false ? '<span>kalıcı kayıt yapılamadı</span>' : ''}
+              ${d.storage ? `<span>depolama: ${escHtml(d.storage)}</span>` : ''}
+              <span>${escHtml([row.device, row.operating_system].filter(Boolean).join(' · '))}</span>
+            </div>
+          </div>`;
+        }).join('')}</div>` : '<div class="cc-empty"><i class="fas fa-check-circle"></i> Kayıtlı yükleme hatası yok. Bir yükleme başarısız olursa nedeni burada görünecek.</div>'}
+      </section>
+    </div>`;
+}
+
+// ── 6. Denetim kaydı ───────────────────────────────────────────────────────
+async function renderCcAudit(main) {
+  main.innerHTML = `
+    <div class="cc-page">
+      <header class="cc-hero">
+        <div class="cc-hero-icon"><i class="fas fa-clipboard-list"></i></div>
+        <div class="cc-hero-text"><h1>Denetim Kaydı</h1><p>Sitede yapılan tüm işlemler: kim, neyi, ne zaman, nereden.</p></div>
+      </header>
+      <div class="cc-toolbar"><label class="cc-search"><i class="fas fa-magnifying-glass"></i><input type="search" id="cca-q" placeholder="Yetkili, işlem, hedef veya ayrıntı ara…"></label></div>
+      <section class="cc-card"><div id="cca-list"><div class="cc-empty">Yükleniyor…</div></div></section>
+    </div>`;
+  const load = async () => {
+    const q = $('#cca-q').value.trim();
+    const list = $('#cca-list');
+    try {
+      const rows = await adminApi(`/cc/audit?limit=300${q ? `&q=${encodeURIComponent(q)}` : ''}`);
+      list.innerHTML = rows.length ? `<div class="cc-table">${rows.map(row => `
+        <div class="cc-table-row">
+          <span class="cc-table-time">${escHtml(formatDate(row.created_at))}</span>
+          <strong>${escHtml(row.actor || '—')}</strong>
+          <code>${escHtml(row.action)}</code>
+          <span class="cc-table-target">${escHtml(row.target || '')}</span>
+          <span class="cc-table-detail" title="${escHtml(row.detail || '')}">${escHtml(String(row.detail || '').slice(0, 140))}</span>
+          <small>${escHtml(row.ip || '')}</small>
+        </div>`).join('')}</div>` : '<div class="cc-empty">Kayıt yok.</div>';
+    } catch (error) { list.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; }
+  };
+  let timer = null;
+  $('#cca-q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 350); });
+  load();
+}
+
 async function renderAuthorityLogs(main) {
   let logs = [];
   try { logs = await adminApi('/authority-logs'); } catch (e) { main.innerHTML = `<p style="color:var(--red2);padding:20px">${escHtml(e.message)}</p>`; return; }
@@ -6693,87 +7418,242 @@ async function renderChatAppearance(main) {
 
 // ===== NSFW KORUMASI =====
 async function renderNsfwProtection(main) {
+  let config;
+  try { config = await adminApi('/nsfw/config'); }
+  catch (error) { main.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; return; }
+
+  const providers = [
+    {
+      key: 'sightengine', name: 'Sightengine', tag: 'Önerilen',
+      blurb: 'Çıplaklığı sınıf sınıf ayırır (cinsel içerik, erotik, müstehcen). Kurulumu en kolay olanı; ücretsiz planla başlanabilir.',
+      steps: [
+        '<a href="https://sightengine.com/signup" target="_blank" rel="noopener">sightengine.com/signup</a> adresinden ücretsiz hesap aç.',
+        'Panelde sol menüden <b>API keys</b> sayfasını aç.',
+        '<b>API user</b> ve <b>API secret</b> değerlerini kopyalayıp aşağıya yapıştır.'
+      ]
+    },
+    {
+      key: 'google_vision', name: 'Google Cloud Vision', tag: 'SafeSearch',
+      blurb: 'Google’ın SafeSearch modeli. Tek bir API anahtarı yeter; Google Cloud hesabında faturalandırma açık olmalı.',
+      steps: [
+        '<a href="https://console.cloud.google.com/apis/library/vision.googleapis.com" target="_blank" rel="noopener">Cloud Vision API</a> sayfasında API’yi etkinleştir.',
+        '<b>APIs &amp; Services → Credentials → Create credentials → API key</b> ile anahtar oluştur.',
+        'Güvenlik için anahtarı yalnızca Cloud Vision API ile sınırla, sonra aşağıya yapıştır.'
+      ]
+    },
+    {
+      key: 'custom', name: 'Kendi sunucun', tag: 'Gelişmiş',
+      blurb: 'Kendi sınıflandırıcın varsa: adresine {"image_url": "..."} POST edilir, {"nsfw": 0..1} yanıtı beklenir.',
+      steps: [
+        'Uç noktan <code>https://</code> ile başlamalı ve JSON dönmeli.',
+        'Yanıtta <code>nsfw</code>, <code>score</code> veya <code>unsafe</code> alanından biri 0 ile 1 arasında olmalı.',
+        'Anahtar girersen <code>Authorization: Bearer …</code> başlığıyla gönderilir.'
+      ]
+    }
+  ];
+  const scopeLabels = { photo: 'Fotoğraflar', story: 'Hikayeler', reals: 'Reals (kapak)', video: 'Videolar (kapak)' };
+  const stats = config.stats || {};
+  const statusTone = !config.enabled ? 'off' : config.ready ? 'on' : 'warn';
+  const statusText = !config.enabled ? 'Kapalı' : config.ready ? 'Aktif — yüklemeler denetleniyor' : 'Açık ama sağlayıcı ayarlı değil';
+
   main.innerHTML = `
-    <div class="adm-head"><h1>NSFW Koruması</h1><p>Uygunsuz görselleri yüklenirken engelle, şüphelileri bulanıklaştır.</p></div>
-    <div class="adm-card nsfw-settings-card">
-      <div class="adm-card-head"><h2>Ayarlar</h2></div>
-      <div class="adm-card-body">
-        <label class="adm-switch-row">
-          <input type="checkbox" id="nsfw-enabled" />
-          <span><strong>Korumayı aç</strong><small>Açıkken herkese açık yüklemeler taranır; eşiği aşan içerik yayınlanmaz.</small></span>
-        </label>
-        <label class="adm-switch-row">
-          <input type="checkbox" id="nsfw-blur" />
-          <span><strong>Şüphelileri bulanıklaştır</strong><small>Eşiğin altındaki şüpheli içerik yayınlanır ama bulanık gelir; kullanıcı "NSFW'yi gör" ile açar.</small></span>
-        </label>
-        <div class="adm-field">
-          <label for="nsfw-threshold">Engelleme eşiği</label>
-          <input type="number" id="nsfw-threshold" min="0.1" max="1" step="0.05" />
-          <small>0.75 önerilir. Düşürürsen daha çok içerik engellenir.</small>
+    <div class="cc-page">
+      <header class="cc-hero">
+        <div class="cc-hero-icon"><i class="fas fa-eye-slash"></i></div>
+        <div class="cc-hero-text">
+          <h1>NSFW Koruması</h1>
+          <p>Yüklenen görseller yayına çıkmadan bir yapay zekâ sağlayıcısına gönderilir; eşiği aşan içerik engellenir.</p>
         </div>
-        <button class="adm-btn adm-btn-primary" id="nsfw-save">Kaydet</button>
-        <p class="nsfw-api-note" id="nsfw-api-note"></p>
+        <span class="cc-pill cc-pill--${statusTone}"><i class="fas fa-circle"></i>${statusText}</span>
+      </header>
+
+      <div class="cc-stat-row">
+        ${[['inbox', 'İnceleme bekleyen', stats.open], ['ban', 'Engellenen', stats.blocked], ['droplet', 'Bulanıklaştırılan', stats.blurred], ['calendar-week', 'Son 7 gün', stats.last_7d]]
+          .map(([icon, label, value]) => `<div class="cc-stat"><i class="fas fa-${icon}"></i><strong>${Number(value) || 0}</strong><span>${label}</span></div>`).join('')}
       </div>
-    </div>
-    <div class="adm-card">
-      <div class="adm-card-head"><h2>Bildiriler</h2><p>Engellenen ve bulanıklaştırılan yüklemeler.</p></div>
-      <div class="adm-card-body"><div id="nsfw-flag-list" class="nsfw-flag-list">Yükleniyor…</div></div>
+
+      <section class="cc-card">
+        <div class="cc-card-head"><h2><i class="fas fa-plug"></i> 1. Sağlayıcı seç</h2>
+          <small>Anahtarlar sunucuda saklanır, bu sayfaya yalnızca son 4 hanesi döner.</small></div>
+        <div class="cc-provider-grid">
+          ${providers.map(provider => `
+            <label class="cc-provider${config.provider === provider.key ? ' is-active' : ''}">
+              <input type="radio" name="nsfw-provider" value="${provider.key}"${config.provider === provider.key ? ' checked' : ''}>
+              <span class="cc-provider-top"><strong>${provider.name}</strong><em>${provider.tag}</em></span>
+              <span class="cc-provider-blurb">${provider.blurb}</span>
+            </label>`).join('')}
+        </div>
+
+        <div class="cc-provider-panel" data-panel="sightengine">
+          <ol class="cc-steps">${providers[0].steps.map(step => `<li>${step}</li>`).join('')}</ol>
+          <div class="cc-form-grid">
+            <label class="cc-field"><span>API user</span>
+              <input type="text" id="nsfw-se-user" value="${escHtml(config.sightengine_user || '')}" placeholder="örn. 1234567890" autocomplete="off"></label>
+            <label class="cc-field"><span>API secret ${config.sightengine_secret_masked ? `<em class="cc-saved">kayıtlı ${escHtml(config.sightengine_secret_masked)}</em>` : ''}</span>
+              <input type="password" id="nsfw-se-secret" placeholder="${config.sightengine_secret_masked ? 'Değiştirmek için yeni değer gir' : 'API secret'}" autocomplete="new-password">
+              ${config.sightengine_secret_masked ? '<button type="button" class="cc-link-btn" data-clear="sightengine_secret">Kayıtlı anahtarı sil</button>' : ''}</label>
+          </div>
+        </div>
+        <div class="cc-provider-panel" data-panel="google_vision">
+          <ol class="cc-steps">${providers[1].steps.map(step => `<li>${step}</li>`).join('')}</ol>
+          <label class="cc-field"><span>API anahtarı ${config.google_api_key_masked ? `<em class="cc-saved">kayıtlı ${escHtml(config.google_api_key_masked)}</em>` : ''}</span>
+            <input type="password" id="nsfw-google-key" placeholder="${config.google_api_key_masked ? 'Değiştirmek için yeni değer gir' : 'AIza…'}" autocomplete="new-password">
+            ${config.google_api_key_masked ? '<button type="button" class="cc-link-btn" data-clear="google_api_key">Kayıtlı anahtarı sil</button>' : ''}</label>
+        </div>
+        <div class="cc-provider-panel" data-panel="custom">
+          <ol class="cc-steps">${providers[2].steps.map(step => `<li>${step}</li>`).join('')}</ol>
+          <div class="cc-form-grid">
+            <label class="cc-field"><span>Uç nokta adresi</span>
+              <input type="url" id="nsfw-custom-url" value="${escHtml(config.custom_url || '')}" placeholder="https://..."></label>
+            <label class="cc-field"><span>Anahtar (isteğe bağlı) ${config.custom_key_masked ? `<em class="cc-saved">kayıtlı ${escHtml(config.custom_key_masked)}</em>` : ''}</span>
+              <input type="password" id="nsfw-custom-key" placeholder="Bearer anahtarı" autocomplete="new-password"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="cc-card">
+        <div class="cc-card-head"><h2><i class="fas fa-sliders"></i> 2. Kurallar</h2></div>
+        <div class="cc-toggle-list">
+          <label class="cc-toggle"><input type="checkbox" id="nsfw-enabled"${config.enabled ? ' checked' : ''}><span class="cc-switch"></span>
+            <span><strong>Korumayı aç</strong><small>Kapalıyken hiçbir içerik sağlayıcıya gönderilmez.</small></span></label>
+          <label class="cc-toggle"><input type="checkbox" id="nsfw-blur"${config.blur ? ' checked' : ''}><span class="cc-switch"></span>
+            <span><strong>Sınırdakileri bulanıklaştır</strong><small>Eşiğin %60’ını geçen ama engellenmeyen içerik bulanık gösterilir.</small></span></label>
+          <label class="cc-toggle"><input type="checkbox" id="nsfw-fail-closed"${config.fail_mode === 'closed' ? ' checked' : ''}><span class="cc-switch"></span>
+            <span><strong>Sağlayıcıya ulaşılamazsa engelle</strong><small>Kapalıysa denetlenemeyen içerik yayınlanır (önerilen). Açıksa güvenli tarafta kalınır ama sağlayıcı çökünce yükleme durur.</small></span></label>
+        </div>
+        <div class="cc-range">
+          <div class="cc-range-head"><span>Engelleme eşiği</span><strong id="nsfw-threshold-out">${Math.round(config.threshold * 100)}%</strong></div>
+          <input type="range" id="nsfw-threshold" min="10" max="100" step="1" value="${Math.round(config.threshold * 100)}">
+          <div class="cc-range-scale"><span>Sıkı</span><span>Dengeli · 75%</span><span>Gevşek</span></div>
+        </div>
+        <div class="cc-chip-group"><span>Denetlenecek içerikler</span>
+          ${Object.entries(scopeLabels).map(([key, label]) => `<label class="cc-chip"><input type="checkbox" data-scope="${key}"${config.scope?.[key] !== false ? ' checked' : ''}><span>${label}</span></label>`).join('')}
+        </div>
+        <p class="cc-note"><i class="fas fa-circle-info"></i> Görsel sınıflandırıcılar videonun kendisini değil kapak görselini denetler.</p>
+      </section>
+
+      <div class="cc-actionbar">
+        <button class="cc-btn cc-btn--primary" id="nsfw-save" type="button"><i class="fas fa-floppy-disk"></i> Kaydet</button>
+        <span class="cc-actionbar-hint" id="nsfw-save-hint"></span>
+      </div>
+
+      <section class="cc-card">
+        <div class="cc-card-head"><h2><i class="fas fa-flask"></i> 3. Test et</h2><small>Kaydettikten sonra bir görsel adresiyle sağlayıcıyı dene. Hiçbir şey engellenmez.</small></div>
+        <div class="cc-inline-form">
+          <input type="url" id="nsfw-test-url" placeholder="https://... (herhangi bir görsel adresi)">
+          <button class="cc-btn" id="nsfw-test" type="button"><i class="fas fa-play"></i> Dene</button>
+        </div>
+        <div id="nsfw-test-out"></div>
+      </section>
+
+      <section class="cc-card">
+        <div class="cc-card-head"><h2><i class="fas fa-inbox"></i> Kayıtlar</h2>
+          <div class="cc-seg" id="nsfw-flag-seg">
+            <button type="button" data-status="open" class="is-active">Bekleyen</button>
+            <button type="button" data-status="reviewed">İncelenen</button>
+            <button type="button" data-status="all">Tümü</button>
+          </div></div>
+        <div id="nsfw-flag-list" class="cc-flag-grid"><div class="cc-empty">Yükleniyor…</div></div>
+      </section>
     </div>`;
 
-  const settings = await adminApi('/settings').catch(() => ({}));
-  const value = key => (settings?.[key] ?? settings?.settings?.[key] ?? '');
-  document.getElementById('nsfw-enabled').checked = String(value('nsfw_protection_enabled')) === '1';
-  document.getElementById('nsfw-blur').checked = String(value('nsfw_blur_enabled')) === '1';
-  document.getElementById('nsfw-threshold').value = Number(value('nsfw_threshold')) || 0.75;
-  document.getElementById('nsfw-api-note').textContent =
-    'Tarama servisi NSFW_API_URL ortam değişkeni ile bağlanır. Bağlı değilse içerik engellenmez.';
+  const syncProvider = () => {
+    const selected = main.querySelector('input[name="nsfw-provider"]:checked')?.value || '';
+    main.querySelectorAll('.cc-provider').forEach(card => card.classList.toggle('is-active', card.querySelector('input').checked));
+    main.querySelectorAll('.cc-provider-panel').forEach(panel => { panel.hidden = panel.dataset.panel !== selected; });
+  };
+  main.querySelectorAll('input[name="nsfw-provider"]').forEach(input => input.addEventListener('change', syncProvider));
+  syncProvider();
 
-  document.getElementById('nsfw-save').addEventListener('click', async event => {
+  $('#nsfw-threshold').addEventListener('input', event => { $('#nsfw-threshold-out').textContent = `${event.target.value}%`; });
+
+  const pendingClear = new Set();
+  main.querySelectorAll('[data-clear]').forEach(button => button.addEventListener('click', () => {
+    pendingClear.add(button.dataset.clear);
+    button.textContent = 'Kaydedince silinecek';
+    button.disabled = true;
+  }));
+
+  $('#nsfw-save').addEventListener('click', async event => {
     const button = event.currentTarget;
+    const scope = {};
+    main.querySelectorAll('[data-scope]').forEach(input => { scope[input.dataset.scope] = input.checked; });
+    const payload = {
+      provider: main.querySelector('input[name="nsfw-provider"]:checked')?.value || '',
+      enabled: $('#nsfw-enabled').checked,
+      blur: $('#nsfw-blur').checked,
+      fail_mode: $('#nsfw-fail-closed').checked ? 'closed' : 'open',
+      threshold: Number($('#nsfw-threshold').value) / 100,
+      scope,
+      sightengine_user: $('#nsfw-se-user').value.trim(),
+      sightengine_secret: $('#nsfw-se-secret').value.trim(),
+      google_api_key: $('#nsfw-google-key').value.trim(),
+      custom_url: $('#nsfw-custom-url').value.trim(),
+      custom_key: $('#nsfw-custom-key').value.trim(),
+      clear: [...pendingClear]
+    };
     button.disabled = true;
     try {
-      await adminApi('/settings', {
-        method: 'POST',
-        body: JSON.stringify({
-          nsfw_protection_enabled: document.getElementById('nsfw-enabled').checked ? '1' : '0',
-          nsfw_blur_enabled: document.getElementById('nsfw-blur').checked ? '1' : '0',
-          nsfw_threshold: String(document.getElementById('nsfw-threshold').value || '0.75')
-        })
-      });
+      await adminApi('/nsfw/config', { method: 'PUT', body: JSON.stringify(payload) });
       toast('NSFW ayarları kaydedildi');
-    } catch (error) {
-      toast(error.message || 'Kaydedilemedi', 'error');
-    } finally {
-      button.disabled = false;
-    }
+      renderNsfwProtection(main);
+    } catch (error) { toast(error.message, 'error'); button.disabled = false; }
   });
 
-  const list = document.getElementById('nsfw-flag-list');
-  try {
-    const flags = await adminApi('/nsfw-flags?status=open');
-    list.innerHTML = flags.length ? flags.map(flag => `
-      <div class="nsfw-flag" data-flag="${flag.id}">
-        <span class="nsfw-flag-badge ${flag.action === 'blocked' ? 'is-blocked' : 'is-blurred'}">${flag.action === 'blocked' ? 'Engellendi' : 'Bulanık'}</span>
-        <div class="nsfw-flag-main">
-          <strong>${flag.username ? '@' + flag.username : 'Bilinmeyen kullanıcı'}</strong>
-          <small>${flag.content_type} · skor ${Number(flag.score || 0).toFixed(2)} · ${new Date(flag.created_at).toLocaleString('tr-TR')}</small>
-        </div>
-        <button class="adm-btn adm-btn-sm nsfw-flag-done" type="button">İncelendi</button>
-      </div>`).join('') : '<p class="adm-empty">Bekleyen bildiri yok.</p>';
-  } catch (error) {
-    list.innerHTML = '<p class="adm-empty">Bildiriler yüklenemedi.</p>';
-  }
-  list.addEventListener('click', async event => {
-    const button = event.target.closest('.nsfw-flag-done');
-    if (!button) return;
-    const row = button.closest('[data-flag]');
+  $('#nsfw-test').addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const out = $('#nsfw-test-out');
     button.disabled = true;
+    out.innerHTML = '<div class="cc-empty">Sağlayıcıya soruluyor…</div>';
     try {
-      await adminApi(`/nsfw-flags/${row.dataset.flag}/review`, { method: 'POST' });
-      row.remove();
+      const result = await adminApi('/nsfw/test', { method: 'POST', body: JSON.stringify({ url: $('#nsfw-test-url').value.trim() }) });
+      const verdicts = { blocked: ['danger', 'Engellenirdi'], blurred: ['warn', 'Bulanıklaştırılırdı'], clean: ['ok', 'Temiz — yayınlanırdı'], unknown: ['muted', 'Sınıflandırılamadı'] };
+      const [tone, label] = verdicts[result.verdict] || verdicts.unknown;
+      out.innerHTML = `<div class="cc-result cc-result--${tone}">
+        <div class="cc-result-head"><span class="cc-pill cc-pill--${tone}">${label}</span>
+          ${result.score !== null ? `<strong>${Math.round(result.score * 100)}%</strong>` : ''}<small>${result.latency_ms} ms · ${escHtml(result.provider)}</small></div>
+        ${result.error ? `<p class="cc-result-error"><i class="fas fa-triangle-exclamation"></i> ${escHtml(result.error)}</p>` : ''}
+        ${result.detail ? `<pre class="cc-code">${escHtml(JSON.stringify(result.detail, null, 2))}</pre>` : ''}
+      </div>`;
     } catch (error) {
-      button.disabled = false;
-      toast(error.message || 'İşlenemedi', 'error');
+      out.innerHTML = `<div class="cc-result cc-result--danger"><p class="cc-result-error">${escHtml(error.message)}</p></div>`;
     }
+    button.disabled = false;
   });
+
+  const loadFlags = async status => {
+    const list = $('#nsfw-flag-list');
+    try {
+      const flags = await adminApi(`/nsfw-flags?status=${status}`);
+      if (!flags.length) { list.innerHTML = '<div class="cc-empty"><i class="fas fa-check-circle"></i> Kayıt yok.</div>'; return; }
+      const actionLabels = { blocked: ['danger', 'Engellendi'], blurred: ['warn', 'Bulanık'], blocked_unverified: ['muted', 'Denetlenemedi'] };
+      list.innerHTML = flags.map(flag => {
+        const [tone, label] = actionLabels[flag.action] || ['muted', flag.action];
+        return `<article class="cc-flag">
+          <div class="cc-flag-media">${flag.media_url ? `<img src="${escHtml(flag.media_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : '<i class="fas fa-image"></i>'}</div>
+          <div class="cc-flag-body">
+            <div class="cc-flag-top"><span class="cc-pill cc-pill--${tone}">${label}</span>${flag.score !== null ? `<strong>${Math.round(flag.score * 100)}%</strong>` : ''}</div>
+            <div class="cc-flag-meta">@${escHtml(flag.username || '—')} · ${escHtml(flag.content_type)} · ${escHtml(formatDate(flag.created_at))}</div>
+            <div class="cc-flag-actions">
+              ${flag.status === 'open' ? `<button class="cc-btn cc-btn--sm" data-review="${flag.id}" type="button"><i class="fas fa-check"></i> İncelendi</button>` : '<span class="cc-muted">İncelendi</span>'}
+              <button class="cc-btn cc-btn--sm cc-btn--ghost" data-delete-flag="${flag.id}" type="button"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>
+        </article>`;
+      }).join('');
+      list.querySelectorAll('[data-review]').forEach(button => button.addEventListener('click', async () => {
+        try { await adminApi(`/nsfw-flags/${button.dataset.review}/review`, { method: 'POST' }); loadFlags(status); }
+        catch (error) { toast(error.message, 'error'); }
+      }));
+      list.querySelectorAll('[data-delete-flag]').forEach(button => button.addEventListener('click', async () => {
+        try { await adminApi(`/nsfw-flags/${button.dataset.deleteFlag}`, { method: 'DELETE' }); loadFlags(status); }
+        catch (error) { toast(error.message, 'error'); }
+      }));
+    } catch (error) { list.innerHTML = `<div class="cc-empty cc-empty--error">${escHtml(error.message)}</div>`; }
+  };
+  main.querySelectorAll('#nsfw-flag-seg button').forEach(button => button.addEventListener('click', () => {
+    main.querySelectorAll('#nsfw-flag-seg button').forEach(other => other.classList.toggle('is-active', other === button));
+    loadFlags(button.dataset.status);
+  }));
+  loadFlags('open');
 }

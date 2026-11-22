@@ -21,6 +21,7 @@ const webpush = require('web-push');
 const { query: databaseQuery, pool, initDb } = require('./database');
 const { hashPassword, verifyPassword, needsRehash } = require('./password');
 const { createFirewall } = require('./firewall');
+const { registerAdminControl } = require('./admin-control');
 
 const webPushPublicKey = String(process.env.WEB_PUSH_PUBLIC_KEY || '').trim();
 const webPushPrivateKey = String(process.env.WEB_PUSH_PRIVATE_KEY || '').trim();
@@ -429,6 +430,25 @@ const firewall = createFirewall({
     || req.path === '/vmb-panel.html'
 });
 app.use((req, res, next) => firewall.middleware(req, res, next));
+
+// ===== KONTROL MERKEZİ =====
+// Acil durum anahtarları (bakım / salt okunur / kayıt kapalı) duvarın hemen
+// arkasında çalışır; içerik, kullanıcı ve sistem yönetimi uçları da buradan gelir.
+const adminControl = registerAdminControl(app, {
+  query,
+  adminMiddleware: (req, res, next) => adminMiddleware(req, res, next),
+  logAction: (...args) => logAction(...args),
+  getIp: req => getIp(req),
+  getClientInfo: req => getClientInfo(req),
+  isAdminPanelRequestPath: requestPath => isAdminPanelRequestPath(requestPath),
+  firewall,
+  onNsfwChange: () => { nsfwSettingsCache = null; },
+  env: {
+    get USE_R2() { return USE_R2; },
+    get USE_CLOUDINARY() { return USE_CLOUDINARY; },
+    get APP_ASSET_VERSION() { return APP_ASSET_VERSION; }
+  }
+});
 
 // ===== GÜVENLİK BAŞLIKLARI =====
 app.use((req, res, next) => {
@@ -1581,7 +1601,7 @@ async function adminMiddleware(req, res, next) {
   const permissions = user;
   if (req.method === 'GET') {
     const readRules = [
-      [/\/(route-logs|authority-logs)/, false], [/\/firewall/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
+      [/\/(route-logs|authority-logs)/, false], [/\/firewall/, false], [/\/cc\//, false], [/\/nsfw\/config/, false], [/\/settings/, false], [/\/messages/, false], [/\/(video-ads|music-ads|shop\/settings|payments)/, false],
       [/\/notifications/, hasAdminPermission(permissions, 'can_manage_announcements')],
       [/\/badges/, hasAdminPermission(permissions, 'can_assign_badges')],
       [/\/artists(?:\/|$)/, hasAdminPermission(permissions, 'can_review_artists')],
@@ -7301,6 +7321,9 @@ async function writeResumableVideoMetadata(metadata) {
     isReals: !!metadata.isReals,
     uploadedBytes: metadata.uploadedBytes,
     completedUrl: metadata.completedUrl || '',
+    finalizing: !!metadata.finalizing,
+    finalizeStartedAt: metadata.finalizeStartedAt || 0,
+    failedError: metadata.failedError || '',
     createdAt: metadata.createdAt
   }), { flag: 'wx' });
   await fs.promises.rename(tempPath, metadata.metadata);
@@ -7339,7 +7362,8 @@ app.post('/api/upload-video/resumable', authMiddleware, uploadLimiter, async (re
     res.status(201).json({ id, uploaded_bytes: 0, chunk_size: RESUMABLE_VIDEO_CHUNK_SIZE });
   } catch (error) {
     console.error('[video-upload] Could not initialize resumable upload:', error);
-    res.status(500).json({ error: 'Video yüklemesi başlatılamadı.' });
+    await recordUploadFailure(req, { stage: 'start', message: error.message, file_size: size });
+    res.status(500).json({ error: 'Video yüklemesi başlatılamadı: ' + error.message });
   }
 });
 
@@ -7347,7 +7371,15 @@ app.get('/api/upload-video/resumable/:id', authMiddleware, async (req, res) => {
   try {
     const metadata = await readResumableVideoMetadata(req.params.id, req.user.id);
     if (!metadata) return res.status(404).json({ error: 'Devam eden video yüklemesi bulunamadı.' });
-    res.json({ id: metadata.id, uploaded_bytes: metadata.uploadedBytes, size: metadata.size, completed_url: metadata.completedUrl || '' });
+    res.json({
+      id: metadata.id,
+      uploaded_bytes: metadata.uploadedBytes,
+      size: metadata.size,
+      completed_url: metadata.completedUrl || '',
+      finalizing: !!metadata.finalizing && !resumableFinalizeIsStale(metadata),
+      failed_error: metadata.failedError || (metadata.finalizing && resumableFinalizeIsStale(metadata)
+        ? 'Video aktarımı yarıda kaldı (sunucu yeniden başlamış olabilir). Lütfen tekrar yükle.' : '')
+    });
   } catch (error) {
     console.error('[video-upload] Could not read resumable upload status:', error);
     res.status(500).json({ error: 'Video yükleme durumu okunamadı.' });
@@ -7388,9 +7420,68 @@ app.put('/api/upload-video/resumable/:id', authMiddleware, express.raw({ type: '
     res.json({ uploaded_bytes: metadata.uploadedBytes });
   } catch (error) {
     console.error('[video-upload] Could not save resumable chunk:', error);
-    res.status(500).json({ error: 'Video parçası kaydedilemedi.' });
+    await recordUploadFailure(req, { stage: 'chunk', message: error.message });
+    res.status(500).json({ error: 'Video parçası kaydedilemedi: ' + error.message });
   }
 });
+
+const RESUMABLE_FINALIZE_STALE_MS = 25 * 60 * 1000;
+function resumableFinalizeIsStale(metadata) {
+  return !!metadata.finalizing && Date.now() - (Number(metadata.finalizeStartedAt) || 0) > RESUMABLE_FINALIZE_STALE_MS;
+}
+
+// Yükleme hatalarını yönetim panelinde görünür kılar. Eskiden hiçbir yere
+// yazılmıyordu; Reals neden yüklenmiyor sorusu bu yüzden tahminle çözülüyordu.
+async function recordUploadFailure(req, detail) {
+  try {
+    await logAction(
+      req.user?.username || 'anonymous',
+      'upload_failed',
+      String(detail.stage || 'server').slice(0, 64),
+      JSON.stringify(detail).slice(0, 4000),
+      getIp(req),
+      getClientInfo(req)
+    );
+  } catch (error) {
+    console.error('[upload-failure] kaydedilemedi:', error.message);
+  }
+}
+
+async function finalizeResumableVideo(metadata, req) {
+  const filename = randomUUID() + (path.extname(metadata.originalName) || '.mp4');
+  const finalPath = path.join(UPLOAD_DIR, filename);
+  try {
+    await fs.promises.rename(metadata.data, finalPath);
+    const url = await handleLargeVideoUpload({
+      path: finalPath,
+      filename,
+      originalname: metadata.originalName,
+      mimetype: metadata.mimetype,
+      size: metadata.size
+    });
+    metadata.completedUrl = url;
+    metadata.finalizing = false;
+    metadata.failedError = '';
+    await writeResumableVideoMetadata(metadata);
+  } catch (error) {
+    console.error('[video-upload] Could not finalize resumable upload:', error);
+    metadata.finalizing = false;
+    metadata.failedError = 'Video depolamaya aktarılamadı: ' + (error.message || 'bilinmeyen hata');
+    metadata.uploadedBytes = 0;
+    await fs.promises.writeFile(metadata.data, Buffer.alloc(0)).catch(() => {});
+    await writeResumableVideoMetadata(metadata).catch(writeError => {
+      console.error('[video-upload] Could not record failed finalize:', writeError);
+    });
+    await recordUploadFailure(req, {
+      stage: 'finalize',
+      message: metadata.failedError,
+      is_reals: !!metadata.isReals,
+      file_size: metadata.size,
+      file_type: metadata.mimetype,
+      storage: USE_R2 ? 'r2' : USE_CLOUDINARY ? 'cloudinary' : 'local'
+    });
+  }
+}
 
 app.post('/api/upload-video/resumable/:id/complete', authMiddleware, async (req, res) => {
   try {
@@ -7401,34 +7492,43 @@ app.post('/api/upload-video/resumable/:id/complete', authMiddleware, async (req,
       if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
     }
     if (metadata.completedUrl) return res.json({ url: metadata.completedUrl });
+    // Aktarım zaten sürüyorsa ikinci kez başlatma; istemci durumu sorgulayacak.
+    if (metadata.finalizing && !resumableFinalizeIsStale(metadata)) {
+      return res.status(202).json({ status: 'processing' });
+    }
     if (metadata.uploadedBytes !== metadata.size) {
       return res.status(409).json({ error: 'Video yüklemesi henüz tamamlanmadı.', uploaded_bytes: metadata.uploadedBytes });
     }
-    const filename = randomUUID() + (path.extname(metadata.originalName) || '.mp4');
-    const finalPath = path.join(UPLOAD_DIR, filename);
-    await fs.promises.rename(metadata.data, finalPath);
-    const url = await handleLargeVideoUpload({
-      path: finalPath,
-      filename,
-      originalname: metadata.originalName,
-      mimetype: metadata.mimetype,
-      size: metadata.size
-    });
-    metadata.completedUrl = url;
+    metadata.finalizing = true;
+    metadata.finalizeStartedAt = Date.now();
+    metadata.failedError = '';
     await writeResumableVideoMetadata(metadata);
-    res.json({ url });
+    // Depolamaya aktarım arka planda: büyük videolar Cloudflare'in 100 sn'lik
+    // istek sınırını aşınca bağlantı 524 ile kopuyordu.
+    res.status(202).json({ status: 'processing' });
+    setImmediate(() => { finalizeResumableVideo(metadata, req).catch(() => {}); });
   } catch (error) {
-    console.error('[video-upload] Could not finalize resumable upload:', error);
-    const metadata = await readResumableVideoMetadata(req.params.id, req.user.id).catch(() => null);
-    if (metadata && !metadata.completedUrl) {
-      await fs.promises.writeFile(metadata.data, Buffer.alloc(0)).catch(() => {});
-      metadata.uploadedBytes = 0;
-      await writeResumableVideoMetadata(metadata).catch(writeError => {
-        console.error('[video-upload] Could not reset failed upload session:', writeError);
-      });
-    }
+    console.error('[video-upload] Could not start finalize:', error);
+    await recordUploadFailure(req, { stage: 'finalize-start', message: error.message });
     res.status(500).json({ error: 'Video yüklemesi tamamlanamadı: ' + error.message });
   }
+});
+
+// İstemci tarafında yaşanan yükleme hataları (ağ kopması, depolama kotası…)
+app.post('/api/upload-failures', authMiddleware, async (req, res) => {
+  const body = req.body || {};
+  await recordUploadFailure(req, {
+    stage: String(body.stage || 'client').slice(0, 40),
+    message: String(body.message || '').slice(0, 400),
+    status: Number(body.status) || 0,
+    is_reals: !!body.is_reals,
+    file_size: Number(body.file_size) || 0,
+    file_type: String(body.file_type || '').slice(0, 60),
+    uploaded_bytes: Number(body.uploaded_bytes) || 0,
+    persisted: body.persisted !== false,
+    source: 'client'
+  });
+  res.json({ ok: true });
 });
 
 app.delete('/api/upload-video/resumable/:id', authMiddleware, async (req, res) => {
@@ -7659,49 +7759,128 @@ app.post('/api/photos/:id/save', authMiddleware, async (req, res) => {
 });
 
 // ===== NSFW KORUMASI =====
-// Sınıflandırma dışarıdan takılabilir: NSFW_API_URL ayarlanırsa oraya {image_url} POST edilir
-// ve {"nsfw": 0..1} beklenir. Ayarlanmazsa koruma "bilinmiyor" döner ve içerik engellenmez.
-const NSFW_API_URL = String(process.env.NSFW_API_URL || '').trim();
-const NSFW_API_KEY = String(process.env.NSFW_API_KEY || '').trim();
+// Sağlayıcı ve anahtarlar yönetim panelinden girilir (settings tablosunda saklanır,
+// panele maskeli döner). Desteklenenler:
+//   sightengine   → api_user + api_secret        (https://sightengine.com)
+//   google_vision → tek API anahtarı              (Google Cloud Vision · SafeSearch)
+//   custom        → kendi uç noktanız, {"nsfw": 0..1} döndürmeli
+// Eski NSFW_API_URL / NSFW_API_KEY ortam değişkenleri yedek olarak çalışmaya devam eder.
+const NSFW_ENV_URL = String(process.env.NSFW_API_URL || '').trim();
+const NSFW_ENV_KEY = String(process.env.NSFW_API_KEY || '').trim();
+const NSFW_SECRET_KEYS = ['nsfw_sightengine_secret', 'nsfw_google_api_key', 'nsfw_custom_key'];
+const NSFW_SETTING_KEYS = [
+  'nsfw_protection_enabled', 'nsfw_blur_enabled', 'nsfw_threshold', 'nsfw_provider',
+  'nsfw_sightengine_user', 'nsfw_sightengine_secret', 'nsfw_google_api_key',
+  'nsfw_custom_url', 'nsfw_custom_key', 'nsfw_fail_mode', 'nsfw_scope'
+];
+const NSFW_SCOPES = ['photo', 'story', 'reals', 'video'];
+let nsfwSettingsCache = null;
 
-async function nsfwSettings() {
-  const { rows } = await query("SELECT key, value FROM settings WHERE key = ANY($1)",
-    [['nsfw_protection_enabled', 'nsfw_blur_enabled', 'nsfw_threshold']]);
-  const map = {};
-  rows.forEach(row => { map[row.key] = row.value; });
-  return {
+async function nsfwSettings({ fresh = false } = {}) {
+  if (!fresh && nsfwSettingsCache && Date.now() - nsfwSettingsCache.at < 15000) return nsfwSettingsCache.value;
+  const { rows } = await query('SELECT key, value FROM settings WHERE key = ANY($1)', [NSFW_SETTING_KEYS]);
+  const map = Object.fromEntries(rows.map(row => [row.key, row.value]));
+  let scope = {};
+  try { scope = JSON.parse(map.nsfw_scope || '{}') || {}; } catch {}
+  let provider = map.nsfw_provider || '';
+  if (!provider && NSFW_ENV_URL) provider = 'custom';
+  const value = {
     enabled: map.nsfw_protection_enabled === '1',
     blur: map.nsfw_blur_enabled === '1',
-    threshold: Number(map.nsfw_threshold) > 0 ? Number(map.nsfw_threshold) : 0.75
+    threshold: Number(map.nsfw_threshold) > 0 ? Number(map.nsfw_threshold) : 0.75,
+    provider: ['sightengine', 'google_vision', 'custom'].includes(provider) ? provider : '',
+    sightengineUser: map.nsfw_sightengine_user || '',
+    sightengineSecret: map.nsfw_sightengine_secret || '',
+    googleKey: map.nsfw_google_api_key || '',
+    customUrl: map.nsfw_custom_url || NSFW_ENV_URL,
+    customKey: map.nsfw_custom_key || NSFW_ENV_KEY,
+    failMode: map.nsfw_fail_mode === 'closed' ? 'closed' : 'open',
+    scope: Object.fromEntries(NSFW_SCOPES.map(key => [key, scope[key] !== false]))
   };
+  nsfwSettingsCache = { at: Date.now(), value };
+  return value;
 }
 
-async function classifyNsfw(mediaUrl) {
-  if (!NSFW_API_URL || !mediaUrl) return null;
+function nsfwProviderReady(settings) {
+  if (settings.provider === 'sightengine') return Boolean(settings.sightengineUser && settings.sightengineSecret);
+  if (settings.provider === 'google_vision') return Boolean(settings.googleKey);
+  if (settings.provider === 'custom') return Boolean(settings.customUrl);
+  return false;
+}
+
+function absoluteMediaUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('/')) return SITE_URL.replace(/\/$/, '') + value;
+  return '';
+}
+
+const GOOGLE_LIKELIHOOD = { UNKNOWN: 0, VERY_UNLIKELY: 0.02, UNLIKELY: 0.15, POSSIBLE: 0.5, LIKELY: 0.82, VERY_LIKELY: 0.97 };
+
+// Dönen: { score: 0..1 | null, error?: string, detail?: object }
+async function classifyNsfw(mediaUrl, settings) {
+  const url = absoluteMediaUrl(mediaUrl);
+  if (!url) return { score: null, error: 'Medya adresi yok' };
+  if (/\.(mp4|mov|m4v|webm|ogv|mkv)(\?|$)/i.test(url)) return { score: null, error: 'Video dosyası; kapak görseli denetlenir' };
   try {
-    const response = await fetch(NSFW_API_URL, {
-      method: 'POST',
-      signal: AbortSignal.timeout(8000),
-      headers: {
-        'Content-Type': 'application/json',
-        ...(NSFW_API_KEY ? { Authorization: `Bearer ${NSFW_API_KEY}` } : {})
-      },
-      body: JSON.stringify({ image_url: mediaUrl, url: mediaUrl })
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const score = Number(data?.nsfw ?? data?.score ?? data?.unsafe);
-    return Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : null;
-  } catch {
-    return null;
+    if (settings.provider === 'sightengine') {
+      const params = new URLSearchParams({
+        url, models: 'nudity-2.1', api_user: settings.sightengineUser, api_secret: settings.sightengineSecret
+      });
+      const response = await fetch(`https://api.sightengine.com/1.0/check.json?${params}`, { signal: AbortSignal.timeout(10000) });
+      const data = await response.json().catch(() => ({}));
+      if (data.status !== 'success') return { score: null, error: data.error?.message || `Sightengine HTTP ${response.status}` };
+      const nudity = data.nudity || {};
+      const explicit = Math.max(Number(nudity.sexual_activity) || 0, Number(nudity.sexual_display) || 0, Number(nudity.erotica) || 0);
+      return {
+        score: Math.min(1, Math.max(0, explicit)),
+        detail: {
+          sexual_activity: nudity.sexual_activity, sexual_display: nudity.sexual_display,
+          erotica: nudity.erotica, very_suggestive: nudity.very_suggestive, none: nudity.none
+        }
+      };
+    }
+    if (settings.provider === 'google_vision') {
+      const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${encodeURIComponent(settings.googleKey)}`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: [{ image: { source: { imageUri: url } }, features: [{ type: 'SAFE_SEARCH_DETECTION' }] }] })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return { score: null, error: data.error?.message || `Google Vision HTTP ${response.status}` };
+      const result = data.responses?.[0] || {};
+      if (result.error) return { score: null, error: result.error.message || 'Google Vision görseli okuyamadı' };
+      const annotation = result.safeSearchAnnotation || {};
+      const adult = GOOGLE_LIKELIHOOD[annotation.adult] ?? 0;
+      const racy = GOOGLE_LIKELIHOOD[annotation.racy] ?? 0;
+      return { score: Math.max(adult, racy * 0.7), detail: { adult: annotation.adult, racy: annotation.racy } };
+    }
+    if (settings.provider === 'custom') {
+      const response = await fetch(settings.customUrl, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        headers: { 'Content-Type': 'application/json', ...(settings.customKey ? { Authorization: `Bearer ${settings.customKey}` } : {}) },
+        body: JSON.stringify({ image_url: url, url })
+      });
+      if (!response.ok) return { score: null, error: `Özel uç nokta HTTP ${response.status}` };
+      const data = await response.json().catch(() => ({}));
+      const score = Number(data?.nsfw ?? data?.score ?? data?.unsafe);
+      if (!Number.isFinite(score)) return { score: null, error: 'Yanıtta nsfw/score alanı yok' };
+      return { score: Math.min(1, Math.max(0, score)), detail: data };
+    }
+    return { score: null, error: 'Sağlayıcı seçilmemiş' };
+  } catch (error) {
+    return { score: null, error: error.name === 'TimeoutError' ? 'Sağlayıcı 10 sn içinde yanıt vermedi' : error.message };
   }
 }
 
-async function recordNsfwFlag({ userId, contentType, contentId, mediaUrl, score, action }) {
+async function recordNsfwFlag({ userId, contentType, contentId, mediaUrl, score, action, provider, detail }) {
   try {
     await query(
-      'INSERT INTO nsfw_flags (user_id, content_type, content_id, media_url, score, action) VALUES ($1,$2,$3,$4,$5,$6)',
-      [userId || null, contentType, contentId || null, String(mediaUrl || '').slice(0, 2048), score, action]
+      'INSERT INTO nsfw_flags (user_id, content_type, content_id, media_url, score, action, provider, detail) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)',
+      [userId || null, contentType, contentId || null, String(mediaUrl || '').slice(0, 2048), score, action, provider || '', detail ? JSON.stringify(detail).slice(0, 2000) : '']
     );
   } catch (error) {
     console.error('[NSFW] kayıt eklenemedi:', error.message);
@@ -7711,20 +7890,31 @@ async function recordNsfwFlag({ userId, contentType, contentId, mediaUrl, score,
 // Yüklenen medyayı denetler. Engellenmesi gerekiyorsa {blocked:true} döner.
 async function screenMediaForNsfw(userId, contentType, mediaUrls) {
   const settings = await nsfwSettings();
-  if (!settings.enabled) return { blocked: false, isNsfw: 0, score: null };
+  if (!settings.enabled || !nsfwProviderReady(settings)) return { blocked: false, isNsfw: 0, score: null };
+  if (settings.scope[contentType] === false) return { blocked: false, isNsfw: 0, score: null };
   const urls = (Array.isArray(mediaUrls) ? mediaUrls : [mediaUrls]).filter(Boolean).slice(0, 4);
   let worst = null;
+  let lastError = '';
   for (const url of urls) {
-    const score = await classifyNsfw(url);
-    if (score !== null && (worst === null || score > worst.score)) worst = { score, url };
+    const result = await classifyNsfw(url, settings);
+    if (result.score === null) { lastError = result.error || lastError; continue; }
+    if (worst === null || result.score > worst.score) worst = { score: result.score, url, detail: result.detail };
   }
-  if (!worst) return { blocked: false, isNsfw: 0, score: null };
+  if (!worst) {
+    // Hiçbir görsel sınıflandırılamadı. "Kapalı hata" modunda güvenli tarafta kal.
+    const classifiable = urls.some(url => !/\.(mp4|mov|m4v|webm|ogv|mkv)(\?|$)/i.test(String(url)));
+    if (settings.failMode === 'closed' && classifiable && lastError) {
+      await recordNsfwFlag({ userId, contentType, mediaUrl: urls[0], score: null, action: 'blocked_unverified', provider: settings.provider, detail: { error: lastError } });
+      return { blocked: true, score: null, error: lastError };
+    }
+    return { blocked: false, isNsfw: 0, score: null };
+  }
   if (worst.score >= settings.threshold) {
-    await recordNsfwFlag({ userId, contentType, mediaUrl: worst.url, score: worst.score, action: 'blocked' });
+    await recordNsfwFlag({ userId, contentType, mediaUrl: worst.url, score: worst.score, action: 'blocked', provider: settings.provider, detail: worst.detail });
     return { blocked: true, score: worst.score };
   }
   if (settings.blur && worst.score >= settings.threshold * 0.6) {
-    await recordNsfwFlag({ userId, contentType, mediaUrl: worst.url, score: worst.score, action: 'blurred' });
+    await recordNsfwFlag({ userId, contentType, mediaUrl: worst.url, score: worst.score, action: 'blurred', provider: settings.provider, detail: worst.detail });
     return { blocked: false, isNsfw: 1, score: worst.score };
   }
   return { blocked: false, isNsfw: 0, score: worst.score };
@@ -7732,7 +7922,107 @@ async function screenMediaForNsfw(userId, contentType, mediaUrls) {
 
 const NSFW_BLOCK_MESSAGE = 'Bu içerik uygunsuz (NSFW) olarak değerlendirildi ve yayınlanamaz. Hatalı olduğunu düşünüyorsan yöneticiyle iletişime geç.';
 
-// Admin: NSFW bildirimleri
+function maskSecret(value) {
+  const text = String(value || '');
+  if (!text) return '';
+  return text.length <= 6 ? '••••••' : `••••••${text.slice(-4)}`;
+}
+
+// ── Admin: NSFW yapılandırması ────────────────────────────────────────────────
+app.get('/api/admin/nsfw/config', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'NSFW ayarları yalnızca ana admine açıktır.' });
+  const settings = await nsfwSettings({ fresh: true });
+  const { rows: counts } = await query(`SELECT
+      COUNT(*) FILTER (WHERE status='open')::int AS open,
+      COUNT(*) FILTER (WHERE action='blocked')::int AS blocked,
+      COUNT(*) FILTER (WHERE action='blurred')::int AS blurred,
+      COUNT(*) FILTER (WHERE action='blocked_unverified')::int AS unverified,
+      COUNT(*) FILTER (WHERE created_at > NOW() - interval '7 days')::int AS last_7d
+    FROM nsfw_flags`).catch(() => ({ rows: [{}] }));
+  res.json({
+    enabled: settings.enabled,
+    blur: settings.blur,
+    threshold: settings.threshold,
+    provider: settings.provider,
+    ready: nsfwProviderReady(settings),
+    fail_mode: settings.failMode,
+    scope: settings.scope,
+    sightengine_user: settings.sightengineUser,
+    sightengine_secret_masked: maskSecret(settings.sightengineSecret),
+    google_api_key_masked: maskSecret(settings.googleKey),
+    custom_url: settings.customUrl,
+    custom_key_masked: maskSecret(settings.customKey),
+    env_fallback: Boolean(NSFW_ENV_URL),
+    stats: counts[0] || {}
+  });
+});
+
+app.put('/api/admin/nsfw/config', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'NSFW ayarları yalnızca ana admine açıktır.' });
+  const body = req.body || {};
+  const updates = {};
+  if (body.enabled !== undefined) updates.nsfw_protection_enabled = boolValue(body.enabled) ? '1' : '0';
+  if (body.blur !== undefined) updates.nsfw_blur_enabled = boolValue(body.blur) ? '1' : '0';
+  if (body.threshold !== undefined) {
+    const threshold = Number(body.threshold);
+    if (!Number.isFinite(threshold) || threshold < 0.1 || threshold > 1) return res.status(400).json({ error: 'Eşik 0.1 ile 1 arasında olmalı.' });
+    updates.nsfw_threshold = String(Math.round(threshold * 100) / 100);
+  }
+  if (body.provider !== undefined) {
+    if (!['', 'sightengine', 'google_vision', 'custom'].includes(body.provider)) return res.status(400).json({ error: 'Geçersiz sağlayıcı.' });
+    updates.nsfw_provider = body.provider;
+  }
+  if (body.fail_mode !== undefined) updates.nsfw_fail_mode = body.fail_mode === 'closed' ? 'closed' : 'open';
+  if (body.scope && typeof body.scope === 'object') {
+    updates.nsfw_scope = JSON.stringify(Object.fromEntries(NSFW_SCOPES.map(key => [key, body.scope[key] !== false])));
+  }
+  if (body.sightengine_user !== undefined) updates.nsfw_sightengine_user = String(body.sightengine_user || '').trim().slice(0, 120);
+  if (body.custom_url !== undefined) {
+    const url = String(body.custom_url || '').trim();
+    if (url && !/^https:\/\//i.test(url)) return res.status(400).json({ error: 'Özel uç nokta https:// ile başlamalı.' });
+    updates.nsfw_custom_url = url.slice(0, 2048);
+  }
+  // Gizli anahtarlar: boş gönderilirse dokunulmaz; silmek için clear listesi kullanılır.
+  const secretFields = { sightengine_secret: 'nsfw_sightengine_secret', google_api_key: 'nsfw_google_api_key', custom_key: 'nsfw_custom_key' };
+  for (const [field, key] of Object.entries(secretFields)) {
+    const value = String(body[field] || '').trim();
+    if (value) updates[key] = value.slice(0, 400);
+  }
+  for (const field of Array.isArray(body.clear) ? body.clear : []) {
+    if (secretFields[field]) updates[secretFields[field]] = '';
+  }
+  for (const [key, value] of Object.entries(updates)) {
+    await query('INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value', [key, value]);
+  }
+  nsfwSettingsCache = null;
+  await logAction(req.adminUser.username, 'nsfw_config_update', body.provider || '', JSON.stringify(Object.keys(updates)), getIp(req), getClientInfo(req));
+  res.json({ ok: true });
+});
+
+// Seçili sağlayıcıyı gerçek bir görselle dener; hiçbir şeyi engellemez.
+app.post('/api/admin/nsfw/test', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'NSFW testi yalnızca ana admine açıktır.' });
+  const settings = await nsfwSettings({ fresh: true });
+  if (!settings.provider) return res.status(400).json({ error: 'Önce bir sağlayıcı seçip kaydet.' });
+  if (!nsfwProviderReady(settings)) return res.status(400).json({ error: 'Seçili sağlayıcının anahtarları eksik.' });
+  const url = String(req.body?.url || '').trim();
+  if (!/^https?:\/\//i.test(url) && !url.startsWith('/')) return res.status(400).json({ error: 'Geçerli bir görsel adresi gir.' });
+  const startedAt = Date.now();
+  const result = await classifyNsfw(url, settings);
+  res.json({
+    provider: settings.provider,
+    latency_ms: Date.now() - startedAt,
+    score: result.score,
+    error: result.error || '',
+    detail: result.detail || null,
+    threshold: settings.threshold,
+    verdict: result.score === null ? 'unknown'
+      : result.score >= settings.threshold ? 'blocked'
+      : settings.blur && result.score >= settings.threshold * 0.6 ? 'blurred' : 'clean'
+  });
+});
+
+// Admin: NSFW kayıtları
 app.get('/api/admin/nsfw-flags', adminMiddleware, async (req, res) => {
   const status = ['open', 'reviewed', 'all'].includes(String(req.query.status)) ? String(req.query.status) : 'open';
   const params = [];
@@ -7740,14 +8030,21 @@ app.get('/api/admin/nsfw-flags', adminMiddleware, async (req, res) => {
   if (status !== 'all') { params.push(status); where = `WHERE f.status = $${params.length}`; }
   const { rows } = await query(
     `SELECT f.*, u.username FROM nsfw_flags f LEFT JOIN users u ON u.id = f.user_id
-     ${where} ORDER BY f.created_at DESC LIMIT 200`, params);
+     ${where} ORDER BY f.created_at DESC LIMIT 300`, params);
   res.json(rows);
 });
 
 app.post('/api/admin/nsfw-flags/:id/review', adminMiddleware, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id)) return res.status(400).json({ error: 'Geçersiz kayıt' });
-  await query('UPDATE nsfw_flags SET status=$1, reviewed_by=$2 WHERE id=$3', ['reviewed', req.user.id, id]);
+  // adminMiddleware req.user değil req.adminUser kurar; eskiden burada çöküyordu.
+  await query('UPDATE nsfw_flags SET status=$1, reviewed_by=$2 WHERE id=$3', ['reviewed', req.adminUser.id || null, id]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/nsfw-flags/:id', adminMiddleware, async (req, res) => {
+  if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Yalnızca ana admin silebilir.' });
+  await query('DELETE FROM nsfw_flags WHERE id=$1', [Number(req.params.id) || 0]);
   res.json({ ok: true });
 });
 
@@ -8116,6 +8413,10 @@ app.post('/api/stories', authMiddleware, uploadLimiter, async (req, res, next) =
   try {
     const mediaType = req.file.mimetype?.startsWith('video/') ? 'video' : 'image';
     const mediaUrl = mediaType === 'video' && USE_R2 ? await handleR2VideoBufferUpload(req.file) : await handleUpload(req.file);
+    if (mediaType === 'image') {
+      const storyNsfw = await screenMediaForNsfw(req.user.id, 'story', [mediaUrl]);
+      if (storyNsfw.blocked) return res.status(422).json({ error: NSFW_BLOCK_MESSAGE, nsfw_blocked: true });
+    }
     const songId = req.body.song_id ? Number(req.body.song_id) : null;
     const songStart = Math.max(0, parseInt(req.body.song_start_seconds, 10) || 0);
     const durationHours = [5, 10, 24].includes(Number(req.body.duration_hours)) ? Number(req.body.duration_hours) : 24;
@@ -10340,7 +10641,9 @@ app.patch('/api/admin/warnings/:id', adminMiddleware, async (req, res) => {
 app.get('/api/admin/settings', adminMiddleware, async (req, res) => {
   if (!req.adminUser.isSuperAdmin) return res.status(403).json({ error: 'Site ayarları yalnızca ana admine açıktır' });
   const { rows } = await query('SELECT * FROM settings');
-  res.json(Object.fromEntries(rows.map(s => [s.key, s.value])));
+  // Gizli anahtarlar ve büyük JSON yapılandırmaları bu uçtan dönmez.
+  const hidden = new Set([...NSFW_SECRET_KEYS, 'firewall_config']);
+  res.json(Object.fromEntries(rows.filter(s => !hidden.has(s.key)).map(s => [s.key, s.value])));
 });
 
 app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
@@ -10361,6 +10664,7 @@ app.post('/api/admin/settings', adminMiddleware, async (req, res) => {
     value = String(value);
   }
   // NSFW koruması
+  if (String(key).startsWith('nsfw_')) nsfwSettingsCache = null;
   if (key === 'nsfw_protection_enabled' || key === 'nsfw_blur_enabled') value = boolValue(value) ? '1' : '0';
   if (key === 'nsfw_threshold') {
     const number = Number(value);
@@ -16447,9 +16751,16 @@ app.post('/api/videos', authMiddleware, async (req, res) => {
     const maintenance = await getRealsMaintenanceSettings();
     if (maintenance.enabled) return denyRealsDuringMaintenance(res, maintenance);
   }
-  if (!title?.trim() || !video_url) return res.status(400).json({ error: 'Başlık ve video gerekli' });
-  const videoNsfw = await screenMediaForNsfw(req.user.id, is_reals ? 'reals' : 'video', [banner_image, video_url]);
-  if (videoNsfw.blocked) return res.status(422).json({ error: NSFW_BLOCK_MESSAGE, nsfw_blocked: true });
+  if (!title?.trim() || !video_url) {
+    await recordUploadFailure(req, { stage: 'publish', message: 'Başlık veya video adresi eksik', is_reals: !!is_reals });
+    return res.status(400).json({ error: 'Başlık ve video gerekli' });
+  }
+  // Görsel sınıflandırıcılar videoyu değil kapak görselini denetler.
+  const videoNsfw = await screenMediaForNsfw(req.user.id, is_reals ? 'reals' : 'video', [banner_image]);
+  if (videoNsfw.blocked) {
+    await recordUploadFailure(req, { stage: 'publish', message: 'NSFW engeli', score: videoNsfw.score, is_reals: !!is_reals });
+    return res.status(422).json({ error: NSFW_BLOCK_MESSAGE, nsfw_blocked: true });
+  }
   const durationSeconds = Math.ceil(Number(req.body.duration_seconds) || 0);
   if (durationSeconds < 0 || durationSeconds > 86400) return res.status(400).json({ error: 'Video süresi geçersiz.' });
   if (is_reals && durationSeconds > 180) return res.status(400).json({ error: 'Reals videoları en fazla 3 dakika olabilir.' });

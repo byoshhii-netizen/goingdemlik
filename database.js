@@ -934,6 +934,8 @@ async function initDb() {
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_nsfw_flags_status_created ON nsfw_flags(status, created_at DESC);
+    ALTER TABLE nsfw_flags ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT '';
+    ALTER TABLE nsfw_flags ADD COLUMN IF NOT EXISTS detail TEXT DEFAULT '';
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_duration INTEGER;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_waveform JSONB;
     ALTER TABLE group_messages ADD COLUMN IF NOT EXISTS voice_listened_at TIMESTAMP;

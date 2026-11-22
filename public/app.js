@@ -1136,7 +1136,7 @@ async function api(path, options = {}) {
     try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || 'Sunucudan geçersiz yanıt geldi.' }; }
     if (!res.ok) {
       if (res.status === 423 && data.app_lock_required) { try { showAppLockGate(data); } catch { /* yoksay */ } }
-      const error = new Error(data.error || 'Hata'); error.data = data; throw error;
+      const error = new Error(data.error || 'Hata'); error.data = data; error.status = res.status; throw error;
     }
     if (canCache && requestCacheVersion === routeDataCacheVersion) {
       routeDataCache.set(cacheKey, { data: cloneApiData(data), expiresAt: Date.now() + ROUTE_DATA_CACHE_MS });
@@ -10238,29 +10238,133 @@ async function removeVideoUploadJob(id) {
 }
 
 function videoUploadPercent(job) {
-  return Math.min(100, Math.round((Number(job.uploadedBytes) / job.videoFile.size) * 100));
+  const size = Number(job?.videoFile?.size) || 0;
+  if (!size) return 0;
+  return Math.min(100, Math.round((Number(job.uploadedBytes) / size) * 100));
 }
 
-async function runVideoUploadJob(job) {
-  if (window.__videoUploadJobRunning) return;
+// ── İlerleme kaydı ───────────────────────────────────────────────────────────
+// Video dosyası IndexedDB'ye yalnızca bir kez yazılır. Her parçadan sonra tüm
+// işi (yüzlerce MB'lık File dahil) yeniden yazmak iPhone Safari'de kota
+// hatasına yol açıyordu; artık parça ilerlemesi hafif bir localStorage
+// kaydında tutulur.
+const VIDEO_UPLOAD_PROGRESS_PREFIX = 'cig_vup_progress:';
+const VIDEO_UPLOAD_STALE_MS = 24 * 60 * 60 * 1000;
+
+function saveVideoUploadProgress(job) {
+  try {
+    localStorage.setItem(VIDEO_UPLOAD_PROGRESS_PREFIX + job.id, JSON.stringify({
+      uploadId: job.uploadId || null,
+      uploadedBytes: Number(job.uploadedBytes) || 0,
+      chunkSize: Number(job.chunkSize) || 0,
+      at: Date.now()
+    }));
+  } catch { /* ilerleme kaydı tutulamazsa yükleme yine de sürer */ }
+}
+
+function loadVideoUploadProgress(job) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(VIDEO_UPLOAD_PROGRESS_PREFIX + job.id) || 'null');
+    if (saved && saved.uploadId) {
+      job.uploadId = saved.uploadId;
+      job.uploadedBytes = Number(saved.uploadedBytes) || 0;
+      if (saved.chunkSize) job.chunkSize = saved.chunkSize;
+    }
+  } catch { /* bozuk kayıt yok sayılır */ }
+  return job;
+}
+
+function clearVideoUploadProgress(jobId) {
+  try { localStorage.removeItem(VIDEO_UPLOAD_PROGRESS_PREFIX + jobId); } catch {}
+}
+
+async function discardVideoUploadJob(job) {
+  if (!job) return;
+  job.cancelled = true; // bekleyen yeniden deneme zamanlayıcısı bu işi diriltmesin
+  if (job.uploadId) {
+    await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, { method: 'DELETE' }).catch(() => {});
+  }
+  clearVideoUploadProgress(job.id);
+  await removeVideoUploadJob(job.id).catch(() => {});
+  if (window.__pendingMemoryVideoJob?.id === job.id) window.__pendingMemoryVideoJob = null;
+}
+
+// Hata kalıcı mı (aynı dosyayla tekrar denemek işe yaramaz) yoksa geçici mi?
+function isPermanentVideoUploadError(error) {
+  const status = Number(error?.status) || 0;
+  const data = error?.data || {};
+  if (data.nsfw_blocked || data.code === 'REALS_MAINTENANCE' || data.code === 'FIREWALL_BLOCKED') return true;
+  if (error?.permanent) return true;
+  if (!status) return false;                       // ağ hatası → geçici
+  if ([404, 408, 409, 423, 425, 429].includes(status)) return false;
+  return status >= 400 && status < 500;            // 4xx → kalıcı, 5xx → geçici
+}
+
+function reportVideoUploadFailure(job, stage, error) {
+  try {
+    const payload = {
+      stage,
+      message: String(error?.message || error || '').slice(0, 400),
+      status: Number(error?.status) || 0,
+      is_reals: !!job?.fields?.is_reals,
+      file_size: Number(job?.videoFile?.size) || 0,
+      file_type: String(job?.videoFile?.type || '').slice(0, 60),
+      uploaded_bytes: Number(job?.uploadedBytes) || 0,
+      persisted: job?.persisted !== false
+    };
+    api('/upload-failures', { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+  } catch {}
+}
+
+const sleepMs = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Sunucu son aşamayı (depolamaya aktarım) arka planda yapar; burada sonucu bekleriz.
+// Böylece büyük videolarda Cloudflare'in 100 saniyelik istek sınırına takılmaz.
+async function waitForVideoFinalize(job, signal) {
+  const deadline = Date.now() + 20 * 60 * 1000;
+  let delay = 1500;
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw new DOMException('İptal edildi', 'AbortError');
+    const status = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, { signal });
+    if (status.completed_url) return status.completed_url;
+    if (status.failed_error) {
+      const error = new Error(status.failed_error);
+      error.status = 500;
+      throw error;
+    }
+    await sleepMs(delay);
+    delay = Math.min(5000, Math.round(delay * 1.3));
+  }
+  const timeout = new Error('Video depolamaya aktarılırken süre doldu. Biraz sonra tekrar dene.');
+  timeout.status = 504;
+  throw timeout;
+}
+
+async function runVideoUploadJob(job, attempt = 0) {
+  if (window.__videoUploadJobRunning || job?.cancelled) return;
   window.__videoUploadJobRunning = true;
   const controller = new AbortController();
   window.__activeVideoUpload = { job, controller };
   const signal = controller.signal;
   const name = job.fields.is_reals ? 'Reals' : 'Video';
+  let stage = 'start';
+  let retryAfterFinally = false;
   try {
+    loadVideoUploadProgress(job);
     if (job.uploadId) {
+      stage = 'status';
       try {
         const status = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, { signal });
         job.uploadedBytes = status.uploaded_bytes;
       } catch (error) {
-        if (error.data?.error !== 'Devam eden video yüklemesi bulunamadı.') throw error;
+        if (Number(error?.status) !== 404) throw error;
         job.uploadId = null;
         job.uploadedBytes = 0;
-        await storeVideoUploadJob(job);
+        saveVideoUploadProgress(job);
       }
     }
     if (!job.uploadId) {
+      stage = 'start';
       const started = await api('/upload-video/resumable', {
         method: 'POST',
         body: JSON.stringify({ filename: job.videoFile.name, mimetype: job.videoFile.type || 'video/mp4', size: job.videoFile.size, is_reals: !!job.fields.is_reals }),
@@ -10269,39 +10373,53 @@ async function runVideoUploadJob(job) {
       job.uploadId = started.id;
       job.chunkSize = started.chunk_size;
       job.uploadedBytes = started.uploaded_bytes || 0;
-      await storeVideoUploadJob(job);
+      saveVideoUploadProgress(job);
     }
 
+    stage = 'chunks';
     const chunkSize = Number(job.chunkSize) || 8 * 1024 * 1024;
     while (job.uploadedBytes < job.videoFile.size) {
       const chunk = job.videoFile.slice(job.uploadedBytes, job.uploadedBytes + chunkSize);
-      const result = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, {
-        method: 'PUT',
-        body: chunk,
-        headers: { 'Content-Type': 'application/octet-stream', 'X-Upload-Offset': String(job.uploadedBytes) },
-        signal
-      });
+      let result;
+      try {
+        result = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, {
+          method: 'PUT',
+          body: chunk,
+          headers: { 'Content-Type': 'application/octet-stream', 'X-Upload-Offset': String(job.uploadedBytes) },
+          signal
+        });
+      } catch (error) {
+        // Konum kaymışsa sunucunun bildiği yerden devam et
+        if (Number(error?.status) === 409 && Number.isFinite(Number(error?.data?.uploaded_bytes))) {
+          job.uploadedBytes = Number(error.data.uploaded_bytes);
+          saveVideoUploadProgress(job);
+          continue;
+        }
+        throw error;
+      }
       job.uploadedBytes = result.uploaded_bytes;
-      await storeVideoUploadJob(job);
+      saveVideoUploadProgress(job);
       updateVideoUploadNotice('uploading', videoUploadPercent(job), `${name} yükleniyor`);
     }
 
+    stage = 'finalize';
     updateVideoUploadNotice('finalizing', 100, `${name} hazırlanıyor`);
-    const uploaded = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}/complete`, {
+    const finalize = await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}/complete`, {
       method: 'POST', body: JSON.stringify({}), signal
     });
+    const videoUrl = finalize.url || await waitForVideoFinalize(job, signal);
+
+    stage = 'banner';
     let bannerImage = job.existing?.banner_image || '';
     if (job.bannerFile) {
       const form = new FormData();
-      form.append('file', job.bannerFile, job.bannerFile.name);
+      form.append('file', job.bannerFile, job.bannerFile.name || 'cover.jpg');
       const banner = await apiForm('/upload', form);
       bannerImage = banner.url;
     }
-    const payload = {
-      ...job.fields,
-      video_url: uploaded.url,
-      banner_image: bannerImage
-    };
+
+    stage = 'publish';
+    const payload = { ...job.fields, video_url: videoUrl, banner_image: bannerImage };
     if (job.existing?.slug) {
       await api('/video/' + encodeURIComponent(job.existing.slug), { method: 'PUT', body: JSON.stringify(payload) });
       toast('Video güncellendi');
@@ -10309,59 +10427,83 @@ async function runVideoUploadJob(job) {
       await api('/videos', { method: 'POST', body: JSON.stringify(payload) });
       toast('YÜKLENDİ', 'success', 3000);
     }
-    if (job.uploadId) {
-      try {
-        await api(`/upload-video/resumable/${encodeURIComponent(job.uploadId)}`, { method: 'DELETE' });
-      } catch (error) {
-        console.warn('Tamamlanan video yükleme oturumu temizlenemedi:', error.message);
-      }
-    }
-    await removeVideoUploadJob(job.id);
+    await discardVideoUploadJob(job);
     updateVideoUploadNotice('done', 100, job.fields.is_reals ? 'Reals hazır' : 'Video hazır');
     if (!job.existing?.slug) navigate(job.fields.is_reals ? '/reals' : '/videolar');
     else renderRoute(location.pathname);
   } catch (error) {
     if (signal.aborted || job.cancelled) return;
-    updateVideoUploadNotice('error', videoUploadPercent(job), 'Yükleme bekliyor');
-    toast(error.message || 'Video yüklemesi başarısız oldu. Tekrar deneyebilirsin.', 'error');
-    console.error('Video yükleme devam ettirilemedi:', error);
+    console.error(`[video-upload] ${stage} aşamasında hata:`, error);
+    reportVideoUploadFailure(job, stage, error);
+    if (isPermanentVideoUploadError(error)) {
+      // Aynı dosyayla tekrar denemek işe yaramaz: işi sil ki sonraki
+      // yüklemeleri sonsuza kadar kilitlemesin.
+      await discardVideoUploadJob(job);
+      updateVideoUploadNotice('failed', 0, error.message || 'Yükleme reddedildi');
+      toast(error.message || `${name} yüklenemedi.`, 'error', 6000);
+      return;
+    }
+    if (attempt < 3) {
+      retryAfterFinally = true;
+      const wait = [2000, 5000, 12000][attempt];
+      updateVideoUploadNotice('uploading', videoUploadPercent(job), `Bağlantı koptu, ${Math.round(wait / 1000)} sn içinde devam edecek`);
+      setTimeout(() => runVideoUploadJob(job, attempt + 1), wait);
+      return;
+    }
+    updateVideoUploadNotice('error', videoUploadPercent(job), 'Yükleme durdu · dokun, kaldığı yerden sürsün');
+    toast(error.message || 'Video yüklemesi durdu. Kaldığı yerden sürdürebilirsin.', 'error', 6000);
   } finally {
     if (window.__activeVideoUpload?.job.id === job.id) window.__activeVideoUpload = null;
     window.__videoUploadJobRunning = false;
+    if (!retryAfterFinally && !window.__activeVideoUpload) window.__lastVideoUploadJob = job;
   }
+}
+
+async function findPendingVideoUploadJob() {
+  if (window.__pendingMemoryVideoJob && String(window.__pendingMemoryVideoJob.userId) === String(currentUser?.id)) {
+    return window.__pendingMemoryVideoJob;
+  }
+  let jobs = [];
+  try { jobs = await getVideoUploadJobs(); } catch { return null; }
+  const mine = jobs.filter(item => String(item.userId) === String(currentUser?.id));
+  const now = Date.now();
+  for (const job of mine) {
+    // Bir günü geçmiş yarım iş sunucuda çoktan silinmiştir
+    if (now - (Number(job.createdAt) || 0) > VIDEO_UPLOAD_STALE_MS || !job.videoFile) {
+      await discardVideoUploadJob(job);
+    }
+  }
+  return mine.find(job => now - (Number(job.createdAt) || 0) <= VIDEO_UPLOAD_STALE_MS && job.videoFile) || null;
 }
 
 async function resumePendingVideoUpload() {
   if (!currentUser || window.__videoUploadJobRunning) return;
   try {
-    const jobs = await getVideoUploadJobs();
-    const job = jobs.find(item => String(item.userId) === String(currentUser.id));
+    const job = await findPendingVideoUploadJob();
     if (job) {
       runVideoUploadJob(job);
-      updateVideoUploadNotice('uploading', videoUploadPercent(job), `${job.fields.is_reals ? 'Reals' : 'Video'} yüklemesi sürdürülüyor`);
+      updateVideoUploadNotice('uploading', videoUploadPercent(loadVideoUploadProgress(job)), `${job.fields.is_reals ? 'Reals' : 'Video'} yüklemesi sürdürülüyor`);
     }
   } catch (error) {
     console.error('Bekleyen video yüklemesi geri yüklenemedi:', error);
-    toast(error.message || 'Bekleyen video yüklemesi geri yüklenemedi.', 'error');
   }
 }
 
 async function cancelVideoUpload() {
   const active = window.__activeVideoUpload;
-  if (!active) return;
-  if (!await CigCigDialogs.confirm('Video yüklemesini iptal etmek istiyor musun?')) return;
-  if (!await CigCigDialogs.confirm('Bu işlem yüklenen parçaları da silecek. İptal kesinleşsin mi?')) return;
-  active.job.cancelled = true;
-  active.controller.abort();
+  // Çalışmayan (hata almış) bir iş de iptal edilebilmeli; eskiden bu mümkün değildi.
+  const job = active?.job || window.__lastVideoUploadJob || await findPendingVideoUploadJob();
+  if (!job) { document.getElementById('video-upload-notice')?.remove(); return; }
+  if (!await CigCigDialogs.confirm('Video yüklemesini iptal edip yüklenen parçaları silmek istiyor musun?')) return;
+  job.cancelled = true;
+  active?.controller.abort();
   try {
-    if (active.job.uploadId) await api(`/upload-video/resumable/${encodeURIComponent(active.job.uploadId)}`, { method: 'DELETE' });
-    await removeVideoUploadJob(active.job.id);
+    await discardVideoUploadJob(job);
+    window.__lastVideoUploadJob = null;
     updateVideoUploadNotice('cancelled', 0, 'İptal oldu · dokunup kapat');
     toast('Video yüklemesi iptal edildi');
   } catch (error) {
-    active.job.cancelled = false;
-    console.error('Video yüklemesi iptal edilemedi:', error);
-    updateVideoUploadNotice('error', videoUploadPercent(active.job), 'İptal edilemedi; tekrar deneyebilirsin');
+    job.cancelled = false;
     toast(error.message || 'Video yüklemesi iptal edilemedi.', 'error');
   }
 }
@@ -10377,15 +10519,29 @@ function updateVideoUploadNotice(state, percent = 0, message = 'Reals yükleniyo
   }
   notice.className = `video-upload-notice ${state}`;
   notice.querySelector('span').textContent = message;
-  notice.querySelector('b').textContent = state === 'error' ? '!' : state === 'cancelled' ? '' : `${percent}%`;
-  notice.querySelector('.video-upload-notice-bar i').style.width = `${state === 'error' ? 100 : percent}%`;
+  const isProblem = state === 'error' || state === 'failed';
+  notice.querySelector('b').textContent = isProblem ? '!' : state === 'cancelled' ? '' : `${percent}%`;
+  notice.querySelector('.video-upload-notice-bar i').style.width = `${isProblem ? 100 : percent}%`;
   const cancelButton = notice.querySelector('.video-upload-cancel');
-  cancelButton.textContent = state === 'error' ? 'Tekrar dene' : 'İptal et';
-  cancelButton.hidden = state === 'error' ? false : state === 'uploading' ? !window.__activeVideoUpload : true;
-  cancelButton.onclick = state === 'error' ? () => resumePendingVideoUpload() : () => cancelVideoUpload();
+  // Durdurulmuş işte iki seçenek: kaldığı yerden sürdür veya tamamen vazgeç.
+  let discardButton = notice.querySelector('.video-upload-discard');
+  if (!discardButton) {
+    discardButton = document.createElement('button');
+    discardButton.type = 'button';
+    discardButton.className = 'video-upload-cancel video-upload-discard';
+    discardButton.textContent = 'Vazgeç';
+    notice.appendChild(discardButton);
+  }
+  discardButton.hidden = state !== 'error';
+  discardButton.onclick = () => cancelVideoUpload();
+  cancelButton.textContent = state === 'error' ? 'Sürdür' : state === 'failed' ? 'Kapat' : 'İptal et';
+  cancelButton.hidden = (state === 'error' || state === 'failed') ? false : state === 'uploading' ? !window.__activeVideoUpload : true;
+  cancelButton.onclick = state === 'error'
+    ? () => resumePendingVideoUpload()
+    : state === 'failed' ? () => notice.remove() : () => cancelVideoUpload();
   notice.onclick = event => {
     if (event.target.closest('button')) return;
-    if (['cancelled', 'done'].includes(state)) notice.remove();
+    if (['cancelled', 'done', 'failed'].includes(state)) notice.remove();
   };
 }
 
@@ -10733,9 +10889,18 @@ async function showNewVideoModal(existing = null, forceReals = false) {
     if (videoFile) {
       submitBtn.disabled = true;
       try {
-        const pendingJobs = await getVideoUploadJobs();
-        if (window.__videoUploadJobRunning || pendingJobs.some(job => String(job.userId) === String(currentUser.id))) {
-          throw new Error('Önce mevcut video yüklemesinin tamamlanmasını veya iptal edilmesini bekle.');
+        if (window.__videoUploadJobRunning) {
+          throw new Error('Şu an süren bir video yüklemesi var. Bitmesini bekle veya bildirimden iptal et.');
+        }
+        const pendingJob = await findPendingVideoUploadJob();
+        if (pendingJob) {
+          const discard = await CigCigDialogs.confirm('Yarım kalmış bir video yüklemesi var. Onu silip bu videoyu yükleyeyim mi?');
+          if (!discard) {
+            submitBtn.disabled = false;
+            resumePendingVideoUpload();
+            return;
+          }
+          await discardVideoUploadJob(pendingJob);
         }
         if (!bannerFile && autoBannerPromise) await autoBannerPromise;
         const job = {
@@ -10749,7 +10914,17 @@ async function showNewVideoModal(existing = null, forceReals = false) {
           uploadedBytes: 0,
           createdAt: Date.now()
         };
-        await storeVideoUploadJob(job);
+        // Dosyayı kalıcı olarak saklamayı dene; iPhone'da büyük videolar kotaya
+        // takılabilir. Öyle olursa yükleme bellekte sürer (sayfa kapanırsa sürdürülemez
+        // ama en azından yüklenir) — eskiden burada tamamen başarısız oluyordu.
+        try {
+          await storeVideoUploadJob(job);
+          job.persisted = true;
+        } catch (storeError) {
+          console.warn('[video-upload] Kalıcı kayıt yapılamadı, bellekte sürüyor:', storeError);
+          job.persisted = false;
+          window.__pendingMemoryVideoJob = job;
+        }
         submitBtn.innerHTML = '<div class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block"></div> Yükleniyor...';
         $('#video-upload-progress').style.display = 'block';
         hideModal({ resumeReals: false });
