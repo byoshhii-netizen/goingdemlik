@@ -12952,6 +12952,7 @@ function ensureDmNotesSchema() {
         expires_at TIMESTAMPTZ NOT NULL
       )
     `).then(() => query('ALTER TABLE dm_notes ADD COLUMN IF NOT EXISTS background_color VARCHAR(7) NOT NULL DEFAULT \'#242731\''))
+    .then(() => query('ALTER TABLE dm_notes ADD COLUMN IF NOT EXISTS close_friends_only INTEGER NOT NULL DEFAULT 0'))
     .then(() => query(`
       CREATE TABLE IF NOT EXISTS dm_note_likes (
         note_user_id BIGINT NOT NULL REFERENCES dm_notes(user_id) ON DELETE CASCADE,
@@ -13004,12 +13005,18 @@ app.get('/api/dm-notes', authMiddleware, async (req, res) => {
                LIMIT 3
              ) recent_likers
            ) ELSE '[]'::json END AS recent_likers,
+           COALESCE(n.close_friends_only,0) AS close_friends_only,
            EXISTS(SELECT 1 FROM dm_note_likes nl WHERE nl.note_user_id=n.user_id AND nl.user_id=$1) AS liked_by_me
     FROM dm_notes n
     JOIN users u ON u.id=n.user_id AND COALESCE(u.is_deleted,0)=0
     LEFT JOIN songs s ON s.id=n.song_id
     LEFT JOIN dm_note_views nv ON nv.note_user_id=n.user_id AND nv.viewer_user_id=$1
     WHERE n.expires_at>NOW()
+      AND (
+        COALESCE(n.close_friends_only,0)=0
+        OR n.user_id=$1
+        OR EXISTS (SELECT 1 FROM close_friends cf WHERE cf.user_id=n.user_id AND cf.friend_id=$1)
+      )
       AND (n.content<>'' OR n.song_id IS NOT NULL)
       AND (n.user_id=$1
         OR EXISTS (SELECT 1 FROM friendships f
@@ -13140,6 +13147,7 @@ app.put('/api/dm-notes', authMiddleware, async (req, res) => {
     }, 0);
     if (luminance > 0.18) return res.status(400).json({ error: 'Not rengi çok açık. Daha koyu bir renk seçin.' });
   }
+  const closeFriendsOnly = req.body?.close_friends_only === true || req.body?.close_friends_only === 'true' ? 1 : 0;
   const songId = req.body?.song_id == null || req.body.song_id === '' ? null : Number(req.body.song_id);
   const songStart = Number(req.body?.song_start_seconds || 0);
   if (content.length > 180) return res.status(400).json({ error: 'Not en fazla 180 karakter olabilir.' });
@@ -13160,14 +13168,14 @@ app.put('/api/dm-notes', authMiddleware, async (req, res) => {
     await client.query('DELETE FROM dm_note_likes WHERE note_user_id=$1', [req.user.id]);
     await client.query('DELETE FROM dm_note_views WHERE note_user_id=$1', [req.user.id]);
     const result = await client.query(`
-      INSERT INTO dm_notes (user_id,content,background_color,song_id,song_start_seconds,created_at,expires_at)
-      VALUES ($1,$2,$3,$4,$5,NOW(),NOW()+INTERVAL '24 hours')
+      INSERT INTO dm_notes (user_id,content,background_color,song_id,song_start_seconds,close_friends_only,created_at,expires_at)
+      VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW()+INTERVAL '24 hours')
       ON CONFLICT (user_id) DO UPDATE SET
         content=EXCLUDED.content,background_color=EXCLUDED.background_color,song_id=EXCLUDED.song_id,
-        song_start_seconds=EXCLUDED.song_start_seconds,created_at=NOW(),
+        song_start_seconds=EXCLUDED.song_start_seconds,close_friends_only=EXCLUDED.close_friends_only,created_at=NOW(),
         expires_at=NOW()+INTERVAL '24 hours'
-      RETURNING user_id,content,background_color,song_id,song_start_seconds,created_at,expires_at
-    `, [req.user.id, content, backgroundColor, song?.id || null, Math.floor(songStart)]);
+      RETURNING user_id,content,background_color,song_id,song_start_seconds,close_friends_only,created_at,expires_at
+    `, [req.user.id, content, backgroundColor, song?.id || null, Math.floor(songStart), closeFriendsOnly]);
     rows = result.rows;
     await client.query('COMMIT');
   } catch (error) {

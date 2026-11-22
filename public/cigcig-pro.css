@@ -3742,3 +3742,216 @@ input[type="range"] { min-height: 0 !important; }
 .chat-lock-forgot p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.45; }
 .chat-lock-forgot small { color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
 .chat-lock-forgot .btn { justify-content: center; min-height: 42px; }
+
+/* =========================================================================
+   GRUP SOHBETİ — DM ile aynı baloncuk görünümü
+   Grup kendi işaretlemesini kullanıyor (.chat-msg / .chat-msg-body), bu yüzden
+   sistemi değiştirmeden görünümü DM'e eşliyoruz. Böylece grup mantığı
+   (yetki, seçim, moderasyon) olduğu gibi çalışmaya devam eder.
+   ========================================================================= */
+.chat-container .chat-msg {
+  display: flex !important;
+  align-items: flex-end;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  margin: 3px 0;
+  grid-template-columns: none !important;
+}
+.chat-container .chat-msg.own { flex-direction: row-reverse; margin-left: auto; }
+
+/* Avatar yalnızca karşı tarafta ve blok başında */
+.chat-container .chat-msg-profile { flex: 0 0 28px; align-self: flex-end; }
+.chat-container .chat-msg-avatar {
+  width: 28px !important; height: 28px !important;
+  border-radius: 50%; object-fit: cover;
+}
+.chat-container .chat-msg.own .chat-msg-profile { display: none !important; }
+.chat-container .chat-msg.chat-continued .chat-msg-profile { visibility: hidden; }
+
+/* Baloncuk */
+.chat-container .chat-msg-body {
+  position: relative;
+  width: fit-content !important;
+  max-width: 78% !important;
+  padding: 7px 11px;
+  border: 1px solid var(--border-hover);
+  border-radius: 4px 16px 16px 16px;
+  background: var(--bg-card2);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,.10);
+  font-size: 15.5px;
+  line-height: 1.38;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.chat-container .chat-msg.own .chat-msg-body {
+  border-radius: 16px 4px 16px 16px;
+  border-color: rgba(var(--accent-rgb, 189,162,117), .72);
+  background-image: linear-gradient(135deg,
+    rgba(var(--accent-rgb, 189,162,117), .38),
+    rgba(var(--accent-rgb, 189,162,117), .27));
+}
+/* Devam mesajlarında kuyruk yok (DM'deki gibi) */
+.chat-container .chat-msg.chat-continued .chat-msg-body { border-radius: 16px; }
+.chat-container .chat-msg.chat-continued { margin-top: 1px; }
+
+/* Üst satır: isim + saat + menü */
+.chat-container .chat-msg-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 2px;
+  min-height: 0;
+}
+.chat-container .chat-msg.own .chat-msg-meta { justify-content: flex-end; }
+.chat-container .chat-msg.chat-continued .chat-msg-name { display: none; }
+.chat-container .chat-msg-name { font-size: 12.5px; font-weight: 700; }
+.chat-container .chat-msg-time { font-size: 10.5px; color: var(--text-muted); }
+.chat-container .chat-msg-edited { font-size: 9.5px; color: var(--text-muted); }
+.chat-container .msg-menu-trigger {
+  position: static !important;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.chat-container .chat-msg:hover .msg-menu-trigger,
+.chat-container .chat-msg:focus-within .msg-menu-trigger { opacity: 1; }
+@media (hover: none) { .chat-container .msg-menu-trigger { opacity: .55; } }
+
+.chat-container .chat-msg-text { font-size: inherit; line-height: inherit; }
+.chat-container .chat-msg-img,
+.chat-container .group-message-image-grid img { border-radius: 11px; }
+.chat-container .chat-reply-preview {
+  margin: 0 0 5px;
+  padding: 5px 8px;
+  border-left: 3px solid rgba(var(--accent-rgb, 189,162,117), .8);
+  border-radius: 7px;
+  background: rgba(0,0,0,.22);
+  font-size: 12.5px;
+}
+.chat-container .chat-reply-preview span { font-weight: 700; color: var(--accent-red2, var(--accent-red)); }
+.chat-container .chat-msg-select { align-self: center; margin-right: 2px; }
+.chat-container .chat-msg.deleted-for-me .chat-msg-body {
+  background: transparent;
+  border-style: dashed;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* =========================================================================
+   AKIŞ MEDYASI — Instagram ölçüleri
+   Fotoğraf: kendi oranında ama 4:5 ile 1.91:1 arasında (oran JS'ten gelir),
+   görsel kabı kırparak doldurur. Reals: sabit 4:5, taşma yok.
+   Keşfet sayfası hariç tutuldu; orada kare ızgara var.
+   ========================================================================= */
+.photos-feed .photo-card:not(.reals-media-card) .photo-media-wrap {
+  position: relative;
+  aspect-ratio: var(--cg-feed-ratio, 1);
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden;
+  background: #000;
+}
+.photos-feed .photo-card:not(.reals-media-card) .photo-media-wrap > .photo-native-link {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+}
+.photos-feed .photo-card:not(.reals-media-card) .photo-media-wrap img.photo-native {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  object-fit: cover !important;
+}
+
+/* Reals kartı: 4:5 kap, video kırparak doldurur */
+.photos-feed .reals-media-card .photo-media-wrap,
+.photos-feed .reals-media-card .ig-post-media {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: hidden;
+  background: #000;
+}
+.photos-feed .reals-media-card .photo-media-wrap > *,
+.photos-feed .reals-media-card .ig-post-media > * {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+}
+.photos-feed .reals-media-card .photo-media-wrap video,
+.photos-feed .reals-media-card .photo-media-wrap img,
+.photos-feed .reals-media-card .ig-post-media video,
+.photos-feed .reals-media-card .ig-post-media img {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  object-fit: cover !important;
+}
+/* Keşfet kendi kare düzenini korusun */
+#media-explore-feed .photo-card .photo-media-wrap { aspect-ratio: auto !important; }
+
+/* =========================================================================
+   NOT — yakın arkadaş anahtarı
+   ========================================================================= */
+.dm-note-close-friends {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 14px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-card2);
+  cursor: pointer;
+}
+.dm-note-close-friends input {
+  width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto;
+  accent-color: #2ecc71;
+}
+.dm-note-close-friends-copy { display: grid; gap: 3px; }
+.dm-note-close-friends-copy strong { font-size: 14px; }
+.dm-note-close-friends-copy strong i { color: #2ecc71; margin-right: 4px; }
+.dm-note-close-friends-copy small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.dm-note-close-friends:has(input:checked) {
+  border-color: rgba(46,204,113,.5);
+  background: rgba(46,204,113,.08);
+}
+
+/* Not kartında ve görüntüleyicisinde yakın arkadaş işareti (hikayelerle aynı yeşil dil) */
+.dm-note-card.is-close-friends .dm-note-avatar { box-shadow: 0 0 0 2px #1fbf5a; }
+.dm-note-close-mark {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2ee66b, #0fa958);
+  color: #062814;
+  font-size: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.45);
+}
+.dm-note-card .dm-note-avatar { position: relative; }
+.profile-note-close-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 2px 0 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(46,230,107,.14);
+  color: #4ae084;
+  font-size: 11.5px;
+  font-weight: 700;
+}

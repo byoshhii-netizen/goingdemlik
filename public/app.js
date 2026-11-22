@@ -8996,6 +8996,7 @@ async function renderGroupDetail(app, slug) {
   enhanceLinkPreviews(app);
 
   const chatEl = $('#chat-messages');
+  groupChatWatchContinuation();
   const clearGroupReply = () => {
     groupReplyToId = null;
     const replyBar = $('#group-reply-bar');
@@ -9951,7 +9952,7 @@ function chatMsgHTML(m, canModerate = false, canReply = false) {
   imageUrls = Array.isArray(imageUrls) ? imageUrls.filter(url => typeof url === 'string' && url.trim()) : [];
   if (!imageUrls.length && m.image_url) imageUrls = [m.image_url];
   const selectBox = `<input type="checkbox" class="chat-msg-select" data-id="${m.id}" aria-label="Mesajı seç" style="display:${groupChatSelectionMode ? 'block' : 'none'}" ${groupChatSelection.has(String(m.id)) ? 'checked' : ''} />`;
-  return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
+  return `<div class="chat-msg ${isOwn ? 'own' : ''}${groupChatSelection.has(String(m.id)) ? ' selected' : ''}" data-message-id="${m.id}" data-user-id="${escHtml(String(m.user_id ?? ''))}" data-reactions="${escHtml(JSON.stringify(Array.isArray(m.reactions) ? m.reactions : []))}">
     ${selectBox}
     <a href="${profileLink}" data-link class="chat-msg-profile" aria-label="${escHtml(m.username || 'Silindi')} profili">${avatar}</a>
     <div class="chat-msg-body">
@@ -11200,6 +11201,7 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
   showModal('', `<div class="profile-note-viewer" style="--dm-note-color:${noteColor}">
     <div class="profile-note-viewer-profile"><span class="profile-note-viewer-avatar${hasUsableAvatar(profileUser) ? '' : ' avatar-placeholder'}">${avatar}</span><span><strong>${escHtml(displayName)}</strong><small>@${escHtml(username)}</small></span></div>
     <p class="profile-note-viewer-content">${escHtml(note.content || '')}</p>
+    ${Number(note.close_friends_only) === 1 || note.close_friends_only === true ? '<span class="profile-note-close-badge"><i class="fas fa-star" aria-hidden="true"></i> Yakın arkadaşlara özel</span>' : ''}
     ${note.created_at ? `<small class="profile-note-shared-at">Paylaşıldı · ${escHtml(formatDmNoteTime(note.created_at))}</small>` : ''}
     ${song}
     ${isOwnNote
@@ -15925,10 +15927,11 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       const avatar = hasUsableAvatar(note) ? `<img src="${escHtml(note.avatar)}" alt="" />` : '<i class="fas fa-user"></i>';
       const label = own ? 'Notun' : (note.nickname || note.username || 'Kullanıcı');
       const recentLikers = own && Array.isArray(note.recent_likers) ? note.recent_likers.slice(0, 3) : [];
-      return `<button type="button" class="dm-note-card${own ? ' is-own' : ''}" data-note-user="${escHtml(note.username || '')}" aria-label="${escHtml(label)} notu" style="--dm-note-color:${escHtml(/^#[0-9a-f]{6}$/i.test(note.background_color || '') ? note.background_color : '#242731')}">
+      const closeFriendsNote = Number(note.close_friends_only) === 1 || note.close_friends_only === true;
+      return `<button type="button" class="dm-note-card${own ? ' is-own' : ''}${closeFriendsNote ? ' is-close-friends' : ''}" data-note-user="${escHtml(note.username || '')}" aria-label="${escHtml(label)} notu" style="--dm-note-color:${escHtml(/^#[0-9a-f]{6}$/i.test(note.background_color || '') ? note.background_color : '#242731')}">
         ${note.song_title ? `<span class="dm-note-song-title"><i class="fas fa-music" aria-hidden="true"></i><span>${escHtml(note.song_title)}</span></span>` : ''}
         ${note.content ? `<span class="dm-note-preview">${escHtml(note.content)}</span>` : ''}
-        <span class="dm-note-avatar">${avatar}${note.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}</span>
+        <span class="dm-note-avatar">${avatar}${note.song_id ? '<i class="fas fa-music dm-note-music-mark"></i>' : ''}${closeFriendsNote ? '<i class="fas fa-star dm-note-close-mark" title="Yakın arkadaşlara özel"></i>' : ''}</span>
         <span class="dm-note-label">${escHtml(own ? 'Notun' : (note.nickname || note.username || 'Not'))}</span>
         ${noteLikersHTML(recentLikers)}
       </button>`;
@@ -15974,6 +15977,13 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       <div class="dm-note-char-count"><span id="dm-note-char-count">0</span>/180</div>
       <label class="dm-note-color-field" for="dm-note-color"><span>Not rengi</span><input id="dm-note-color" type="color" value="#242731" aria-label="Not arka plan rengi" /></label>
       <div class="dm-note-color-preview" id="dm-note-color-preview" style="--dm-note-color:#242731"><i class="fas fa-note-sticky"></i><span id="dm-note-preview-content">Notun burada görünecek</span><small id="dm-note-preview-time">Şimdi</small></div>
+      <label class="dm-note-close-friends">
+        <input type="checkbox" id="dm-note-close-friends" />
+        <span class="dm-note-close-friends-copy">
+          <strong><i class="fas fa-star" aria-hidden="true"></i> Yalnızca yakın arkadaşlar</strong>
+          <small>Notunu sadece yakın arkadaş listendekiler görür.</small>
+        </span>
+      </label>
       <section class="dm-note-music-picker">
         <div class="dm-note-picker-heading"><strong><i class="fas fa-music"></i> Müzik ekle</strong><button type="button" class="btn btn-ghost btn-sm" id="dm-note-clear-song" hidden>Kaldır</button></div>
         <input id="dm-note-song-search" type="search" placeholder="Şarkı veya sanatçı ara..." autocomplete="off" />
@@ -16176,7 +16186,8 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
           content: content.value,
           background_color: document.getElementById('dm-note-color')?.value || '#242731',
           song_id: chosenSong?.id || null,
-          song_start_seconds: Number(startInput?.value) || 0
+          song_start_seconds: Number(startInput?.value) || 0,
+          close_friends_only: Boolean(document.getElementById('dm-note-close-friends')?.checked)
         }) });
         dmNotes = await api('/dm-notes');
         hideModal();
@@ -22902,15 +22913,46 @@ function showStoryUploadModal() {
     const mediaImage = file?.type.startsWith('image/') ? preview.querySelector('.story-media-preview-item > img') : null;
     choices.innerHTML = mediaFilterChoicesMarkup(mediaImage?.src || '', selectedStoryFilters[activeStoryPreviewIndex] || selectedStoryDefaultFilter, Boolean(file));
   };
-  const updateStoryPreviewLayers = () => {
+  // Yalnızca gerçekten değişen parçayı güncelle. Katmanları her seferinde
+  // yeniden kurmak avatar ve kapak görsellerini yeniden yükletip takılma yaratıyordu.
+  const updateStoryPreviewCaptionOnly = () => {
+    const text = $('#story-caption').value.trim();
+    let touched = false;
+    preview.querySelectorAll('.story-compose-preview-bottom').forEach(bottom => {
+      touched = true;
+      const existing = bottom.querySelector('p');
+      if (!text) { existing?.remove(); return; }
+      if (existing) { existing.textContent = text; return; }
+      bottom.insertAdjacentHTML('afterbegin', `<p>${escHtml(text)}</p>`);
+    });
+    return touched;
+  };
+  const updateStoryPreviewLayers = ({ captionOnly = false } = {}) => {
+    if (captionOnly && updateStoryPreviewCaptionOnly()) return;
     preview.querySelectorAll('.story-media-preview-item,.story-media-lightbox-content').forEach(item => {
       item.querySelectorAll('.story-compose-preview-top,.story-compose-preview-bottom').forEach(layer => layer.remove());
       item.insertAdjacentHTML('beforeend', renderStoryPreviewLayers());
     });
   };
+  // Aynı dosya için adres bir kez üretilir; filtre/sayfa değişiminde görsel
+  // yeniden çözümlenmez. Besteci kapanırken hepsi birden serbest bırakılır.
+  const storyPreviewUrlCache = new Map();
+  const storyObjectUrlFor = file => {
+    if (!storyPreviewUrlCache.has(file)) {
+      const created = URL.createObjectURL(file);
+      storyPreviewUrlCache.set(file, created);
+      storyPreviewUrls.push(created);
+    }
+    return storyPreviewUrlCache.get(file);
+  };
   const renderMediaPreview = (files, requestedIndex = activeStoryPreviewIndex) => {
-    storyPreviewUrls.forEach(URL.revokeObjectURL);
-    storyPreviewUrls = [];
+    // Artık kullanılmayan dosyaların adreslerini bırak
+    [...storyPreviewUrlCache.keys()].forEach(cached => {
+      if (files.includes(cached)) return;
+      URL.revokeObjectURL(storyPreviewUrlCache.get(cached));
+      storyPreviewUrlCache.delete(cached);
+    });
+    storyPreviewUrls = [...storyPreviewUrlCache.values()];
     if (!files.length) {
       preview.hidden = true;
       preview.parentElement.classList.remove('has-media');
@@ -22925,8 +22967,7 @@ function showStoryUploadModal() {
     $('#story-media-pick-label').textContent = 'Medyayı değiştir';
     $('#story-preview-empty')?.classList.add('hidden');
     const file = files[activeStoryPreviewIndex];
-    const url = URL.createObjectURL(file);
-    storyPreviewUrls.push(url);
+    const url = storyObjectUrlFor(file);
     const media = file.type.startsWith('video/')
       ? `<video src="${url}" controls playsinline style="filter:${mediaFilterCss(selectedStoryFilters[activeStoryPreviewIndex] || 'none')}"></video>`
       : `<img src="${url}" alt="Hikaye önizlemesi" draggable="false" style="filter:${mediaFilterCss(selectedStoryFilters[activeStoryPreviewIndex] || 'none')}" />`;
@@ -23025,7 +23066,7 @@ function showStoryUploadModal() {
     else renderStoryFilterChoices(null);
   });
   $('#story-caption').oninput = () => {
-    updateStoryPreviewLayers();
+    updateStoryPreviewLayers({ captionOnly: true });
   };
   if (pendingStoryFiles.length) renderMediaPreview(pendingStoryFiles);
   else renderStoryFilterChoices(null);
@@ -23804,6 +23845,7 @@ function setPhotoGalleryIndex(card, index) {
 }
 function photoAdCardHTML(a) { return `<article class="photo-card photo-ad-card" data-ad-id="${a.id}" style="padding:0;overflow:hidden;cursor:pointer"><div class="photo-card-head" style="padding:12px"><div style="width:34px;height:34px;border-radius:50%;background:var(--accent-red);display:grid;place-items:center;color:#fff"><i class="fas fa-bullhorn"></i></div><b>Reklam</b><small style="color:var(--text-muted)">Sponsorlu</small></div><div class="photo-media-wrap"><div class="photo-media-backdrop" style="background-image:url('${escHtml(a.image_url)}')"></div><img src="${escHtml(a.image_url)}" class="photo-native" alt="${escHtml(a.title)}"/></div><div style="padding:12px"><h3>${escHtml(a.title)}</h3>${descriptionPreviewHTML(a.description, 'photo-ad-description', 140)}</div></article>`; }
 function bindPhotoFeed(feed) {
+  cigFitFeedMedia(arguments[0] instanceof Element ? arguments[0] : null);
   feed.querySelectorAll('.media-explore-save').forEach(button => {
     button.addEventListener('click', async event => {
       event.preventDefault();
@@ -25166,11 +25208,11 @@ async function renderMyPlaylists(app) {
       </label>
       <button class="btn btn-primary my-playlists-create" id="pl-create-btn" aria-label="Yeni playlist oluştur" title="Yeni playlist oluştur"><i class="fas fa-plus"></i><span>Oluştur</span></button>
     </div>
-    <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
     <section id="pl-discover" class="pl-discover" hidden>
       <h2 class="pl-discover-title">Keşfedebilecekleriniz</h2>
       <div id="pl-discover-list" class="pl-discover-list"></div>
     </section>
+    <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
   </div>`;
 
   const renderList = async () => {
@@ -27379,5 +27421,78 @@ async function showChatLockForgotPrompt(scope = 'all', onDone = null) {
       document.getElementById('cg-forgot-error').textContent = error.message || 'Sıfırlanamadı.';
       button.disabled = false;
     }
+  });
+}
+
+/* ============================================================================
+   GRUP SOHBETİ — DM ile aynı baloncuk akışı
+   Aynı kişinin ardışık mesajları DM'deki gibi tek blok halinde gruplanır:
+   avatar ve isim yalnızca ilk mesajda görünür.
+   ============================================================================ */
+function groupChatApplyContinuation(container) {
+  const root = container || document.getElementById('chat-messages');
+  if (!root) return;
+  let previousSender = null;
+  let previousTime = 0;
+  root.querySelectorAll(':scope > .chat-msg').forEach(row => {
+    if (row.classList.contains('deleted-for-me')) {
+      previousSender = null;
+      row.classList.remove('chat-continued');
+      return;
+    }
+    const sender = row.dataset.userId || '';
+    const stamp = Date.parse(row.querySelector('.chat-msg-time')?.getAttribute('datetime') || '') || 0;
+    // Aynı kişi ve 5 dakikadan kısa aralık -> devam mesajı
+    const isContinued = Boolean(sender) && sender === previousSender
+      && (!stamp || !previousTime || Math.abs(stamp - previousTime) < 5 * 60 * 1000);
+    row.classList.toggle('chat-continued', isContinued);
+    previousSender = sender;
+    previousTime = stamp || previousTime;
+  });
+}
+
+// Yalnızca grup sohbeti listesini izler (global DOM izleyici yok, ek yük getirmez)
+let groupChatContinuationObserver = null;
+function groupChatWatchContinuation() {
+  const root = document.getElementById('chat-messages');
+  if (!root) return;
+  if (root.dataset.continuationWatch === '1') { groupChatApplyContinuation(root); return; }
+  root.dataset.continuationWatch = '1';
+  groupChatContinuationObserver?.disconnect();
+  let scheduled = false;
+  groupChatContinuationObserver = new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => { scheduled = false; groupChatApplyContinuation(root); });
+  });
+  groupChatContinuationObserver.observe(root, { childList: true });
+  groupChatApplyContinuation(root);
+}
+
+/* ============================================================================
+   AKIŞ MEDYA ORANI — Instagram mantığı
+   Instagram fotoğrafı kendi oranında gösterir ama 4:5 (dikey) ile 1.91:1
+   (yatay) arasına sıkıştırır; görsel kabı kırparak doldurur. Böylece akış
+   düzenli görünür, siyah boşluk veya taşma olmaz.
+   ============================================================================ */
+const CG_FEED_MIN_RATIO = 0.8;    // 4:5
+const CG_FEED_MAX_RATIO = 1.91;   // 1.91:1
+function cigFitFeedMedia(root) {
+  const scope = root instanceof Element ? root : document;
+  scope.querySelectorAll('.photos-feed .photo-card:not(.reals-media-card) .photo-media-wrap').forEach(wrap => {
+    if (wrap.closest('#media-explore-feed')) return;      // keşfet kendi kare ızgarasını kullanır
+    if (wrap.dataset.feedRatio === '1') return;
+    const image = wrap.querySelector('img.photo-native');
+    if (!image) return;
+    const apply = () => {
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      if (!width || !height) return;
+      const ratio = Math.min(Math.max(width / height, CG_FEED_MIN_RATIO), CG_FEED_MAX_RATIO);
+      wrap.style.setProperty('--cg-feed-ratio', String(Math.round(ratio * 1000) / 1000));
+      wrap.dataset.feedRatio = '1';
+    };
+    if (image.complete && image.naturalWidth) apply();
+    else image.addEventListener('load', apply, { once: true });
   });
 }
