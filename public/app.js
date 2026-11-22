@@ -4518,10 +4518,23 @@ async function renderHome(app) {
           return [];
         })
       ]);
-      const media = shuffleArray([
-        ...photos.map(photo => ({ type: 'photo', content: photo })),
-        ...reals.map(real => ({ type: 'reals', content: real }))
-      ]).slice(0, 6);
+      // Fotoğraf ağırlıklı karışık akış: en çok 2 Reals, gerisi fotoğraf.
+      const FEED_TOTAL = 6;
+      const FEED_MAX_REALS = 2;
+      const photoItems = shuffleArray(photos.map(photo => ({ type: 'photo', content: photo })));
+      const realsItems = shuffleArray(reals.map(real => ({ type: 'reals', content: real })));
+      const pickedReals = realsItems.slice(0, FEED_MAX_REALS);
+      const pickedPhotos = photoItems.slice(0, Math.max(0, FEED_TOTAL - pickedReals.length));
+      // Fotoğraf yetmiyorsa kalan yeri Reals doldursun
+      if (pickedPhotos.length + pickedReals.length < FEED_TOTAL) {
+        pickedReals.push(...realsItems.slice(pickedReals.length, pickedReals.length + (FEED_TOTAL - pickedPhotos.length - pickedReals.length)));
+      }
+      // Reals'ler baştan ve sondan değil, aranın içine girsin
+      const media = pickedPhotos.slice();
+      pickedReals.forEach((item, index) => {
+        media.splice(Math.min(media.length, 2 + index * 3), 0, item);
+      });
+      media.length = Math.min(media.length, FEED_TOTAL);
       const el = $('#home-photos');
       el.innerHTML = media.length
         ? media.map(item => item.type === 'reals' ? realsMediaCardHTML(item.content) : photoCardHTML(item.content)).join('')
@@ -11179,6 +11192,7 @@ function openProfileNoteViewer(note, profileUser = note, onDelete = null) {
     <div class="profile-note-audio-status" id="profile-note-audio-status" aria-live="polite"></div>
     ${isOwnNote ? '<button type="button" class="btn btn-outline profile-note-delete" id="profile-note-delete"><i class="fas fa-trash"></i> Notu sil</button>' : ''}
   </div>`, 'profile-note-viewer-modal');
+  document.getElementById('modal')?.style.setProperty('--dm-note-color', noteColor);
   document.getElementById('profile-note-like')?.addEventListener('click', async event => {
     const button = event.currentTarget;
     if (button.disabled) return;
@@ -17978,6 +17992,7 @@ function showDmImageViewer(imageUrls, ephemeral = false) {
       <span class="dm-image-viewer-zoom" aria-live="polite">100%</span>
       <button type="button" data-image-zoom="in" aria-label="Yakınlaştır" title="Yakınlaştır"><i class="fas fa-plus"></i></button>
       <button type="button" data-image-zoom="reset" aria-label="Yakınlaştırmayı sıfırla" title="Sıfırla"><i class="fas fa-expand"></i></button>
+      ${ephemeral ? '' : '<button type="button" data-image-download class="dm-image-download" aria-label="Fotoğrafı indir" title="İndir"><i class="fas fa-download"></i></button>'}
       <span class="dm-image-viewer-help">Kaydırma tekerleği veya iki parmakla da yakınlaştırabilirsin</span>
     </div>
     ${ephemeral ? '<p class="form-hint">Bu fotoğraflar için sınırlı görüntüleme hakkı kullanıldı.</p>' : ''}
@@ -17986,6 +18001,45 @@ function showDmImageViewer(imageUrls, ephemeral = false) {
   const items = [...(stage?.querySelectorAll('.dm-image-viewer-item') || [])];
   const zoomLabel = document.querySelector('.dm-image-viewer-zoom');
   let activeItem = items[0] || null;
+
+  // Sınırlı görüntüleme ile gönderilmemiş fotoğraflar indirilebilir.
+  document.querySelector('[data-image-download]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const source = (activeItem || items[0])?.querySelector('.dm-image-view')?.getAttribute('src');
+    if (!source) return;
+    button.disabled = true;
+    const saveBlob = blob => {
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = 'cigfoto.png';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(href), 5000);
+    };
+    try {
+      const response = await fetch(source, { mode: 'cors', credentials: 'omit' });
+      if (!response.ok) throw new Error('indirilemedi');
+      saveBlob(await response.blob());
+      toast('cigfoto.png indirildi');
+    } catch {
+      // Farklı alan adından (CDN) CORS engeli varsa sunucu üzerinden indir
+      try {
+        const response = await fetch('/api/download-image?url=' + encodeURIComponent(source), {
+          headers: currentToken ? { Authorization: 'Bearer ' + currentToken } : {}
+        });
+        if (!response.ok) throw new Error('indirilemedi');
+        saveBlob(await response.blob());
+        toast('cigfoto.png indirildi');
+      } catch {
+        toast('Fotoğraf indirilemedi.', 'error');
+      }
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   const states = new WeakMap();
   const stateFor = item => {
     let state = states.get(item);
@@ -19079,8 +19133,21 @@ function showDmMsgMenu(btn, msgId, isOwn, username, startDmReply) {
     menu.appendChild(sentAt);
   }
   document.body.appendChild(menu);
-  menu.style.left = `${Math.max(8, Math.min(rect.left - menu.offsetWidth + rect.width, window.innerWidth - menu.offsetWidth - 8))}px`;
-  menu.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+  // Menü, seçilen mesaj balonuna yapışsın: altında yer yoksa üstüne geçsin.
+  const bubble = messageRow?.querySelector('.dm-msg-bubble') || messageRow;
+  const anchorRect = bubble ? bubble.getBoundingClientRect() : rect;
+  const margin = 8;
+  const menuWidth = menu.offsetWidth;
+  const menuHeight = menu.offsetHeight;
+  let top = anchorRect.bottom + 6;
+  if (top + menuHeight + margin > window.innerHeight) {
+    const above = anchorRect.top - menuHeight - 6;
+    top = above >= margin ? above : Math.max(margin, window.innerHeight - menuHeight - margin);
+  }
+  let left = isOwn ? anchorRect.right - menuWidth : anchorRect.left;
+  left = Math.max(margin, Math.min(left, window.innerWidth - menuWidth - margin));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
   setTimeout(() => document.addEventListener('click', function rm() { menu.remove(); document.removeEventListener('click', rm); }, { once: true }), 0);
 }
 
@@ -20218,19 +20285,13 @@ async function renderMusicList(app) {
     console.warn('Müzik sayfası alt yazısı yüklenemedi:', error.message);
   }
   app.innerHTML = `<div class="container page">
-    <div class="page-header music-page-header">
-      <div class="page-title music-page-title">
-        <span class="music-page-title-icon"><i class="fas fa-music"></i></span>
-        <span><strong>Müzik</strong><small>${escHtml(musicPageTagline)}</small></span>
-      </div>
-      ${currentUser ? `<div class="music-page-header-actions">
-        <a href="/playlistlerim" data-link class="music-playlists-link" aria-label="Playlistlerim">
-          <span class="music-playlists-icon"><i class="fas fa-list-ul" aria-hidden="true"></i></span>
-          <span class="music-playlists-copy"><strong>Playlistlerim</strong><small>Koleksiyonunu aç</small></span>
-          <i class="fas fa-arrow-right music-playlists-arrow" aria-hidden="true"></i>
-        </a>
-      </div>` : ''}
-    </div>
+    ${currentUser ? `<div class="page-header music-page-header music-page-header--compact">
+      <a href="/playlistlerim" data-link class="music-playlists-link" aria-label="Playlistlerim">
+        <span class="music-playlists-icon"><i class="fas fa-list-ul" aria-hidden="true"></i></span>
+        <span class="music-playlists-copy"><strong>Playlistlerim</strong><small>Koleksiyonunu aç</small></span>
+        <i class="fas fa-arrow-right music-playlists-arrow" aria-hidden="true"></i>
+      </a>
+    </div>` : ''}
     <div class="music-search-bar" style="margin-bottom:20px">
       <div class="search-bar" style="margin:0">
         <i class="fas fa-search"></i>
@@ -23608,7 +23669,6 @@ function photoCardHTML(p, showSave = false) {
         ${songBlock}
       </div>
       <div class="ig-post-head-actions">
-        ${p.song_title && p.song_id ? `<div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>` : ''}
         ${isOwnPost ? '<div class="photo-card-owner-actions"><button class="btn btn-ghost btn-sm photo-edit" title="Fotoğrafı düzenle" aria-label="Düzenle"><i class="fas fa-pen"></i></button><button class="btn btn-ghost btn-sm photo-delete" title="Fotoğrafı sil" aria-label="Sil"><i class="far fa-trash-can"></i></button></div>' : ''}
       </div>
     </div>
@@ -23616,6 +23676,7 @@ function photoCardHTML(p, showSave = false) {
       <div class="photo-media-backdrop" style="background-image:url('${escHtml(imageUrls[0])}')"></div>
       <div class="photo-native-link" data-photo-open="${p.id}"><img src="${escHtml(imageUrls[0])}" class="photo-native" alt="${escHtml(p.title || p.caption || '')}" draggable="false" loading="lazy" decoding="async" style="filter:${escHtml(mediaFilterCss(p.media_filter))}"/></div>
       ${galleryControls}
+      ${p.song_title && p.song_id ? `<div class="photo-audio-controls"><button class="photo-audio-toggle" type="button" title="Müziği aç" aria-label="Müziği aç"><i class="fas fa-volume-off"></i></button><input class="photo-volume" type="range" min="0" max="100" value="${Math.round(getMediaVolume() * 100)}" aria-label="Ses seviyesi" title="Ses seviyesi" /></div>` : ''}
     </div>
     <div class="photo-card-content ig-post-body">
       <div class="photo-actions ig-post-actions">
@@ -26514,13 +26575,14 @@ const CIG_GIF_RULES = {
 };
 
 function cigGifSource() {
+  // İlk açılışta GIPHY; sonrasında kullanıcının en son seçtiği sekme.
   try {
     const saved = localStorage.getItem(CIG_GIF_SOURCE_KEY);
-    return saved === 'giphy' ? 'giphy' : 'cig';
-  } catch { return 'cig'; }
+    return saved === 'cig' ? 'cig' : 'giphy';
+  } catch { return 'giphy'; }
 }
 function setCigGifSource(value) {
-  try { localStorage.setItem(CIG_GIF_SOURCE_KEY, value === 'giphy' ? 'giphy' : 'cig'); } catch { /* yoksay */ }
+  try { localStorage.setItem(CIG_GIF_SOURCE_KEY, value === 'cig' ? 'cig' : 'giphy'); } catch { /* yoksay */ }
 }
 function cigAbsoluteUrl(value) {
   try { return new URL(String(value || ''), location.origin).href; } catch { return String(value || ''); }

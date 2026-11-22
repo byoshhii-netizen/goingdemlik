@@ -2444,15 +2444,20 @@ body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
 @media (min-width: 761px) { .song-detail-cover-wrap.has-vinyl { width: 240px; height: 240px; } }
 
 /* =========================================================================
-   PROFİL AVATARI — elips düzeltmesi (SADECE kutu geometrisi)
-   .profile-header mobilde kolon flex; kolon düzeninde flex-basis yüksekliği
-   belirler ve style.css'teki "flex:0 0 76px" yüksekliği 76'ya sabitlerken
-   genişlik 90 kalıyor -> elips. flex-basis'i auto yapınca yükseklik yine
-   mevcut height kuralından (90/76) gelir ve kutu kare olur.
-   Görselin kendisine (object-fit, konum, zoom) DOKUNULMUYOR.
+   PROFİL AVATARI — elips düzeltmesi
+   Gerçek sebep: style.css'te .profile-header > .profile-avatar-wrap için
+   min-height/max-height 76px !important olarak çivilenmiş. cigcig-pro.css
+   431-560px aralığında width ve height'i 90px'e çekiyor ama min/max-height'e
+   dokunmadığı için max-height yüksekliği 76'ya kırpıyor -> 90x76 elips.
+   max-height her zaman height'i ezdiğinden kaynak sırası burada işe yaramaz;
+   çözüm min/max-height sınırlarını kaldırmak. Böylece yükseklik her
+   kırılımda kendi height kuralından gelir: 76 / 90 / 100 — hepsi kare.
+   Görsele (object-fit, konum, zoom) DOKUNULMUYOR.
    ========================================================================= */
-@media (max-width: 600px) {
-  .profile-header > .profile-avatar-wrap { flex-basis: auto !important; }
+.profile-header > .profile-avatar-wrap,
+.profile-page .profile-avatar-wrap {
+  min-height: 0 !important;
+  max-height: none !important;
 }
 
 /* =========================================================================
@@ -2473,11 +2478,11 @@ body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
   display: inline-flex; align-items: center; justify-content: center;
   height: 30px; min-width: 38px; padding: 0 9px;
   border: 1px solid rgba(255,255,255,.16); border-radius: 9px;
-  background: rgba(255,255,255,.05); color: #d8b87c;
+  background: rgba(255,255,255,.05); color: var(--accent-red);
   font: 800 11px/1 Inter, system-ui, sans-serif; letter-spacing: .5px;
   cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .1s ease;
 }
-.comment-gif-btn:hover { background: rgba(216,184,124,.14); border-color: rgba(216,184,124,.45); }
+.comment-gif-btn:hover { background: rgba(var(--accent-rgb),.14); border-color: rgba(var(--accent-rgb),.45); }
 .comment-gif-btn:active { transform: scale(.94); }
 .comment-compose-footer { display: flex; align-items: center; gap: 8px; }
 .comment-compose-footer #comment-char-count { margin-right: auto; }
@@ -2507,7 +2512,7 @@ body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
    UYGULAMA ŞİFRESİ — ayar kartı
    ========================================================================= */
 .app-lock-toggle { display: flex; align-items: flex-start; gap: 11px; margin: 4px 0 16px; cursor: pointer; }
-.app-lock-toggle input { width: 18px; height: 18px; margin-top: 2px; accent-color: #c9a96e; flex: 0 0 auto; }
+.app-lock-toggle input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--accent-red); flex: 0 0 auto; }
 .app-lock-toggle span { display: grid; gap: 3px; }
 .app-lock-toggle small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
 .app-lock-presets { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -2518,10 +2523,10 @@ body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
   font: 600 12.5px/1 inherit; cursor: pointer;
   transition: border-color .15s ease, color .15s ease, background .15s ease;
 }
-.app-lock-presets button:hover { border-color: rgba(201,169,110,.5); color: var(--text-primary); }
+.app-lock-presets button:hover { border-color: rgba(var(--accent-rgb),.5); color: var(--text-primary); }
 .app-lock-presets button.is-active {
-  border-color: #c9a96e; color: #f1e4cb;
-  background: rgba(201,169,110,.16);
+  border-color: var(--accent-red); color: var(--text-primary);
+  background: rgba(var(--accent-rgb),.16);
 }
 .app-lock-custom { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
 @media (max-width: 480px) { .app-lock-custom { grid-template-columns: 1fr; } }
@@ -2547,7 +2552,7 @@ body.app-lock-active { overflow: hidden; }
 }
 .app-lock-gate-icon {
   display: grid; place-items: center; width: 54px; height: 54px;
-  border-radius: 50%; background: rgba(201,169,110,.16); color: #d8b87c; font-size: 21px;
+  border-radius: 50%; background: rgba(var(--accent-rgb),.16); color: var(--accent-red); font-size: 21px;
 }
 .app-lock-gate-panel strong { font-size: 18px; color: #f1f1f1; }
 .app-lock-gate-panel p { margin: 0; color: #8b8b8b; font-size: 13.5px; line-height: 1.5; }
@@ -2557,8 +2562,8 @@ body.app-lock-active { overflow: hidden; }
   background: #1a1a1d; color: #eee; font-size: 15px;
 }
 .app-lock-gate-panel input:focus {
-  outline: none; border-color: #c9a96e;
-  box-shadow: 0 0 0 3px rgba(201,169,110,.16);
+  outline: none; border-color: var(--accent-red);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb),.16);
 }
 .app-lock-gate-panel .btn-primary { width: 100%; min-height: 46px; font-weight: 700; }
 .app-lock-gate-error { min-height: 18px; color: #ff6b6b; font-size: 13px; }
@@ -2613,7 +2618,7 @@ body.app-lock-active { overflow: hidden; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   margin-bottom: 7px; color: var(--text-secondary); font-size: 12.5px; font-weight: 600;
 }
-.story-upload-progress-head strong { color: #d8b87c; font-variant-numeric: tabular-nums; }
+.story-upload-progress-head strong { color: var(--accent-red); font-variant-numeric: tabular-nums; }
 .story-upload-progress-track {
   position: relative; height: 8px; overflow: hidden;
   border-radius: 999px; background: var(--bg-card2);
@@ -2621,13 +2626,13 @@ body.app-lock-active { overflow: hidden; }
 .story-upload-progress-bar {
   height: 100%; width: 0;
   border-radius: 999px;
-  background: linear-gradient(90deg, #c9a96e, #e7c98d);
+  background: linear-gradient(90deg, var(--accent-red), var(--accent-red2, var(--accent-red)));
   transition: width .25s ease;
 }
 /* Yüzde bilinmiyorken (hazırlık aşaması) akan şerit */
 .story-upload-progress.is-indeterminate .story-upload-progress-bar {
   width: 100% !important;
-  background: linear-gradient(90deg, transparent 0%, #c9a96e 40%, #e7c98d 60%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, var(--accent-red) 40%, var(--accent-red2, var(--accent-red)) 60%, transparent 100%);
   background-size: 240% 100%;
   animation: cgUploadSlide 1.1s linear infinite;
   transition: none;
@@ -2696,11 +2701,11 @@ body.app-lock-active { overflow: hidden; }
   display: grid; place-items: center;
   width: 40px; height: 40px; padding: 0;
   border: 1px solid #26262a; border-radius: 13px;
-  background: #1a1a1d; color: #d8b87c; font-size: 15px;
+  background: #1a1a1d; color: var(--accent-red); font-size: 15px;
   cursor: pointer; transition: background .15s ease, transform .1s ease;
 }
 .cg-gif-icon:active { transform: scale(.93); }
-.cg-gif-icon--add { background: linear-gradient(135deg, #c9a96e, #a98a52); border-color: transparent; color: #17130a; }
+.cg-gif-icon--add { background: linear-gradient(135deg, var(--accent-red), var(--accent-red2, var(--accent-red))); border-color: transparent; color: #fff; }
 
 .cg-gif-tabs {
   position: relative;
@@ -2720,7 +2725,7 @@ body.app-lock-active { overflow: hidden; }
   color: #8a8a92; font: 700 13px/1 Inter, system-ui, sans-serif;
   cursor: pointer; transition: color .18s ease;
 }
-.cg-gif-tab.is-active { color: #f1e4cb; }
+.cg-gif-tab.is-active { color: var(--text-primary); }
 
 .cg-gif-pane { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .cg-gif-pane[hidden] { display: none; }
@@ -2769,7 +2774,7 @@ body.app-lock-active { overflow: hidden; }
   transition: transform .12s ease, border-color .15s ease;
 }
 .cg-gif-card:active { transform: scale(.96); }
-.cg-gif-card:hover { border-color: rgba(201,169,110,.5); }
+.cg-gif-card:hover { border-color: rgba(var(--accent-rgb),.5); }
 .cg-gif-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .cg-gif-card:disabled { opacity: .5; }
 .cg-gif-owner {
@@ -2790,7 +2795,7 @@ body.app-lock-active { overflow: hidden; }
 .cg-gif-more {
   grid-column: 1 / -1; min-height: 44px; margin-top: 2px;
   border: 1px solid #26262a; border-radius: 13px;
-  background: #1a1a1d; color: #d8b87c; font: 700 13px/1 inherit; cursor: pointer;
+  background: #1a1a1d; color: var(--accent-red); font: 700 13px/1 inherit; cursor: pointer;
 }
 .cg-gif-empty {
   grid-column: 1 / -1;
@@ -2824,7 +2829,7 @@ body.app-lock-active { overflow: hidden; }
   cursor: pointer; overflow: hidden;
 }
 .cg-gif-drop-empty { display: grid; justify-items: center; gap: 5px; padding: 24px; text-align: center; }
-.cg-gif-drop-empty i { font-size: 26px; color: #c9a96e; }
+.cg-gif-drop-empty i { font-size: 26px; color: var(--accent-red); }
 .cg-gif-drop-empty strong { color: #e8e8ea; font-size: 14.5px; }
 .cg-gif-drop-empty small { color: #7d7d85; font-size: 12px; }
 .cg-gif-drop-preview { position: relative; display: grid; justify-items: center; width: 100%; padding: 12px; }
@@ -2832,11 +2837,11 @@ body.app-lock-active { overflow: hidden; }
 .cg-gif-drop-meta { margin-top: 8px; color: #8a8a92; font-size: 11.5px; text-align: center; word-break: break-all; }
 .cg-gif-drop-change {
   margin-top: 6px; padding: 4px 11px; border-radius: 999px;
-  background: rgba(201,169,110,.16); color: #d8b87c; font: 700 11px/1.6 inherit;
+  background: rgba(var(--accent-rgb),.16); color: var(--accent-red); font: 700 11px/1.6 inherit;
 }
 .cg-gif-rules { display: grid; gap: 6px; margin: 14px 0 4px; padding: 12px 14px; list-style: none; border-radius: 13px; background: #171719; }
 .cg-gif-rules li { display: flex; align-items: center; gap: 9px; color: #9a9aa2; font-size: 12px; line-height: 1.45; }
-.cg-gif-rules i { width: 15px; color: #c9a96e; font-size: 11px; text-align: center; }
+.cg-gif-rules i { width: 15px; color: var(--accent-red); font-size: 11px; text-align: center; }
 
 .cg-gif-field { margin-top: 16px; }
 .cg-gif-field-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
@@ -2848,7 +2853,7 @@ body.app-lock-active { overflow: hidden; }
 .cg-gif-chip {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 7px 5px 11px; border-radius: 999px;
-  background: rgba(201,169,110,.15); color: #e7c98d;
+  background: rgba(var(--accent-rgb),.15); color: var(--accent-red2, var(--accent-red));
   font: 600 12.5px/1 Inter, system-ui, sans-serif;
 }
 .cg-gif-chip.is-small { padding: 4px 6px 4px 9px; font-size: 11px; background: rgba(255,255,255,.06); color: #c6c6cc; }
@@ -2862,21 +2867,21 @@ body.app-lock-active { overflow: hidden; }
   box-sizing: border-box; width: 100%; height: 44px; padding: 0 13px;
   border: 1px solid #26262a; border-radius: 12px; background: #1a1a1d; color: #eee; font-size: 15px;
 }
-#cg-gif-kw:focus { outline: none; border-color: #c9a96e; box-shadow: 0 0 0 3px rgba(201,169,110,.15); }
+#cg-gif-kw:focus { outline: none; border-color: var(--accent-red); box-shadow: 0 0 0 3px rgba(var(--accent-rgb),.15); }
 .cg-gif-hint { display: block; margin-top: 7px; color: #7d7d85; font-size: 11.5px; line-height: 1.5; }
 .cg-gif-error { margin-top: 10px; color: #ff6b6b; font-size: 12.5px; min-height: 16px; }
 .cg-gif-submit {
   flex: 0 0 auto; margin: 0 14px calc(14px + env(safe-area-inset-bottom));
   min-height: 48px; border: 0; border-radius: 14px;
-  background: linear-gradient(135deg, #c9a96e, #b08f58); color: #17130a;
+  background: linear-gradient(135deg, var(--accent-red), var(--accent-red2, var(--accent-red))); color: #fff;
   font: 800 14.5px/1 Inter, system-ui, sans-serif; cursor: pointer;
 }
 .cg-gif-submit:disabled { background: #232327; color: #6a6a72; cursor: default; }
 .cg-gif-progress { margin-top: 14px; }
 .cg-gif-progress-head { display: flex; justify-content: space-between; margin-bottom: 6px; color: #9a9aa2; font-size: 12px; font-weight: 600; }
-.cg-gif-progress-head strong { color: #d8b87c; font-variant-numeric: tabular-nums; }
+.cg-gif-progress-head strong { color: var(--accent-red); font-variant-numeric: tabular-nums; }
 .cg-gif-progress-track { height: 7px; border-radius: 999px; background: #232327; overflow: hidden; }
-.cg-gif-progress-bar { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #c9a96e, #e7c98d); transition: width .2s ease; }
+.cg-gif-progress-bar { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, var(--accent-red), var(--accent-red2, var(--accent-red))); transition: width .2s ease; }
 
 /* ---- Giflerim ---- */
 .cg-gif-seg {
@@ -2887,7 +2892,7 @@ body.app-lock-active { overflow: hidden; }
   min-height: 34px; border: 0; border-radius: 10px; background: none;
   color: #8a8a92; font: 700 12.5px/1 inherit; cursor: pointer;
 }
-.cg-gif-seg button.is-active { background: #2b2b31; color: #f1e4cb; }
+.cg-gif-seg button.is-active { background: #2b2b31; color: var(--text-primary); }
 .cg-gif-mine { display: grid; gap: 10px; }
 .cg-gif-mine-card {
   display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 11px;
@@ -2911,7 +2916,7 @@ body.app-lock-active { overflow: hidden; }
 .cg-gif-loading { display: grid; place-items: center; padding: 40px; }
 .cg-gif-spin {
   width: 26px; height: 26px; border-radius: 50%;
-  border: 2.5px solid #2a2a2e; border-top-color: #c9a96e;
+  border: 2.5px solid #2a2a2e; border-top-color: var(--accent-red);
   animation: cgGifSpin .8s linear infinite;
 }
 @keyframes cgGifSpin { to { transform: rotate(360deg); } }
@@ -2947,8 +2952,8 @@ body.app-lock-active { overflow: hidden; }
   .dm-attach-menu button i {
     display: grid; place-items: center;
     width: 42px !important; height: 42px; margin: 0 !important;
-    border-radius: 50%; background: rgba(201,169,110,.14);
-    color: #d8b87c !important; font-size: 16px !important;
+    border-radius: 50%; background: rgba(var(--accent-rgb),.14);
+    color: var(--accent-red) !important; font-size: 16px !important;
   }
   .dm-attach-menu button span { line-height: 1.25; }
   .dm-attach-menu button:active { transform: scale(.95); }
@@ -2990,7 +2995,7 @@ body.app-lock-active { overflow: hidden; }
   background: var(--bg-card2);
   transition: border-color .18s ease;
 }
-.comment-form:focus-within { border-color: rgba(201,169,110,.45); }
+.comment-form:focus-within { border-color: rgba(var(--accent-rgb),.45); }
 .comment-form .comment-avatar { width: 34px !important; height: 34px !important; flex: 0 0 34px; border-radius: 50%; }
 .comment-compose-body { flex: 1; min-width: 0; }
 .comment-form textarea {
@@ -3007,3 +3012,332 @@ body.app-lock-active { overflow: hidden; }
 /* Reals / foto yorum sayfası */
 .ig-comment-form { gap: 8px; align-items: flex-end; }
 .ig-comment-form .ig-comment-me { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 50%; object-fit: cover; }
+
+/* =========================================================================
+   GIF IZGARASI — Instagram/GIPHY gibi boşluksuz masonry
+   Eşit yükseklikli ızgara, farklı en-boy oranlarında büyük boşluklar
+   bırakıyordu; sütun akışı her kartı kendi yüksekliğinde dizer.
+   ========================================================================= */
+.cg-gif-grid {
+  display: block !important;
+  columns: 2;
+  column-gap: 6px;
+  padding: 0 12px calc(14px + env(safe-area-inset-bottom));
+}
+@media (min-width: 480px) { .cg-gif-grid { columns: 3; } }
+@media (min-width: 720px) { .cg-gif-grid { columns: 4; } }
+.cg-gif-card {
+  break-inside: avoid;
+  -webkit-column-break-inside: avoid;
+  display: block;
+  width: 100%;
+  margin: 0 0 6px;
+  aspect-ratio: auto !important;
+  max-height: none !important;
+  border-radius: 12px;
+}
+.cg-gif-card img { height: auto !important; object-fit: contain !important; }
+.cg-gif-skeleton {
+  break-inside: avoid; margin-bottom: 6px;
+  height: 120px; aspect-ratio: auto;
+}
+.cg-gif-skeleton:nth-child(2n) { height: 165px; }
+.cg-gif-skeleton:nth-child(3n) { height: 100px; }
+.cg-gif-more, .cg-gif-empty { column-span: all; }
+.cg-gif-more { display: block; width: 100%; margin: 6px 0 0; }
+
+/* =========================================================================
+   MESAJ TEPKİLERİ — WhatsApp gibi balonun alt kenarına asılı hap
+   ========================================================================= */
+.dm-msg-wrap .dm-msg-reactions {
+  top: auto !important;
+  right: 6px !important;
+  bottom: -12px !important;
+  gap: 2px !important;
+}
+.dm-msg-wrap .dm-msg-reactions:not(:empty) ~ *,
+.dm-msg-wrap:has(.dm-msg-reactions .dm-reaction-pill) { margin-bottom: 14px; }
+.dm-msg-wrap .dm-reaction-pill {
+  min-height: 23px !important;
+  padding: 2px 7px !important;
+  gap: 3px !important;
+  border: 1px solid rgba(255,255,255,.09) !important;
+  border-radius: 999px !important;
+  background: var(--bg-secondary, #1f1f23) !important;
+  box-shadow: 0 2px 7px rgba(0,0,0,.42) !important;
+}
+.dm-msg-wrap .dm-reaction-pill span { font-size: 13px !important; }
+.dm-msg-wrap .dm-reaction-pill small {
+  font-size: 10.5px !important; font-weight: 600 !important;
+  color: var(--text-secondary) !important;
+}
+.dm-msg-wrap .dm-reaction-pill.is-mine {
+  border-color: rgba(239,51,64,.55) !important;
+  background: color-mix(in srgb, var(--bg-secondary, #1f1f23) 82%, rgba(239,51,64,.6)) !important;
+}
+
+/* Mesaj menüsü: balona yapışık, daha yumuşak */
+#dm-msg-ctx {
+  border-radius: 14px !important;
+  box-shadow: 0 14px 38px rgba(0,0,0,.55) !important;
+  animation: dmMsgCtxIn .14s ease both;
+}
+@keyframes dmMsgCtxIn { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
+
+/* =========================================================================
+   ÜST VE ALT BAR — telefonda Instagram ölçülerine yakın
+   ========================================================================= */
+@media (max-width: 768px) {
+  .nav-container { height: 64px !important; }
+  .nav-brand .site-wordmark { font-size: 1.42rem; }
+  .navbar .nav-icon-btn,
+  .navbar .nav-action-btn,
+  .nav-container > div > button,
+  .nav-container > button { min-width: 42px; min-height: 42px; }
+  .navbar .nav-container i { font-size: 20px; }
+
+  .mobile-bottom-bar a { min-height: 54px !important; gap: 2px !important; }
+  .mobile-bottom-bar i { font-size: 25px !important; }
+  .mobile-bottom-bar img,
+  .mobile-bottom-bar .bottom-bar-avatar { width: 27px !important; height: 27px !important; }
+}
+
+/* =========================================================================
+   MÜZİK SAYFASI — sade başlık, Playlistlerim tek başına
+   ========================================================================= */
+.music-page-header--compact {
+  display: flex; justify-content: flex-start;
+  margin-bottom: 14px; padding: 0;
+  border: 0; background: none;
+}
+.music-page-header--compact .music-playlists-link { width: 100%; max-width: 420px; }
+
+/* =========================================================================
+   NOT PANELİ — kapatma düğmesi not rengini alsın, panel daha derli toplu
+   ========================================================================= */
+#modal.profile-note-viewer-modal {
+  border: 1px solid color-mix(in srgb, var(--dm-note-color, #242731) 55%, #000) !important;
+  border-radius: 22px !important;
+  background: color-mix(in srgb, var(--dm-note-color, #242731) 22%, #121214) !important;
+}
+#modal.profile-note-viewer-modal .modal-header {
+  padding: 10px 12px 0 !important;
+  border-bottom: 0 !important;
+  background: none !important;
+}
+#modal.profile-note-viewer-modal .modal-close {
+  display: grid; place-items: center;
+  width: 34px; height: 34px;
+  border: 1px solid color-mix(in srgb, var(--dm-note-color, #242731) 62%, transparent) !important;
+  border-radius: 50% !important;
+  background: color-mix(in srgb, var(--dm-note-color, #242731) 78%, #000) !important;
+  color: #fff !important;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  transition: transform .12s ease, background .15s ease;
+}
+#modal.profile-note-viewer-modal .modal-close:hover {
+  background: color-mix(in srgb, var(--dm-note-color, #242731) 95%, #000) !important;
+}
+#modal.profile-note-viewer-modal .modal-close:active { transform: scale(.92); }
+.profile-note-viewer { border-radius: 18px; }
+.profile-note-viewer-content { font-size: 16.5px; line-height: 1.5; }
+.profile-note-shared-at { opacity: .72; }
+
+/* =========================================================================
+   REALS — üstteki "Reals" başlığı görünmesin
+   Düzen bozulmaz: eylemler zaten margin-left:auto ile sağa yaslı.
+   Etiket ekran okuyucular için DOM'da kalıyor.
+   ========================================================================= */
+.ig-reels-heading {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* =========================================================================
+   FOTOĞRAF SESİ — başlıkta değil, fotoğrafın sağ alt köşesinde
+   ========================================================================= */
+.photo-media-wrap { position: relative; }
+.photo-media-wrap > .photo-audio-controls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: row-reverse; /* düğme sağda sabit, ses çubuğu sola doğru açılır */
+  align-items: center;
+  gap: 8px;
+}
+.photo-media-wrap > .photo-audio-controls .photo-audio-toggle {
+  position: static !important;
+  width: 36px !important;
+  height: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  min-height: 36px !important;
+  max-height: 36px !important;
+  border: 1px solid rgba(255,255,255,.22) !important;
+  background: rgba(10,10,12,.62) !important;
+  background-color: rgba(10,10,12,.62) !important;
+  color: #fff !important;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 14px rgba(0,0,0,.4);
+}
+.photo-media-wrap > .photo-audio-controls .photo-audio-toggle i {
+  width: 15px !important;
+  height: 15px !important;
+  line-height: 15px !important;
+  font-size: 15px !important;
+}
+.photo-media-wrap > .photo-audio-controls .photo-audio-toggle:active { transform: scale(.92); }
+.photo-media-wrap > .photo-audio-controls .photo-volume {
+  width: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: width .2s ease, opacity .2s ease;
+}
+.photo-media-wrap > .photo-audio-controls:hover .photo-volume,
+.photo-media-wrap > .photo-audio-controls:focus-within .photo-volume {
+  width: 94px;
+  opacity: 1;
+  pointer-events: auto;
+}
+/* Dokunmatikte kayar çubuk yerine sade aç/kapat */
+@media (hover: none) {
+  .photo-media-wrap > .photo-audio-controls .photo-volume { display: none; }
+}
+
+/* =========================================================================
+   KEŞFET — Instagram keşfet düzeni
+   Tam boy gönderi kartları 3 sütuna sıkışınca 735px yüksekliğe çıkıyor ve
+   ızgara dağılıyordu. Kartlar kare karo olur, yalnızca görsel görünür.
+   ========================================================================= */
+.media-explore-page #media-explore-feed {
+  --cg-ex-gap: 2px;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-auto-rows: calc((100% - var(--cg-ex-gap) * 2) / 3);
+  grid-auto-flow: row dense;
+  gap: var(--cg-ex-gap) !important;
+  padding: 0 !important;
+  background: none;
+}
+/* Izgara dışı içerikler (yükleniyor, boş durum, reklam) tam satır */
+.media-explore-page #media-explore-feed > *:not(article) { grid-column: 1 / -1; }
+
+.media-explore-page #media-explore-feed > article {
+  position: relative;
+  min-width: 0;
+  min-height: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #0c0c0e !important;
+  box-shadow: none !important;
+  overflow: hidden;
+}
+/* Instagram deseni: her dokuzlu grubun ilki büyük karo */
+.media-explore-page #media-explore-feed > article:nth-of-type(9n + 1) {
+  grid-column: span 2;
+  grid-row: span 2;
+}
+/* Karoda yalnızca medya kalsın */
+.media-explore-page #media-explore-feed > article > *:not(.photo-media-wrap):not(.ig-post-media) {
+  display: none !important;
+}
+.media-explore-page #media-explore-feed > article .photo-media-wrap,
+.media-explore-page #media-explore-feed > article .ig-post-media {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  aspect-ratio: auto !important;
+}
+.media-explore-page #media-explore-feed > article .photo-media-backdrop { display: none !important; }
+.media-explore-page #media-explore-feed > article .photo-native-link,
+.media-explore-page #media-explore-feed > article .reals-media-open {
+  position: absolute !important; inset: 0 !important;
+  width: 100% !important; height: 100% !important; margin: 0 !important;
+}
+.media-explore-page #media-explore-feed > article img,
+.media-explore-page #media-explore-feed > article video {
+  width: 100% !important;
+  height: 100% !important;
+  max-height: none !important;
+  object-fit: cover !important;
+  border-radius: 0 !important;
+}
+/* Reals karolarında küçük bir oynat rozeti kalsın */
+.media-explore-page #media-explore-feed > article.reals-media-card::after {
+  content: "\f04b";
+  position: absolute; top: 7px; right: 8px; z-index: 3;
+  font-family: "Font Awesome 6 Free"; font-weight: 900; font-size: 13px;
+  color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.6);
+  pointer-events: none;
+}
+/* Galeri okları/noktaları karoda görünmesin */
+.media-explore-page #media-explore-feed > article .photo-gallery-nav,
+.media-explore-page #media-explore-feed > article .photo-gallery-dots,
+.media-explore-page #media-explore-feed > article .photo-audio-controls { display: none !important; }
+
+/* ---- Keşfet başlığı: sade, taşmayan, Instagram gibi ---- */
+.media-explore-hero {
+  box-sizing: border-box;
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 0 10px !important;
+  padding: 10px 12px 12px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+}
+.media-explore-hero::before,
+.media-explore-hero::after { display: none !important; content: none !important; }
+.media-explore-heading { margin-bottom: 10px; gap: 10px !important; }
+.media-explore-icon { display: none !important; }
+.media-explore-heading h1 {
+  font-size: 22px !important;
+  letter-spacing: -.02em !important;
+  text-shadow: none !important;
+}
+.media-explore-search {
+  box-sizing: border-box;
+  width: 100% !important;
+  min-height: 44px !important;
+  padding: 0 14px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 12px !important;
+  background: var(--bg-card2) !important;
+  color: var(--text-muted) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.media-explore-search:focus-within {
+  transform: none !important;
+  border-color: var(--border-hover) !important;
+  box-shadow: none !important;
+}
+.media-explore-search input { font-size: 15px; }
+@media (max-width: 600px) {
+  .media-explore-hero { margin-inline: 0 !important; }
+  .media-explore-heading h1 { font-size: 20px !important; }
+}

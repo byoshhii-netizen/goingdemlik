@@ -13612,6 +13612,59 @@ app.post('/api/conversation/:username/mark-read', authMiddleware, async (req, re
   res.json({ ok: true, conversationId: conversation.id, readThroughMessageId });
 });
 
+// Mesaj fotoğrafını indirmek için güvenli vekil (CDN'de CORS engeli olduğunda).
+// Yalnızca sitenin kendi medya kaynaklarına izin verilir; rastgele adres çekilmez.
+app.get('/api/download-image', authMiddleware, async (req, res) => {
+  const raw = String(req.query.url || '').trim();
+  if (!raw || raw.length > 2048) return res.status(400).json({ error: 'Adres geçersiz.' });
+
+  const allowedHosts = new Set();
+  if (process.env.CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_URL) allowedHosts.add('res.cloudinary.com');
+  [process.env.R2_PUBLIC_URL, R2_ENDPOINT, SITE_URL].forEach(value => {
+    if (!value) return;
+    try { allowedHosts.add(new URL(value).hostname); } catch { /* yoksay */ }
+  });
+
+  let target;
+  try {
+    target = new URL(raw, SITE_URL || 'https://cigcig.xyz');
+  } catch { return res.status(400).json({ error: 'Adres geçersiz.' }); }
+  if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+    return res.status(400).json({ error: 'Adres geçersiz.' });
+  }
+
+  // Yerel /uploads dosyaları doğrudan diskten verilir.
+  if (!USE_CLOUDINARY && target.pathname.startsWith('/uploads/')) {
+    const safeName = path.basename(target.pathname);
+    const filePath = path.join(__dirname, 'uploads', safeName);
+    if (!filePath.startsWith(path.join(__dirname, 'uploads'))) return res.status(400).json({ error: 'Adres geçersiz.' });
+    return res.download(filePath, 'cigfoto.png', error => {
+      if (error && !res.headersSent) res.status(404).json({ error: 'Fotoğraf bulunamadı.' });
+    });
+  }
+
+  if (!allowedHosts.has(target.hostname)) {
+    return res.status(400).json({ error: 'Bu adresten indirme yapılamaz.' });
+  }
+
+  try {
+    const upstream = await fetch(target.href, { redirect: 'follow' });
+    if (!upstream.ok) return res.status(502).json({ error: 'Fotoğraf alınamadı.' });
+    const type = String(upstream.headers.get('content-type') || '');
+    if (!type.startsWith('image/')) return res.status(400).json({ error: 'Bu adres bir fotoğraf değil.' });
+    const length = Number(upstream.headers.get('content-length') || 0);
+    if (length && length > 30 * 1024 * 1024) return res.status(413).json({ error: 'Fotoğraf çok büyük.' });
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.setHeader('Content-Type', type);
+    res.setHeader('Content-Disposition', 'attachment; filename="cigfoto.png"');
+    res.setHeader('Cache-Control', 'private, max-age=0');
+    res.send(buffer);
+  } catch (error) {
+    console.error('[download-image] başarısız:', error.message);
+    res.status(502).json({ error: 'Fotoğraf indirilemedi.' });
+  }
+});
+
 // =========================================================================
 // CIG GIF ARŞİVİ — kullanıcıların yüklediği GIF/görseller ve etiketleri
 // =========================================================================
