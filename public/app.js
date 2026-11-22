@@ -129,6 +129,17 @@ let appVersionPollTimer = null;
 const journalistDirectory = new Map();
 let dmSearchUnlockCode = '';
 let dmIconUnlockCode = '';
+// Kilit simgesiyle açılan sohbetler: rota değişse de açık kalır,
+// sayfa yenilenince sıfırlanır, 10 dakika sonra tekrar şifre ister.
+let dmIconUnlockedAt = 0;
+const DM_ICON_UNLOCK_TTL = 10 * 60 * 1000;
+function dmIconUnlockIsValid() {
+  return Boolean(dmIconUnlockCode) && (Date.now() - dmIconUnlockedAt) < DM_ICON_UNLOCK_TTL;
+}
+function dmClearIconUnlock() {
+  dmIconUnlockCode = '';
+  dmIconUnlockedAt = 0;
+}
 let dmSearchUnlockedConvs = [];
 let groupChatSelection = new Set();
 let groupChatSelectionMode = false;
@@ -2052,6 +2063,11 @@ function renderRoute(fullPath) {
   }
   const wasInMessages = previousPath === '/mesajlar' || previousPath?.startsWith('/mesajlar/');
   const isInMessages = path === '/mesajlar' || path.startsWith('/mesajlar/');
+  // Aramaya şifre yazarak açılan sohbetler yalnızca mesajlarda kalındığı sürece görünür.
+  if (!isInMessages && (dmSearchUnlockCode || dmSearchUnlockedConvs.length)) {
+    dmSearchUnlockCode = '';
+    dmSearchUnlockedConvs = [];
+  }
   if (wasInMessages && path.startsWith('/profil/')) dmSuggestionsReturningFromProfile = true;
   const returnedFromProfile = isInMessages && previousPath?.startsWith('/profil/') && dmSuggestionsReturningFromProfile;
   if (returnedFromProfile) dmSuggestionsReturningFromProfile = false;
@@ -3881,7 +3897,7 @@ function updateNavUI() {
     if (desktopLogoutGroup) desktopLogoutGroup.hidden = true;
     if (adminMenuLink) adminMenuLink.hidden = true;
     dmSearchUnlockCode = '';
-    dmIconUnlockCode = '';
+    dmClearIconUnlock();
     dmSearchUnlockedConvs = [];
     authEl.classList.remove('hidden');
     const navBrand = document.querySelector('.nav-brand');
@@ -16372,7 +16388,24 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
   });
 
   // Hidden toggle
-  document.getElementById('dm-hidden-toggle-btn')?.addEventListener('click', () => {
+  document.getElementById('dm-hidden-toggle-btn')?.addEventListener('click', async () => {
+    const revealHiddenPanel = () => {
+      const panel = $('#dm-hidden-panel');
+      const list = $('#dm-hidden-list');
+      if (list) list.innerHTML = hiddenConvs.length ? hiddenConvs.map(c => convItemHTML(c, true)).join('') : '<div class="dm-empty-small">Kilitli konuşma yok</div>';
+      bindConversationItems();
+      panel?.classList.remove('hidden');
+    };
+    // 10 dakika içinde açılmışsa ve sayfa yenilenmemişse şifre sorma
+    if (dmIconUnlockIsValid()) {
+      try {
+        hiddenConvs = await api('/conversations/unlock', { method: 'POST', body: JSON.stringify({ password: dmIconUnlockCode }) });
+        revealHiddenPanel();
+        return;
+      } catch {
+        dmClearIconUnlock(); // şifre değişmiş olabilir, normal akışa dön
+      }
+    }
     showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için Sohbet Kilidi ayarlarında belirlediğin kilit simgesi şifresini gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Kilit simgesi şifresi" autocomplete="off" autocapitalize="none" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
     $('#dm-global-unlock-btn')?.addEventListener('click', async () => {
       const button = $('#dm-global-unlock-btn');
@@ -16381,12 +16414,9 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       try {
         hiddenConvs = await api('/conversations/unlock', { method: 'POST', body: JSON.stringify({ password }) });
         dmIconUnlockCode = password;
+        dmIconUnlockedAt = Date.now();
         hideModal();
-        const panel = $('#dm-hidden-panel');
-        const list = $('#dm-hidden-list');
-        if (list) list.innerHTML = hiddenConvs.length ? hiddenConvs.map(c => convItemHTML(c, true)).join('') : '<div class="dm-empty-small">Kilitli konuşma yok</div>';
-        bindConversationItems();
-        panel?.classList.remove('hidden');
+        revealHiddenPanel();
       } catch (error) {
         $('#dm-global-unlock-error').textContent = error.message || 'Şifre yanlış';
         button.disabled = false;
