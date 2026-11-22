@@ -2142,6 +2142,12 @@ Talepleriniz için platform üzerinden iletişime geçebilirsiniz.`]);
     console.warn('pg_trgm kurulamadı, GIF araması basit eşleşmeye düşecek:', error.message);
   }
 
+  // Sohbet kilidi: her konuşma için açılış yöntemi (icon | search)
+  await query(`
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS lock_mode_user1 TEXT DEFAULT '';
+    ALTER TABLE dm_conversations ADD COLUMN IF NOT EXISTS lock_mode_user2 TEXT DEFAULT '';
+  `);
+
   console.log('PostgreSQL bağlantısı ve tablolar hazır.');
 }
 

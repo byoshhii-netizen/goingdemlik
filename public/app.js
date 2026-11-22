@@ -13775,133 +13775,86 @@ async function renderSettingsSection(section) {
       }
     }));
   } else if (section === 'dm-lock') {
-    let lockSettings;
+    let lockState = { has_code: false, separate_icon_code: false, icon_count: 0, search_count: 0 };
     try {
-      lockSettings = await api('/me/dm-lock-settings');
+      lockState = { ...lockState, ...(await api('/me/chat-lock')) };
     } catch (error) {
       el.innerHTML = `<div class="card"><div class="card-body"><div class="form-error">${escHtml(error.message)}</div></div></div>`;
       return;
     }
     el.innerHTML = `
-      <div class="card">
-        <div class="card-header"><span><i class="fas fa-lock" style="color:var(--accent-red2);margin-right:6px"></i>Sohbet Kilidi</span></div>
+      <section class="card chat-lock-card">
+        <div class="card-header"><span><i class="fas fa-lock"></i> Sohbet kilidi</span></div>
         <div class="card-body">
-          <p class="settings-help">Kilitli sohbetlerine hangi yollardan erişebileceğini seç. Arama koduyla açılan sohbetler yalnızca bu sayfa açıkken görünür; sayfayı yenilediğinde tekrar kilitlenir.</p>
-          <label class="profile-visibility-option">
-            <span class="profile-visibility-icon"><i class="fas fa-lock-open"></i></span>
-            <span><b>Kilit simgesiyle aç</b><small>Ayarlarında belirlediğin ayrı kilit simgesi şifresiyle kilitli sohbetlerini görüntüle.</small></span>
-            <input type="checkbox" id="dm-lock-icon-enabled" ${lockSettings.icon_unlock_enabled ? 'checked' : ''} />
-          </label>
-          <div class="form-group" style="margin-top:16px">
-            <label for="dm-lock-icon-current">${lockSettings.has_icon_code ? 'Mevcut kilit simgesi şifresi' : 'Kilit simgesi şifresi'}</label>
-            ${lockSettings.has_icon_code ? '<input id="dm-lock-icon-current" type="password" autocomplete="current-password" placeholder="Değişiklik için mevcut şifre" />' : '<small class="field-hint">Kilitli konuşma şifrelerinden farklı, yalnızca kilit simgesinden açmak için kullanılır.</small>'}
-            <input id="dm-lock-icon-new" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="${lockSettings.has_icon_code ? 'Yeni şifre (değiştirmek için)' : 'Yeni şifre (en az 4 karakter)'}" style="margin-top:8px" />
-            <input id="dm-lock-icon-confirm" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="Yeni şifreyi tekrar girin" style="margin-top:8px" />
-            <button type="button" class="btn btn-outline btn-sm" id="save-dm-icon-code" style="margin-top:8px"><i class="fas fa-key"></i> ${lockSettings.has_icon_code ? 'Kilit Simgesi Şifresini Değiştir' : 'Kilit Simgesi Şifresi Oluştur'}</button>
-            ${lockSettings.has_icon_code ? '<button type="button" class="btn btn-ghost btn-sm" id="forgot-dm-icon-code" style="margin-top:8px">Kilidi Unuttum</button>' : ''}
-            <div id="dm-icon-code-msg" class="form-error mt-4"></div>
+          <p class="settings-help">Kilitlediğin sohbetler listenden kaldırılır. Her sohbet için iki açılış yolundan birini seçersin; ikisi de aynı kilit şifresini kullanır.</p>
+
+          <div class="chat-lock-modes">
+            <div class="chat-lock-mode-info">
+              <span><i class="fas fa-lock"></i></span>
+              <div><strong>Kilit simgesinden</strong><small>Listende kilit simgesi görünür, dokunup şifreni girersin.</small></div>
+              <b>${lockState.icon_count}</b>
+            </div>
+            <div class="chat-lock-mode-info">
+              <span><i class="fas fa-magnifying-glass"></i></span>
+              <div><strong>Aramadan anahtarla</strong><small>Hiç görünmez; şifreyi arama kutusuna yazınca çıkar.</small></div>
+              <b>${lockState.search_count}</b>
+            </div>
           </div>
-          <label class="profile-visibility-option">
-            <span class="profile-visibility-icon"><i class="fas fa-magnifying-glass"></i></span>
-            <span><b>Kişi arama koduyla aç</b><small>Mesajlar sayfasındaki arama alanına özel kodu yazıp Enter'a bas.</small></span>
-            <input type="checkbox" id="dm-lock-search-enabled" ${lockSettings.search_unlock_enabled ? 'checked' : ''} />
-          </label>
-          <div class="form-group" style="margin-top:16px">
-            <label for="dm-lock-search-code">Özel arama kodu</label>
-            <input id="dm-lock-search-code" type="password" minlength="4" maxlength="64" autocomplete="new-password" placeholder="${lockSettings.has_search_code ? 'Değiştirmek için yeni kod girin' : 'En az 4 karakter'}" />
-            <small class="field-hint">${lockSettings.has_search_code ? 'Kayıtlı bir kod var. Değiştirmek için yeni kod gir veya kaldırma seçeneğini kullan.' : 'Bu kod şifreli olarak saklanır ve yalnızca kilitli sohbetleri geçici açmak için kullanılır.'}</small>
+
+          <div class="form-group">
+            <label for="chat-lock-code">${lockState.has_code ? 'Yeni kilit şifresi' : 'Kilit şifresi'}</label>
+            <input id="chat-lock-code" type="password" autocomplete="new-password" maxlength="64" placeholder="${lockState.has_code ? 'Değiştirmek istemiyorsan boş bırak' : 'En az 4 karakter'}" />
           </div>
-          ${lockSettings.has_search_code ? `<label class="checkbox-label"><input type="checkbox" id="dm-lock-clear-code" /> Kayıtlı arama kodunu kaldır</label>` : ''}
-          <button class="btn btn-primary" id="save-dm-lock-settings"><i class="fas fa-save"></i> Ayarları Kaydet</button>
-          <div id="dm-lock-settings-msg" class="form-error mt-4"></div>
+          ${lockState.has_code ? `<div class="form-group"><label for="chat-lock-current">Mevcut kilit şifren</label><input id="chat-lock-current" type="password" autocomplete="current-password" placeholder="Değişikliği onaylamak için" /></div>` : ''}
+
+          <label class="chat-lock-toggle">
+            <input type="checkbox" id="chat-lock-separate" ${lockState.separate_icon_code ? 'checked' : ''} />
+            <span><strong>Kilit simgesi için ayrı şifre kullan</strong><small>Bazı sohbetleri simgeden, bazılarını aramadan açıyorsan ikisine farklı şifre verebilirsin.</small></span>
+          </label>
+          <div class="form-group" id="chat-lock-icon-group" ${lockState.separate_icon_code ? '' : 'hidden'}>
+            <label for="chat-lock-icon-code">Kilit simgesi şifresi</label>
+            <input id="chat-lock-icon-code" type="password" autocomplete="new-password" maxlength="64" placeholder="${lockState.separate_icon_code ? 'Değiştirmek istemiyorsan boş bırak' : 'En az 4 karakter'}" />
+          </div>
+
+          <button type="button" class="btn btn-primary" id="chat-lock-save"><i class="fas fa-save"></i> Kaydet</button>
+          <div id="chat-lock-msg" class="form-error mt-4"></div>
         </div>
-      </div>`;
-    $('#save-dm-lock-settings')?.addEventListener('click', async () => {
-      const message = $('#dm-lock-settings-msg');
-      const button = $('#save-dm-lock-settings');
+      </section>`;
+
+    const separateToggle = document.getElementById('chat-lock-separate');
+    const iconGroup = document.getElementById('chat-lock-icon-group');
+    separateToggle?.addEventListener('change', () => { iconGroup.hidden = !separateToggle.checked; });
+
+    document.getElementById('chat-lock-save')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const message = document.getElementById('chat-lock-msg');
+      const code = document.getElementById('chat-lock-code').value.trim();
+      const currentCode = document.getElementById('chat-lock-current')?.value.trim() || '';
+      const separate = Boolean(separateToggle?.checked);
+      const iconCode = document.getElementById('chat-lock-icon-code')?.value.trim() || '';
+      message.style.color = '';
+      if (!lockState.has_code && code.length < 4) { message.textContent = 'Kilit şifresi en az 4 karakter olmalı.'; return; }
+      if (lockState.has_code && code && !currentCode) { message.textContent = 'Şifreyi değiştirmek için mevcut şifreni gir.'; return; }
+      if (separate && !iconCode && !lockState.separate_icon_code) { message.textContent = 'Simge için ayrı bir şifre gir.'; return; }
       button.disabled = true;
-      const clearSearchCode = $('#dm-lock-clear-code')?.checked || false;
       try {
-        lockSettings = await api('/me/dm-lock-settings', {
+        const updated = await api('/me/chat-lock', {
           method: 'PUT',
-          body: JSON.stringify({
-            icon_unlock_enabled: $('#dm-lock-icon-enabled').checked,
-            search_unlock_enabled: !clearSearchCode && $('#dm-lock-search-enabled').checked,
-            search_code: $('#dm-lock-search-code').value,
-            clear_search_code: clearSearchCode
-          })
+          body: JSON.stringify({ code, current_code: currentCode, separate_icon_code: separate, icon_code: iconCode })
         });
-        toast('Sohbet kilidi ayarları kaydedildi');
-        renderSettingsSection('dm-lock');
+        lockState = { ...lockState, ...updated };
+        document.getElementById('chat-lock-code').value = '';
+        if (document.getElementById('chat-lock-current')) document.getElementById('chat-lock-current').value = '';
+        if (document.getElementById('chat-lock-icon-code')) document.getElementById('chat-lock-icon-code').value = '';
+        message.style.color = 'var(--green)';
+        message.textContent = 'Sohbet kilidi ayarların kaydedildi.';
       } catch (error) {
-        message.textContent = error.message;
+        message.textContent = error.message || 'Kaydedilemedi.';
+      } finally {
         button.disabled = false;
       }
     });
-    $('#save-dm-icon-code')?.addEventListener('click', async () => {
-      const message = $('#dm-icon-code-msg');
-      const nextCode = $('#dm-lock-icon-new').value;
-      if (nextCode.length < 4 || nextCode.length > 64) {
-        message.textContent = 'Yeni kilit simgesi şifresi 4-64 karakter arasında olmalıdır.';
-        return;
-      }
-      if (nextCode !== $('#dm-lock-icon-confirm').value) {
-        message.textContent = 'Yeni şifreler eşleşmiyor.';
-        return;
-      }
-      const button = $('#save-dm-icon-code');
-      button.disabled = true;
-      try {
-        await api('/me/dm-lock-settings', {
-          method: 'PUT',
-          body: JSON.stringify({
-            current_icon_code: $('#dm-lock-icon-current')?.value || '',
-            icon_code: nextCode
-          })
-        });
-        toast(lockSettings.has_icon_code ? 'Kilit simgesi şifresi değiştirildi' : 'Kilit simgesi şifresi oluşturuldu');
-        renderSettingsSection('dm-lock');
-      } catch (error) {
-        message.textContent = error.message;
-        button.disabled = false;
-      }
-    });
-    $('#forgot-dm-icon-code')?.addEventListener('click', () => {
-      showModal('Kilit Simgesi Şifresini Sıfırla', `
-        <p style="margin-bottom:12px">Mevcut şifre olmadan yeni bir kilit simgesi şifresi oluşturulacak. Bu hesaptaki kilitli sohbetler kilitten çıkarılacak ve sohbet şifreleri temizlenecek. <strong>Mesajlar silinmeyecek.</strong></p>
-        <div class="form-group"><label for="dm-forgot-icon-new">Yeni şifre</label><input id="dm-forgot-icon-new" type="password" minlength="4" maxlength="64" autocomplete="new-password" /></div>
-        <div class="form-group"><label for="dm-forgot-icon-confirm">Yeni şifreyi tekrar girin</label><input id="dm-forgot-icon-confirm" type="password" minlength="4" maxlength="64" autocomplete="new-password" /></div>
-        <div id="dm-forgot-icon-error" class="form-error mt-4"></div>
-        <div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn btn-primary" id="dm-forgot-icon-submit" style="flex:1">Sohbet Kilitlerini Temizle ve Yeni Şifre Oluştur</button><button type="button" class="btn btn-outline" id="dm-forgot-icon-cancel">Vazgeç</button></div>
-      `);
-      $('#dm-forgot-icon-cancel').onclick = hideModal;
-      $('#dm-forgot-icon-submit').onclick = async () => {
-        const button = $('#dm-forgot-icon-submit');
-        const nextCode = $('#dm-forgot-icon-new').value;
-        const errorEl = $('#dm-forgot-icon-error');
-        if (nextCode.length < 4 || nextCode.length > 64) {
-          errorEl.textContent = 'Yeni şifre 4-64 karakter arasında olmalıdır.';
-          return;
-        }
-        if (nextCode !== $('#dm-forgot-icon-confirm').value) {
-          errorEl.textContent = 'Yeni şifreler eşleşmiyor.';
-          return;
-        }
-        button.disabled = true;
-        try {
-          const result = await api('/me/dm-lock-settings', {
-            method: 'PUT',
-            body: JSON.stringify({ icon_code: nextCode, forgot_icon_code: true, icon_unlock_enabled: true })
-          });
-          hideModal();
-          toast(`Yeni şifre oluşturuldu; ${result.unlocked_conversation_count} kilitli sohbet kilitten çıkarıldı. Mesajlar silinmedi.`);
-          renderSettingsSection('dm-lock');
-        } catch (error) {
-          errorEl.textContent = error.message;
-          button.disabled = false;
-        }
-      };
-    });
+
   } else if (section === 'app') {
     const installed = isPwaAlreadyInstalled();
     const supportsInstall = isPwaInstallSupportedDevice();
@@ -16084,6 +16037,7 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       document.getElementById('dm-note-song-preview').disabled = true;
       previewAudio = trackMediaAudio(new Audio(url));
       previewAudio.preload = 'metadata';
+      cigRenderWaveformBars(bars, url);
       const metadataAudio = previewAudio;
       metadataAudio.addEventListener('loadedmetadata', () => {
         if (previewAudio !== metadataAudio) return;
@@ -16160,10 +16114,12 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       document.getElementById('dm-note-clear-song').hidden = true;
       document.getElementById('dm-note-song-selected').innerHTML = '<span class="dm-note-no-song">İstersen notuna müzik ekleyebilirsin.</span>';
     });
+    let notePreviewRestart = 0;
     startInput?.addEventListener('input', () => {
       updateWaveform();
       stopSongPreview();
-      playSongPreview();
+      clearTimeout(notePreviewRestart);
+      notePreviewRestart = setTimeout(playSongPreview, 220);
     });
     updateWaveform();
     document.getElementById('dm-note-song-preview')?.addEventListener('click', () => {
@@ -18885,48 +18841,116 @@ document.addEventListener('mouseout', e => {
   if (wrap) { const btn = wrap.querySelector('.dm-msg-menu-btn'); if (btn) btn.style.opacity = '0'; }
 });
 
-function showDmMessageLockPrompt(username) {
-  const canUseAccountLock = dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled;
-  showModal('Konuşmayı Kilitle', `
-    <div class="dm-lock-prompt">
-      <div class="dm-lock-prompt-intro"><span><i class="fas fa-lock"></i></span><div><strong>Bu konuşmayı gizle</strong><small>Yalnızca senin mesaj listenden kaldırılır. Kilit açılana kadar görünmez.</small></div></div>
-      <div class="dm-lock-type-options">
-        <label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="personal" checked /><span><i class="fas fa-key"></i><b>Bu sohbet için şifre</b><small>Gizlerken belirleyeceğin şifreyle açılır.</small></span></label>
-        ${canUseAccountLock ? '<label class="dm-lock-type-option"><input type="radio" name="dm-lock-type" value="account" /><span><i class="fas fa-shield-halved"></i><b>Hesap kilit kodu</b><small>Sohbet Kilidi ayarlarında belirlediğin kodu kullan.</small></span></label>' : ''}
+async function showDmMessageLockPrompt(username) {
+  let state = { has_code: false, separate_icon_code: false, icon_count: 0, search_count: 0 };
+  try { state = { ...state, ...(await api('/me/chat-lock')) }; } catch { /* varsayılanlarla devam */ }
+
+  const setupStep = `
+    <div class="cg-lock-step" data-step="code">
+      <div class="cg-lock-intro">
+        <span class="cg-lock-intro-icon"><i class="fas fa-key"></i></span>
+        <div><strong>Önce kilit şifreni belirle</strong><small>Kilitlediğin tüm sohbetler bu şifreyle açılır. Daha sonra ayarlardan değiştirebilirsin.</small></div>
       </div>
-      <div class="form-group" id="dm-message-lock-password-group"><label for="dm-message-lock-password">Konuşma şifresi</label><input id="dm-message-lock-password" type="password" autocomplete="new-password" placeholder="Bir şifre belirle" /></div>
-      <div class="dm-lock-prompt-actions"><button type="button" class="btn btn-outline" id="dm-message-lock-cancel">Vazgeç</button><button type="button" class="btn btn-primary" id="dm-message-lock-confirm"><i class="fas fa-lock"></i> Konuşmayı kilitle</button></div>
-      <div class="form-error" id="dm-message-lock-error"></div>
-    </div>`);
-  const passwordGroup = document.getElementById('dm-message-lock-password-group');
-  const passwordInput = document.getElementById('dm-message-lock-password');
-  document.querySelectorAll('input[name="dm-lock-type"]').forEach(input => input.addEventListener('change', () => {
-    const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
-    passwordGroup.hidden = !personal;
-    if (!personal) passwordInput.value = '';
-  }));
-  document.getElementById('dm-message-lock-cancel')?.addEventListener('click', hideModal);
-  document.getElementById('dm-message-lock-confirm')?.addEventListener('click', async event => {
-    const button = event.currentTarget;
-    const errorNode = document.getElementById('dm-message-lock-error');
-    const personal = document.querySelector('input[name="dm-lock-type"]:checked')?.value === 'personal';
-    const password = personal ? passwordInput.value : '';
-    if (personal && !password) {
-      errorNode.textContent = 'Konuşma şifresi belirle veya hesap kilit kodunu seç.';
-      passwordInput.focus();
-      return;
+      <div class="form-group"><label for="cg-lock-code">Kilit şifresi</label><input id="cg-lock-code" type="password" autocomplete="new-password" maxlength="64" placeholder="En az 4 karakter" /></div>
+      <div class="form-group"><label for="cg-lock-code2">Şifre tekrar</label><input id="cg-lock-code2" type="password" autocomplete="new-password" maxlength="64" placeholder="Tekrar yaz" /></div>
+      <div class="cg-lock-actions">
+        <button type="button" class="btn btn-outline" data-lock-cancel>Vazgeç</button>
+        <button type="button" class="btn btn-primary" id="cg-lock-code-next">Devam <i class="fas fa-arrow-right"></i></button>
+      </div>
+    </div>`;
+
+  const modeStep = `
+    <div class="cg-lock-step" data-step="mode" ${state.has_code ? '' : 'hidden'}>
+      <div class="cg-lock-intro">
+        <span class="cg-lock-intro-icon"><i class="fas fa-lock"></i></span>
+        <div><strong>Bu sohbet nasıl açılsın?</strong><small>Sohbet listenden kaldırılır. Aşağıdaki iki yoldan birini seç.</small></div>
+      </div>
+      <div class="cg-lock-modes">
+        <label class="cg-lock-mode">
+          <input type="radio" name="cg-lock-mode" value="icon" checked />
+          <span class="cg-lock-mode-box">
+            <i class="fas fa-lock"></i>
+            <b>Kilit simgesinden</b>
+            <small>Listende bir kilit simgesi görünür. Dokunup şifreni girersin.</small>
+          </span>
+        </label>
+        <label class="cg-lock-mode">
+          <input type="radio" name="cg-lock-mode" value="search" />
+          <span class="cg-lock-mode-box">
+            <i class="fas fa-magnifying-glass"></i>
+            <b>Aramadan anahtarla</b>
+            <small>Hiçbir iz kalmaz. Arama kutusuna şifreni yazınca ortaya çıkar.</small>
+          </span>
+        </label>
+      </div>
+      <p class="cg-lock-note" id="cg-lock-note"></p>
+      <div class="cg-lock-actions">
+        <button type="button" class="btn btn-outline" data-lock-cancel>Vazgeç</button>
+        <button type="button" class="btn btn-primary" id="cg-lock-confirm"><i class="fas fa-lock"></i> Sohbeti kilitle</button>
+      </div>
+    </div>`;
+
+  showModal('Sohbeti kilitle', `<div class="cg-lock">${state.has_code ? '' : setupStep}${modeStep}<div class="form-error" id="cg-lock-error"></div></div>`);
+
+  const root = document.querySelector('.cg-lock');
+  const errorNode = document.getElementById('cg-lock-error');
+  const note = document.getElementById('cg-lock-note');
+  const showStep = name => root.querySelectorAll('.cg-lock-step').forEach(step => { step.hidden = step.dataset.step !== name; });
+
+  if (!state.has_code) showStep('code');
+
+  const syncNote = () => {
+    const mode = root.querySelector('input[name="cg-lock-mode"]:checked')?.value;
+    if (mode === 'icon') {
+      note.textContent = state.search_count
+        ? `${state.search_count} sohbetin aramadan açılıyor. İstersen ayarlardan simge için ayrı bir şifre tanımlayabilirsin.`
+        : 'Şifre, kilit simgesine dokunduğunda sorulur.';
+    } else {
+      note.textContent = state.icon_count
+        ? `${state.icon_count} sohbetin simgeden açılıyor. İki yöntem için ayrı şifre istersen ayarlardan tanımlayabilirsin.`
+        : 'Şifreyi mesaj arama kutusuna yazdığında bu sohbet ortaya çıkar.';
     }
+  };
+  root.querySelectorAll('input[name="cg-lock-mode"]').forEach(input => input.addEventListener('change', syncNote));
+  syncNote();
+
+  root.querySelectorAll('[data-lock-cancel]').forEach(button => button.addEventListener('click', hideModal));
+
+  document.getElementById('cg-lock-code-next')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const code = document.getElementById('cg-lock-code').value.trim();
+    const confirmCode = document.getElementById('cg-lock-code2').value.trim();
+    errorNode.textContent = '';
+    if (code.length < 4 || code.length > 64) { errorNode.textContent = 'Kilit şifresi 4-64 karakter olmalı.'; return; }
+    if (code !== confirmCode) { errorNode.textContent = 'Şifreler birbirini tutmuyor.'; return; }
+    button.disabled = true;
+    try {
+      await api('/me/chat-lock', { method: 'PUT', body: JSON.stringify({ code }) });
+      state.has_code = true;
+      showStep('mode');
+      syncNote();
+    } catch (error) {
+      errorNode.textContent = error.message || 'Kilit şifresi kaydedilemedi.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.getElementById('cg-lock-confirm')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const mode = root.querySelector('input[name="cg-lock-mode"]:checked')?.value === 'search' ? 'search' : 'icon';
+    errorNode.textContent = '';
     button.disabled = true;
     try {
       await api(`/conversation/${encodeURIComponent(username)}/hide`, {
         method: 'POST',
-        body: JSON.stringify({ password, lock_type: personal ? 'password' : 'account' })
+        body: JSON.stringify({ lock_mode: mode })
       });
       hideModal();
       navigate('/mesajlar');
-      toast('Konuşma kilitlendi.');
+      toast(mode === 'icon' ? 'Sohbet kilitlendi. Listende kilit simgesinden açabilirsin.' : 'Sohbet kilitlendi. Şifreni arama kutusuna yazarak açabilirsin.');
     } catch (error) {
-      errorNode.textContent = error.message || 'Konuşma kilitlenemedi.';
+      errorNode.textContent = error.message || 'Sohbet kilitlenemedi.';
       button.disabled = false;
     }
   });
@@ -23435,7 +23459,7 @@ async function renderMediaExplore(app) {
   document.title = 'Keşfet – ' + siteName;
   app.innerHTML = `<div class="container page photos-page media-explore-page">
     <header class="media-explore-hero">
-      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-images"></i></span><div><h1>Keşfet</h1></div></div>
+      <div class="media-explore-heading"><span class="media-explore-icon"><i class="fas fa-magnifying-glass"></i></span><div><h1>Keşfet</h1></div></div>
       <label class="media-explore-search"><i class="fas fa-magnifying-glass" aria-hidden="true"></i><input id="media-explore-search" type="search" placeholder="Başlık, açıklama, kullanıcı, tarih veya #etiket ara..." autocomplete="off" aria-label="Medya başlığı, açıklaması, kullanıcı, tarih veya hashtag ara" /></label>
     </header>
     <div id="media-explore-feed" class="photos-feed" aria-live="polite"><div class="loading-center"><div class="spinner"></div></div></div>
@@ -23499,6 +23523,8 @@ async function renderMediaExplore(app) {
         ...reals.map(real => ({ type: 'reals', content: real })),
         ...videos.map(video => ({ type: 'video', content: video }))
       ].sort((a, b) => new Date(b.content.created_at || 0) - new Date(a.content.created_at || 0));
+      // Keşfet her sayfa yenilemesinde farklı sıralanır; sekme içinde gezinirken sabit kalır.
+      mediaItems = seededShuffle(mediaItems, MEDIA_EXPLORE_SEED);
       mediaLoaded = true;
     };
     if (!hasInitialTag) await loadAllMedia();
@@ -25068,13 +25094,15 @@ async function renderMyPlaylists(app) {
       <div class="page-title my-playlists-title">
         <i class="fas fa-list" aria-hidden="true"></i> Playlistlerim
       </div>
-      <button class="btn btn-primary btn-sm my-playlists-create" id="pl-create-btn" aria-label="Playlist oluştur"><i class="fas fa-plus"></i> Oluştur</button>
     </div>
-    <label class="pl-search">
-      <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-      <input type="search" id="pl-search-input" maxlength="80" placeholder="Playlistlerinde ara..." autocomplete="off" aria-label="Playlist ara" />
-      <button type="button" class="pl-search-clear" id="pl-search-clear" hidden aria-label="Aramayı temizle"><i class="fas fa-xmark"></i></button>
-    </label>
+    <div class="pl-toolbar">
+      <label class="pl-search">
+        <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+        <input type="search" id="pl-search-input" maxlength="80" placeholder="Playlistlerinde ara..." autocomplete="off" aria-label="Playlist ara" />
+        <button type="button" class="pl-search-clear" id="pl-search-clear" hidden aria-label="Aramayı temizle"><i class="fas fa-xmark"></i></button>
+      </label>
+      <button class="btn btn-primary my-playlists-create" id="pl-create-btn" aria-label="Yeni playlist oluştur" title="Yeni playlist oluştur"><i class="fas fa-plus"></i><span>Oluştur</span></button>
+    </div>
     <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
     <section id="pl-discover" class="pl-discover" hidden>
       <h2 class="pl-discover-title">Keşfedebilecekleriniz</h2>
@@ -25715,13 +25743,13 @@ async function renderStore(app) {
     return `<div class="store-card" data-product-id="${p.id}" data-product-type="${p.type}">
       <div class="store-card-header" style="background:${cfg.gradient}">
         ${hasSale ? `<div class="store-badge-sale">%${discountPct} İNDİRİM</div>` : ''}
-        <div class="store-card-icon">${p.type === 'red_tick' ? '<span class="store-red-tick" aria-label="Kırmızı Tik"><i class="fas fa-check"></i></span>' : `<i class="${escHtml(p.type === 'vip' ? 'fas fa-gem' : p.type === 'plus' ? 'fas fa-plus' : p.type === 'ad_boost' ? 'fas fa-music' : p.badge_icon || cfg.icon)}"></i>`}</div>
+        <div class="store-card-icon">${p.type === 'red_tick' ? '<span class="store-red-tick" aria-label="Kırmızı Tik"><img src="/gobolog.png" alt="" aria-hidden="true" /></span>' : `<i class="${escHtml(p.type === 'vip' ? 'fas fa-gem' : p.type === 'plus' ? 'fas fa-plus' : p.type === 'ad_boost' ? 'fas fa-music' : p.badge_icon || cfg.icon)}"></i>`}</div>
         <div class="store-card-type">${escHtml(p.name)}</div>
         <div class="store-card-price-row">
           ${hasSale ? `<span class="store-price-old">${parseFloat(p.original_price).toFixed(2)} ₺</span>` : ''}
           <span class="store-price-new">${Number(p.purchase_enabled) === 1 ? `${parseFloat(p.price).toFixed(2)} ₺` : 'Satın alım kapalı'}</span>
         </div>
-        <div class="store-card-duration"><i class="fas ${p.type === 'red_tick' ? 'fa-check' : 'fa-clock'}"></i> ${p.type === 'red_tick' ? 'Doğrulanmış hesap rozeti' : `${p.duration_days} günlük üyelik`}</div>
+        <div class="store-card-duration">${p.type === 'red_tick' ? '<img class="store-red-tick-mini" src="/gobolog.png" alt="" aria-hidden="true" /> Doğrulanmış hesap rozeti' : `<i class="fas fa-clock"></i> ${p.duration_days} günlük üyelik`}</div>
       </div>
       <div class="store-card-body">
         ${descriptionPreviewHTML(p.description, 'store-card-desc', 120)}
@@ -25798,7 +25826,9 @@ async function renderStore(app) {
       .store-card-header { padding:28px 24px 20px; position:relative; text-align:center; }
       .store-badge-sale { position:absolute; top:12px; right:12px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; letter-spacing:.5px; }
       .store-card-icon { font-size:36px; color:#fff; margin-bottom:10px; filter:drop-shadow(0 2px 8px rgba(0,0,0,0.3)); }
-      .store-red-tick { display:inline-grid;width:42px;height:42px;place-items:center;border:3px solid rgba(255,255,255,.92);border-radius:50%;color:#ef3340;background:#fff;font-size:23px;box-shadow:0 3px 12px rgba(0,0,0,.24); }
+      .store-red-tick { display:inline-grid;width:46px;height:46px;place-items:center; }
+      .store-red-tick img { width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 3px 10px rgba(0,0,0,.3)); }
+      .store-red-tick-mini { width:15px;height:15px;object-fit:contain;vertical-align:-2px; }
       .store-card-type { font-size:22px; font-weight:800; color:#fff; margin-bottom:8px; text-shadow:0 1px 3px rgba(0,0,0,0.3); }
       .store-card-price-row { display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:6px; }
       .store-price-old { font-size:14px; color:rgba(255,255,255,0.65); text-decoration:line-through; }
@@ -27065,3 +27095,124 @@ function showDmGifPicker(onSelect) {
   renderChips();
   load();
 }
+
+/* ============================================================================
+   KEŞFET SIRALAMASI — sayfa başına sabit, yenileyince değişen karışık dizilim
+   ============================================================================ */
+const MEDIA_EXPLORE_SEED = Math.floor(Math.random() * 1e9) >>> 0;
+function seededShuffle(list, seed) {
+  const items = Array.isArray(list) ? list.slice() : [];
+  let state = (seed >>> 0) || 1;
+  const random = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+  for (let i = items.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+
+/* ============================================================================
+   MÜZİK KESİTİ SEÇİCİ — Instagram tarzı
+   1) Gerçek ses dalgası (dosyayı çözümleyip tepe değerlerini çıkarır)
+   2) Dalga üzerinde parmakla/fareyle sürükleyerek konum seçme
+   3) Sürüklerken ses sürekli yeniden başlamaz, bırakınca başlar
+   ============================================================================ */
+const CIG_WAVE_CACHE = new Map();
+
+async function cigLoadWaveformPeaks(url, barCount = 68) {
+  if (!url) return null;
+  const key = `${url}|${barCount}`;
+  if (CIG_WAVE_CACHE.has(key)) return CIG_WAVE_CACHE.get(key);
+  const task = (async () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      const response = await fetch(url, { mode: 'cors' });
+      if (!response.ok) return null;
+      const declared = Number(response.headers.get('content-length') || 0);
+      if (declared && declared > 15 * 1024 * 1024) return null;
+      const bytes = await response.arrayBuffer();
+      const context = new AudioCtx();
+      const decoded = await context.decodeAudioData(bytes);
+      const channel = decoded.getChannelData(0);
+      const block = Math.floor(channel.length / barCount) || 1;
+      const peaks = [];
+      let loudest = 0;
+      for (let i = 0; i < barCount; i += 1) {
+        const start = i * block;
+        let total = 0;
+        let samples = 0;
+        for (let j = 0; j < block; j += 16) { total += Math.abs(channel[start + j] || 0); samples += 1; }
+        const value = samples ? total / samples : 0;
+        peaks.push(value);
+        if (value > loudest) loudest = value;
+      }
+      if (context.close) context.close();
+      if (!loudest) return null;
+      return peaks.map(value => Math.max(14, Math.round((value / loudest) * 100)));
+    } catch {
+      return null; // CORS, desteklenmeyen biçim vb. -> sentetik dalga kalsın
+    }
+  })();
+  CIG_WAVE_CACHE.set(key, task);
+  return task;
+}
+
+async function cigRenderWaveformBars(barsElement, url) {
+  if (!barsElement || !url) return;
+  const peaks = await cigLoadWaveformPeaks(url, 68);
+  if (!peaks || !barsElement.isConnected) return;
+  barsElement.innerHTML = peaks.map(height => `<i style="--bar-height:${height}%"></i>`).join('');
+}
+
+(function cigWaveformScrubbing() {
+  const SELECTOR = '.dm-note-waveform, .media-song-waveform';
+  let active = null;
+
+  const applyPosition = (waveform, clientX) => {
+    const input = waveform.querySelector('input[type="range"]');
+    if (!input || input.disabled) return;
+    const max = Number(input.max) || 0;
+    if (max <= 0) return;
+    const rect = waveform.getBoundingClientRect();
+    if (!rect.width) return;
+    // Seçim penceresi parmağın ortasında dursun
+    const windowWidth = rect.width * (30 / (max + 30));
+    const usable = Math.max(1, rect.width - windowWidth);
+    const offset = Math.min(Math.max(clientX - rect.left - windowWidth / 2, 0), usable);
+    const value = Math.round((offset / usable) * max);
+    if (value === Number(input.value)) return;
+    input.value = String(value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  document.addEventListener('pointerdown', event => {
+    const waveform = event.target.closest(SELECTOR);
+    if (!waveform) return;
+    const input = waveform.querySelector('input[type="range"]');
+    if (!input || input.disabled) return;
+    active = waveform;
+    waveform.classList.add('is-scrubbing');
+    waveform.setPointerCapture?.(event.pointerId);
+    applyPosition(waveform, event.clientX);
+    event.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('pointermove', event => {
+    if (!active) return;
+    applyPosition(active, event.clientX);
+    event.preventDefault();
+  }, { passive: false });
+
+  const finish = () => {
+    if (!active) return;
+    active.classList.remove('is-scrubbing');
+    active.querySelector('input[type="range"]')?.dispatchEvent(new Event('change', { bubbles: true }));
+    active = null;
+  };
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+})();

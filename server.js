@@ -6760,6 +6760,101 @@ app.put('/api/me/dm-privacy-settings', authMiddleware, async (req, res) => {
   });
 });
 
+// ===== SOHBET KİLİDİ (sadeleştirilmiş) =====
+// Tek bir kilit şifresi her iki açılış yöntemini de açar. Kullanıcı isterse
+// kilit simgesi için ayrı bir şifre tanımlayabilir.
+app.get('/api/me/chat-lock', authMiddleware, async (req, res) => {
+  const { rows } = await query(
+    'SELECT search_code_hash, icon_code_hash FROM dm_user_settings WHERE user_id=$1',
+    [req.user.id]
+  );
+  const setting = rows[0] || {};
+  const searchHash = setting.search_code_hash || '';
+  const iconHash = setting.icon_code_hash || '';
+  const { rows: counts } = await query(
+    `SELECT
+       COUNT(*) FILTER (WHERE mode = 'icon')   AS icon_count,
+       COUNT(*) FILTER (WHERE mode = 'search') AS search_count
+     FROM (
+       SELECT CASE WHEN user1_id=$1 THEN COALESCE(lock_mode_user1,'') ELSE COALESCE(lock_mode_user2,'') END AS mode
+       FROM dm_conversations
+       WHERE (user1_id=$1 AND hidden_by_user1=1) OR (user2_id=$1 AND hidden_by_user2=1)
+     ) t`,
+    [req.user.id]
+  );
+  res.json({
+    has_code: Boolean(searchHash || iconHash),
+    separate_icon_code: Boolean(searchHash && iconHash && searchHash !== iconHash),
+    icon_count: Number(counts[0]?.icon_count) || 0,
+    search_count: Number(counts[0]?.search_count) || 0
+  });
+});
+
+app.put('/api/me/chat-lock', authMiddleware, authLimiter, async (req, res) => {
+  const code = String(req.body?.code || '').trim();
+  const currentCode = String(req.body?.current_code || '').trim();
+  const separate = req.body?.separate_icon_code === true;
+  const iconCode = String(req.body?.icon_code || '').trim();
+  const sha = value => crypto.createHash('sha256').update(value).digest('hex');
+
+  if (code && (code.length < 4 || code.length > 64)) {
+    return res.status(400).json({ error: 'Kilit şifresi 4-64 karakter arasında olmalıdır.' });
+  }
+  if (separate && iconCode && (iconCode.length < 4 || iconCode.length > 64)) {
+    return res.status(400).json({ error: 'Simge şifresi 4-64 karakter arasında olmalıdır.' });
+  }
+  try {
+    const { rows } = await query(
+      'SELECT search_code_hash, icon_code_hash FROM dm_user_settings WHERE user_id=$1',
+      [req.user.id]
+    );
+    const current = rows[0] || {};
+    const existing = current.search_code_hash || current.icon_code_hash || '';
+    // Mevcut şifre varsa değiştirmek için doğrulama iste
+    if (existing && code && !matchesDmLockHash(existing, currentCode)) {
+      return res.status(403).json({ error: 'Mevcut kilit şifreni doğru girmelisin.' });
+    }
+    if (!existing && !code) {
+      return res.status(400).json({ error: 'Önce bir kilit şifresi belirle.' });
+    }
+    const primaryHash = code ? sha(code) : existing;
+    let iconHash = primaryHash;
+    if (separate) {
+      if (iconCode) iconHash = sha(iconCode);
+      else if (current.icon_code_hash && current.icon_code_hash !== current.search_code_hash) iconHash = current.icon_code_hash;
+      else return res.status(400).json({ error: 'Simge için ayrı bir şifre gir.' });
+    }
+    await query(`
+      INSERT INTO dm_user_settings (user_id, search_code_hash, search_unlock_enabled, icon_code_hash, icon_unlock_enabled, updated_at)
+      VALUES ($1,$2,1,$3,1,NOW())
+      ON CONFLICT (user_id) DO UPDATE SET
+        search_code_hash=EXCLUDED.search_code_hash,
+        search_unlock_enabled=1,
+        icon_code_hash=EXCLUDED.icon_code_hash,
+        icon_unlock_enabled=1,
+        updated_at=NOW()
+    `, [req.user.id, primaryHash, iconHash]);
+    res.json({ ok: true, has_code: true, separate_icon_code: primaryHash !== iconHash });
+  } catch (error) {
+    console.error('[chat-lock] kaydedilemedi:', error.message);
+    res.status(500).json({ error: 'Kilit ayarı kaydedilemedi.' });
+  }
+});
+
+// Kilitli bir sohbetin modunu değiştir veya kilidi tamamen kaldır
+app.post('/api/conversation/:username/lock-mode', authMiddleware, async (req, res) => {
+  const mode = req.body?.lock_mode === 'search' ? 'search' : 'icon';
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const uid = req.user.id;
+  const u1 = Math.min(uid, target[0].id), u2 = Math.max(uid, target[0].id);
+  const { rows } = await query('SELECT id,user1_id FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
+  if (!rows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
+  const column = rows[0].user1_id == uid ? 'lock_mode_user1' : 'lock_mode_user2';
+  await query(`UPDATE dm_conversations SET ${column}=$1 WHERE id=$2`, [mode, rows[0].id]);
+  res.json({ ok: true, lock_mode: mode });
+});
+
 app.get('/api/me/dm-lock-settings', authMiddleware, async (req, res) => {
   const { rows } = await query(
     'SELECT search_code_hash,search_unlock_enabled,icon_unlock_enabled,icon_code_hash FROM dm_user_settings WHERE user_id=$1',
@@ -13198,7 +13293,8 @@ app.get('/api/conversations/hidden', authMiddleware, async (req, res) => {
       FROM user_presence_sessions
       WHERE user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
     ) presence ON TRUE
-    WHERE ((c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1))
+    WHERE ((c.user1_id=$1 AND c.hidden_by_user1=1 AND COALESCE(c.lock_mode_user1,'') <> 'icon')
+        OR (c.user2_id=$1 AND c.hidden_by_user2=1 AND COALESCE(c.lock_mode_user2,'') <> 'icon'))
       AND NOT EXISTS (SELECT 1 FROM blocks bl WHERE
         (bl.blocker_id=$1 AND bl.blocked_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END)
         OR (bl.blocker_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END AND bl.blocked_id=$1))
@@ -13244,7 +13340,8 @@ app.post('/api/conversations/unlock', authMiddleware, async (req, res) => {
       FROM user_presence_sessions
       WHERE user_id=CASE WHEN c.user1_id=$1 THEN u2.id ELSE u1.id END
     ) presence ON TRUE
-    WHERE (c.user1_id=$1 AND c.hidden_by_user1=1) OR (c.user2_id=$1 AND c.hidden_by_user2=1)
+    WHERE (c.user1_id=$1 AND c.hidden_by_user1=1 AND COALESCE(c.lock_mode_user1,'') <> 'search')
+       OR (c.user2_id=$1 AND c.hidden_by_user2=1 AND COALESCE(c.lock_mode_user2,'') <> 'search')
     ORDER BY c.last_message_at DESC
   `, [req.user.id]);
   res.json(rows);
@@ -14567,7 +14664,8 @@ app.post('/api/conversation/:username/messages/:messageId/view-image', authMiddl
 
 app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  const lockType = req.body?.lock_type === 'account' ? 'account' : 'password';
+  const lockMode = req.body?.lock_mode === 'search' ? 'search' : req.body?.lock_mode === 'icon' ? 'icon' : '';
+  const lockType = lockMode ? 'account' : (req.body?.lock_type === 'account' ? 'account' : 'password');
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
   if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
   const other = target[0];
@@ -14584,20 +14682,19 @@ app.post('/api/conversation/:username/hide', authMiddleware, async (req, res) =>
       [uid]
     );
     const setting = settings[0];
-    const hasAccountLock = Boolean(setting?.search_code_hash && Number(setting.search_unlock_enabled) === 1)
-      || Boolean(setting?.icon_code_hash && Number(setting.icon_unlock_enabled) === 1);
-    if (!hasAccountLock) return res.status(400).json({ error: 'Önce Sohbet Kilidi ayarlarından geçerli bir kilit kodu etkinleştir.' });
+    const hasAccountLock = Boolean(setting?.search_code_hash) || Boolean(setting?.icon_code_hash);
+    if (!hasAccountLock) return res.status(400).json({ error: 'Önce bir kilit şifresi belirlemelisin.' });
     passHash = DM_ACCOUNT_LOCK_SENTINEL;
   } else {
     if (!password) return res.status(400).json({ error: 'Konuşma şifresi gerekli.' });
     passHash = crypto.createHash('sha256').update(password).digest('hex');
   }
   if (isUser1) {
-    await query('UPDATE dm_conversations SET hidden_by_user1=1, hidden_pass_user1=$1 WHERE id=$2', [passHash, conv.id]);
+    await query('UPDATE dm_conversations SET hidden_by_user1=1, hidden_pass_user1=$1, lock_mode_user1=$2 WHERE id=$3', [passHash, lockMode, conv.id]);
   } else {
-    await query('UPDATE dm_conversations SET hidden_by_user2=1, hidden_pass_user2=$1 WHERE id=$2', [passHash, conv.id]);
+    await query('UPDATE dm_conversations SET hidden_by_user2=1, hidden_pass_user2=$1, lock_mode_user2=$2 WHERE id=$3', [passHash, lockMode, conv.id]);
   }
-  res.json({ ok: true });
+  res.json({ ok: true, lock_mode: lockMode });
 });
 
 app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) => {

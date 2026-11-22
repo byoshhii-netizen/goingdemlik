@@ -3490,3 +3490,227 @@ body.app-lock-active { overflow: hidden; }
   letter-spacing: -.01em !important;
   text-transform: none !important;
 }
+
+/* =========================================================================
+   SOHBET KİLİDİ — iki adımlı kilitleme ve ayarlar
+   ========================================================================= */
+.cg-lock { display: grid; gap: 4px; }
+.cg-lock-step[hidden] { display: none !important; }
+.cg-lock-intro {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-bottom: 16px; padding: 13px;
+  border: 1px solid var(--border); border-radius: 14px;
+  background: var(--bg-card2);
+}
+.cg-lock-intro-icon {
+  display: grid; place-items: center;
+  width: 38px; height: 38px; flex: 0 0 38px;
+  border-radius: 11px;
+  background: rgba(var(--accent-rgb), .15);
+  color: var(--accent-red);
+  font-size: 15px;
+}
+.cg-lock-intro strong { display: block; margin-bottom: 3px; font-size: 14.5px; }
+.cg-lock-intro small { color: var(--text-muted); font-size: 12.5px; line-height: 1.45; }
+
+.cg-lock-modes { display: grid; gap: 9px; margin-bottom: 12px; }
+.cg-lock-mode { display: block; cursor: pointer; }
+.cg-lock-mode input { position: absolute; opacity: 0; pointer-events: none; }
+.cg-lock-mode-box {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 13px;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card2);
+  transition: border-color .15s ease, background .15s ease;
+}
+.cg-lock-mode-box > i {
+  grid-row: 1 / span 2;
+  display: grid; place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.cg-lock-mode-box b { font-size: 14.5px; }
+.cg-lock-mode-box small { color: var(--text-muted); font-size: 12.5px; line-height: 1.4; }
+.cg-lock-mode input:checked + .cg-lock-mode-box {
+  border-color: var(--accent-red);
+  background: rgba(var(--accent-rgb), .08);
+}
+.cg-lock-mode input:checked + .cg-lock-mode-box > i {
+  background: rgba(var(--accent-rgb), .18);
+  color: var(--accent-red);
+}
+.cg-lock-mode input:focus-visible + .cg-lock-mode-box { outline: 2px solid var(--accent-red); outline-offset: 2px; }
+.cg-lock-note { margin: 0 2px 14px; color: var(--text-muted); font-size: 12.5px; line-height: 1.5; }
+.cg-lock-actions { display: flex; gap: 9px; }
+.cg-lock-actions .btn { flex: 1; min-height: 44px; }
+
+/* Ayarlar kartı */
+.chat-lock-modes { display: grid; gap: 8px; margin: 4px 0 18px; }
+.chat-lock-mode-info {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-card2);
+}
+.chat-lock-mode-info > span {
+  display: grid; place-items: center;
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  background: rgba(var(--accent-rgb), .13);
+  color: var(--accent-red);
+  font-size: 13px;
+}
+.chat-lock-mode-info strong { display: block; font-size: 14px; }
+.chat-lock-mode-info small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.chat-lock-mode-info > b {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.chat-lock-toggle {
+  display: flex; align-items: flex-start; gap: 11px;
+  margin: 4px 0 14px; cursor: pointer;
+}
+.chat-lock-toggle input { width: 18px; height: 18px; margin-top: 2px; flex: 0 0 auto; accent-color: var(--accent-red); }
+.chat-lock-toggle span { display: grid; gap: 3px; }
+.chat-lock-toggle small { color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+
+/* =========================================================================
+   MÜZİK KESİTİ SEÇİCİ — dokunmatik sürükleme ve Instagram benzeri pencere
+   ========================================================================= */
+.dm-note-waveform,
+.media-song-waveform {
+  position: relative;
+  touch-action: none;           /* sürüklerken sayfa kaymasın */
+  cursor: grab;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.dm-note-waveform.is-scrubbing,
+.media-song-waveform.is-scrubbing { cursor: grabbing; }
+
+/* Görünmez menzil girdisi tüm alanı kaplasın ama olayları biz yönetelim */
+.dm-note-waveform input[type="range"],
+.media-song-waveform input[type="range"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Seçim penceresi: kalın kenarlık + iki yanında tutamaç */
+.dm-note-waveform-selection {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: var(--clip-left, 0%);
+  width: var(--clip-width, 100%);
+  border: 2.5px solid var(--accent-red);
+  border-radius: 11px;
+  background: rgba(var(--accent-rgb), .13);
+  box-shadow: 0 0 0 2px rgba(0,0,0,.28);
+  transition: left .06s linear;
+  pointer-events: none;
+}
+.is-scrubbing .dm-note-waveform-selection { transition: none; }
+.dm-note-waveform-selection::before,
+.dm-note-waveform-selection::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 4px;
+  height: 22px;
+  margin-top: -11px;
+  border-radius: 999px;
+  background: var(--accent-red);
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+.dm-note-waveform-selection::before { left: -3px; }
+.dm-note-waveform-selection::after { right: -3px; }
+
+/* Çubuklar seçim dışında sönük kalsın */
+.dm-note-waveform-bars i { transition: opacity .15s ease; }
+
+/* =========================================================================
+   MENZİL GİRDİLERİ — dokunmatik dolgu kuralından etkilenmesin
+   style.css'te "input, textarea, select { min-height:44px }" (pointer:coarse)
+   kuralı ses çubuklarını 5px'ten 44px'e şişirip gri kapsüle çeviriyordu.
+   :where() ile sıfır özgüllük: her bileşen kendi görünümünü korur.
+   ========================================================================= */
+:where(input[type="range"]) {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+input[type="range"] { min-height: 0 !important; }
+
+/* Şarkı sayfası oynatıcısı — ses kontrolü */
+.sdp-vol-slider {
+  height: 20px !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+.sdp-vol-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--accent-red2, var(--accent-red, #ef3340)) 0 var(--volume-fill, 80%),
+    rgba(255,255,255,.18) var(--volume-fill, 80%) 100%);
+}
+.sdp-vol-slider::-webkit-slider-thumb { margin-top: -4.5px; }
+.sdp-vol-slider::-moz-range-track { height: 5px; border-radius: 999px; background: rgba(255,255,255,.16); }
+.sdp-seek { height: 30px !important; min-height: 0 !important; }
+
+@media (max-width: 680px) {
+  .sdp-vol-wrap { min-height: 40px; gap: 7px; padding: 0 10px 0 6px; }
+  .sdp-vol-slider { width: auto !important; max-width: none !important; flex: 1 1 auto; }
+  .sdp-vol-value { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+}
+
+/* Genel oynatıcı çubukları da aynı dertten etkilenmesin */
+.gplayer-vol-slider, .gplayer-seek { min-height: 0 !important; padding: 0 !important; }
+
+/* =========================================================================
+   PLAYLISTLERIM — Oluştur tuşu arama satırına taşındı
+   ========================================================================= */
+.pl-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.pl-toolbar .pl-search { flex: 1 1 auto; margin: 0; min-width: 0; }
+.pl-toolbar .my-playlists-create {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 13px;
+  white-space: nowrap;
+  font-weight: 700;
+}
+@media (max-width: 430px) {
+  .pl-toolbar .my-playlists-create { padding: 0 13px; }
+  .pl-toolbar .my-playlists-create span { display: none; }
+  .pl-toolbar .my-playlists-create i { font-size: 15px; }
+}
