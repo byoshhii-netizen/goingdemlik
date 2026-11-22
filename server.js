@@ -10923,6 +10923,32 @@ app.get('/api/public-playlists', async (req, res) => {
   }
 });
 
+// Playlist keşfi: başkalarının herkese açık listelerinde isme göre arama
+app.get('/api/playlists/discover', authMiddleware, async (req, res) => {
+  const search = String(req.query.q || '').trim().slice(0, 80);
+  if (search.length < 2) return res.json({ playlists: [] });
+  try {
+    const { rows } = await query(
+      `SELECT p.id, p.public_id, p.name, p.emoji, p.cover_url, u.username AS owner_username,
+              CAST(COUNT(ps.id) AS INTEGER) AS song_count
+       FROM playlists p
+       JOIN users u ON u.id = p.user_id AND COALESCE(u.is_deleted, 0) = 0
+       LEFT JOIN playlist_songs ps ON ps.playlist_id = p.id
+       WHERE COALESCE(p.is_public, 1) = 1
+         AND p.user_id <> $1
+         AND (p.name ILIKE '%' || $2 || '%' OR p.description ILIKE '%' || $2 || '%')
+       GROUP BY p.id, u.username
+       ORDER BY (LOWER(p.name) = LOWER($2)) DESC, song_count DESC, p.created_at DESC
+       LIMIT 12`,
+      [req.user.id, search]
+    );
+    res.json({ playlists: rows });
+  } catch (error) {
+    console.error('[playlists/discover] başarısız:', error.message);
+    res.status(500).json({ error: 'Playlist araması yapılamadı.' });
+  }
+});
+
 app.get('/api/playlists', authMiddleware, async (req, res) => {
   try {
     const { rows } = await query(

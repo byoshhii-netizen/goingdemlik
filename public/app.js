@@ -25070,7 +25070,16 @@ async function renderMyPlaylists(app) {
       </div>
       <button class="btn btn-primary btn-sm my-playlists-create" id="pl-create-btn" aria-label="Playlist oluştur"><i class="fas fa-plus"></i> Oluştur</button>
     </div>
+    <label class="pl-search">
+      <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+      <input type="search" id="pl-search-input" maxlength="80" placeholder="Playlistlerinde ara..." autocomplete="off" aria-label="Playlist ara" />
+      <button type="button" class="pl-search-clear" id="pl-search-clear" hidden aria-label="Aramayı temizle"><i class="fas fa-xmark"></i></button>
+    </label>
     <div id="pl-list"><div class="loading-center"><div class="spinner"></div></div></div>
+    <section id="pl-discover" class="pl-discover" hidden>
+      <h2 class="pl-discover-title">Keşfedebilecekleriniz</h2>
+      <div id="pl-discover-list" class="pl-discover-list"></div>
+    </section>
   </div>`;
 
   const renderList = async () => {
@@ -25084,7 +25093,7 @@ async function renderMyPlaylists(app) {
       }
       el.innerHTML = `<div class="pl-grid">
         ${playlists.map(pl => `
-          <div class="pl-card" data-id="${escHtml(pl.public_id || pl.id)}" style="cursor:pointer">
+          <div class="pl-card" data-id="${escHtml(pl.public_id || pl.id)}" data-playlist-name="${escHtml(pl.name)}" style="cursor:pointer">
             <div class="pl-card-icon">
               ${pl.cover_url
                 ? `<img src="${escHtml(pl.cover_url)}" alt="" />`
@@ -25133,6 +25142,81 @@ async function renderMyPlaylists(app) {
   };
 
   renderList();
+
+  // ----- Playlist arama: kendi listelerinde süz, benzerlerini keşfet olarak öner -----
+  const playlistSearchInput = document.getElementById('pl-search-input');
+  const playlistSearchClear = document.getElementById('pl-search-clear');
+  const discoverBox = document.getElementById('pl-discover');
+  const discoverList = document.getElementById('pl-discover-list');
+  let discoverTimer = 0;
+  let discoverRequest = 0;
+
+  const normalizePlaylistTerm = value => String(value || '')
+    .trim()
+    .replace(/[\u0130\u0131I]/g, 'i')
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const filterOwnPlaylists = term => {
+    const needle = normalizePlaylistTerm(term);
+    const cards = document.querySelectorAll('#pl-list [data-playlist-name]');
+    let shown = 0;
+    cards.forEach(card => {
+      const haystack = normalizePlaylistTerm(card.dataset.playlistName);
+      const match = !needle || haystack.includes(needle);
+      card.hidden = !match;
+      if (match) shown += 1;
+    });
+    const emptyNote = document.getElementById('pl-no-match');
+    if (needle && !shown && cards.length) {
+      if (!emptyNote) {
+        document.getElementById('pl-list')?.insertAdjacentHTML('beforeend',
+          '<p id="pl-no-match" class="pl-no-match">Bu isimde bir playlistin yok.</p>');
+      }
+    } else emptyNote?.remove();
+  };
+
+  const loadDiscover = async term => {
+    const current = ++discoverRequest;
+    if (normalizePlaylistTerm(term).length < 2) {
+      discoverBox.hidden = true;
+      discoverList.innerHTML = '';
+      return;
+    }
+    try {
+      const data = await api('/playlists/discover?q=' + encodeURIComponent(term.trim()));
+      if (current !== discoverRequest || !discoverList.isConnected) return;
+      const items = data.playlists || [];
+      discoverBox.hidden = !items.length;
+      discoverList.innerHTML = items.map(item => `
+        <a class="pl-discover-card" href="/playlist/${encodeURIComponent(item.public_id || item.id)}" data-link>
+          <span class="pl-discover-art">${item.cover_url ? `<img src="${escHtml(item.cover_url)}" alt="" loading="lazy" />` : escHtml(item.emoji || '🎵')}</span>
+          <span class="pl-discover-copy">
+            <strong>${escHtml(item.name)}</strong>
+            <small>${Number(item.song_count) || 0} şarkı · @${escHtml(item.owner_username)}</small>
+          </span>
+          <i class="fas fa-chevron-right" aria-hidden="true"></i>
+        </a>`).join('');
+    } catch {
+      if (current === discoverRequest) { discoverBox.hidden = true; discoverList.innerHTML = ''; }
+    }
+  };
+
+  playlistSearchInput?.addEventListener('input', event => {
+    const value = event.target.value;
+    playlistSearchClear.hidden = !value;
+    filterOwnPlaylists(value);
+    clearTimeout(discoverTimer);
+    discoverTimer = setTimeout(() => loadDiscover(value), 320);
+  });
+  playlistSearchClear?.addEventListener('click', () => {
+    playlistSearchInput.value = '';
+    playlistSearchClear.hidden = true;
+    filterOwnPlaylists('');
+    loadDiscover('');
+    playlistSearchInput.focus();
+  });
 
   document.getElementById('pl-create-btn')?.addEventListener('click', () => {
     showCreatePlaylistModal('create', null, '', '', true, renderList, '');

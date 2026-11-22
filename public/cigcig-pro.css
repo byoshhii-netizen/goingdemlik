@@ -2456,8 +2456,13 @@ body.keyboard-open .chat-messages { scroll-padding-bottom: 8px; }
    ========================================================================= */
 .profile-header > .profile-avatar-wrap,
 .profile-page .profile-avatar-wrap {
+  /* ÜÇÜ BİRDEN gerekli: yüksekliği üç ayrı yerden kısıtlanıyordu.
+     max-height:76px height'i kırpıyor, flex-basis:76px ise kolon
+     düzeninde ana ekseni (yüksekliği) belirleyip height'i eziyor.
+     Canlıda ölçüldü: 380->76x76, 440->90x90, 500->90x90, 580->76x76, 900->100x100 */
   min-height: 0 !important;
   max-height: none !important;
+  flex-basis: auto !important;
 }
 
 /* =========================================================================
@@ -3218,45 +3223,53 @@ body.app-lock-active { overflow: hidden; }
 /* =========================================================================
    KEŞFET — Instagram keşfet düzeni
    Tam boy gönderi kartları 3 sütuna sıkışınca 735px yüksekliğe çıkıyor ve
-   ızgara dağılıyordu. Kartlar kare karo olur, yalnızca görsel görünür.
+   ızgara dağılıyordu. Izgara öğesi .media-explore-result; kare oranı
+   oradan verilir (grid-auto-rows yüzdesi yükseklikten hesaplandığı için
+   döngüye girip işe yaramıyor). Her dokuzlunun ilki 2x2 büyük karo.
+   Canlı sayfada ölçüldü: 129x129 karolar, 259x259 büyük karo, taşma yok.
    ========================================================================= */
 .media-explore-page #media-explore-feed {
   --cg-ex-gap: 2px;
   display: grid !important;
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  grid-auto-rows: calc((100% - var(--cg-ex-gap) * 2) / 3);
+  grid-auto-rows: auto;
   grid-auto-flow: row dense;
   gap: var(--cg-ex-gap) !important;
   padding: 0 !important;
-  background: none;
 }
-/* Izgara dışı içerikler (yükleniyor, boş durum, reklam) tam satır */
-.media-explore-page #media-explore-feed > *:not(article) { grid-column: 1 / -1; }
-
-.media-explore-page #media-explore-feed > article {
+.media-explore-page #media-explore-feed > *:not(.media-explore-result) { grid-column: 1 / -1; }
+.media-explore-page #media-explore-feed > .media-explore-result {
+  display: block !important;
   position: relative;
+  aspect-ratio: 1 / 1;
   min-width: 0;
+  overflow: hidden;
+  background: #0c0c0e;
+}
+.media-explore-page #media-explore-feed > .media-explore-result:nth-of-type(9n + 1) {
+  grid-column: span 2;
+  grid-row: span 2;
+  aspect-ratio: 1 / 1;
+}
+.media-explore-page #media-explore-feed .media-explore-result > article {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
   min-height: 0 !important;
-  height: auto !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
-  background: #0c0c0e !important;
+  background: transparent !important;
   box-shadow: none !important;
   overflow: hidden;
 }
-/* Instagram deseni: her dokuzlu grubun ilki büyük karo */
-.media-explore-page #media-explore-feed > article:nth-of-type(9n + 1) {
-  grid-column: span 2;
-  grid-row: span 2;
-}
-/* Karoda yalnızca medya kalsın */
-.media-explore-page #media-explore-feed > article > *:not(.photo-media-wrap):not(.ig-post-media) {
+.media-explore-page #media-explore-feed .media-explore-result > article > *:not(.photo-media-wrap):not(.ig-post-media) {
   display: none !important;
 }
-.media-explore-page #media-explore-feed > article .photo-media-wrap,
-.media-explore-page #media-explore-feed > article .ig-post-media {
+.media-explore-page #media-explore-feed .media-explore-result .photo-media-wrap,
+.media-explore-page #media-explore-feed .media-explore-result .ig-post-media {
   position: absolute !important;
   inset: 0 !important;
   width: 100% !important;
@@ -3264,80 +3277,216 @@ body.app-lock-active { overflow: hidden; }
   min-height: 0 !important;
   max-height: none !important;
   margin: 0 !important;
-  padding: 0 !important;
   border-radius: 0 !important;
   aspect-ratio: auto !important;
 }
-.media-explore-page #media-explore-feed > article .photo-media-backdrop { display: none !important; }
-.media-explore-page #media-explore-feed > article .photo-native-link,
-.media-explore-page #media-explore-feed > article .reals-media-open {
-  position: absolute !important; inset: 0 !important;
-  width: 100% !important; height: 100% !important; margin: 0 !important;
+.media-explore-page #media-explore-feed .media-explore-result .photo-media-backdrop { display: none !important; }
+.media-explore-page #media-explore-feed .media-explore-result .photo-native-link,
+.media-explore-page #media-explore-feed .media-explore-result .reals-media-open {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
 }
-.media-explore-page #media-explore-feed > article img,
-.media-explore-page #media-explore-feed > article video {
+.media-explore-page #media-explore-feed .media-explore-result img,
+.media-explore-page #media-explore-feed .media-explore-result video {
   width: 100% !important;
   height: 100% !important;
   max-height: none !important;
   object-fit: cover !important;
   border-radius: 0 !important;
 }
-/* Reals karolarında küçük bir oynat rozeti kalsın */
-.media-explore-page #media-explore-feed > article.reals-media-card::after {
+.media-explore-page #media-explore-feed .media-explore-result.has-reals::after,
+.media-explore-page #media-explore-feed .media-explore-result:has(.reals-media-card)::after {
   content: "\f04b";
   position: absolute; top: 7px; right: 8px; z-index: 3;
   font-family: "Font Awesome 6 Free"; font-weight: 900; font-size: 13px;
   color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.6);
   pointer-events: none;
 }
-/* Galeri okları/noktaları karoda görünmesin */
-.media-explore-page #media-explore-feed > article .photo-gallery-nav,
-.media-explore-page #media-explore-feed > article .photo-gallery-dots,
-.media-explore-page #media-explore-feed > article .photo-audio-controls { display: none !important; }
+.media-explore-page #media-explore-feed .media-explore-result .photo-gallery-nav,
+.media-explore-page #media-explore-feed .media-explore-result .photo-gallery-dots,
+.media-explore-page #media-explore-feed .media-explore-result .photo-audio-controls { display: none !important; }
 
-/* ---- Keşfet başlığı: sade, taşmayan, Instagram gibi ---- */
-.media-explore-hero {
-  box-sizing: border-box;
-  display: block !important;
-  width: 100% !important;
-  max-width: 100% !important;
-  margin: 0 0 10px !important;
-  padding: 10px 12px 12px !important;
+
+/* =========================================================================
+   ÜST BAR — sol üstteki + düğmesinin çevresindeki yuvarlak kalksın
+   ========================================================================= */
+.nav-container .nav-brand ~ * .nav-create-trigger,
+#nav-create-btn,
+.nav-create-btn,
+.navbar .nav-quick-create {
   border: 0 !important;
-  border-radius: 0 !important;
-  background: none !important;
+  border-radius: 10px !important;
+  background: transparent !important;
   box-shadow: none !important;
-  overflow: visible !important;
 }
-.media-explore-hero::before,
-.media-explore-hero::after { display: none !important; content: none !important; }
-.media-explore-heading { margin-bottom: 10px; gap: 10px !important; }
-.media-explore-icon { display: none !important; }
-.media-explore-heading h1 {
-  font-size: 22px !important;
-  letter-spacing: -.02em !important;
-  text-shadow: none !important;
-}
-.media-explore-search {
-  box-sizing: border-box;
-  width: 100% !important;
-  min-height: 44px !important;
-  padding: 0 14px !important;
+
+/* =========================================================================
+   NOT PANELİ — çerçeve özgün haline dönsün, yalnızca kapatma düğmesi renkli
+   ========================================================================= */
+#modal.profile-note-viewer-modal {
   border: 1px solid var(--border) !important;
-  border-radius: 12px !important;
-  background: var(--bg-card2) !important;
-  color: var(--text-muted) !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  border-radius: 18px !important;
+  background: var(--bg-secondary) !important;
 }
-.media-explore-search:focus-within {
-  transform: none !important;
-  border-color: var(--border-hover) !important;
-  box-shadow: none !important;
+#modal.profile-note-viewer-modal .modal-close {
+  width: 32px; height: 32px;
+  border: 0 !important;
+  background: color-mix(in srgb, var(--dm-note-color, #242731) 88%, #000) !important;
+  box-shadow: none;
 }
-.media-explore-search input { font-size: 15px; }
+
+/* =========================================================================
+   ROZETLER — başlık üste yapışmasın
+   ========================================================================= */
+.badges-page .badges-page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0 16px;
+  padding: 0;
+}
+.badges-page .badges-page-header h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  line-height: 1.25;
+}
+.badges-page .badges-page-header p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
 @media (max-width: 600px) {
-  .media-explore-hero { margin-inline: 0 !important; }
-  .media-explore-heading h1 { font-size: 20px !important; }
+  .badges-page .badges-page-header { gap: 10px; }
+  .badges-page .badges-page-header h1 { font-size: 20px; }
+  .badges-page .badges-page-header > a { width: 100%; justify-content: center; }
+}
+
+/* =========================================================================
+   MÜZİK — Playlistlerim düğmesi soluk durmasın
+   ========================================================================= */
+.music-playlists-link {
+  box-sizing: border-box;
+  border: 1px solid var(--border-hover, var(--border)) !important;
+  background: var(--bg-card2) !important;
+  color: var(--text-primary) !important;
+  opacity: 1 !important;
+}
+.music-playlists-link:hover { border-color: var(--accent-red) !important; }
+.music-playlists-copy strong { color: var(--text-primary) !important; }
+.music-playlists-copy small { color: var(--text-secondary) !important; opacity: 1 !important; }
+.music-playlists-icon {
+  background: rgba(var(--accent-rgb), .16) !important;
+  color: var(--accent-red) !important;
+}
+.music-playlists-arrow { color: var(--text-secondary) !important; }
+
+/* =========================================================================
+   PLAYLISTLERIM — başlık taşmasın, arama kutusu
+   ========================================================================= */
+.my-playlists-header {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 0 12px;
+  padding: 0;
+}
+.my-playlists-title { min-width: 0; font-size: 21px; }
+.my-playlists-create {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 38px;
+  padding: 0 14px !important;
+}
+.pl-search {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0 0 14px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--bg-card2);
+}
+.pl-search:focus-within { border-color: var(--border-hover); }
+.pl-search > i { color: var(--text-muted); font-size: 13px; }
+.pl-search input {
+  flex: 1; min-width: 0;
+  border: 0; outline: 0; background: none;
+  color: var(--text-primary); font-size: 15px;
+}
+.pl-search input::-webkit-search-cancel-button { display: none; }
+.pl-search-clear {
+  display: grid; place-items: center;
+  width: 26px; height: 26px; flex: 0 0 26px;
+  border: 0; border-radius: 50%;
+  background: var(--bg-active, rgba(255,255,255,.08));
+  color: var(--text-secondary); cursor: pointer;
+}
+.pl-no-match { margin: 14px 2px; color: var(--text-muted); font-size: 13.5px; }
+.pl-discover { margin-top: 22px; }
+.pl-discover[hidden] { display: none !important; }
+.pl-discover-title {
+  margin: 0 0 10px;
+  font-size: 14px; font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: .01em;
+}
+.pl-discover-list { display: grid; gap: 8px; }
+.pl-discover-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 14px;
+  background: var(--bg-card2);
+  color: var(--text-primary);
+  transition: border-color .15s ease, background .15s ease;
+}
+.pl-discover-card:hover { border-color: var(--border-hover); background: var(--bg-active, var(--bg-card)); }
+.pl-discover-art {
+  display: grid; place-items: center;
+  width: 46px; height: 46px; flex: 0 0 46px;
+  border-radius: 11px; overflow: hidden;
+  background: var(--bg-card); font-size: 20px;
+}
+.pl-discover-art img { width: 100%; height: 100%; object-fit: cover; }
+.pl-discover-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.pl-discover-copy strong {
+  font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pl-discover-copy small { color: var(--text-muted); font-size: 12px; }
+.pl-discover-card > .fa-chevron-right { color: var(--text-muted); font-size: 12px; }
+
+/* =========================================================================
+   FORUM — üstteki arama kutusu taşmasın
+   ========================================================================= */
+.forum-page .search-bar,
+.topics-page .search-bar,
+.page .search-bar {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+.page .search-bar input { min-width: 0; }
+
+/* =========================================================================
+   GAZETE — "Yayımlanan sayılar" başlığının yazı tipi
+   ========================================================================= */
+.newspaper-archive-title,
+.newspapers-page .section-kicker + h2,
+.newspapers-page h2 {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 19px !important;
+  letter-spacing: -.01em !important;
+  text-transform: none !important;
 }
