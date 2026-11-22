@@ -3714,3 +3714,31 @@ input[type="range"] { min-height: 0 !important; }
   .pl-toolbar .my-playlists-create span { display: none; }
   .pl-toolbar .my-playlists-create i { font-size: 15px; }
 }
+
+/* Sohbet kilidi — "şifremi unuttum" bağlantısı ve bölümü */
+.dm-forgot-link {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  padding: 6px;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: 600 13px/1 inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.dm-forgot-link:hover { color: var(--text-secondary); }
+.chat-lock-forgot {
+  display: grid;
+  gap: 8px;
+  margin-top: 22px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card2);
+}
+.chat-lock-forgot strong { font-size: 14px; }
+.chat-lock-forgot p { margin: 0; color: var(--text-muted); font-size: 12.5px; line-height: 1.45; }
+.chat-lock-forgot small { color: var(--text-muted); font-size: 11.5px; line-height: 1.45; }
+.chat-lock-forgot .btn { justify-content: center; min-height: 42px; }

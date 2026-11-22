@@ -13834,8 +13834,20 @@ async function renderSettingsSection(section) {
 
           <button type="button" class="btn btn-primary" id="chat-lock-save"><i class="fas fa-save"></i> Kaydet</button>
           <div id="chat-lock-msg" class="form-error mt-4"></div>
+
+          ${lockState.has_code ? `<div class="chat-lock-forgot">
+            <strong>Şifreni mi unuttun?</strong>
+            ${lockState.separate_icon_code ? `<p>İki ayrı şifren var. Yalnızca unuttuğunu sıfırlayabilirsin.</p>
+            <button type="button" class="btn btn-outline" id="chat-lock-forgot-icon"><i class="fas fa-lock"></i> Simge şifremi unuttum</button>
+            <small>Simgeden açılan ${lockState.icon_count} sohbetin kilidi kalkar, ayrı simge şifresi silinir. Ana şifren durur.</small>` : ''}
+            <button type="button" class="btn btn-danger" id="chat-lock-forgot-all"><i class="fas fa-rotate-left"></i> ${lockState.separate_icon_code ? 'Her şeyi sıfırla' : 'Şifremi unuttum'}</button>
+            <small>Kilitli olan tüm sohbetler temizlenir ve kilitler sıfırlanır. Mesajların silinmez.</small>
+          </div>` : ''}
         </div>
       </section>`;
+
+    document.getElementById('chat-lock-forgot-icon')?.addEventListener('click', () => showChatLockForgotPrompt('icon', () => renderSettingsSection(section)));
+    document.getElementById('chat-lock-forgot-all')?.addEventListener('click', () => showChatLockForgotPrompt('all', () => renderSettingsSection(section)));
 
     const separateToggle = document.getElementById('chat-lock-separate');
     const iconGroup = document.getElementById('chat-lock-icon-group');
@@ -16381,7 +16393,7 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
       input.value = '';
       renderInboxList();
       closeDmSearch();
-      toast(dmSearchUnlockedConvs.length ? 'Kilitli sohbetler bu sayfa yenilenene kadar açıldı' : 'Açılacak kilitli sohbet yok');
+      toast(dmSearchUnlockedConvs.length ? 'Kilitli sohbetler açıldı. Mesajlardan ayrılınca tekrar gizlenir.' : 'Açılacak kilitli sohbet yok');
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -16406,7 +16418,11 @@ async function renderMessages(app, targetUsername, rotateSuggestions = false) {
         dmClearIconUnlock(); // şifre değişmiş olabilir, normal akışa dön
       }
     }
-    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için Sohbet Kilidi ayarlarında belirlediğin kilit simgesi şifresini gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Kilit simgesi şifresi" autocomplete="off" autocapitalize="none" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
+    showModal('Kilitli Sohbetler', `<div class="dm-unlock-screen"><i class="fas fa-lock"></i><p>Kilitli sohbetleri görmek için Sohbet Kilidi ayarlarında belirlediğin kilit simgesi şifresini gir.</p><input id="dm-global-unlock-pass" type="password" placeholder="Kilit simgesi şifresi" autocomplete="off" autocapitalize="none" spellcheck="false" readonly onfocus="this.removeAttribute('readonly')" /><button class="btn btn-primary" id="dm-global-unlock-btn"><i class="fas fa-unlock"></i> Kilidi Aç</button><button type="button" class="dm-forgot-link" id="dm-global-forgot">Şifremi unuttum</button><div id="dm-global-unlock-error" class="form-error"></div></div>`);
+    $('#dm-global-forgot')?.addEventListener('click', () => showChatLockForgotPrompt('icon', () => {
+      hideModal();
+      navigate('/mesajlar');
+    }));
     $('#dm-global-unlock-btn')?.addEventListener('click', async () => {
       const button = $('#dm-global-unlock-btn');
       const password = $('#dm-global-unlock-pass')?.value || '';
@@ -19438,6 +19454,7 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
       </div>
       <div class="dm-options-actions">
         <button class="btn btn-outline" id="dm-opt-hide"><i class="fas fa-lock"></i> Konuşmayı kilitle</button>
+        <button class="btn btn-outline" id="dm-opt-unlock" hidden><i class="fas fa-lock-open"></i> Kilidi kaldır</button>
         ${dmLockSettings.icon_unlock_enabled || dmLockSettings.search_unlock_enabled ? '<button class="btn btn-outline" id="dm-opt-setpass"><i class="fas fa-key"></i> Şifre Değiştir</button>' : ''}
         <button class="btn btn-outline" id="dm-opt-clear-me"><i class="fas fa-eraser"></i> Sadece benden temizle</button>
         <button class="btn dm-clear-all" id="dm-opt-clear-own"><i class="fas fa-trash-alt"></i> Kendi mesajlarımı temizle</button>
@@ -19503,6 +19520,22 @@ function showDmOptionsMenu(username, convId, isMuted = false, onMuteChange = () 
   document.getElementById('dm-opt-hide')?.addEventListener('click', () => {
     hideModal();
     showDmMessageLockPrompt(username);
+  });
+  // Kilitli sohbetlerde "kilitle" yerine "kilidi kaldır" gösterilsin
+  (async () => {
+    try {
+      const state = await api(`/conversation/${encodeURIComponent(username)}/lock-state`);
+      if (!state?.locked) return;
+      const lockButton = document.getElementById('dm-opt-hide');
+      const unlockButton = document.getElementById('dm-opt-unlock');
+      if (!unlockButton) return;
+      if (lockButton) lockButton.hidden = true;
+      unlockButton.hidden = false;
+    } catch { /* yoksay */ }
+  })();
+  document.getElementById('dm-opt-unlock')?.addEventListener('click', () => {
+    hideModal();
+    showDmRemoveLockPrompt(username);
   });
   document.getElementById('dm-opt-setpass')?.addEventListener('click', () => {
     hideModal();
@@ -27246,3 +27279,105 @@ async function cigRenderWaveformBars(barsElement, url) {
   document.addEventListener('pointerup', finish);
   document.addEventListener('pointercancel', finish);
 })();
+
+/* ============================================================================
+   SOHBET KİLİDİ — kilidi kaldırma ve "şifremi unuttum"
+   ============================================================================ */
+function showDmRemoveLockPrompt(username) {
+  showModal('Kilidi kaldır', `
+    <div class="cg-lock">
+      <div class="cg-lock-intro">
+        <span class="cg-lock-intro-icon"><i class="fas fa-lock-open"></i></span>
+        <div><strong>Bu sohbetin kilidini kaldır</strong><small>Kilit şifreni gir; sohbet kalıcı olarak mesaj listene geri döner.</small></div>
+      </div>
+      <div class="form-group">
+        <label for="cg-unlock-code">Kilit şifresi</label>
+        <input id="cg-unlock-code" type="password" autocomplete="current-password" maxlength="64" placeholder="Kilit şifren" />
+      </div>
+      <div class="cg-lock-actions">
+        <button type="button" class="btn btn-outline" id="cg-unlock-cancel">Vazgeç</button>
+        <button type="button" class="btn btn-primary" id="cg-unlock-confirm"><i class="fas fa-lock-open"></i> Kilidi kaldır</button>
+      </div>
+      <button type="button" class="dm-forgot-link" id="cg-unlock-forgot">Şifremi unuttum</button>
+      <div class="form-error" id="cg-unlock-error"></div>
+    </div>`);
+
+  const errorNode = document.getElementById('cg-unlock-error');
+  const input = document.getElementById('cg-unlock-code');
+  input?.focus();
+  document.getElementById('cg-unlock-cancel')?.addEventListener('click', hideModal);
+  document.getElementById('cg-unlock-forgot')?.addEventListener('click', () => showChatLockForgotPrompt('all', () => {
+    hideModal();
+    navigate('/mesajlar');
+  }));
+
+  const submit = async event => {
+    const button = event?.currentTarget;
+    const password = input.value;
+    if (!password) { errorNode.textContent = 'Kilit şifreni gir.'; return; }
+    if (button) button.disabled = true;
+    errorNode.textContent = '';
+    try {
+      await api(`/conversation/${encodeURIComponent(username)}/remove-lock`, {
+        method: 'POST',
+        body: JSON.stringify({ password })
+      });
+      hideModal();
+      toast('Sohbetin kilidi kaldırıldı.');
+      navigate('/mesajlar');
+    } catch (error) {
+      errorNode.textContent = error.message || 'Kilit kaldırılamadı.';
+      if (button) button.disabled = false;
+    }
+  };
+  document.getElementById('cg-unlock-confirm')?.addEventListener('click', submit);
+  input?.addEventListener('keydown', event => { if (event.key === 'Enter') submit(); });
+}
+
+// scope: 'icon' -> yalnızca simgeden açılanlar, 'all' -> her şey sıfırlanır
+async function showChatLockForgotPrompt(scope = 'all', onDone = null) {
+  let state = { separate_icon_code: false, icon_count: 0, search_count: 0 };
+  try { state = { ...state, ...(await api('/me/chat-lock')) }; } catch { /* varsayılan */ }
+  const iconOnly = scope === 'icon' && state.separate_icon_code;
+  const title = iconOnly ? 'Simge şifreni mi unuttun?' : 'Kilit şifreni mi unuttun?';
+  const body = iconOnly
+    ? `Kilit simgesinden açılan <b>${state.icon_count}</b> sohbetin kilidi kaldırılacak ve simge için belirlediğin ayrı şifre silinecek. Ana kilit şifren ve aramadan açılan sohbetlerin olduğu gibi kalacak.`
+    : `<b>Kilitli olan tüm sohbetler temizlenir ve kilitler sıfırlanır.</b> Bütün kilitli sohbetler mesaj listene geri döner, kayıtlı kilit şifrelerin silinir ve sohbet kilidi ilk günkü haline döner. Hiçbir mesajın silinmez.`;
+
+  showModal(title, `
+    <div class="cg-lock">
+      <div class="cg-lock-intro">
+        <span class="cg-lock-intro-icon"><i class="fas fa-triangle-exclamation"></i></span>
+        <div><strong>${iconOnly ? 'Simge kilitleri sıfırlanacak' : 'Tüm kilitler sıfırlanacak'}</strong><small>${body}</small></div>
+      </div>
+      <div class="cg-lock-actions">
+        <button type="button" class="btn btn-outline" id="cg-forgot-cancel">Vazgeç</button>
+        <button type="button" class="btn btn-danger" id="cg-forgot-confirm"><i class="fas fa-rotate-left"></i> Kabul ediyorum, sıfırla</button>
+      </div>
+      <div class="form-error" id="cg-forgot-error"></div>
+    </div>`);
+
+  document.getElementById('cg-forgot-cancel')?.addEventListener('click', hideModal);
+  document.getElementById('cg-forgot-confirm')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await api('/me/chat-lock/forgot', {
+        method: 'POST',
+        body: JSON.stringify({ scope: iconOnly ? 'icon' : 'all' })
+      });
+      dmClearIconUnlock();
+      dmSearchUnlockCode = '';
+      dmSearchUnlockedConvs = [];
+      hideModal();
+      toast(result.cleared
+        ? `${result.cleared} sohbetin kilidi kaldırıldı.`
+        : 'Kilitler sıfırlandı.');
+      if (typeof onDone === 'function') onDone();
+      else location.reload();
+    } catch (error) {
+      document.getElementById('cg-forgot-error').textContent = error.message || 'Sıfırlanamadı.';
+      button.disabled = false;
+    }
+  });
+}

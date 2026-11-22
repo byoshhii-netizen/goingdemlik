@@ -14722,6 +14722,93 @@ app.post('/api/conversation/:username/mute', authMiddleware, async (req, res) =>
   res.json({ ok: true });
 });
 
+// Bir konuşmanın kilit durumu (seçenekler menüsü doğru düğmeyi göstersin diye)
+app.get('/api/conversation/:username/lock-state', authMiddleware, async (req, res) => {
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const uid = req.user.id;
+  const u1 = Math.min(uid, target[0].id), u2 = Math.max(uid, target[0].id);
+  const { rows } = await query(
+    'SELECT user1_id, hidden_by_user1, hidden_by_user2, lock_mode_user1, lock_mode_user2 FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2',
+    [u1, u2]
+  );
+  if (!rows.length) return res.json({ locked: false, lock_mode: '' });
+  const isUser1 = rows[0].user1_id == uid;
+  res.json({
+    locked: Number(isUser1 ? rows[0].hidden_by_user1 : rows[0].hidden_by_user2) === 1,
+    lock_mode: (isUser1 ? rows[0].lock_mode_user1 : rows[0].lock_mode_user2) || ''
+  });
+});
+
+// Kilidi tamamen kaldır (şifre doğrulanır, sohbet listeye geri döner)
+app.post('/api/conversation/:username/remove-lock', authMiddleware, authLimiter, async (req, res) => {
+  const password = String(req.body?.password || '');
+  const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
+  if (!target.length) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+  const uid = req.user.id;
+  const u1 = Math.min(uid, target[0].id), u2 = Math.max(uid, target[0].id);
+  const { rows } = await query('SELECT * FROM dm_conversations WHERE user1_id=$1 AND user2_id=$2', [u1, u2]);
+  if (!rows.length) return res.status(404).json({ error: 'Konuşma bulunamadı' });
+  const conv = rows[0];
+  const isUser1 = conv.user1_id == uid;
+  if (!Number(isUser1 ? conv.hidden_by_user1 : conv.hidden_by_user2)) {
+    return res.json({ ok: true, locked: false });
+  }
+  const storedHash = isUser1 ? conv.hidden_pass_user1 : conv.hidden_pass_user2;
+  const accepted = storedHash === DM_ACCOUNT_LOCK_SENTINEL || !storedHash
+    ? (await isValidDmIconCode(uid, password) || await isValidDmSearchCode(uid, password))
+    : matchesDmLockHash(storedHash, password);
+  if (!accepted) return res.status(403).json({ error: 'Kilit şifresi yanlış.' });
+  if (isUser1) {
+    await query("UPDATE dm_conversations SET hidden_by_user1=0, hidden_pass_user1='', lock_mode_user1='' WHERE id=$1", [conv.id]);
+  } else {
+    await query("UPDATE dm_conversations SET hidden_by_user2=0, hidden_pass_user2='', lock_mode_user2='' WHERE id=$1", [conv.id]);
+  }
+  res.json({ ok: true, locked: false });
+});
+
+// Şifremi unuttum: kilitleri sıfırla
+// scope 'icon'  -> yalnızca simgeden açılan sohbetlerin kilidi kalkar, ayrı simge şifresi silinir
+// scope 'all'   -> bütün kilitler kalkar, şifreler sıfırlanır (ilk hale döner)
+app.post('/api/me/chat-lock/forgot', authMiddleware, authLimiter, async (req, res) => {
+  const scope = req.body?.scope === 'icon' ? 'icon' : 'all';
+  const uid = req.user.id;
+  try {
+    let cleared = 0;
+    if (scope === 'icon') {
+      const a = await query(
+        "UPDATE dm_conversations SET hidden_by_user1=0, hidden_pass_user1='', lock_mode_user1='' WHERE user1_id=$1 AND hidden_by_user1=1 AND COALESCE(lock_mode_user1,'') <> 'search'",
+        [uid]
+      );
+      const b = await query(
+        "UPDATE dm_conversations SET hidden_by_user2=0, hidden_pass_user2='', lock_mode_user2='' WHERE user2_id=$1 AND hidden_by_user2=1 AND COALESCE(lock_mode_user2,'') <> 'search'",
+        [uid]
+      );
+      cleared = (a.rowCount || 0) + (b.rowCount || 0);
+      // Ayrı simge şifresi silinir; simge modu yeniden ana şifreyi kullanır
+      await query('UPDATE dm_user_settings SET icon_code_hash=search_code_hash, updated_at=NOW() WHERE user_id=$1', [uid]);
+      return res.json({ ok: true, scope, cleared });
+    }
+    const a = await query(
+      "UPDATE dm_conversations SET hidden_by_user1=0, hidden_pass_user1='', lock_mode_user1='' WHERE user1_id=$1 AND hidden_by_user1=1",
+      [uid]
+    );
+    const b = await query(
+      "UPDATE dm_conversations SET hidden_by_user2=0, hidden_pass_user2='', lock_mode_user2='' WHERE user2_id=$1 AND hidden_by_user2=1",
+      [uid]
+    );
+    cleared = (a.rowCount || 0) + (b.rowCount || 0);
+    await query(
+      "UPDATE dm_user_settings SET search_code_hash='', icon_code_hash='', search_unlock_enabled=0, icon_unlock_enabled=0, updated_at=NOW() WHERE user_id=$1",
+      [uid]
+    );
+    res.json({ ok: true, scope, cleared });
+  } catch (error) {
+    console.error('[chat-lock/forgot] başarısız:', error.message);
+    res.status(500).json({ error: 'Kilitler sıfırlanamadı.' });
+  }
+});
+
 app.post('/api/conversation/:username/unhide', authMiddleware, async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   const { rows: target } = await query('SELECT id FROM users WHERE username=$1', [req.params.username]);
